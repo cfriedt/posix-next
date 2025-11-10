@@ -1,0 +1,231 @@
+# Copyright (c) 2024 Tenstorrent
+#
+# SPDX-License-Identifier: Apache-2.0
+
+config POSIX_API
+	bool "POSIX APIs"
+	imply POSIX_SYSTEM_INTERFACES
+	imply POSIX_BASE_DEFINITIONS # clock_gettime(), pthread_create(), sem_get(), etc
+	imply POSIX_AEP_REALTIME_MINIMAL # CLOCK_MONOTONIC, pthread_attr_setstack(), etc
+	imply POSIX_NETWORKING if NETWORKING # inet_ntoa(), socket(), etc
+	imply EVENTFD # eventfd(), eventfd_read(), eventfd_write()
+	imply POSIX_FD_MGMT # open(), close(), read(), write()
+	imply POSIX_MULTI_PROCESS # sleep(), getpid(), etc
+	imply XSI_SINGLE_PROCESS # gettimeofday()
+	select DEPRECATED
+	help
+	  This option is deprecated. Applications should select CONFIG_POSIX_AEP_CHOICE_BASE,
+	  CONFIG_POSIX_AEP_CHOICE_PSE51, CONFIG_POSIX_AEP_CHOICE_PSE52, or
+	  CONFIG_POSIX_AEP_CHOICE_PSE53. Libraries should depend on
+	  CONFIG_POSIX_SYSTEM_INTERFACES and other POSIX Option Groups.
+
+	  For more information, please see
+
+
+choice POSIX_AEP_CHOICE
+	prompt "POSIX Subprofile"
+	default POSIX_AEP_CHOICE_ZEPHYR
+	help
+	  This choice is intended to help users select the correct POSIX profile for their
+	  application. Choices are based on IEEE 1003.13-2003 (now inactive / reserved) and
+	  extrapolated to the more recent Subprofiling Option Groups in IEEE 1003.3-2017.
+
+	  A subprofile enables its Option Groups and Options by default; each of them may
+	  still be disabled individually, and further Option Groups may be enabled on top.
+
+	  For more information, please refer to
+	  https://standards.ieee.org/ieee/1003.13/3322/
+	  https://pubs.opengroup.org/onlinepubs/9699919799/xrat/V4_subprofiles.html
+
+config POSIX_AEP_CHOICE_NONE
+	bool "No POSIX subprofile"
+	help
+	  No POSIX subprofile is selected.
+
+config POSIX_AEP_CHOICE_ZEPHYR
+	bool "Minimal Zephyr System Profile"
+	imply POSIX_C_LIB_EXT
+	imply POSIX_C_LANG_SUPPORT_R
+	help
+	  Zephyr expects certain POSIX functions to be available throughout the build environment,
+	  such as gmtime_r(), strnlen(), strtok_r(), and possibly others.
+
+	  These functions are divided into two standalone Option Groups that may be enabled
+	  independently of the remainder of the POSIX API implementation; namely POSIX_C_LIB_EXT and
+	  POSIX_C_LANG_SUPPORT_R. If not referenced by the Zephyr kernel or application, there are no
+	  resource implications for enabling these option groups.
+
+	  Unlike pre-defined, standard POSIX subprofiles, this subprofile is custom to Zephyr and
+	  therefore does not need to include the base definitions or system interfaces that would
+	  otherwise be required for a conformant POSIX system or subprofile. This system profile
+	  does not itself meet the requirements for POSIX implementation conformance.
+
+	  For more information, see
+	  https://docs.zephyrproject.org/latest/contribute/coding_guidelines/index.html
+	  https://pubs.opengroup.org/onlinepubs/9699919799/xrat/V4_subprofiles.html
+
+config POSIX_AEP_CHOICE_BASE
+	bool "Minimal POSIX System Profile"
+	imply POSIX_SYSTEM_INTERFACES
+	imply POSIX_BASE_DEFINITIONS
+	help
+	  Only enable the base definitions required for all POSIX systems.
+
+	  For more information, please see
+	  https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap02.html#tag_02_01_03_01
+
+config POSIX_AEP_CHOICE_PSE51
+	bool "Minimal Realtime System Profile (PSE51)"
+	imply POSIX_SYSTEM_INTERFACES
+	imply POSIX_BASE_DEFINITIONS
+	imply POSIX_AEP_REALTIME_MINIMAL
+	help
+	  PSE51 includes the POSIX Base Definitions (System Interfaces) as well as several Options and
+	  Option Groups to facilitate device I/O, signals, mandatory configuration utilities, and
+	  threading.
+
+	  For more information, please see
+	  https://pubs.opengroup.org/onlinepubs/9699919799/xrat/V4_subprofiles.html
+
+config POSIX_AEP_CHOICE_PSE52
+	bool "Realtime Controller System Profile (PSE52)"
+	imply POSIX_SYSTEM_INTERFACES
+	imply POSIX_BASE_DEFINITIONS
+	imply POSIX_AEP_REALTIME_MINIMAL
+	imply POSIX_AEP_REALTIME_CONTROLLER
+	help
+	  PSE52 includes the POSIX Base Definitions (System Interfaces) as well as all features of
+	  PSE51. Additionally, it includes interfaces for file descriptor management, filesystem
+	  support, support for message queues, and tracing.
+
+	  For more information, please see
+	  https://pubs.opengroup.org/onlinepubs/9699919799/xrat/V4_subprofiles.html
+
+config POSIX_AEP_CHOICE_PSE53
+	bool "Dedicated Realtime System Profile (PSE53)"
+	imply POSIX_SYSTEM_INTERFACES
+	imply POSIX_BASE_DEFINITIONS
+	imply POSIX_AEP_REALTIME_MINIMAL
+	imply POSIX_AEP_REALTIME_CONTROLLER
+	imply POSIX_AEP_REALTIME_DEDICATED
+	help
+	  PSE53 includes the POSIX Base Definitions (System Interfaces) as well as all features of
+	  PSE52. Additionally, it includes interfaces for POSIX multi-processing, networking, pipes,
+	  and prioritized I/O.
+
+	  For more information, please see
+	  https://pubs.opengroup.org/onlinepubs/9699919799/xrat/V4_subprofiles.html
+
+config POSIX_AEP_CHOICE_NETAPP
+	bool "Network Appliance Profile"
+	imply POSIX_SYSTEM_INTERFACES
+	imply POSIX_AEP_REALTIME_MINIMAL
+	imply POSIX_AEP_REALTIME_CONTROLLER
+	imply POSIX_NETWORKING if NETWORKING
+	imply POSIX_RAW_SOCKETS if NETWORKING
+	imply POSIX_CPUTIME
+	imply POSIX_PRIORITY_SCHEDULING
+	help
+	  This profile is custom to Zephyr and does not correspond to a standard POSIX subprofile.
+	  It includes all features of PSE52 as well as the networking interfaces of PSE53, but not
+	  its multi-process, pipe, spawn or sporadic server interfaces. It is intended for
+	  networked applications that do not need process management. The networking interfaces
+	  are only enabled when CONFIG_NETWORKING is enabled.
+
+# TODO: PSE54: Multi-purpose Realtime System Profile
+
+endchoice # POSIX_AEP_CHOICE
+
+if POSIX_SYSTEM_INTERFACES
+
+# Mandatory POSIX System Interfaces (base profile)
+config POSIX_BASE_DEFINITIONS
+	bool
+	imply POSIX_ASYNCHRONOUS_IO
+	imply POSIX_BARRIERS
+	imply POSIX_CLOCK_SELECTION
+	imply POSIX_MAPPED_FILES
+	imply POSIX_MEMORY_PROTECTION
+	imply POSIX_RW_LOCKS
+	imply POSIX_REALTIME_SIGNALS
+	imply POSIX_SEMAPHORES
+	imply POSIX_SPIN_LOCKS
+	imply POSIX_THREAD_SAFE_FUNCTIONS
+	imply POSIX_THREADS
+	imply POSIX_TIMEOUTS
+	imply POSIX_TIMERS
+	help
+	  This option is not user configurable. It may be configured indirectly by selecting
+	  CONFIG_POSIX_AEP_CHOICE_BASE=y.
+
+	  For more information, please see
+	  https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap02.html#tag_02_01_03_01
+
+config POSIX_AEP_REALTIME_MINIMAL
+	bool
+	# Option Groups
+	imply POSIX_DEVICE_IO
+	imply POSIX_SIGNALS
+	imply POSIX_SINGLE_PROCESS
+	select XSI
+	imply XSI_THREADS_EXT
+	# Options
+	imply POSIX_FSYNC
+	imply POSIX_MEMLOCK
+	imply POSIX_MEMLOCK_RANGE
+	imply POSIX_MONOTONIC_CLOCK
+	imply POSIX_SHARED_MEMORY_OBJECTS
+	imply POSIX_SYNCHRONIZED_IO
+	imply POSIX_THREAD_ATTR_STACKADDR
+	imply POSIX_THREAD_ATTR_STACKSIZE
+	imply POSIX_THREAD_CPUTIME
+	imply POSIX_THREAD_PRIO_INHERIT
+	imply POSIX_THREAD_PRIO_PROTECT
+	imply POSIX_THREAD_PRIORITY_SCHEDULING
+	# select POSIX_THREAD_SPORADIC_SERVER
+	help
+	  This option is not user configurable. It may be configured indirectly by selecting
+	  CONFIG_POSIX_AEP_CHOICE_PSE51=y.
+
+	  For more information, please see
+	  https://pubs.opengroup.org/onlinepubs/9699919799/xrat/V4_subprofiles.html
+
+config POSIX_AEP_REALTIME_CONTROLLER
+	bool
+	# Option Groups
+	imply POSIX_FD_MGMT
+	imply POSIX_FILE_SYSTEM
+	# Options
+	imply POSIX_MESSAGE_PASSING
+	# select POSIX_TRACE
+	# select POSIX_TRACE_EVENT_FILTER
+	# select POSIX_TRACE_LOG
+	help
+	  This option is not user configurable. It may be configured indirectly by selecting
+	  CONFIG_POSIX_AEP_CHOICE_PSE52=y.
+
+	  For more information, please see
+	  https://pubs.opengroup.org/onlinepubs/9699919799/xrat/V4_subprofiles.html
+
+config POSIX_AEP_REALTIME_DEDICATED
+	bool
+	# Option Groups
+	imply POSIX_MULTI_PROCESS
+	imply POSIX_NETWORKING
+	# select POSIX_PIPE
+	# select POSIX_SIGNAL_JUMP
+	# Options
+	imply POSIX_CPUTIME
+	# select POSIX_PRIORITIZED_IO
+	imply POSIX_PRIORITY_SCHEDULING
+	imply POSIX_RAW_SOCKETS
+	# select POSIX_SPAWN
+	# select POSIX_SPORADIC_SERVER
+	help
+	  This option is not user configurable. It may be configured indirectly by selecting
+	  CONFIG_POSIX_AEP_CHOICE_PSE53=y.
+
+	  For more information, please see
+	  https://pubs.opengroup.org/onlinepubs/9699919799/xrat/V4_subprofiles.html
+
+endif # POSIX_SYSTEM_INTERFACES
