@@ -1,0 +1,89 @@
+name: Run tests with twister
+
+on:
+  push:
+    branches:
+      - main
+      - v*-branch
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+    branches:
+      - main
+      - v*-branch
+  # Disabled for now until a self-hosted runner is available
+  # schedule:
+  #   # Run at 02:00 UTC on every Sunday
+  #   - cron: '0 2 * * 0'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+env:
+  MANIFEST_PATH: lib/posix
+  ZEPHYR_BASE: ${{ github.workspace }}/zephyr
+  PLATFORMS: -p mps2/an385 -p native_sim -p qemu_cortex_a53 -p qemu_riscv64 -p qemu_x86 -p qemu_x86_64
+  ROOTS: -T tests/posix -T ${{ github.workspace }}/zephyr/tests/net -T ${{ github.workspace }}/zephyr/tests/lib/c_lib
+
+jobs:
+  twister-build:
+    strategy:
+      fail-fast: false
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Set up environment
+        shell: bash
+        run: |
+          WEST_INIT_PATH="$(mktemp -d)"
+          rmdir $WEST_INIT_PATH
+          WEST_INIT_PATH="$(basename "$WEST_INIT_PATH")"
+          echo "WEST_INIT_PATH=${WEST_INIT_PATH}" >> $GITHUB_ENV
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          # note: checkout to posix-next and then rename to lib/posix as a workaround for the
+          # assumed west workspace location via 'west init -l lib/posix'. See output of
+          # 'west init --help' for details.
+          path: ${{ env.WEST_INIT_PATH }}
+
+      - name: Set up Zephyr project
+        uses: zephyrproject-rtos/action-zephyr-setup@v1.0.9
+        with:
+          app-path: ${{ env.WEST_INIT_PATH }}
+          toolchains: aarch64-zephyr-elf:arm-zephyr-eabi:riscv64-zephyr-elf:x86_64-zephyr-elf
+
+      # note: correct location of lib/.west/ to .west/
+      - name: Re-home module
+        shell: bash
+        run: |
+          MANIFEST_PATH_BASE="$(basename "${{ env.MANIFEST_PATH }}")"
+          MANIFEST_PATH_DIR="$(dirname "${{ github.workspace }}/${{ env.MANIFEST_PATH }}")"
+          mkdir -p "$MANIFEST_PATH_DIR"
+          mv "${{ env.WEST_INIT_PATH }}" "$MANIFEST_PATH_DIR/$MANIFEST_PATH_BASE"
+          west config -d manifest.path
+          west config manifest.path "${{ env.MANIFEST_PATH }}"
+
+      # Verify binary blobs (skipped, no blobs needed)
+      - name: Apply patches
+        shell: bash
+        run: |
+          west -v patch apply
+
+      - name: Run Tests with Twister (Pull Request)
+        if: github.event_name == 'pull_request'
+        shell: bash
+        working-directory: ${{ env.MANIFEST_PATH }}
+        run: |
+          python3 ${{ env.ZEPHYR_BASE }}/scripts/ci/test_plan.py -r ${{ github.workspace }}/${{ env.MANIFEST_PATH }} -c origin/${{ github.base_ref }}.. --pull-request ${{ env.ROOTS }}
+          west twister --subset 1/5 --load-tests testplan.json
+
+      - name: Run Tests with Twister (Nightly)
+        if: github.event_name == 'schedule'
+        shell: bash
+        working-directory: ${{ env.MANIFEST_PATH }}
+        run: |
+          west twister -c -i ${{ env.PLATFORMS }} ${{ env.ROOTS }}
