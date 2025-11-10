@@ -1,0 +1,620 @@
+diff --git a/include/zephyr/sys/clock.h b/include/zephyr/sys/clock.h
+--- a/include/zephyr/sys/clock.h
++++ b/include/zephyr/sys/clock.h
+@@ -426,8 +426,6 @@ static inline bool sys_timepoint_expired(k_timepoint_t timepoint)
+ /* forward declaration as workaround for time.h */
+ struct timespec;
+ 
+-/* Convert a POSIX clock (cast to int) to a sys_clock identifier */
+-int sys_clock_from_clockid(int clock_id);
+ /** INTERNAL_HIDDEN @endcond */
+ 
+ /**
+diff --git a/lib/libc/common/CMakeLists.txt b/lib/libc/common/CMakeLists.txt
+--- a/lib/libc/common/CMakeLists.txt
++++ b/lib/libc/common/CMakeLists.txt
+@@ -31,3 +31,5 @@ zephyr_library_sources(source/errno/errno.c)
+ 
+ # Prevent compiler from optimizing calloc into an infinite recursive call
+ zephyr_library_compile_options($<TARGET_PROPERTY:compiler,no_builtin_malloc>)
++
++zephyr_library_compile_definitions_ifdef(CONFIG_COMMON_LIBC_THRD _POSIX_C_SOURCE=200809L)
+diff --git a/lib/os/clock.c b/lib/os/clock.c
+--- a/lib/os/clock.c
++++ b/lib/os/clock.c
+@@ -50,22 +50,6 @@ static void timespec_from_ticks(uint64_t ticks, struct timespec *ts)
+ 	};
+ }
+ 
+-int sys_clock_from_clockid(int clock_id)
+-{
+-	switch (clock_id) {
+-#if defined(CLOCK_REALTIME) || defined(_POSIX_C_SOURCE)
+-	case (int)CLOCK_REALTIME:
+-		return SYS_CLOCK_REALTIME;
+-#endif
+-#if defined(CLOCK_MONOTONIC) || defined(_POSIX_MONOTONIC_CLOCK)
+-	case (int)CLOCK_MONOTONIC:
+-		return SYS_CLOCK_MONOTONIC;
+-#endif
+-	default:
+-		return -EINVAL;
+-	}
+-}
+-
+ int sys_clock_gettime(int clock_id, struct timespec *ts)
+ {
+ 	if (!is_valid_clock_id(clock_id)) {
+diff --git a/samples/net/cellular_modem/CMakeLists.txt b/samples/net/cellular_modem/CMakeLists.txt
+--- a/samples/net/cellular_modem/CMakeLists.txt
++++ b/samples/net/cellular_modem/CMakeLists.txt
+@@ -6,3 +6,5 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+ project(cellular_modem)
+ 
+ target_sources(app PRIVATE src/main.c)
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/samples/net/cloud/aws_iot_mqtt/CMakeLists.txt b/samples/net/cloud/aws_iot_mqtt/CMakeLists.txt
+--- a/samples/net/cloud/aws_iot_mqtt/CMakeLists.txt
++++ b/samples/net/cloud/aws_iot_mqtt/CMakeLists.txt
+@@ -23,3 +23,5 @@ endif()
+ target_sources(app PRIVATE "src/main.c" ${creds})
+ 
+ include(${ZEPHYR_BASE}/samples/net/common/common.cmake)
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/samples/net/cloud/mqtt_azure/CMakeLists.txt b/samples/net/cloud/mqtt_azure/CMakeLists.txt
+--- a/samples/net/cloud/mqtt_azure/CMakeLists.txt
++++ b/samples/net/cloud/mqtt_azure/CMakeLists.txt
+@@ -7,3 +7,5 @@ project(mqtt-azure)
+ 
+ FILE(GLOB app_sources src/*.c)
+ target_sources(app PRIVATE ${app_sources})
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/samples/net/cloud/tagoio_http_post/CMakeLists.txt b/samples/net/cloud/tagoio_http_post/CMakeLists.txt
+--- a/samples/net/cloud/tagoio_http_post/CMakeLists.txt
++++ b/samples/net/cloud/tagoio_http_post/CMakeLists.txt
+@@ -7,3 +7,5 @@ project(tagoio_http_post)
+ target_sources(app PRIVATE src/main.c)
+ target_sources(app PRIVATE src/sockets.c)
+ target_sources_ifdef(CONFIG_WIFI app PRIVATE src/wifi.c)
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/samples/net/ethernet/dsa/CMakeLists.txt b/samples/net/ethernet/dsa/CMakeLists.txt
+--- a/samples/net/ethernet/dsa/CMakeLists.txt
++++ b/samples/net/ethernet/dsa/CMakeLists.txt
+@@ -6,3 +6,5 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+ project(dsa)
+ 
+ target_sources(app PRIVATE src/main.c)
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/samples/net/lwm2m_client/CMakeLists.txt b/samples/net/lwm2m_client/CMakeLists.txt
+--- a/samples/net/lwm2m_client/CMakeLists.txt
++++ b/samples/net/lwm2m_client/CMakeLists.txt
+@@ -8,3 +8,5 @@ FILE(GLOB app_sources src/*.c)
+ target_sources(app PRIVATE ${app_sources})
+ 
+ include(${ZEPHYR_BASE}/samples/net/common/common.cmake)
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/samples/net/mdns_responder/CMakeLists.txt b/samples/net/mdns_responder/CMakeLists.txt
+--- a/samples/net/mdns_responder/CMakeLists.txt
++++ b/samples/net/mdns_responder/CMakeLists.txt
+@@ -8,3 +8,5 @@ target_sources(app PRIVATE src/main.c)
+ target_sources(app PRIVATE src/service.c)
+ 
+ include(${ZEPHYR_BASE}/samples/net/common/common.cmake)
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/samples/net/mqtt_publisher/CMakeLists.txt b/samples/net/mqtt_publisher/CMakeLists.txt
+--- a/samples/net/mqtt_publisher/CMakeLists.txt
++++ b/samples/net/mqtt_publisher/CMakeLists.txt
+@@ -9,3 +9,5 @@ FILE(GLOB app_sources src/*.c)
+ target_sources(app PRIVATE ${app_sources})
+ 
+ include(${ZEPHYR_BASE}/samples/net/common/common.cmake)
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/samples/net/ocpp/CMakeLists.txt b/samples/net/ocpp/CMakeLists.txt
+--- a/samples/net/ocpp/CMakeLists.txt
++++ b/samples/net/ocpp/CMakeLists.txt
+@@ -17,3 +17,5 @@ generate_inc_file_for_target(
+     # <path-to-generated-.inc-file> (e.g. ${gen_dir}/device.crt.inc)
+ )
+ endif()
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/samples/net/prometheus/CMakeLists.txt b/samples/net/prometheus/CMakeLists.txt
+--- a/samples/net/prometheus/CMakeLists.txt
++++ b/samples/net/prometheus/CMakeLists.txt
+@@ -50,3 +50,5 @@ foreach(inc_file
+     ${gen_dir}/${inc_file}.inc
+   )
+ endforeach()
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/samples/net/quic/echo_service/CMakeLists.txt b/samples/net/quic/echo_service/CMakeLists.txt
+--- a/samples/net/quic/echo_service/CMakeLists.txt
++++ b/samples/net/quic/echo_service/CMakeLists.txt
+@@ -9,3 +9,5 @@ FILE(GLOB app_sources src/*.c)
+ target_sources(app PRIVATE ${app_sources})
+ 
+ include(${ZEPHYR_BASE}/samples/net/common/common.cmake)
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/samples/net/secure_mqtt_sensor_actuator/CMakeLists.txt b/samples/net/secure_mqtt_sensor_actuator/CMakeLists.txt
+--- a/samples/net/secure_mqtt_sensor_actuator/CMakeLists.txt
++++ b/samples/net/secure_mqtt_sensor_actuator/CMakeLists.txt
+@@ -9,3 +9,5 @@ FILE(GLOB app_sources src/*.c)
+ target_sources(app PRIVATE ${app_sources})
+ 
+ zephyr_include_directories(${APPLICATION_SOURCE_DIR}/src/tls_config)
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/samples/net/sockets/big_http_download/CMakeLists.txt b/samples/net/sockets/big_http_download/CMakeLists.txt
+--- a/samples/net/sockets/big_http_download/CMakeLists.txt
++++ b/samples/net/sockets/big_http_download/CMakeLists.txt
+@@ -8,3 +8,5 @@ FILE(GLOB app_sources src/*.c)
+ target_sources(app PRIVATE ${app_sources})
+ 
+ include(${ZEPHYR_BASE}/samples/net/common/common.cmake)
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/samples/net/sockets/can/CMakeLists.txt b/samples/net/sockets/can/CMakeLists.txt
+--- a/samples/net/sockets/can/CMakeLists.txt
++++ b/samples/net/sockets/can/CMakeLists.txt
+@@ -6,3 +6,5 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+ project(sockets_can)
+ 
+ target_sources(app PRIVATE src/main.c)
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/samples/net/sockets/coap_client/CMakeLists.txt b/samples/net/sockets/coap_client/CMakeLists.txt
+--- a/samples/net/sockets/coap_client/CMakeLists.txt
++++ b/samples/net/sockets/coap_client/CMakeLists.txt
+@@ -8,3 +8,5 @@ FILE(GLOB app_sources src/*.c)
+ target_sources(app PRIVATE ${app_sources})
+ target_include_directories(app PRIVATE ${ZEPHYR_BASE}/subsys/net/ip)
+ include(${ZEPHYR_BASE}/samples/net/common/common.cmake)
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/samples/net/sockets/coap_client_tcp/CMakeLists.txt b/samples/net/sockets/coap_client_tcp/CMakeLists.txt
+--- a/samples/net/sockets/coap_client_tcp/CMakeLists.txt
++++ b/samples/net/sockets/coap_client_tcp/CMakeLists.txt
+@@ -6,3 +6,5 @@ project(coap_client_tcp)
+ 
+ FILE(GLOB app_sources src/*.c)
+ target_sources(app PRIVATE ${app_sources})
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/samples/net/sockets/coap_download/CMakeLists.txt b/samples/net/sockets/coap_download/CMakeLists.txt
+--- a/samples/net/sockets/coap_download/CMakeLists.txt
++++ b/samples/net/sockets/coap_download/CMakeLists.txt
+@@ -8,3 +8,5 @@ project(coap_download)
+ target_sources(app PRIVATE
+     src/main.c
+ )
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/samples/net/sockets/coap_server/CMakeLists.txt b/samples/net/sockets/coap_server/CMakeLists.txt
+--- a/samples/net/sockets/coap_server/CMakeLists.txt
++++ b/samples/net/sockets/coap_server/CMakeLists.txt
+@@ -46,3 +46,5 @@ foreach(inc_file
+     ${gen_dir}/${inc_file}.inc
+   )
+ endforeach()
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/samples/net/sockets/coap_upload/CMakeLists.txt b/samples/net/sockets/coap_upload/CMakeLists.txt
+--- a/samples/net/sockets/coap_upload/CMakeLists.txt
++++ b/samples/net/sockets/coap_upload/CMakeLists.txt
+@@ -10,3 +10,5 @@ target_sources(app PRIVATE
+ )
+ 
+ include(${ZEPHYR_BASE}/samples/net/common/common.cmake)
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/samples/net/sockets/dumb_http_server/CMakeLists.txt b/samples/net/sockets/dumb_http_server/CMakeLists.txt
+--- a/samples/net/sockets/dumb_http_server/CMakeLists.txt
++++ b/samples/net/sockets/dumb_http_server/CMakeLists.txt
+@@ -13,3 +13,5 @@ generate_inc_file_for_target(app src/response_small.html.bin ${gen_dir}/response
+ generate_inc_file_for_target(app src/response_big.html.bin   ${gen_dir}/response_big.html.bin.inc)
+ 
+ include(${ZEPHYR_BASE}/samples/net/common/common.cmake)
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/samples/net/sockets/dumb_http_server_mt/CMakeLists.txt b/samples/net/sockets/dumb_http_server_mt/CMakeLists.txt
+--- a/samples/net/sockets/dumb_http_server_mt/CMakeLists.txt
++++ b/samples/net/sockets/dumb_http_server_mt/CMakeLists.txt
+@@ -21,3 +21,5 @@ foreach(inc_file
+     ${gen_dir}/${inc_file}.inc
+   )
+ endforeach()
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/samples/net/sockets/echo/CMakeLists.txt b/samples/net/sockets/echo/CMakeLists.txt
+--- a/samples/net/sockets/echo/CMakeLists.txt
++++ b/samples/net/sockets/echo/CMakeLists.txt
+@@ -9,3 +9,5 @@ FILE(GLOB app_sources src/*.c)
+ target_sources(app PRIVATE ${app_sources})
+ 
+ include(${ZEPHYR_BASE}/samples/net/common/common.cmake)
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/samples/net/sockets/echo_async/CMakeLists.txt b/samples/net/sockets/echo_async/CMakeLists.txt
+--- a/samples/net/sockets/echo_async/CMakeLists.txt
++++ b/samples/net/sockets/echo_async/CMakeLists.txt
+@@ -8,3 +8,5 @@ FILE(GLOB app_sources src/*.c)
+ target_sources(app PRIVATE ${app_sources})
+ 
+ include(${ZEPHYR_BASE}/samples/net/common/common.cmake)
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/samples/net/sockets/echo_async_select/CMakeLists.txt b/samples/net/sockets/echo_async_select/CMakeLists.txt
+--- a/samples/net/sockets/echo_async_select/CMakeLists.txt
++++ b/samples/net/sockets/echo_async_select/CMakeLists.txt
+@@ -8,3 +8,5 @@ FILE(GLOB app_sources src/*.c)
+ target_sources(app PRIVATE ${app_sources})
+ 
+ include(${ZEPHYR_BASE}/samples/net/common/common.cmake)
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/samples/net/sockets/echo_client/CMakeLists.txt b/samples/net/sockets/echo_client/CMakeLists.txt
+--- a/samples/net/sockets/echo_client/CMakeLists.txt
++++ b/samples/net/sockets/echo_client/CMakeLists.txt
+@@ -31,3 +31,5 @@ generate_inc_file_for_target(
+     src/echo-apps-cert.der
+     ${gen_dir}/echo-apps-cert.der.inc
+     )
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/samples/net/sockets/echo_server/CMakeLists.txt b/samples/net/sockets/echo_server/CMakeLists.txt
+--- a/samples/net/sockets/echo_server/CMakeLists.txt
++++ b/samples/net/sockets/echo_server/CMakeLists.txt
+@@ -63,3 +63,5 @@ zephyr_linker_section_ifdef(CONFIG_NET_SAMPLE_WEBSOCKET_CONSOLE NAME
+   http_resource_desc_ws_console_service
+   KVMA RAM_REGION GROUP RODATA_REGION
+ )
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/samples/net/sockets/echo_service/CMakeLists.txt b/samples/net/sockets/echo_service/CMakeLists.txt
+--- a/samples/net/sockets/echo_service/CMakeLists.txt
++++ b/samples/net/sockets/echo_service/CMakeLists.txt
+@@ -20,3 +20,5 @@ if(CONFIG_SHELL_ALIASES_HAS_FILE)
+     ${gen_dir}/generated-shell-aliases.inc
+   )
+ endif()
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/samples/net/sockets/http_client/CMakeLists.txt b/samples/net/sockets/http_client/CMakeLists.txt
+--- a/samples/net/sockets/http_client/CMakeLists.txt
++++ b/samples/net/sockets/http_client/CMakeLists.txt
+@@ -14,3 +14,5 @@ generate_inc_file_for_target(
+     src/https-cert.der
+     ${gen_dir}/https-cert.der.inc
+     )
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/samples/net/sockets/http_get/CMakeLists.txt b/samples/net/sockets/http_get/CMakeLists.txt
+--- a/samples/net/sockets/http_get/CMakeLists.txt
++++ b/samples/net/sockets/http_get/CMakeLists.txt
+@@ -17,3 +17,5 @@ generate_inc_file_for_target(
+     src/globalsign_r1.der
+     ${gen_dir}/globalsign_r1.der.inc
+     )
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/samples/net/sockets/http_server/CMakeLists.txt b/samples/net/sockets/http_server/CMakeLists.txt
+--- a/samples/net/sockets/http_server/CMakeLists.txt
++++ b/samples/net/sockets/http_server/CMakeLists.txt
+@@ -79,3 +79,5 @@ foreach(inc_file
+     ${gen_dir}/${inc_file}.inc
+   )
+ endforeach()
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/samples/net/sockets/net_mgmt/CMakeLists.txt b/samples/net/sockets/net_mgmt/CMakeLists.txt
+--- a/samples/net/sockets/net_mgmt/CMakeLists.txt
++++ b/samples/net/sockets/net_mgmt/CMakeLists.txt
+@@ -8,3 +8,5 @@ project(sockets_net_mgmt)
+ target_sources_ifdef(CONFIG_NET_SOCKETS_NET_MGMT app PRIVATE src/main.c)
+ 
+ include(${ZEPHYR_BASE}/samples/net/common/common.cmake)
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/samples/net/sockets/packet/CMakeLists.txt b/samples/net/sockets/packet/CMakeLists.txt
+--- a/samples/net/sockets/packet/CMakeLists.txt
++++ b/samples/net/sockets/packet/CMakeLists.txt
+@@ -8,3 +8,5 @@ project(sockets_echo_server)
+ target_sources(                     app PRIVATE src/packet.c)
+ 
+ include(${ZEPHYR_BASE}/samples/net/common/common.cmake)
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/samples/net/sockets/sntp_client/CMakeLists.txt b/samples/net/sockets/sntp_client/CMakeLists.txt
+--- a/samples/net/sockets/sntp_client/CMakeLists.txt
++++ b/samples/net/sockets/sntp_client/CMakeLists.txt
+@@ -8,3 +8,5 @@ FILE(GLOB app_sources src/*.c)
+ target_sources(app PRIVATE ${app_sources})
+ 
+ include(${ZEPHYR_BASE}/samples/net/common/common.cmake)
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/samples/net/sockets/socketpair/CMakeLists.txt b/samples/net/sockets/socketpair/CMakeLists.txt
+--- a/samples/net/sockets/socketpair/CMakeLists.txt
++++ b/samples/net/sockets/socketpair/CMakeLists.txt
+@@ -9,3 +9,5 @@ FILE(GLOB app_sources src/*.c)
+ target_sources(app PRIVATE ${app_sources})
+ 
+ include(${ZEPHYR_BASE}/samples/net/common/common.cmake)
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/samples/net/sockets/txtime/CMakeLists.txt b/samples/net/sockets/txtime/CMakeLists.txt
+--- a/samples/net/sockets/txtime/CMakeLists.txt
++++ b/samples/net/sockets/txtime/CMakeLists.txt
+@@ -8,3 +8,5 @@ project(sockets_txtime)
+ target_sources(app PRIVATE src/main.c)
+ 
+ include(${ZEPHYR_BASE}/samples/net/common/common.cmake)
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/samples/net/sockets/websocket_client/CMakeLists.txt b/samples/net/sockets/websocket_client/CMakeLists.txt
+--- a/samples/net/sockets/websocket_client/CMakeLists.txt
++++ b/samples/net/sockets/websocket_client/CMakeLists.txt
+@@ -14,3 +14,5 @@ generate_inc_file_for_target(
+     src/https-cert.der
+     ${gen_dir}/https-cert.der.inc
+     )
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/samples/net/tftp_client/CMakeLists.txt b/samples/net/tftp_client/CMakeLists.txt
+--- a/samples/net/tftp_client/CMakeLists.txt
++++ b/samples/net/tftp_client/CMakeLists.txt
+@@ -8,3 +8,5 @@ FILE(GLOB app_sources src/*.c)
+ target_sources(app PRIVATE ${app_sources})
+ 
+ include(${ZEPHYR_BASE}/samples/net/common/common.cmake)
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/samples/net/wifi/shell/CMakeLists.txt b/samples/net/wifi/shell/CMakeLists.txt
+--- a/samples/net/wifi/shell/CMakeLists.txt
++++ b/samples/net/wifi/shell/CMakeLists.txt
+@@ -7,3 +7,5 @@ project(wifi)
+ 
+ FILE(GLOB app_sources src/*.c)
+ target_sources(app PRIVATE ${app_sources})
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/samples/net/wireguard/CMakeLists.txt b/samples/net/wireguard/CMakeLists.txt
+--- a/samples/net/wireguard/CMakeLists.txt
++++ b/samples/net/wireguard/CMakeLists.txt
+@@ -11,3 +11,5 @@ target_sources(app PRIVATE
+   src/main.c
+   src/wg.c
+ )
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/samples/subsys/modbus/tcp_gateway/CMakeLists.txt b/samples/subsys/modbus/tcp_gateway/CMakeLists.txt
+--- a/samples/subsys/modbus/tcp_gateway/CMakeLists.txt
++++ b/samples/subsys/modbus/tcp_gateway/CMakeLists.txt
+@@ -6,3 +6,5 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+ project(modbus-serial-backend)
+ 
+ target_sources(app PRIVATE src/main.c)
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/samples/subsys/modbus/tcp_server/CMakeLists.txt b/samples/subsys/modbus/tcp_server/CMakeLists.txt
+--- a/samples/subsys/modbus/tcp_server/CMakeLists.txt
++++ b/samples/subsys/modbus/tcp_server/CMakeLists.txt
+@@ -6,3 +6,5 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+ project(modbus-tcp-server)
+ 
+ target_sources(app PRIVATE src/main.c)
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/samples/subsys/usb/legacy/netusb/CMakeLists.txt b/samples/subsys/usb/legacy/netusb/CMakeLists.txt
+--- a/samples/subsys/usb/legacy/netusb/CMakeLists.txt
++++ b/samples/subsys/usb/legacy/netusb/CMakeLists.txt
+@@ -6,3 +6,5 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+ project(zperf)
+ 
+ target_sources(app PRIVATE src/main.c)
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/samples/subsys/video/tcpserversink/CMakeLists.txt b/samples/subsys/video/tcpserversink/CMakeLists.txt
+--- a/samples/subsys/video/tcpserversink/CMakeLists.txt
++++ b/samples/subsys/video/tcpserversink/CMakeLists.txt
+@@ -6,3 +6,5 @@ project(video_tcpserversink)
+ 
+ file(GLOB app_sources src/*.c)
+ target_sources(app PRIVATE ${app_sources})
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/subsys/net/lib/ocpp/CMakeLists.txt b/subsys/net/lib/ocpp/CMakeLists.txt
+--- a/subsys/net/lib/ocpp/CMakeLists.txt
++++ b/subsys/net/lib/ocpp/CMakeLists.txt
+@@ -9,3 +9,8 @@ zephyr_library_sources(
+     ocpp_j.c
+     ocpp_wamp_rpc.c
+ )
++
++zephyr_library_compile_definitions(
++    _POSIX_C_SOURCE=200809L
++    _XOPEN_SOURCE=700
++)
+diff --git a/subsys/net/lib/ocpp/Kconfig b/subsys/net/lib/ocpp/Kconfig
+--- a/subsys/net/lib/ocpp/Kconfig
++++ b/subsys/net/lib/ocpp/Kconfig
+@@ -7,6 +7,8 @@ config OCPP
+ 	depends on WEBSOCKET_CLIENT
+ 	select EXPERIMENTAL
+ 	select POSIX_C_LANG_SUPPORT_R
++	select POSIX_SYSTEM_INTERFACES
++	select POSIX_BASE_DEFINITIONS
+ 	help
+ 	  This option enables the open charge point protocol library
+ 
+diff --git a/tests/bsim/net/sockets/echo_test/CMakeLists.txt b/tests/bsim/net/sockets/echo_test/CMakeLists.txt
+--- a/tests/bsim/net/sockets/echo_test/CMakeLists.txt
++++ b/tests/bsim/net/sockets/echo_test/CMakeLists.txt
+@@ -45,3 +45,5 @@ zephyr_include_directories(
+   ${BSIM_COMPONENTS_PATH}/libUtilv1/src/
+   ${BSIM_COMPONENTS_PATH}/libPhyComv1/src/
+   )
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/tests/drivers/wifi/nrf_wifi/CMakeLists.txt b/tests/drivers/wifi/nrf_wifi/CMakeLists.txt
+--- a/tests/drivers/wifi/nrf_wifi/CMakeLists.txt
++++ b/tests/drivers/wifi/nrf_wifi/CMakeLists.txt
+@@ -6,3 +6,5 @@ project(build_nrf70_wifi_driver_all)
+ 
+ FILE(GLOB app_sources src/*.c)
+ target_sources(app PRIVATE ${app_sources})
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/tests/lib/c_lib/thrd/CMakeLists.txt b/tests/lib/c_lib/thrd/CMakeLists.txt
+--- a/tests/lib/c_lib/thrd/CMakeLists.txt
++++ b/tests/lib/c_lib/thrd/CMakeLists.txt
+@@ -7,3 +7,5 @@ project(c11_threads)
+ FILE(GLOB app_sources src/*.c)
+ 
+ target_sources(app PRIVATE ${app_sources})
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/tests/lib/fdtable/CMakeLists.txt b/tests/lib/fdtable/CMakeLists.txt
+--- a/tests/lib/fdtable/CMakeLists.txt
++++ b/tests/lib/fdtable/CMakeLists.txt
+@@ -6,3 +6,5 @@ project(fdtable)
+ 
+ FILE(GLOB app_sources src/*.c)
+ target_sources(app PRIVATE ${app_sources})
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/tests/net/all/CMakeLists.txt b/tests/net/all/CMakeLists.txt
+--- a/tests/net/all/CMakeLists.txt
++++ b/tests/net/all/CMakeLists.txt
+@@ -6,3 +6,5 @@ project(all)
+ 
+ FILE(GLOB app_sources src/*.c)
+ target_sources(app PRIVATE ${app_sources})
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/tests/net/lib/http_server/common/CMakeLists.txt b/tests/net/lib/http_server/common/CMakeLists.txt
+--- a/tests/net/lib/http_server/common/CMakeLists.txt
++++ b/tests/net/lib/http_server/common/CMakeLists.txt
+@@ -10,3 +10,5 @@ target_sources(app PRIVATE ${app_sources})
+ zephyr_linker_sources(SECTIONS sections-rom.ld)
+ zephyr_iterable_section(NAME http_resource_desc_service_A KVMA RAM_REGION GROUP RODATA_REGION)
+ zephyr_iterable_section(NAME http_resource_desc_service_B KVMA RAM_REGION GROUP RODATA_REGION)
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/tests/net/lib/http_server/core/CMakeLists.txt b/tests/net/lib/http_server/core/CMakeLists.txt
+--- a/tests/net/lib/http_server/core/CMakeLists.txt
++++ b/tests/net/lib/http_server/core/CMakeLists.txt
+@@ -16,3 +16,5 @@ target_link_libraries(app PRIVATE zephyr_interface zephyr)
+ 
+ zephyr_linker_sources(SECTIONS sections-rom.ld)
+ zephyr_iterable_section(NAME http_resource_desc_test_http_service KVMA RAM_REGION GROUP RODATA_REGION)
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/tests/net/lib/http_server/crime/CMakeLists.txt b/tests/net/lib/http_server/crime/CMakeLists.txt
+--- a/tests/net/lib/http_server/crime/CMakeLists.txt
++++ b/tests/net/lib/http_server/crime/CMakeLists.txt
+@@ -22,3 +22,5 @@ generate_inc_file_for_target(app ${source_file_not_found} ${gen_dir}/not_found_p
+ 
+ zephyr_linker_sources(SECTIONS sections-rom.ld)
+ zephyr_iterable_section(NAME http_resource_desc_test_http_service KVMA RAM_REGION GROUP RODATA_REGION)
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/tests/net/lib/http_server/h3/CMakeLists.txt b/tests/net/lib/http_server/h3/CMakeLists.txt
+--- a/tests/net/lib/http_server/h3/CMakeLists.txt
++++ b/tests/net/lib/http_server/h3/CMakeLists.txt
+@@ -32,3 +32,5 @@ target_link_libraries(app PRIVATE zephyr_interface zephyr)
+ 
+ zephyr_linker_sources(SECTIONS sections-rom.ld)
+ zephyr_iterable_section(NAME http_resource_desc_test_http_service KVMA RAM_REGION GROUP RODATA_REGION)
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/tests/net/lib/http_server/hpack/CMakeLists.txt b/tests/net/lib/http_server/hpack/CMakeLists.txt
+--- a/tests/net/lib/http_server/hpack/CMakeLists.txt
++++ b/tests/net/lib/http_server/hpack/CMakeLists.txt
+@@ -6,3 +6,5 @@ project(http2_hpack)
+ 
+ FILE(GLOB app_sources src/*.c)
+ target_sources(app PRIVATE ${app_sources})
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/tests/net/lib/ocpp/CMakeLists.txt b/tests/net/lib/ocpp/CMakeLists.txt
+--- a/tests/net/lib/ocpp/CMakeLists.txt
++++ b/tests/net/lib/ocpp/CMakeLists.txt
+@@ -10,3 +10,5 @@ target_include_directories(app PRIVATE
+ )
+ FILE(GLOB app_sources src/*.c)
+ target_sources(app PRIVATE ${app_sources})
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/tests/net/lib/prometheus/collector/CMakeLists.txt b/tests/net/lib/prometheus/collector/CMakeLists.txt
+--- a/tests/net/lib/prometheus/collector/CMakeLists.txt
++++ b/tests/net/lib/prometheus/collector/CMakeLists.txt
+@@ -7,3 +7,5 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+ project(test_prometheus_collector)
+ 
+ target_sources(app PRIVATE src/main.c)
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/tests/net/lib/prometheus/counter/CMakeLists.txt b/tests/net/lib/prometheus/counter/CMakeLists.txt
+--- a/tests/net/lib/prometheus/counter/CMakeLists.txt
++++ b/tests/net/lib/prometheus/counter/CMakeLists.txt
+@@ -7,3 +7,5 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+ project(test_prometheus_counter)
+ 
+ target_sources(app PRIVATE src/main.c)
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/tests/net/lib/prometheus/formatter/CMakeLists.txt b/tests/net/lib/prometheus/formatter/CMakeLists.txt
+--- a/tests/net/lib/prometheus/formatter/CMakeLists.txt
++++ b/tests/net/lib/prometheus/formatter/CMakeLists.txt
+@@ -7,3 +7,5 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+ project(test_prometheus_formatter)
+ 
+ target_sources(app PRIVATE src/main.c)
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/tests/net/lib/prometheus/gauge/CMakeLists.txt b/tests/net/lib/prometheus/gauge/CMakeLists.txt
+--- a/tests/net/lib/prometheus/gauge/CMakeLists.txt
++++ b/tests/net/lib/prometheus/gauge/CMakeLists.txt
+@@ -7,3 +7,5 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+ project(test_prometheus_gauge)
+ 
+ target_sources(app PRIVATE src/main.c)
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/tests/net/lib/prometheus/histogram/CMakeLists.txt b/tests/net/lib/prometheus/histogram/CMakeLists.txt
+--- a/tests/net/lib/prometheus/histogram/CMakeLists.txt
++++ b/tests/net/lib/prometheus/histogram/CMakeLists.txt
+@@ -7,3 +7,5 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+ project(test_prometheus_histogram)
+ 
+ target_sources(app PRIVATE src/main.c)
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/tests/net/lib/prometheus/summary/CMakeLists.txt b/tests/net/lib/prometheus/summary/CMakeLists.txt
+--- a/tests/net/lib/prometheus/summary/CMakeLists.txt
++++ b/tests/net/lib/prometheus/summary/CMakeLists.txt
+@@ -7,3 +7,5 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+ project(test_prometheus_summary)
+ 
+ target_sources(app PRIVATE src/main.c)
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/tests/net/socket/service/CMakeLists.txt b/tests/net/socket/service/CMakeLists.txt
+--- a/tests/net/socket/service/CMakeLists.txt
++++ b/tests/net/socket/service/CMakeLists.txt
+@@ -7,3 +7,5 @@ project(socket_poll)
+ target_include_directories(app PRIVATE ${ZEPHYR_BASE}/subsys/net/ip)
+ FILE(GLOB app_sources src/*.c)
+ target_sources(app PRIVATE ${app_sources})
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
