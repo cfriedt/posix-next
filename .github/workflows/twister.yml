@@ -25,8 +25,19 @@ concurrency:
 env:
   MANIFEST_PATH: lib/posix
   ZEPHYR_BASE: ${{ github.workspace }}/zephyr
-  PLATFORMS: -p mps2/an385 -p native_sim -p qemu_cortex_a53 -p qemu_riscv64 -p qemu_x86 -p qemu_x86_64
-  ROOTS: -T tests/posix -T ${{ github.workspace }}/zephyr/tests/net -T ${{ github.workspace }}/zephyr/tests/lib/c_lib
+  PLATFORMS: >-
+    -p mps2/an385
+    -p native_sim
+    -p qemu_cortex_a53
+    -p qemu_riscv64
+    -p qemu_x86
+    -p qemu_x86_64
+  ROOTS: >-
+    -T ${{ github.workspace }}/lib/posix/samples/posix
+    -T ${{ github.workspace }}/lib/posix/tests/posix
+    -T ${{ github.workspace }}/zephyr/samples/net
+    -T ${{ github.workspace }}/zephyr/tests/net
+    -T ${{ github.workspace }}/zephyr/tests/lib/c_lib
 
 jobs:
   twister-build:
@@ -45,6 +56,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
         with:
+          # need history in order to be able to run 'scripts/ci/test_plan.py -c origin/main..'
+          fetch-depth: 0
           # note: checkout to posix-next and then rename to lib/posix as a workaround for the
           # assumed west workspace location via 'west init -l lib/posix'. See output of
           # 'west init --help' for details.
@@ -76,14 +89,27 @@ jobs:
       - name: Run Tests with Twister (Pull Request)
         if: github.event_name == 'pull_request'
         shell: bash
-        working-directory: ${{ env.MANIFEST_PATH }}
+        working-directory: ${{ env.ZEPHYR_BASE }}
         run: |
-          python3 ${{ env.ZEPHYR_BASE }}/scripts/ci/test_plan.py -r ${{ github.workspace }}/${{ env.MANIFEST_PATH }} -c origin/${{ github.base_ref }}.. --pull-request ${{ env.ROOTS }}
-          west twister --subset 1/5 --load-tests testplan.json
+          # must be run from ZEPHYR_BASE. generates testplan.json
+          ./scripts/ci/test_plan.py -r ${{ github.workspace }}/${{ env.MANIFEST_PATH }} \
+            -c origin/${{ github.base_ref }}.. --pull-request \
+            ${{ env.PLATFORMS }} \
+            ${{ env.ROOTS }}
+
+          # run twister with the generated testplan
+          # there are about 625 tests that get pulled into this run with the specified platforms
+          # and roots. for now, hard-coded limit of first 25th of shuffled tests to reduce
+          # on-diff CI time
+          ./scripts/twister \
+            --subset 1/25  --shuffle-tests \
+            --load-tests testplan.json \
+            ${{ env.PLATFORMS }} \
+            ${{ env.ROOTS }}
 
       - name: Run Tests with Twister (Nightly)
         if: github.event_name == 'schedule'
         shell: bash
-        working-directory: ${{ env.MANIFEST_PATH }}
+        working-directory: ${{ env.ZEPHYR_BASE }}
         run: |
           west twister -c -i ${{ env.PLATFORMS }} ${{ env.ROOTS }}
