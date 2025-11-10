@@ -1,0 +1,146 @@
+patches:
+  - path: zephyr/posix-tests-enable-dynamic-threads.patch
+    sha256sum: 45c9570f58be300e043e41e85731c06aa7060256551ec54535682155b686dbc6
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-24
+    upstreamable: true
+    merge-pr: https://github.com/zephyrproject-rtos/zephyr/pull/120028
+    comments: |
+      Part of zephyr#120028 (rebased onto v4.5.0-rc1), replacing the v4.3.0/v4.4.1-era
+      deprecate-config-posix-api and do-not-define-_POSIX_C_SOURCE patches.
+      tests: posix: enable dynamic threads where the tests expect them
+      Kconfig warns when a symbol is assigned a value that its dependencies
+      do not allow, and two of the POSIX thread test configurations do that.
+
+      xsi_threads_ext sets CONFIG_DYNAMIC_THREAD_ALLOC=y without enabling
+      CONFIG_DYNAMIC_THREAD, so the option has always been off and the
+      dynamic stack test paths have never run. Enable CONFIG_DYNAMIC_THREAD
+      with the CONFIG_THREAD_STACK_INFO it depends on and a heap for the
+      stacks, disable both in the static_stack scenario so that it keeps
+      testing static stacks, and raise the RAM requirement to match.
+
+      threads_base sets CONFIG_DYNAMIC_THREAD_POOL_SIZE in prj.conf, but the
+      static_stack scenario disables CONFIG_DYNAMIC_THREAD, on which the pool
+      size depends. Move the pool size into the scenarios that use dynamic
+      threads. The same scenario also sets CONFIG_THREAD_STACK_INFO=n, which
+      is ignored on architectures that select it; drop it.
+  - path: zephyr/posix-netpacket-packet-h.patch
+    sha256sum: a263928c09aadaaf0575b570935e3fa407d256e471dfabffa834bdfa4f06499e
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-23
+    upstreamable: true
+    merge-pr: https://github.com/zephyrproject-rtos/zephyr/pull/120028
+    comments: |
+      Part of zephyr#120028 (rebased onto v4.5.0-rc1), replacing the v4.3.0/v4.4.1-era
+      deprecate-config-posix-api and do-not-define-_POSIX_C_SOURCE patches.
+      posix: add <netpacket/packet.h>
+      Provide the packet socket address header so that applications and
+      modules can include <netpacket/packet.h> as they do on other systems.
+      The Zephyr header pulls in the native packet socket definitions from
+      <zephyr/net/net_ip.h>, and the newlib and picolibc shims forward to it
+      since neither C library ships this header.
+  - path: zephyr/posix-network-appliance-subprofile.patch
+    sha256sum: c64b15bb672fdb003fb6855a7ed950dfdac45fb49a0c15c2b18d3ed5b5d8affc
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-23
+    upstreamable: true
+    merge-pr: https://github.com/zephyrproject-rtos/zephyr/pull/120028
+    comments: |
+      Part of zephyr#120028 (rebased onto v4.5.0-rc1), replacing the v4.3.0/v4.4.1-era
+      deprecate-config-posix-api and do-not-define-_POSIX_C_SOURCE patches.
+      posix: add a network appliance subprofile
+      Networked applications typically need the networking interfaces of
+      PSE53 but not its multi-process, pipe, spawn or sporadic server
+      interfaces. Add CONFIG_POSIX_AEP_CHOICE_NETAPP, a Zephyr-specific
+      subprofile that selects PSE52 plus POSIX_NETWORKING, POSIX_RAW_SOCKETS,
+      POSIX_CPUTIME and POSIX_PRIORITY_SCHEDULING, so that such applications
+      do not have to pull in the whole of PSE53.
+  - path: zephyr/posix-remove-zephyr-posix-header-prefix.patch
+    sha256sum: 2e7c294498bab25c56251c2226dd14d9d51d20db140a0fac571eb67d6567a0db
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-22
+    upstreamable: true
+    merge-pr: https://github.com/zephyrproject-rtos/zephyr/pull/120028
+    comments: |
+      Part of zephyr#120028 (rebased onto v4.5.0-rc1), replacing the v4.3.0/v4.4.1-era
+      deprecate-config-posix-api and do-not-define-_POSIX_C_SOURCE patches.
+      posix: remove zephyr/posix in header prefixes
+      If C libraries provide conformant POSIX headers, then use the headers
+      provided by the C library.
+
+      Otherwise, C library maintainers may add `include/zephyr/posix` to their
+      standard search path.
+
+      This change removes the requirement to have `<zephyr/posix/...>` prefixing
+      all standard POSIX includes in Zephyr.
+
+      The main reason that it was required was due to conflicts between C
+      library time.h, signal.h and the fact that Zephyr posix headers were being
+      somewhat ad-hoc mixed with libc posix headers.
+
+      Now, any (even partially) POSIX-conformant C libraries are expected to
+      provide their own types, constants, and headers, and Zephyr's
+      implementation uses those definitions.
+
+      If any definitions are missing, we define them on a per-libc basis. This
+      can also be done out-of-tree, which allows for implementors to take
+      advantage of the `CONFIG_TC_PROVIDES_POSIX..` options.
+
+      This is likely the last major commit required before we deprecate the
+      `CONFIG_POSIX_API` Kconfig option in favour of POSIX subprofiling \o/
+  - path: zephyr/posix-unistd-version-and-symbolic-constants.patch
+    sha256sum: 7c5b21cdc9bc42c28299366f83f413a61a5363047234ca84750c605c5eced438
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-22
+    upstreamable: true
+    merge-pr: https://github.com/zephyrproject-rtos/zephyr/pull/120028
+    comments: |
+      Part of zephyr#120028 (rebased onto v4.5.0-rc1), replacing the v4.3.0/v4.4.1-era
+      deprecate-config-posix-api and do-not-define-_POSIX_C_SOURCE patches.
+      posix: ensure that unistd.h declares version and symbolic constants
+      The specification requires that unistd.h (or a file that is included via
+      unistd.h) declare version macros and symbolic constants.
+
+      Feature test macros declarations are also removed from
+      `subsys/portability/posix/options/CMakeLists.txt`.
+
+      Closes #97949
+  - path: zephyr/deprecate-config-posix-api.patch
+    sha256sum: f635f5ce15c84f17a41ba2af7faae40b0dce52cf2ea30b2c8b833963936d497b
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-23
+    upstreamable: true
+    merge-pr: https://github.com/zephyrproject-rtos/zephyr/pull/120028
+    comments: |
+      Part of zephyr#120028 (rebased onto v4.5.0-rc1), replacing the v4.3.0/v4.4.1-era
+      deprecate-config-posix-api and do-not-define-_POSIX_C_SOURCE patches.
+      posix: deprecate CONFIG_POSIX_API
+      CONFIG_POSIX_API predates POSIX subprofiling and enables an ad-hoc,
+      ever-growing set of Option Groups. Mark it deprecated and convert the
+      in-tree users to a subprofile (CONFIG_POSIX_AEP_CHOICE_*) plus the
+      Option Groups they actually use, following the conversion used in the
+      posix-next module. Networked samples and tests use the NETAPP
+      subprofile.
+
+      Gate the file and file-system function declarations in
+      <zephyr/posix/unistd.h> on _POSIX_C_SOURCE or
+      CONFIG_POSIX_SYSTEM_INTERFACES instead of CONFIG_POSIX_API, and make
+      the network namespace compatibility mode for tests depend on
+      CONFIG_POSIX_NETWORKING, the Option Group that provides the POSIX
+      socket API.
+
+      The hostap module selects the Option Groups it uses directly; this
+      requires the hostap change that includes the standard POSIX headers
+      instead of gating them on CONFIG_POSIX_API.

@@ -1,0 +1,1797 @@
+diff --git a/doc/releases/migration-guide-4.5.rst b/doc/releases/migration-guide-4.5.rst
+--- a/doc/releases/migration-guide-4.5.rst
++++ b/doc/releases/migration-guide-4.5.rst
+@@ -2932,6 +2932,16 @@ POSIX
+ * ``CONFIG_POSIX_READER_WRITER_LOCKS`` has been removed. Use
+   :kconfig:option:`CONFIG_POSIX_RW_LOCKS` instead.
+ 
++* :kconfig:option:`CONFIG_POSIX_API` is deprecated. It is equivalent to
++  :kconfig:option:`CONFIG_POSIX_AEP_CHOICE_PSE51` with :kconfig:option:`CONFIG_POSIX_NETWORKING`,
++  :kconfig:option:`CONFIG_POSIX_FD_MGMT`, :kconfig:option:`CONFIG_POSIX_MULTI_PROCESS`,
++  :kconfig:option:`CONFIG_XSI_SINGLE_PROCESS` and :kconfig:option:`CONFIG_EVENTFD`. Applications
++  should select a subprofile (:kconfig:option:`CONFIG_POSIX_AEP_CHOICE_BASE`,
++  :kconfig:option:`CONFIG_POSIX_AEP_CHOICE_PSE51`, :kconfig:option:`CONFIG_POSIX_AEP_CHOICE_PSE52`
++  or :kconfig:option:`CONFIG_POSIX_AEP_CHOICE_PSE53`) and the Option Groups they use. Libraries
++  should depend on :kconfig:option:`CONFIG_POSIX_SYSTEM_INTERFACES` and the Option Groups they
++  need instead of :kconfig:option:`CONFIG_POSIX_API`. See :ref:`posix_config`.
++
+ Random
+ ======
+ 
+diff --git a/doc/releases/release-notes-4.5.rst b/doc/releases/release-notes-4.5.rst
+--- a/doc/releases/release-notes-4.5.rst
++++ b/doc/releases/release-notes-4.5.rst
+@@ -490,6 +490,12 @@ Deprecated APIs and options
+   * Deprecated :kconfig:option:`CONFIG_NET_L2_PTP`.
+     Used :kconfig:option:`CONFIG_NET_L2_PTP_TIMESTAMPING` instead.
+ 
++* POSIX
++
++  * :kconfig:option:`CONFIG_POSIX_API` was deprecated. Select a POSIX subprofile such as
++    :kconfig:option:`CONFIG_POSIX_AEP_CHOICE_PSE51` and the required Option Groups instead. See
++    :ref:`POSIX Configuration<posix_config>` for more details.
++
+ * SPI
+ 
+   * The SPI API now uses inclusive terminology (controller/peripheral, SDO/SDI). The former
+diff --git a/doc/services/connectivity/networking/api/sockets.rst b/doc/services/connectivity/networking/api/sockets.rst
+--- a/doc/services/connectivity/networking/api/sockets.rst
++++ b/doc/services/connectivity/networking/api/sockets.rst
+@@ -22,7 +22,7 @@ compatible API implementation for Zephyr:
+ * Is namespaced by default, to avoid name conflicts with well-known
+   names like ``close()``, which may be part of libc or other POSIX
+   compatibility libraries.
+-  If enabled by :kconfig:option:`CONFIG_POSIX_API`, it will also
++  If enabled by :kconfig:option:`CONFIG_POSIX_NETWORKING`, it will also
+   expose POSIX compatible APIs.
+ 
+ BSD Sockets compatible API is enabled using :kconfig:option:`CONFIG_NET_SOCKETS`
+@@ -35,7 +35,7 @@ config option and implements the following operations: ``socket()``, ``close()``
+ Based on the namespacing requirements above, these operations are by
+ default exposed as functions with ``zsock_`` prefix, e.g.
+ :c:func:`zsock_socket` and :c:func:`zsock_close`. If the config option
+-:kconfig:option:`CONFIG_POSIX_API` is defined, all the functions
++:kconfig:option:`CONFIG_POSIX_NETWORKING` is defined, all the functions
+ will be also exposed as aliases without the prefix. This includes the
+ functions like ``close()`` and ``fcntl()`` (which may conflict with
+ functions in libc or other libraries, for example, with the filesystem
+diff --git a/doc/services/portability/posix/overview/index.rst b/doc/services/portability/posix/overview/index.rst
+--- a/doc/services/portability/posix/overview/index.rst
++++ b/doc/services/portability/posix/overview/index.rst
+@@ -85,7 +85,7 @@ leverages the ``nanosleep()`` and ``perror()`` POSIX functions.
+ .. code-block:: cfg
+    :caption: `prj.conf` for a simple POSIX app in Zephyr
+ 
+-    CONFIG_POSIX_API=y
++    CONFIG_POSIX_AEP_CHOICE_PSE51=y
+ 
+ .. code-block:: c
+    :caption: A simple app that uses Zephyr's POSIX API
+@@ -149,19 +149,21 @@ Legacy
+ ++++++
+ 
+ Historically, Zephyr used :kconfig:option:`CONFIG_POSIX_API` to configure a set of POSIX features
+-that was overloaded and always increasing in size.
+-
+-* :kconfig:option:`CONFIG_POSIX_API`
+-
+-The option is now frozen, and can be considered equivalent to the following:
++that was overloaded and always increasing in size. The option is deprecated and will be removed in
++a future release. It is equivalent to the following:
+ 
+ * :kconfig:option:`CONFIG_POSIX_AEP_CHOICE_PSE51`
+ * :kconfig:option:`CONFIG_POSIX_FD_MGMT`
+ * :kconfig:option:`CONFIG_POSIX_MESSAGE_PASSING`
++* :kconfig:option:`CONFIG_POSIX_MULTI_PROCESS`
+ * :kconfig:option:`CONFIG_POSIX_NETWORKING`
++* :kconfig:option:`CONFIG_XSI_SINGLE_PROCESS`
++* :kconfig:option:`CONFIG_EVENTFD`
+ 
+-However, :kconfig:option:`CONFIG_POSIX_API` should be considered legacy and should not be used for
+-new Zephyr applications.
++Applications should instead select a subprofile such as
++:kconfig:option:`CONFIG_POSIX_AEP_CHOICE_PSE51` together with the Option Groups they require.
++Libraries should depend on :kconfig:option:`CONFIG_POSIX_SYSTEM_INTERFACES` and the individual
++Option Groups rather than on :kconfig:option:`CONFIG_POSIX_API`.
+ 
+ .. _IEEE: https://www.ieee.org/
+ .. _IEEE Computer Society: https://www.computer.org/
+diff --git a/drivers/modem/Kconfig b/drivers/modem/Kconfig
+--- a/drivers/modem/Kconfig
++++ b/drivers/modem/Kconfig
+@@ -156,7 +156,7 @@ config MODEM_SOCKET
+ 	  Note that the modem socket uses runtime allocated file descriptors
+ 	  reserved from the fdtable, for which the max count is set using the
+ 	  Kconfig option ZVFS_OPEN_MAX. Make sure to update this value as both
+-	  the modem sockets and the POSIX_API, if used, share them.
++	  the modem sockets and other POSIX APIs, if used, share them.
+ 
+ config MODEM_SOCKET_PACKET_COUNT
+ 	int "Maximum number of stored packet sizes per socket"
+diff --git a/drivers/wifi/nxp/Kconfig.nxp b/drivers/wifi/nxp/Kconfig.nxp
+--- a/drivers/wifi/nxp/Kconfig.nxp
++++ b/drivers/wifi/nxp/Kconfig.nxp
+@@ -1234,10 +1234,12 @@ if NXP_WIFI_SMOKE_TESTS
+ 
+ config NXP_WIFI_SIGMA_AGENT
+ 	bool "Wi-Fi Alliance Sigma Agent Support"
+-	select POSIX_API
++	select POSIX_SYSTEM_INTERFACES
+ 	select POSIX_THREADS
++	select POSIX_BARRIERS
+ 	select PTHREAD_CREATE_BARRIER
+ 	select POSIX_TIMERS
++	select POSIX_NETWORKING
+ 	help
+ 	  This option is to enable Wi-Fi Alliance Sigma Agent support in the Wi-Fi driver.
+ 
+diff --git a/include/zephyr/net/socket.h b/include/zephyr/net/socket.h
+--- a/include/zephyr/net/socket.h
++++ b/include/zephyr/net/socket.h
+@@ -431,7 +431,7 @@ bool net_socket_port_in_use(enum net_ip_protocol ip_proto, uint16_t local_port,
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/socket.html
+  * for normative description.
+  * This function is also exposed as `socket()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  *
+  * If CONFIG_USERSPACE is enabled, the caller will be granted access to the
+  * context object associated with the returned file descriptor.
+@@ -448,7 +448,7 @@ __syscall int zsock_socket(int family, int type, int proto);
+  * https://pubs.opengroup.org/onlinepubs/009695399/functions/socketpair.html
+  * for normative description.
+  * This function is also exposed as `socketpair()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ __syscall int zsock_socketpair(int family, int type, int proto, int *sv);
+ 
+@@ -458,7 +458,7 @@ __syscall int zsock_socketpair(int family, int type, int proto, int *sv);
+  * @details
+  * Close a network socket.
+  * This function is also exposed as `close()`
+- * if @kconfig{CONFIG_POSIX_API} is defined (in which case it
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined (in which case it
+  * may conflict with generic POSIX `close()` function).
+  */
+ __syscall int zsock_close(int sock);
+@@ -472,7 +472,7 @@ __syscall int zsock_close(int sock);
+  * for normative description, but currently this function has no effect in
+  * Zephyr and provided solely for compatibility with existing code.
+  * This function is also exposed as `shutdown()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ __syscall int zsock_shutdown(int sock, int how);
+ 
+@@ -484,7 +484,7 @@ __syscall int zsock_shutdown(int sock, int how);
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/bind.html
+  * for normative description.
+  * This function is also exposed as `bind()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ __syscall int zsock_bind(int sock, const struct net_sockaddr *addr,
+ 			 net_socklen_t addrlen);
+@@ -497,7 +497,7 @@ __syscall int zsock_bind(int sock, const struct net_sockaddr *addr,
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/connect.html
+  * for normative description.
+  * This function is also exposed as `connect()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ __syscall int zsock_connect(int sock, const struct net_sockaddr *addr,
+ 			    net_socklen_t addrlen);
+@@ -510,7 +510,7 @@ __syscall int zsock_connect(int sock, const struct net_sockaddr *addr,
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/listen.html
+  * for normative description.
+  * This function is also exposed as `listen()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ __syscall int zsock_listen(int sock, int backlog);
+ 
+@@ -522,7 +522,7 @@ __syscall int zsock_listen(int sock, int backlog);
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/accept.html
+  * for normative description.
+  * This function is also exposed as `accept()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ __syscall int zsock_accept(int sock, struct net_sockaddr *addr, net_socklen_t *addrlen);
+ 
+@@ -534,7 +534,7 @@ __syscall int zsock_accept(int sock, struct net_sockaddr *addr, net_socklen_t *a
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/sendto.html
+  * for normative description.
+  * This function is also exposed as `sendto()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ __syscall ssize_t zsock_sendto(int sock, const void *buf, size_t len,
+ 			       int flags, const struct net_sockaddr *dest_addr,
+@@ -548,7 +548,7 @@ __syscall ssize_t zsock_sendto(int sock, const void *buf, size_t len,
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/send.html
+  * for normative description.
+  * This function is also exposed as `send()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ static inline ssize_t zsock_send(int sock, const void *buf, size_t len,
+ 				 int flags)
+@@ -564,7 +564,7 @@ static inline ssize_t zsock_send(int sock, const void *buf, size_t len,
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/sendmsg.html
+  * for normative description.
+  * This function is also exposed as `sendmsg()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ __syscall ssize_t zsock_sendmsg(int sock, const struct net_msghdr *msg,
+ 				int flags);
+@@ -577,7 +577,7 @@ __syscall ssize_t zsock_sendmsg(int sock, const struct net_msghdr *msg,
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/recvfrom.html
+  * for normative description.
+  * This function is also exposed as `recvfrom()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ __syscall ssize_t zsock_recvfrom(int sock, void *buf, size_t max_len,
+ 				 int flags, struct net_sockaddr *src_addr,
+@@ -591,7 +591,7 @@ __syscall ssize_t zsock_recvfrom(int sock, void *buf, size_t max_len,
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/recvmsg.html
+  * for normative description.
+  * This function is also exposed as `recvmsg()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ __syscall ssize_t zsock_recvmsg(int sock, struct net_msghdr *msg, int flags);
+ 
+@@ -603,7 +603,7 @@ __syscall ssize_t zsock_recvmsg(int sock, struct net_msghdr *msg, int flags);
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/recv.html
+  * for normative description.
+  * This function is also exposed as `recv()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ static inline ssize_t zsock_recv(int sock, void *buf, size_t max_len,
+ 				 int flags)
+@@ -618,7 +618,7 @@ static inline ssize_t zsock_recv(int sock, void *buf, size_t max_len,
+  * This functions allow to (only) configure a socket for blocking or
+  * non-blocking operation (O_NONBLOCK).
+  * This function is also exposed as `fcntl()`
+- * if @kconfig{CONFIG_POSIX_API} is defined (in which case
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined (in which case
+  * it may conflict with generic POSIX `fcntl()` function).
+  */
+ __syscall int zsock_fcntl_impl(int sock, int cmd, int flags);
+@@ -657,7 +657,7 @@ static inline int zsock_fcntl_wrapper(int sock, int cmd, ...)
+  *   - @ref ZFD_IOCTL_FIONREAD
+  *   - @ref ZFD_IOCTL_FIONWRITE
+  * This function is also exposed as `ioctl()`
+- * if @kconfig{CONFIG_POSIX_API} is defined (in which case
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined (in which case
+  * it may conflict with generic POSIX `ioctl()` function).
+  */
+ __syscall int zsock_ioctl_impl(int sock, unsigned long request, va_list ap);
+@@ -688,7 +688,7 @@ static inline int zsock_ioctl_wrapper(int sock, unsigned long request, ...)
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/poll.html
+  * for normative description.
+  * This function is also exposed as `poll()`
+- * if @kconfig{CONFIG_POSIX_API} is defined (in which case
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined (in which case
+  * it may conflict with generic POSIX `poll()` function).
+  */
+ static inline int zsock_poll(struct zsock_pollfd *fds, int nfds, int timeout)
+@@ -707,7 +707,7 @@ static inline int zsock_poll(struct zsock_pollfd *fds, int nfds, int timeout)
+  * available in Linux (some options are dummy and provided to ease porting
+  * of existing code).
+  * This function is also exposed as `getsockopt()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ __syscall int zsock_getsockopt(int sock, int level, int optname,
+ 			       void *optval, net_socklen_t *optlen);
+@@ -723,7 +723,7 @@ __syscall int zsock_getsockopt(int sock, int level, int optname,
+  * available in Linux (some options are dummy and provided to ease porting
+  * of existing code).
+  * This function is also exposed as `setsockopt()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ __syscall int zsock_setsockopt(int sock, int level, int optname,
+ 			       const void *optval, net_socklen_t optlen);
+@@ -736,7 +736,7 @@ __syscall int zsock_setsockopt(int sock, int level, int optname,
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/getpeername.html
+  * for normative description.
+  * This function is also exposed as `getpeername()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ __syscall int zsock_getpeername(int sock, struct net_sockaddr *addr,
+ 				net_socklen_t *addrlen);
+@@ -749,7 +749,7 @@ __syscall int zsock_getpeername(int sock, struct net_sockaddr *addr,
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/getsockname.html
+  * for normative description.
+  * This function is also exposed as `getsockname()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ __syscall int zsock_getsockname(int sock, struct net_sockaddr *addr,
+ 				net_socklen_t *addrlen);
+@@ -762,7 +762,7 @@ __syscall int zsock_getsockname(int sock, struct net_sockaddr *addr,
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/gethostname.html
+  * for normative description.
+  * This function is also exposed as `gethostname()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ __syscall int zsock_gethostname(char *buf, size_t len);
+ 
+@@ -774,7 +774,7 @@ __syscall int zsock_gethostname(char *buf, size_t len);
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/inet_ntop.html
+  * for normative description.
+  * This function is also exposed as `inet_ntop()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ static inline char *zsock_inet_ntop(net_sa_family_t family, const void *src,
+ 				    char *dst, size_t size)
+@@ -790,7 +790,7 @@ static inline char *zsock_inet_ntop(net_sa_family_t family, const void *src,
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/inet_pton.html
+  * for normative description.
+  * This function is also exposed as `inet_pton()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ __syscall int zsock_inet_pton(net_sa_family_t family, const char *src, void *dst);
+ 
+@@ -833,7 +833,7 @@ __syscall int z_zsock_getaddrinfo_internal(const char *host,
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/getaddrinfo.html
+  * for normative description.
+  * This function is also exposed as `getaddrinfo()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ int zsock_getaddrinfo(const char *host, const char *service,
+ 		      const struct zsock_addrinfo *hints,
+@@ -847,7 +847,7 @@ int zsock_getaddrinfo(const char *host, const char *service,
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/freeaddrinfo.html
+  * for normative description.
+  * This function is also exposed as `freeaddrinfo()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ void zsock_freeaddrinfo(struct zsock_addrinfo *ai);
+ 
+@@ -859,7 +859,7 @@ void zsock_freeaddrinfo(struct zsock_addrinfo *ai);
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/gai_strerror.html
+  * for normative description.
+  * This function is also exposed as `gai_strerror()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ const char *zsock_gai_strerror(int errcode);
+ 
+@@ -894,7 +894,7 @@ const char *zsock_gai_strerror(int errcode);
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/getnameinfo.html
+  * for normative description.
+  * This function is also exposed as `getnameinfo()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ int zsock_getnameinfo(const struct net_sockaddr *addr, net_socklen_t addrlen,
+ 		      char *host, net_socklen_t hostlen,
+diff --git a/include/zephyr/net/socket_select.h b/include/zephyr/net/socket_select.h
+--- a/include/zephyr/net/socket_select.h
++++ b/include/zephyr/net/socket_select.h
+@@ -43,7 +43,7 @@ typedef struct zvfs_fd_set zsock_fd_set;
+  * use zsock_poll() instead. In Zephyr this function works only with
+  * sockets, not arbitrary file descriptors.
+  * This function is also exposed as `select()`
+- * if @kconfig{CONFIG_POSIX_API} is defined (in which case
++ * if @kconfig{CONFIG_POSIX_DEVICE_IO} is defined (in which case
+  * it may conflict with generic POSIX `select()` function).
+  */
+ static inline int zsock_select(int nfds, zsock_fd_set *readfds, zsock_fd_set *writefds,
+@@ -68,7 +68,7 @@ static inline int zsock_select(int nfds, zsock_fd_set *readfds, zsock_fd_set *wr
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/select.html
+  * for normative description.
+  * This function is also exposed as `FD_ZERO()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_DEVICE_IO} is defined.
+  */
+ static inline void ZSOCK_FD_ZERO(zsock_fd_set *set)
+ {
+@@ -83,7 +83,7 @@ static inline void ZSOCK_FD_ZERO(zsock_fd_set *set)
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/select.html
+  * for normative description.
+  * This function is also exposed as `FD_ISSET()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_DEVICE_IO} is defined.
+  */
+ static inline int ZSOCK_FD_ISSET(int fd, zsock_fd_set *set)
+ {
+@@ -98,7 +98,7 @@ static inline int ZSOCK_FD_ISSET(int fd, zsock_fd_set *set)
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/select.html
+  * for normative description.
+  * This function is also exposed as `FD_CLR()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_DEVICE_IO} is defined.
+  */
+ static inline void ZSOCK_FD_CLR(int fd, zsock_fd_set *set)
+ {
+@@ -113,7 +113,7 @@ static inline void ZSOCK_FD_CLR(int fd, zsock_fd_set *set)
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/select.html
+  * for normative description.
+  * This function is also exposed as `FD_SET()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_DEVICE_IO} is defined.
+  */
+ static inline void ZSOCK_FD_SET(int fd, zsock_fd_set *set)
+ {
+diff --git a/include/zephyr/posix/unistd.h b/include/zephyr/posix/unistd.h
+--- a/include/zephyr/posix/unistd.h
++++ b/include/zephyr/posix/unistd.h
+@@ -10,7 +10,7 @@
+ #include <sys/types.h>
+ #include <time.h>
+ 
+-#ifdef CONFIG_POSIX_API
++#if defined(_POSIX_C_SOURCE) || defined(CONFIG_POSIX_SYSTEM_INTERFACES)
+ #include <zephyr/fs/fs.h>
+ #endif
+ #include <zephyr/posix/sys/confstr.h>
+@@ -23,7 +23,7 @@
+ extern "C" {
+ #endif
+ 
+-#ifdef CONFIG_POSIX_API
++#if defined(_POSIX_C_SOURCE) || defined(CONFIG_POSIX_SYSTEM_INTERFACES)
+ /* File related operations */
+ int close(int file);
+ ssize_t write(int file, const void *buffer, size_t count);
+@@ -47,7 +47,7 @@ FUNC_NORETURN void _exit(int status);
+ 
+ int gethostname(char *buf, size_t len);
+ 
+-#endif /* CONFIG_POSIX_API */
++#endif /* defined(_POSIX_C_SOURCE) || defined(CONFIG_POSIX_SYSTEM_INTERFACES) */
+ 
+ #ifdef CONFIG_POSIX_C_LIB_EXT
+ int getopt(int argc, char *const argv[], const char *optstring);
+diff --git a/lib/libc/common/Kconfig b/lib/libc/common/Kconfig
+--- a/lib/libc/common/Kconfig
++++ b/lib/libc/common/Kconfig
+@@ -107,9 +107,9 @@ config COMMON_LIBC_STRNLEN
+ config COMMON_LIBC_THRD
+ 	bool "C11 <threads.h> API support"
+ 	depends on DYNAMIC_THREAD
+-	# Note: the POSIX_API dependency is only necessary until common elements
++	# Note: the POSIX_THREADS dependency is only necessary until common elements
+ 	# of C11 threads and POSIX API can be abstracted out to a common library.
+-	depends on POSIX_API
++	depends on POSIX_THREADS
+ 	default y
+ 	help
+ 	  Common implementation of C11 <threads.h> API.
+diff --git a/modules/hostap/Kconfig b/modules/hostap/Kconfig
+--- a/modules/hostap/Kconfig
++++ b/modules/hostap/Kconfig
+@@ -9,7 +9,14 @@ config WIFI_NM_WPA_SUPPLICANT
+ 	bool "WPA Supplicant from hostap project [EXPERIMENTAL]"
+ 	select POSIX_TIMERS
+ 	select POSIX_SIGNALS
+-	select POSIX_API
++	select POSIX_SYSTEM_INTERFACES
++	select POSIX_BASE_DEFINITIONS
++	select POSIX_AEP_REALTIME_MINIMAL
++	select POSIX_DEVICE_IO
++	select POSIX_FD_MGMT
++	select POSIX_MULTI_PROCESS
++	select POSIX_NETWORKING
++	select XSI
+ 	select XSI_SINGLE_PROCESS
+ 	select NET_SOCKETS
+ 	select NET_SOCKETS_PACKET
+diff --git a/modules/hostap/src/supp_main.c b/modules/hostap/src/supp_main.c
+--- a/modules/hostap/src/supp_main.c
++++ b/modules/hostap/src/supp_main.c
+@@ -5,6 +5,8 @@
+  * SPDX-License-Identifier: Apache-2.0
+  */
+ 
++#include <unistd.h>
++
+ #include <zephyr/logging/log.h>
+ LOG_MODULE_REGISTER(wifi_supplicant, CONFIG_WIFI_NM_WPA_SUPPLICANT_LOG_LEVEL);
+ 
+diff --git a/samples/net/cellular_modem/prj.conf b/samples/net/cellular_modem/prj.conf
+--- a/samples/net/cellular_modem/prj.conf
++++ b/samples/net/cellular_modem/prj.conf
+@@ -1,6 +1,6 @@
+ # Copyright (c) 2023 Bjarki Arge Andreasen
+ # SPDX-License-Identifier: Apache-2.0
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ 
+ # Networking
+ CONFIG_NETWORKING=y
+diff --git a/samples/net/cellular_modem/src/main.c b/samples/net/cellular_modem/src/main.c
+--- a/samples/net/cellular_modem/src/main.c
++++ b/samples/net/cellular_modem/src/main.c
+@@ -4,9 +4,13 @@
+  * SPDX-License-Identifier: Apache-2.0
+  */
+ 
++#include <netinet/in.h>
++#include <sys/socket.h>
++#include <arpa/inet.h>
++#include <unistd.h>
++
+ #include <zephyr/device.h>
+ #include <zephyr/kernel.h>
+-#include <zephyr/net/socket.h>
+ #include <zephyr/net/net_if.h>
+ #include <zephyr/net/dns_resolve.h>
+ #include <zephyr/pm/device.h>
+diff --git a/samples/net/cloud/aws_iot_mqtt/prj.conf b/samples/net/cloud/aws_iot_mqtt/prj.conf
+--- a/samples/net/cloud/aws_iot_mqtt/prj.conf
++++ b/samples/net/cloud/aws_iot_mqtt/prj.conf
+@@ -12,7 +12,7 @@ CONFIG_INIT_STACKS=y
+ CONFIG_HW_STACK_PROTECTION=y
+ CONFIG_REQUIRES_FULL_LIBC=y
+ CONFIG_JSON_LIBRARY=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ 
+ # DNS
+ CONFIG_DNS_RESOLVER=y
+diff --git a/samples/net/cloud/mqtt_azure/prj.conf b/samples/net/cloud/mqtt_azure/prj.conf
+--- a/samples/net/cloud/mqtt_azure/prj.conf
++++ b/samples/net/cloud/mqtt_azure/prj.conf
+@@ -1,5 +1,5 @@
+ CONFIG_NETWORKING=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ 
+ # Disable IPv6 support
+ CONFIG_NET_IPV6=n
+diff --git a/samples/net/cloud/tagoio_http_post/prj.conf b/samples/net/cloud/tagoio_http_post/prj.conf
+--- a/samples/net/cloud/tagoio_http_post/prj.conf
++++ b/samples/net/cloud/tagoio_http_post/prj.conf
+@@ -6,7 +6,7 @@ CONFIG_MAIN_STACK_SIZE=4096
+ # HEAP size (512 bytes) are enough to run DNS.
+ CONFIG_COMMON_LIBC_MALLOC_ARENA_SIZE=4096
+ 
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ 
+ # Networking config
+ CONFIG_NETWORKING=y
+diff --git a/samples/net/ethernet/dsa/prj.conf b/samples/net/ethernet/dsa/prj.conf
+--- a/samples/net/ethernet/dsa/prj.conf
++++ b/samples/net/ethernet/dsa/prj.conf
+@@ -38,7 +38,7 @@ CONFIG_NET_DSA_LOG_LEVEL_INF=y
+ # Support for lan1..3 as RAW_SOCKETS
+ CONFIG_NET_SOCKETS=y
+ CONFIG_NET_SOCKETS_PACKET=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ 
+ # How many traffic classes to enable
+ CONFIG_NET_TC_TX_COUNT=6
+diff --git a/samples/net/lwm2m_client/overlay-swir_hl78xx_ev_kit.conf b/samples/net/lwm2m_client/overlay-swir_hl78xx_ev_kit.conf
+--- a/samples/net/lwm2m_client/overlay-swir_hl78xx_ev_kit.conf
++++ b/samples/net/lwm2m_client/overlay-swir_hl78xx_ev_kit.conf
+@@ -22,7 +22,7 @@ CONFIG_DNS_RESOLVER=y
+ CONFIG_NET_SOCKETS_DNS_TIMEOUT=15000
+ 
+ # POSIX API
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ CONFIG_REQUIRES_FULL_LIBC=y
+ 
+ # Wait for the network to be ready
+diff --git a/samples/net/mdns_responder/prj.conf b/samples/net/mdns_responder/prj.conf
+--- a/samples/net/mdns_responder/prj.conf
++++ b/samples/net/mdns_responder/prj.conf
+@@ -46,4 +46,4 @@ CONFIG_NET_CONFIG_PEER_IPV4_ADDR="192.0.2.2"
+ CONFIG_NET_CONFIG_MY_IPV4_GW="192.0.2.2"
+ 
+ CONFIG_NET_SOCKETS=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+diff --git a/samples/net/mqtt_publisher/prj.conf b/samples/net/mqtt_publisher/prj.conf
+--- a/samples/net/mqtt_publisher/prj.conf
++++ b/samples/net/mqtt_publisher/prj.conf
+@@ -9,7 +9,7 @@ CONFIG_NET_IF_MCAST_IPV6_ADDR_COUNT=2
+ 
+ CONFIG_PRINTK=y
+ CONFIG_STDOUT_CONSOLE=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ 
+ # Enable IPv6 support
+ CONFIG_NET_IPV6=n
+diff --git a/samples/net/mqtt_sn_publisher/prj.conf b/samples/net/mqtt_sn_publisher/prj.conf
+--- a/samples/net/mqtt_sn_publisher/prj.conf
++++ b/samples/net/mqtt_sn_publisher/prj.conf
+@@ -40,6 +40,3 @@ CONFIG_MQTT_SN_LIB_BROADCAST_RADIUS=1
+ CONFIG_NET_SAMPLE_MQTT_SN_STATIC_GATEWAY=y
+ CONFIG_NET_SAMPLE_MQTT_SN_GATEWAY_ADDRESS="192.0.2.2:10000"
+ CONFIG_NET_SAMPLE_MQTT_SN_BROADCAST_ADDRESS="225.1.1.1:1883"
+-
+-# POSIX
+-CONFIG_POSIX_API=y
+diff --git a/samples/net/ocpp/prj.conf b/samples/net/ocpp/prj.conf
+--- a/samples/net/ocpp/prj.conf
++++ b/samples/net/ocpp/prj.conf
+@@ -49,5 +49,5 @@ CONFIG_SNTP=y
+ 
+ CONFIG_ZBUS=y
+ CONFIG_ZBUS_RUNTIME_OBSERVERS=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ CONFIG_POSIX_CLOCK_SELECTION=y
+diff --git a/samples/net/prometheus/prj.conf b/samples/net/prometheus/prj.conf
+--- a/samples/net/prometheus/prj.conf
++++ b/samples/net/prometheus/prj.conf
+@@ -5,7 +5,7 @@ CONFIG_LOG=y
+ CONFIG_ENTROPY_GENERATOR=y
+ CONFIG_TEST_RANDOM_GENERATOR=y
+ CONFIG_INIT_STACKS=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ CONFIG_ZVFS_POLL_MAX=32
+ CONFIG_REQUIRES_FULL_LIBC=y
+ CONFIG_HEAP_MEM_POOL_SIZE=2048
+diff --git a/samples/net/quic/echo_service/prj.conf b/samples/net/quic/echo_service/prj.conf
+--- a/samples/net/quic/echo_service/prj.conf
++++ b/samples/net/quic/echo_service/prj.conf
+@@ -16,7 +16,7 @@ CONFIG_NET_SOCKETS_SERVICE=y
+ CONFIG_NET_LOG=y
+ CONFIG_NET_STATISTICS=y
+ CONFIG_NET_SHELL=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ 
+ # Network driver config
+ CONFIG_ENTROPY_GENERATOR=y
+diff --git a/samples/net/secure_mqtt_sensor_actuator/prj.conf b/samples/net/secure_mqtt_sensor_actuator/prj.conf
+--- a/samples/net/secure_mqtt_sensor_actuator/prj.conf
++++ b/samples/net/secure_mqtt_sensor_actuator/prj.conf
+@@ -43,7 +43,7 @@ CONFIG_NET_CONNECTION_MANAGER=y
+ CONFIG_NET_HOSTNAME_ENABLE=y
+ 
+ # Enable Posix API functionality
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ 
+ # Enable sensor API
+ CONFIG_SENSOR=y
+diff --git a/samples/net/sockets/big_http_download/prj.conf b/samples/net/sockets/big_http_download/prj.conf
+--- a/samples/net/sockets/big_http_download/prj.conf
++++ b/samples/net/sockets/big_http_download/prj.conf
+@@ -11,7 +11,8 @@ CONFIG_NET_IPV4=y
+ CONFIG_NET_IPV6=y
+ CONFIG_NET_TCP=y
+ CONFIG_NET_SOCKETS=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
++CONFIG_POSIX_MULTI_PROCESS=y
+ CONFIG_NET_CONTEXT_RCVTIMEO=y
+ CONFIG_NET_CONTEXT_SNDTIMEO=y
+ 
+diff --git a/samples/net/sockets/big_http_download/src/big_http_download.c b/samples/net/sockets/big_http_download/src/big_http_download.c
+--- a/samples/net/sockets/big_http_download/src/big_http_download.c
++++ b/samples/net/sockets/big_http_download/src/big_http_download.c
+@@ -13,19 +13,14 @@
+ 
+ #include <psa/crypto.h>
+ 
+-#if !defined(__ZEPHYR__) || defined(CONFIG_POSIX_API)
+-
+ #include <netinet/in.h>
+ #include <sys/socket.h>
+ #include <arpa/inet.h>
+ #include <unistd.h>
+ #include <netdb.h>
+ 
+-#endif
+-
+ #if defined(__ZEPHYR__)
+ 
+-#include <zephyr/net/socket.h>
+ #include <zephyr/kernel.h>
+ 
+ #if defined(CONFIG_NET_SOCKETS_SOCKOPT_TLS)
+diff --git a/samples/net/sockets/big_http_download/tests.yaml b/samples/net/sockets/big_http_download/tests.yaml
+--- a/samples/net/sockets/big_http_download/tests.yaml
++++ b/samples/net/sockets/big_http_download/tests.yaml
+@@ -11,8 +11,6 @@ common:
+     - net
+     - socket
+ tests:
+-  sample.net.sockets.big_http_download:
+-    extra_configs:
+-      - CONFIG_POSIX_API=y
++  sample.net.sockets.big_http_download: {}
+   sample.net.sockets.big_http_download.ci:
+     extra_args: EXTRA_CONF_FILE=overlay-ci.conf
+diff --git a/samples/net/sockets/can/prj.conf b/samples/net/sockets/can/prj.conf
+--- a/samples/net/sockets/can/prj.conf
++++ b/samples/net/sockets/can/prj.conf
+@@ -6,7 +6,7 @@ CONFIG_NET_DRIVERS=y
+ CONFIG_NET_CANBUS=y
+ CONFIG_NET_SOCKETS=y
+ CONFIG_NET_SOCKETS_CAN=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ 
+ CONFIG_NET_IPV6=n
+ CONFIG_NET_IPV4=n
+diff --git a/samples/net/sockets/coap_client/overlay-swir_hl78xx_ev_kit.conf b/samples/net/sockets/coap_client/overlay-swir_hl78xx_ev_kit.conf
+--- a/samples/net/sockets/coap_client/overlay-swir_hl78xx_ev_kit.conf
++++ b/samples/net/sockets/coap_client/overlay-swir_hl78xx_ev_kit.conf
+@@ -29,7 +29,7 @@ CONFIG_NET_SOCKETS_DNS_TIMEOUT=15000
+ CONFIG_NET_SAMPLE_COMMON_WAIT_DNS_SERVER_ADDITION=y
+ 
+ # POSIX API
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ CONFIG_REQUIRES_FULL_LIBC=y
+ 
+ # Network management
+diff --git a/samples/net/sockets/coap_client/prj.conf b/samples/net/sockets/coap_client/prj.conf
+--- a/samples/net/sockets/coap_client/prj.conf
++++ b/samples/net/sockets/coap_client/prj.conf
+@@ -7,7 +7,7 @@ CONFIG_NET_UDP=y
+ 
+ CONFIG_NET_SOCKETS=y
+ CONFIG_ZVFS_POLL_MAX=4
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ 
+ CONFIG_COAP=y
+ 
+diff --git a/samples/net/sockets/coap_client_tcp/prj.conf b/samples/net/sockets/coap_client_tcp/prj.conf
+--- a/samples/net/sockets/coap_client_tcp/prj.conf
++++ b/samples/net/sockets/coap_client_tcp/prj.conf
+@@ -22,7 +22,7 @@ CONFIG_NET_CONFIG_MY_IPV4_ADDR="192.0.2.1"
+ CONFIG_NET_CONFIG_PEER_IPV4_ADDR="192.0.2.2"
+ 
+ # POSIX
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ 
+ # Kernel options
+ CONFIG_ENTROPY_GENERATOR=y
+diff --git a/samples/net/sockets/coap_download/prj.conf b/samples/net/sockets/coap_download/prj.conf
+--- a/samples/net/sockets/coap_download/prj.conf
++++ b/samples/net/sockets/coap_download/prj.conf
+@@ -22,4 +22,4 @@ CONFIG_NET_CONFIG_MY_IPV4_ADDR="192.0.2.1"
+ CONFIG_NET_CONFIG_PEER_IPV4_ADDR="192.0.2.2"
+ 
+ # POSIX
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+diff --git a/samples/net/sockets/coap_server/prj.conf b/samples/net/sockets/coap_server/prj.conf
+--- a/samples/net/sockets/coap_server/prj.conf
++++ b/samples/net/sockets/coap_server/prj.conf
+@@ -5,7 +5,7 @@ CONFIG_NET_UDP=y
+ 
+ # Socket
+ CONFIG_NET_SOCKETS=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ CONFIG_ZVFS_POLL_MAX=10
+ 
+ # CoAP
+diff --git a/samples/net/sockets/coap_upload/prj.conf b/samples/net/sockets/coap_upload/prj.conf
+--- a/samples/net/sockets/coap_upload/prj.conf
++++ b/samples/net/sockets/coap_upload/prj.conf
+@@ -29,4 +29,4 @@ CONFIG_NET_CONFIG_MY_IPV4_ADDR="192.0.2.1"
+ CONFIG_NET_CONFIG_PEER_IPV4_ADDR="192.0.2.2"
+ 
+ # POSIX
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+diff --git a/samples/net/sockets/dumb_http_server/prj.conf b/samples/net/sockets/dumb_http_server/prj.conf
+--- a/samples/net/sockets/dumb_http_server/prj.conf
++++ b/samples/net/sockets/dumb_http_server/prj.conf
+@@ -7,7 +7,7 @@ CONFIG_NET_IPV4=y
+ CONFIG_NET_IPV6=n
+ CONFIG_NET_TCP=y
+ CONFIG_NET_SOCKETS=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ 
+ # Network driver config
+ CONFIG_TEST_RANDOM_GENERATOR=y
+diff --git a/samples/net/sockets/dumb_http_server/src/socket_dumb_http.c b/samples/net/sockets/dumb_http_server/src/socket_dumb_http.c
+--- a/samples/net/sockets/dumb_http_server/src/socket_dumb_http.c
++++ b/samples/net/sockets/dumb_http_server/src/socket_dumb_http.c
+@@ -7,17 +7,13 @@
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <errno.h>
+-
+-#if !defined(__ZEPHYR__) || defined(CONFIG_POSIX_API)
+-
+ #include <netinet/in.h>
+ #include <sys/socket.h>
+ #include <arpa/inet.h>
+ #include <unistd.h>
+ 
+-#else
++#if defined(__ZEPHYR__)
+ 
+-#include <zephyr/net/socket.h>
+ #include <zephyr/kernel.h>
+ 
+ #include <zephyr/net/net_pkt.h>
+diff --git a/samples/net/sockets/dumb_http_server/tests.yaml b/samples/net/sockets/dumb_http_server/tests.yaml
+--- a/samples/net/sockets/dumb_http_server/tests.yaml
++++ b/samples/net/sockets/dumb_http_server/tests.yaml
+@@ -12,11 +12,7 @@ common:
+   platform_exclude: intel_adsp/cavs25
+ tests:
+   sample.net.sockets.dumb_http_server:
+-    extra_configs:
+-      - CONFIG_POSIX_API=y
+     platform_exclude: s32k148_evb/s32k148
+   sample.net.sockets.dumb_http_server.s32k148_evb:
+-    extra_configs:
+-      - CONFIG_POSIX_API=y
+     extra_args: SHIELD=nxp_adtja1101
+     platform_allow: s32k148_evb/s32k148
+diff --git a/samples/net/sockets/dumb_http_server_mt/prj.conf b/samples/net/sockets/dumb_http_server_mt/prj.conf
+--- a/samples/net/sockets/dumb_http_server_mt/prj.conf
++++ b/samples/net/sockets/dumb_http_server_mt/prj.conf
+@@ -2,7 +2,7 @@
+ CONFIG_TEST_RANDOM_GENERATOR=y
+ 
+ # POSIX options
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ 
+ # Networking config
+ CONFIG_NETWORKING=y
+diff --git a/samples/net/sockets/dumb_http_server_mt/src/main.c b/samples/net/sockets/dumb_http_server_mt/src/main.c
+--- a/samples/net/sockets/dumb_http_server_mt/src/main.c
++++ b/samples/net/sockets/dumb_http_server_mt/src/main.c
+@@ -11,6 +11,11 @@ LOG_MODULE_REGISTER(net_dumb_http_srv_mt_sample);
+ #include <zephyr/posix/sys/socket.h>
+ #include <zephyr/posix/unistd.h>
+ 
++#include <netinet/in.h>
++#include <sys/socket.h>
++#include <arpa/inet.h>
++#include <unistd.h>
++
+ #include <zephyr/kernel.h>
+ #include <errno.h>
+ #include <zephyr/net/net_ip.h>
+diff --git a/samples/net/sockets/dumb_http_server_mt/tests.yaml b/samples/net/sockets/dumb_http_server_mt/tests.yaml
+--- a/samples/net/sockets/dumb_http_server_mt/tests.yaml
++++ b/samples/net/sockets/dumb_http_server_mt/tests.yaml
+@@ -13,4 +13,4 @@ common:
+ tests:
+   sample.net.sockets.dumb_http_server_mt:
+     extra_configs:
+-      - CONFIG_POSIX_API=y
++      - CONFIG_POSIX_AEP_CHOICE_PSE53=y
+diff --git a/samples/net/sockets/echo/prj.conf b/samples/net/sockets/echo/prj.conf
+--- a/samples/net/sockets/echo/prj.conf
++++ b/samples/net/sockets/echo/prj.conf
+@@ -1,6 +1,7 @@
+ # General config
+ CONFIG_MAIN_STACK_SIZE=1200
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE52=y
++CONFIG_POSIX_NETWORKING=y
+ 
+ # Networking config
+ CONFIG_NETWORKING=y
+diff --git a/samples/net/sockets/echo_async/prj.conf b/samples/net/sockets/echo_async/prj.conf
+--- a/samples/net/sockets/echo_async/prj.conf
++++ b/samples/net/sockets/echo_async/prj.conf
+@@ -10,7 +10,7 @@ CONFIG_NET_TCP=y
+ CONFIG_NET_SOCKETS=y
+ CONFIG_ZVFS_POLL_MAX=5
+ 
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ 
+ # Logging
+ CONFIG_LOG=y
+diff --git a/samples/net/sockets/echo_async/tests.yaml b/samples/net/sockets/echo_async/tests.yaml
+--- a/samples/net/sockets/echo_async/tests.yaml
++++ b/samples/net/sockets/echo_async/tests.yaml
+@@ -9,9 +9,7 @@ common:
+     - net
+     - socket
+ tests:
+-  sample.net.sockets.echo_async:
+-    extra_configs:
+-      - CONFIG_POSIX_API=y
++  sample.net.sockets.echo_async: {}
+   sample.net.sockets.echo_async.wifi.nrf70dk:
+     extra_args:
+       - SNIPPET=wifi-ipv4
+diff --git a/samples/net/sockets/echo_async_select/prj.conf b/samples/net/sockets/echo_async_select/prj.conf
+--- a/samples/net/sockets/echo_async_select/prj.conf
++++ b/samples/net/sockets/echo_async_select/prj.conf
+@@ -1,7 +1,7 @@
+ # General config
+ CONFIG_REQUIRES_FULL_LIBC=y
+ CONFIG_MAIN_STACK_SIZE=1200
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ 
+ # Networking config
+ CONFIG_NETWORKING=y
+diff --git a/samples/net/sockets/echo_async_select/tests.yaml b/samples/net/sockets/echo_async_select/tests.yaml
+--- a/samples/net/sockets/echo_async_select/tests.yaml
++++ b/samples/net/sockets/echo_async_select/tests.yaml
+@@ -9,6 +9,4 @@ common:
+     - socket
+   filter: CONFIG_FULL_LIBC_SUPPORTED and not CONFIG_NATIVE_LIBC
+ tests:
+-  sample.net.sockets.echo_async_select:
+-    extra_configs:
+-      - CONFIG_POSIX_API=y
++  sample.net.sockets.echo_async_select: {}
+diff --git a/samples/net/sockets/echo_client/prj.conf b/samples/net/sockets/echo_client/prj.conf
+--- a/samples/net/sockets/echo_client/prj.conf
++++ b/samples/net/sockets/echo_client/prj.conf
+@@ -8,7 +8,8 @@ CONFIG_NET_SOCKETS=y
+ CONFIG_ZVFS_POLL_MAX=5
+ CONFIG_NET_CONNECTION_MANAGER=y
+ 
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
++CONFIG_EVENTFD=y
+ 
+ # Kernel options
+ CONFIG_MAIN_STACK_SIZE=2048
+diff --git a/samples/net/sockets/echo_server/overlay-ws-console.conf b/samples/net/sockets/echo_server/overlay-ws-console.conf
+--- a/samples/net/sockets/echo_server/overlay-ws-console.conf
++++ b/samples/net/sockets/echo_server/overlay-ws-console.conf
+@@ -3,7 +3,6 @@ CONFIG_LOG_BACKEND_WS=y
+ CONFIG_HTTP_SERVER_WEBSOCKET=y
+ CONFIG_HTTP_SERVER=y
+ CONFIG_EVENTFD=y
+-CONFIG_POSIX_API=y
+ CONFIG_ZVFS_POLL_MAX=32
+ CONFIG_NET_MAX_CONN=32
+ CONFIG_NET_SOCKETS_TLS_MAX_CONTEXTS=32
+diff --git a/samples/net/sockets/echo_service/prj.conf b/samples/net/sockets/echo_service/prj.conf
+--- a/samples/net/sockets/echo_service/prj.conf
++++ b/samples/net/sockets/echo_service/prj.conf
+@@ -1,7 +1,7 @@
+ # General config
+ # The async method used in the sample needs more stack for the workqueue
+ CONFIG_SYSTEM_WORKQUEUE_STACK_SIZE=1500
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ 
+ # Networking config
+ CONFIG_NETWORKING=y
+diff --git a/samples/net/sockets/http_client/prj.conf b/samples/net/sockets/http_client/prj.conf
+--- a/samples/net/sockets/http_client/prj.conf
++++ b/samples/net/sockets/http_client/prj.conf
+@@ -12,7 +12,7 @@ CONFIG_NET_SHELL=y
+ # Sockets
+ CONFIG_NET_SOCKETS=y
+ CONFIG_ZVFS_POLL_MAX=4
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ 
+ # Network driver config
+ CONFIG_TEST_RANDOM_GENERATOR=y
+diff --git a/samples/net/sockets/http_get/prj.conf b/samples/net/sockets/http_get/prj.conf
+--- a/samples/net/sockets/http_get/prj.conf
++++ b/samples/net/sockets/http_get/prj.conf
+@@ -9,7 +9,8 @@ CONFIG_NET_IPV6=y
+ CONFIG_NET_TCP=y
+ CONFIG_NET_SOCKETS=y
+ 
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE52=y
++CONFIG_POSIX_NETWORKING=y
+ 
+ CONFIG_DNS_RESOLVER=y
+ CONFIG_DNS_SERVER_IP_ADDRESSES=y
+diff --git a/samples/net/sockets/http_get/tests.yaml b/samples/net/sockets/http_get/tests.yaml
+--- a/samples/net/sockets/http_get/tests.yaml
++++ b/samples/net/sockets/http_get/tests.yaml
+@@ -16,8 +16,6 @@ tests:
+     platform_exclude:
+       - cc3220sf_launchxl
+       - cc3235sf_launchxl
+-    extra_configs:
+-      - CONFIG_POSIX_API=y
+   sample.net.sockets.http_get.offload.simplelink:
+     platform_allow: cc3220sf_launchxl
+     harness: net
+diff --git a/samples/net/sockets/http_server/prj.conf b/samples/net/sockets/http_server/prj.conf
+--- a/samples/net/sockets/http_server/prj.conf
++++ b/samples/net/sockets/http_server/prj.conf
+@@ -7,7 +7,7 @@ CONFIG_ENTROPY_GENERATOR=y
+ CONFIG_TEST_RANDOM_GENERATOR=y
+ CONFIG_INIT_STACKS=y
+ CONFIG_ZVFS_OPEN_ADD_SIZE_NET_SAMPLE=24
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ CONFIG_ZVFS_POLL_MAX=32
+ 
+ # Eventfd
+diff --git a/samples/net/sockets/net_mgmt/prj.conf b/samples/net/sockets/net_mgmt/prj.conf
+--- a/samples/net/sockets/net_mgmt/prj.conf
++++ b/samples/net/sockets/net_mgmt/prj.conf
+@@ -5,7 +5,7 @@ CONFIG_NET_TCP=y
+ CONFIG_NET_IPV6=y
+ CONFIG_NET_IPV4=y
+ CONFIG_NET_SOCKETS=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ CONFIG_NET_SOCKETS_NET_MGMT=y
+ CONFIG_NET_MGMT_EVENT=y
+ 
+diff --git a/samples/net/sockets/packet/prj.conf b/samples/net/sockets/packet/prj.conf
+--- a/samples/net/sockets/packet/prj.conf
++++ b/samples/net/sockets/packet/prj.conf
+@@ -6,7 +6,7 @@ CONFIG_NET_IPV6=n
+ CONFIG_NET_IPV4=n
+ CONFIG_NET_MAX_CONTEXTS=10
+ CONFIG_NET_SOCKETS=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ CONFIG_NET_CONTEXT_RCVTIMEO=y
+ CONFIG_NET_MGMT=y
+ CONFIG_NET_MGMT_EVENT=y
+diff --git a/samples/net/sockets/packet/src/packet.c b/samples/net/sockets/packet/src/packet.c
+--- a/samples/net/sockets/packet/src/packet.c
++++ b/samples/net/sockets/packet/src/packet.c
+@@ -10,9 +10,14 @@ LOG_MODULE_REGISTER(net_pkt_sock_sample, LOG_LEVEL_DBG);
+ #include <zephyr/kernel.h>
+ #include <errno.h>
+ #include <stdio.h>
++#include <netinet/in.h>
++#include <sys/socket.h>
++#include <arpa/inet.h>
++#include <unistd.h>
++#include <netdb.h>
++#include <poll.h>
+ 
+ #include <zephyr/misc/lorem_ipsum.h>
+-#include <zephyr/net/socket.h>
+ #include <zephyr/net/ethernet.h>
+ #include <zephyr/net/net_mgmt.h>
+ 
+diff --git a/samples/net/sockets/sntp_client/prj.conf b/samples/net/sockets/sntp_client/prj.conf
+--- a/samples/net/sockets/sntp_client/prj.conf
++++ b/samples/net/sockets/sntp_client/prj.conf
+@@ -1,6 +1,6 @@
+ # General config
+ CONFIG_REQUIRES_FULL_LIBC=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ 
+ # Networking config
+ CONFIG_NETWORKING=y
+diff --git a/samples/net/sockets/socketpair/prj.conf b/samples/net/sockets/socketpair/prj.conf
+--- a/samples/net/sockets/socketpair/prj.conf
++++ b/samples/net/sockets/socketpair/prj.conf
+@@ -2,7 +2,7 @@
+ CONFIG_HEAP_MEM_POOL_SIZE=2048
+ 
+ # socketpair dependencies
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ CONFIG_NET_SOCKETPAIR=y
+ 
+ # Networking config (network subsystem dependencies)
+diff --git a/samples/net/sockets/txtime/prj.conf b/samples/net/sockets/txtime/prj.conf
+--- a/samples/net/sockets/txtime/prj.conf
++++ b/samples/net/sockets/txtime/prj.conf
+@@ -5,7 +5,7 @@ CONFIG_NET_TCP=n
+ CONFIG_NET_IPV6=y
+ CONFIG_NET_IPV4=y
+ CONFIG_NET_SOCKETS=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ CONFIG_NET_CONTEXT_PRIORITY=y
+ CONFIG_NET_CONTEXT_TXTIME=y
+ CONFIG_NET_TC_TX_COUNT=7
+diff --git a/samples/net/sockets/websocket_client/prj.conf b/samples/net/sockets/websocket_client/prj.conf
+--- a/samples/net/sockets/websocket_client/prj.conf
++++ b/samples/net/sockets/websocket_client/prj.conf
+@@ -41,4 +41,4 @@ CONFIG_NET_LOG=y
+ 
+ CONFIG_MAIN_STACK_SIZE=2048
+ CONFIG_HEAP_MEM_POOL_SIZE=1500
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+diff --git a/samples/net/ssh/prj.conf b/samples/net/ssh/prj.conf
+--- a/samples/net/ssh/prj.conf
++++ b/samples/net/ssh/prj.conf
+@@ -5,7 +5,7 @@ CONFIG_NET_TCP=y
+ CONFIG_NET_IPV6=y
+ CONFIG_NET_IPV4=y
+ CONFIG_NET_SOCKETS=y
+-#CONFIG_POSIX_API=y
++#CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ CONFIG_NET_CONNECTION_MANAGER=y
+ CONFIG_NET_IPV4_MAPPING_TO_IPV6=y
+ CONFIG_DNS_RESOLVER=y
+diff --git a/samples/net/tftp_client/prj.conf b/samples/net/tftp_client/prj.conf
+--- a/samples/net/tftp_client/prj.conf
++++ b/samples/net/tftp_client/prj.conf
+@@ -19,6 +19,6 @@ CONFIG_NET_CONFIG_MY_IPV4_ADDR="192.0.2.1"
+ 
+ CONFIG_DNS_RESOLVER=n
+ CONFIG_TFTP_LIB=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ 
+ CONFIG_MAIN_STACK_SIZE=2048
+diff --git a/samples/net/wireguard/prj.conf b/samples/net/wireguard/prj.conf
+--- a/samples/net/wireguard/prj.conf
++++ b/samples/net/wireguard/prj.conf
+@@ -7,7 +7,7 @@ CONFIG_NET_UDP=y
+ CONFIG_NET_TCP=y
+ CONFIG_NET_STATISTICS=y
+ CONFIG_NET_SOCKETS_SERVICE=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ 
+ CONFIG_TEST_RANDOM_GENERATOR=y
+ 
+diff --git a/samples/subsys/modbus/tcp_gateway/prj.conf b/samples/subsys/modbus/tcp_gateway/prj.conf
+--- a/samples/subsys/modbus/tcp_gateway/prj.conf
++++ b/samples/subsys/modbus/tcp_gateway/prj.conf
+@@ -1,6 +1,6 @@
+ CONFIG_LOG=y
+ CONFIG_MAIN_STACK_SIZE=1200
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ 
+ CONFIG_SERIAL=y
+ CONFIG_UART_INTERRUPT_DRIVEN=y
+diff --git a/samples/subsys/modbus/tcp_server/prj.conf b/samples/subsys/modbus/tcp_server/prj.conf
+--- a/samples/subsys/modbus/tcp_server/prj.conf
++++ b/samples/subsys/modbus/tcp_server/prj.conf
+@@ -1,7 +1,7 @@
+ CONFIG_LOG=y
+ CONFIG_GPIO=y
+ CONFIG_MAIN_STACK_SIZE=1200
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ 
+ CONFIG_MODBUS=y
+ CONFIG_MODBUS_ROLE_SERVER=y
+diff --git a/samples/subsys/portability/posix/env/prj.conf b/samples/subsys/portability/posix/env/prj.conf
+--- a/samples/subsys/portability/posix/env/prj.conf
++++ b/samples/subsys/portability/posix/env/prj.conf
+@@ -1,4 +1,5 @@
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE51=y
++CONFIG_POSIX_MULTI_PROCESS=y
+ CONFIG_SHELL=y
+ CONFIG_POSIX_ENV_SHELL=y
+ CONFIG_DYNAMIC_THREAD=y
+diff --git a/samples/subsys/portability/posix/eventfd/prj.conf b/samples/subsys/portability/posix/eventfd/prj.conf
+--- a/samples/subsys/portability/posix/eventfd/prj.conf
++++ b/samples/subsys/portability/posix/eventfd/prj.conf
+@@ -1,6 +1,8 @@
+ # General config
+ CONFIG_REQUIRES_FULL_LIBC=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
++CONFIG_POSIX_MULTI_PROCESS=y
++CONFIG_EVENTFD=y
+ CONFIG_EVENTFD=y
+ 
+ # eventfd() implementation currently depends on some networking APIs,
+diff --git a/samples/subsys/portability/posix/gettimeofday/prj.conf b/samples/subsys/portability/posix/gettimeofday/prj.conf
+--- a/samples/subsys/portability/posix/gettimeofday/prj.conf
++++ b/samples/subsys/portability/posix/gettimeofday/prj.conf
+@@ -1,7 +1,10 @@
+ # General config
+ CONFIG_MAIN_STACK_SIZE=2048
+ CONFIG_REQUIRES_FULL_LIBC=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_BASE=y
++CONFIG_XSI=y
++CONFIG_XSI_SINGLE_PROCESS=y
++CONFIG_POSIX_MULTI_PROCESS=y
+ CONFIG_SNTP=y
+ CONFIG_NET_CONFIG_CLOCK_SNTP_INIT=y
+ CONFIG_NET_CONFIG_SNTP_INIT_SERVER="time.nist.gov"
+diff --git a/samples/subsys/portability/posix/philosophers/prj.conf b/samples/subsys/portability/posix/philosophers/prj.conf
+--- a/samples/subsys/portability/posix/philosophers/prj.conf
++++ b/samples/subsys/portability/posix/philosophers/prj.conf
+@@ -1,7 +1,8 @@
+ CONFIG_STDOUT_CONSOLE=n
+ CONFIG_MP_MAX_NUM_CPUS=1
+ 
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE51=y
++CONFIG_POSIX_MULTI_PROCESS=y
+ CONFIG_THREAD_STACK_INFO=y
+ CONFIG_DYNAMIC_THREAD=y
+ 
+diff --git a/samples/subsys/portability/posix/uname/prj.conf b/samples/subsys/portability/posix/uname/prj.conf
+--- a/samples/subsys/portability/posix/uname/prj.conf
++++ b/samples/subsys/portability/posix/uname/prj.conf
+@@ -1,4 +1,4 @@
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE51=y
+ CONFIG_SHELL=y
+ CONFIG_POSIX_UNAME_SHELL=y
+ CONFIG_MP_MAX_NUM_CPUS=1
+diff --git a/samples/subsys/usb/legacy/netusb/prj.conf b/samples/subsys/usb/legacy/netusb/prj.conf
+--- a/samples/subsys/usb/legacy/netusb/prj.conf
++++ b/samples/subsys/usb/legacy/netusb/prj.conf
+@@ -14,7 +14,7 @@ CONFIG_NET_IF_MCAST_IPV6_ADDR_COUNT=5
+ CONFIG_NET_IF_UNICAST_IPV4_ADDR_COUNT=1
+ CONFIG_NET_MAX_CONTEXTS=5
+ CONFIG_NET_TC_TX_COUNT=1
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ 
+ CONFIG_INIT_STACKS=y
+ CONFIG_TEST_RANDOM_GENERATOR=y
+diff --git a/samples/subsys/video/tcpserversink/prj.conf b/samples/subsys/video/tcpserversink/prj.conf
+--- a/samples/subsys/video/tcpserversink/prj.conf
++++ b/samples/subsys/video/tcpserversink/prj.conf
+@@ -3,7 +3,7 @@ CONFIG_NETWORKING=y
+ CONFIG_NET_TCP=y
+ CONFIG_NET_IPV4=y
+ CONFIG_NET_SOCKETS=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ 
+ # Kernel options
+ CONFIG_MAIN_STACK_SIZE=2048
+diff --git a/subsys/net/ip/Kconfig b/subsys/net/ip/Kconfig
+--- a/subsys/net/ip/Kconfig
++++ b/subsys/net/ip/Kconfig
+@@ -11,8 +11,8 @@ menu "IP stack"
+ config NET_NAMESPACE_COMPAT_MODE
+ 	bool "Network namespace compatibility mode"
+ 	# Disable the compatibility mode for network tests. But if the tests
+-	# uses POSIX APIs, then currently the compat mode is needed.
+-	depends on !NET_TEST || POSIX_API
++	# use POSIX networking APIs, then currently the compat mode is needed.
++	depends on !NET_TEST || POSIX_NETWORKING
+ 	default y
+ 	help
+ 	  The networking APIs and code is now namespaced i.e., relevant network
+diff --git a/subsys/net/l2/wifi/wifi_shell.c b/subsys/net/l2/wifi/wifi_shell.c
+--- a/subsys/net/l2/wifi/wifi_shell.c
++++ b/subsys/net/l2/wifi/wifi_shell.c
+@@ -13,6 +13,7 @@
+ LOG_MODULE_REGISTER(net_wifi_shell, LOG_LEVEL_INF);
+ 
+ #include <zephyr/kernel.h>
++#include <getopt.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
+diff --git a/subsys/portability/posix/Kconfig.profile b/subsys/portability/posix/Kconfig.profile
+--- a/subsys/portability/posix/Kconfig.profile
++++ b/subsys/portability/posix/Kconfig.profile
+@@ -3,7 +3,7 @@
+ # SPDX-License-Identifier: Apache-2.0
+ 
+ config POSIX_API
+-	bool "POSIX APIs"
++	bool "POSIX APIs [DEPRECATED]"
+ 	select POSIX_SYSTEM_INTERFACES
+ 	select POSIX_BASE_DEFINITIONS # clock_gettime(), pthread_create(), sem_get(), etc
+ 	select POSIX_AEP_REALTIME_MINIMAL # CLOCK_MONOTONIC, pthread_attr_setstack(), etc
+@@ -12,11 +12,12 @@ config POSIX_API
+ 	imply POSIX_FD_MGMT # open(), close(), read(), write()
+ 	imply POSIX_MULTI_PROCESS # sleep(), getpid(), etc
+ 	imply XSI_SINGLE_PROCESS # gettimeofday()
++	select DEPRECATED
+ 	help
+-	  This option enables the required POSIX System Interfaces (base definitions), all of PSE51,
+-	  and some features found in PSE52.
+-
+-	  Note: in the future, this option may be deprecated in favour of subprofiling options.
++	  This option is deprecated. Applications should select CONFIG_POSIX_AEP_CHOICE_BASE,
++	  CONFIG_POSIX_AEP_CHOICE_PSE51, CONFIG_POSIX_AEP_CHOICE_PSE52, or
++	  CONFIG_POSIX_AEP_CHOICE_PSE53. Libraries should depend on
++	  CONFIG_POSIX_SYSTEM_INTERFACES and other POSIX Option Groups.
+ 
+ choice POSIX_AEP_CHOICE
+ 	prompt "POSIX Subprofile"
+diff --git a/tests/benchmarks/posix/threads/prj.conf b/tests/benchmarks/posix/threads/prj.conf
+--- a/tests/benchmarks/posix/threads/prj.conf
++++ b/tests/benchmarks/posix/threads/prj.conf
+@@ -1,6 +1,5 @@
+ CONFIG_TEST=y
+ CONFIG_ASSERT=n
+ 
+-CONFIG_POSIX_API=y
+-CONFIG_POSIX_AEP_CHOICE_BASE=y
++CONFIG_POSIX_AEP_CHOICE_PSE51=y
+ CONFIG_POSIX_PRIORITY_SCHEDULING=y
+diff --git a/tests/bsim/net/sockets/echo_test/prj.conf b/tests/bsim/net/sockets/echo_test/prj.conf
+--- a/tests/bsim/net/sockets/echo_test/prj.conf
++++ b/tests/bsim/net/sockets/echo_test/prj.conf
+@@ -10,7 +10,8 @@ CONFIG_NET_SOCKETS=y
+ CONFIG_ZVFS_POLL_MAX=4
+ CONFIG_NET_CONNECTION_MANAGER=y
+ 
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
++CONFIG_EVENTFD=y
+ 
+ # Kernel options
+ CONFIG_MAIN_STACK_SIZE=2048
+diff --git a/tests/lib/c_lib/thrd/prj.conf b/tests/lib/c_lib/thrd/prj.conf
+--- a/tests/lib/c_lib/thrd/prj.conf
++++ b/tests/lib/c_lib/thrd/prj.conf
+@@ -2,7 +2,7 @@ CONFIG_ZTEST=y
+ CONFIG_TEST_USERSPACE=y
+ CONFIG_ZTEST_FATAL_HOOK=y
+ 
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_BASE=y
+ CONFIG_THREAD_STACK_INFO=y
+ CONFIG_DYNAMIC_THREAD=y
+ CONFIG_DYNAMIC_THREAD_POOL_SIZE=2
+diff --git a/tests/lib/fdtable/prj.conf b/tests/lib/fdtable/prj.conf
+--- a/tests/lib/fdtable/prj.conf
++++ b/tests/lib/fdtable/prj.conf
+@@ -1,4 +1,4 @@
+ CONFIG_ZTEST=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE52=y
+ CONFIG_ZVFS=y
+ CONFIG_ZVFS_FDTABLE=y
+diff --git a/tests/net/all/prj.conf b/tests/net/all/prj.conf
+--- a/tests/net/all/prj.conf
++++ b/tests/net/all/prj.conf
+@@ -9,7 +9,7 @@ CONFIG_TEST_RANDOM_GENERATOR=y
+ CONFIG_ZTEST=y
+ CONFIG_LOG_DEFAULT_LEVEL=4
+ CONFIG_MAX_THREAD_BYTES=6
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ 
+ # TLS configuration
+ CONFIG_MBEDTLS=y
+diff --git a/tests/net/all/tests.yaml b/tests/net/all/tests.yaml
+--- a/tests/net/all/tests.yaml
++++ b/tests/net/all/tests.yaml
+@@ -18,7 +18,7 @@ tests:
+     platform_allow: qemu_x86
+     extra_configs:
+       - CONFIG_NET_NAMESPACE_COMPAT_MODE=n
+-      - CONFIG_POSIX_API=n
++      - CONFIG_POSIX_AEP_CHOICE_NONE=y
+   net.build.compat_namespacing:
+     platform_allow: qemu_x86
+     extra_configs:
+@@ -28,7 +28,7 @@ tests:
+     extra_configs:
+       - CONFIG_WIREGUARD=y
+       - CONFIG_NET_NAMESPACE_COMPAT_MODE=n
+-      - CONFIG_POSIX_API=n
++      - CONFIG_POSIX_AEP_CHOICE_NONE=y
+   # Compile test CANBUS
+   net.build.no_compat_namespacing_canbus:
+     platform_allow: qemu_x86
+@@ -36,7 +36,7 @@ tests:
+     depends_on: can
+     extra_configs:
+       - CONFIG_NET_NAMESPACE_COMPAT_MODE=n
+-      - CONFIG_POSIX_API=n
++      - CONFIG_POSIX_AEP_CHOICE_NONE=y
+       - CONFIG_NET_CANBUS=y
+       - CONFIG_CAN=y
+       - CONFIG_NET_SOCKETS_CAN=y
+@@ -51,7 +51,7 @@ tests:
+       - frdm_rw612
+     extra_configs:
+       - CONFIG_NET_NAMESPACE_COMPAT_MODE=n
+-      - CONFIG_POSIX_API=n
++      - CONFIG_POSIX_AEP_CHOICE_NONE=y
+       - CONFIG_NET_L2_OPENTHREAD=y
+       - CONFIG_CPP=y
+       - CONFIG_NET_SLIP_TAP=n
+diff --git a/tests/net/hostname/tests.yaml b/tests/net/hostname/tests.yaml
+--- a/tests/net/hostname/tests.yaml
++++ b/tests/net/hostname/tests.yaml
+@@ -23,12 +23,12 @@ tests:
+       - CONFIG_NET_HOSTNAME_DYNAMIC=y
+   net.hostname.posix_api.unique_update_compatibility:
+     extra_configs:
+-      - CONFIG_POSIX_API=y
++      - CONFIG_POSIX_AEP_CHOICE_PSE53=y
+       - CONFIG_NET_HOSTNAME_UNIQUE_UPDATE=y
+       - CONFIG_NET_HOSTNAME_UNIQUE=y
+   net.hostname.posix_api.dynamic_hostname:
+     extra_configs:
+-      - CONFIG_POSIX_API=y
++      - CONFIG_POSIX_AEP_CHOICE_PSE53=y
+       - CONFIG_NET_HOSTNAME_DYNAMIC=y
+   net.hostname.event:
+     extra_configs:
+diff --git a/tests/net/lib/http_server/common/prj.conf b/tests/net/lib/http_server/common/prj.conf
+--- a/tests/net/lib/http_server/common/prj.conf
++++ b/tests/net/lib/http_server/common/prj.conf
+@@ -8,7 +8,7 @@ CONFIG_ZTEST_STACK_SIZE=1024
+ 
+ CONFIG_HTTP_SERVER=y
+ CONFIG_EVENTFD=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ 
+ # Networking config
+ CONFIG_NET_SOCKETS=y
+diff --git a/tests/net/lib/http_server/core/prj.conf b/tests/net/lib/http_server/core/prj.conf
+--- a/tests/net/lib/http_server/core/prj.conf
++++ b/tests/net/lib/http_server/core/prj.conf
+@@ -3,7 +3,7 @@ CONFIG_NET_TEST=y
+ 
+ # Eventfd
+ CONFIG_EVENTFD=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ 
+ CONFIG_ENTROPY_GENERATOR=y
+ CONFIG_TEST_RANDOM_GENERATOR=y
+diff --git a/tests/net/lib/http_server/crime/prj.conf b/tests/net/lib/http_server/crime/prj.conf
+--- a/tests/net/lib/http_server/crime/prj.conf
++++ b/tests/net/lib/http_server/crime/prj.conf
+@@ -3,7 +3,7 @@ CONFIG_NET_TEST=y
+ 
+ # Eventfd
+ CONFIG_EVENTFD=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ 
+ CONFIG_ENTROPY_GENERATOR=y
+ CONFIG_TEST_RANDOM_GENERATOR=y
+diff --git a/tests/net/lib/http_server/h3/prj.conf b/tests/net/lib/http_server/h3/prj.conf
+--- a/tests/net/lib/http_server/h3/prj.conf
++++ b/tests/net/lib/http_server/h3/prj.conf
+@@ -2,7 +2,7 @@ CONFIG_ZTEST=y
+ CONFIG_NET_TEST=y
+ 
+ CONFIG_EVENTFD=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ CONFIG_ENTROPY_GENERATOR=y
+ CONFIG_TEST_RANDOM_GENERATOR=y
+ CONFIG_TLS_CREDENTIALS=y
+diff --git a/tests/net/lib/http_server/hpack/prj.conf b/tests/net/lib/http_server/hpack/prj.conf
+--- a/tests/net/lib/http_server/hpack/prj.conf
++++ b/tests/net/lib/http_server/hpack/prj.conf
+@@ -1,6 +1,6 @@
+ CONFIG_ZTEST=y
+ CONFIG_NET_TEST=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ CONFIG_ENTROPY_GENERATOR=y
+ CONFIG_TEST_RANDOM_GENERATOR=y
+ 
+diff --git a/tests/net/lib/ocpp/prj.conf b/tests/net/lib/ocpp/prj.conf
+--- a/tests/net/lib/ocpp/prj.conf
++++ b/tests/net/lib/ocpp/prj.conf
+@@ -36,7 +36,7 @@ CONFIG_NET_MGMT_EVENT=y
+ CONFIG_ENTROPY_GENERATOR=y
+ CONFIG_TEST_RANDOM_GENERATOR=y
+ 
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE52=y
+ CONFIG_POSIX_CLOCK_SELECTION=y
+ 
+ CONFIG_ZTEST=y
+diff --git a/tests/net/lib/prometheus/collector/prj.conf b/tests/net/lib/prometheus/collector/prj.conf
+--- a/tests/net/lib/prometheus/collector/prj.conf
++++ b/tests/net/lib/prometheus/collector/prj.conf
+@@ -3,7 +3,7 @@ CONFIG_NET_LOG=y
+ CONFIG_ZTEST=y
+ CONFIG_ZTEST_STACK_SIZE=1024
+ CONFIG_PROMETHEUS=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ CONFIG_NETWORKING=y
+ CONFIG_NET_SOCKETS=y
+ CONFIG_HTTP_SERVER=y
+diff --git a/tests/net/lib/prometheus/counter/prj.conf b/tests/net/lib/prometheus/counter/prj.conf
+--- a/tests/net/lib/prometheus/counter/prj.conf
++++ b/tests/net/lib/prometheus/counter/prj.conf
+@@ -3,7 +3,7 @@ CONFIG_ZTEST=y
+ CONFIG_TEST_RANDOM_GENERATOR=y
+ CONFIG_ZTEST_STACK_SIZE=1024
+ CONFIG_PROMETHEUS=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ CONFIG_NETWORKING=y
+ CONFIG_NET_SOCKETS=y
+ CONFIG_NET_LOG=y
+diff --git a/tests/net/lib/prometheus/formatter/prj.conf b/tests/net/lib/prometheus/formatter/prj.conf
+--- a/tests/net/lib/prometheus/formatter/prj.conf
++++ b/tests/net/lib/prometheus/formatter/prj.conf
+@@ -3,7 +3,7 @@ CONFIG_NET_LOG=y
+ CONFIG_ZTEST=y
+ CONFIG_ZTEST_STACK_SIZE=1024
+ CONFIG_PROMETHEUS=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ CONFIG_NETWORKING=y
+ CONFIG_NET_SOCKETS=y
+ CONFIG_HTTP_SERVER=y
+diff --git a/tests/net/lib/prometheus/gauge/prj.conf b/tests/net/lib/prometheus/gauge/prj.conf
+--- a/tests/net/lib/prometheus/gauge/prj.conf
++++ b/tests/net/lib/prometheus/gauge/prj.conf
+@@ -3,7 +3,7 @@ CONFIG_ZTEST=y
+ CONFIG_TEST_RANDOM_GENERATOR=y
+ CONFIG_ZTEST_STACK_SIZE=1024
+ CONFIG_PROMETHEUS=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ CONFIG_NETWORKING=y
+ CONFIG_NET_SOCKETS=y
+ CONFIG_NET_LOG=y
+diff --git a/tests/net/lib/prometheus/histogram/prj.conf b/tests/net/lib/prometheus/histogram/prj.conf
+--- a/tests/net/lib/prometheus/histogram/prj.conf
++++ b/tests/net/lib/prometheus/histogram/prj.conf
+@@ -3,7 +3,7 @@ CONFIG_ZTEST=y
+ CONFIG_TEST_RANDOM_GENERATOR=y
+ CONFIG_ZTEST_STACK_SIZE=1024
+ CONFIG_PROMETHEUS=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ CONFIG_NETWORKING=y
+ CONFIG_NET_SOCKETS=y
+ CONFIG_NET_LOG=y
+diff --git a/tests/net/lib/prometheus/summary/prj.conf b/tests/net/lib/prometheus/summary/prj.conf
+--- a/tests/net/lib/prometheus/summary/prj.conf
++++ b/tests/net/lib/prometheus/summary/prj.conf
+@@ -3,7 +3,7 @@ CONFIG_ZTEST=y
+ CONFIG_TEST_RANDOM_GENERATOR=y
+ CONFIG_ZTEST_STACK_SIZE=1024
+ CONFIG_PROMETHEUS=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ CONFIG_NETWORKING=y
+ CONFIG_NET_SOCKETS=y
+ CONFIG_NET_LOG=y
+diff --git a/tests/net/socket/service/prj.conf b/tests/net/socket/service/prj.conf
+--- a/tests/net/socket/service/prj.conf
++++ b/tests/net/socket/service/prj.conf
+@@ -12,8 +12,8 @@ CONFIG_NET_MAX_CONN=5
+ CONFIG_NET_SOCKETS_SERVICE=y
+ CONFIG_ZVFS_POLL_MAX=20
+ 
+-# We need to set POSIX_API and use picolibc for eventfd to work
+-CONFIG_POSIX_API=y
++# We need POSIX networking (PSE53) and picolibc for eventfd to work
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ CONFIG_PICOLIBC=y
+ 
+ # Network driver config
+diff --git a/tests/net/socket/socket_helpers.h b/tests/net/socket/socket_helpers.h
+--- a/tests/net/socket/socket_helpers.h
++++ b/tests/net/socket/socket_helpers.h
+@@ -6,7 +6,7 @@
+ 
+ #include <zephyr/ztest_assert.h>
+ 
+-#if defined(CONFIG_POSIX_API)
++#if defined(CONFIG_POSIX_NETWORKING)
+ #include <sys/socket.h>
+ #include <arpa/inet.h>
+ #include <unistd.h>
+diff --git a/tests/subsys/portability/posix/barriers/prj.conf b/tests/subsys/portability/posix/barriers/prj.conf
+--- a/tests/subsys/portability/posix/barriers/prj.conf
++++ b/tests/subsys/portability/posix/barriers/prj.conf
+@@ -1,4 +1,3 @@
+-CONFIG_POSIX_API=y
+ CONFIG_ZTEST=y
+ 
+ CONFIG_POSIX_AEP_CHOICE_BASE=y
+diff --git a/tests/subsys/portability/posix/clock_selection/prj.conf b/tests/subsys/portability/posix/clock_selection/prj.conf
+--- a/tests/subsys/portability/posix/clock_selection/prj.conf
++++ b/tests/subsys/portability/posix/clock_selection/prj.conf
+@@ -1,4 +1,3 @@
+-CONFIG_POSIX_API=y
+ CONFIG_ZTEST=y
+ 
+ CONFIG_POSIX_AEP_CHOICE_BASE=y
+diff --git a/tests/subsys/portability/posix/common/prj.conf b/tests/subsys/portability/posix/common/prj.conf
+--- a/tests/subsys/portability/posix/common/prj.conf
++++ b/tests/subsys/portability/posix/common/prj.conf
+@@ -1,4 +1,5 @@
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE51=y
++CONFIG_XSI_SINGLE_PROCESS=y
+ CONFIG_POSIX_SEMAPHORES=y
+ CONFIG_POSIX_THREAD_THREADS_MAX=6
+ CONFIG_ZTEST=y
+diff --git a/tests/subsys/portability/posix/eventfd/prj.conf b/tests/subsys/portability/posix/eventfd/prj.conf
+--- a/tests/subsys/portability/posix/eventfd/prj.conf
++++ b/tests/subsys/portability/posix/eventfd/prj.conf
+@@ -8,6 +8,8 @@ CONFIG_TEST_RANDOM_GENERATOR=y
+ 
+ CONFIG_ZTEST=y
+ 
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE51=y
++CONFIG_EVENTFD=y
++CONFIG_XSI=y
+ CONFIG_XSI_STREAMS=y
+ CONFIG_EVENTFD=y
+diff --git a/tests/subsys/portability/posix/fs/prj.conf b/tests/subsys/portability/posix/fs/prj.conf
+--- a/tests/subsys/portability/posix/fs/prj.conf
++++ b/tests/subsys/portability/posix/fs/prj.conf
+@@ -1,7 +1,7 @@
+ CONFIG_FILE_SYSTEM=y
+ CONFIG_LOG=y
+ CONFIG_FAT_FILESYSTEM_ELM=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE52=y
+ CONFIG_POSIX_FILE_SYSTEM=y
+ CONFIG_POSIX_FILE_SYSTEM_R=y
+ CONFIG_ZTEST=y
+diff --git a/tests/subsys/portability/posix/multi_process/prj.conf b/tests/subsys/portability/posix/multi_process/prj.conf
+--- a/tests/subsys/portability/posix/multi_process/prj.conf
++++ b/tests/subsys/portability/posix/multi_process/prj.conf
+@@ -1,5 +1,7 @@
+-CONFIG_POSIX_API=y
+ CONFIG_ZTEST=y
+ 
+ CONFIG_POSIX_AEP_CHOICE_BASE=y
++CONFIG_POSIX_DEVICE_IO=y
++CONFIG_POSIX_FD_MGMT=y
++CONFIG_EVENTFD=y
+ CONFIG_POSIX_MULTI_PROCESS=y
+diff --git a/tests/subsys/portability/posix/net/prj.conf b/tests/subsys/portability/posix/net/prj.conf
+--- a/tests/subsys/portability/posix/net/prj.conf
++++ b/tests/subsys/portability/posix/net/prj.conf
+@@ -2,6 +2,6 @@ CONFIG_ZTEST=y
+ CONFIG_NET_TEST=y
+ CONFIG_TEST_RANDOM_GENERATOR=y
+ 
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ CONFIG_POSIX_NETWORKING=y
+ CONFIG_NETWORKING=y
+diff --git a/tests/subsys/portability/posix/net/tests.yaml b/tests/subsys/portability/posix/net/tests.yaml
+--- a/tests/subsys/portability/posix/net/tests.yaml
++++ b/tests/subsys/portability/posix/net/tests.yaml
+@@ -56,6 +56,6 @@ tests:
+       - CONFIG_NET_HOSTNAME_DYNAMIC=y
+   portability.posix.net.hostname.unique_update:
+     extra_configs:
+-      - CONFIG_POSIX_API=y
++      - CONFIG_POSIX_AEP_CHOICE_PSE53=y
+       - CONFIG_NET_HOSTNAME_UNIQUE_UPDATE=y
+       - CONFIG_NET_HOSTNAME_UNIQUE=y
+diff --git a/tests/subsys/portability/posix/rwlocks/prj.conf b/tests/subsys/portability/posix/rwlocks/prj.conf
+--- a/tests/subsys/portability/posix/rwlocks/prj.conf
++++ b/tests/subsys/portability/posix/rwlocks/prj.conf
+@@ -1,7 +1,6 @@
+-CONFIG_POSIX_API=y
+ CONFIG_ZTEST=y
+ 
+-CONFIG_POSIX_AEP_CHOICE_BASE=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ CONFIG_POSIX_RW_LOCKS=y
+ 
+ CONFIG_DYNAMIC_THREAD=y
+diff --git a/tests/subsys/portability/posix/semaphores/prj.conf b/tests/subsys/portability/posix/semaphores/prj.conf
+--- a/tests/subsys/portability/posix/semaphores/prj.conf
++++ b/tests/subsys/portability/posix/semaphores/prj.conf
+@@ -1,7 +1,7 @@
+-CONFIG_POSIX_API=y
+ CONFIG_ZTEST=y
+ 
+ CONFIG_POSIX_AEP_CHOICE_BASE=y
++CONFIG_POSIX_MULTI_PROCESS=y
+ CONFIG_POSIX_SEMAPHORES=y
+ 
+ CONFIG_DYNAMIC_THREAD=y
+diff --git a/tests/subsys/portability/posix/signals/prj.conf b/tests/subsys/portability/posix/signals/prj.conf
+--- a/tests/subsys/portability/posix/signals/prj.conf
++++ b/tests/subsys/portability/posix/signals/prj.conf
+@@ -1,7 +1,7 @@
+-CONFIG_POSIX_API=y
+ CONFIG_ZTEST=y
+ 
+ CONFIG_POSIX_AEP_CHOICE_PSE51=y
++CONFIG_POSIX_MULTI_PROCESS=y
+ CONFIG_POSIX_SIGNALS=y
+ 
+ CONFIG_DYNAMIC_THREAD=y
+diff --git a/tests/subsys/portability/posix/spinlocks/prj.conf b/tests/subsys/portability/posix/spinlocks/prj.conf
+--- a/tests/subsys/portability/posix/spinlocks/prj.conf
++++ b/tests/subsys/portability/posix/spinlocks/prj.conf
+@@ -1,4 +1,3 @@
+-CONFIG_POSIX_API=y
+ CONFIG_ZTEST=y
+ 
+ CONFIG_POSIX_AEP_CHOICE_BASE=y
+diff --git a/tests/subsys/portability/posix/threads_base/prj.conf b/tests/subsys/portability/posix/threads_base/prj.conf
+--- a/tests/subsys/portability/posix/threads_base/prj.conf
++++ b/tests/subsys/portability/posix/threads_base/prj.conf
+@@ -1,5 +1,6 @@
+ CONFIG_ZTEST=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE51=y
++CONFIG_POSIX_MULTI_PROCESS=y
+ CONFIG_POSIX_THREADS=y
+ CONFIG_PTHREAD_CREATE_BARRIER=y
+ 
+diff --git a/tests/subsys/portability/posix/threads_ext/prj.conf b/tests/subsys/portability/posix/threads_ext/prj.conf
+--- a/tests/subsys/portability/posix/threads_ext/prj.conf
++++ b/tests/subsys/portability/posix/threads_ext/prj.conf
+@@ -1,5 +1,3 @@
+-CONFIG_POSIX_API=y
+-
+ CONFIG_ZTEST=y
+ CONFIG_POSIX_AEP_CHOICE_BASE=y
+ CONFIG_POSIX_THREADS_EXT=y
+diff --git a/tests/subsys/portability/posix/timers/prj.conf b/tests/subsys/portability/posix/timers/prj.conf
+--- a/tests/subsys/portability/posix/timers/prj.conf
++++ b/tests/subsys/portability/posix/timers/prj.conf
+@@ -1,7 +1,7 @@
+-CONFIG_POSIX_API=y
+ CONFIG_ZTEST=y
+ 
+-CONFIG_POSIX_AEP_CHOICE_BASE=y
++CONFIG_POSIX_AEP_CHOICE_PSE51=y
++CONFIG_POSIX_MULTI_PROCESS=y
+ CONFIG_POSIX_TIMERS=y
+ 
+ # Needed for timer_create() when using SIGEV_THREAD
+diff --git a/tests/subsys/portability/posix/xsi_realtime/prj.conf b/tests/subsys/portability/posix/xsi_realtime/prj.conf
+--- a/tests/subsys/portability/posix/xsi_realtime/prj.conf
++++ b/tests/subsys/portability/posix/xsi_realtime/prj.conf
+@@ -1,7 +1,6 @@
+-CONFIG_POSIX_API=y
+ CONFIG_ZTEST=y
+ 
+-CONFIG_POSIX_AEP_CHOICE_BASE=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ CONFIG_XSI_REALTIME=y
+ CONFIG_FILE_SYSTEM=y
+ CONFIG_POSIX_FILE_SYSTEM=y
+diff --git a/tests/subsys/portability/posix/xsi_streams/prj.conf b/tests/subsys/portability/posix/xsi_streams/prj.conf
+--- a/tests/subsys/portability/posix/xsi_streams/prj.conf
++++ b/tests/subsys/portability/posix/xsi_streams/prj.conf
+@@ -1,5 +1,5 @@
+-CONFIG_POSIX_API=y
+ CONFIG_ZTEST=y
+ 
+ CONFIG_POSIX_AEP_CHOICE_BASE=y
++CONFIG_XSI=y
+ CONFIG_XSI_STREAMS=y
+diff --git a/tests/subsys/portability/posix/xsi_system_logging/prj.conf b/tests/subsys/portability/posix/xsi_system_logging/prj.conf
+--- a/tests/subsys/portability/posix/xsi_system_logging/prj.conf
++++ b/tests/subsys/portability/posix/xsi_system_logging/prj.conf
+@@ -1,5 +1,4 @@
+-CONFIG_POSIX_API=y
+ CONFIG_ZTEST=y
+ 
+-CONFIG_POSIX_AEP_CHOICE_BASE=y
++CONFIG_POSIX_AEP_CHOICE_NETAPP=y
+ CONFIG_XSI_SYSTEM_LOGGING=y
+diff --git a/tests/subsys/portability/posix/xsi_threads_ext/prj.conf b/tests/subsys/portability/posix/xsi_threads_ext/prj.conf
+--- a/tests/subsys/portability/posix/xsi_threads_ext/prj.conf
++++ b/tests/subsys/portability/posix/xsi_threads_ext/prj.conf
+@@ -1,4 +1,4 @@
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE51=y
+ 
+ CONFIG_ZTEST=y
+ CONFIG_XSI_THREADS_EXT=y
