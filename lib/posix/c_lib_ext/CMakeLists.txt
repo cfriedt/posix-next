@@ -16,6 +16,7 @@ zephyr_library_sources(
   stpcpy.c
   strcasecmp.c
   strdup.c
+  strfmon.c
   strnlen.c
 )
 
