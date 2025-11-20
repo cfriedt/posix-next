@@ -27,6 +27,7 @@
 #include <limits.h>
 #include <locale.h>
 #include <math.h>
+#include <monetary.h>
 #include <mqueue.h>
 #include <net/if.h>
 #include <netdb.h>
@@ -83,6 +84,7 @@ EXPORT_SYMBOL(setjmp);
 #ifdef CONFIG_POSIX_C_LIB_EXT
 EXPORT_SYMBOL(fnmatch);
 EXPORT_SYMBOL(getopt);
+EXPORT_SYMBOL(strfmon);
 #endif /* CONFIG_POSIX_C_LIB_EXT */
 
 /* CLOCK_SELECTION */
