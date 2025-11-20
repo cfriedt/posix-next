@@ -68,6 +68,13 @@ long sysconf(int opt);
 long gethostid(void);
 #endif
 
+#if CONFIG_POSIX_PIPE
+int pipe(int pipefd[2]);
+#ifdef _GNU_SOURCE
+int pipe2(int pipefd[2], int flags);
+#endif
+#endif /* CONFIG_POSIX_PIPE */
+
 #ifdef __cplusplus
 }
 #endif
