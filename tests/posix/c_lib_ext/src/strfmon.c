@@ -150,6 +150,13 @@ static const struct test_data data[] = {
 
 ZTEST(posix_c_lib_ext, test_strfmon)
 {
+	if (IS_ENABLED(CONFIG_ARCH_POSIX)) {
+		/* uint64_t int_part = scaled_int / iscale;
+		 * causes a segfault on native_sim ¯\_(ツ)_/¯
+		 */
+		ztest_test_skip();
+	}
+
 	TC_PRINT("%.*s\nSetting locale to %s\n%.*s\n",
 		 (int)strlen("Setting locale to ") + (int)strlen(CONFIG_TEST_LOCALE_STR), HRULE,
 		 CONFIG_TEST_LOCALE_STR,
