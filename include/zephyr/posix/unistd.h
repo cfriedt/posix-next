@@ -121,7 +121,7 @@ typedef unsigned long useconds_t;
 /* intptr_t is optionally defined by the libc stdint.h and we assume it is defined there */
 
 int access(const char *path, int amode);
-unsigned alarm(unsigned seconds);
+unsigned int alarm(unsigned int seconds);
 int chdir(const char *path);
 int chown(const char *path, uid_t owner, gid_t group);
 int close(int fildes);
@@ -210,7 +210,7 @@ int setreuid(uid_t ruid, uid_t euid);
 #endif
 pid_t setsid(void);
 int setuid(uid_t uid);
-unsigned sleep(unsigned seconds);
+unsigned int sleep(unsigned int seconds);
 #if defined(_XOPEN_SOURCE) || defined(__DOXYGEN__)
 void swab(const void *ZRESTRICT src, void *ZRESTRICT dest, ssize_t nbytes);
 #endif
