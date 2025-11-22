@@ -18,6 +18,10 @@ extern "C" {
 int getenv_r(const char *name, char *buf, size_t len);
 #endif
 
+#if defined(_POSIX_C_SOURCE) || defined(__DOXYGEN__)
+int getsubopt(char **optionp, char *const *keylistp, char **valuep);
+#endif
+
 #if defined(_XOPEN_SOURCE) || defined(__DOXYGEN__)
 int putenv(char *string);
 #endif

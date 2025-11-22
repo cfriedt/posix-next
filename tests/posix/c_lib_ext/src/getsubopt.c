@@ -8,8 +8,6 @@
 
 #include <stdlib.h>
 
-extern int getsubopt(char **optionp, char *const *keylistp, char **valuep);
-
 ZTEST(posix_c_lib_ext, test_getsubopt)
 {
 	char *value;
