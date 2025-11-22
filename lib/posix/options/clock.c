@@ -80,6 +80,12 @@ int clock_settime(clockid_t clock_id, const struct timespec *tp)
  * https://pubs.opengroup.org/onlinepubs/9699919799/xrat/V4_xsh_chap01.html
  * https://pubs.opengroup.org/onlinepubs/9699919799/xrat/V4_xsh_chap03.html
  */
+#if !defined(_USECONDS_T_DECLARED) && !defined(__useconds_t_defined)
+typedef unsigned long useconds_t;
+#define _USECONDS_T_DECLARED
+#define __useconds_t_defined
+#endif
+
 int usleep(useconds_t useconds)
 {
 	int32_t rem;
