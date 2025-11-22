@@ -59,8 +59,6 @@
 #define _POSIX_CHOWN_RESTRICTED (0)
 #undef _POSIX_NO_TRUNC
 #define _POSIX_NO_TRUNC (0)
-#undef _POSIX_VDISABLE
-#define _POSIX_VDISABLE ('\0')
 
 /* _POSIX_ADVISORY_INFO: not supported */
 
