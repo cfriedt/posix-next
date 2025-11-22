@@ -1,0 +1,41 @@
+/*
+ * Copyright (c) 2024, Meta
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+#ifndef ZEPHYR_INCLUDE_POSIX_SYS_PATHCONF_H_
+#define ZEPHYR_INCLUDE_POSIX_SYS_PATHCONF_H_
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+enum {
+	_PC_2_SYMLINKS,
+	_PC_ALLOC_SIZE_MIN,
+	_PC_ASYNC_IO,
+	_PC_CHOWN_RESTRICTED,
+	_PC_FILESIZEBITS,
+	_PC_LINK_MAX,
+	_PC_MAX_CANON,
+	_PC_MAX_INPUT,
+	_PC_NAME_MAX,
+	_PC_NO_TRUNC,
+	_PC_PATH_MAX,
+	_PC_PIPE_BUF,
+	_PC_PRIO_IO,
+	_PC_REC_INCR_XFER_SIZE,
+	_PC_REC_MAX_XFER_SIZE,
+	_PC_REC_MIN_XFER_SIZE,
+	_PC_REC_XFER_ALIGN,
+	_PC_SYMLINK_MAX,
+	_PC_SYNC_IO,
+	_PC_TIMESTAMP_RESOLUTION,
+	_PC_VDISABLE,
+};
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* ZEPHYR_INCLUDE_POSIX_SYS_PATHCONF_H_ */
