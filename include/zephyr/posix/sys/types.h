@@ -148,10 +148,12 @@ typedef unsigned short uid_t;
 #define __uid_t_defined
 #endif
 
+#if (_POSIX_C_SOURCE < 200809L) || defined(__DOXYGEN__)
 #if !defined(_USECONDS_T_DECLARED) && !defined(__useconds_t_defined)
 typedef unsigned long useconds_t;
 #define _USECONDS_T_DECLARED
 #define __useconds_t_defined
+#endif
 #endif
 
 #ifdef __cplusplus
