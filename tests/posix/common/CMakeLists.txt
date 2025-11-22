@@ -9,5 +9,9 @@ zephyr_include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../../../lib/posix)
 
 target_sources(app PRIVATE ${app_sources})
 
-target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+# for private posix_clock.h, used for conversion functions
 target_include_directories(app PRIVATE ${ZEPHYR_POSIX_NEXT_MODULE_DIR}/lib/posix/options)
+
+# FIXME: We should not rely on usleep() (which is was dropped in Issue 7, 200809L)
+target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200112L)
+target_compile_options(app PRIVATE -U_XOPEN_SOURCE -D_XOPEN_SOURCE=600)
