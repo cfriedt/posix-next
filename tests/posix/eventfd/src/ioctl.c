@@ -6,6 +6,9 @@
 
 #include "_main.h"
 
+#undef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L
+
 #include <fcntl.h>
 #include <sys/ioctl.h>
 

@@ -117,7 +117,8 @@ struct stat {
 #define __stat_defined
 #endif
 
-#define S_IFMT 00170000
+#define S_IFMT ZVFS_MODE_IFMT
+
 #if defined(_XOPEN_SOURCE) || defined(__DOXYGEN__)
 #define S_IFBLK  ZVFS_MODE_IFBLK
 #define S_IFCHR  ZVFS_MODE_IFCHR
@@ -129,31 +130,33 @@ struct stat {
 #define S_IFSHM  ZVFS_MODE_IFSHM
 #endif
 
-#define S_IRWXU 0000700
-#define S_IRUSR 0000400
-#define S_IWUSR 0000200
-#define S_IXUSR 0000100
-#define S_IRWXG 0000070
-#define S_IRGRP 0000040
-#define S_IWGRP 0000020
-#define S_IXGRP 0000010
-#define S_IRWXO 0000007
-#define S_IROTH 0000004
-#define S_IWOTH 0000002
-#define S_IXOTH 0000001
-#define S_ISUID 0004000
-#define S_ISGID 0002000
+#define S_IRWXU ZVFS_S_IRWXU
+#define S_IRUSR ZVFS_S_IRUSR
+#define S_IWUSR ZVFS_S_IWUSR
+#define S_IXUSR ZVFS_S_IXUSR
+#define S_IRWXG ZVFS_S_IRWXG
+#define S_IRGRP ZVFS_S_IRGRP
+#define S_IWGRP ZVFS_S_IWGRP
+#define S_IXGRP ZVFS_S_IXGRP
+#define S_IRWXO ZVFS_S_IRWXO
+#define S_IROTH ZVFS_S_IROTH
+#define S_IWOTH ZVFS_S_IWOTH
+#define S_IXOTH ZVFS_S_IXOTH
+#define S_ISUID ZVFS_S_ISUID
+#define S_ISGID ZVFS_S_ISGID
 #if defined(_XOPEN_SOURCE) || defined(__DOXYGEN__)
-#define S_ISVTX 0001000
+#define S_ISVTX ZVFS_S_ISVTX
 #endif
 
 #define S_ISBLK(m)  (((m) & S_IFMT) == S_IFBLK)
+#if defined(_XOPEN_SOURCE) || defined(__DOXYGEN__)
 #define S_ISCHR(m)  (((m) & S_IFMT) == S_IFCHR)
 #define S_ISDIR(m)  (((m) & S_IFMT) == S_IFDIR)
 #define S_ISFIFO(m) (((m) & S_IFMT) == S_IFIFO)
 #define S_ISREG(m)  (((m) & S_IFMT) == S_IFREG)
 #define S_ISLNK(m)  (((m) & S_IFMT) == S_IFLNK)
 #define S_ISSOCK(m) (((m) & S_IFMT) == S_IFSOCK)
+#endif
 
 #if defined(_XOPEN_SOURCE) || defined(__DOXYGEN__)
 #define S_TYPEISMQ(buf)  (0)
