@@ -5,6 +5,7 @@
  */
 
 #include <pthread.h>
+#include <unistd.h>
 
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/util.h>
