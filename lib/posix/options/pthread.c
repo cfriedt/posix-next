@@ -10,6 +10,7 @@
 #include "pthread_sched.h"
 
 #include <stdio.h>
+#include <limits.h>
 
 #include <zephyr/init.h>
 #include <zephyr/kernel.h>
