@@ -125,6 +125,24 @@ typedef uint32_t pthread_t;
 #define __pthread_t_defined
 #endif
 
+#ifndef _PTHREAD_MUTEX_INITIALIZER
+#define _PTHREAD_MUTEX_INITIALIZER (-1)
+#endif
+
+#ifndef _PTHREAD_COND_INITIALIZER
+#define _PTHREAD_COND_INITIALIZER (-1)
+#endif
+
+#ifndef _PTHREAD_RWLOCK_INITIALIZER
+#define _PTHREAD_RWLOCK_INITIALIZER (-1)
+#endif
+
+#ifndef _PTHREAD_ONCE_INITIALIZER
+/* clang-format off */
+#define _PTHREAD_ONCE_INITIALIZER {0}
+/* clang-format on */
+#endif
+
 #ifdef __cplusplus
 }
 #endif
