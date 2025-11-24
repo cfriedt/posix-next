@@ -7,6 +7,7 @@
 #include <pthread.h>
 #include <semaphore.h>
 #include <time.h>
+#include <unistd.h>
 
 #include <zephyr/sys/util.h>
 #include <zephyr/ztest.h>
