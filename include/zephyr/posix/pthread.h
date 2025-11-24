@@ -35,9 +35,9 @@ extern "C" {
 #define PTHREAD_MUTEX_ERRORCHECK    2
 #define PTHREAD_MUTEX_NORMAL        0
 #define PTHREAD_MUTEX_RECURSIVE     1
-#define PTHREAD_MUTEX_ROBUST              4
-#define PTHREAD_MUTEX_STALLED             1
-#define PTHREAD_ONCE_INIT                 _PTHREAD_ONCE_INITIALIZER
+#define PTHREAD_MUTEX_ROBUST        4
+#define PTHREAD_MUTEX_STALLED       1
+#define PTHREAD_ONCE_INIT           _PTHREAD_ONCE_INITIALIZER
 #if defined(_POSIX_THREAD_PRIO_INHERIT) || defined(__DOXYGEN__)
 #define PTHREAD_PRIO_INHERIT 1
 #endif
@@ -107,7 +107,7 @@ int pthread_attr_setstacksize(pthread_attr_t *attr, size_t stacksize);
 #endif
 int pthread_barrier_destroy(pthread_barrier_t *barrier);
 int pthread_barrier_init(pthread_barrier_t *ZRESTRICT barrier,
-			 const pthread_barrierattr_t *ZRESTRICT attr, unsigned count);
+			 const pthread_barrierattr_t *ZRESTRICT attr, unsigned int count);
 int pthread_barrier_wait(pthread_barrier_t *barrier);
 int pthread_barrierattr_destroy(pthread_barrierattr_t *attr);
 #if defined(_POSIX_THREAD_PROCESS_SHARED) || defined(__DOXYGEN__)
