@@ -239,6 +239,13 @@ ssize_t write(int fildes, const void *buf, size_t nbyte);
 extern char *optarg;
 extern int opterr, optind, optopt;
 
+#if CONFIG_POSIX_PIPE
+int pipe(int pipefd[2]);
+#ifdef _GNU_SOURCE
+int pipe2(int pipefd[2], int flags);
+#endif
+#endif /* CONFIG_POSIX_PIPE */
+
 #ifdef __cplusplus
 }
 #endif
