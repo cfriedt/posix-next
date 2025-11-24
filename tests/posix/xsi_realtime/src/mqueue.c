@@ -8,6 +8,7 @@
 #include <fcntl.h>
 #include <mqueue.h>
 #include <pthread.h>
+#include <unistd.h>
 
 #include <zephyr/sys/util.h>
 #include <zephyr/ztest.h>
