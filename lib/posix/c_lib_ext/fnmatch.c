@@ -9,6 +9,11 @@
  * This code is derived from software contributed to Berkeley by
  * Guido van Rossum.
  *
+ * Copyright (c) 2011 The FreeBSD Foundation
+ * All rights reserved.
+ * Portions of this software were developed by David Chisnall
+ * under sponsorship from the FreeBSD Foundation.
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -62,202 +67,107 @@
 
 #define FOLDCASE(ch, flags) foldcase((unsigned char)(ch), (flags))
 
-#define MATCH_CLASS6(p, a, b, c, d, e, f, g)                                                       \
-	((p)[0] == (a) && (p)[1] == (b) && (p)[2] == (c) && (p)[3] == (d) && (p)[4] == (e) &&      \
-	 (p)[5] == (f) && (p)[6] == (g))
+#define RANGE_ERROR   (-1)
+#define RANGE_NOMATCH 1
+#define RANGE_MATCH   0
 
-#define MATCH_CLASS7(p, a, b, c, d, e, f, g, h)                                                    \
-	((p)[0] == (a) && (p)[1] == (b) && (p)[2] == (c) && (p)[3] == (d) && (p)[4] == (e) &&      \
-	 (p)[5] == (f) && (p)[6] == (g) && (p)[7] == (h))
-
-enum fnm_char_class {
-	FNM_CC_ALNUM,
-	FNM_CC_ALPHA,
-	FNM_CC_BLANK,
-	FNM_CC_CNTRL,
-	FNM_CC_DIGIT,
-	FNM_CC_GRAPH,
-	FNM_CC_LOWER,
-	FNM_CC_PRINT,
-	FNM_CC_PUNCT,
-	FNM_CC_SPACE,
-	FNM_CC_UPPER,
-	FNM_CC_XDIGIT,
-	FNM_CC_INVALID,
-};
-
-static bool fnm_cc_is_valid(const char *pattern, size_t psize, enum fnm_char_class *cc)
+/* POSIX character class matching was missing from the BSD version. This was added in 2025 */
+static int rangematch_cc(const char **pattern, int ch)
 {
-	if (psize < 4 || *pattern != ':') {
-		return false;
-	}
+	typedef unsigned long long ull;
 
-	pattern++; /* skip ':' */
-	psize--;
+	/*
+	 * [:alnum:] et al are 9 characters. [:xdigits:] is 10.
+	 * If we first check for the leading "[:", then we have at most 8 remaining characters to
+	 * compare. Rather than using string comparison, encode the 8 characters into an integer and
+	 * compare to a precomputed constants. This likely only works for the "C" locale.
+	 */
+#define FNM_CC5(a, b, c, d, e)                                                                     \
+	(((ull)(a) << 48) | ((ull)(b) << 40) | ((ull)(c) << 32) | ((ull)(d) << 24) |               \
+	 ((ull)(e) << 16) | ((ull)':' << 8) | ((ull)']' << 0))
+#define FNM_CC6(a, b, c, d, e, f)                                                                  \
+	(((ull)(a) << 56) | ((ull)(b) << 48) | ((ull)(c) << 40) | ((ull)(d) << 32) |               \
+	 ((ull)(e) << 24) | ((ull)(f) << 16) | ((ull)':' << 8) | ((ull)']' << 0))
 
-	/* Each class name ends with ":]" */
-	switch (pattern[0]) {
-	case 'a':
-		if (MATCH_CLASS6(pattern, 'a', 'l', 'n', 'u', 'm', ':', ']')) {
-			*cc = FNM_CC_ALNUM;
-			return true;
-		}
-		if (MATCH_CLASS6(pattern, 'a', 'l', 'p', 'h', 'a', ':', ']')) {
-			*cc = FNM_CC_ALPHA;
-			return true;
-		}
-		break;
-
-	case 'b':
-		if (MATCH_CLASS6(pattern, 'b', 'l', 'a', 'n', 'k', ':', ']')) {
-			*cc = FNM_CC_BLANK;
-			return true;
-		}
-		if (MATCH_CLASS6(pattern, 'a', 'l', 'p', 'h', 'a', ':', ']')) {
-			*cc = FNM_CC_ALPHA;
-			return true;
-		}
-		break;
-
-	case 'c':
-		if (MATCH_CLASS6(pattern, 'c', 'n', 't', 'r', 'l', ':', ']')) {
-			*cc = FNM_CC_CNTRL;
-			return true;
-		}
-		break;
-
-	case 'd':
-		if (MATCH_CLASS6(pattern, 'd', 'i', 'g', 'i', 't', ':', ']')) {
-			*cc = FNM_CC_DIGIT;
-			return true;
-		}
-		break;
-
-	case 'g':
-		if (MATCH_CLASS6(pattern, 'g', 'r', 'a', 'p', 'h', ':', ']')) {
-			*cc = FNM_CC_GRAPH;
-			return true;
-		}
-		break;
-
-	case 'l':
-		if (MATCH_CLASS6(pattern, 'l', 'o', 'w', 'e', 'r', ':', ']')) {
-			*cc = FNM_CC_LOWER;
-			return true;
-		}
-		break;
-
-	case 'p':
-		if (MATCH_CLASS6(pattern, 'p', 'r', 'i', 'n', 't', ':', ']')) {
-			*cc = FNM_CC_PRINT;
-			return true;
-		}
-		if (MATCH_CLASS6(pattern, 'p', 'u', 'n', 'c', 't', ':', ']')) {
-			*cc = FNM_CC_PUNCT;
-			return true;
-		}
-		break;
-
-	case 's':
-		if (MATCH_CLASS6(pattern, 's', 'p', 'a', 'c', 'e', ':', ']')) {
-			*cc = FNM_CC_SPACE;
-			return true;
-		}
-		break;
-
-	case 'u':
-		if (MATCH_CLASS6(pattern, 'u', 'p', 'p', 'e', 'r', ':', ']')) {
-			*cc = FNM_CC_UPPER;
-			return true;
-		}
-		break;
-
-	case 'x':
-		if (MATCH_CLASS7(pattern, 'x', 'd', 'i', 'g', 'i', 't', ':', ']')) {
-			*cc = FNM_CC_XDIGIT;
-			return true;
-		}
-		break;
-
-	default:
-		break;
-	}
-
-	return false;
-}
-
-static int fnm_cc_match(int c, enum fnm_char_class cc)
-{
-	switch (cc) {
-	case FNM_CC_ALNUM:
-		return isalnum(c);
-	case FNM_CC_ALPHA:
-		return isalpha(c);
-	case FNM_CC_BLANK:
-		return isblank(c);
-	case FNM_CC_CNTRL:
-		return iscntrl(c);
-	case FNM_CC_DIGIT:
-		return isdigit(c);
-	case FNM_CC_GRAPH:
-		return isgraph(c);
-	case FNM_CC_LOWER:
-		return islower(c);
-	case FNM_CC_PRINT:
-		return isprint(c);
-	case FNM_CC_PUNCT:
-		return ispunct(c);
-	case FNM_CC_SPACE:
-		return isspace(c);
-	case FNM_CC_UPPER:
-		return isupper(c);
-	case FNM_CC_XDIGIT:
-		return isxdigit(c);
-	default:
-		break;
-	}
-
-	return 0;
-}
-
-static bool match_posix_class(const char **pattern, int test)
-{
-	enum fnm_char_class cc;
-
+	ull key;
+	int ret;
 	const char *p = *pattern;
-	size_t remaining = strlen(p);
 
-	if (!fnm_cc_is_valid(p, remaining, &cc)) {
-		return false;
+	/* check the leading "[:" */
+	if ((p[0] != '[') || (p[1] != ':')) {
+		return RANGE_ERROR;
 	}
 
-	/* move pattern pointer past ":]" */
-	const char *end = strstr(p, ":]");
-	if (end) {
-		*pattern = end + 2;
+	/* encode the remaining characters into a 64-bit integer */
+	for (p += 2, key = 0; *p != EOS; ++p) {
+		if (*(p - 1) == ']') {
+			break;
+		}
+
+		key <<= 8;
+		key |= (unsigned char)(*p);
 	}
 
-	return fnm_cc_match(test, cc);
+	switch (key) {
+	case FNM_CC5('a', 'l', 'n', 'u', 'm'):
+		ret = !isalnum(ch);
+		break;
+	case FNM_CC5('a', 'l', 'p', 'h', 'a'):
+		ret = !isalpha(ch);
+		break;
+	case FNM_CC5('b', 'l', 'a', 'n', 'k'):
+		ret = !isblank(ch);
+		break;
+	case FNM_CC5('c', 'n', 't', 'r', 'l'):
+		ret = !iscntrl(ch);
+		break;
+	case FNM_CC5('d', 'i', 'g', 'i', 't'):
+		ret = !isdigit(ch);
+		break;
+	case FNM_CC5('g', 'r', 'a', 'p', 'h'):
+		ret = !isgraph(ch);
+		break;
+	case FNM_CC5('l', 'o', 'w', 'e', 'r'):
+		ret = !islower(ch);
+		break;
+	case FNM_CC5('p', 'r', 'i', 'n', 't'):
+		ret = !isprint(ch);
+		break;
+	case FNM_CC5('p', 'u', 'n', 'c', 't'):
+		ret = !ispunct(ch);
+		break;
+	case FNM_CC5('s', 'p', 'a', 'c', 'e'):
+		ret = !isspace(ch);
+		break;
+	case FNM_CC5('u', 'p', 'p', 'e', 'r'):
+		ret = !isupper(ch);
+		break;
+	case FNM_CC6('x', 'd', 'i', 'g', 'i', 't'):
+		ret = !isxdigit(ch);
+		break;
+	default:
+		return RANGE_ERROR;
+	}
+
+	*pattern = p;
+	return ret;
 }
 
 static inline int foldcase(int ch, int flags)
 {
-
-	if ((flags & FNM_CASEFOLD) != 0 && isupper(ch)) {
+	if (((flags & FNM_CASEFOLD) != 0) && isupper(ch)) {
 		return tolower(ch);
 	}
 
 	return ch;
 }
 
-static const char *rangematch(const char *pattern, int test, int flags)
+static int rangematch(const char **pattern, char test, int flags)
 {
-	bool negate, ok, need;
 	char c, c2;
-
-	if (pattern == NULL) {
-		return NULL;
-	}
+	int negate, ok;
+	const char *origpat;
+	const char *pat = *pattern;
 
 	/*
 	 * A bracket expression starting with an unquoted circumflex
@@ -266,104 +176,113 @@ static const char *rangematch(const char *pattern, int test, int flags)
 	 * consistency with the regular expression syntax.
 	 * J.T. Conklin (conklin@ngai.kaleida.com)
 	 */
-	negate = *pattern == '!' || *pattern == '^';
+	negate = (*pat == '!' || *pat == '^');
 	if (negate) {
-		++pattern;
+		++pat;
 	}
 
-	for (need = true, ok = false, c = FOLDCASE(*pattern++, flags); c != ']' || need;
-	     c = FOLDCASE(*pattern++, flags)) {
-		need = false;
+	test = FOLDCASE(test, flags);
 
-		if (c == '/' && (flags & FNM_PATHNAME)) {
-			return (void *)-1;
-		}
-
-		if (c == '\\' && !(flags & FNM_NOESCAPE)) {
-			c = FOLDCASE(*pattern++, flags);
-		}
-
-		if (c == EOS) {
-			return NULL;
-		}
-
-		if (c == '[' && *pattern == ':') {
-			if (match_posix_class(&pattern, test)) {
-				ok = true;
+	/*
+	 * A right bracket shall lose its special meaning and represent
+	 * itself in a bracket expression if it occurs first in the list.
+	 * -- POSIX.2 2.8.3.2
+	 */
+	ok = 0;
+	origpat = pat;
+	for (;;) {
+		if (*pat == ']' && pat > origpat) {
+			pat++;
+			break;
+		} else if (*pat == '\0') {
+			return RANGE_ERROR;
+		} else if (*pat == '/' && (flags & FNM_PATHNAME)) {
+			return RANGE_NOMATCH;
+		} else if (*pat == '\\' && !(flags & FNM_NOESCAPE)) {
+			pat++;
+		} else {
+			switch (rangematch_cc(&pat, test)) {
+			case RANGE_ERROR:
+				/* not a character class, proceed below */
+				break;
+			case RANGE_MATCH:
+				/* a valid character class that was matched */
+				ok = 1;
 				continue;
-			} else {
-				/* skip over class if unrecognized */
-				while (*pattern && !(*pattern == ':' && *(pattern + 1) == ']')) {
-					pattern++;
-				}
-				if (*pattern) {
-					pattern += 2;
-				}
+			case RANGE_NOMATCH:
+				/* a valid character class that was not matched */
 				continue;
 			}
 		}
 
-		if (*pattern == '-') {
-			c2 = FOLDCASE(*(pattern + 1), flags);
-			if (c2 != EOS && c2 != ']') {
-				pattern += 2;
-				if (c2 == '\\' && !(flags & FNM_NOESCAPE)) {
-					c2 = FOLDCASE(*pattern++, flags);
-				}
+		c = FOLDCASE(*pat++, flags);
 
-				if (c2 == EOS) {
-					return NULL;
+		if (*pat == '-' && *(pat + 1) != EOS && *(pat + 1) != ']') {
+			if (*++pat == '\\' && !(flags & FNM_NOESCAPE)) {
+				if (*pat != EOS) {
+					pat++;
 				}
+			}
+			c2 = FOLDCASE(*pat, flags);
+			pat++;
+			if (c2 == EOS) {
+				return RANGE_ERROR;
+			}
 
-				if (c <= test && test <= c2) {
-					ok = true;
-				}
+			if (flags & FNM_CASEFOLD) {
+				c2 = tolower(c2);
+			}
+
+			if (c <= test && test <= c2) {
+				ok = 1;
 			}
 		} else if (c == test) {
-			ok = true;
+			ok = 1;
 		}
 	}
 
-	return ok == negate ? NULL : pattern;
+	if (ok != negate) {
+		*pattern = pat;
+		return RANGE_MATCH;
+	}
+
+	return RANGE_NOMATCH;
 }
 
-static int fnmatchx(const char *pattern, const char *string, int flags, size_t recursion)
+static int fnmatchx(const char *pattern, const char *string, const char *stringstart, int flags,
+		    size_t recursion)
 {
-	const char *stringstart, *r;
-	char c, test;
-
-	if (pattern == NULL || string == NULL) {
-		return FNM_NOMATCH;
-	}
+	char c;
+	char pc, sc;
 
 	if (recursion-- == 0) {
 		return FNM_NORES;
 	}
 
-	for (stringstart = string;;) {
-		c = FOLDCASE(*pattern++, flags);
-		switch (c) {
+	while (true) {
+		pc = FOLDCASE(*pattern++, flags);
+		sc = FOLDCASE(*string, flags);
+		switch (pc) {
 		case EOS:
-			if ((flags & FNM_LEADING_DIR) && *string == '/') {
+			if (((flags & FNM_LEADING_DIR) != 0) && (sc == '/')) {
 				return 0;
 			}
-
-			return *string == EOS ? 0 : FNM_NOMATCH;
+			if (sc == EOS) {
+				return 0;
+			}
+			return FNM_NOMATCH;
 		case '?':
-			if (*string == EOS) {
+			if (sc == EOS) {
 				return FNM_NOMATCH;
 			}
-
-			if (*string == '/' && (flags & FNM_PATHNAME)) {
+			if ((sc == '/') && ((flags & FNM_PATHNAME) != 0)) {
 				return FNM_NOMATCH;
 			}
-
-			if (*string == '.' && (flags & FNM_PERIOD) &&
-			    (string == stringstart ||
-			     ((flags & FNM_PATHNAME) && *(string - 1) == '/'))) {
+			if ((sc == '.') && ((flags & FNM_PERIOD) != 0) &&
+			    ((string == stringstart) ||
+			     (((flags & FNM_PATHNAME) != 0) && (*(string - 1) == '/')))) {
 				return FNM_NOMATCH;
 			}
-
 			++string;
 			break;
 		case '*':
@@ -373,107 +292,85 @@ static int fnmatchx(const char *pattern, const char *string, int flags, size_t r
 				c = FOLDCASE(*++pattern, flags);
 			}
 
-			if (*string == '.' && (flags & FNM_PERIOD) &&
-			    (string == stringstart ||
-			     ((flags & FNM_PATHNAME) && *(string - 1) == '/'))) {
+			if ((sc == '.') && ((flags & FNM_PERIOD) != 0) &&
+			    ((string == stringstart) ||
+			     (((flags & FNM_PATHNAME) != 0) && (*(string - 1) == '/')))) {
 				return FNM_NOMATCH;
 			}
 
 			/* Optimize for pattern with * at end or before /. */
 			if (c == EOS) {
-				if (flags & FNM_PATHNAME) {
-					return (flags & FNM_LEADING_DIR) ||
-							       strchr(string, '/') == NULL
-						       ? 0
-						       : FNM_NOMATCH;
-				} else {
+				if ((flags & FNM_PATHNAME) == 0) {
 					return 0;
 				}
-			} else if (c == '/' && flags & FNM_PATHNAME) {
+
+				if (((flags & FNM_LEADING_DIR) != 0) ||
+				    (strchr(string, '/') == NULL)) {
+					return 0;
+				}
+
+				return FNM_NOMATCH;
+			} else if ((c == '/') && ((flags & FNM_PATHNAME) != 0)) {
 				string = strchr(string, '/');
 				if (string == NULL) {
 					return FNM_NOMATCH;
 				}
-
 				break;
 			}
 
 			/* General case, use recursion. */
-			do {
-				test = FOLDCASE(*string, flags);
-				if (test == EOS) {
+			while (sc != EOS) {
+				if (fnmatchx(pattern, string, stringstart, flags, recursion) == 0) {
+					return 0;
+				}
+				sc = FOLDCASE(*string, flags);
+				if ((sc == '/') && ((flags & FNM_PATHNAME) != 0)) {
 					break;
 				}
-
-				int e = fnmatchx(pattern, string, flags & ~FNM_PERIOD, recursion);
-
-				if (e != FNM_NOMATCH) {
-					return e;
-				}
-
-				if (test == '/' && flags & FNM_PATHNAME) {
-					break;
-				}
-
 				++string;
-			} while (true);
-
+			}
 			return FNM_NOMATCH;
 		case '[':
-			if (*string == EOS) {
+			if (sc == EOS) {
+				return FNM_NOMATCH;
+			}
+			if ((sc == '/') && ((flags & FNM_PATHNAME) != 0)) {
+				return FNM_NOMATCH;
+			}
+			if ((sc == '.') && ((flags & FNM_PERIOD) != 0) &&
+			    ((string == stringstart) ||
+			     (((flags & FNM_PATHNAME) != 0) && (*(string - 1) == '/')))) {
 				return FNM_NOMATCH;
 			}
 
-			if (*string == '/' && flags & FNM_PATHNAME) {
-				return FNM_NOMATCH;
-			}
-
-			if (*string == '.' && (flags & FNM_PERIOD) &&
-			    (string == stringstart ||
-			     ((flags & FNM_PATHNAME) && *(string - 1) == '/'))) {
-				return FNM_NOMATCH;
-			}
-
-			r = rangematch(pattern, FOLDCASE(*string, flags), flags);
-
-			if (r == NULL) {
-				if (FOLDCASE('[', flags) != FOLDCASE(*string, flags)) {
-					return FNM_NOMATCH;
-				}
-				++string;
+			switch (rangematch(&pattern, sc, flags)) {
+			case RANGE_ERROR:
+				goto norm;
+			case RANGE_MATCH:
 				break;
+			case RANGE_NOMATCH:
+				return FNM_NOMATCH;
 			}
-
-			if (r == (void *)-1) {
-				if (*string != '[') {
-					return FNM_NOMATCH;
-				}
-			} else {
-				pattern = r;
-			}
-
 			++string;
 			break;
 		case '\\':
-			if (!(flags & FNM_NOESCAPE)) {
-				c = FOLDCASE(*pattern++, flags);
-				if (c == EOS) {
-					c = '\0';
-					--pattern;
-				}
+			if ((flags & FNM_NOESCAPE) == 0) {
+				pc = FOLDCASE(*pattern++, flags);
 			}
 			__fallthrough;
 		default:
-			if (c != FOLDCASE(*string++, flags)) {
+norm:
+			if (pc != sc) {
 				return FNM_NOMATCH;
 			}
-
+			++string;
 			break;
 		}
 	}
+	CODE_UNREACHABLE;
 }
 
 int fnmatch(const char *pattern, const char *string, int flags)
 {
-	return fnmatchx(pattern, string, flags, 64);
+	return fnmatchx(pattern, string, string, flags, 64);
 }
