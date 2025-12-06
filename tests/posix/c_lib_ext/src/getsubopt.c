@@ -43,12 +43,14 @@ ZTEST(posix_c_lib_ext, test_getsubopt)
 	}
 
 	/* degenerate cases */
+#if !defined(CONFIG_NATIVE_LIBC)
 	zexpect_equal(-1, getsubopt(NULL, NULL, NULL));
 	zexpect_equal(-1, getsubopt(NULL, NULL, &value));
 	zexpect_equal(-1, getsubopt(NULL, (char **)key_list, NULL));
 	zexpect_equal(-1, getsubopt(NULL, (char **)key_list, &value));
 	zexpect_equal(-1, getsubopt(&option, NULL, NULL));
 	zexpect_equal(-1, getsubopt(&option, NULL, &value));
+#endif
 
 	/* iterate over valuep being NULL and valid */
 	for (size_t j = 0; j < 2; ++j) {
