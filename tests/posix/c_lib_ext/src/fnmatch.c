@@ -143,21 +143,22 @@ ZTEST(posix_c_lib_ext, test_fnmatch)
 	ARRAY_FOR_EACH_PTR(test_data, data) {
 		/* ensure that characters in "nomatch" do not match "pattern" */
 		for (size_t j = 0; j < strlen(data->nomatch); j++) {
-			char input[] = {data->nomatch[j], '\0'};
+			char c = data->nomatch[j];
+			char input[] = {c, '\0'};
 
 			zexpect_equal(fnmatch(data->pattern, input, 0), FNM_NOMATCH,
 				      "pattern \"%s\" unexpectedly matched char 0x%02x (%c)",
-				      data->pattern, data->nomatch[j],
-				      isprint(data->nomatch[j]) ? data->nomatch[j] : '.');
+				      data->pattern, c, isprint(c) ? c : '.');
 		}
 
 		/* ensure that characters in "match" do match "pattern" */
 		for (size_t j = 0; j < strlen(data->match); j++) {
-			char input[] = {data->match[j], '\0'};
+			char c = data->match[j];
+			char input[] = {c, '\0'};
 
 			zexpect_ok(fnmatch(data->pattern, input, 0),
 				   "pattern \"%s\" did not match char 0x%02x (%c)", data->pattern,
-				   data->match[j], isprint(data->match[j]) ? data->match[j] : '.');
+				   c, isprint(c) ? c : '.');
 		}
 	}
 
