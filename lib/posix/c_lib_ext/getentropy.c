@@ -15,10 +15,7 @@ int getentropy(void *buffer, size_t length)
 {
 	const struct device *const entropy = ENTROPY_NODE;
 
-	if (!buffer) {
-		errno = EFAULT;
-		return -1;
-	}
+	__ASSERT_NO_MSG(buffer != NULL);
 
 	if (length > 256) {
 		errno = EIO;
