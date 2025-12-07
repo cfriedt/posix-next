@@ -17,14 +17,11 @@ int getsubopt(char **optionp, char *const *keylist, char **valuep)
 	size_t i, len;
 	char *begin, *end, *eq, *key, *val;
 
-	if (optionp == NULL || keylist == NULL) {
-		LOG_DBG("optionp or keylist is NULL");
-		return -1;
-	}
+	__ASSERT_NO_MSG(optionp != NULL);
+	__ASSERT_NO_MSG(keylist != NULL);
+	__ASSERT_NO_MSG(valuep != NULL);
 
-	if (valuep != NULL) {
-		*valuep = NULL;
-	}
+	*valuep = NULL;
 
 	for (i = 0, begin = *optionp, end = begin, eq = NULL, len = strlen(*optionp); i <= len;
 	     ++i, ++end) {
@@ -46,16 +43,11 @@ int getsubopt(char **optionp, char *const *keylist, char **valuep)
 	key = begin;
 	if (eq == NULL) {
 		len = end - begin;
-		if (valuep != NULL) {
-			*valuep = NULL;
-		}
 		LOG_DBG("key: %.*s", (int)len, key);
 	} else {
 		len = eq - begin;
 		val = eq + 1;
-		if (valuep != NULL) {
-			*valuep = val;
-		}
+		*valuep = val;
 		LOG_DBG("key: %.*s val: %.*s", (int)len, key, (int)(end - val), val);
 	}
 
