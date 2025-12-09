@@ -61,6 +61,10 @@ if(NOT CONFIG_TC_PROVIDES_POSIX_FILE_SYSTEM)
   zephyr_library_sources_ifdef(CONFIG_POSIX_FILE_SYSTEM fs.c)
 endif()
 
+if(NOT CONFIG_TC_PROVIDES_POSIX_PIPE)
+  zephyr_library_sources_ifdef(CONFIG_POSIX_PIPE pipe.c)
+endif()
+
 if(NOT CONFIG_TC_PROVIDES_POSIX_FILE_SYSTEM_R)
   zephyr_library_sources_ifdef(CONFIG_POSIX_FILE_SYSTEM_R file_system_r.c)
 endif()
