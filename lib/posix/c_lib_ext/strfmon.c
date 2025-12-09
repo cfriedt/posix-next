@@ -5,6 +5,7 @@
 
 #include <errno.h>
 #include <ctype.h>
+#include <limits.h>
 #include <locale.h>
 #include <monetary.h>
 #include <stdarg.h>
@@ -134,20 +135,23 @@ static bool strfmon_parse_format(const char **fmtp, const struct lconv *lc,
 	if (*p == 'i') {
 		spec->use_international = true;
 		if (spec->right_precision < 0) {
-			spec->right_precision = lc->int_frac_digits;
+			if (lc->int_frac_digits == CHAR_MAX) {
+				spec->right_precision = 2;
+			} else {
+				spec->right_precision = lc->int_frac_digits;
+			}
 		}
 	} else if (*p == 'n') {
 		spec->use_international = false;
 		if ((spec->right_precision < 0)) {
-			spec->right_precision = lc->frac_digits;
+			if (lc->frac_digits == CHAR_MAX) {
+				spec->right_precision = 2;
+			} else {
+				spec->right_precision = lc->frac_digits;
+			}
 		}
 	} else {
 		return false;
-	}
-
-	if (spec->right_precision < 0) {
-		/* default if unspecified */
-		spec->right_precision = 2;
 	}
 
 	/* number of characters consumed */
