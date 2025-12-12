@@ -170,10 +170,6 @@ int gethostname(char *name, size_t namelen);
 char *getlogin(void);
 int getlogin_r(char *name, size_t namesize);
 int getopt(int argc, char *const argv[], const char *optstring);
-#if defined(CONFIG_POSIX_GETOPT_R)
-int getopt_r(int argc, char *const argv[], const char *optstring, char **optarg, int *opterr,
-	     int *optind, int *optopt);
-#endif
 pid_t getpgid(pid_t pid);
 pid_t getpgrp(void);
 pid_t getpid(void);
