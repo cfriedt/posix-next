@@ -42,7 +42,6 @@ static void uname_print_usage(const struct shell *sh)
 
 static int uname_cmd_handler(const struct shell *sh, size_t argc, char **argv)
 {
-	struct getopt_state *state = getopt_state_get();
 	struct utsname info;
 	unsigned int set;
 	int option;
