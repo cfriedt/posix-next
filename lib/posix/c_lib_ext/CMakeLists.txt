@@ -3,11 +3,13 @@
 zephyr_include_directories(getopt)
 
 zephyr_library()
-zephyr_library_sources_ifndef(CONFIG_TC_PROVIDES_POSIX_C_LIB_EXT
+
+if(NOT CONFIG_TC_PROVIDES_POSIX_C_LIB_EXT)
+
+zephyr_library_sources(
   fnmatch.c
   getentropy.c
   getopt.c
-  getopt_r.c
   getsubopt.c
   stpcpy.c
   strcasecmp.c
@@ -16,5 +18,16 @@ zephyr_library_sources_ifndef(CONFIG_TC_PROVIDES_POSIX_C_LIB_EXT
   strnlen.c
 )
 
-# this allows all users to use getopt_r() even when getopt() is provided externally
-zephyr_library_sources_ifdef(CONFIG_POSIX_GETOPT_R getopt_r.c)
+# technically not part of POSIX_C_LIB_EXT, but closely related
+zephyr_library_sources(
+  getopt_long.c
+  zephyr_getopt.c
+)
+
+endif()
+
+# in case CONFIG_TC_PROVIDES_POSIX_C_LIB_EXT is set, and users still want zephyr_getopt()
+zephyr_library_sources_ifdef(CONFIG_ZEPHYR_GETOPT zephyr_getopt.c)
+
+zephyr_library_property(ALLOW_EMPTY TRUE)
+zephyr_library_compile_options(-U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
