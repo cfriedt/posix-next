@@ -57,6 +57,7 @@
 #include <wchar.h>
 #include <wctype.h>
 
+#include <zephyr/getopt.h>
 #include <zephyr/llext/symbol.h>
 
 /* errno may be thread-local; extensions resolve it per call through this */
@@ -671,5 +672,8 @@ EXPORT_SYMBOL(optarg);
 EXPORT_SYMBOL(opterr);
 EXPORT_SYMBOL(optind);
 EXPORT_SYMBOL(optopt);
+#ifdef CONFIG_ZEPHYR_GETOPT
+EXPORT_SYMBOL(zephyr_getopt);
+#endif /* CONFIG_ZEPHYR_GETOPT */
 #endif /* CONFIG_POSIX_C_LIB_EXT */
 
