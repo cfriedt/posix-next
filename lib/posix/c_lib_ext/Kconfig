@@ -2,29 +2,42 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-menuconfig POSIX_C_LIB_EXT
+menu "POSIX C Library Extensions"
+
+config POSIX_C_LIB_EXT
 	bool "POSIX general C library extension"
 	help
-	  Select 'y' here and Zephyr will provide an implementation of the POSIX_C_LIB_EXT Option
-	  Group, consisting of fnmatch(), getopt(), getsubopt(), optarg, opterr, optind, optopt,
-	  stpcpy(), stpncpy(), strcasecmp(), strdup(), strfmon(), and strncasecmp(), strndup(), and
-	  strnlen().
+	  Select 'y' here to enable support for the POSIX_C_LIB_EXT Option, consisting of fnmatch(),
+	  getopt(), getsubopt(), optarg, opterr, optind, optopt, stpcpy(), stpncpy(), strcasecmp(),
+	  strdup(), strfmon(), and strncasecmp(), strndup(), and strnlen().
 
 	  For more information, please see
 	  https://pubs.opengroup.org/onlinepubs/9699919799/xrat/V4_subprofiles.html
 
-if POSIX_C_LIB_EXT
-
-config POSIX_GETOPT_R
-	bool "Enable reentrant and thread-safe getopt_r()"
-	default y if !TC_PROVIDES_POSIX_C_LIB_EXT
+config ZEPHYR_GETOPT
+	bool "Support for zephyr_getopt()"
+	# defaults to 'y' when not provided by the toolchain, our getopt(), getopt_long(),
+	# getopt_long_only(), depend on zephyr_getopt()
+	default y if POSIX_C_LIB_EXT && !TC_PROVIDES_POSIX_C_LIB_EXT
 	help
-	  Say 'y' here to enable the reentrant and thread-safe getopt_r() function. This function is
-	  not part of the POSIX standard, but is useful for those who wish to have getopt()
-	  functionality in a multi-threaded environment.
+	  Say 'y' here to support zephyr_getopt(), a reentrant function that supports short and long options.
+
+if ZEPHYR_GETOPT
+
+config ZEPHYR_GETOPT_LONG
+	bool "Support for long options in zephyr_getopt()"
+	default y
+	help
+	  Say 'y' here to support long options, such as "--option <value>", "--option=<value>", and
+	  "-option <value>" with zephyr_getopt().
+
+	  When this option is disabled, the longopts, longindex, and longonly arguments passed to
+	  zephyr_getopt() have no affect.
 
 module = GETOPT
 module-str = getopt
 source "subsys/logging/Kconfig.template.log_config"
 
-endif # POSIX_C_LIB_EXT
+endif
+
+endmenu
