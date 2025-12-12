@@ -56,6 +56,15 @@ static int loop_iter;
 
 ZTEST(posix_c_lib_ext, test_getopt)
 {
+	if (IS_ENABLED(CONFIG_NATIVE_LIBC)) {
+		/* This seems to be required by glibc in order to reliably reset getopt state */
+		static const char *const argv[] = {"cmd", NULL};
+		int argc = ARRAY_SIZE(argv) - 1;
+
+		optind = 0;
+		(void)getopt(argc, (GETOPT_ARGV_CAST)argv, "");
+	}
+
 	/* Test optind is incremented correctly */
 	{
 		static const char *const argv[] = {"cmd", "-a", "-b", "arg", "file", NULL};
