@@ -35,9 +35,11 @@ ZTEST(getopt_long, test_getopt_long)
 
 	/* Test basic long option without argument */
 	{
-		static const struct option long_options[] = {{"verbose", no_argument, NULL, 'v'},
-							     {"help", no_argument, NULL, 'h'},
-							     {0, 0, 0, 0}};
+		static const struct option long_options[] = {
+			{"verbose", no_argument, NULL, 'v'},
+			{"help", no_argument, NULL, 'h'},
+			{0, 0, 0, 0},
+		};
 		static const char *const argv[] = {"cmd", "--verbose", NULL};
 		int argc = ARRAY_SIZE(argv) - 1;
 		int opt;
@@ -49,8 +51,10 @@ ZTEST(getopt_long, test_getopt_long)
 
 	/* Test long option with required argument (separate) */
 	{
-		static const struct option long_options[] = {{"file", required_argument, NULL, 'f'},
-							     {0, 0, 0, 0}};
+		static const struct option long_options[] = {
+			{"file", required_argument, NULL, 'f'},
+			{0, 0, 0, 0},
+		};
 		static const char *const argv[] = {"cmd", "--file", "myfile.txt", NULL};
 		int argc = ARRAY_SIZE(argv) - 1;
 		int opt;
@@ -63,8 +67,10 @@ ZTEST(getopt_long, test_getopt_long)
 
 	/* Test long option with required argument using = syntax */
 	{
-		static const struct option long_options[] = {{"file", required_argument, NULL, 'f'},
-							     {0, 0, 0, 0}};
+		static const struct option long_options[] = {
+			{"file", required_argument, NULL, 'f'},
+			{0, 0, 0, 0},
+		};
 		static const char *const argv[] = {"cmd", "--file=myfile.txt", NULL};
 		int argc = ARRAY_SIZE(argv) - 1;
 		int opt;
@@ -77,9 +83,11 @@ ZTEST(getopt_long, test_getopt_long)
 
 	/* Test multiple long options in sequence */
 	{
-		static const struct option long_options[] = {{"verbose", no_argument, NULL, 'v'},
-							     {"file", required_argument, NULL, 'f'},
-							     {0, 0, 0, 0}};
+		static const struct option long_options[] = {
+			{"verbose", no_argument, NULL, 'v'},
+			{"file", required_argument, NULL, 'f'},
+			{0, 0, 0, 0},
+		};
 		static const char *const argv[] = {"cmd", "--verbose", "--file", "test.txt", NULL};
 		int argc = ARRAY_SIZE(argv) - 1;
 		int opt;
@@ -90,9 +98,7 @@ ZTEST(getopt_long, test_getopt_long)
 		loop_iter = 0;
 		while ((opt = getopt_long(argc, (GETOPT_ARGV_CAST)argv, "vf:", long_options,
 					  NULL)) != -1) {
-			if (loop_iter > TEST_MAX_LOOP_ITER) {
-				break;
-			}
+			zassert_true(loop_iter < TEST_MAX_LOOP_ITER);
 			loop_iter++;
 
 			switch (opt) {
@@ -118,7 +124,8 @@ ZTEST(getopt_long, test_getopt_long)
 			{"verbose", no_argument, NULL, 'v'},
 			{"file", required_argument, NULL, 'f'},
 			{"output", required_argument, NULL, 'o'},
-			{0, 0, 0, 0}};
+			{0, 0, 0, 0},
+		};
 		static const char *const argv[] = {"cmd", "--output", "out.txt", NULL};
 		int argc = ARRAY_SIZE(argv) - 1;
 		int opt;
@@ -139,7 +146,8 @@ ZTEST(getopt_long, test_getopt_long)
 		static const struct option long_options[] = {
 			{"verbose", no_argument, &verbose_flag, 1},
 			{"debug", no_argument, &debug_flag, 1},
-			{0, 0, 0, 0}};
+			{0, 0, 0, 0},
+		};
 		static const char *const argv[] = {"cmd", "--verbose", "--debug", NULL};
 		int argc = ARRAY_SIZE(argv) - 1;
 		int opt;
@@ -150,9 +158,7 @@ ZTEST(getopt_long, test_getopt_long)
 		loop_iter = 0;
 		while ((opt = getopt_long(argc, (GETOPT_ARGV_CAST)argv, "", long_options, NULL)) !=
 		       -1) {
-			if (loop_iter > TEST_MAX_LOOP_ITER) {
-				break;
-			}
+			zassert_true(loop_iter < TEST_MAX_LOOP_ITER);
 			loop_iter++;
 
 			/* When flag is not NULL, getopt_long returns 0 */
@@ -166,9 +172,11 @@ ZTEST(getopt_long, test_getopt_long)
 	/* Test flag with different values */
 	{
 		static int mode_flag;
-		static const struct option long_options[] = {{"fast", no_argument, &mode_flag, 1},
-							     {"slow", no_argument, &mode_flag, 2},
-							     {0, 0, 0, 0}};
+		static const struct option long_options[] = {
+			{"fast", no_argument, &mode_flag, 1},
+			{"slow", no_argument, &mode_flag, 2},
+			{0, 0, 0, 0},
+		};
 		static const char *const argv[] = {"cmd", "--fast", NULL};
 		int argc = ARRAY_SIZE(argv) - 1;
 		int opt;
@@ -182,9 +190,11 @@ ZTEST(getopt_long, test_getopt_long)
 
 	/* Test mixing short and long options */
 	{
-		static const struct option long_options[] = {{"verbose", no_argument, NULL, 'v'},
-							     {"file", required_argument, NULL, 'f'},
-							     {0, 0, 0, 0}};
+		static const struct option long_options[] = {
+			{"verbose", no_argument, NULL, 'v'},
+			{"file", required_argument, NULL, 'f'},
+			{0, 0, 0, 0},
+		};
 		static const char *const argv[] = {"cmd", "-v", "--file", "test.txt", NULL};
 		int argc = ARRAY_SIZE(argv) - 1;
 		int opt;
@@ -195,9 +205,7 @@ ZTEST(getopt_long, test_getopt_long)
 		loop_iter = 0;
 		while ((opt = getopt_long(argc, (GETOPT_ARGV_CAST)argv, "vf:", long_options,
 					  NULL)) != -1) {
-			if (loop_iter > TEST_MAX_LOOP_ITER) {
-				break;
-			}
+			zassert_true(loop_iter < TEST_MAX_LOOP_ITER);
 			loop_iter++;
 
 			switch (opt) {
@@ -220,7 +228,9 @@ ZTEST(getopt_long, test_getopt_long)
 	/* Test long option with optional argument (value provided) */
 	{
 		static const struct option long_options[] = {
-			{"config", optional_argument, NULL, 'c'}, {0, 0, 0, 0}};
+			{"config", optional_argument, NULL, 'c'},
+			{0, 0, 0, 0},
+		};
 		static const char *const argv[] = {"cmd", "--config=myconfig.txt", NULL};
 		int argc = ARRAY_SIZE(argv) - 1;
 		int opt;
@@ -233,8 +243,10 @@ ZTEST(getopt_long, test_getopt_long)
 
 	/* Test unknown long option returns '?' */
 	{
-		static const struct option long_options[] = {{"verbose", no_argument, NULL, 'v'},
-							     {0, 0, 0, 0}};
+		static const struct option long_options[] = {
+			{"verbose", no_argument, NULL, 'v'},
+			{0, 0, 0, 0},
+		};
 		static const char *const argv[] = {"cmd", "--unknown", NULL};
 		int argc = ARRAY_SIZE(argv) - 1;
 		int opt;
@@ -246,8 +258,10 @@ ZTEST(getopt_long, test_getopt_long)
 
 	/* Test missing required argument returns '?' */
 	{
-		static const struct option long_options[] = {{"file", required_argument, NULL, 'f'},
-							     {0, 0, 0, 0}};
+		static const struct option long_options[] = {
+			{"file", required_argument, NULL, 'f'},
+			{0, 0, 0, 0},
+		};
 		static const char *const argv[] = {"cmd", "--file", NULL};
 		int argc = ARRAY_SIZE(argv) - 1;
 		int opt;
@@ -259,8 +273,10 @@ ZTEST(getopt_long, test_getopt_long)
 
 	/* Test colon prefix for different error reporting */
 	{
-		static const struct option long_options[] = {{"file", required_argument, NULL, 'f'},
-							     {0, 0, 0, 0}};
+		static const struct option long_options[] = {
+			{"file", required_argument, NULL, 'f'},
+			{0, 0, 0, 0},
+		};
 		static const char *const argv[] = {"cmd", "--file", NULL};
 		int argc = ARRAY_SIZE(argv) - 1;
 		int opt;
@@ -272,8 +288,10 @@ ZTEST(getopt_long, test_getopt_long)
 
 	/* Test '--' terminates option processing */
 	{
-		static const struct option long_options[] = {{"verbose", no_argument, NULL, 'v'},
-							     {0, 0, 0, 0}};
+		static const struct option long_options[] = {
+			{"verbose", no_argument, NULL, 'v'},
+			{0, 0, 0, 0},
+		};
 		static const char *const argv[] = {"cmd", "-v", "--", "--verbose", "file", NULL};
 		int argc = ARRAY_SIZE(argv) - 1;
 		int opt;
@@ -283,9 +301,7 @@ ZTEST(getopt_long, test_getopt_long)
 		loop_iter = 0;
 		while ((opt = getopt_long(argc, (GETOPT_ARGV_CAST)argv, "v", long_options, NULL)) !=
 		       -1) {
-			if (loop_iter > TEST_MAX_LOOP_ITER) {
-				break;
-			}
+			zassert_true(loop_iter < TEST_MAX_LOOP_ITER);
 			loop_iter++;
 
 			if (opt == 'v') {
@@ -333,9 +349,7 @@ ZTEST(getopt_long, test_getopt_long_example)
 		loop_iter = 0;
 		while ((opt = getopt_long(argc, (GETOPT_ARGV_CAST)argv, "a:Ad:vc:f:", long_options,
 					  &option_index)) != -1) {
-			if (loop_iter > TEST_MAX_LOOP_ITER) {
-				break;
-			}
+			zassert_true(loop_iter < TEST_MAX_LOOP_ITER);
 			loop_iter++;
 
 			switch (opt) {
@@ -457,9 +471,7 @@ ZTEST(getopt_long, test_getopt_long_only)
 		loop_iter = 0;
 		while ((opt = getopt_long_only(argc, (GETOPT_ARGV_CAST)argv, "vf:", long_options,
 					       NULL)) != -1) {
-			if (loop_iter > TEST_MAX_LOOP_ITER) {
-				break;
-			}
+			zassert_true(loop_iter < TEST_MAX_LOOP_ITER);
 			loop_iter++;
 
 			switch (opt) {
@@ -595,9 +607,7 @@ ZTEST(getopt_long, test_getopt_long_only)
 		loop_iter = 0;
 		while ((opt = getopt_long_only(argc, (GETOPT_ARGV_CAST)argv, "v", long_options,
 					       NULL)) != -1) {
-			if (loop_iter > TEST_MAX_LOOP_ITER) {
-				break;
-			}
+			zassert_true(loop_iter < TEST_MAX_LOOP_ITER);
 			loop_iter++;
 
 			if (opt == 'v') {
@@ -625,9 +635,7 @@ ZTEST(getopt_long, test_getopt_long_only)
 		loop_iter = 0;
 		while ((opt = getopt_long_only(argc, (GETOPT_ARGV_CAST)argv, "vf:", long_options,
 					       NULL)) != -1) {
-			if (loop_iter > TEST_MAX_LOOP_ITER) {
-				break;
-			}
+			zassert_true(loop_iter < TEST_MAX_LOOP_ITER);
 			loop_iter++;
 
 			switch (opt) {
@@ -660,9 +668,7 @@ ZTEST(getopt_long, test_getopt_long_only)
 		loop_iter = 0;
 		while ((opt = getopt_long_only(argc, (GETOPT_ARGV_CAST)argv, "abv", long_options,
 					       NULL)) != -1) {
-			if (loop_iter > TEST_MAX_LOOP_ITER) {
-				break;
-			}
+			zassert_true(loop_iter < TEST_MAX_LOOP_ITER);
 			loop_iter++;
 
 			switch (opt) {
