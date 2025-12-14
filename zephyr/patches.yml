@@ -217,3 +217,18 @@ patches:
     upstreamable: true
     comments: |
       Add a getopt wrappers for minimal, picolibc, and newlib.
+  - path: zephyr/deprecate-config-getopt-shell.patch
+    sha256sum: 255ce60d41051070ad89457f66c1d132b0e7d6c24214f2f71d1b9a263c12ac84
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2025-12-14
+    upstreamable: true
+    comments: |
+      Rebased onto v4.5.0-rc1, where upstream renamed its getopt to sys_getopt_*: the shell, Wi-Fi,
+      Wi-Fi credentials, npm6001 and ztest callers are converted to the C library's getopt_long()
+      and the optarg/optind/optopt globals instead.
+      Deprecate CONFIG_GETOPT_SHELL, remove CONFIG_GETOPT_LONG. Users should use `getopt_r()`,
+      `getopt_long_r()`, `getopt_long_only_r()` if they need reentrant versions of these functions.
+      Picolibc and newlib can theoretically provide these functions as well, but they would need to
+      be non-inline wrappers around their own internal reentrant implementations.
