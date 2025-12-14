@@ -9,6 +9,7 @@
 
 #include <zephyr/toolchain.h>
 
+#undef stpncpy
 char *stpncpy(char *ZRESTRICT s1, const char *ZRESTRICT s2, size_t n)
 {
 	char *ret = NULL;
@@ -31,6 +32,7 @@ char *stpncpy(char *ZRESTRICT s1, const char *ZRESTRICT s2, size_t n)
 	return ret;
 }
 
+#undef stpcpy
 char *stpcpy(char *ZRESTRICT s1, const char *ZRESTRICT s2)
 {
 	return stpncpy(s1, s2, strlen(s2) + 1);
