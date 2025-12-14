@@ -1,0 +1,883 @@
+diff --git a/doc/services/shell/index.rst b/doc/services/shell/index.rst
+index 77b891175f7..f55b40513f3 100644
+--- a/doc/services/shell/index.rst
++++ b/doc/services/shell/index.rst
+@@ -714,21 +714,21 @@ An example thread safe usage:
+ .. code-block:: c
+ 
+   char *cvalue = NULL;
+-  struct getopt_state *state;
+-  while ((char c = getopt(argc, argv, "abhc:")) != -1) {
+-        state = getopt_state_get();
++  char *optarg;
++  int opterr;
++  int optind = 1;
++  int optopt;
++
++  while ((char c = getopt_r(argc, argv, "abhc:", &optarg, &opterr, &optind, &optopt)) != -1) {
+         switch (c) {
+         case 'c':
+-                cvalue = state->optarg;
++                cvalue = optarg;
+                 break;
+         default:
+                 break;
+         }
+   }
+ 
+-Thread safe getopt functionality is activated by
+-:kconfig:option:`CONFIG_SHELL_GETOPT` set to ``y``.
+-
+ Obscured Input Feature
+ **********************
+ 
+diff --git a/include/zephyr/shell/shell.h b/include/zephyr/shell/shell.h
+index ba275c5393c..896e65dc2ae 100644
+--- a/include/zephyr/shell/shell.h
++++ b/include/zephyr/shell/shell.h
+@@ -19,10 +19,6 @@
+ #include <zephyr/sys/util.h>
+ #include <zephyr/toolchain.h>
+ 
+-#if defined CONFIG_SHELL_GETOPT
+-#include <getopt.h>
+-#endif
+-
+ #ifdef __cplusplus
+ extern "C" {
+ #endif
+@@ -993,11 +989,6 @@ struct shell_ctx {
+ 	/*!< Logging level for a backend. */
+ 	uint32_t log_level;
+ 
+-#if defined CONFIG_SHELL_GETOPT
+-	/*!< getopt context for a shell backend. */
+-	struct getopt_state getopt;
+-#endif
+-
+ 	uint16_t cmd_buff_len; /*!< Command length.*/
+ 	uint16_t cmd_buff_pos; /*!< Command buffer cursor position.*/
+ 
+diff --git a/samples/shields/npm6001_ek/prj.conf b/samples/shields/npm6001_ek/prj.conf
+index b0292200688..751265dfcf4 100644
+--- a/samples/shields/npm6001_ek/prj.conf
++++ b/samples/shields/npm6001_ek/prj.conf
+@@ -2,9 +2,8 @@
+ # SPDX-License-Identifier: Apache-2.0
+ 
+ CONFIG_SHELL=y
+-CONFIG_SHELL_GETOPT=y
+ CONFIG_POSIX_C_LIB_EXT=y
+-CONFIG_GETOPT_LONG=y
++CONFIG_ZEPHYR_GETOPT_LONG=y
+ CONFIG_GPIO=y
+ CONFIG_REGULATOR=y
+ CONFIG_REGULATOR_SHELL=y
+diff --git a/samples/subsys/shell/shell_module/prj_getopt.conf b/samples/subsys/shell/shell_module/prj_getopt.conf
+index 4d3abc9e3b4..b1afc52993f 100644
+--- a/samples/subsys/shell/shell_module/prj_getopt.conf
++++ b/samples/subsys/shell/shell_module/prj_getopt.conf
+@@ -1,7 +1,7 @@
+ CONFIG_PRINTK=y
+ CONFIG_SHELL=y
+-CONFIG_SHELL_GETOPT=y
+ CONFIG_LOG=y
++CONFIG_POSIX_C_LIB_EXT=y
+ CONFIG_INIT_STACKS=y
+ CONFIG_THREAD_STACK_INFO=y
+ CONFIG_KERNEL_SHELL=y
+diff --git a/samples/subsys/shell/shell_module/src/main.c b/samples/subsys/shell/shell_module/src/main.c
+index 8f58334f2fe..4cfbc193c60 100644
+--- a/samples/subsys/shell/shell_module/src/main.c
++++ b/samples/subsys/shell/shell_module/src/main.c
+@@ -4,19 +4,18 @@
+  * SPDX-License-Identifier: Apache-2.0
+  */
+ 
++#define _POSIX_C_SOURCE 200809L
++
++#include <ctype.h>
++#include <stdlib.h>
++#include <unistd.h>
++
++#include <zephyr/getopt.h>
+ #include <zephyr/kernel.h>
+ #include <zephyr/shell/shell.h>
+ #include <zephyr/version.h>
+ #include <zephyr/logging/log.h>
+-#include <stdlib.h>
+ #include <zephyr/drivers/uart.h>
+-#include <ctype.h>
+-
+-#ifdef CONFIG_ARCH_POSIX
+-#include <unistd.h>
+-#else
+-#include <unistd.h>
+-#endif
+ 
+ LOG_MODULE_REGISTER(app);
+ 
+@@ -104,18 +101,19 @@ static int cmd_demo_board(const struct shell *sh, size_t argc, char **argv)
+ 	return 0;
+ }
+ 
+-#if defined CONFIG_SHELL_GETOPT
+-/* Thread save usage */
++/* Thread safe usage */
+ static int cmd_demo_getopt_ts(const struct shell *sh, size_t argc,
+ 			      char **argv)
+ {
+-	struct getopt_state *state;
+ 	int aflag = 0;
+ 	int bflag = 0;
+ 	int c;
++	char *optarg;
++	int opterr;
++	int optind = 1;
++	int optopt;
+ 
+-	while ((c = getopt(argc, argv, "abhc:")) != -1) {
+-		state = getopt_state_get();
++	while ((c = getopt_r(argc, argv, "abhc:", &optarg, &opterr, &optind, &optopt)) != -1) {
+ 		switch (c) {
+ 		case 'a':
+ 			aflag = 1;
+@@ -133,18 +131,18 @@ static int cmd_demo_getopt_ts(const struct shell *sh, size_t argc,
+ 			shell_help(sh);
+ 			return SHELL_CMD_HELP_PRINTED;
+ 		case '?':
+-			if (state->optopt == 'c') {
++			if (optopt == 'c') {
+ 				shell_print(sh,
+ 					"Option -%c requires an argument.",
+-					state->optopt);
+-			} else if (isprint(state->optopt) != 0) {
++					optopt);
++			} else if (isprint(optopt) != 0) {
+ 				shell_print(sh,
+ 					"Unknown option `-%c'.",
+-					state->optopt);
++					optopt);
+ 			} else {
+ 				shell_print(sh,
+ 					"Unknown option character `\\x%x'.",
+-					state->optopt);
++					optopt);
+ 			}
+ 			return 1;
+ 		default:
+@@ -163,6 +161,7 @@ static int cmd_demo_getopt(const struct shell *sh, size_t argc,
+ 	int bflag = 0;
+ 	int c;
+ 
++	optind = 1;
+ 	while ((c = getopt(argc, argv, "abhc:")) != -1) {
+ 		switch (c) {
+ 		case 'a':
+@@ -202,7 +201,6 @@ static int cmd_demo_getopt(const struct shell *sh, size_t argc,
+ 	shell_print(sh, "aflag = %d, bflag = %d", aflag, bflag);
+ 	return 0;
+ }
+-#endif
+ 
+ static int cmd_demo_params(const struct shell *sh, size_t argc, char **argv)
+ {
+@@ -325,14 +323,12 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_demo,
+ 	SHELL_CMD(params, NULL, "Print params command.", cmd_demo_params),
+ 	SHELL_CMD(ping, NULL, "Ping command.", cmd_demo_ping),
+ 	SHELL_CMD(board, NULL, "Show board name command.", cmd_demo_board),
+-#if defined CONFIG_SHELL_GETOPT
+ 	SHELL_CMD(getopt_thread_safe, NULL,
+ 		  "Cammand using getopt in thread safe way"
+ 		  " looking for: \"abhc:\".",
+ 		  cmd_demo_getopt_ts),
+ 	SHELL_CMD(getopt, NULL, "Cammand using getopt in non thread safe way"
+ 		  " looking for: \"abhc:\".\n", cmd_demo_getopt),
+-#endif
+ 	SHELL_SUBCMD_SET_END /* Array terminated. */
+ );
+ SHELL_CMD_REGISTER(demo, &sub_demo, "Demo commands", NULL);
+diff --git a/subsys/net/l2/Kconfig b/subsys/net/l2/Kconfig
+index abc17725d07..77180688489 100644
+--- a/subsys/net/l2/Kconfig
++++ b/subsys/net/l2/Kconfig
+@@ -71,8 +71,6 @@ config NET_L2_WIFI_SHELL
+ 	bool "Wi-Fi shell module"
+ 	select NET_L2_WIFI_MGMT
+ 	select NET_L2_WIFI_UTILS
+-	select SHELL_GETOPT
+-	select GETOPT_LONG
+ 	help
+ 	  This can be used for controlling Wi-Fi through the console via
+ 	  exposing a shell module named "wifi".
+diff --git a/subsys/net/l2/wifi/wifi_shell.c b/subsys/net/l2/wifi/wifi_shell.c
+index 8c8289bdb3d..78d42a61924 100644
+--- a/subsys/net/l2/wifi/wifi_shell.c
++++ b/subsys/net/l2/wifi/wifi_shell.c
+@@ -583,7 +583,10 @@ static int __wifi_args_to_params(const struct shell *sh, size_t argc, char *argv
+ {
+ 	int opt;
+ 	int opt_index = 0;
+-	struct getopt_state *state;
++	char *optarg;
++	int opterr;
++	int optind = 1;
++	int optopt;
+ 	static const struct option long_options[] = {
+ 		{"ssid", required_argument, 0, 's'},
+ 		{"passphrase", required_argument, 0, 'p'},
+@@ -650,7 +653,7 @@ static int __wifi_args_to_params(const struct shell *sh, size_t argc, char *argv
+ 
+ 	while ((opt = getopt_long(argc, argv, "s:p:k:e:w:b:c:m:t:a:B:K:S:T:A:V:I:P:g:Rh:i:",
+ 				  long_options, &opt_index)) != -1) {
+-		state = getopt_state_get();
++
+ 		switch (opt) {
+ 		case 's':
+ 			params->ssid = state->optarg;
+@@ -1017,7 +1020,10 @@ static int wifi_scan_args_to_params(const struct shell *sh,
+ {
+ 	int opt;
+ 	int opt_index = 0;
+-	struct getopt_state *state;
++	char *optarg;
++	int opterr;
++	int optind = 1;
++	int optopt;
+ 	static const struct option long_options[] = {
+ 		{"type", required_argument, 0, 't'},
+ 		{"bands", required_argument, 0, 'b'},
+@@ -1036,7 +1042,7 @@ static int wifi_scan_args_to_params(const struct shell *sh,
+ 
+ 	while ((opt = getopt_long(argc, argv, "t:b:a:p:s:m:c:i:h",
+ 				  long_options, &opt_index)) != -1) {
+-		state = getopt_state_get();
++
+ 		switch (opt) {
+ 		case 't':
+ 			if (!strncasecmp(state->optarg, "passive", 7)) {
+@@ -1729,7 +1735,10 @@ static int twt_args_to_params(const struct shell *sh, size_t argc, char *argv[],
+ {
+ 	int opt;
+ 	int opt_index = 0;
+-	struct getopt_state *state;
++	char *optarg;
++	int opterr;
++	int optind = 1;
++	int optopt;
+ 	long value;
+ 	double twt_mantissa_scale = 0.0;
+ 	double twt_interval_scale = 0.0;
+@@ -1758,7 +1767,7 @@ static int twt_args_to_params(const struct shell *sh, size_t argc, char *argv[],
+ 
+ 	while ((opt = getopt_long(argc, argv, "n:c:t:f:r:T:I:a:t:w:p:D:d:e:m:i:h",
+ 				  long_options, &opt_index)) != -1) {
+-		state = getopt_state_get();
++
+ 		switch (opt) {
+ 		case 'n':
+ 			if (!parse_number(sh, &value, state->optarg, NULL,
+@@ -2138,7 +2147,10 @@ static int wifi_ap_config_args_to_params(const struct shell *sh, size_t argc, ch
+ {
+ 	int opt;
+ 	int opt_index = 0;
+-	struct getopt_state *state;
++	char *optarg;
++	int opterr;
++	int optind = 1;
++	int optopt;
+ 	static const struct option long_options[] = {
+ 		{"max_inactivity", required_argument, 0, 't'},
+ 		{"max_num_sta", required_argument, 0, 's'},
+@@ -2153,7 +2165,7 @@ static int wifi_ap_config_args_to_params(const struct shell *sh, size_t argc, ch
+ 
+ 	while ((opt = getopt_long(argc, argv, "t:s:n:c:i:h",
+ 				  long_options, &opt_index)) != -1) {
+-		state = getopt_state_get();
++
+ 		switch (opt) {
+ 		case 't':
+ 			if (!parse_number(sh, &val, state->optarg, "max_inactivity",
+@@ -2634,7 +2646,10 @@ void parse_mode_args_to_params(const struct shell *sh, int argc,
+ 	int opt;
+ 	int opt_index = 0;
+ 	int opt_num = 0;
+-	struct getopt_state *state;
++	char *optarg;
++	int opterr;
++	int optind = 1;
++	int optopt;
+ 	static const struct option long_options[] = {
+ 		{"iface", required_argument, 0, 'i'},
+ 		{"sta", no_argument, 0, 's'},
+@@ -2647,7 +2662,7 @@ void parse_mode_args_to_params(const struct shell *sh, int argc,
+ 	mode->oper = WIFI_MGMT_GET;
+ 	while ((opt = getopt_long(argc, argv, "i:smtpakh",
+ 				  long_options, &opt_index)) != -1) {
+-		state = getopt_state_get();
++
+ 		switch (opt) {
+ 		case 's':
+ 			mode->mode |= WIFI_STA_MODE;
+@@ -2737,7 +2752,10 @@ void parse_channel_args_to_params(const struct shell *sh, int argc,
+ {
+ 	int opt;
+ 	int opt_index = 0;
+-	struct getopt_state *state;
++	char *optarg;
++	int opterr;
++	int optind = 1;
++	int optopt;
+ 	static const struct option long_options[] = {
+ 		{"iface", optional_argument, 0, 'i'},
+ 		{"channel", required_argument, 0, 'c'},
+@@ -2747,7 +2765,7 @@ void parse_channel_args_to_params(const struct shell *sh, int argc,
+ 
+ 	while ((opt = getopt_long(argc, argv, "i:c:gh",
+ 				  long_options, &opt_index)) != -1) {
+-		state = getopt_state_get();
++
+ 		switch (opt) {
+ 		case 'c':
+ 			channel->channel = (uint16_t)atoi(state->optarg);
+@@ -2835,7 +2853,10 @@ void parse_filter_args_to_params(const struct shell *sh, int argc,
+ {
+ 	int opt;
+ 	int opt_index = 0;
+-	struct getopt_state *state;
++	char *optarg;
++	int opterr;
++	int optind = 1;
++	int optopt;
+ 	static const struct option long_options[] = {
+ 		{"iface", required_argument, 0, 'i'},
+ 		{"capture-len", optional_argument, 0, 'b'},
+@@ -2849,7 +2870,7 @@ void parse_filter_args_to_params(const struct shell *sh, int argc,
+ 
+ 	while ((opt = getopt_long(argc, argv, "i:b:amcdgh",
+ 				  long_options, &opt_index)) != -1) {
+-		state = getopt_state_get();
++
+ 		switch (opt) {
+ 		case 'a':
+ 			filter->filter |= WIFI_PACKET_FILTER_ALL;
+@@ -2959,7 +2980,10 @@ static int parse_dpp_args_auth_init(const struct shell *sh, size_t argc, char *a
+ {
+ 	int opt;
+ 	int opt_index = 0;
+-	struct getopt_state *state;
++	char *optarg;
++	int opterr;
++	int optind = 1;
++	int optopt;
+ 	static const struct option long_options[] = {
+ 		{"peer", required_argument, 0, 'p'},
+ 		{"role", required_argument, 0, 'r'},
+@@ -2972,7 +2996,7 @@ static int parse_dpp_args_auth_init(const struct shell *sh, size_t argc, char *a
+ 
+ 	while ((opt = getopt_long(argc, argv, "p:r:c:m:s:i:",
+ 				  long_options, &opt_index)) != -1) {
+-		state = getopt_state_get();
++
+ 		switch (opt) {
+ 		case 'p':
+ 			params->auth_init.peer = shell_strtol(state->optarg, 10, &ret);
+@@ -3011,7 +3035,10 @@ static int parse_dpp_args_chirp(const struct shell *sh, size_t argc, char *argv[
+ {
+ 	int opt;
+ 	int opt_index = 0;
+-	struct getopt_state *state;
++	char *optarg;
++	int opterr;
++	int optind = 1;
++	int optopt;
+ 	static const struct option long_options[] = {
+ 		{"own", required_argument, 0, 'o'},
+ 		{"freq", required_argument, 0, 'f'},
+@@ -3021,7 +3048,7 @@ static int parse_dpp_args_chirp(const struct shell *sh, size_t argc, char *argv[
+ 
+ 	while ((opt = getopt_long(argc, argv, "o:f:i:",
+ 				  long_options, &opt_index)) != -1) {
+-		state = getopt_state_get();
++
+ 		switch (opt) {
+ 		case 'o':
+ 			params->chirp.id = shell_strtol(state->optarg, 10, &ret);
+@@ -3051,7 +3078,10 @@ static int parse_dpp_args_listen(const struct shell *sh, size_t argc, char *argv
+ {
+ 	int opt;
+ 	int opt_index = 0;
+-	struct getopt_state *state;
++	char *optarg;
++	int opterr;
++	int optind = 1;
++	int optopt;
+ 	static const struct option long_options[] = {
+ 		{"role", required_argument, 0, 'r'},
+ 		{"freq", required_argument, 0, 'f'},
+@@ -3061,7 +3091,7 @@ static int parse_dpp_args_listen(const struct shell *sh, size_t argc, char *argv
+ 
+ 	while ((opt = getopt_long(argc, argv, "r:f:i:",
+ 				  long_options, &opt_index)) != -1) {
+-		state = getopt_state_get();
++
+ 		switch (opt) {
+ 		case 'r':
+ 			params->listen.role = shell_strtol(state->optarg, 10, &ret);
+@@ -3091,7 +3121,10 @@ static int parse_dpp_args_btstrap_gen(const struct shell *sh, size_t argc, char
+ {
+ 	int opt;
+ 	int opt_index = 0;
+-	struct getopt_state *state;
++	char *optarg;
++	int opterr;
++	int optind = 1;
++	int optopt;
+ 	static const struct option long_options[] = {
+ 		{"type", required_argument, 0, 't'},
+ 		{"opclass", required_argument, 0, 'o'},
+@@ -3103,7 +3136,7 @@ static int parse_dpp_args_btstrap_gen(const struct shell *sh, size_t argc, char
+ 
+ 	while ((opt = getopt_long(argc, argv, "t:o:h:a:i:",
+ 				  long_options, &opt_index)) != -1) {
+-		state = getopt_state_get();
++
+ 		switch (opt) {
+ 		case 't':
+ 			params->bootstrap_gen.type = shell_strtol(state->optarg, 10, &ret);
+@@ -3157,7 +3190,10 @@ static int parse_dpp_args_set_config_param(const struct shell *sh, size_t argc,
+ {
+ 	int opt;
+ 	int opt_index = 0;
+-	struct getopt_state *state;
++	char *optarg;
++	int opterr;
++	int optind = 1;
++	int optopt;
+ 	static const struct option long_options[] = {
+ 		{"configurator", required_argument, 0, 'c'},
+ 		{"mode", required_argument, 0, 'm'},
+@@ -3168,7 +3204,7 @@ static int parse_dpp_args_set_config_param(const struct shell *sh, size_t argc,
+ 
+ 	while ((opt = getopt_long(argc, argv, "p:r:c:m:s:i:",
+ 				  long_options, &opt_index)) != -1) {
+-		state = getopt_state_get();
++
+ 		switch (opt) {
+ 		case 'c':
+ 			params->configurator_set.configurator =
+@@ -3449,7 +3485,10 @@ static int cmd_wifi_dpp_ap_auth_init(const struct shell *sh, size_t argc, char *
+ {
+ 	int opt;
+ 	int opt_index = 0;
+-	struct getopt_state *state;
++	char *optarg;
++	int opterr;
++	int optind = 1;
++	int optopt;
+ 	static const struct option long_options[] = {
+ 		{"peer", required_argument, 0, 'p'},
+ 		{"iface", required_argument, 0, 'i'},
+@@ -3462,7 +3501,7 @@ static int cmd_wifi_dpp_ap_auth_init(const struct shell *sh, size_t argc, char *
+ 
+ 	while ((opt = getopt_long(argc, argv, "p:i:",
+ 				  long_options, &opt_index)) != -1) {
+-		state = getopt_state_get();
++
+ 		switch (opt) {
+ 		case 'p':
+ 			params.auth_init.peer = shell_strtol(state->optarg, 10, &ret);
+@@ -3562,7 +3601,10 @@ static int wifi_bgscan_args_to_params(const struct shell *sh, size_t argc, char
+ 	int err;
+ 	int opt;
+ 	int opt_index = 0;
+-	struct getopt_state *state;
++	char *optarg;
++	int opterr;
++	int optind = 1;
++	int optopt;
+ 	static const struct option long_options[] = {
+ 		{"type", required_argument, 0, 't'},
+ 		{"short-interval", required_argument, 0, 's'},
+@@ -3575,7 +3617,7 @@ static int wifi_bgscan_args_to_params(const struct shell *sh, size_t argc, char
+ 	long val;
+ 
+ 	while ((opt = getopt_long(argc, argv, "t:s:r:l:b:i:", long_options, &opt_index)) != -1) {
+-		state = getopt_state_get();
++
+ 		switch (opt) {
+ 		case 't':
+ 			if (strcmp("simple", state->optarg) == 0) {
+@@ -3667,7 +3709,10 @@ static int wifi_config_args_to_params(const struct shell *sh, size_t argc, char
+ {
+ 	int opt;
+ 	int opt_index = 0;
+-	struct getopt_state *state;
++	char *optarg;
++	int opterr;
++	int optind = 1;
++	int optopt;
+ 	static const struct option long_options[] = {
+ 		{"okc", required_argument, 0, 'o'},
+ 		{"iface", required_argument, 0, 'i'},
+@@ -3676,7 +3721,7 @@ static int wifi_config_args_to_params(const struct shell *sh, size_t argc, char
+ 
+ 	while ((opt = getopt_long(argc, argv, "o:i:",
+ 				  long_options, &opt_index)) != -1) {
+-		state = getopt_state_get();
++
+ 		switch (opt) {
+ 		case 'o':
+ 			if (!parse_number(sh, &val, state->optarg, "okc", 0, 1)) {
+diff --git a/subsys/net/lib/wifi_credentials/Kconfig b/subsys/net/lib/wifi_credentials/Kconfig
+index 1a5671ccd73..0d53c2b1136 100644
+--- a/subsys/net/lib/wifi_credentials/Kconfig
++++ b/subsys/net/lib/wifi_credentials/Kconfig
+@@ -57,8 +57,6 @@ config WIFI_CREDENTIALS_SHELL
+ 	bool "Shell commands to manage Wi-Fi credentials"
+ 	default y
+ 	depends on SHELL
+-	select SHELL_GETOPT
+-	select GETOPT_LONG
+ 	depends on !WIFI_CREDENTIALS_BACKEND_NONE
+ 
+ config WIFI_CREDENTIALS_CONNECT_STORED
+diff --git a/subsys/net/lib/wifi_credentials/wifi_credentials_shell.c b/subsys/net/lib/wifi_credentials/wifi_credentials_shell.c
+index 3966a2404bc..a16f3e42aa7 100644
+--- a/subsys/net/lib/wifi_credentials/wifi_credentials_shell.c
++++ b/subsys/net/lib/wifi_credentials/wifi_credentials_shell.c
+@@ -117,7 +117,10 @@ static int cmd_add_network(const struct shell *sh, size_t argc, char *argv[])
+ {
+ 	int opt;
+ 	int opt_index = 0;
+-	struct getopt_state *state;
++	char *optarg;
++	int opterr;
++	int optind = 1;
++	int optopt;
+ 	static const struct option long_options[] = {
+ 		{"ssid", required_argument, 0, 's'},	 {"passphrase", required_argument, 0, 'p'},
+ 		{"key-mgmt", required_argument, 0, 'k'}, {"ieee-80211w", required_argument, 0, 'w'},
+@@ -138,27 +141,26 @@ static int cmd_add_network(const struct shell *sh, size_t argc, char *argv[])
+ 	long channel;
+ 	long mfp = WIFI_MFP_OPTIONAL;
+ 
+-	while ((opt = getopt_long(argc, argv, "s:p:k:w:b:c:m:t:a:K:h", long_options, &opt_index)) !=
+-	       -1) {
+-		state = getopt_state_get();
++	while ((opt = getopt_long_r(argc, argv, "s:p:k:w:b:c:m:t:a:K:h", long_options, &opt_index,
++				    &optarg, &opterr, &optind, &optopt)) != -1) {
+ 		switch (opt) {
+ 		case 's':
+-			creds.header.ssid_len = strlen(state->optarg);
++			creds.header.ssid_len = strlen(optarg);
+ 			if (creds.header.ssid_len > WIFI_SSID_MAX_LEN) {
+ 				shell_warn(sh, "SSID too long (max %d characters)\n",
+ 					   WIFI_SSID_MAX_LEN);
+ 				return -EINVAL;
+ 			}
+-			memcpy(creds.header.ssid, state->optarg, creds.header.ssid_len);
++			memcpy(creds.header.ssid, optarg, creds.header.ssid_len);
+ 			break;
+ 		case 'k':
+-			creds.header.type = atoi(state->optarg);
++			creds.header.type = atoi(optarg);
+ 			if (creds.header.type) {
+ 				secure_connection = true;
+ 			}
+ 			break;
+ 		case 'p':
+-			creds.password_len = strlen(state->optarg);
++			creds.password_len = strlen(optarg);
+ 			if (creds.password_len < WIFI_PSK_MIN_LEN) {
+ 				shell_warn(sh, "Passphrase should be minimum %d characters\n",
+ 					   WIFI_PSK_MIN_LEN);
+@@ -169,12 +171,12 @@ static int cmd_add_network(const struct shell *sh, size_t argc, char *argv[])
+ 					   WIFI_PSK_MAX_LEN);
+ 				return -EINVAL;
+ 			}
+-			memcpy(creds.password, state->optarg, creds.password_len);
++			memcpy(creds.password, optarg, creds.password_len);
+ 			break;
+ 		case 'c':
+-			channel = strtol(state->optarg, &endptr, 10);
++			channel = strtol(optarg, &endptr, 10);
+ 			if (*endptr != '\0') {
+-				shell_error(sh, "Invalid channel: %s\n", state->optarg);
++				shell_error(sh, "Invalid channel: %s\n", optarg);
+ 				return -EINVAL;
+ 			}
+ 
+@@ -205,7 +207,7 @@ static int cmd_add_network(const struct shell *sh, size_t argc, char *argv[])
+ 			creds.header.channel = channel;
+ 			break;
+ 		case 'b':
+-			switch (atoi(state->optarg)) {
++			switch (atoi(optarg)) {
+ 			case 2:
+ 				creds.header.flags |= WIFI_CREDENTIALS_FLAG_2_4GHz;
+ 				break;
+@@ -216,7 +218,7 @@ static int cmd_add_network(const struct shell *sh, size_t argc, char *argv[])
+ 				creds.header.flags |= WIFI_CREDENTIALS_FLAG_6GHz;
+ 				break;
+ 			default:
+-				shell_error(sh, "Invalid band: %d\n", atoi(state->optarg));
++				shell_error(sh, "Invalid band: %d\n", atoi(optarg));
+ 				return -EINVAL;
+ 			}
+ 			break;
+@@ -227,9 +229,9 @@ static int cmd_add_network(const struct shell *sh, size_t argc, char *argv[])
+ 					    wifi_security_txt(creds.header.type));
+ 				return -ENOTSUP;
+ 			}
+-			mfp = strtol(state->optarg, &endptr, 10);
++			mfp = strtol(optarg, &endptr, 10);
+ 			if (*endptr != '\0') {
+-				shell_error(sh, "Invalid IEEE 802.11w value: %s", state->optarg);
++				shell_error(sh, "Invalid IEEE 802.11w value: %s", optarg);
+ 				return -EINVAL;
+ 			}
+ 			if (mfp == WIFI_MFP_DISABLE) {
+@@ -237,45 +239,43 @@ static int cmd_add_network(const struct shell *sh, size_t argc, char *argv[])
+ 			} else if (mfp == WIFI_MFP_REQUIRED) {
+ 				creds.header.flags |= WIFI_CREDENTIALS_FLAG_MFP_REQUIRED;
+ 			} else if (mfp > 2) {
+-				shell_error(sh, "Invalid IEEE 802.11w value: %s",
+-					    state->optarg);
++				shell_error(sh, "Invalid IEEE 802.11w value: %s", optarg);
+ 				return -EINVAL;
+ 			}
+ 			break;
+ 		case 'm':
+ 			if (net_bytes_from_str(creds.header.bssid, sizeof(creds.header.bssid),
+-					       state->optarg) < 0) {
++					       optarg) < 0) {
+ 				shell_warn(sh, "Invalid MAC address\n");
+ 				return -EINVAL;
+ 			}
+ 			creds.header.flags |= WIFI_CREDENTIALS_FLAG_BSSID;
+ 			break;
+ 		case 'a':
+-			creds.header.aid_length = strlen(state->optarg);
++			creds.header.aid_length = strlen(optarg);
+ 			if (creds.header.aid_length > WIFI_ENT_IDENTITY_MAX_LEN) {
+ 				shell_warn(sh, "anon_id too long (max %d characters)\n",
+ 					   WIFI_ENT_IDENTITY_MAX_LEN);
+ 				return -EINVAL;
+ 			}
+-			memcpy(creds.header.anon_id, state->optarg, creds.header.aid_length);
++			memcpy(creds.header.anon_id, optarg, creds.header.aid_length);
+ 			creds.header.flags |= WIFI_CREDENTIALS_FLAG_ANONYMOUS_IDENTITY;
+ 			break;
+ 		case 'K':
+-			creds.header.key_passwd_length = strlen(state->optarg);
++			creds.header.key_passwd_length = strlen(optarg);
+ 			if (creds.header.key_passwd_length > WIFI_ENT_PSWD_MAX_LEN) {
+ 				shell_warn(sh, "key_passwd too long (max %d characters)\n",
+ 					   WIFI_ENT_PSWD_MAX_LEN);
+ 				return -EINVAL;
+ 			}
+-			memcpy(creds.header.key_passwd, state->optarg,
+-			       creds.header.key_passwd_length);
++			memcpy(creds.header.key_passwd, optarg, creds.header.key_passwd_length);
+ 			creds.header.flags |= WIFI_CREDENTIALS_FLAG_KEY_PASSWORD;
+ 			break;
+ 		case 'h':
+ 			shell_help(sh);
+ 			return -ENOEXEC;
+ 		default:
+-			shell_error(sh, "Invalid option %c\n", state->optopt);
++			shell_error(sh, "Invalid option %c\n", optopt);
+ 			return -EINVAL;
+ 		}
+ 	}
+diff --git a/subsys/shell/Kconfig b/subsys/shell/Kconfig
+index c35b0193f6b..a22f1dab341 100644
+--- a/subsys/shell/Kconfig
++++ b/subsys/shell/Kconfig
+@@ -189,13 +189,10 @@ config SHELL_VT100_COLORS
+ 	  If enabled VT100 colors are used in shell (e.g. print errors in red).
+ 
+ config SHELL_GETOPT
+-	bool "Threadsafe getopt support in shell"
+-	select POSIX_C_LIB_EXT
++	bool "Threadsafe getopt support in shell [DEPRECATED]"
++	select DEPRECATED
+ 	help
+-	  This config creates a separate getopt_state for the shell instance.
+-	  It ensures that using getopt with shell is thread safe.
+-	  When more threads are using getopt please call getopt_state_get to
+-	  get getopt state of the shell thread.
++	  This option is deprecated. Please use `getopt_r()` instead of `getopt()`.
+ 
+ config SHELL_METAKEYS
+ 	bool "Metakeys"
+@@ -214,7 +211,6 @@ config SHELL_HELP
+ config SHELL_HELP_OPT_PARSE
+ 	bool "Parse -h and --help options"
+ 	depends on SHELL_HELP
+-	depends on !SHELL_GETOPT
+ 	default y
+ 	help
+ 	  Shell parses command to find '-h' or '--help' string. If the shell
+diff --git a/subsys/shell/modules/devmem_service.c b/subsys/shell/modules/devmem_service.c
+index df37a18f4d0..bf5adb0b1d3 100644
+--- a/subsys/shell/modules/devmem_service.c
++++ b/subsys/shell/modules/devmem_service.c
+@@ -9,17 +9,16 @@
+ #undef _POSIX_C_SOURCE
+ #define _POSIX_C_SOURCE 200809L
+ 
++#include <getopt.h>
+ #include <stdlib.h>
+ #include <unistd.h>
++
+ #include <zephyr/device.h>
++#include <zephyr/getopt.h>
+ #include <zephyr/shell/shell.h>
+ #include <zephyr/sys/byteorder.h>
+ #include <zephyr/sys/util.h>
+ 
+-#ifndef CONFIG_NATIVE_LIBC
+-extern void getopt_init(void);
+-#endif
+-
+ static inline bool is_ascii(uint8_t data)
+ {
+ 	return (data >= 0x30 && data <= 0x39) || (data >= 0x61 && data <= 0x66) ||
+@@ -118,11 +117,12 @@ static int cmd_dump(const struct shell *sh, size_t argc, char **argv)
+ 	size_t width = 32;
+ 	mem_addr_t addr = -1;
+ 
+-	optind = 1;
+-#ifndef CONFIG_NATIVE_LIBC
+-	getopt_init();
+-#endif
+-	while ((rv = getopt(argc, argv, "a:s:w:")) != -1) {
++	char *optarg;
++	int opterr;
++	int optind = 1;
++	int optopt;
++
++	while ((rv = getopt_r(argc, argv, "a:s:w:", &optarg, &opterr, &optind, &optopt)) != -1) {
+ 		switch (rv) {
+ 		case 'a':
+ 			addr = (mem_addr_t)shell_strtoul(optarg, 16, &err);
+diff --git a/subsys/shell/shell.c b/subsys/shell/shell.c
+index 8c3380d23ba..8bcbb512083 100644
+--- a/subsys/shell/shell.c
++++ b/subsys/shell/shell.c
+@@ -545,10 +545,6 @@ static int exec_cmd(const struct shell *sh, size_t argc, const char **argv,
+ 	}
+ 
+ 	if (!ret_val) {
+-#if CONFIG_SHELL_GETOPT
+-		getopt_init();
+-#endif
+-
+ 		z_flag_cmd_ctx_set(sh, true);
+ 		/* Unlock thread mutex in case command would like to borrow
+ 		 * shell context to other thread to avoid mutex deadlock.
+diff --git a/subsys/testsuite/ztest/Kconfig b/subsys/testsuite/ztest/Kconfig
+index 5f07f448103..d1a15b058a7 100644
+--- a/subsys/testsuite/ztest/Kconfig
++++ b/subsys/testsuite/ztest/Kconfig
+@@ -27,8 +27,6 @@ config ZTEST_SHELL
+ 	bool "Ztest with shell support"
+ 	select SHELL
+ 	select SHELL_THREAD_PRIORITY_OVERRIDE
+-	select GETOPT_LONG
+-	select SHELL_GETOPT
+ 	help
+ 	  Enable shell to manage test execution and selection.
+ 
+diff --git a/subsys/testsuite/ztest/src/ztest.c b/subsys/testsuite/ztest/src/ztest.c
+index 080e1726528..bae835fbaf2 100644
+--- a/subsys/testsuite/ztest/src/ztest.c
++++ b/subsys/testsuite/ztest/src/ztest.c
+@@ -1253,7 +1253,6 @@ static int cmd_runall(const struct shell *sh, size_t argc, char **argv)
+ static int cmd_shuffle(const struct shell *sh, size_t argc, char **argv)
+ {
+ 
+-	struct getopt_state *state;
+ 	int opt;
+ 	static struct option long_options[] = {{"suite_iter", required_argument, 0, 's'},
+ 					       {"case_iter", required_argument, 0, 'c'},
+@@ -1265,11 +1264,16 @@ static int cmd_shuffle(const struct shell *sh, size_t argc, char **argv)
+ 	int suite_iter = 1;
+ 	int case_iter = 1;
+ 
+-	while ((opt = getopt_long(argc, argv, "s:c:", long_options, &opt_index)) != -1) {
+-		state = getopt_state_get();
++	char *optarg;
++	int opterr;
++	int optind = 1;
++	int optopt;
++
++	while ((opt = getopt_long_r(argc, argv, "s:c:", long_options, &opt_index, &optarg, &opterr,
++				    &optind, &optopt)) != -1) {
+ 		switch (opt) {
+ 		case 's':
+-			val = atoi(state->optarg);
++			val = atoi(optarg);
+ 			if (val < 1) {
+ 				shell_error(sh, "Invalid number of suite iterations");
+ 				return -ENOEXEC;
+@@ -1278,7 +1282,7 @@ static int cmd_shuffle(const struct shell *sh, size_t argc, char **argv)
+ 			opt_num++;
+ 			break;
+ 		case 'c':
+-			val = atoi(state->optarg);
++			val = atoi(optarg);
+ 			if (val < 1) {
+ 				shell_error(sh, "Invalid number of case iterations");
+ 				return -ENOEXEC;
+@@ -1301,7 +1305,6 @@ static int cmd_shuffle(const struct shell *sh, size_t argc, char **argv)
+ 
+ static int cmd_run_suite(const struct shell *sh, size_t argc, char **argv)
+ {
+-	struct getopt_state *state;
+ 	int opt;
+ 	static struct option long_options[] = {{"repeat_iter", required_argument, NULL, 'r'},
+ 		{NULL, 0, NULL, 0}};
+@@ -1310,12 +1313,16 @@ static int cmd_run_suite(const struct shell *sh, size_t argc, char **argv)
+ 	int opt_num = 0;
+ 	void *param = NULL;
+ 	int repeat_iter = 1;
++	char *optarg;
++	int opterr;
++	int optind = 1;
++	int optopt;
+ 
+-	while ((opt = getopt_long(argc, argv, "r:p:", long_options, &opt_index)) != -1) {
+-		state = getopt_state_get();
++	while ((opt = getopt_long_r(argc, argv, "r:p:", long_options, &opt_index, &optarg, &opterr,
++				    &optind, &optopt)) != -1) {
+ 		switch (opt) {
+ 		case 'r':
+-			val = atoi(state->optarg);
++			val = atoi(optarg);
+ 			if (val < 1) {
+ 				shell_fprintf(sh, SHELL_ERROR,
+ 					"Invalid number of suite interations\n");
+@@ -1325,7 +1332,7 @@ static int cmd_run_suite(const struct shell *sh, size_t argc, char **argv)
+ 			opt_num++;
+ 			break;
+ 		case 'p':
+-			param = state->optarg;
++			param = optarg;
+ 			opt_num++;
+ 			break;
+ 		default:
+diff --git a/tests/drivers/wifi/nrf_wifi/prj.conf b/tests/drivers/wifi/nrf_wifi/prj.conf
+index fb8c6c778a8..58b1e9fd079 100644
+--- a/tests/drivers/wifi/nrf_wifi/prj.conf
++++ b/tests/drivers/wifi/nrf_wifi/prj.conf
+@@ -53,7 +53,6 @@ CONFIG_REBOOT=y
+ CONFIG_LOG=y
+ CONFIG_PRINTK=y
+ CONFIG_SHELL=y
+-CONFIG_SHELL_GETOPT=y
+ CONFIG_DEVICE_SHELL=y
+ CONFIG_POSIX_TIMERS=y
+ CONFIG_DATE_SHELL=y
