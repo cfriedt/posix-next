@@ -10,7 +10,7 @@ PR_DEST="origin/main"
 SCRIPT_PATH="$(realpath -s "$(dirname "$0")")"
 
 POSIX_NEXT_PATH="$(realpath -s "$SCRIPT_PATH"/../..)"
-WORKSPACE_PATH="$(realpath -s "$POSIX_NEXT_PATH"/../..)"
+WORKSPACE_PATH="$(realpath -s "$POSIX_NEXT_PATH"/../../..)"
 ZEPHYR_BASE="$WORKSPACE_PATH/zephyr"
 
 PLATFORMS=( \
@@ -25,6 +25,7 @@ ROOTS=( \
   $POSIX_NEXT_PATH/samples/posix \
   $POSIX_NEXT_PATH/tests/posix \
   $ZEPHYR_BASE/samples/net \
+  $ZEPHYR_BASE/samples/subsys/shell/shell_module \
   $ZEPHYR_BASE/tests/net \
   $ZEPHYR_BASE/tests/lib/c_lib \
 )
