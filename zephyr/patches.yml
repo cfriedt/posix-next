@@ -253,3 +253,37 @@ patches:
     upstreamable: true
     comments: |
       Add a getopt wrappers for minimal, picolibc, and newlib.
+  - path: zephyr/deprecate-config-getopt-shell.patch
+    sha256sum: 255ce60d41051070ad89457f66c1d132b0e7d6c24214f2f71d1b9a263c12ac84
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2025-12-14
+    upstreamable: true
+    comments: |
+      Rebased onto v4.5.0-rc1, where upstream renamed its getopt to sys_getopt_*: the shell, Wi-Fi,
+      Wi-Fi credentials, npm6001 and ztest callers are converted to the C library's getopt_long()
+      and the optarg/optind/optopt globals instead.
+      Deprecate CONFIG_GETOPT_SHELL, remove CONFIG_GETOPT_LONG. Users should use `getopt_r()`,
+      `getopt_long_r()`, `getopt_long_only_r()` if they need reentrant versions of these functions.
+      Picolibc and newlib can theoretically provide these functions as well, but they would need to
+      be non-inline wrappers around their own internal reentrant implementations.
+  - path: zephyr/remove-config-getopt.patch
+    sha256sum: 0a89fabe91bfe1e8e97c7f4313adf30126aa5b16801e465cbba49b4350185f2b
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-15
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/deprecate-config-posix-api.patch
+          - zephyr/deprecate-config-getopt-shell.patch
+    comments: |
+      Rebased onto v4.5.0-rc1, where upstream had renamed its getopt to sys_getopt_*: the Bluetooth, SSH,
+      HTTP client, TFTP and iptables shells are converted to getopt_long_r()
+      as well, and the OpenThread border router overlays select ZEPHYR_GETOPT_LONG.
+      Remove CONFIG_GETOPT, CONFIG_GETOPT_LONG, CONFIG_SHELL_GETOPT, and lib/utils/getopt.
+      Convert remaining sys_getopt callers to getopt_r() / getopt_long_r() and select
+      ZEPHYR_GETOPT / ZEPHYR_GETOPT_LONG instead.
