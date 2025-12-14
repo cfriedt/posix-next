@@ -5,9 +5,15 @@
  */
 
 #include <zephyr/posix/unistd.h>
+
+#include <zephyr/device.h>
 #include <zephyr/ztest.h>
 
-static const struct device *const dev = DEVICE_DT_GET_OR_NULL(DT_CHOSEN(zephyr_entropy));
+#if DT_HAS_CHOSEN(zephyr_entropy)
+static const struct device *const dev = DEVICE_DT_GET(DT_CHOSEN(zephyr_entropy));
+#else
+static const struct device *const dev;
+#endif
 
 ZTEST(posix_c_lib_ext, test_getentropy)
 {
