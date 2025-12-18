@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2018 Intel Corporation
  * Copyright (c) 2023 Meta
+ * Copyright (c) 2025, Friedt Professional Engineering Services, Inc.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -9,15 +10,16 @@
 #include "posix_internal.h"
 #include "pthread_sched.h"
 
-#include <stdio.h>
 #include <limits.h>
+#include <pthread.h>
+#include <stdio.h>
+#include <unistd.h>
 
 #include <zephyr/init.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/atomic.h>
-#include <pthread.h>
-#include <unistd.h>
+#include <zephyr/sys/elastipool.h>
 #include <zephyr/sys/sem.h>
 #include <zephyr/sys/slist.h>
 #include <zephyr/sys/util.h>
@@ -91,11 +93,12 @@ static sys_dlist_t posix_thread_q[] = {
 	SYS_DLIST_STATIC_INIT(&posix_thread_q[POSIX_THREAD_RUN_Q]),
 	SYS_DLIST_STATIC_INIT(&posix_thread_q[POSIX_THREAD_DONE_Q]),
 };
-
-static __pinned_bss struct posix_thread posix_thread_pool[CONFIG_POSIX_THREAD_THREADS_MAX];
+static int pthread_concurrency;
 
 static SYS_SEM_DEFINE(pthread_pool_lock, 1, 1);
-static int pthread_concurrency;
+SYS_ELASTIPOOL_DEFINE_STATIC(posix_thread_pool, sizeof(struct posix_thread),
+			     __alignof(struct posix_thread), CONFIG_POSIX_THREAD_THREADS_MAX,
+			     CONFIG_POSIX_THREAD_THREADS_MAX);
 
 static inline void posix_thread_q_set(struct posix_thread *t, enum posix_thread_qid qid)
 {
@@ -125,69 +128,13 @@ static inline enum posix_thread_qid posix_thread_q_get(struct posix_thread *t)
 	}
 }
 
-/*
- * We reserve the MSB to mark a pthread_t as initialized (from the
- * perspective of the application). With a linear space, this means that
- * the theoretical pthread_t range is [0,2147483647].
- */
-BUILD_ASSERT(CONFIG_POSIX_THREAD_THREADS_MAX < PTHREAD_OBJ_MASK_INIT,
-	     "CONFIG_POSIX_THREAD_THREADS_MAX is too high");
-
-static inline size_t posix_thread_to_offset(struct posix_thread *t)
-{
-	return t - posix_thread_pool;
-}
-
-static inline size_t get_posix_thread_idx(pthread_t pth)
-{
-	return mark_pthread_obj_uninitialized(pth);
-}
-
-struct posix_thread *to_posix_thread(pthread_t pthread)
-{
-	struct posix_thread *t;
-	bool actually_initialized;
-	size_t bit = get_posix_thread_idx(pthread);
-
-	/* if the provided thread does not claim to be initialized, its invalid */
-	if (!is_pthread_obj_initialized(pthread)) {
-		LOG_DBG("pthread is not initialized (%x)", pthread);
-		return NULL;
-	}
-
-	if (bit >= ARRAY_SIZE(posix_thread_pool)) {
-		LOG_DBG("Invalid pthread (%x)", pthread);
-		return NULL;
-	}
-
-	t = &posix_thread_pool[bit];
-
-	/*
-	 * Denote a pthread as "initialized" (i.e. allocated) if it is not in ready_q.
-	 * This differs from other posix object allocation strategies because they use
-	 * a bitarray to indicate whether an object has been allocated.
-	 */
-	actually_initialized = !(posix_thread_q_get(t) == POSIX_THREAD_READY_Q ||
-				 (posix_thread_q_get(t) == POSIX_THREAD_DONE_Q &&
-				  t->attr.detachstate == PTHREAD_CREATE_DETACHED));
-
-	if (!actually_initialized) {
-		LOG_DBG("Pthread claims to be initialized (%x)", pthread);
-		return NULL;
-	}
-
-	return &posix_thread_pool[bit];
-}
-
 pthread_t pthread_self(void)
 {
-	size_t bit;
 	struct posix_thread *t;
 
 	t = (struct posix_thread *)CONTAINER_OF(k_current_get(), struct posix_thread, thread);
-	bit = posix_thread_to_offset(t);
 
-	return mark_pthread_obj_initialized(bit);
+	return (pthread_t)(uintptr_t)t;
 }
 
 int pthread_equal(pthread_t pt1, pthread_t pt2)
@@ -209,10 +156,10 @@ void __z_pthread_cleanup_push(void *cleanup[3], void (*routine)(void *arg), void
 {
 	struct posix_thread *t = NULL;
 	struct __pthread_cleanup *const c = (struct __pthread_cleanup *)cleanup;
+	BUILD_ASSERT(3 * sizeof(void *) == sizeof(*c));
 
 	SYS_SEM_LOCK(&pthread_pool_lock) {
-		t = to_posix_thread(pthread_self());
-		BUILD_ASSERT(3 * sizeof(void *) == sizeof(*c));
+		t = posix_get_pool_obj_unlocked(&posix_thread_pool, pthread_self());
 		__ASSERT_NO_MSG(t != NULL);
 		__ASSERT_NO_MSG(c != NULL);
 		__ASSERT_NO_MSG(routine != NULL);
@@ -228,7 +175,7 @@ void __z_pthread_cleanup_pop(int execute)
 	struct posix_thread *t = NULL;
 
 	SYS_SEM_LOCK(&pthread_pool_lock) {
-		t = to_posix_thread(pthread_self());
+		t = posix_get_pool_obj_unlocked(&posix_thread_pool, pthread_self());
 		__ASSERT_NO_MSG(t != NULL);
 		node = sys_slist_get(&t->cleanup_list);
 		__ASSERT_NO_MSG(node != NULL);
@@ -538,6 +485,11 @@ static void zephyr_thread_wrapper(void *arg1, void *arg2, void *arg3)
 	CODE_UNREACHABLE;
 }
 
+/*
+ * posix_thread_recycle() is the first call in pthread_create()
+ * It auto-initializes the thread_pool, by adding statically allocated threads to
+ * POSIX_THREAD_READY_Q.
+ */
 static void posix_thread_recycle(void)
 {
 	struct posix_thread *t;
@@ -684,7 +636,7 @@ int pthread_create(pthread_t *th, const pthread_attr_t *_attr, void *(*threadrou
 #endif
 
 	/* finally provide the initialized thread to the caller */
-	*th = mark_pthread_obj_initialized(posix_thread_to_offset(t));
+	*th = (pthread_t)(uintptr_t)t;
 
 	LOG_DBG("Created pthread %p", &t->thread);
 
@@ -737,7 +689,7 @@ int pthread_setcancelstate(int state, int *oldstate)
 	}
 
 	SYS_SEM_LOCK(&pthread_pool_lock) {
-		t = to_posix_thread(pthread_self());
+		t = posix_get_pool_obj_unlocked(&posix_thread_pool, pthread_self());
 		if (t == NULL) {
 			ret = EINVAL;
 			SYS_SEM_LOCK_BREAK;
@@ -778,7 +730,7 @@ int pthread_setcanceltype(int type, int *oldtype)
 	}
 
 	SYS_SEM_LOCK(&pthread_pool_lock) {
-		t = to_posix_thread(pthread_self());
+		t = posix_get_pool_obj_unlocked(&posix_thread_pool, pthread_self());
 		if (t == NULL) {
 			ret = EINVAL;
 			SYS_SEM_LOCK_BREAK;
@@ -806,7 +758,7 @@ void pthread_testcancel(void)
 	struct posix_thread *t = NULL;
 
 	SYS_SEM_LOCK(&pthread_pool_lock) {
-		t = to_posix_thread(pthread_self());
+		t = posix_get_pool_obj_unlocked(&posix_thread_pool, pthread_self());
 		if (t == NULL) {
 			SYS_SEM_LOCK_BREAK;
 		}
@@ -837,7 +789,7 @@ int pthread_cancel(pthread_t pthread)
 	struct posix_thread *t = NULL;
 
 	SYS_SEM_LOCK(&pthread_pool_lock) {
-		t = to_posix_thread(pthread);
+		t = posix_get_pool_obj_unlocked(&posix_thread_pool, pthread);
 		if (t == NULL) {
 			ret = ESRCH;
 			SYS_SEM_LOCK_BREAK;
@@ -880,7 +832,7 @@ int pthread_setschedparam(pthread_t pthread, int policy, const struct sched_para
 	}
 
 	SYS_SEM_LOCK(&pthread_pool_lock) {
-		t = to_posix_thread(pthread);
+		t = posix_get_pool_obj_unlocked(&posix_thread_pool, pthread);
 		if (t == NULL) {
 			ret = ESRCH;
 			SYS_SEM_LOCK_BREAK;
@@ -921,7 +873,7 @@ int pthread_setschedprio(pthread_t thread, int prio)
 
 	ret = ESRCH;
 	SYS_SEM_LOCK(&pthread_pool_lock) {
-		t = to_posix_thread(thread);
+		t = posix_get_pool_obj_unlocked(&posix_thread_pool, thread);
 		if (t == NULL) {
 			ret = ESRCH;
 			SYS_SEM_LOCK_BREAK;
@@ -1005,7 +957,7 @@ int pthread_getschedparam(pthread_t pthread, int *policy, struct sched_param *pa
 	}
 
 	SYS_SEM_LOCK(&pthread_pool_lock) {
-		t = to_posix_thread(pthread);
+		t = posix_get_pool_obj_unlocked(&posix_thread_pool, pthread);
 		if (t == NULL) {
 			ret = ESRCH;
 			SYS_SEM_LOCK_BREAK;
@@ -1062,7 +1014,7 @@ void pthread_exit(void *retval)
 	struct posix_thread *self = NULL;
 
 	SYS_SEM_LOCK(&pthread_pool_lock) {
-		self = to_posix_thread(pthread_self());
+		self = posix_get_pool_obj_unlocked(&posix_thread_pool, pthread_self());
 		if (self == NULL) {
 			SYS_SEM_LOCK_BREAK;
 		}
@@ -1094,7 +1046,7 @@ static int pthread_timedjoin_internal(pthread_t pthread, void **status, k_timeou
 	}
 
 	SYS_SEM_LOCK(&pthread_pool_lock) {
-		t = to_posix_thread(pthread);
+		t = posix_get_pool_obj_unlocked(&posix_thread_pool, pthread);
 		if (t == NULL) {
 			ret = ESRCH;
 			SYS_SEM_LOCK_BREAK;
@@ -1206,7 +1158,7 @@ int pthread_detach(pthread_t pthread)
 	struct posix_thread *t = NULL;
 
 	SYS_SEM_LOCK(&pthread_pool_lock) {
-		t = to_posix_thread(pthread);
+		t = posix_get_pool_obj_unlocked(&posix_thread_pool, pthread);
 		if (t == NULL) {
 			ret = ESRCH;
 			SYS_SEM_LOCK_BREAK;
@@ -1455,13 +1407,14 @@ int pthread_setname_np(pthread_t thread, const char *name)
 {
 #ifdef CONFIG_THREAD_NAME
 	k_tid_t kthread;
+	struct posix_thread *t;
 
-	thread = get_posix_thread_idx(thread);
-	if (thread >= ARRAY_SIZE(posix_thread_pool)) {
+	t = posix_get_pool_obj(&posix_thread_pool, &pthread_pool_lock, thread);
+	if (t == NULL) {
 		return ESRCH;
 	}
 
-	kthread = &posix_thread_pool[thread].thread;
+	kthread = &t->thread;
 
 	if (name == NULL) {
 		return EINVAL;
@@ -1479,9 +1432,10 @@ int pthread_getname_np(pthread_t thread, char *name, size_t len)
 {
 #ifdef CONFIG_THREAD_NAME
 	k_tid_t kthread;
+	struct posix_thread *t;
 
-	thread = get_posix_thread_idx(thread);
-	if (thread >= ARRAY_SIZE(posix_thread_pool)) {
+	t = posix_get_pool_obj(&posix_thread_pool, &pthread_pool_lock, thread);
+	if (t == NULL) {
 		return ESRCH;
 	}
 
@@ -1490,7 +1444,7 @@ int pthread_getname_np(pthread_t thread, char *name, size_t len)
 	}
 
 	memset(name, '\0', len);
-	kthread = &posix_thread_pool[thread].thread;
+	kthread = &t->thread;
 	return k_thread_name_copy(kthread, name, len - 1);
 #else
 	ARG_UNUSED(thread);
@@ -1520,7 +1474,7 @@ int pthread_sigmask(int how, const sigset_t *ZRESTRICT set, sigset_t *ZRESTRICT 
 	}
 
 	SYS_SEM_LOCK(&pthread_pool_lock) {
-		t = to_posix_thread(pthread_self());
+		t = posix_get_pool_obj_unlocked(&posix_thread_pool, pthread_self());
 		if (t == NULL) {
 			ret = ESRCH;
 			SYS_SEM_LOCK_BREAK;
@@ -1561,8 +1515,14 @@ int pthread_sigmask(int how, const sigset_t *ZRESTRICT set, sigset_t *ZRESTRICT 
 __boot_func
 static int posix_thread_pool_init(void)
 {
-	ARRAY_FOR_EACH_PTR(posix_thread_pool, th) {
+	for (size_t i = 0; i < CONFIG_POSIX_THREAD_THREADS_MAX; ++i) {
+		struct posix_thread *th =
+			(struct posix_thread *)(posix_thread_pool.config->storage +
+						i * ROUND_UP(posix_thread_pool.config->obj_size,
+							     posix_thread_pool.config->obj_align));
+
 		posix_thread_q_set(th, POSIX_THREAD_READY_Q);
+		sys_elastipool_alloc(&posix_thread_pool, (void **)&th);
 	}
 
 	return 0;
@@ -1573,4 +1533,9 @@ int sched_yield(void)
 {
 	k_yield();
 	return 0;
+}
+
+struct posix_thread *to_posix_thread(pthread_t pthread)
+{
+	return posix_get_pool_obj(&posix_thread_pool, &pthread_pool_lock, pthread);
 }

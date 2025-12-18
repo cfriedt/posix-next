@@ -14,7 +14,11 @@
 #include <zephyr/kernel.h>
 #include <pthread.h>
 #include <zephyr/sys/dlist.h>
+#include <zephyr/sys/elastipool.h>
 #include <zephyr/sys/slist.h>
+#include <zephyr/sys/sem.h>
+
+#define POSIX_OBJ_INITIALIZER (-1)
 
 /*
  * Bit used to mark a pthread object as initialized. Initialization status is
@@ -22,12 +26,7 @@
  */
 #define PTHREAD_OBJ_MASK_INIT 0x80000000
 
-#ifdef CONFIG_RX
-struct __packed posix_thread_attr
-#else
-struct posix_thread_attr
-#endif
-{
+struct __packed posix_thread_attr {
 	void *stack;
 	/* the following two bitfields should combine to be 32-bits in size */
 	uint32_t stacksize: CONFIG_POSIX_PTHREAD_ATTR_STACKSIZE_BITS;
@@ -121,6 +120,36 @@ static inline uint32_t mark_pthread_obj_initialized(uint32_t obj)
 static inline uint32_t mark_pthread_obj_uninitialized(uint32_t obj)
 {
 	return obj & ~PTHREAD_OBJ_MASK_INIT;
+}
+
+/* get a pointer to a pool object that has already been allocated using handle */
+void *posix_get_pool_obj_unlocked(const struct sys_elastipool *pool, uint32_t handle);
+/* get a pointer to a pool object if already initialized, otherwise, initialize a new one */
+void *posix_init_pool_obj_unlocked(const struct sys_elastipool *pool, uint32_t handle,
+				   void (*cb)(void *obj));
+
+static inline void *posix_get_pool_obj(const struct sys_elastipool *pool, struct sys_sem *lock,
+				       uint32_t handle)
+{
+	void *ret = NULL;
+
+	SYS_SEM_LOCK(lock) {
+		ret = posix_get_pool_obj_unlocked(pool, handle);
+	}
+
+	return (void *)ret;
+}
+
+static inline void *posix_init_pool_obj(const struct sys_elastipool *pool, struct sys_sem *lock,
+					uint32_t handle, void (*cb)(void *obj))
+{
+	void *ret = NULL;
+
+	SYS_SEM_LOCK(lock) {
+		ret = posix_init_pool_obj_unlocked(pool, handle, cb);
+	}
+
+	return (void *)ret;
 }
 
 struct posix_thread *to_posix_thread(pthread_t pth);
