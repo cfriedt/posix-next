@@ -1,0 +1,1125 @@
+commit 146c1d9ae7dc2fabfe27234eb7f5a2cc45f73f36
+Author: Chris Friedt <chris@fr4.co>
+Date:   Wed Dec 17 12:47:56 2025 -0500
+
+    tests: elastipool: add tests for the elastic object pool
+    
+    Add tests for the elastic object pool.
+    
+    Tests cover the 3 main APIs provided:
+    
+    * `sys_elastipool_alloc()`
+    * `sys_elastipool_clear()`
+    * `sys_elastipool_free()`
+    * `sys_elastipool_init()`
+    
+    Additionally, 3 configurations of elastipool are covered to ensure
+    expected behaviour
+    
+    * static-only allocation
+    * dynamic-only allocation
+    * elastic allocation (both static and dynamic)
+    
+    Signed-off-by: Chris Friedt <chris@fr4.co>
+
+diff --git a/tests/lib/elastipool/CMakeLists.txt b/tests/lib/elastipool/CMakeLists.txt
+new file mode 100644
+index 00000000000..8872ba2a35c
+--- /dev/null
++++ b/tests/lib/elastipool/CMakeLists.txt
+@@ -0,0 +1,8 @@
++# SPDX-License-Identifier: Apache-2.0
++
++cmake_minimum_required(VERSION 3.20.0)
++find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
++project(elastipool)
++
++FILE(GLOB app_sources src/*.c)
++target_sources(app PRIVATE ${app_sources})
+diff --git a/tests/lib/elastipool/Kconfig b/tests/lib/elastipool/Kconfig
+new file mode 100644
+index 00000000000..5cd42b0d309
+--- /dev/null
++++ b/tests/lib/elastipool/Kconfig
+@@ -0,0 +1,14 @@
++# Copyright (c) 2025, Friedt Professional Engineering Services, Inc.
++#
++# SPDX-License-Identifier: Apache-2.0
++
++config TEST_ELASTIC_POOL_MAX_ELEMS
++	int "Maximum number of elements for elastic pool testing"
++	default 1024
++	help
++	  The maximum number of elements for elastic pool testing.
++
++	  This number should be non-trivial. If runtime were not a constraint,
++	  then it would ideally be -1, i.e. no limit.
++
++source "Kconfig.zephyr"
+diff --git a/tests/lib/elastipool/prj.conf b/tests/lib/elastipool/prj.conf
+new file mode 100644
+index 00000000000..4b3bdbb719e
+--- /dev/null
++++ b/tests/lib/elastipool/prj.conf
+@@ -0,0 +1,5 @@
++CONFIG_ZTEST=y
++
++CONFIG_SYS_HASH_FUNC32=y
++CONFIG_SYS_HASH_MAP=y
++CONFIG_SYS_ELASTIPOOL=y
+diff --git a/tests/lib/elastipool/src/main.c b/tests/lib/elastipool/src/main.c
+new file mode 100644
+index 00000000000..18908c9be01
+--- /dev/null
++++ b/tests/lib/elastipool/src/main.c
+@@ -0,0 +1,137 @@
++/*
++ * Copyright (c) 2025, Friedt Professional Engineering Services, Inc.
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <string.h>
++
++#include <zephyr/ztest.h>
++#include <zephyr/sys/elastipool.h>
++#include <zephyr/toolchain.h>
++
++struct elem {
++	uint64_t blob[2];
++};
++
++SYS_ELASTIPOOL_DEFINE(static_pool, sizeof(struct elem), __alignof(struct elem), 1, 1);
++SYS_ELASTIPOOL_DEFINE_STATIC(dynamic_pool, sizeof(struct elem), __alignof(struct elem), 0, 1);
++SYS_ELASTIPOOL_DEFINE_ADVANCED(
++	elastic_pool, sizeof(struct elem), __alignof(struct elem), 1,
++	(size_t)CONFIG_TEST_ELASTIC_POOL_MAX_ELEMS,
++	SYS_ELASTIPOOL_HEAP_ALLOC_FN(1, (size_t)CONFIG_TEST_ELASTIC_POOL_MAX_ELEMS), static);
++
++ZTEST(elastipool, test_sys_elastipool_init)
++{
++	struct sys_elastipool pool;
++	struct sys_elastipool_api api;
++	struct sys_elastipool_config config;
++	struct sys_elastipool_data data;
++
++	zexpect_ok(sys_elastipool_init(
++		&pool, &api, &config, &data, sizeof(struct elem), __alignof(struct elem), 1,
++		CONFIG_TEST_ELASTIC_POOL_MAX_ELEMS, elastic_pool.config->storage,
++		elastic_pool.config->bmp, elastic_pool.config->map, elastic_pool.api->heap_alloc));
++
++	zexpect_mem_equal(&api, elastic_pool.api, sizeof(api));
++	zexpect_mem_equal(&config, elastic_pool.config, sizeof(config));
++}
++
++ZTEST(elastipool, test_sys_elastipool_alloc)
++{
++	void *elem, *elem2;
++
++	zexpect_ok(sys_elastipool_alloc(&static_pool, &elem));
++	zexpect_equal(-ENOMEM, sys_elastipool_alloc(&static_pool, &elem));
++
++	zexpect_ok(sys_elastipool_alloc(&dynamic_pool, &elem));
++	zexpect_equal(-ENOMEM, sys_elastipool_alloc(&dynamic_pool, &elem));
++
++	zexpect_ok(sys_elastipool_alloc(&elastic_pool, &elem));
++	zexpect_ok(sys_elastipool_alloc(&elastic_pool, &elem2));
++}
++
++ZTEST(elastipool, test_sys_elastipool_free)
++{
++	void *elem, *elem2;
++
++	zexpect_ok(sys_elastipool_alloc(&static_pool, &elem));
++	zexpect_ok(sys_elastipool_free(&static_pool, elem));
++	zexpect_equal(-EINVAL, sys_elastipool_free(&static_pool, (void *)0x4242));
++
++	zexpect_ok(sys_elastipool_alloc(&dynamic_pool, &elem));
++	zexpect_ok(sys_elastipool_free(&dynamic_pool, elem));
++	zexpect_equal(-EINVAL, sys_elastipool_free(&dynamic_pool, (void *)0x4242));
++
++	zexpect_ok(sys_elastipool_alloc(&elastic_pool, &elem));
++	zexpect_ok(sys_elastipool_alloc(&elastic_pool, &elem2));
++	zexpect_ok(sys_elastipool_free(&elastic_pool, elem));
++	zexpect_ok(sys_elastipool_free(&elastic_pool, elem2));
++	zexpect_equal(-EINVAL, sys_elastipool_free(&elastic_pool, (void *)0x4242));
++}
++
++ZTEST(elastipool, test_sys_elastipool_clear)
++{
++	void *elem;
++	const struct sys_elastipool *pools[] = {
++		&static_pool,
++		&dynamic_pool,
++	};
++
++	/* test clear for the fixed-size pools (limit is based on available memory) */
++	ARRAY_FOR_EACH(pools, i) {
++		const struct sys_elastipool *const pool = pools[i];
++
++		/* allocate all blocks */
++		for (size_t i = 0; i < pool->config->max_obj; i++) {
++			zexpect_ok(sys_elastipool_alloc(pool, &elem));
++		}
++		/* check that we have used all of the available blocks */
++		zexpect_equal(pool->data->pool_size, pool->config->max_obj);
++		/* clear all allocations */
++		sys_elastipool_clear(pool);
++		/* check that all of the available blocks are free */
++		zexpect_equal(pool->data->pool_size, 0);
++		/* re-allocate all blocks */
++		for (size_t i = 0; i < pool->config->max_obj; i++) {
++			zexpect_ok(sys_elastipool_alloc(pool, &elem));
++		}
++	}
++
++	/* test clear for the elastic allocation strategy (limit is based on available memory) */
++
++	/* allocate as many blocks as possible */
++	size_t count = 0;
++
++	for (size_t i = 0; i < elastic_pool.config->max_obj; i++, ++count) {
++		if (sys_elastipool_alloc(&elastic_pool, &elem) < 0) {
++			zassert_true(count >= 2);
++			break;
++		}
++	}
++
++	TC_PRINT("Allocated %zu objects of size %zu\n", count, sizeof(struct elem));
++
++	/* clear all allocations */
++	sys_elastipool_clear(&elastic_pool);
++	/* check that all of the available blocks are free */
++	zexpect_equal(elastic_pool.data->pool_size, 0);
++	/* re-allocate as many blocks as possible */
++	for (size_t i = 0; i < elastic_pool.config->max_obj; i++) {
++		if (sys_elastipool_alloc(&elastic_pool, &elem) < 0) {
++			zassert_true(i == count, "failed to re-allocate object %zu", i);
++			break;
++		}
++	}
++
++	TC_PRINT("Re-allocated %zu objects of size %zu\n", count, sizeof(struct elem));
++}
++
++static void after(void *arg)
++{
++	sys_elastipool_clear(&static_pool);
++	sys_elastipool_clear(&dynamic_pool);
++	sys_elastipool_clear(&elastic_pool);
++}
++
++ZTEST_SUITE(elastipool, NULL, NULL, NULL, after, NULL);
+diff --git a/tests/lib/elastipool/testcase.yaml b/tests/lib/elastipool/testcase.yaml
+new file mode 100644
+index 00000000000..d6fad6941fc
+--- /dev/null
++++ b/tests/lib/elastipool/testcase.yaml
+@@ -0,0 +1,12 @@
++common:
++  integration_platforms:
++    - native_sim
++    - native_sim/native/64
++
++tests:
++  libraries.elastipool: {}
++  libraries.elastipool.himem:
++    min_ram: 4096
++    extra_configs:
++      # Test "a large number" of allocations in test_sys_elastipool_clear
++      - CONFIG_TEST_ELASTIC_POOL_MAX_ELEMS=65536
+
+commit 4c6d88d620834c7588af896abd09eabe551b9be8
+Author: Chris Friedt <chris@fr4.co>
+Date:   Wed Dec 17 12:10:18 2025 -0500
+
+    elastipool: add an elastic object pool implementation
+    
+    This changes adds an elastic object pool, which is a allocator of
+    fixed-size objects that can be configured to have a guaranteed minimum
+    number of objects available for allocation, and can also be configured
+    to support growing (to a user-specified size) with non-guaranteed
+    objects allocated from the heap.
+    
+    Every allocation is tracked and can be safely deallocated when no longer
+    in use.
+    
+    Elastipool was created to address the need of having a common API for
+    both static and dynamic allocation, with potentially different object
+    types that might require specialized allocators. Additionally, it
+    addresses "features" of other in-tree object allocators that can be
+    considered a hinderance in certain use cases.
+    
+    1. elastipool is a simple library
+      - does not depend on kernel primitives
+      - can be used both in kernel context and user context
+      - only depends on hash map if users require dynamic growth
+    
+    2. elastipool is not synchronized
+      - does not require any details of scheduler internals
+      - approach aligns better with traditional data structures
+      - external synchronization objects may be used, if needed, based on
+        the context
+        - `k_spinlock` in driver
+        - `sys_sem` or `k_mutex` in OS services or libraries
+        - no synchronization when only accessed by a single thread
+    
+    3. elastipool does not use a free list
+      - a (non-synchronized) bitmap is used to track fixed allocations
+      - a small tradeoff in speed for space
+      - a hash map is used to track dynamic allocations (if needed)
+    
+    4. elastipool is likely only ISR-safe when used for static allocations.
+    
+    Similarly to drivers, elastipool separates API, config, and data.
+    
+    API and configuration details are compile-time constant and selected
+    based on two input parameters.
+    
+    i) min_elements: the minimum (guaranteed) number of objects in the pool
+    ii) max_elements: the maximum possible number of objects in the pool
+    
+    The max_elements parameter must always be greater than zero, and must
+    always be greater-than or equal-to min_elements.
+    
+    If min_elements is zero, then all allocations are dynamic (from the heap).
+    
+    If min_elements is non-zero, and min_elements is equal to max_elements,
+    then all objects are guaranteed and are drawn from a statically allocated
+    pool (similar to the slab allocator).
+    
+    If max elements is greater than min_elements, then at most min_elements
+    objects are guaranteed to be available, as they are allocated statically,
+    and up to max_elements - min_elements objects may be allocated from the
+    heap.
+    
+    Heap allocation is not guaranteed and is subject to available memory
+    constraints.
+    
+    Users may effectively get a limitless number of allocations by specifying
+    a max_elements parameter of `(size_t)(-1)`. However, doing so may starve
+    the rest of the system of resources.
+    
+    Perhaps the most imminent use case for elastipool is where support is
+    needed for both dynamic and statically allocated number of kernel objects
+    such as threads, thread stacks, semaphores, mutexes, spinlocks, etc, and
+    where there may be specialized allocators required for each based on
+    allocation constraints, kernel vs userspace, and a configurable maximum
+    number of elements.
+    
+    Signed-off-by: Chris Friedt <chris@fr4.co>
+
+diff --git a/include/zephyr/sys/elastipool.h b/include/zephyr/sys/elastipool.h
+new file mode 100644
+index 00000000000..1fe70a464da
+--- /dev/null
++++ b/include/zephyr/sys/elastipool.h
+@@ -0,0 +1,407 @@
++/*
++ * Copyright (c) 2025, Friedt Professional Engineering Services, Inc.
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_INCLUDE_SYS_ELASTIPOOL_H_
++#define ZEPHYR_INCLUDE_SYS_ELASTIPOOL_H_
++
++#include <stdint.h>
++
++#include <zephyr/kernel.h>
++#include <zephyr/sys/hash_map.h>
++#include <zephyr/sys/util.h>
++#include <zephyr/toolchain.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/**
++ * @file
++ * @defgroup elastipool_apis Elastipool
++ * @ingroup memory_management
++ *
++ * @brief Elastipool (Elastic Object Pool) API
++ *
++ * Object pools provide a bounded, semi-dynamic means of memory management, with guarantees. They
++ * are typically used when a number of homomorphic objects are required, each of the same fixed
++ * size. Object pools guarantee a set number of allocations will be successful in a narrow scope,
++ * and that allocation and deallocation operations have predictable, bounded latencies.
++ *
++ * Elastipool bridges the gap between having a number of statically-allocated, guaranteed
++ * fixed-size allocations, and the ability to grow dynamically based on demand, up to a maximum
++ * pool size.
++ *
++ * @{
++ */
++
++/**
++ * @brief Elastipool configuration
++ *
++ * A structure used to contain constant configuration details for a specific elastipool instance.
++ *
++ * When `min_obj` is zero, then the elastipool instance only performs dynamic allocation.
++ * When `min_obj` is non-zero, the elastipool instance statically allocates the specified number
++ * of objects and guarantees they are allocatable. The `storage` field specifies the memory region
++ * claimed by static allocation.
++ * When `min_obj` is equal to `max_obj`, the elastipool instance only supports guaranteed
++ * allocation. When `max_obj` is greater than `min_obj`, the elastipool instance is capable of
++ * allocating an additional `max_obj - min_obj` objects from the heap. Heap allocations are not
++ * guaranteed.
++ *
++ * The `sys_elastipool_config` structure is typically compile-time constant and stored in read-only
++ * memory.
++ */
++struct sys_elastipool_config {
++	/** The un-padded size, in bytes, of each element */
++	size_t obj_size;
++	/** The alignment requirement, in bytes, of each element */
++	size_t obj_align;
++	/** The minimum number of elements guaranteed to be available */
++	size_t min_obj;
++	/** The maximum possible number of objects allocatable by the pool */
++	size_t max_obj;
++	/** A pointer to storage for statically allocated (guaranteed) objects */
++	uint8_t *storage;
++	/** A pointer to a bitmap that tracks static allocation */
++	unsigned long *bmp;
++	/** A pointer to the hash map that tracks dynamic (heap-based) allocation */
++	struct sys_hashmap *map;
++};
++
++/**
++ * @brief Elastipool runtime data
++ *
++ * A structure that contains runtime data for each elastipool instance.
++ */
++struct sys_elastipool_data {
++	/** The number of objects allocated by the elastipool instance at any given time */
++	size_t pool_size;
++};
++
++/* forward declaration */
++struct sys_elastipool;
++
++/**
++ * @brief Elastipool allocation function type
++ *
++ * A function pointer type that implements the semantics of elastipool allocation.
++ *
++ * @param pool the elastipool instance
++ * @param[out] obj storage for the pointer resulting from a successful allocation
++ *
++ * @retval 0 on success
++ * @retval -ENOMEM when an allocation was not successful
++ */
++typedef int (*sys_elastipool_api_alloc_t)(const struct sys_elastipool *pool, void **obj);
++
++/**
++ * @brief Elastipool pointer validation
++ *
++ * A function pointer type that implements the semantics of elastipool pointer validation.
++ *
++ * @param pool the elastipool instance
++ * @param obj a pointer to check
++ *
++ * @retval 0 on success
++ * @retval -EINVAL when an invalid pointer is provided
++ */
++typedef int (*sys_elastipool_api_check_t)(const struct sys_elastipool *pool, const void *ptr);
++
++/**
++ *
++ * @brief Elastipool clear function type
++ *
++ * A function pointer type that implements the semantics of elastipool clear operation.
++ *
++ * Clearing an elastipool instance deallocates all previous allocations using that instance
++ * and zeros the number of current allocations, effectively resetting the elastipool instance
++ * to the same state it occupied during system initialization.
++ *
++ * Memory that is used for object storage is not zero'ed with this type of call.
++ *
++ * @param pool the elastipool instance to clear
++ */
++typedef void (*sys_elastipool_api_clear_t)(const struct sys_elastipool *pool);
++
++/**
++ * @brief Elastipool de-allocation function type
++ *
++ * A function pointer type that implements the semantics of elastipool de-allocation.
++ *
++ * @param pool the elastipool instance
++ * @param obj a pointer to the memory to be deallocated
++ *
++ * @retval 0 on success
++ * @retval -EINVAL when an invalid pointer is provided
++ */
++typedef int (*sys_elastipool_api_free_t)(const struct sys_elastipool *pool, const void *ptr);
++
++/**
++ * @brief Elastipool heap-allocation function type
++ *
++ * A function pointer type that implements the semantics of elastipool heap allocation. This part
++ * of the API is not intended for users.
++ *
++ * Elastipool heap allocators behave similarly to `aligned_alloc()` when @p size is non-zero.
++ * When @p size is zero, elastipool heap allocators behave like `free()` and de-allocate memory
++ * pointed-to by @p ptr.
++ *
++ * @param ptr a pointer to previously allocated memory, when @p size is zero
++ * @param size the size of the allocation, in bytes, or zero to de-allocate memory
++ * @param align the alignment requirement of the allocation, when @p size is non-zero
++ *
++ * @return `NULL` on failure or a non-`NULL` pointer to allocated memory on success.
++ *
++ * @see <a href="https://en.cppreference.com/w/c/memory/aligned_alloc">aligned_alloc</a>
++ */
++typedef void *(*sys_elastipool_api_heap_alloc_t)(const void *ptr, size_t size, size_t align);
++
++/**
++ * @brief Generic Elastipool API
++ */
++struct sys_elastipool_api {
++	sys_elastipool_api_alloc_t alloc;
++	sys_elastipool_api_check_t check;
++	sys_elastipool_api_clear_t clear;
++	sys_elastipool_api_free_t free;
++	sys_elastipool_api_heap_alloc_t heap_alloc;
++};
++
++/**
++ * @brief Elastic Object Pool
++ *
++ * This is the top-level structure for elastipool instances.
++ */
++struct sys_elastipool {
++	/** The elastipool API */
++	const struct sys_elastipool_api *api;
++	/** Constant elastipool configuration */
++	const struct sys_elastipool_config *config;
++	/** Runtime-modified elastipool data */
++	struct sys_elastipool_data *data;
++};
++
++/**
++ * @brief Define and initialize an elastipool instance at runtime
++ *
++ * Some parameters are optional or unused depending on the values of @p min_obj and @p max_obj.
++ *
++ * - @p storage is optional when @p min_obj is equal to zero
++ * - @p bmp is optional when @p min_obj is equal to 0
++ * - @p map is optional when @p max_obj is equal to @p min_obj
++ * - @p allocator is optional when @p max_obj is equal to @p min_obj
++ * - if @p allocator is `NULL`, and @p max_obj is greater than @p min_obj, the default allocator is
++ * used
++ *
++ * @param pool pointer to storage of the elastipool instance
++ * @param api pointer to storage for the elastipool api
++ * @param config pointer to storage for the elastipool configuration
++ * @param data pointer to storagge for the elastipool runtime data
++ * @param obj_size the un-padded size of each object (must be > 0)
++ * @param obj_align the alignment requirement of each object (must be >= 0)
++ * @param min_obj the minimum number of objects guaranteed to be allocatable by the elastipool
++ * instance
++ * @param max_obj the maximum number of objects possible to allocate by the elastipool instance
++ * @param storage pointer to storage for static allocations (optional)
++ * @param bmp pointer to bitmap storage for static allocations (optional)
++ * @param map pointer to a hash map object for dynamic allocations (optional)
++ * @param allocator a user-supplied heap allocator for object-specific allocation requirements
++ * (optional)
++ *
++ * @return 0 on success
++ * @return -EINVAL if an argument was invalid
++ */
++int sys_elastipool_init(struct sys_elastipool *pool, struct sys_elastipool_api *api,
++			struct sys_elastipool_config *config, struct sys_elastipool_data *data,
++			size_t obj_size, size_t obj_align, size_t min_obj, size_t max_obj,
++			uint8_t *storage, unsigned long *bmp, struct sys_hashmap *map,
++			sys_elastipool_api_heap_alloc_t allocator);
++
++/**
++ * @brief Allocate an object using an elastic object pool
++ *
++ * @param pool the elastipool instance
++ * @param[out] obj storage for the pointer resulting from a successful allocation
++ *
++ * @retval 0 on success
++ * @retval -ENOMEM when an allocation was not successful
++ */
++static inline int sys_elastipool_alloc(const struct sys_elastipool *pool, void **obj)
++{
++	return pool->api->alloc(pool, obj);
++}
++
++/**
++ * @brief Clear an elastic object pool instance of all previous allocations
++ *
++ * @param pool the elastipool instance
++ */
++static inline void sys_elastipool_clear(const struct sys_elastipool *pool)
++{
++	pool->api->clear(pool);
++}
++
++/**
++ * @brief De-allocate an object obtained from an elastic object pool instance
++ *
++ * @param pool the elastipool instance
++ * @param obj a pointer to the memory to be deallocated
++ *
++ * @retval 0 on success
++ * @retval -EINVAL when an invalid pointer is provided
++ */
++static inline int sys_elastipool_free(const struct sys_elastipool *pool, const void *obj)
++{
++	return pool->api->free(pool, obj);
++}
++
++/**
++ * @brief Verify that an object obtained from an elastic object pool instance
++ *
++ * @param pool the elastipool instance
++ * @param obj a pointer to the memory to be deallocated
++ *
++ * @retval 0 on success
++ * @retval -EINVAL when an invalid pointer is provided
++ */
++static inline int sys_elastipool_check(const struct sys_elastipool *pool, const void *obj)
++{
++	return pool->api->check(pool, obj);
++}
++
++
++/** @cond INTERNAL_HIDDEN */
++
++int sys_elastipool_api_alloc_dyn(const struct sys_elastipool *pool, void **obj);
++int sys_elastipool_api_alloc_elastic(const struct sys_elastipool *pool, void **obj);
++int sys_elastipool_api_alloc_static(const struct sys_elastipool *pool, void **obj);
++
++int sys_elastipool_api_check_dyn(const struct sys_elastipool *pool, const void *ptr);
++int sys_elastipool_api_check_elastic(const struct sys_elastipool *pool, const void *ptr);
++int sys_elastipool_api_check_static(const struct sys_elastipool *pool, const void *ptr);
++
++void sys_elastipool_api_clear_dyn(const struct sys_elastipool *pool);
++void sys_elastipool_api_clear_elastic(const struct sys_elastipool *pool);
++void sys_elastipool_api_clear_static(const struct sys_elastipool *pool);
++
++int sys_elastipool_api_free_dyn(const struct sys_elastipool *pool, const void *ptr);
++int sys_elastipool_api_free_elastic(const struct sys_elastipool *pool, const void *ptr);
++int sys_elastipool_api_free_static(const struct sys_elastipool *pool, const void *ptr);
++
++void *sys_elastipool_api_heap_alloc(const void *ptr, size_t size, size_t align);
++
++#define SYS_ELASTIPOOL_ALLOC_FN(min, max)                                                          \
++	(((min) == 0) ? sys_elastipool_api_alloc_dyn                                               \
++		      : (((min) == (max)) ? sys_elastipool_api_alloc_static                        \
++					  : sys_elastipool_api_alloc_elastic))
++#define SYS_ELASTIPOOL_CHECK_FN(min, max)                                                          \
++	(((min) == 0) ? sys_elastipool_api_check_dyn                                               \
++		      : (((min) == (max)) ? sys_elastipool_api_check_static                        \
++					  : sys_elastipool_api_check_elastic))
++#define SYS_ELASTIPOOL_CLEAR_FN(min, max)                                                          \
++	(((min) == 0) ? sys_elastipool_api_clear_dyn                                               \
++		      : (((min) == (max)) ? sys_elastipool_api_clear_static                        \
++					  : sys_elastipool_api_clear_elastic))
++#define SYS_ELASTIPOOL_FREE_FN(min, max)                                                           \
++	(((min) == 0) ? sys_elastipool_api_free_dyn                                                \
++		      : (((min) == (max)) ? sys_elastipool_api_free_static                         \
++					  : sys_elastipool_api_free_elastic))
++#define SYS_ELASTIPOOL_HEAP_ALLOC_FN(min, max)                                                     \
++	(((max) > (min)) ? sys_elastipool_api_heap_alloc : NULL)
++#define SYS_ELASTIPOOL_SLAB_STORAGE(name, min, max)                                                \
++	(((min) > 0) ? _elastipool_slab_storage_##name : NULL)
++#define SYS_ELASTIPOOL_SLAB_BITMAP(name, min, max)                                                 \
++	(((min) > 0) ? _elastipool_slab_bitmap_##name : NULL)
++#define SYS_ELASTIPOOL_MAP(name, min, max) (((max) > (min)) ? &_elastipool_map_##name : NULL)
++
++/** @endcond */
++
++/**
++ * @brief Define and initialize an elastipool instance at compile time (advanced)
++ *
++ * This is the advanced interface that may be used as an alternative to @ref SYS_ELASTIPOOL_DEFINE
++ * or @ref SYS_ELASTIPOOL_DEFINE_STATIC.
++ *
++ * @param name the name of the elastipool instance
++ * @param size the un-padded size of each object
++ * @param align the alignment requirement of each object
++ * @param min the minimum number of objects guaranteed to be allocatable by the elastipool instance
++ * @param max the maximum number of objects possible to allocate by the elastipool instance
++ * @param allocator a user-supplied heap allocator for object-specific allocation requirements
++ *
++ * @note Users may specify the `static` keyword after @p allocator in case the elastipool instance
++ * should not be visible in the global namespace.
++ */
++#define SYS_ELASTIPOOL_DEFINE_ADVANCED(name, size, align, min, max, allocator, ...)                \
++	BUILD_ASSERT((size) > 0, "size must be > 0");                                              \
++	BUILD_ASSERT((align) >= 0, "align must be >= 0");                                          \
++	BUILD_ASSERT((min) >= 0, "min must be >= 0");                                              \
++	BUILD_ASSERT((max) > 0, "max must be > 0");                                                \
++	BUILD_ASSERT((max) >= (min), "max must be >= min");                                        \
++	BUILD_ASSERT(((align) == 0) || IS_POWER_OF_TWO(align), "align must be a power of two");    \
++	__maybe_unused __noinit __aligned(WB_UP(align)) static uint8_t                             \
++		_elastipool_slab_storage_##name[ROUND_UP((size), (align)) * (size)];               \
++	__maybe_unused static unsigned long _elastipool_slab_bitmap_##name[DIV_ROUND_UP(           \
++		(min), BITS_PER_BYTE * sizeof(unsigned long))];                                    \
++	__maybe_unused SYS_HASHMAP_DEFINE_STATIC(_elastipool_map_##name);                          \
++	static const struct sys_elastipool_config _elastipool_config_##name = {                    \
++		.obj_size = (size),                                                                \
++		.obj_align = (((align) == 0) ? 1 : (align)),                                       \
++		.min_obj = (min),                                                                  \
++		.max_obj = (max),                                                                  \
++		.storage = SYS_ELASTIPOOL_SLAB_STORAGE(name, (min), (max)),                        \
++		.bmp = SYS_ELASTIPOOL_SLAB_BITMAP(name, (min), (max)),                             \
++		.map = SYS_ELASTIPOOL_MAP(name, (min), (max)),                                     \
++	};                                                                                         \
++	static struct sys_elastipool_data _elastipool_data_##name;                                 \
++	static const struct sys_elastipool_api _elastipool_api_##name = {                          \
++		.alloc = SYS_ELASTIPOOL_ALLOC_FN((min), (max)),                                    \
++		.check = SYS_ELASTIPOOL_CHECK_FN((min), (max)),                                    \
++		.clear = SYS_ELASTIPOOL_CLEAR_FN((min), (max)),                                    \
++		.free = SYS_ELASTIPOOL_FREE_FN((min), (max)),                                      \
++		.heap_alloc = (allocator),                                                         \
++	};                                                                                         \
++	__VA_ARGS__ const struct sys_elastipool name = {                                           \
++		.api = &_elastipool_api_##name,                                                    \
++		.config = &_elastipool_config_##name,                                              \
++		.data = &_elastipool_data_##name,                                                  \
++	}
++
++/**
++ * @brief Define and initialize an elastipool instance at compile time
++ *
++ * @param name the name of the elastipool instance
++ * @param size the un-padded size of each object
++ * @param align the alignment requirement of each object
++ * @param min the minimum number of objects guaranteed to be allocatable by the elastipool instance
++ * @param max the maximum number of objects possible to allocate by the elastipool instance
++ *
++ * @note Using this macro to define an elastipool instance will result in @p name being visible in
++ * the global C namespace. Consider @ref SYS_ELASTIPOOL_DEFINE_STATIC for static definition.
++ */
++#define SYS_ELASTIPOOL_DEFINE(name, size, align, min, max, ...)                                    \
++	SYS_ELASTIPOOL_DEFINE_ADVANCED(name, (size), (align), (min), (max),                        \
++				       SYS_ELASTIPOOL_HEAP_ALLOC_FN((min), (max)), __VA_ARGS__)
++
++/**
++ * @brief Statically define and initialize an elastipool instance at compile time
++ *
++ * @param name the name of the elastipool instance
++ * @param size the un-padded size of each object
++ * @param align the alignment requirement of each object
++ * @param min the minimum number of objects guaranteed to be allocatable by the elastipool instance
++ * @param max the maximum number of objects possible to allocate by the elastipool instance
++ */
++#define SYS_ELASTIPOOL_DEFINE_STATIC(name, size, align, min, max)            \
++	SYS_ELASTIPOOL_DEFINE(name, (size), (align), (min), (max), static)
++
++/** @} */
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* ZEPHYR_INCLUDE_SYS_ELASTIPOOL_H_ */
+diff --git a/lib/CMakeLists.txt b/lib/CMakeLists.txt
+index 51413ffc4b5..073f7e38528 100644
+--- a/lib/CMakeLists.txt
++++ b/lib/CMakeLists.txt
+@@ -5,6 +5,7 @@ add_compile_options($<TARGET_PROPERTY:compiler,warning_shadow_variables>)
+ 
+ add_subdirectory(libc)
+ add_subdirectory_ifdef(CONFIG_CPP                  cpp)
++add_subdirectory(elastipool)
+ add_subdirectory(hash)
+ add_subdirectory(heap)
+ add_subdirectory(mem_blocks)
+diff --git a/lib/Kconfig b/lib/Kconfig
+index 41800484d6b..a9a86d724b4 100644
+--- a/lib/Kconfig
++++ b/lib/Kconfig
+@@ -9,6 +9,8 @@ source "lib/cpp/Kconfig"
+ 
+ menu "Additional libraries"
+ 
++source "lib/elastipool/Kconfig"
++
+ source "lib/hash/Kconfig"
+ 
+ source "lib/heap/Kconfig"
+diff --git a/lib/elastipool/CMakeLists.txt b/lib/elastipool/CMakeLists.txt
+new file mode 100644
+index 00000000000..c8ee30959ec
+--- /dev/null
++++ b/lib/elastipool/CMakeLists.txt
+@@ -0,0 +1,8 @@
++# SPDX-License-Identifier: Apache-2.0
++
++if(CONFIG_SYS_ELASTIPOOL)
++
++zephyr_library()
++zephyr_library_sources(elastipool.c)
++
++endif()
+diff --git a/lib/elastipool/Kconfig b/lib/elastipool/Kconfig
+new file mode 100644
+index 00000000000..90673760129
+--- /dev/null
++++ b/lib/elastipool/Kconfig
+@@ -0,0 +1,11 @@
++# SPDX-License-Identifier: Apache-2.0
++
++config SYS_ELASTIPOOL
++	bool "Elastic memory pool"
++	depends on SYS_HASH_MAP
++	help
++	  Say 'y' here to enable the elastic memory pool ("elastipool") API.
++
++	  The elastic memory pool API supports allocation of fixed-size objects from either
++	  a statically allocated pool of objects, or dynamically allocation from the heap, or
++	  both, up to a maximum number of allocations.
+diff --git a/lib/elastipool/elastipool.c b/lib/elastipool/elastipool.c
+new file mode 100644
+index 00000000000..88146758302
+--- /dev/null
++++ b/lib/elastipool/elastipool.c
+@@ -0,0 +1,339 @@
++/*
++ * Copyright (c) 2025, Friedt Professional Engineering Services, Inc.
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <stdint.h>
++#include <stdlib.h>
++
++#include <zephyr/kernel.h>
++#include <zephyr/sys/elastipool.h>
++#include <zephyr/sys/hash_map.h>
++#include <zephyr/toolchain.h>
++
++/* like find_lsb_set() but operates on longs rather than fixed-size uint32_t's */
++static ALWAYS_INLINE unsigned int find_lsb_set_l(unsigned long op)
++{
++#ifdef CONFIG_TOOLCHAIN_HAS_BUILTIN_FFS
++	return __builtin_ffsl(op);
++#else
++	if (op == 0) {
++		return 0;
++	}
++
++	for (size_t i = 0; i < sizeof(op) * BITS_PER_BYTE; ++i, op >>= 1) {
++		if ((op & 1) != 0) {
++			return i + 1;
++		}
++	}
++
++	return -1;
++#endif
++}
++
++static int sys_elastipool_bmp_alloc(unsigned long *bmp, size_t n)
++{
++	int bit = -1;
++	size_t m = 0;
++	size_t stride = sizeof(unsigned long) * BITS_PER_BYTE;
++	int n_longs = DIV_ROUND_UP(n, stride);
++
++	/* cycle through longs that do not require any truncation */
++	for (unsigned long *end = &bmp[n_longs - 1]; bmp < end; ++bmp, m += stride) {
++		unsigned long l = ~(*bmp);
++
++		if (l == 0) {
++			continue;
++		}
++
++		bit = find_lsb_set_l(l) - 1;
++		*bmp |= BIT(bit);
++
++		return bit + m;
++	}
++
++	/* the last long might require truncation, unless n is an even multiple of stride */
++	unsigned long mask = (unsigned long)BIT64_MASK(n - m);
++	unsigned long l = ~(*bmp) & mask;
++
++	if (l == 0) {
++		/* there are no blocks available to allocate */
++		return -ENOMEM;
++	}
++
++	bit = find_lsb_set_l(l) - 1;
++	*bmp |= BIT(bit);
++
++	return bit + m;
++}
++
++static int sys_elastipool_bmp_check(unsigned long *bmp, size_t bit, size_t num_bits)
++{
++	if (bit >= num_bits) {
++		return -EINVAL;
++	}
++
++	size_t stride = sizeof(unsigned long) * BITS_PER_BYTE;
++	size_t i = bit / stride;
++
++	bmp += i;
++	bit -= i * stride;
++
++	if (((*bmp) & (unsigned long)BIT64(bit)) == 0) {
++		/* block was never allocated */
++		return -EINVAL;
++	}
++
++	return bit;
++}
++
++static int sys_elastipool_bmp_free(unsigned long *bmp, size_t bit, size_t num_bits)
++{
++	int ret;
++
++	ret = sys_elastipool_bmp_check(bmp, bit, num_bits);
++	if (ret < 0) {
++		return ret;
++	}
++
++	*bmp &= ~BIT64(bit);
++
++	return 0;
++}
++
++int sys_elastipool_api_alloc_dyn(const struct sys_elastipool *pool, void **obj)
++{
++	int ret;
++
++	__ASSERT_NO_MSG(pool != NULL);
++	__ASSERT_NO_MSG(obj != NULL);
++
++	if (pool->data->pool_size == pool->config->max_obj) {
++		return -ENOMEM;
++	}
++
++	*obj = pool->api->heap_alloc(NULL, pool->config->obj_size, pool->config->obj_align);
++	if (*obj == NULL) {
++		return -ENOMEM;
++	}
++
++	uint64_t kv = (uint64_t)(uintptr_t)*obj;
++
++	ret = sys_hashmap_insert(pool->config->map, kv, kv, NULL);
++	if (ret < 0) {
++		pool->api->heap_alloc(*obj, 0, 0);
++		*obj = NULL;
++		return ret;
++	}
++
++	pool->data->pool_size++;
++	return 0;
++}
++
++int sys_elastipool_api_alloc_elastic(const struct sys_elastipool *pool, void **obj)
++{
++	if (sys_elastipool_api_alloc_static(pool, obj) == 0) {
++		return 0;
++	}
++
++	return sys_elastipool_api_alloc_dyn(pool, obj);
++}
++
++int sys_elastipool_api_alloc_static(const struct sys_elastipool *pool, void **obj)
++{
++	__ASSERT_NO_MSG(pool != NULL);
++	__ASSERT_NO_MSG(obj != NULL);
++
++	if (pool->data->pool_size == pool->config->max_obj) {
++		return -ENOMEM;
++	}
++
++	int ret = sys_elastipool_bmp_alloc(pool->config->bmp, pool->config->min_obj);
++
++	if (ret < 0) {
++		return ret;
++	}
++
++	++pool->data->pool_size;
++	*obj = pool->config->storage +
++	       ret * ROUND_UP(pool->config->obj_size, pool->config->obj_align);
++
++	return 0;
++}
++
++int sys_elastipool_api_free_dyn(const struct sys_elastipool *pool, const void *obj)
++{
++	__ASSERT_NO_MSG(pool != NULL);
++	__ASSERT_NO_MSG(obj != NULL);
++
++	if (pool->data->pool_size == 0) {
++		return -EINVAL;
++	}
++
++	if (!sys_hashmap_remove(pool->config->map, (uint64_t)(uintptr_t)obj, NULL)) {
++		return -EINVAL;
++	}
++
++	(void)pool->api->heap_alloc(obj, 0, 0);
++
++	return 0;
++}
++
++int sys_elastipool_api_free_elastic(const struct sys_elastipool *pool, const void *obj)
++{
++	if (sys_elastipool_api_free_static(pool, obj) == 0) {
++		return 0;
++	}
++
++	return sys_elastipool_api_free_dyn(pool, obj);
++}
++
++int sys_elastipool_api_free_static(const struct sys_elastipool *pool, const void *obj)
++{
++	__ASSERT_NO_MSG(pool != NULL);
++	__ASSERT_NO_MSG(obj != NULL);
++
++	size_t block_size = ROUND_UP(pool->config->obj_size, pool->config->obj_align);
++	size_t bit = (uintptr_t)((uint8_t *)obj - pool->config->storage) / block_size;
++
++	int ret = sys_elastipool_bmp_free(pool->config->bmp, bit, pool->config->min_obj);
++
++	if (ret < 0) {
++		return ret;
++	}
++
++	--pool->data->pool_size;
++	return 0;
++}
++
++static void test_hashmap_clear_callback(uint64_t key, uint64_t value, void *cookie)
++{
++	ARG_UNUSED(value);
++
++	const struct sys_elastipool *pool = (const struct sys_elastipool *)cookie;
++
++	(void)pool->api->heap_alloc((void *)(uintptr_t)key, 0, 0);
++}
++
++void sys_elastipool_api_clear_dyn(const struct sys_elastipool *pool)
++{
++	sys_hashmap_clear(pool->config->map, test_hashmap_clear_callback, (void *)pool);
++	pool->data->pool_size = 0;
++}
++
++void sys_elastipool_api_clear_elastic(const struct sys_elastipool *pool)
++{
++	sys_elastipool_api_clear_static(pool);
++	sys_elastipool_api_clear_dyn(pool);
++}
++
++void sys_elastipool_api_clear_static(const struct sys_elastipool *pool)
++{
++	memset(pool->config->bmp, 0,
++	       pool->config->min_obj * ROUND_UP(pool->config->obj_size, pool->config->obj_align));
++	pool->data->pool_size = 0;
++}
++
++void *sys_elastipool_api_heap_alloc(const void *ptr, size_t size, size_t align)
++{
++	/* newlib doesn't declare this by default */
++	void *aligned_alloc(size_t alignment, size_t size);
++
++	if (size == 0) {
++		free((void *)ptr);
++		return NULL;
++	}
++
++	return aligned_alloc(align, size);
++}
++
++int sys_elastipool_init(struct sys_elastipool *pool, struct sys_elastipool_api *api,
++			struct sys_elastipool_config *config, struct sys_elastipool_data *data,
++			size_t obj_size, size_t obj_align, size_t min_obj, size_t max_obj,
++			uint8_t *storage, unsigned long *bmp, struct sys_hashmap *map,
++			sys_elastipool_api_heap_alloc_t allocator)
++{
++	if ((obj_size == 0) || (min_obj == 0) || (max_obj < min_obj) ||
++	    ((obj_align != 0) && !IS_POWER_OF_TWO(obj_align)) || (api == NULL) ||
++	    (config == NULL)) {
++		return -EINVAL;
++	}
++
++	if ((min_obj > 0) && ((storage == NULL) || (bmp == NULL))) {
++		return -EINVAL;
++	}
++
++	if ((max_obj > min_obj) && (map == NULL)) {
++		return -EINVAL;
++	}
++
++	if (obj_align == 0) {
++		obj_align = 1;
++	}
++
++	*config = (struct sys_elastipool_config){
++		.obj_size = obj_size,
++		.obj_align = obj_align,
++		.min_obj = min_obj,
++		.max_obj = max_obj,
++		.storage = storage,
++		.bmp = bmp,
++		.map = map,
++	};
++	*data = (struct sys_elastipool_data){0};
++	*api = (struct sys_elastipool_api){
++		.alloc = SYS_ELASTIPOOL_ALLOC_FN(min_obj, max_obj),
++		.check = SYS_ELASTIPOOL_CHECK_FN(min_obj, max_obj),
++		.clear = SYS_ELASTIPOOL_CLEAR_FN(min_obj, max_obj),
++		.free = SYS_ELASTIPOOL_FREE_FN(min_obj, max_obj),
++		.heap_alloc = (allocator == NULL) ? SYS_ELASTIPOOL_HEAP_ALLOC_FN(min_obj, max_obj)
++						  : allocator,
++	};
++
++	*pool = (struct sys_elastipool){
++		.api = api,
++		.config = config,
++		.data = data,
++	};
++
++	return 0;
++}
++
++int sys_elastipool_api_check_dyn(const struct sys_elastipool *pool, const void *ptr)
++{
++	__ASSERT_NO_MSG(pool != NULL);
++
++	if (!sys_hashmap_contains_key(pool->config->map, (uint64_t)(uintptr_t)ptr)) {
++		return -EINVAL;
++	}
++
++	return 0;
++}
++
++int sys_elastipool_api_check_elastic(const struct sys_elastipool *pool, const void *ptr)
++{
++	__ASSERT_NO_MSG(pool != NULL);
++
++	if (sys_elastipool_api_check_static(pool, ptr) == 0) {
++		return 0;
++	}
++	return sys_elastipool_api_check_dyn(pool, ptr);
++}
++
++int sys_elastipool_api_check_static(const struct sys_elastipool *pool, const void *ptr)
++{
++	int ret;
++
++	__ASSERT_NO_MSG(pool != NULL);
++
++	int bit = (((uint8_t *)ptr) - pool->config->storage) /
++		  ROUND_UP(pool->config->obj_size, pool->config->obj_align);
++
++	ret = sys_elastipool_bmp_check(pool->config->bmp, (size_t)bit, pool->config->min_obj);
++	if (ret < 0) {
++		return ret;
++	}
++
++	return 0;
++}
