@@ -1,314 +1,3 @@
-commit 146c1d9ae7dc2fabfe27234eb7f5a2cc45f73f36
-Author: Chris Friedt <chris@fr4.co>
-Date:   Wed Dec 17 12:47:56 2025 -0500
-
-    tests: elastipool: add tests for the elastic object pool
-    
-    Add tests for the elastic object pool.
-    
-    Tests cover the 3 main APIs provided:
-    
-    * `sys_elastipool_alloc()`
-    * `sys_elastipool_clear()`
-    * `sys_elastipool_free()`
-    * `sys_elastipool_init()`
-    
-    Additionally, 3 configurations of elastipool are covered to ensure
-    expected behaviour
-    
-    * static-only allocation
-    * dynamic-only allocation
-    * elastic allocation (both static and dynamic)
-    
-    Signed-off-by: Chris Friedt <chris@fr4.co>
-
-diff --git a/tests/lib/elastipool/CMakeLists.txt b/tests/lib/elastipool/CMakeLists.txt
-new file mode 100644
-index 00000000000..8872ba2a35c
---- /dev/null
-+++ b/tests/lib/elastipool/CMakeLists.txt
-@@ -0,0 +1,8 @@
-+# SPDX-License-Identifier: Apache-2.0
-+
-+cmake_minimum_required(VERSION 3.20.0)
-+find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
-+project(elastipool)
-+
-+FILE(GLOB app_sources src/*.c)
-+target_sources(app PRIVATE ${app_sources})
-diff --git a/tests/lib/elastipool/Kconfig b/tests/lib/elastipool/Kconfig
-new file mode 100644
-index 00000000000..5cd42b0d309
---- /dev/null
-+++ b/tests/lib/elastipool/Kconfig
-@@ -0,0 +1,14 @@
-+# Copyright (c) 2025, Friedt Professional Engineering Services, Inc.
-+#
-+# SPDX-License-Identifier: Apache-2.0
-+
-+config TEST_ELASTIC_POOL_MAX_ELEMS
-+	int "Maximum number of elements for elastic pool testing"
-+	default 1024
-+	help
-+	  The maximum number of elements for elastic pool testing.
-+
-+	  This number should be non-trivial. If runtime were not a constraint,
-+	  then it would ideally be -1, i.e. no limit.
-+
-+source "Kconfig.zephyr"
-diff --git a/tests/lib/elastipool/prj.conf b/tests/lib/elastipool/prj.conf
-new file mode 100644
-index 00000000000..4b3bdbb719e
---- /dev/null
-+++ b/tests/lib/elastipool/prj.conf
-@@ -0,0 +1,5 @@
-+CONFIG_ZTEST=y
-+
-+CONFIG_SYS_HASH_FUNC32=y
-+CONFIG_SYS_HASH_MAP=y
-+CONFIG_SYS_ELASTIPOOL=y
-diff --git a/tests/lib/elastipool/src/main.c b/tests/lib/elastipool/src/main.c
-new file mode 100644
-index 00000000000..18908c9be01
---- /dev/null
-+++ b/tests/lib/elastipool/src/main.c
-@@ -0,0 +1,137 @@
-+/*
-+ * Copyright (c) 2025, Friedt Professional Engineering Services, Inc.
-+ *
-+ * SPDX-License-Identifier: Apache-2.0
-+ */
-+
-+#include <string.h>
-+
-+#include <zephyr/ztest.h>
-+#include <zephyr/sys/elastipool.h>
-+#include <zephyr/toolchain.h>
-+
-+struct elem {
-+	uint64_t blob[2];
-+};
-+
-+SYS_ELASTIPOOL_DEFINE(static_pool, sizeof(struct elem), __alignof(struct elem), 1, 1);
-+SYS_ELASTIPOOL_DEFINE_STATIC(dynamic_pool, sizeof(struct elem), __alignof(struct elem), 0, 1);
-+SYS_ELASTIPOOL_DEFINE_ADVANCED(
-+	elastic_pool, sizeof(struct elem), __alignof(struct elem), 1,
-+	(size_t)CONFIG_TEST_ELASTIC_POOL_MAX_ELEMS,
-+	SYS_ELASTIPOOL_HEAP_ALLOC_FN(1, (size_t)CONFIG_TEST_ELASTIC_POOL_MAX_ELEMS), static);
-+
-+ZTEST(elastipool, test_sys_elastipool_init)
-+{
-+	struct sys_elastipool pool;
-+	struct sys_elastipool_api api;
-+	struct sys_elastipool_config config;
-+	struct sys_elastipool_data data;
-+
-+	zexpect_ok(sys_elastipool_init(
-+		&pool, &api, &config, &data, sizeof(struct elem), __alignof(struct elem), 1,
-+		CONFIG_TEST_ELASTIC_POOL_MAX_ELEMS, elastic_pool.config->storage,
-+		elastic_pool.config->bmp, elastic_pool.config->map, elastic_pool.api->heap_alloc));
-+
-+	zexpect_mem_equal(&api, elastic_pool.api, sizeof(api));
-+	zexpect_mem_equal(&config, elastic_pool.config, sizeof(config));
-+}
-+
-+ZTEST(elastipool, test_sys_elastipool_alloc)
-+{
-+	void *elem, *elem2;
-+
-+	zexpect_ok(sys_elastipool_alloc(&static_pool, &elem));
-+	zexpect_equal(-ENOMEM, sys_elastipool_alloc(&static_pool, &elem));
-+
-+	zexpect_ok(sys_elastipool_alloc(&dynamic_pool, &elem));
-+	zexpect_equal(-ENOMEM, sys_elastipool_alloc(&dynamic_pool, &elem));
-+
-+	zexpect_ok(sys_elastipool_alloc(&elastic_pool, &elem));
-+	zexpect_ok(sys_elastipool_alloc(&elastic_pool, &elem2));
-+}
-+
-+ZTEST(elastipool, test_sys_elastipool_free)
-+{
-+	void *elem, *elem2;
-+
-+	zexpect_ok(sys_elastipool_alloc(&static_pool, &elem));
-+	zexpect_ok(sys_elastipool_free(&static_pool, elem));
-+	zexpect_equal(-EINVAL, sys_elastipool_free(&static_pool, (void *)0x4242));
-+
-+	zexpect_ok(sys_elastipool_alloc(&dynamic_pool, &elem));
-+	zexpect_ok(sys_elastipool_free(&dynamic_pool, elem));
-+	zexpect_equal(-EINVAL, sys_elastipool_free(&dynamic_pool, (void *)0x4242));
-+
-+	zexpect_ok(sys_elastipool_alloc(&elastic_pool, &elem));
-+	zexpect_ok(sys_elastipool_alloc(&elastic_pool, &elem2));
-+	zexpect_ok(sys_elastipool_free(&elastic_pool, elem));
-+	zexpect_ok(sys_elastipool_free(&elastic_pool, elem2));
-+	zexpect_equal(-EINVAL, sys_elastipool_free(&elastic_pool, (void *)0x4242));
-+}
-+
-+ZTEST(elastipool, test_sys_elastipool_clear)
-+{
-+	void *elem;
-+	const struct sys_elastipool *pools[] = {
-+		&static_pool,
-+		&dynamic_pool,
-+	};
-+
-+	/* test clear for the fixed-size pools (limit is based on available memory) */
-+	ARRAY_FOR_EACH(pools, i) {
-+		const struct sys_elastipool *const pool = pools[i];
-+
-+		/* allocate all blocks */
-+		for (size_t i = 0; i < pool->config->max_obj; i++) {
-+			zexpect_ok(sys_elastipool_alloc(pool, &elem));
-+		}
-+		/* check that we have used all of the available blocks */
-+		zexpect_equal(pool->data->pool_size, pool->config->max_obj);
-+		/* clear all allocations */
-+		sys_elastipool_clear(pool);
-+		/* check that all of the available blocks are free */
-+		zexpect_equal(pool->data->pool_size, 0);
-+		/* re-allocate all blocks */
-+		for (size_t i = 0; i < pool->config->max_obj; i++) {
-+			zexpect_ok(sys_elastipool_alloc(pool, &elem));
-+		}
-+	}
-+
-+	/* test clear for the elastic allocation strategy (limit is based on available memory) */
-+
-+	/* allocate as many blocks as possible */
-+	size_t count = 0;
-+
-+	for (size_t i = 0; i < elastic_pool.config->max_obj; i++, ++count) {
-+		if (sys_elastipool_alloc(&elastic_pool, &elem) < 0) {
-+			zassert_true(count >= 2);
-+			break;
-+		}
-+	}
-+
-+	TC_PRINT("Allocated %zu objects of size %zu\n", count, sizeof(struct elem));
-+
-+	/* clear all allocations */
-+	sys_elastipool_clear(&elastic_pool);
-+	/* check that all of the available blocks are free */
-+	zexpect_equal(elastic_pool.data->pool_size, 0);
-+	/* re-allocate as many blocks as possible */
-+	for (size_t i = 0; i < elastic_pool.config->max_obj; i++) {
-+		if (sys_elastipool_alloc(&elastic_pool, &elem) < 0) {
-+			zassert_true(i == count, "failed to re-allocate object %zu", i);
-+			break;
-+		}
-+	}
-+
-+	TC_PRINT("Re-allocated %zu objects of size %zu\n", count, sizeof(struct elem));
-+}
-+
-+static void after(void *arg)
-+{
-+	sys_elastipool_clear(&static_pool);
-+	sys_elastipool_clear(&dynamic_pool);
-+	sys_elastipool_clear(&elastic_pool);
-+}
-+
-+ZTEST_SUITE(elastipool, NULL, NULL, NULL, after, NULL);
-diff --git a/tests/lib/elastipool/testcase.yaml b/tests/lib/elastipool/testcase.yaml
-new file mode 100644
-index 00000000000..d6fad6941fc
---- /dev/null
-+++ b/tests/lib/elastipool/testcase.yaml
-@@ -0,0 +1,12 @@
-+common:
-+  integration_platforms:
-+    - native_sim
-+    - native_sim/native/64
-+
-+tests:
-+  libraries.elastipool: {}
-+  libraries.elastipool.himem:
-+    min_ram: 4096
-+    extra_configs:
-+      # Test "a large number" of allocations in test_sys_elastipool_clear
-+      - CONFIG_TEST_ELASTIC_POOL_MAX_ELEMS=65536
-
-commit 4c6d88d620834c7588af896abd09eabe551b9be8
-Author: Chris Friedt <chris@fr4.co>
-Date:   Wed Dec 17 12:10:18 2025 -0500
-
-    elastipool: add an elastic object pool implementation
-    
-    This changes adds an elastic object pool, which is a allocator of
-    fixed-size objects that can be configured to have a guaranteed minimum
-    number of objects available for allocation, and can also be configured
-    to support growing (to a user-specified size) with non-guaranteed
-    objects allocated from the heap.
-    
-    Every allocation is tracked and can be safely deallocated when no longer
-    in use.
-    
-    Elastipool was created to address the need of having a common API for
-    both static and dynamic allocation, with potentially different object
-    types that might require specialized allocators. Additionally, it
-    addresses "features" of other in-tree object allocators that can be
-    considered a hinderance in certain use cases.
-    
-    1. elastipool is a simple library
-      - does not depend on kernel primitives
-      - can be used both in kernel context and user context
-      - only depends on hash map if users require dynamic growth
-    
-    2. elastipool is not synchronized
-      - does not require any details of scheduler internals
-      - approach aligns better with traditional data structures
-      - external synchronization objects may be used, if needed, based on
-        the context
-        - `k_spinlock` in driver
-        - `sys_sem` or `k_mutex` in OS services or libraries
-        - no synchronization when only accessed by a single thread
-    
-    3. elastipool does not use a free list
-      - a (non-synchronized) bitmap is used to track fixed allocations
-      - a small tradeoff in speed for space
-      - a hash map is used to track dynamic allocations (if needed)
-    
-    4. elastipool is likely only ISR-safe when used for static allocations.
-    
-    Similarly to drivers, elastipool separates API, config, and data.
-    
-    API and configuration details are compile-time constant and selected
-    based on two input parameters.
-    
-    i) min_elements: the minimum (guaranteed) number of objects in the pool
-    ii) max_elements: the maximum possible number of objects in the pool
-    
-    The max_elements parameter must always be greater than zero, and must
-    always be greater-than or equal-to min_elements.
-    
-    If min_elements is zero, then all allocations are dynamic (from the heap).
-    
-    If min_elements is non-zero, and min_elements is equal to max_elements,
-    then all objects are guaranteed and are drawn from a statically allocated
-    pool (similar to the slab allocator).
-    
-    If max elements is greater than min_elements, then at most min_elements
-    objects are guaranteed to be available, as they are allocated statically,
-    and up to max_elements - min_elements objects may be allocated from the
-    heap.
-    
-    Heap allocation is not guaranteed and is subject to available memory
-    constraints.
-    
-    Users may effectively get a limitless number of allocations by specifying
-    a max_elements parameter of `(size_t)(-1)`. However, doing so may starve
-    the rest of the system of resources.
-    
-    Perhaps the most imminent use case for elastipool is where support is
-    needed for both dynamic and statically allocated number of kernel objects
-    such as threads, thread stacks, semaphores, mutexes, spinlocks, etc, and
-    where there may be specialized allocators required for each based on
-    allocation constraints, kernel vs userspace, and a configurable maximum
-    number of elements.
-    
-    Signed-off-by: Chris Friedt <chris@fr4.co>
-
 diff --git a/include/zephyr/sys/elastipool.h b/include/zephyr/sys/elastipool.h
 new file mode 100644
 index 00000000000..1fe70a464da
@@ -780,10 +469,10 @@ index 00000000000..90673760129
 +	  both, up to a maximum number of allocations.
 diff --git a/lib/elastipool/elastipool.c b/lib/elastipool/elastipool.c
 new file mode 100644
-index 00000000000..88146758302
+index 00000000000..ef02a45f4bc
 --- /dev/null
 +++ b/lib/elastipool/elastipool.c
-@@ -0,0 +1,339 @@
+@@ -0,0 +1,341 @@
 +/*
 + * Copyright (c) 2025, Friedt Professional Engineering Services, Inc.
 + *
@@ -797,6 +486,8 @@ index 00000000000..88146758302
 +#include <zephyr/sys/elastipool.h>
 +#include <zephyr/sys/hash_map.h>
 +#include <zephyr/toolchain.h>
++
++#define SYS_ELASTIPOOL_STRIDE_BITS (sizeof(unsigned long) * BITS_PER_BYTE)
 +
 +/* like find_lsb_set() but operates on longs rather than fixed-size uint32_t's */
 +static ALWAYS_INLINE unsigned int find_lsb_set_l(unsigned long op)
@@ -822,11 +513,10 @@ index 00000000000..88146758302
 +{
 +	int bit = -1;
 +	size_t m = 0;
-+	size_t stride = sizeof(unsigned long) * BITS_PER_BYTE;
-+	int n_longs = DIV_ROUND_UP(n, stride);
++	int n_longs = DIV_ROUND_UP(n, SYS_ELASTIPOOL_STRIDE_BITS);
 +
 +	/* cycle through longs that do not require any truncation */
-+	for (unsigned long *end = &bmp[n_longs - 1]; bmp < end; ++bmp, m += stride) {
++	for (unsigned long *end = &bmp[n_longs - 1]; bmp < end; ++bmp, m += SYS_ELASTIPOOL_STRIDE_BITS) {
 +		unsigned long l = ~(*bmp);
 +
 +		if (l == 0) {
@@ -854,36 +544,36 @@ index 00000000000..88146758302
 +	return bit + m;
 +}
 +
-+static int sys_elastipool_bmp_check(unsigned long *bmp, size_t bit, size_t num_bits)
++static int sys_elastipool_bmp_check(unsigned long **bmp, size_t *bit, size_t num_bits)
 +{
-+	if (bit >= num_bits) {
++	if (*bit >= num_bits) {
 +		return -EINVAL;
 +	}
 +
-+	size_t stride = sizeof(unsigned long) * BITS_PER_BYTE;
-+	size_t i = bit / stride;
++	size_t stride = SYS_ELASTIPOOL_STRIDE_BITS;
++	size_t i = *bit / stride;
 +
-+	bmp += i;
-+	bit -= i * stride;
++	*bmp += i;
++	*bit -= i * stride;
 +
-+	if (((*bmp) & (unsigned long)BIT64(bit)) == 0) {
++	if (((**bmp) & (unsigned long)BIT64(*bit)) == 0) {
 +		/* block was never allocated */
 +		return -EINVAL;
 +	}
 +
-+	return bit;
++	return 0;
 +}
 +
 +static int sys_elastipool_bmp_free(unsigned long *bmp, size_t bit, size_t num_bits)
 +{
 +	int ret;
 +
-+	ret = sys_elastipool_bmp_check(bmp, bit, num_bits);
++	ret = sys_elastipool_bmp_check(&bmp, &bit, num_bits);
 +	if (ret < 0) {
 +		return ret;
 +	}
 +
-+	*bmp &= ~BIT64(bit);
++	*bmp &= (unsigned long)~BIT64(bit);
 +
 +	return 0;
 +}
@@ -1113,13 +803,220 @@ index 00000000000..88146758302
 +
 +	__ASSERT_NO_MSG(pool != NULL);
 +
-+	int bit = (((uint8_t *)ptr) - pool->config->storage) /
++	unsigned long *bmp = pool->config->bmp;
++	size_t bit = (((uint8_t *)ptr) - pool->config->storage) /
 +		  ROUND_UP(pool->config->obj_size, pool->config->obj_align);
 +
-+	ret = sys_elastipool_bmp_check(pool->config->bmp, (size_t)bit, pool->config->min_obj);
++	ret = sys_elastipool_bmp_check(&bmp, &bit, pool->config->min_obj);
 +	if (ret < 0) {
 +		return ret;
 +	}
 +
 +	return 0;
 +}
+diff --git a/tests/lib/elastipool/CMakeLists.txt b/tests/lib/elastipool/CMakeLists.txt
+new file mode 100644
+index 00000000000..8872ba2a35c
+--- /dev/null
++++ b/tests/lib/elastipool/CMakeLists.txt
+@@ -0,0 +1,8 @@
++# SPDX-License-Identifier: Apache-2.0
++
++cmake_minimum_required(VERSION 3.20.0)
++find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
++project(elastipool)
++
++FILE(GLOB app_sources src/*.c)
++target_sources(app PRIVATE ${app_sources})
+diff --git a/tests/lib/elastipool/Kconfig b/tests/lib/elastipool/Kconfig
+new file mode 100644
+index 00000000000..5cd42b0d309
+--- /dev/null
++++ b/tests/lib/elastipool/Kconfig
+@@ -0,0 +1,14 @@
++# Copyright (c) 2025, Friedt Professional Engineering Services, Inc.
++#
++# SPDX-License-Identifier: Apache-2.0
++
++config TEST_ELASTIC_POOL_MAX_ELEMS
++	int "Maximum number of elements for elastic pool testing"
++	default 1024
++	help
++	  The maximum number of elements for elastic pool testing.
++
++	  This number should be non-trivial. If runtime were not a constraint,
++	  then it would ideally be -1, i.e. no limit.
++
++source "Kconfig.zephyr"
+diff --git a/tests/lib/elastipool/prj.conf b/tests/lib/elastipool/prj.conf
+new file mode 100644
+index 00000000000..4b3bdbb719e
+--- /dev/null
++++ b/tests/lib/elastipool/prj.conf
+@@ -0,0 +1,5 @@
++CONFIG_ZTEST=y
++
++CONFIG_SYS_HASH_FUNC32=y
++CONFIG_SYS_HASH_MAP=y
++CONFIG_SYS_ELASTIPOOL=y
+diff --git a/tests/lib/elastipool/src/main.c b/tests/lib/elastipool/src/main.c
+new file mode 100644
+index 00000000000..18908c9be01
+--- /dev/null
++++ b/tests/lib/elastipool/src/main.c
+@@ -0,0 +1,137 @@
++/*
++ * Copyright (c) 2025, Friedt Professional Engineering Services, Inc.
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <string.h>
++
++#include <zephyr/ztest.h>
++#include <zephyr/sys/elastipool.h>
++#include <zephyr/toolchain.h>
++
++struct elem {
++	uint64_t blob[2];
++};
++
++SYS_ELASTIPOOL_DEFINE(static_pool, sizeof(struct elem), __alignof(struct elem), 1, 1);
++SYS_ELASTIPOOL_DEFINE_STATIC(dynamic_pool, sizeof(struct elem), __alignof(struct elem), 0, 1);
++SYS_ELASTIPOOL_DEFINE_ADVANCED(
++	elastic_pool, sizeof(struct elem), __alignof(struct elem), 1,
++	(size_t)CONFIG_TEST_ELASTIC_POOL_MAX_ELEMS,
++	SYS_ELASTIPOOL_HEAP_ALLOC_FN(1, (size_t)CONFIG_TEST_ELASTIC_POOL_MAX_ELEMS), static);
++
++ZTEST(elastipool, test_sys_elastipool_init)
++{
++	struct sys_elastipool pool;
++	struct sys_elastipool_api api;
++	struct sys_elastipool_config config;
++	struct sys_elastipool_data data;
++
++	zexpect_ok(sys_elastipool_init(
++		&pool, &api, &config, &data, sizeof(struct elem), __alignof(struct elem), 1,
++		CONFIG_TEST_ELASTIC_POOL_MAX_ELEMS, elastic_pool.config->storage,
++		elastic_pool.config->bmp, elastic_pool.config->map, elastic_pool.api->heap_alloc));
++
++	zexpect_mem_equal(&api, elastic_pool.api, sizeof(api));
++	zexpect_mem_equal(&config, elastic_pool.config, sizeof(config));
++}
++
++ZTEST(elastipool, test_sys_elastipool_alloc)
++{
++	void *elem, *elem2;
++
++	zexpect_ok(sys_elastipool_alloc(&static_pool, &elem));
++	zexpect_equal(-ENOMEM, sys_elastipool_alloc(&static_pool, &elem));
++
++	zexpect_ok(sys_elastipool_alloc(&dynamic_pool, &elem));
++	zexpect_equal(-ENOMEM, sys_elastipool_alloc(&dynamic_pool, &elem));
++
++	zexpect_ok(sys_elastipool_alloc(&elastic_pool, &elem));
++	zexpect_ok(sys_elastipool_alloc(&elastic_pool, &elem2));
++}
++
++ZTEST(elastipool, test_sys_elastipool_free)
++{
++	void *elem, *elem2;
++
++	zexpect_ok(sys_elastipool_alloc(&static_pool, &elem));
++	zexpect_ok(sys_elastipool_free(&static_pool, elem));
++	zexpect_equal(-EINVAL, sys_elastipool_free(&static_pool, (void *)0x4242));
++
++	zexpect_ok(sys_elastipool_alloc(&dynamic_pool, &elem));
++	zexpect_ok(sys_elastipool_free(&dynamic_pool, elem));
++	zexpect_equal(-EINVAL, sys_elastipool_free(&dynamic_pool, (void *)0x4242));
++
++	zexpect_ok(sys_elastipool_alloc(&elastic_pool, &elem));
++	zexpect_ok(sys_elastipool_alloc(&elastic_pool, &elem2));
++	zexpect_ok(sys_elastipool_free(&elastic_pool, elem));
++	zexpect_ok(sys_elastipool_free(&elastic_pool, elem2));
++	zexpect_equal(-EINVAL, sys_elastipool_free(&elastic_pool, (void *)0x4242));
++}
++
++ZTEST(elastipool, test_sys_elastipool_clear)
++{
++	void *elem;
++	const struct sys_elastipool *pools[] = {
++		&static_pool,
++		&dynamic_pool,
++	};
++
++	/* test clear for the fixed-size pools (limit is based on available memory) */
++	ARRAY_FOR_EACH(pools, i) {
++		const struct sys_elastipool *const pool = pools[i];
++
++		/* allocate all blocks */
++		for (size_t i = 0; i < pool->config->max_obj; i++) {
++			zexpect_ok(sys_elastipool_alloc(pool, &elem));
++		}
++		/* check that we have used all of the available blocks */
++		zexpect_equal(pool->data->pool_size, pool->config->max_obj);
++		/* clear all allocations */
++		sys_elastipool_clear(pool);
++		/* check that all of the available blocks are free */
++		zexpect_equal(pool->data->pool_size, 0);
++		/* re-allocate all blocks */
++		for (size_t i = 0; i < pool->config->max_obj; i++) {
++			zexpect_ok(sys_elastipool_alloc(pool, &elem));
++		}
++	}
++
++	/* test clear for the elastic allocation strategy (limit is based on available memory) */
++
++	/* allocate as many blocks as possible */
++	size_t count = 0;
++
++	for (size_t i = 0; i < elastic_pool.config->max_obj; i++, ++count) {
++		if (sys_elastipool_alloc(&elastic_pool, &elem) < 0) {
++			zassert_true(count >= 2);
++			break;
++		}
++	}
++
++	TC_PRINT("Allocated %zu objects of size %zu\n", count, sizeof(struct elem));
++
++	/* clear all allocations */
++	sys_elastipool_clear(&elastic_pool);
++	/* check that all of the available blocks are free */
++	zexpect_equal(elastic_pool.data->pool_size, 0);
++	/* re-allocate as many blocks as possible */
++	for (size_t i = 0; i < elastic_pool.config->max_obj; i++) {
++		if (sys_elastipool_alloc(&elastic_pool, &elem) < 0) {
++			zassert_true(i == count, "failed to re-allocate object %zu", i);
++			break;
++		}
++	}
++
++	TC_PRINT("Re-allocated %zu objects of size %zu\n", count, sizeof(struct elem));
++}
++
++static void after(void *arg)
++{
++	sys_elastipool_clear(&static_pool);
++	sys_elastipool_clear(&dynamic_pool);
++	sys_elastipool_clear(&elastic_pool);
++}
++
++ZTEST_SUITE(elastipool, NULL, NULL, NULL, after, NULL);
+diff --git a/tests/lib/elastipool/testcase.yaml b/tests/lib/elastipool/testcase.yaml
+new file mode 100644
+index 00000000000..d6fad6941fc
+--- /dev/null
++++ b/tests/lib/elastipool/testcase.yaml
+@@ -0,0 +1,12 @@
++common:
++  integration_platforms:
++    - native_sim
++    - native_sim/native/64
++
++tests:
++  libraries.elastipool: {}
++  libraries.elastipool.himem:
++    min_ram: 4096
++    extra_configs:
++      # Test "a large number" of allocations in test_sys_elastipool_clear
++      - CONFIG_TEST_ELASTIC_POOL_MAX_ELEMS=65536
