@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2018 Intel Corporation
  * Copyright (c) 2023 Meta
+ * Copyright (c) 2025, Friedt Professional Engineering Services, Inc.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -15,82 +16,12 @@
 
 LOG_MODULE_REGISTER(pthread_key, CONFIG_PTHREAD_KEY_LOG_LEVEL);
 
-SYS_SEM_DEFINE(pthread_key_lock, 1, 1);
-
 /* This is non-standard (i.e. an implementation detail) */
 #define PTHREAD_KEY_INITIALIZER (-1)
 
-/*
- * We reserve the MSB to mark a pthread_key_t as initialized (from the
- * perspective of the application). With a linear space, this means that
- * the theoretical pthread_key_t range is [0,2147483647].
- */
-BUILD_ASSERT(CONFIG_POSIX_THREAD_KEYS_MAX < PTHREAD_OBJ_MASK_INIT,
-	     "CONFIG_POSIX_THREAD_KEYS_MAX is too high");
-
-static pthread_key_obj posix_key_pool[CONFIG_POSIX_THREAD_KEYS_MAX];
-SYS_BITARRAY_DEFINE_STATIC(posix_key_bitarray, CONFIG_POSIX_THREAD_KEYS_MAX);
-
-static inline size_t posix_key_to_offset(pthread_key_obj *k)
-{
-	return k - posix_key_pool;
-}
-
-static inline size_t to_posix_key_idx(pthread_key_t key)
-{
-	return mark_pthread_obj_uninitialized(key);
-}
-
-static pthread_key_obj *get_posix_key(pthread_key_t key)
-{
-	int actually_initialized;
-	size_t bit = to_posix_key_idx(key);
-
-	/* if the provided cond does not claim to be initialized, its invalid */
-	if (!is_pthread_obj_initialized(key)) {
-		LOG_DBG("Key is uninitialized (%x)", key);
-		return NULL;
-	}
-
-	/* Mask off the MSB to get the actual bit index */
-	if (sys_bitarray_test_bit(&posix_key_bitarray, bit, &actually_initialized) < 0) {
-		LOG_DBG("Key is invalid (%x)", key);
-		return NULL;
-	}
-
-	if (actually_initialized == 0) {
-		/* The cond claims to be initialized but is actually not */
-		LOG_DBG("Key claims to be initialized (%x)", key);
-		return NULL;
-	}
-
-	return &posix_key_pool[bit];
-}
-
-static pthread_key_obj *to_posix_key(pthread_key_t *key)
-{
-	size_t bit;
-	pthread_key_obj *k;
-
-	if (*key != PTHREAD_KEY_INITIALIZER) {
-		return get_posix_key(*key);
-	}
-
-	/* Try and automatically associate a pthread_key_obj */
-	if (sys_bitarray_alloc(&posix_key_bitarray, 1, &bit) < 0) {
-		/* No keys left to allocate */
-		return NULL;
-	}
-
-	/* Record the associated posix_cond in mu and mark as initialized */
-	*key = mark_pthread_obj_initialized(bit);
-	k = &posix_key_pool[bit];
-
-	/* Initialize the condition variable here */
-	memset(k, 0, sizeof(*k));
-
-	return k;
-}
+SYS_SEM_DEFINE(pthread_key_lock, 1, 1);
+SYS_ELASTIPOOL_DEFINE_STATIC(posix_key_pool, sizeof(pthread_key_obj), __alignof(pthread_key_obj),
+			     CONFIG_POSIX_THREAD_KEYS_MAX, CONFIG_POSIX_THREAD_KEYS_MAX);
 
 /**
  * @brief Create a key for thread-specific data
@@ -103,14 +34,15 @@ int pthread_key_create(pthread_key_t *key,
 	pthread_key_obj *new_key;
 
 	*key = PTHREAD_KEY_INITIALIZER;
-	new_key = to_posix_key(key);
+	new_key = posix_init_pool_obj(&posix_key_pool, &pthread_key_lock, *key, NULL);
 	if (new_key == NULL) {
 		return ENOMEM;
 	}
 
 	sys_slist_init(&(new_key->key_data_l));
-
 	new_key->destructor = destructor;
+	*key = (pthread_key_t)(uintptr_t)new_key;
+
 	LOG_DBG("Initialized key %p (%x)", new_key, *key);
 
 	return 0;
@@ -123,14 +55,13 @@ int pthread_key_create(pthread_key_t *key,
  */
 int pthread_key_delete(pthread_key_t key)
 {
-	size_t bit;
 	int ret = EINVAL;
 	pthread_key_obj *key_obj = NULL;
 	struct pthread_key_data *key_data;
 	sys_snode_t *node_l, *next_node_l;
 
 	SYS_SEM_LOCK(&pthread_key_lock) {
-		key_obj = get_posix_key(key);
+		key_obj = posix_get_pool_obj_unlocked(&posix_key_pool, key);
 		if (key_obj == NULL) {
 			ret = EINVAL;
 			SYS_SEM_LOCK_BREAK;
@@ -148,8 +79,7 @@ int pthread_key_delete(pthread_key_t key)
 				pthread_self());
 		}
 
-		bit = posix_key_to_offset(key_obj);
-		ret = sys_bitarray_free(&posix_key_bitarray, 1, bit);
+		ret = sys_elastipool_free(&posix_key_pool, key_obj);
 		__ASSERT_NO_MSG(ret == 0);
 	}
 
@@ -183,7 +113,7 @@ int pthread_setspecific(pthread_key_t key, const void *value)
 	 * Else add the key to the thread's list.
 	 */
 	SYS_SEM_LOCK(&pthread_key_lock) {
-		key_obj = get_posix_key(key);
+		key_obj = posix_get_pool_obj_unlocked(&posix_key_pool, key);
 		if (key_obj == NULL) {
 			retval = EINVAL;
 			SYS_SEM_LOCK_BREAK;
@@ -254,7 +184,7 @@ void *pthread_getspecific(pthread_key_t key)
 	}
 
 	SYS_SEM_LOCK(&pthread_key_lock) {
-		key_obj = get_posix_key(key);
+		key_obj = posix_get_pool_obj_unlocked(&posix_key_pool, key);
 		if (key_obj == NULL) {
 			value = NULL;
 			SYS_SEM_LOCK_BREAK;
