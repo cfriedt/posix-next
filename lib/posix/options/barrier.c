@@ -7,10 +7,12 @@
 
 #include "posix_internal.h"
 
+#include <pthread.h>
+
 #include <zephyr/init.h>
 #include <zephyr/kernel.h>
-#include <pthread.h>
-#include <zephyr/sys/bitarray.h>
+#include <zephyr/sys/elastipool.h>
+#include <zephyr/sys/sem.h>
 
 struct posix_barrier {
 	struct k_mutex mutex;
@@ -23,60 +25,18 @@ struct posix_barrierattr {
 	uint32_t pshared;
 };
 
-__pinned_bss
-static struct posix_barrier posix_barrier_pool[CONFIG_MAX_PTHREAD_BARRIER_COUNT];
-
-SYS_BITARRAY_DEFINE_STATIC(posix_barrier_bitarray, CONFIG_MAX_PTHREAD_BARRIER_COUNT);
-
-/*
- * We reserve the MSB to mark a pthread_barrier_t as initialized (from the
- * perspective of the application). With a linear space, this means that
- * the theoretical pthread_barrier_t range is [0,2147483647].
- */
-BUILD_ASSERT(CONFIG_MAX_PTHREAD_BARRIER_COUNT < PTHREAD_OBJ_MASK_INIT,
-	     "CONFIG_MAX_PTHREAD_BARRIER_COUNT is too high");
-
-static inline size_t posix_barrier_to_offset(struct posix_barrier *bar)
-{
-	return bar - posix_barrier_pool;
-}
-
-static inline size_t to_posix_barrier_idx(pthread_barrier_t b)
-{
-	return mark_pthread_obj_uninitialized(b);
-}
-
-struct posix_barrier *get_posix_barrier(pthread_barrier_t b)
-{
-	int actually_initialized;
-	size_t bit = to_posix_barrier_idx(b);
-
-	/* if the provided barrier does not claim to be initialized, its invalid */
-	if (!is_pthread_obj_initialized(b)) {
-		return NULL;
-	}
-
-	/* Mask off the MSB to get the actual bit index */
-	if (sys_bitarray_test_bit(&posix_barrier_bitarray, bit, &actually_initialized) < 0) {
-		return NULL;
-	}
-
-	if (actually_initialized == 0) {
-		/* The barrier claims to be initialized but is actually not */
-		return NULL;
-	}
-
-	return &posix_barrier_pool[bit];
-}
+static SYS_SEM_DEFINE(posix_barrier_lock, 1, 1);
+SYS_ELASTIPOOL_DEFINE_STATIC(posix_barrier_pool, sizeof(struct posix_barrier),
+			     __alignof(struct posix_barrier), CONFIG_MAX_PTHREAD_BARRIER_COUNT,
+			     CONFIG_MAX_PTHREAD_BARRIER_COUNT);
 
 int pthread_barrier_wait(pthread_barrier_t *b)
 {
 	int ret;
 	int err;
-	pthread_barrier_t bb = *b;
 	struct posix_barrier *bar;
 
-	bar = get_posix_barrier(bb);
+	bar = posix_get_pool_obj(&posix_barrier_pool, &posix_barrier_lock, *b);
 	if (bar == NULL) {
 		return EINVAL;
 	}
@@ -113,58 +73,46 @@ unlock:
 int pthread_barrier_init(pthread_barrier_t *b, const pthread_barrierattr_t *attr,
 			 unsigned int count)
 {
-	size_t bit;
 	struct posix_barrier *bar;
 
 	if (count == 0) {
 		return EINVAL;
 	}
 
-	if (sys_bitarray_alloc(&posix_barrier_bitarray, 1, &bit) < 0) {
+	if (sys_elastipool_alloc(&posix_barrier_pool, (void **)&bar) < 0) {
 		return ENOMEM;
 	}
 
-	bar = &posix_barrier_pool[bit];
 	bar->max = count;
 	bar->count = 0;
 
-	*b = mark_pthread_obj_initialized(bit);
+	*b = (pthread_barrier_t)(uintptr_t)bar;
 
 	return 0;
 }
 
 int pthread_barrier_destroy(pthread_barrier_t *b)
 {
-	int err;
-	size_t bit;
+	int ret = EINVAL;
 	struct posix_barrier *bar;
 
-	bar = get_posix_barrier(*b);
+	bar = posix_get_pool_obj(&posix_barrier_pool, &posix_barrier_lock, *b);
 	if (bar == NULL) {
 		return EINVAL;
 	}
 
-	err = k_mutex_lock(&bar->mutex, K_FOREVER);
-	if (err < 0) {
-		return -err;
+	SYS_SEM_LOCK(&posix_barrier_lock) {
+		ret = sys_elastipool_free(&posix_barrier_pool, (void *)bar);
+		if (ret < 0) {
+			ret = -ret;
+		}
 	}
-	__ASSERT_NO_MSG(err == 0);
 
-	/* An implementation may use this function to set barrier to an invalid value */
-	bar->max = 0;
-	bar->count = 0;
+	if (ret == 0) {
+		*b = -1;
+	}
 
-	bit = posix_barrier_to_offset(bar);
-	err = sys_bitarray_free(&posix_barrier_bitarray, 1, bit);
-	__ASSERT_NO_MSG(err == 0);
-
-	err = k_condvar_broadcast(&bar->cond);
-	__ASSERT_NO_MSG(err == 0);
-
-	err = k_mutex_unlock(&bar->mutex);
-	__ASSERT_NO_MSG(err == 0);
-
-	return 0;
+	return ret;
 }
 
 int pthread_barrierattr_init(pthread_barrierattr_t *attr)
@@ -219,9 +167,12 @@ static int pthread_barrier_pool_init(void)
 	size_t i;
 
 	for (i = 0; i < CONFIG_MAX_PTHREAD_BARRIER_COUNT; ++i) {
-		err = k_mutex_init(&posix_barrier_pool[i].mutex);
+		struct posix_barrier *bar =
+			&((struct posix_barrier *)posix_barrier_pool.config->storage)[i];
+
+		err = k_mutex_init(&bar->mutex);
 		__ASSERT_NO_MSG(err == 0);
-		err = k_condvar_init(&posix_barrier_pool[i].cond);
+		err = k_condvar_init(&bar->cond);
 		__ASSERT_NO_MSG(err == 0);
 	}
 
