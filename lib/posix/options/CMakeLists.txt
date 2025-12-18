@@ -36,7 +36,7 @@ if(NOT CONFIG_TC_PROVIDES_POSIX_ASYNCHRONOUS_IO)
 endif()
 
 if(NOT CONFIG_TC_PROVIDES_POSIX_BARRIERS)
-  zephyr_library_sources_ifdef(CONFIG_POSIX_BARRIERS barrier.c)
+  zephyr_library_sources_ifdef(CONFIG_POSIX_BARRIERS barrier.c posix_pool.c)
 endif()
 
 if(NOT CONFIG_TC_PROVIDES_POSIX_CLOCK_SELECTION)
@@ -99,7 +99,7 @@ if(NOT CONFIG_TC_PROVIDES_POSIX_SINGLE_PROCESS)
 endif()
 
 if(NOT CONFIG_TC_PROVIDES_POSIX_SPIN_LOCKS)
-  zephyr_library_sources_ifdef(CONFIG_POSIX_SPIN_LOCKS spinlock.c)
+  zephyr_library_sources_ifdef(CONFIG_POSIX_SPIN_LOCKS spinlock.c posix_pool.c)
 endif()
 
 if(NOT CONFIG_TC_PROVIDES_POSIX_TIMERS)
@@ -111,11 +111,11 @@ if(NOT CONFIG_TC_PROVIDES_POSIX_TIMERS)
 endif()
 
 if(NOT CONFIG_TC_PROVIDES_POSIX_RW_LOCKS)
-  zephyr_library_sources_ifdef(CONFIG_POSIX_RW_LOCKS rwlock.c)
+  zephyr_library_sources_ifdef(CONFIG_POSIX_RW_LOCKS rwlock.c posix_pool.c)
 endif()
 
 if(NOT CONFIG_TC_PROVIDES_POSIX_SEMAPHORES)
-  zephyr_library_sources_ifdef(CONFIG_POSIX_SEMAPHORES semaphore.c)
+  zephyr_library_sources_ifdef(CONFIG_POSIX_SEMAPHORES semaphore.c posix_pool.c)
 endif()
 
 if(NOT CONFIG_TC_PROVIDES_POSIX_THREADS)
@@ -126,6 +126,7 @@ if(NOT CONFIG_TC_PROVIDES_POSIX_THREADS)
     grp.c
     key.c
     mutex.c
+    posix_pool.c
     pthread.c
     pwd.c
   )
