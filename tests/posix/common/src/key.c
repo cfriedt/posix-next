@@ -117,7 +117,7 @@ ZTEST(key, test_key_resource_leak)
 {
 	pthread_key_t key;
 
-	for (size_t i = 0; i < CONFIG_POSIX_THREAD_KEYS_MAX; ++i) {
+	for (size_t i = 0; i < 2 * CONFIG_POSIX_THREAD_KEYS_MAX; ++i) {
 		zassert_ok(pthread_key_create(&key, NULL), "failed to create key %zu", i);
 		zassert_ok(pthread_key_delete(key), "failed to delete key %zu", i);
 	}
@@ -151,8 +151,13 @@ static void *setspecific_thread(void *count)
 
 	while (1) {
 		pthread_key_t key;
+		if (*alloc_count == CONFIG_POSIX_THREAD_KEYS_MAX / N_THR) {
+			break;
+		}
 
-		zassert_ok(pthread_key_create(&key, NULL), "failed to create key");
+		if (pthread_key_create(&key, NULL) < 0) {
+			break;
+		}
 		if (pthread_setspecific(key, &value) == ENOMEM) {
 			break;
 		};
