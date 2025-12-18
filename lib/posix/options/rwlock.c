@@ -7,11 +7,12 @@
 #include "posix_clock.h"
 #include "posix_internal.h"
 
+#include <pthread.h>
+
 #include <zephyr/init.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
-#include <pthread.h>
-#include <zephyr/sys/bitarray.h>
+#include <zephyr/sys/elastipool.h>
 #include <zephyr/sys/sem.h>
 
 #define CONCURRENT_READER_LIMIT  (CONFIG_POSIX_THREAD_THREADS_MAX + 1)
@@ -34,77 +35,9 @@ static uint32_t write_lock_acquire(struct posix_rwlock *rwl, uint32_t timeout);
 LOG_MODULE_REGISTER(pthread_rwlock, CONFIG_PTHREAD_RWLOCK_LOG_LEVEL);
 
 static SYS_SEM_DEFINE(posix_rwlock_lock, 1, 1);
-
-static struct posix_rwlock posix_rwlock_pool[CONFIG_MAX_PTHREAD_RWLOCK_COUNT];
-SYS_BITARRAY_DEFINE_STATIC(posix_rwlock_bitarray, CONFIG_MAX_PTHREAD_RWLOCK_COUNT);
-
-/*
- * We reserve the MSB to mark a pthread_rwlock_t as initialized (from the
- * perspective of the application). With a linear space, this means that
- * the theoretical pthread_rwlock_t range is [0,2147483647].
- */
-BUILD_ASSERT(CONFIG_MAX_PTHREAD_RWLOCK_COUNT < PTHREAD_OBJ_MASK_INIT,
-	     "CONFIG_MAX_PTHREAD_RWLOCK_COUNT is too high");
-
-static inline size_t posix_rwlock_to_offset(struct posix_rwlock *rwl)
-{
-	return rwl - posix_rwlock_pool;
-}
-
-static inline size_t to_posix_rwlock_idx(pthread_rwlock_t rwlock)
-{
-	return mark_pthread_obj_uninitialized(rwlock);
-}
-
-static struct posix_rwlock *get_posix_rwlock(pthread_rwlock_t rwlock)
-{
-	int actually_initialized;
-	size_t bit = to_posix_rwlock_idx(rwlock);
-
-	/* if the provided rwlock does not claim to be initialized, its invalid */
-	if (!is_pthread_obj_initialized(rwlock)) {
-		LOG_DBG("RWlock is uninitialized (%x)", rwlock);
-		return NULL;
-	}
-
-	/* Mask off the MSB to get the actual bit index */
-	if (sys_bitarray_test_bit(&posix_rwlock_bitarray, bit, &actually_initialized) < 0) {
-		LOG_DBG("RWlock is invalid (%x)", rwlock);
-		return NULL;
-	}
-
-	if (actually_initialized == 0) {
-		/* The rwlock claims to be initialized but is actually not */
-		LOG_DBG("RWlock claims to be initialized (%x)", rwlock);
-		return NULL;
-	}
-
-	return &posix_rwlock_pool[bit];
-}
-
-struct posix_rwlock *to_posix_rwlock(pthread_rwlock_t *rwlock)
-{
-	size_t bit;
-	struct posix_rwlock *rwl;
-
-	if (*rwlock != PTHREAD_RWLOCK_INITIALIZER) {
-		return get_posix_rwlock(*rwlock);
-	}
-
-	/* Try and automatically associate a posix_rwlock */
-	if (sys_bitarray_alloc(&posix_rwlock_bitarray, 1, &bit) < 0) {
-		LOG_DBG("Unable to allocate pthread_rwlock_t");
-		return NULL;
-	}
-
-	/* Record the associated posix_rwlock in rwl and mark as initialized */
-	*rwlock = mark_pthread_obj_initialized(bit);
-
-	/* Initialize the posix_rwlock */
-	rwl = &posix_rwlock_pool[bit];
-
-	return rwl;
-}
+SYS_ELASTIPOOL_DEFINE_STATIC(posix_rwlock_pool, sizeof(struct posix_rwlock),
+			     __alignof(struct posix_rwlock), CONFIG_MAX_PTHREAD_RWLOCK_COUNT,
+			     CONFIG_MAX_PTHREAD_RWLOCK_COUNT);
 
 /**
  * @brief Initialize read-write lock object.
@@ -119,7 +52,7 @@ int pthread_rwlock_init(pthread_rwlock_t *rwlock,
 	ARG_UNUSED(attr);
 	*rwlock = PTHREAD_RWLOCK_INITIALIZER;
 
-	rwl = to_posix_rwlock(rwlock);
+	rwl = posix_init_pool_obj(&posix_rwlock_pool, &posix_rwlock_lock, *rwlock, NULL);
 	if (rwl == NULL) {
 		return ENOMEM;
 	}
@@ -128,6 +61,8 @@ int pthread_rwlock_init(pthread_rwlock_t *rwlock,
 	sys_sem_init(&rwl->wr_sem, 1, 1);
 	sys_sem_init(&rwl->reader_active, 1, 1);
 	rwl->wr_owner = NULL;
+
+	*rwlock = (pthread_rwlock_t)(uintptr_t)rwl;
 
 	LOG_DBG("Initialized rwlock %p", rwl);
 
@@ -142,12 +77,11 @@ int pthread_rwlock_init(pthread_rwlock_t *rwlock,
 int pthread_rwlock_destroy(pthread_rwlock_t *rwlock)
 {
 	int err;
-	size_t bit;
 	int ret = EINVAL;
 	struct posix_rwlock *rwl;
 
 	SYS_SEM_LOCK(&posix_rwlock_lock) {
-		rwl = get_posix_rwlock(*rwlock);
+		rwl = posix_get_pool_obj_unlocked(&posix_rwlock_pool, *rwlock);
 		if (rwl == NULL) {
 			ret = EINVAL;
 			SYS_SEM_LOCK_BREAK;
@@ -159,8 +93,7 @@ int pthread_rwlock_destroy(pthread_rwlock_t *rwlock)
 		}
 
 		ret = 0;
-		bit = posix_rwlock_to_offset(rwl);
-		err = sys_bitarray_free(&posix_rwlock_bitarray, 1, bit);
+		err = sys_elastipool_free(&posix_rwlock_pool, (void *)rwl);
 		__ASSERT_NO_MSG(err == 0);
 	}
 
@@ -179,7 +112,7 @@ int pthread_rwlock_rdlock(pthread_rwlock_t *rwlock)
 {
 	struct posix_rwlock *rwl;
 
-	rwl = get_posix_rwlock(*rwlock);
+	rwl = posix_get_pool_obj(&posix_rwlock_pool, &posix_rwlock_lock, *rwlock);
 	if (rwl == NULL) {
 		return EINVAL;
 	}
@@ -206,7 +139,7 @@ int pthread_rwlock_timedrdlock(pthread_rwlock_t *rwlock,
 		return EINVAL;
 	}
 
-	rwl = get_posix_rwlock(*rwlock);
+	rwl = posix_get_pool_obj(&posix_rwlock_pool, &posix_rwlock_lock, *rwlock);
 	if (rwl == NULL) {
 		return EINVAL;
 	}
@@ -230,7 +163,7 @@ int pthread_rwlock_tryrdlock(pthread_rwlock_t *rwlock)
 {
 	struct posix_rwlock *rwl;
 
-	rwl = get_posix_rwlock(*rwlock);
+	rwl = posix_get_pool_obj(&posix_rwlock_pool, &posix_rwlock_lock, *rwlock);
 	if (rwl == NULL) {
 		return EINVAL;
 	}
@@ -250,7 +183,7 @@ int pthread_rwlock_wrlock(pthread_rwlock_t *rwlock)
 {
 	struct posix_rwlock *rwl;
 
-	rwl = get_posix_rwlock(*rwlock);
+	rwl = posix_get_pool_obj(&posix_rwlock_pool, &posix_rwlock_lock, *rwlock);
 	if (rwl == NULL) {
 		return EINVAL;
 	}
@@ -277,7 +210,7 @@ int pthread_rwlock_timedwrlock(pthread_rwlock_t *rwlock,
 		return EINVAL;
 	}
 
-	rwl = get_posix_rwlock(*rwlock);
+	rwl = posix_get_pool_obj(&posix_rwlock_pool, &posix_rwlock_lock, *rwlock);
 	if (rwl == NULL) {
 		return EINVAL;
 	}
@@ -301,7 +234,7 @@ int pthread_rwlock_trywrlock(pthread_rwlock_t *rwlock)
 {
 	struct posix_rwlock *rwl;
 
-	rwl = get_posix_rwlock(*rwlock);
+	rwl = posix_get_pool_obj(&posix_rwlock_pool, &posix_rwlock_lock, *rwlock);
 	if (rwl == NULL) {
 		return EINVAL;
 	}
@@ -319,7 +252,7 @@ int pthread_rwlock_unlock(pthread_rwlock_t *rwlock)
 {
 	struct posix_rwlock *rwl;
 
-	rwl = get_posix_rwlock(*rwlock);
+	rwl = posix_get_pool_obj(&posix_rwlock_pool, &posix_rwlock_lock, *rwlock);
 	if (rwl == NULL) {
 		return EINVAL;
 	}
