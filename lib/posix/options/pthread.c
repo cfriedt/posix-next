@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2018 Intel Corporation
  * Copyright (c) 2023 Meta
+ * Copyright (c) 2025, Friedt Professional Engineering Services, Inc.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -1548,52 +1549,6 @@ int sched_yield(void)
 {
 	k_yield();
 	return 0;
-}
-
-void *posix_get_pool_obj_unlocked(const struct sys_elastipool *pool, uint32_t handle)
-{
-	uintptr_t ret;
-
-	if (sizeof(handle) == sizeof(ret)) {
-		ret = handle;
-	} else if (2 * sizeof(handle) == sizeof(ret)) {
-		/* assumption is that the heap lies in the same 32-bit address range */
-		ret = (uintptr_t)pool->config->storage;
-		ret >>= BITS_PER_BYTE * (sizeof(ret) >> 1);
-		ret <<= BITS_PER_BYTE * (sizeof(ret) >> 1);
-		ret |= handle;
-	} else {
-		/* unsupported size */
-		return NULL;
-	}
-
-	if (sys_elastipool_check(pool, (void *)ret) < 0) {
-		/* object is uninitialized */
-		ret = 0 /* NULL */;
-	}
-
-	return (void *)ret;
-}
-
-void *posix_init_pool_obj_unlocked(const struct sys_elastipool *pool, uint32_t handle,
-				   void (*cb)(void *obj))
-{
-	if (handle != POSIX_OBJ_INITIALIZER) {
-		return posix_get_pool_obj_unlocked(pool, handle);
-	}
-
-	uintptr_t obj = 0;
-
-	if (sys_elastipool_alloc(pool, (void **)&obj) < 0) {
-		/* No objects left to allocate */
-		obj = 0;
-	}
-
-	if ((obj != 0) && (cb != NULL)) {
-		cb((void *)obj);
-	}
-
-	return (void *)obj;
 }
 
 struct posix_thread *to_posix_thread(pthread_t pthread)
