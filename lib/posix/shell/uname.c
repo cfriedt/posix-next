@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <unistd.h>
+#include <getopt.h>
 
 #include "posix_shell.h"
 
@@ -52,8 +52,14 @@ static int uname_cmd_handler(const struct shell *sh, size_t argc, char **argv)
 
 	/* Get the uname options */
 
+	char *optarg;
+	int opterr;
+	int optind;
+	int optopt;
+
 	optind = 1;
-	while ((option = getopt(argc, argv, "asonrvmpi")) != -1) {
+	while ((option = getopt_r(argc, argv, "asonrvmpi", &optarg, &opterr, &optind, &optopt)) !=
+	       -1) {
 		switch (option) {
 		case 'a':
 			set = UNAME_ALL;
@@ -92,7 +98,7 @@ static int uname_cmd_handler(const struct shell *sh, size_t argc, char **argv)
 
 		case '?':
 		default:
-			badarg = (char)state->optopt;
+			badarg = (char)optopt;
 			break;
 		}
 	}
