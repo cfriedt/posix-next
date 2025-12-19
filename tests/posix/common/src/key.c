@@ -176,12 +176,12 @@ ZTEST(key, test_thread_specific_data_deallocation)
 	zassert_ok(pthread_create(&thread, NULL, setspecific_thread, &alloc_count_t0),
 		"attempt to create thread failed");
 	zassert_ok(pthread_join(thread, NULL), "failed to join thread");
-	printk("first thread allocated %d keys", alloc_count_t0);
+	printk("first thread allocated %d keys\n", alloc_count_t0);
 
 	zassert_ok(pthread_create(&thread, NULL, setspecific_thread, &alloc_count_t1),
 		"attempt to create thread failed");
 	zassert_ok(pthread_join(thread, NULL), "failed to join thread");
-	printk("second thread allocated %d keys", alloc_count_t1);
+	printk("second thread allocated %d keys\n", alloc_count_t1);
 
 	zassert_equal(alloc_count_t0, alloc_count_t1,
 		"failed to deallocate thread specific data");
