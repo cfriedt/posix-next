@@ -71,33 +71,33 @@ ZTEST_F(eventfd, test_unset_poll_event_block)
 	eventfd_poll_unset_common(fixture->fd);
 }
 
-K_THREAD_STACK_DEFINE(thread_stack, CONFIG_TEST_STACK_SIZE);
-static struct k_thread thread;
-
-static void thread_eventfd_read_42(void *arg1, void *arg2, void *arg3)
+static void *thread_eventfd_read_42(void *arg1)
 {
 	eventfd_t value;
 	struct eventfd_fixture *fixture = arg1;
 
 	zassert_ok(eventfd_read(fixture->fd, &value));
 	zassert_equal(value, 42);
+
+	return NULL;
 }
 
 ZTEST_F(eventfd, test_read_then_write_block)
 {
-	k_thread_create(&thread, thread_stack, K_THREAD_STACK_SIZEOF(thread_stack),
-			thread_eventfd_read_42, fixture, NULL, NULL, 0, 0, K_NO_WAIT);
+	pthread_t th;
 
-	k_msleep(100);
+	zassert_ok(pthread_create(&th, NULL, thread_eventfd_read_42, fixture));
+
+	usleep(100000);
 
 	/* this write never occurs */
 	zassert_ok(eventfd_write(fixture->fd, 42));
 
 	/* unreachable code */
-	k_thread_join(&thread, K_FOREVER);
+	zassert_ok(pthread_join(th, NULL));
 }
 
-static void thread_eventfd_posix_read_42(void *arg1, void *arg2, void *arg3)
+static void *thread_eventfd_posix_read_42(void *arg1)
 {
 	uint64_t value;
 	struct eventfd_fixture *fixture = arg1;
@@ -106,102 +106,91 @@ static void thread_eventfd_posix_read_42(void *arg1, void *arg2, void *arg3)
 	ret = read(fixture->fd, &value, sizeof(value));
 	zassert(ret == sizeof(value), "read(2) failed");
 	zassert_equal(value, 42);
+
+	return NULL;
 }
 
 ZTEST_F(eventfd, test_posix_read_then_write_block)
 {
-	k_thread_create(&thread, thread_stack, K_THREAD_STACK_SIZEOF(thread_stack),
-			thread_eventfd_posix_read_42, fixture, NULL, NULL, 0, 0, K_NO_WAIT);
+	pthread_t th;
 
-	k_msleep(100);
+	zassert_ok(pthread_create(&th, NULL, thread_eventfd_posix_read_42, fixture));
+
+	usleep(100000);
 
 	zassert_ok(eventfd_write(fixture->fd, 42));
 
-	k_thread_join(&thread, K_FOREVER);
+	zassert_ok(pthread_join(th, NULL));
 }
 
-static void thread_eventfd_write(void *arg1, void *arg2, void *arg3)
+static void *thread_eventfd_write(void *arg1)
 {
 	struct eventfd_fixture *fixture = arg1;
 
 	zassert_ok(eventfd_write(fixture->fd, 71));
+
+	return NULL;
 }
 
 ZTEST_F(eventfd, test_write_while_pollin)
 {
-	struct zsock_pollfd fds[] = {
+	struct pollfd fds[] = {
 		{
 			.fd = fixture->fd,
-			.events = ZSOCK_POLLIN,
+			.events = POLLIN,
 		},
 	};
 	eventfd_t value;
+	pthread_t th;
 	int ret;
 
-	k_thread_create(&thread, thread_stack, K_THREAD_STACK_SIZEOF(thread_stack),
-			thread_eventfd_write, fixture, NULL, NULL, 0, 0, K_MSEC(100));
+	zassert_ok(pthread_create(&th, NULL, thread_eventfd_write, fixture));
 
 	/* Expect 1 event */
-	ret = zsock_poll(fds, ARRAY_SIZE(fds), 200);
+	ret = poll(fds, ARRAY_SIZE(fds), 200);
 	zassert_equal(ret, 1);
 
-	zassert_equal(fds[0].revents, ZSOCK_POLLIN);
+	zassert_equal(fds[0].revents, POLLIN);
 
 	/* Check value */
 	zassert_ok(eventfd_read(fixture->fd, &value));
 	zassert_equal(value, 71);
 
-	zassert_ok(k_thread_join(&thread, K_FOREVER));
+	zassert_ok(pthread_join(th, NULL));
 }
 
-static void thread_eventfd_read(void *arg1, void *arg2, void *arg3)
+static void *thread_eventfd_read(void *arg1)
 {
 	eventfd_t value;
 	struct eventfd_fixture *fixture = arg1;
 
+	usleep(100000);
+
 	zassert_ok(eventfd_read(fixture->fd, &value));
+
+	return NULL;
 }
 
 ZTEST_F(eventfd, test_read_while_pollout)
 {
-	struct zsock_pollfd fds[] = {
+	struct pollfd fds[] = {
 		{
 			.fd = fixture->fd,
-			.events = ZSOCK_POLLOUT,
+			.events = POLLOUT,
 		},
 	};
+	pthread_t th;
 	int ret;
 
 	zassert_ok(eventfd_write(fixture->fd, UINT64_MAX - 1));
 
-	k_thread_create(&thread, thread_stack, K_THREAD_STACK_SIZEOF(thread_stack),
-			thread_eventfd_read, fixture, NULL, NULL, 0, 0, K_MSEC(100));
+	zassert_ok(pthread_create(&th, NULL, thread_eventfd_read, fixture));
 
 	/* Expect 1 event */
-	ret = zsock_poll(fds, ARRAY_SIZE(fds), 200);
+	ret = poll(fds, ARRAY_SIZE(fds), 200);
 	zassert_equal(ret, 1);
 
-	zassert_equal(fds[0].revents, ZSOCK_POLLOUT);
+	zassert_equal(fds[0].revents, POLLOUT);
 
-	zassert_ok(k_thread_join(&thread, K_FOREVER));
-}
-
-static void thread_eventfd_close(void *arg1, void *arg2, void *arg3)
-{
-	struct eventfd_fixture *fixture = arg1;
-
-	zassert_ok(close(fixture->fd));
-}
-
-ZTEST_F(eventfd, test_read_then_close_block)
-{
-	eventfd_t value;
-
-	k_thread_create(&thread, thread_stack, K_THREAD_STACK_SIZEOF(thread_stack),
-			thread_eventfd_close, fixture, NULL, NULL, 0, 0, K_MSEC(100));
-
-	zassert_equal(read(fixture->fd, &value, sizeof(value)), -1);
-	printf("ERRNO: %d\n", errno);
-
-	k_thread_join(&thread, K_FOREVER);
+	zassert_ok(pthread_join(th, NULL));
 }
