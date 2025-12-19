@@ -7,6 +7,8 @@
 #include <aio.h>
 #include <errno.h>
 
+#include <zephyr/toolchain.h>
+
 int aio_cancel(int fildes, struct aiocb *aiocbp)
 {
 	ARG_UNUSED(fildes);
