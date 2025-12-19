@@ -21,9 +21,14 @@ ZTEST_F(eventfd, test_set_flags)
 	int flags;
 	short event;
 
-	/* Get current flags; Expect blocking, non-semaphore. */
-	flags = ioctl(fixture->fd, F_GETFL, 0);
-	zassert_equal(flags, 0, "flags == %d", flags);
+	/* FIXME: To align with Linux, we should probably modify Zephyr so that eventfd does not
+	 * support F_SETFL / F_GETFL
+	 */
+	if (!IS_ENABLED(CONFIG_NATIVE_LIBC)) {
+		/* Get current flags; Expect blocking, non-semaphore. */
+		flags = ioctl(fixture->fd, F_GETFL, 0);
+		zassert_equal(flags, 0, "flags == %d", flags);
+	}
 
 	event = POLLIN;
 	ret = is_blocked(fixture->fd, &event);
@@ -37,13 +42,17 @@ ZTEST_F(eventfd, test_set_flags)
 	zassert_ok(ret);
 	zassert_equal(val, 3, "val == %lld", val);
 
+	/* FIXME: To align with Linux, we should probably modify Zephyr so that eventfd does not
+	 * support F_SETFL / F_GETFL
+	 */
+	if (!IS_ENABLED(CONFIG_NATIVE_LIBC)) {
+		/* Set nonblocking without reopening. */
+		ret = ioctl(fixture->fd, F_SETFL, O_NONBLOCK);
+		zassert_ok(ret, "%d", ret);
 
-	/* Set nonblocking without reopening. */
-	ret = ioctl(fixture->fd, F_SETFL, O_NONBLOCK);
-	zassert_ok(ret);
-
-	flags = ioctl(fixture->fd, F_GETFL, 0);
-	zassert_equal(flags, O_NONBLOCK, "flags == %d", flags);
+		flags = ioctl(fixture->fd, F_GETFL, 0);
+		zassert_equal(flags, O_NONBLOCK, "flags == %d", flags);
+	}
 
 	event = POLLOUT;
 	ret = is_blocked(fixture->fd, &event);
@@ -58,13 +67,17 @@ ZTEST_F(eventfd, test_set_flags)
 	zassert_ok(ret);
 	zassert_equal(val, 19, "val == %lld", val);
 
+	/* FIXME: To align with Linux, we should probably modify Zephyr so that eventfd does not
+	 * support F_SETFL / F_GETFL
+	 */
+	if (!IS_ENABLED(CONFIG_NATIVE_LIBC)) {
+		/* Set back to blocking. */
+		ret = ioctl(fixture->fd, F_SETFL, 0);
+		zassert_ok(ret);
 
-	/* Set back to blocking. */
-	ret = ioctl(fixture->fd, F_SETFL, 0);
-	zassert_ok(ret);
-
-	flags = ioctl(fixture->fd, F_GETFL, 0);
-	zassert_equal(flags, 0, "flags == %d", flags);
+		flags = ioctl(fixture->fd, F_GETFL, 0);
+		zassert_equal(flags, 0, "flags == %d", flags);
+	}
 
 	event = POLLIN;
 	ret = is_blocked(fixture->fd, &event);
