@@ -17,9 +17,11 @@ int getsubopt(char **optionp, char *const *keylist, char **valuep)
 	size_t i, len;
 	char *begin, *end, *eq, *key, *val;
 
+#ifndef CONFIG_NATIVE_LIBC
 	__ASSERT_NO_MSG(optionp != NULL);
 	__ASSERT_NO_MSG(keylist != NULL);
 	__ASSERT_NO_MSG(valuep != NULL);
+#endif
 
 	*valuep = NULL;
 
