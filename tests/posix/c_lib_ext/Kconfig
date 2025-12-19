@@ -26,3 +26,35 @@ config TEST_LOCALE_STR
 	default "C" if TEST_LOCALE_CHOICE_C
 	default "en_US.UTF-8" if TEST_LOCALE_CHOICE_EN_US_UTF8
 	default "C"
+
+# consider moving this to a common aread in tests/posix/
+config TEST_POSIX_LINUX_COMPAT
+	bool "Test POSIX suites are compatible with Linux"
+	help
+	  This option is used to verify that the POSIX testsuites pass on Linux. It is for exclusive
+	  use with native_sim, and CONFIG_TC_PROVIDES_<OPTION_GROUP>=y must be set for the testsuite
+	  (option group). The "DUT" in this case becomes the testsuite itself. By transitive
+	  property, we can say approximately that if Linux passes against the testsuite, and Zephyr
+	  passes the testsuite, then Linux and Zephyr are approximately compatible, to the extent of
+	  coverage provided by the testsuite.
+
+# Minor hack since we already have CONFIG_TC_PROVIDES_POSIX_C_LIB_EXT for NATIVE_LIBC:
+#
+# since Kconfig.zephyr selects TC_PROVIDES_POSIX_C_LIB_EXT for NATIVE_LIBC, we explicitly
+# disable it by default for testcases other than linux_compat. That way, the Zephyr
+# implementation is also tested by native_sim.
+#
+# This can be easily verified by
+#
+# grep C_LIB_EXT twister-out/native_sim_native/host/modules/lib/posix/tests/posix/c_lib_ext/\
+#   portability.posix.c_lib_ext.linux_compat/zephyr/.config
+#   CONFIG_TC_PROVIDES_POSIX_C_LIB_EXT=y
+#   CONFIG_POSIX_C_LIB_EXT=y
+#
+# grep C_LIB_EXT twister-out/native_sim_native/host/modules/lib/posix/tests/posix/c_lib_ext/\
+#   portability.posix.c_lib_ext.picolibc/zephyr/.config
+#   CONFIG_POSIX_C_LIB_EXT=n
+config TC_PROVIDES_POSIX_C_LIB_EXT
+	bool
+	default y if TEST_POSIX_LINUX_COMPAT && ARCH_POSIX && CONFIG_NATIVE_LIBC
+	default n
