@@ -30,7 +30,7 @@ static inline int getopt_r(int argc, char *const argv[], const char *optstring, 
 		return -1;
 	}
 
-	return zephyr_getopt(argc, argv, NULL, NULL, false, optstring, optarg, opterr, optind,
+	return zephyr_getopt(argc, argv, optstring, NULL, NULL, false, optarg, opterr, optind,
 			     optopt);
 }
 
