@@ -8,12 +8,12 @@
 #define TESTS_POSIX_EVENTFD_SRC__MAIN_H_
 
 #include <errno.h>
-#include <stdio.h>
-
-#include <zephyr/net/socket.h>
 #include <poll.h>
+#include <pthread.h>
+#include <stdio.h>
 #include <sys/eventfd.h>
 #include <unistd.h>
+
 #include <zephyr/ztest.h>
 
 #define TESTVAL 10
