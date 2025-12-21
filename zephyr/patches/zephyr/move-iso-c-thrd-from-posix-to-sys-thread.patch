@@ -1,0 +1,741 @@
+diff --git a/include/zephyr/sys/thread.h b/include/zephyr/sys/thread.h
+new file mode 100644
+index 00000000000..a492c625d30
+--- /dev/null
++++ b/include/zephyr/sys/thread.h
+@@ -0,0 +1,65 @@
++/*
++ * Copyright (c) The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_INCLUDE_ZEPHYR_SYS_THREAD_H_
++#define ZEPHYR_INCLUDE_ZEPHYR_SYS_THREAD_H_
++
++#include <errno.h>
++
++#include <zephyr/kernel.h>
++#include <zephyr/toolchain.h>
++#include <zephyr/sys/atomic.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++#define SYS_THREAD_PROCESS_SHARED  1
++#define SYS_THREAD_PROCESS_PRIVATE 0
++
++#define SYS_OBJ_INITIALIZER (-1)
++
++typedef unsigned long sys_thread_key_t;
++typedef void (*sys_thread_key_dtor_t)(void *);
++
++__syscall int sys_thread_key_create(sys_thread_key_t *key, sys_thread_key_dtor_t destructor);
++__syscall int sys_thread_key_delete(sys_thread_key_t key);
++__syscall int sys_thread_setspecific(sys_thread_key_t key, const void *value);
++__syscall int sys_thread_getspecific(sys_thread_key_t key, void **value);
++
++#define SYS_PROCESS_SHARED 1
++
++typedef atomic_t sys_thread_once_t;
++
++static inline void sys_thread_once(sys_thread_once_t *flag, void (*func)(void))
++{
++	if (atomic_cas((atomic_t *)flag, 0, 1)) {
++		func();
++	}
++}
++
++__syscall int sys_condvar_destroy(struct k_condvar *cond);
++__syscall int sys_condvar_init(struct k_condvar **cond);
++
++#define SYS_MUTEX_RECURSIVE 1
++
++__syscall int sys_mutex_destroy(struct k_mutex *mutex);
++__syscall int sys_mutex_init(struct k_mutex **mutex, int flags);
++
++__syscall int sys_thread_create(struct k_thread **th, k_thread_stack_t *stack, size_t size,
++			     k_thread_entry_t entry, void *p1, void *p2, void *p3, int prio,
++			     uint32_t options);
++__syscall void sys_thread_exit(void *retval);
++__syscall int sys_thread_detach(struct k_thread *th);
++__syscall int k_thread_rejoin(struct k_thread *th, void **retval);
++
++#ifdef __cplusplus
++}
++#endif
++
++#include <zephyr/syscalls/thread.h>
++
++#endif /* ZEPHYR_INCLUDE_ZEPHYR_SYS_THREAD_H_ */
+diff --git a/include/zephyr/sys/timeutil.h b/include/zephyr/sys/timeutil.h
+index 4c7f32424be..588e05cb85a 100644
+--- a/include/zephyr/sys/timeutil.h
++++ b/include/zephyr/sys/timeutil.h
+@@ -686,6 +686,8 @@ static inline k_timeout_t timespec_to_timeout(const struct timespec *req, struct
+ 	return timeout;
+ }
+ 
++k_timepoint_t timespec_to_timepoint(const struct timespec *ts);
++
+ /**
+  * @}
+  */
+diff --git a/lib/libc/common/Kconfig b/lib/libc/common/Kconfig
+index bd44c55c903..4abe6548377 100644
+--- a/lib/libc/common/Kconfig
++++ b/lib/libc/common/Kconfig
+@@ -106,10 +106,6 @@ config COMMON_LIBC_STRNLEN
+ 
+ config COMMON_LIBC_THRD
+ 	bool "C11 <threads.h> API support"
+-	depends on DYNAMIC_THREAD
+-	# Note: the POSIX_THREADS dependency is only necessary until common elements
+-	# of C11 threads and POSIX API can be abstracted out to a common library.
+-	depends on POSIX_THREADS
+ 	default y
+ 	help
+ 	  Common implementation of C11 <threads.h> API.
+diff --git a/lib/libc/common/include/machine/_threads.h b/lib/libc/common/include/machine/_threads.h
+index cebce717c73..98926cade6f 100644
+--- a/lib/libc/common/include/machine/_threads.h
++++ b/lib/libc/common/include/machine/_threads.h
+@@ -13,12 +13,12 @@ extern "C" {
+ 
+ #define ONCE_FLAG_INIT {0}
+ 
+-typedef int cnd_t;
+-typedef int mtx_t;
+-typedef int thrd_t;
+-typedef int tss_t;
++typedef unsigned long cnd_t;
++typedef unsigned long mtx_t;
++typedef unsigned long thrd_t;
++typedef unsigned long tss_t;
+ typedef struct {
+-	char flag;
++	long flag;
+ } once_flag;
+ 
+ #ifdef __cplusplus
+diff --git a/lib/libc/common/source/thrd/cnd.c b/lib/libc/common/source/thrd/cnd.c
+index 457a9ae0ee8..b260e79e5ce 100644
+--- a/lib/libc/common/source/thrd/cnd.c
++++ b/lib/libc/common/source/thrd/cnd.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (c) 2023, Meta
++ * Copyright (c) The Zephyr Project Contributors
+  *
+  * SPDX-License-Identifier: Apache-2.0
+  */
+@@ -7,29 +7,30 @@
+ #include <errno.h>
+ #include <threads.h>
+ 
+-#include <pthread.h>
++#include <zephyr/kernel.h>
++#include <zephyr/sys/thread.h>
++#include <zephyr/sys/timeutil.h>
+ 
+ int cnd_broadcast(cnd_t *cond)
+ {
+-	switch (pthread_cond_broadcast(cond)) {
+-	case 0:
++	if (k_condvar_broadcast(*(struct k_condvar **)cond) >= 0) {
+ 		return thrd_success;
+-	default:
+-		return thrd_error;
+ 	}
++
++	return thrd_error;
+ }
+ 
+ void cnd_destroy(cnd_t *cond)
+ {
+-	(void)pthread_cond_destroy(cond);
++	(void)sys_condvar_destroy(*(struct k_condvar **)cond);
+ }
+ 
+ int cnd_init(cnd_t *cond)
+ {
+-	switch (pthread_cond_init(cond, NULL)) {
++	switch (sys_condvar_init((struct k_condvar **)cond)) {
+ 	case 0:
+ 		return thrd_success;
+-	case ENOMEM:
++	case -ENOMEM:
+ 		return thrd_nomem;
+ 	default:
+ 		return thrd_error;
+@@ -38,11 +39,9 @@ int cnd_init(cnd_t *cond)
+ 
+ int cnd_signal(cnd_t *cond)
+ {
+-	switch (pthread_cond_signal(cond)) {
++	switch (k_condvar_signal(*(struct k_condvar **)cond)) {
+ 	case 0:
+ 		return thrd_success;
+-	case ENOMEM:
+-		return thrd_nomem;
+ 	default:
+ 		return thrd_error;
+ 	}
+@@ -50,10 +49,11 @@ int cnd_signal(cnd_t *cond)
+ 
+ int cnd_timedwait(cnd_t *restrict cond, mtx_t *restrict mtx, const struct timespec *restrict ts)
+ {
+-	switch (pthread_cond_timedwait(cond, mtx, ts)) {
++	switch (k_condvar_wait(*(struct k_condvar **)cond, *(struct k_mutex **)mtx,
++			       sys_timepoint_timeout(timespec_to_timepoint(ts)))) {
+ 	case 0:
+ 		return thrd_success;
+-	case ETIMEDOUT:
++	case -EAGAIN:
+ 		return thrd_timedout;
+ 	default:
+ 		return thrd_error;
+@@ -62,7 +62,7 @@ int cnd_timedwait(cnd_t *restrict cond, mtx_t *restrict mtx, const struct timesp
+ 
+ int cnd_wait(cnd_t *cond, mtx_t *mtx)
+ {
+-	switch (pthread_cond_wait(cond, mtx)) {
++	switch (k_condvar_wait(*(struct k_condvar **)cond, *(struct k_mutex **)mtx, K_FOREVER)) {
+ 	case 0:
+ 		return thrd_success;
+ 	default:
+diff --git a/lib/libc/common/source/thrd/mtx.c b/lib/libc/common/source/thrd/mtx.c
+index 17b41a99709..6163447e36f 100644
+--- a/lib/libc/common/source/thrd/mtx.c
++++ b/lib/libc/common/source/thrd/mtx.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (c) 2023, Meta
++ * Copyright (c) The Zephyr Project Contributors
+  *
+  * SPDX-License-Identifier: Apache-2.0
+  */
+@@ -8,55 +8,53 @@
+ #include <threads.h>
+ 
+ #include <zephyr/kernel.h>
+-#include <pthread.h>
++#include <zephyr/sys/thread.h>
++#include <zephyr/sys/timeutil.h>
+ 
+-int mtx_init(mtx_t *mutex, int type)
++static int mtx_type_to_flags(int type, int *flags)
+ {
+-	int ret;
+-	pthread_mutexattr_t attr;
+-	pthread_mutexattr_t *attrp = NULL;
+-
+ 	switch (type) {
+ 	case mtx_plain:
+ 	case mtx_timed:
++		*flags = 0;
+ 		break;
+ 	case mtx_plain | mtx_recursive:
+ 	case mtx_timed | mtx_recursive:
+-		attrp = &attr;
+-		ret = pthread_mutexattr_init(attrp);
+-		__ASSERT_NO_MSG(ret == 0);
+-
+-		ret = pthread_mutexattr_settype(attrp, PTHREAD_MUTEX_RECURSIVE);
+-		__ASSERT_NO_MSG(ret == 0);
++		*flags = SYS_MUTEX_RECURSIVE;
+ 		break;
+ 	default:
++		return -EINVAL;
++	}
++
++	return 0;
++}
++
++int mtx_init(mtx_t *mutex, int type)
++{
++	int flags;
++
++	if (mtx_type_to_flags(type, &flags) < 0) {
+ 		return thrd_error;
+ 	}
+ 
+-	switch (pthread_mutex_init(mutex, attrp)) {
++	switch (sys_mutex_init((struct k_mutex **)mutex, flags)) {
+ 	case 0:
+-		ret = thrd_success;
+-		break;
++		return thrd_success;
+ 	default:
+-		ret = thrd_error;
+-		break;
+-	}
+-
+-	if (attrp != NULL) {
+-		(void)pthread_mutexattr_destroy(attrp);
++		return thrd_error;
+ 	}
+ 
+-	return ret;
++	CODE_UNREACHABLE;
+ }
+ 
+ void mtx_destroy(mtx_t *mutex)
+ {
+-	(void)pthread_mutex_destroy(mutex);
++	(void)sys_mutex_destroy(*(struct k_mutex **)mutex);
+ }
+ 
+ int mtx_lock(mtx_t *mutex)
+ {
+-	switch (pthread_mutex_lock(mutex)) {
++	switch (k_mutex_lock(*(struct k_mutex **)mutex, K_FOREVER)) {
+ 	case 0:
+ 		return thrd_success;
+ 	default:
+@@ -64,12 +62,15 @@ int mtx_lock(mtx_t *mutex)
+ 	}
+ }
+ 
+-int mtx_timedlock(mtx_t *restrict mutex, const struct timespec *restrict time_point)
++int mtx_timedlock(mtx_t *restrict mutex, const struct timespec *restrict ts)
+ {
+-	switch (pthread_mutex_timedlock(mutex, time_point)) {
++	switch (k_mutex_lock(*(struct k_mutex **)mutex,
++			     sys_timepoint_timeout(timespec_to_timepoint(ts)))) {
+ 	case 0:
+ 		return thrd_success;
+-	case ETIMEDOUT:
++	case -EBUSY:
++		return thrd_busy;
++	case -EAGAIN:
+ 		return thrd_timedout;
+ 	default:
+ 		return thrd_error;
+@@ -78,10 +79,10 @@ int mtx_timedlock(mtx_t *restrict mutex, const struct timespec *restrict time_po
+ 
+ int mtx_trylock(mtx_t *mutex)
+ {
+-	switch (pthread_mutex_trylock(mutex)) {
++	switch (k_mutex_lock(*(struct k_mutex **)mutex, K_NO_WAIT)) {
+ 	case 0:
+ 		return thrd_success;
+-	case EBUSY:
++	case -EBUSY:
+ 		return thrd_busy;
+ 	default:
+ 		return thrd_error;
+@@ -90,7 +91,7 @@ int mtx_trylock(mtx_t *mutex)
+ 
+ int mtx_unlock(mtx_t *mutex)
+ {
+-	switch (pthread_mutex_unlock(mutex)) {
++	switch (k_mutex_unlock(*(struct k_mutex **)mutex)) {
+ 	case 0:
+ 		return thrd_success;
+ 	default:
+diff --git a/lib/libc/common/source/thrd/once.c b/lib/libc/common/source/thrd/once.c
+index 2125e25bf07..36de194b4af 100644
+--- a/lib/libc/common/source/thrd/once.c
++++ b/lib/libc/common/source/thrd/once.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (c) 2023, Meta
++ * Copyright (c) The Zephyr Project Contributors
+  *
+  * SPDX-License-Identifier: Apache-2.0
+  */
+@@ -7,10 +7,9 @@
+ #include <errno.h>
+ #include <threads.h>
+ 
+-#include <zephyr/kernel.h>
+-#include <pthread.h>
++#include <zephyr/sys/thread.h>
+ 
+ void call_once(once_flag *flag, void (*func)(void))
+ {
+-	(void)pthread_once((pthread_once_t *)flag, func);
++	(void)sys_thread_once((sys_thread_once_t *)flag, func);
+ }
+diff --git a/lib/libc/common/source/thrd/thrd.c b/lib/libc/common/source/thrd/thrd.c
+index 0946e2cb2b9..1f394af592e 100644
+--- a/lib/libc/common/source/thrd/thrd.c
++++ b/lib/libc/common/source/thrd/thrd.c
+@@ -1,32 +1,27 @@
+ /*
+- * Copyright (c) 2023, Meta
++ * Copyright (c) The Zephyr Project Contributors
+  *
+  * SPDX-License-Identifier: Apache-2.0
+  */
+ 
+ #include <errno.h>
++#include <stddef.h>
+ #include <threads.h>
+ 
+ #include <zephyr/kernel.h>
+-#include <pthread.h>
+-#include <sched.h>
+ #include <zephyr/sys/clock.h>
+-
+-struct thrd_trampoline_arg {
+-	thrd_start_t func;
+-	void *arg;
+-};
++#include <zephyr/sys/thread.h>
+ 
+ int thrd_create(thrd_t *thr, thrd_start_t func, void *arg)
+ {
+-	typedef void *(*pthread_func_t)(void *arg);
+-
+-	pthread_func_t pfunc = (pthread_func_t)func;
++	k_thread_entry_t entry = (k_thread_entry_t)func;
+ 
+-	switch (pthread_create(thr, NULL, pfunc, arg)) {
++	switch (sys_thread_create((struct k_thread **)thr, NULL, 0, entry, arg, NULL, NULL,
++				  k_thread_priority_get(k_current_get()),
++				  k_is_user_context() ? (K_INHERIT_PERMS | K_USER) : 0)) {
+ 	case 0:
+ 		return thrd_success;
+-	case EAGAIN:
++	case -ENOMEM:
+ 		return thrd_nomem;
+ 	default:
+ 		return thrd_error;
+@@ -35,12 +30,12 @@ int thrd_create(thrd_t *thr, thrd_start_t func, void *arg)
+ 
+ int thrd_equal(thrd_t lhs, thrd_t rhs)
+ {
+-	return pthread_equal(lhs, rhs);
++	return lhs == rhs;
+ }
+ 
+ thrd_t thrd_current(void)
+ {
+-	return pthread_self();
++	return (thrd_t)k_current_get();
+ }
+ 
+ int thrd_sleep(const struct timespec *duration, struct timespec *remaining)
+@@ -54,19 +49,19 @@ int thrd_sleep(const struct timespec *duration, struct timespec *remaining)
+ 
+ void thrd_yield(void)
+ {
+-	(void)sched_yield();
++	(void)k_yield();
+ }
+ 
+ FUNC_NORETURN void thrd_exit(int res)
+ {
+-	pthread_exit(INT_TO_POINTER(res));
++	sys_thread_exit(INT_TO_POINTER(res));
+ 
+ 	CODE_UNREACHABLE;
+ }
+ 
+ int thrd_detach(thrd_t thr)
+ {
+-	switch (pthread_detach(thr)) {
++	switch (sys_thread_detach((struct k_thread *)(uintptr_t)thr)) {
+ 	case 0:
+ 		return thrd_success;
+ 	default:
+@@ -78,7 +73,7 @@ int thrd_join(thrd_t thr, int *res)
+ {
+ 	void *ret;
+ 
+-	switch (pthread_join(thr, &ret)) {
++	switch (k_thread_rejoin((struct k_thread *)(uintptr_t)thr, &ret)) {
+ 	case 0:
+ 		if (res != NULL) {
+ 			*res = POINTER_TO_INT(ret);
+diff --git a/lib/libc/common/source/thrd/tss.c b/lib/libc/common/source/thrd/tss.c
+index dca1a3a7577..3c87f62a842 100644
+--- a/lib/libc/common/source/thrd/tss.c
++++ b/lib/libc/common/source/thrd/tss.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (c) 2023, Meta
++ * Copyright (c) The Zephyr Project Contributors
+  *
+  * SPDX-License-Identifier: Apache-2.0
+  */
+@@ -8,16 +8,16 @@
+ #include <threads.h>
+ 
+ #include <zephyr/kernel.h>
+-#include <pthread.h>
++#include <zephyr/sys/thread.h>
+ 
+ int tss_create(tss_t *key, tss_dtor_t destructor)
+ {
+-	switch (pthread_key_create(key, destructor)) {
++	switch (sys_thread_key_create((sys_thread_key_t *)key, destructor)) {
+ 	case 0:
+ 		return thrd_success;
+-	case EAGAIN:
++	case -EAGAIN:
+ 		return thrd_busy;
+-	case ENOMEM:
++	case -ENOMEM:
+ 		return thrd_nomem;
+ 	default:
+ 		return thrd_error;
+@@ -26,15 +26,21 @@ int tss_create(tss_t *key, tss_dtor_t destructor)
+ 
+ void *tss_get(tss_t key)
+ {
+-	return pthread_getspecific(key);
++	void *value = NULL;
++
++	if (sys_thread_getspecific((sys_thread_key_t)key, &value) < 0) {
++		return NULL;
++	}
++
++	return value;
+ }
+ 
+ int tss_set(tss_t key, void *val)
+ {
+-	switch (pthread_setspecific(key, val)) {
++	switch (sys_thread_setspecific((sys_thread_key_t)key, val)) {
+ 	case 0:
+ 		return thrd_success;
+-	case ENOMEM:
++	case -ENOMEM:
+ 		return thrd_nomem;
+ 	default:
+ 		return thrd_error;
+@@ -43,5 +49,5 @@ int tss_set(tss_t key, void *val)
+ 
+ void tss_delete(tss_t key)
+ {
+-	(void)pthread_key_delete(key);
++	(void)sys_thread_key_delete((sys_thread_key_t)key);
+ }
+diff --git a/lib/os/CMakeLists.txt b/lib/os/CMakeLists.txt
+index 09ef3c4e4c0..6e8b9ad4af5 100644
+--- a/lib/os/CMakeLists.txt
++++ b/lib/os/CMakeLists.txt
+@@ -3,6 +3,7 @@
+ zephyr_syscall_header(
+   ${ZEPHYR_BASE}/include/zephyr/sys/clock.h
+   ${ZEPHYR_BASE}/include/zephyr/sys/mutex.h
++  ${ZEPHYR_BASE}/include/zephyr/sys/thread.h
+ )
+ 
+ zephyr_sources(
+@@ -10,6 +11,7 @@ zephyr_sources(
+   clock.c
+   printk.c
+   sem.c
++  thread.c
+   thread_entry.c
+   )
+ 
+diff --git a/lib/os/clock.c b/lib/os/clock.c
+index e4d98de11a9..86cdc49770e 100644
+--- a/lib/os/clock.c
++++ b/lib/os/clock.c
+@@ -206,6 +206,17 @@ int z_vrfy_sys_clock_nanosleep(int clock_id, int flags, const struct timespec *r
+ #include <zephyr/syscalls/sys_clock_nanosleep_mrsh.c>
+ #endif /* CONFIG_USERSPACE */
+ 
++k_timepoint_t timespec_to_timepoint(const struct timespec *ts)
++{
++	struct timespec now;
++	struct timespec duration = *ts;
++
++	(void)sys_clock_gettime(SYS_CLOCK_REALTIME, &now);
++	timespec_sub(&duration, &now);
++
++	return sys_timepoint_calc(timespec_to_timeout(&duration, NULL));
++}
++
+ #ifdef CONFIG_ZTEST
+ #include <zephyr/ztest.h>
+ static void reset_clock_offset(void)
+diff --git a/lib/os/thread.c b/lib/os/thread.c
+new file mode 100644
+index 00000000000..759933c93b9
+--- /dev/null
++++ b/lib/os/thread.c
+@@ -0,0 +1,176 @@
++/*
++ * Copyright (c) The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <zephyr/sys/thread.h>
++
++int z_impl_sys_thread_key_create(sys_thread_key_t *key, sys_thread_key_dtor_t destructor)
++{
++	return -ENOSYS;
++}
++
++#ifdef CONFIG_USERSPACE
++int z_vrfy_sys_thread_key_create(sys_thread_key_t *key, sys_thread_key_dtor_t destructor)
++{
++	K_OOPS(K_SYSCALL_MEMORY_WRITE(key, sizeof(*key)));
++	return z_impl_sys_thread_key_create(key, destructor);
++}
++#include <zephyr/syscalls/sys_thread_key_create_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++int z_impl_sys_thread_key_delete(sys_thread_key_t key)
++{
++	return -ENOSYS;
++}
++
++#ifdef CONFIG_USERSPACE
++int z_vrfy_sys_thread_key_delete(sys_thread_key_t key)
++{
++	return z_impl_sys_thread_key_delete(key);
++}
++#include <zephyr/syscalls/sys_thread_key_delete_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++int z_impl_sys_thread_setspecific(sys_thread_key_t key, const void *value)
++{
++	return -ENOSYS;
++}
++
++#ifdef CONFIG_USERSPACE
++int z_vrfy_sys_thread_setspecific(sys_thread_key_t key, const void *value)
++{
++	return z_impl_sys_thread_setspecific(key, const void *value);
++}
++#include <zephyr/syscalls/sys_thread_setspecific_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++int z_impl_sys_thread_getspecific(sys_thread_key_t key, void **value)
++{
++	return -ENOSYS;
++}
++
++#ifdef CONFIG_USERSPACE
++int z_vrfy_sys_thread_getspecific(sys_thread_key_t key, void **value)
++{
++	K_OOPS(K_SYSCALL_MEMORY_WRITE(value, sizeof(*value)));
++	return z_impl_sys_thread_getspecific(key, value);
++}
++#include <zephyr/syscalls/sys_thread_getspecific_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++int z_impl_sys_condvar_destroy(struct k_condvar *cond)
++{
++	return -ENOSYS;
++}
++
++#ifdef CONFIG_USERSPACE
++int z_vrfy_sys_condvar_destroy(struct k_condvar *cond)
++{
++	return z_impl_sys_condvar_destroy(cond);
++}
++#include <zephyr/syscalls/sys_condvar_destroy_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++int z_impl_sys_condvar_init(struct k_condvar **cond)
++{
++	return -ENOSYS;
++}
++
++#ifdef CONFIG_USERSPACE
++int z_vrfy_sys_condvar_init(struct k_condvar *cond)
++{
++	K_OOPS(K_SYSCALL_MEMORY_WRITE(cond, sizeof(*cond)));
++	return z_impl_sys_condvar_init(cond);
++}
++#include <zephyr/syscalls/sys_condvar_destroy_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++int z_impl_sys_mutex_destroy(struct k_mutex *mutex)
++{
++	return -ENOSYS;
++}
++
++#ifdef CONFIG_USERSPACE
++int z_vrfy_sys_mutex_destroy(struct k_condvar *cond)
++{
++	return z_impl_sys_mutex_destroy(cond);
++}
++#include <zephyr/syscalls/sys_mutex_destroy_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++int z_impl_sys_mutex_init(struct k_mutex **mutex, int flags)
++{
++	return -ENOSYS;
++}
++
++#ifdef CONFIG_USERSPACE
++int z_vrfy_sys_mutex_init(struct k_mutex **mutex, int flags)
++{
++	K_OOPS(K_SYSCALL_MEMORY_WRITE(mutex, sizeof(*mutex)));
++	return z_impl_sys_mutex_init(mutex, flags);
++}
++#include <zephyr/syscalls/sys_mutex_init_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++int z_impl_sys_thread_create(struct k_thread **th, k_thread_stack_t *stack, size_t size,
++			     k_thread_entry_t entry, void *p1, void *p2, void *p3, int prio,
++			     uint32_t options)
++{
++	return -ENOSYS;
++}
++
++#ifdef CONFIG_USERSPACE
++int z_vrfy_sys_thread_create(struct k_thread **th, k_thread_stack_t *stack, size_t size,
++			     k_thread_entry_t entry, void *p1, void *p2, void *p3, int prio,
++			     uint32_t options)
++{
++	K_OOPS(K_SYSCALL_MEMORY_WRITE(th, sizeof(*th)));
++	if (stack != NULL) {
++		K_OOPS(K_SYSCALL_MEMORY_WRITE(stack, size));
++	}
++	return z_impl_sys_thread_create(th, stack, size, entry, p1, p2, p3, prio, options);
++}
++#include <zephyr/syscalls/sys_thread_create_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++
++void z_impl_sys_thread_exit(void *retval)
++{
++}
++
++#ifdef CONFIG_USERSPACE
++int z_vrfy_sys_thread_exit(void *retval)
++{
++	return z_impl_sys_thread_exit(retval);
++}
++#include <zephyr/syscalls/sys_thread_exit_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++int z_impl_sys_thread_detach(struct k_thread *th)
++{
++	return -ENOSYS;
++}
++
++#ifdef CONFIG_USERSPACE
++int z_vrfy_sys_thread_detach(struct k_thread *th)
++{
++	return z_impl_sys_thread_detach(th);
++}
++#include <zephyr/syscalls/sys_thread_detach_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++int z_impl_k_thread_rejoin(struct k_thread *th, void **retval)
++{
++	return -ENOSYS;
++}
++
++#ifdef CONFIG_USERSPACE
++int z_vrfy_k_thread_rejoin(struct k_thread *th, void **retval)
++{
++	K_OOPS(K_SYSCALL_MEMORY_WRITE(retval, sizeof(*retval)));
++	return z_impl_k_thread_rejoin(th, retval);
++}
++#include <zephyr/syscalls/k_thread_rejoin_mrsh.c>
++#endif /* CONFIG_USERSPACE */
