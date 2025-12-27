@@ -81,7 +81,9 @@ struct posix_condattr {
 
 struct posix_cond {
 	struct k_condvar condvar;
+#if !defined(CONFIG_SYS_THREAD)
 	struct posix_condattr attr;
+#endif
 };
 
 typedef struct pthread_key_obj {
