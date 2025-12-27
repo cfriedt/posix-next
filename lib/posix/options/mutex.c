@@ -39,7 +39,9 @@ static int pthread_mutexattr_to_flags(const pthread_mutexattr_t *attr, int *flag
 	switch (a->type) {
 	case PTHREAD_MUTEX_DEFAULT:
 	case PTHREAD_MUTEX_NORMAL:
+#if defined(PTHREAD_MUTEX_ROBUST)
 	case PTHREAD_MUTEX_ROBUST:
+#endif
 		break;
 	case PTHREAD_MUTEX_RECURSIVE:
 		*flags = SYS_MUTEX_RECURSIVE;
