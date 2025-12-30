@@ -90,7 +90,7 @@ typedef struct {
 #if !(defined(_PTHREAD_ONCE_T_DECLARED) && defined(__pthread_once_t_defined)) ||                   \
 	defined(__DOXYGEN__)
 typedef struct {
-	bool flag;
+	unsigned long flag;
 } pthread_once_t;
 #define _PTHREAD_ONCE_T_DECLARED
 #define __pthread_once_t_defined
