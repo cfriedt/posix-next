@@ -1031,27 +1031,24 @@ int pthread_getschedparam(pthread_t pthread, int *policy, struct sched_param *pa
  */
 int pthread_once(pthread_once_t *once, void (*init_func)(void))
 {
-	int ret = EINVAL;
-	bool run_init_func = false;
-	struct pthread_once *const _once = (struct pthread_once *)once;
-
 	if (init_func == NULL) {
 		return EINVAL;
 	}
 
-	SYS_SEM_LOCK(&pthread_pool_lock) {
-		if (!_once->flag) {
-			run_init_func = true;
-			_once->flag = true;
+	if ((sizeof(atomic_t) == sizeof(*once)) && (__alignof(atomic_t) == __alignof(*once))) {
+		if (atomic_cas((atomic_t *)once, 0, 1)) {
+			init_func();
 		}
-		ret = 0;
+	} else {
+		/* __atomic_compare_and_exchange_n() is not visible on qemu_riscv64 for some reason
+		 * (sdk 0.17.4)
+		 */
+		if (!__atomic_test_and_set((uint8_t *)once, __ATOMIC_SEQ_CST)) {
+			init_func();
+		}
 	}
 
-	if (ret == 0 && run_init_func) {
-		init_func();
-	}
-
-	return ret;
+	return 0;
 }
 
 /**
