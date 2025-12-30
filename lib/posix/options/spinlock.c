@@ -10,20 +10,10 @@
 
 #include <zephyr/init.h>
 #include <zephyr/kernel.h>
+#include <zephyr/sys/atomic.h>
 #include <zephyr/sys/bitarray.h>
 
-union _spinlock_storage {
-	struct k_spinlock lock;
-	uint8_t byte;
-};
-#if !defined(CONFIG_CPP) && !defined(CONFIG_SMP) && !defined(CONFIG_SPIN_VALIDATE)
-BUILD_ASSERT(sizeof(struct k_spinlock) == 0,
-	     "please remove the _spinlock_storage workaround if, at some point, k_spinlock is no "
-	     "longer zero bytes when CONFIG_SMP=n && CONFIG_SPIN_VALIDATE=n");
-#endif
-
-static union _spinlock_storage posix_spinlock_pool[CONFIG_MAX_PTHREAD_SPINLOCK_COUNT];
-static k_spinlock_key_t posix_spinlock_key[CONFIG_MAX_PTHREAD_SPINLOCK_COUNT];
+static atomic_t posix_spinlock_pool[CONFIG_MAX_PTHREAD_SPINLOCK_COUNT];
 SYS_BITARRAY_DEFINE_STATIC(posix_spinlock_bitarray, CONFIG_MAX_PTHREAD_SPINLOCK_COUNT);
 
 /*
@@ -34,9 +24,9 @@ SYS_BITARRAY_DEFINE_STATIC(posix_spinlock_bitarray, CONFIG_MAX_PTHREAD_SPINLOCK_
 BUILD_ASSERT(CONFIG_MAX_PTHREAD_SPINLOCK_COUNT < PTHREAD_OBJ_MASK_INIT,
 	"CONFIG_MAX_PTHREAD_SPINLOCK_COUNT is too high");
 
-static inline size_t posix_spinlock_to_offset(struct k_spinlock *l)
+static inline size_t posix_spinlock_to_offset(atomic_t *l)
 {
-	return (union _spinlock_storage *)l - posix_spinlock_pool;
+	return l - posix_spinlock_pool;
 }
 
 static inline size_t to_posix_spinlock_idx(pthread_spinlock_t lock)
@@ -44,7 +34,7 @@ static inline size_t to_posix_spinlock_idx(pthread_spinlock_t lock)
 	return mark_pthread_obj_uninitialized(lock);
 }
 
-static struct k_spinlock *get_posix_spinlock(pthread_spinlock_t *lock)
+static atomic_t *get_posix_spinlock(pthread_spinlock_t *lock)
 {
 	size_t bit;
 	int actually_initialized;
@@ -69,7 +59,7 @@ static struct k_spinlock *get_posix_spinlock(pthread_spinlock_t *lock)
 		return NULL;
 	}
 
-	return (struct k_spinlock *)&posix_spinlock_pool[bit];
+	return &posix_spinlock_pool[bit];
 }
 
 int pthread_spin_init(pthread_spinlock_t *lock, int pshared)
@@ -88,6 +78,7 @@ int pthread_spin_init(pthread_spinlock_t *lock, int pshared)
 		return ENOMEM;
 	}
 
+
 	*lock = mark_pthread_obj_initialized(bit);
 
 	return 0;
@@ -97,7 +88,7 @@ int pthread_spin_destroy(pthread_spinlock_t *lock)
 {
 	int err;
 	size_t bit;
-	struct k_spinlock *l;
+	atomic_t *l;
 
 	l = get_posix_spinlock(lock);
 	if (l == NULL) {
@@ -112,10 +103,9 @@ int pthread_spin_destroy(pthread_spinlock_t *lock)
 	return 0;
 }
 
-int pthread_spin_lock(pthread_spinlock_t *lock)
+static int pthread_spin_lock_common(pthread_spinlock_t *lock, bool wait)
 {
-	size_t bit;
-	struct k_spinlock *l;
+	atomic_t *l;
 
 	l = get_posix_spinlock(lock);
 	if (l == NULL) {
@@ -123,31 +113,30 @@ int pthread_spin_lock(pthread_spinlock_t *lock)
 		return EINVAL;
 	}
 
-	bit = posix_spinlock_to_offset(l);
-	posix_spinlock_key[bit] = k_spin_lock(l);
+	while (!atomic_cas(l, 0, 1)) {
+		arch_nop();
+		if (wait) {
+			continue;
+		}
+		return EBUSY;
+	}
 
 	return 0;
 }
 
+int pthread_spin_lock(pthread_spinlock_t *lock)
+{
+	return pthread_spin_lock_common(lock, true);
+}
+
 int pthread_spin_trylock(pthread_spinlock_t *lock)
 {
-	size_t bit;
-	struct k_spinlock *l;
-
-	l = get_posix_spinlock(lock);
-	if (l == NULL) {
-		/* not specified as part of POSIX but this is the Linux behavior */
-		return EINVAL;
-	}
-
-	bit = posix_spinlock_to_offset(l);
-	return k_spin_trylock(l, &posix_spinlock_key[bit]);
+	return pthread_spin_lock_common(lock, false);
 }
 
 int pthread_spin_unlock(pthread_spinlock_t *lock)
 {
-	size_t bit;
-	struct k_spinlock *l;
+	atomic_t *l;
 
 	l = get_posix_spinlock(lock);
 	if (l == NULL) {
@@ -155,8 +144,7 @@ int pthread_spin_unlock(pthread_spinlock_t *lock)
 		return EINVAL;
 	}
 
-	bit = posix_spinlock_to_offset(l);
-	k_spin_unlock(l, posix_spinlock_key[bit]);
+	atomic_cas(l, 1, 0);
 
 	return 0;
 }
