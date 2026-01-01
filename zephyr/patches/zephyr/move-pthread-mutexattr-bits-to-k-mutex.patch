@@ -1,0 +1,284 @@
+diff --git a/include/zephyr/kernel.h b/include/zephyr/kernel.h
+index 9191370a93c..11e014b55bf 100644
+--- a/include/zephyr/kernel.h
++++ b/include/zephyr/kernel.h
+@@ -3227,6 +3227,13 @@ extern struct k_work_q k_sys_work_q;
+  * @{
+  */
+ 
++/** Specifies non-recursive, error-checking mutex behaviour */
++#define K_MUTEX_ERRORCHECK   0
++/** Specifies non-recursive mutex behaviour */
++#define K_MUTEX_NONRECURSIVE 1
++/** Specifies recursive mutex behaviour */
++#define K_MUTEX_RECURSIVE    (-1)
++
+ /**
+  * Mutex Structure
+  * @ingroup mutex_apis
+@@ -3239,6 +3246,10 @@ struct k_mutex {
+ 
+ 	/** Current lock count */
+ 	uint32_t lock_count;
++#if defined(CONFIG_SYS_THREAD) || defined(__DOXYGEN__)
++	/** Mutex lock limit (0 := ) */
++	uint32_t lock_limit;
++#endif
+ 
+ 	/** Original thread priority */
+ 	int owner_orig_prio;
+@@ -3253,14 +3264,16 @@ struct k_mutex {
+ /**
+  * @cond INTERNAL_HIDDEN
+  */
+-#define Z_MUTEX_INITIALIZER(obj) \
+-	{ \
+-	.wait_q = Z_WAIT_Q_INIT(&(obj).wait_q), \
+-	.owner = NULL, \
+-	.lock_count = 0, \
+-	.owner_orig_prio = K_LOWEST_APPLICATION_THREAD_PRIO, \
++#define Z_MUTEX_EXT_LIM(lim) COND_CODE_1(CONFIG_SYS_THREAD, (.lock_limit = (lim),), ())
++
++#define Z_MUTEX_EXT_INITIALIZER(obj, lim)                                                          \
++	{                                                                                          \
++		.wait_q = Z_WAIT_Q_INIT(&(obj).wait_q), .owner = NULL, .lock_count = 0,            \
++		Z_MUTEX_EXT_LIM(lim).owner_orig_prio = K_LOWEST_APPLICATION_THREAD_PRIO,           \
+ 	}
+ 
++#define Z_MUTEX_INITIALIZER(obj) Z_MUTEX_EXT_INITIALIZER(obj, K_MUTEX_RECURSIVE)
++
+ /**
+  * INTERNAL_HIDDEN @endcond
+  */
+@@ -3274,9 +3287,24 @@ struct k_mutex {
+  *
+  * @param name Name of the mutex.
+  */
+-#define K_MUTEX_DEFINE(name) \
+-	STRUCT_SECTION_ITERABLE(k_mutex, name) = \
+-		Z_MUTEX_INITIALIZER(name)
++#define K_MUTEX_DEFINE(name) STRUCT_SECTION_ITERABLE(k_mutex, name) = Z_MUTEX_INITIALIZER(name)
++
++/**
++ * @brief Statically define and initialize an extended mutex.
++ *
++ * The mutex can be accessed outside the module where it is defined using:
++ *
++ * @code extern struct k_mutex <name>; @endcode
++ *
++ * @param name Name of the mutex.
++ * @param limit Recursion limit of the mutex.
++ *
++ * The @p limit parameter may be one of @ref K_MUTEX_NORMAL,
++ * @ref K_MUTEX_RECURSIVE, @ref K_MUTEX_ERRORCHECK, or any other
++ * integral value.
++ */
++#define K_MUTEX_EXT_DEFINE(name, limit)                                                            \
++	STRUCT_SECTION_ITERABLE(k_mutex, name) = Z_MUTEX_EXT_INITIALIZER(name, limit)
+ 
+ /**
+  * @brief Initialize a mutex.
+@@ -3292,6 +3320,39 @@ struct k_mutex {
+  */
+ __syscall int k_mutex_init(struct k_mutex *mutex);
+ 
++/**
++ * @brief Initialize a mutex (with recursion limit)
++ *
++ * This routine initializes a mutex object, prior to its first use.
++ *
++ * Upon completion, the mutex is available and does not have an owner.
++ *
++ * The @p limit parameter may be one of @ref K_MUTEX_NORMAL,
++ * @ref K_MUTEX_RECURSIVE, @ref K_MUTEX_ERRORCHECK, or any other
++ * integral value.
++ *
++ * @param mutex Address of the mutex.
++ * @param limit Recursion limit of the mutex.
++ *
++ * @retval 0 Mutex object created
++ */
++__syscall int k_mutex_ext_init(struct k_mutex *mutex, uint32_t limit);
++
++/**
++ * @brief Query the recursion limit of a mutex
++ *
++ * @param mutex Mutex to query.
++ *
++ * @return The recursion limit of @p mutex
++ */
++__syscall unsigned int k_mutex_rec_limit_get(const struct k_mutex *mutex);
++
++/** @cond INTERNAL_HIDDEN */
++static inline unsigned int z_impl_k_mutex_rec_limit_get(const struct k_mutex *mutex)
++{
++	return COND_CODE_1(CONFIG_SYS_THREAD, (mutex->lock_limit), (K_MUTEX_RECURSIVE));
++}
++/** @endcond */
+ 
+ /**
+  * @brief Lock a mutex.
+@@ -3311,8 +3372,9 @@ __syscall int k_mutex_init(struct k_mutex *mutex);
+  *                K_FOREVER.
+  *
+  * @retval 0 Mutex locked.
++ * @retval -EAGAIN Recursion limit has been reached.
+  * @retval -EBUSY Returned without waiting.
+- * @retval -EAGAIN Waiting period timed out.
++ * @retval -ETIMEDOUT Waiting period timed out.
+  */
+ __syscall int k_mutex_lock(struct k_mutex *mutex, k_timeout_t timeout);
+ 
+diff --git a/kernel/mutex.c b/kernel/mutex.c
+index ce76e5a2af5..b52a148ed3d 100644
+--- a/kernel/mutex.c
++++ b/kernel/mutex.c
+@@ -26,6 +26,8 @@
+  * unexpected priority levels (too high, or too low).
+  */
+ 
++#include <limits.h>
++
+ #include <zephyr/kernel.h>
+ #include <zephyr/kernel_structs.h>
+ #include <zephyr/toolchain.h>
+@@ -52,11 +54,13 @@ static struct k_spinlock lock;
+ static struct k_obj_type obj_type_mutex;
+ #endif /* CONFIG_OBJ_CORE_MUTEX */
+ 
+-int z_impl_k_mutex_init(struct k_mutex *mutex)
++int z_impl_k_mutex_ext_init(struct k_mutex *mutex, __maybe_unused uint32_t limit)
+ {
+ 	mutex->owner = NULL;
+ 	mutex->lock_count = 0U;
+-
++#ifdef CONFIG_SYS_THREAD
++	mutex->lock_limit = limit;
++#endif
+ 	z_waitq_init(&mutex->wait_q);
+ 
+ 	k_object_init(mutex);
+@@ -70,6 +74,20 @@ int z_impl_k_mutex_init(struct k_mutex *mutex)
+ 	return 0;
+ }
+ 
++#ifdef CONFIG_USERSPACE
++static inline int z_vrfy_k_mutex_ext_init(struct k_mutex *mutex, uint32_t limit)
++{
++	K_OOPS(K_SYSCALL_OBJ_INIT(mutex, K_OBJ_MUTEX));
++	return z_impl_k_mutex_ext_init(mutex, limit);
++}
++#include <zephyr/syscalls/k_mutex_ext_init_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++int z_impl_k_mutex_init(struct k_mutex *mutex)
++{
++	return z_impl_k_mutex_ext_init(mutex, K_MUTEX_RECURSIVE);
++}
++
+ #ifdef CONFIG_USERSPACE
+ static inline int z_vrfy_k_mutex_init(struct k_mutex *mutex)
+ {
+@@ -114,6 +132,29 @@ int z_impl_k_mutex_lock(struct k_mutex *mutex, k_timeout_t timeout)
+ 
+ 	key = k_spin_lock(&lock);
+ 
++#ifdef CONFIG_SYS_THREAD
++	if (unlikely((mutex->owner == _current) && (mutex->lock_limit == K_MUTEX_ERRORCHECK))) {
++		LOG_DBG("%p would deadlock taking mutex %p", _current, mutex);
++
++		k_spin_unlock(&lock, key);
++
++		SYS_PORT_TRACING_OBJ_FUNC_EXIT(k_mutex, lock, mutex, timeout, -EDEADLK);
++
++		return -EDEADLK;
++	}
++
++	if (unlikely((mutex->owner == _current) && (mutex->lock_limit >= K_MUTEX_NONRECURSIVE) && (mutex->lock_count >= mutex->lock_limit))) {
++		LOG_DBG("%p failed to take mutex %p, count: %u, limit: %u", _current, mutex,
++			mutex->lock_count, mutex->lock_limit);
++
++		k_spin_unlock(&lock, key);
++
++		SYS_PORT_TRACING_OBJ_FUNC_EXIT(k_mutex, lock, mutex, timeout, -EAGAIN);
++
++		return -EAGAIN;
++	}
++#endif
++
+ 	if (likely((mutex->lock_count == 0U) || (mutex->owner == _current))) {
+ 
+ 		mutex->owner_orig_prio = (mutex->lock_count == 0U) ?
+@@ -193,9 +234,9 @@ int z_impl_k_mutex_lock(struct k_mutex *mutex, k_timeout_t timeout)
+ 		k_spin_unlock(&lock, key);
+ 	}
+ 
+-	SYS_PORT_TRACING_OBJ_FUNC_EXIT(k_mutex, lock, mutex, timeout, -EAGAIN);
++	SYS_PORT_TRACING_OBJ_FUNC_EXIT(k_mutex, lock, mutex, timeout, -ETIMEDOUT);
+ 
+-	return -EAGAIN;
++	return -ETIMEDOUT;
+ }
+ 
+ #ifdef CONFIG_USERSPACE
+@@ -312,3 +353,12 @@ static int init_mutex_obj_core_list(void)
+ SYS_INIT(init_mutex_obj_core_list, PRE_KERNEL_1,
+ 	 CONFIG_KERNEL_INIT_PRIORITY_OBJECTS);
+ #endif /* CONFIG_OBJ_CORE_MUTEX */
++
++#ifdef CONFIG_USERSPACE
++static inline unsigned int z_vrfy_k_mutex_rec_limit_get(const struct k_mutex *mutex)
++{
++	K_OOPS(K_SYSCALL_OBJ(mutex, K_OBJ_MUTEX));
++	return z_impl_k_mutex_rec_limit_get(mutex);
++}
++#include <zephyr/syscalls/k_mutex_rec_limit_get_mrsh.c>
++#endif /* CONFIG_USERSPACE */
+diff --git a/tests/bluetooth/audio/mocks/src/kernel.c b/tests/bluetooth/audio/mocks/src/kernel.c
+index 4b84b9a94ad..ce01013348c 100644
+--- a/tests/bluetooth/audio/mocks/src/kernel.c
++++ b/tests/bluetooth/audio/mocks/src/kernel.c
+@@ -152,7 +152,7 @@ int k_mutex_lock(struct k_mutex *mutex, k_timeout_t timeout)
+ 		if (K_TIMEOUT_EQ(timeout, K_NO_WAIT)) {
+ 			return -EBUSY;
+ 		} else {
+-			return -EAGAIN;
++			return -ETIMEDOUT;
+ 		}
+ 	}
+ 
+diff --git a/tests/kernel/mutex/mutex_api/src/test_mutex_apis.c b/tests/kernel/mutex/mutex_api/src/test_mutex_apis.c
+index 1a5c3211d45..b3ef3bf4806 100644
+--- a/tests/kernel/mutex/mutex_api/src/test_mutex_apis.c
++++ b/tests/kernel/mutex/mutex_api/src/test_mutex_apis.c
+@@ -416,7 +416,7 @@ static void tThread_mutex_lock_should_fail(void *p1, void *p2, void *p3)
+ 	timeout.ticks |= (uint64_t)(uintptr_t)p2 << 32;
+ 	timeout.ticks |= (uint64_t)(uintptr_t)p3 << 0;
+ 
+-	zassert_equal(-EAGAIN, k_mutex_lock(mutex, timeout), NULL);
++	zassert_equal(-ETIMEDOUT, k_mutex_lock(mutex, timeout), NULL);
+ }
+ 
+ /**
+diff --git a/tests/kernel/mutex/sys_mutex/src/main.c b/tests/kernel/mutex/sys_mutex/src/main.c
+index 9da45b0bebe..724a2ef64b1 100644
+--- a/tests/kernel/mutex/sys_mutex/src/main.c
++++ b/tests/kernel/mutex/sys_mutex/src/main.c
+@@ -112,7 +112,7 @@ void thread_05(void *p1, void *p2, void *p3)
+ 
+ 	/* Wait and boost owner priority to 5 */
+ 	rv = sys_mutex_lock(&mutex_4, K_SECONDS(1));
+-	if (rv != -EAGAIN) {
++	if (rv != -ETIMEDOUT) {
+ 		tc_rc = TC_FAIL;
+ 		TC_ERROR("Failed to timeout on mutex %p\n", &mutex_4);
+ 		return;
+@@ -180,7 +180,7 @@ void thread_07(void *p1, void *p2, void *p3)
+ 	 */
+ 
+ 	rv = sys_mutex_lock(&mutex_3, K_SECONDS(3));
+-	if (rv != -EAGAIN) {
++	if (rv != -ETIMEDOUT) {
+ 		tc_rc = TC_FAIL;
+ 		TC_ERROR("Failed to timeout on mutex %p\n", &mutex_3);
+ 		return;

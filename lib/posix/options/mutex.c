@@ -28,18 +28,13 @@ struct pthread_mutexattr {
 };
 BUILD_ASSERT(sizeof(pthread_mutexattr_t) >= sizeof(struct pthread_mutexattr));
 
-/*
- *  Default mutex attrs.
- */
-static const struct pthread_mutexattr def_attr = {
-	.type = PTHREAD_MUTEX_DEFAULT,
-};
-
 static SYS_SEM_DEFINE(posix_mutex_lock, 1, 1);
 SYS_ELASTIPOOL_DEFINE_STATIC(posix_mutex_pool, sizeof(struct k_mutex), __alignof(struct k_mutex),
 			     CONFIG_MAX_PTHREAD_MUTEX_COUNT, CONFIG_MAX_PTHREAD_MUTEX_COUNT);
+#ifndef CONFIG_SYS_THREAD
 /* fixme: this should just be added to zephyr's mutex descriptor */
 static __pinned_bss uint8_t posix_mutex_type[CONFIG_MAX_PTHREAD_MUTEX_COUNT];
+#endif
 
 static inline size_t posix_mutex_to_offset(struct k_mutex *m)
 {
@@ -48,19 +43,15 @@ static inline size_t posix_mutex_to_offset(struct k_mutex *m)
 	       ROUND_UP(posix_mutex_pool.config->obj_size, posix_mutex_pool.config->obj_align);
 }
 
-static void mutex_init_pool_obj_cb(void *obj)
-{
-	int err;
-	struct k_mutex *const m = (struct k_mutex *)obj;
-
-	err = k_mutex_init(m);
-	__ASSERT_NO_MSG(err == 0);
-}
-
 struct k_mutex *to_posix_mutex(pthread_mutex_t *mu)
 {
-	return posix_init_pool_obj(&posix_mutex_pool, &posix_mutex_lock, *mu,
-				   mutex_init_pool_obj_cb);
+	struct k_mutex *m = posix_init_pool_obj(&posix_mutex_pool, &posix_mutex_lock, *mu, NULL);
+
+	if ((m != NULL) && (*mu == PTHREAD_MUTEX_INITIALIZER)) {
+		k_mutex_ext_init(m, K_MUTEX_NONRECURSIVE);
+	}
+
+	return m;
 }
 
 static int acquire_mutex(pthread_mutex_t *mu, k_timeout_t timeout)
@@ -68,32 +59,35 @@ static int acquire_mutex(pthread_mutex_t *mu, k_timeout_t timeout)
 	int type = -1;
 	size_t bit = -1;
 	int ret = EINVAL;
-	size_t lock_count = -1;
+	__maybe_unused size_t lock_count = -1;
 	struct k_mutex *m = NULL;
-	struct k_thread *owner = NULL;
+	__maybe_unused struct k_thread *owner = NULL;
 
 	SYS_SEM_LOCK(&posix_mutex_lock) {
-		m = posix_init_pool_obj_unlocked(&posix_mutex_pool, *mu, mutex_init_pool_obj_cb);
+		m = posix_init_pool_obj_unlocked(&posix_mutex_pool, *mu, NULL);
 		if (m == NULL) {
 			ret = EINVAL;
 			SYS_SEM_LOCK_BREAK;
 		}
-		*mu = (pthread_mutex_t)(uintptr_t)m;
 
 		ret = 0;
-		bit = posix_mutex_to_offset(m);
-		type = posix_mutex_type[bit];
-		owner = m->owner;
-		lock_count = m->lock_count;
-
-		LOG_DBG("Locking mutex %p (bit %zu, type %d) with timeout %" PRIx64, m, bit, type,
-			(int64_t)timeout.ticks);
 	}
 
 	if (ret != 0) {
 		goto handle_error;
 	}
 
+#ifndef CONFIG_SYS_THREAD
+	bit = posix_mutex_to_offset(m);
+	type = posix_mutex_type[bit];
+	owner = m->owner;
+	lock_count = m->lock_count;
+#endif
+
+	LOG_DBG("Locking mutex %p (bit %zu, type %d) with timeout %" PRIx64, m, bit, type,
+		(int64_t)timeout.ticks);
+
+#ifndef CONFIG_SYS_THREAD
 	if (owner == k_current_get()) {
 		switch (type) {
 		case PTHREAD_MUTEX_DEFAULT:
@@ -126,17 +120,10 @@ static int acquire_mutex(pthread_mutex_t *mu, k_timeout_t timeout)
 			break;
 		}
 	}
+#endif
 
 	if (ret == 0) {
 		ret = k_mutex_lock(m, timeout);
-		if (ret == -EAGAIN) {
-			LOG_DBG("Timeout locking mutex %p", m);
-			/*
-			 * special quirk - k_mutex_lock() returns EAGAIN if a timeout occurs, but
-			 * for pthreads, that means something different
-			 */
-			ret = ETIMEDOUT;
-		}
 	}
 
 handle_error:
@@ -146,6 +133,7 @@ handle_error:
 	}
 
 	if (ret == 0) {
+		*mu = (pthread_mutex_t)(uintptr_t)m;
 		LOG_DBG("Locked mutex %p", m);
 	}
 
@@ -187,33 +175,58 @@ int pthread_mutex_timedlock(pthread_mutex_t *m,
 int pthread_mutex_init(pthread_mutex_t *mu, const pthread_mutexattr_t *_attr)
 {
 	size_t bit;
-	int type = -1;
+	__maybe_unused int type = -1;
 	int ret = ENOMEM;
 	struct k_mutex *m;
-	const struct pthread_mutexattr *attr = (const struct pthread_mutexattr *)_attr;
+	__maybe_unused const struct pthread_mutexattr *attr =
+		(const struct pthread_mutexattr *)_attr;
 
 	*mu = PTHREAD_MUTEX_INITIALIZER;
 
 	SYS_SEM_LOCK(&posix_mutex_lock) {
-		m = posix_init_pool_obj_unlocked(&posix_mutex_pool, *mu, mutex_init_pool_obj_cb);
+		m = posix_init_pool_obj_unlocked(&posix_mutex_pool, *mu, NULL);
 		if (m == NULL) {
 			ret = ENOMEM;
 			SYS_SEM_LOCK_BREAK;
 		}
-		*mu = (pthread_mutex_t)(uintptr_t)m;
+		ret = 0;
+	}
 
+	if (ret == 0) {
+#ifdef CONFIG_SYS_THREAD
+		uint32_t recursion_limit;
+
+		type = (attr == NULL) ? PTHREAD_MUTEX_DEFAULT : attr->type;
+
+		switch (type) {
+		case PTHREAD_MUTEX_DEFAULT:
+		case PTHREAD_MUTEX_NORMAL:
+			recursion_limit = K_MUTEX_NONRECURSIVE;
+			break;
+		case PTHREAD_MUTEX_RECURSIVE:
+			recursion_limit = K_MUTEX_RECURSIVE;
+			break;
+		case PTHREAD_MUTEX_ERRORCHECK:
+			recursion_limit = K_MUTEX_ERRORCHECK;
+			break;
+		default:
+			__ASSERT(false, "invalid mutex type %d", type);
+			return EINVAL;
+		}
+
+		k_mutex_ext_init(m, recursion_limit);
+#else
 		bit = posix_mutex_to_offset(m);
 		if (attr == NULL) {
-			posix_mutex_type[bit] = def_attr.type;
+			posix_mutex_type[bit] = PTHREAD_MUTEX_DEFAULT;
 		} else {
 			posix_mutex_type[bit] = attr->type;
 		}
 
 		type = posix_mutex_type[bit];
-		ret = 0;
-	}
+#endif
+		*mu = (pthread_mutex_t)(uintptr_t)m;
 
-	if (ret == 0) {
 		LOG_DBG("Initialized mutex %p, bit %zu, type %d", m, bit, type);
 	}
 
@@ -448,11 +461,39 @@ static int pthread_mutex_pool_init(void)
 	for (i = 0; i < CONFIG_MAX_PTHREAD_MUTEX_COUNT; ++i) {
 		struct k_mutex *const m = (struct k_mutex *)posix_mutex_pool.config->storage;
 
-		err = k_mutex_init(m);
+		err = k_mutex_ext_init(m, K_MUTEX_NONRECURSIVE);
 		__ASSERT_NO_MSG(err == 0);
+#ifndef CONFIG_SYS_THREAD
 		posix_mutex_type[i] = PTHREAD_MUTEX_DEFAULT;
+#endif
 	}
 
 	return 0;
 }
 SYS_INIT(pthread_mutex_pool_init, PRE_KERNEL_1, 0);
+
+#ifdef CONFIG_ZTEST
+#include <zephyr/ztest.h>
+
+static void posix_mutex_ztest_before(const struct ztest_unit_test *test, void *data)
+{
+	ARG_UNUSED(test);
+	ARG_UNUSED(data);
+
+	(void)pthread_mutex_pool_init();
+}
+
+static void posix_mutex_ztest_after(const struct ztest_unit_test *test, void *data)
+{
+	ARG_UNUSED(test);
+	ARG_UNUSED(data);
+
+	size_t in_use = posix_mutex_pool.data->pool_size;
+
+	if (in_use != 0) {
+		LOG_ERR("ZTEST %s:%s: there are still %zu mutexes in use", test->test_suite_name, test->name, in_use);
+	}
+}
+
+ZTEST_RULE(posix_mutex_ztest_rule, posix_mutex_ztest_before, posix_mutex_ztest_after);
+#endif
