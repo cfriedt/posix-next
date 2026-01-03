@@ -17,10 +17,10 @@
 #include <zephyr/sys/elastipool.h>
 #include <zephyr/sys/sem.h>
 
-struct pthread_condattr {
-	clockid_t clock;
-};
-BUILD_ASSERT(sizeof(pthread_condattr_t) >= sizeof(struct pthread_condattr));
+BUILD_ASSERT(sizeof(pthread_condattr_t) >= sizeof(struct posix_condattr));
+#ifdef CONFIG_SYS_THREAD
+BUILD_ASSERT(sizeof(pthread_condattr_t) >= sizeof(((struct k_condvar *)0)->flags));
+#endif
 
 LOG_MODULE_REGISTER(pthread_cond, CONFIG_PTHREAD_COND_LOG_LEVEL);
 
@@ -33,7 +33,11 @@ static void cond_init_pool_obj_cb(void *obj)
 {
 	struct posix_cond *const cv = (struct posix_cond *)obj;
 
+#if defined(CONFIG_SYS_THREAD)
+	(void)pthread_condattr_init((pthread_condattr_t *)&cv->condvar.flags);
+#else
 	(void)pthread_condattr_init((pthread_condattr_t *)&cv->attr);
+#endif
 }
 
 static int cond_wait(pthread_cond_t *cvar, pthread_mutex_t *mu, const struct timespec *abstime)
@@ -68,7 +72,13 @@ static int cond_wait(pthread_cond_t *cvar, pthread_mutex_t *mu, const struct tim
 	}
 
 	if (abstime != NULL) {
-		timeout = K_MSEC(timespec_to_timeoutms(cv->attr.clock, abstime));
+#ifdef CONFIG_SYS_THREAD
+		struct posix_condattr *const ap = (struct posix_condattr *)&cv->condvar.flags;
+#else
+		struct posix_condattr *const ap = (struct posix_condattr *)&cv->attr;
+#endif
+
+		timeout = K_MSEC(timespec_to_timeoutms(ap->clock, abstime));
 	}
 
 	LOG_DBG("Waiting on cond %p with timeout %" PRIx64, cv, (int64_t)timeout.ticks);
@@ -180,8 +190,13 @@ int pthread_cond_init(pthread_cond_t *cvar, const pthread_condattr_t *att)
 			return EINVAL;
 		}
 
+#ifdef CONFIG_SYS_THREAD
+		(void)pthread_condattr_destroy((pthread_condattr_t *)&cv->condvar.flags);
+		cv->condvar.flags = *((unsigned char *)&attr);
+#else
 		(void)pthread_condattr_destroy((pthread_condattr_t *)&cv->attr);
 		cv->attr = *attr;
+#endif
 	}
 
 	LOG_DBG("Initialized cond %p", cv);

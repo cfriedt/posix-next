@@ -367,6 +367,8 @@ ZTEST(pthread, test_pthread_execution)
 	zassert_true(serial_threads == 1, "Bungled barrier return value(s)");
 
 	printk("Barrier test OK\n");
+
+	pthread_mutex_destroy(&lock);
 }
 
 ZTEST(pthread, test_pthread_termination)
@@ -591,6 +593,10 @@ static void before(void *arg)
 		/* skip redundant testing if there is no thread pool / heap allocation */
 		ztest_test_skip();
 	}
+
+	lock = (pthread_mutex_t){PTHREAD_MUTEX_INITIALIZER};
+	cvar0 = (pthread_cond_t){PTHREAD_COND_INITIALIZER};
+	cvar1 = (pthread_cond_t){PTHREAD_COND_INITIALIZER};
 }
 
 ZTEST_SUITE(pthread, NULL, NULL, before, NULL, NULL);
