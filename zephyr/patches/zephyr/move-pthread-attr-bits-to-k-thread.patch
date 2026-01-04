@@ -1,0 +1,49 @@
+diff --git a/include/zephyr/kernel.h b/include/zephyr/kernel.h
+index 11e014b55bf..8cac8d9ca2e 100644
+--- a/include/zephyr/kernel.h
++++ b/include/zephyr/kernel.h
+@@ -347,6 +347,14 @@ void k_thread_foreach_unlocked_filter_by_cpu(unsigned int cpu,
+  */
+ #define K_SSE_REGS (BIT(7))
+ 
++#define K_CONTENTIONSCOPE (BIT(8))
++#define K_INHERITSCHED (BIT(9))
++#define K_CALLER_DESTROYS (BIT(10))
++#define K_CANCEL_PENDING (BIT(11))
++#define K_CANCEL_STATE (BIT(12))
++#define K_CANCEL_TYPE (BIT(13))
++#define K_DETACH_STATE (BIT(14))
++
+ /* end - thread options */
+ 
+ #if !defined(_ASMLANGUAGE)
+diff --git a/include/zephyr/kernel/thread.h b/include/zephyr/kernel/thread.h
+index db7713d6d40..cd11688abba 100644
+--- a/include/zephyr/kernel/thread.h
++++ b/include/zephyr/kernel/thread.h
+@@ -360,6 +360,25 @@ struct k_thread {
+ 	_wait_q_t  halt_queue;
+ #endif /* CONFIG_SMP */
+ 
++#ifdef CONFIG_SYS_THREAD
++	sys_slist_t cleanup_list;
++	sys_slist_t key_list;
++	struct {
++		/* equivalent to struct posix_thread_attr */
++		void *stack;
++		uint32_t details[2];
++	} attr;
++	void *retval;
++	uintptr_t qid;
++
++	/* FIXME: switch to kernel Kconfig for sig rt max */
++#if defined(CONFIG_POSIX_RTSIG_MAX)
++	unsigned long sigset[DIV_ROUND_UP(32 /* SIGRTMIN */ + CONFIG_POSIX_RTSIG_MAX + 1, BITS_PER_LONG)];
++#else
++	unsigned long sigset[2];
++#endif
++#endif
++
+ 	/** arch-specifics: must always be at the end */
+ 	struct _thread_arch arch;
+ };

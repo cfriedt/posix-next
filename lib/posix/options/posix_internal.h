@@ -26,7 +26,7 @@
  */
 #define PTHREAD_OBJ_MASK_INIT 0x80000000
 
-struct __packed posix_thread_attr {
+struct posix_thread_attr {
 	void *stack;
 	/* the following two bitfields should combine to be 32-bits in size */
 	uint32_t stacksize: CONFIG_POSIX_PTHREAD_ATTR_STACKSIZE_BITS;
@@ -45,6 +45,9 @@ struct __packed posix_thread_attr {
 	bool detachstate: 1;
 };
 
+#ifdef CONFIG_SYS_THREAD
+#define posix_thread k_thread
+#else
 struct posix_thread {
 	struct k_thread thread;
 
@@ -69,6 +72,7 @@ struct posix_thread {
 	/* Queue ID (internal-only) */
 	uint8_t qid;
 };
+#endif
 
 struct posix_condattr {
 	/* leaves room for CLOCK_REALTIME (1, default) and CLOCK_MONOTONIC (4) */
