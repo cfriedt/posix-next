@@ -23,6 +23,7 @@ PLATFORMS=( \
 )
 ROOTS=( \
   $POSIX_NEXT_PATH/samples/posix \
+  $POSIX_NEXT_PATH/tests/benchmarks/posix \
   $POSIX_NEXT_PATH/tests/posix \
   $ZEPHYR_BASE/samples/net \
   $ZEPHYR_BASE/samples/subsys/shell/shell_module \
