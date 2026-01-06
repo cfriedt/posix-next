@@ -1,0 +1,49 @@
+diff --git a/include/zephyr/sys/timeutil.h b/include/zephyr/sys/timeutil.h
+index 4c7f32424be..2c5e1028a76 100644
+--- a/include/zephyr/sys/timeutil.h
++++ b/include/zephyr/sys/timeutil.h
+@@ -686,6 +686,22 @@ static inline k_timeout_t timespec_to_timeout(const struct timespec *req, struct
+ 	return timeout;
+ }
+ 
++/**
++ * @brief Convert an absolute realtime clock timespec to a kernel timepoint
++ *
++ * In contrast to @ref timespec_to_timeout, which operates on relative time durations, this
++ * function converts the absolute time point described by @p abstime to a @ref k_timepoint_t which
++ * is currently specified as a number of ticks relative to system boot.
++ *
++ * Furthermore, this function assumes that @p abstime is defined with respect to the "wall clock",
++ * @ref SYS_CLOCK_REALTIME, and that it is defined with respect to the epoch, on January 1, 1970
++ * at 00:00:00 UTC.
++ *
++ * @param abstime absolute time to convert
++ * @return the equivalent kernel time point
++ */
++k_timepoint_t timespec_abs_rt_to_timepoint(const struct timespec *abstime);
++
+ /**
+  * @}
+  */
+diff --git a/lib/utils/timeutil.c b/lib/utils/timeutil.c
+index a18b43f4912..0d4992fec35 100644
+--- a/lib/utils/timeutil.c
++++ b/lib/utils/timeutil.c
+@@ -238,3 +238,17 @@ bool timespec_normalize(struct timespec *ts)
+ 
+ 	return true;
+ }
++
++k_timepoint_t timespec_abs_rt_to_timepoint(const struct timespec *abstime)
++{
++	struct timespec now;
++	int __maybe_unused rc;
++	struct timespec duration = *abstime;
++
++	rc = sys_clock_gettime(SYS_CLOCK_REALTIME, &now);
++	__ASSERT(rc == 0, "%s() %s: %d", "sys_clock_gettime", "failed", rc);
++	rc = (int)timespec_sub(&duration, &now);
++	__ASSERT(rc == 1, "%s() %s: %d", "timespec_sub", "overflowed", rc);
++
++	return sys_timepoint_calc(timespec_to_timeout(&duration, NULL));
++}
