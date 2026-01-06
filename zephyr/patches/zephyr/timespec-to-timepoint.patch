@@ -1,0 +1,41 @@
+diff --git a/include/zephyr/sys/timeutil.h b/include/zephyr/sys/timeutil.h
+index 4c7f32424be..91364752996 100644
+--- a/include/zephyr/sys/timeutil.h
++++ b/include/zephyr/sys/timeutil.h
+@@ -686,6 +686,17 @@ static inline k_timeout_t timespec_to_timeout(const struct timespec *req, struct
+ 	return timeout;
+ }
+ 
++/**
++ * @brief Convert a timespec to a kernel timepoint
++ *
++ * In contrast to @ref timespec_to_timeout, which operates on relative time durations, this
++ * function converts the absolute time point described by @p abstime to a @ref k_timepoint_t.
++ *
++ * @param abstime absolute time to convert
++ * @return the equivalent kernel time point
++ */
++k_timepoint_t timespec_to_timepoint(const struct timespec *abstime);
++
+ /**
+  * @}
+  */
+diff --git a/lib/utils/timeutil.c b/lib/utils/timeutil.c
+index a18b43f4912..fddb407cc54 100644
+--- a/lib/utils/timeutil.c
++++ b/lib/utils/timeutil.c
+@@ -238,3 +238,14 @@ bool timespec_normalize(struct timespec *ts)
+ 
+ 	return true;
+ }
++
++k_timepoint_t timespec_to_timepoint(const struct timespec *ts)
++{
++	struct timespec now;
++	struct timespec duration = *ts;
++
++	(void)sys_clock_gettime(SYS_CLOCK_REALTIME, &now);
++	timespec_sub(&duration, &now);
++
++	return sys_timepoint_calc(timespec_to_timeout(&duration, NULL));
++}
