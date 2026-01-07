@@ -19,9 +19,11 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/atomic.h>
+#include <zephyr/sys/dlist.h>
 #include <zephyr/sys/elastipool.h>
 #include <zephyr/sys/sem.h>
 #include <zephyr/sys/slist.h>
+#include <zephyr/sys/thread.h>
 #include <zephyr/sys/util.h>
 
 #define ZEPHYR_TO_POSIX_PRIORITY(_zprio)                                                           \
@@ -448,17 +450,18 @@ static void posix_thread_recycle_work_handler(struct k_work *work)
 }
 static K_WORK_DELAYABLE_DEFINE(posix_thread_recycle_work, posix_thread_recycle_work_handler);
 
+#ifndef CONFIG_SYS_THREAD
 extern struct sys_sem pthread_key_lock;
 
 static void posix_thread_finalize(struct posix_thread *t, void *retval)
 {
-	sys_snode_t *node_l, *node_s;
+	sys_dnode_t *node_l, *node_s;
 	pthread_key_obj *key_obj;
 	pthread_thread_data *thread_spec_data;
 	sys_snode_t *node_key_data, *node_key_data_s, *node_key_data_prev = NULL;
 	struct pthread_key_data *key_data;
 
-	SYS_SLIST_FOR_EACH_NODE_SAFE(&t->key_list, node_l, node_s) {
+	SYS_DLIST_FOR_EACH_NODE_SAFE(&t->key_list, node_l, node_s) {
 		thread_spec_data = (pthread_thread_data *)node_l;
 		if (thread_spec_data != NULL) {
 			key_obj = thread_spec_data->key;
@@ -489,9 +492,7 @@ static void posix_thread_finalize(struct posix_thread *t, void *retval)
 
 	/* move thread from run_q to done_q */
 	SYS_SEM_LOCK(&pthread_pool_lock) {
-#ifndef CONFIG_SYS_THREAD
 		sys_dlist_remove(&t->q_node);
-#endif
 		posix_thread_q_push(t, POSIX_THREAD_DONE_Q);
 		t->retval = retval;
 	}
@@ -502,6 +503,7 @@ static void posix_thread_finalize(struct posix_thread *t, void *retval)
 	/* abort the underlying k_thread */
 	k_thread_abort((struct k_thread *)t);
 }
+#endif
 
 FUNC_NORETURN
 static void zephyr_thread_wrapper(void *arg1, void *arg2, void *arg3)
@@ -523,7 +525,22 @@ static void zephyr_thread_wrapper(void *arg1, void *arg2, void *arg3)
 	__ASSERT_NO_MSG(err == 0 || err == PTHREAD_BARRIER_SERIAL_THREAD);
 #endif
 
+#ifdef CONFIG_SYS_THREAD
+	sys_thread_finalize(t, fun_ptr(arg1));
+
+	/* move thread from run_q to done_q */
+	SYS_SEM_LOCK(&pthread_pool_lock) {
+		posix_thread_q_push(t, POSIX_THREAD_DONE_Q);
+	}
+
+	/* trigger recycle work */
+	(void)k_work_schedule(&posix_thread_recycle_work, K_MSEC(CONFIG_PTHREAD_RECYCLER_DELAY_MS));
+
+	/* abort the underlying k_thread */
+	k_thread_abort((struct k_thread *)t);
+#else
 	posix_thread_finalize(t, fun_ptr(arg1));
+#endif
 
 	CODE_UNREACHABLE;
 }
@@ -632,7 +649,7 @@ int pthread_create(pthread_t *th, const pthread_attr_t *_attr, void *(*threadrou
 		if (t != NULL) {
 			/* initialize thread state */
 			posix_thread_q_push(t, POSIX_THREAD_RUN_Q);
-			sys_slist_init(&t->key_list);
+			sys_dlist_init(&t->key_list);
 			sys_slist_init(&t->cleanup_list);
 		}
 	}
@@ -788,7 +805,23 @@ int pthread_setcancelstate(int state, int *oldstate)
 
 	if (ret == 0 && state == PTHREAD_CANCEL_ENABLE &&
 	    cancel_type == PTHREAD_CANCEL_ASYNCHRONOUS && cancel_pending) {
+#ifdef CONFIG_SYS_THREAD
+		sys_thread_finalize(t, PTHREAD_CANCELED);
+
+		/* move thread from run_q to done_q */
+		SYS_SEM_LOCK(&pthread_pool_lock) {
+			posix_thread_q_push(t, POSIX_THREAD_DONE_Q);
+		}
+
+		/* trigger recycle work */
+		(void)k_work_schedule(&posix_thread_recycle_work,
+				      K_MSEC(CONFIG_PTHREAD_RECYCLER_DELAY_MS));
+
+		/* abort the underlying k_thread */
+		k_thread_abort((struct k_thread *)t);
+#else
 		posix_thread_finalize(t, PTHREAD_CANCELED);
+#endif
 	}
 
 	return ret;
@@ -857,7 +890,23 @@ void pthread_testcancel(void)
 	}
 
 	if (cancel_pended) {
+#ifdef CONFIG_SYS_THREAD
+		sys_thread_finalize(t, PTHREAD_CANCELED);
+
+		/* move thread from run_q to done_q */
+		SYS_SEM_LOCK(&pthread_pool_lock) {
+			posix_thread_q_push(t, POSIX_THREAD_DONE_Q);
+		}
+
+		/* trigger recycle work */
+		(void)k_work_schedule(&posix_thread_recycle_work,
+				      K_MSEC(CONFIG_PTHREAD_RECYCLER_DELAY_MS));
+
+		/* abort the underlying k_thread */
+		k_thread_abort((struct k_thread *)t);
+#else
 		posix_thread_finalize(t, PTHREAD_CANCELED);
+#endif
 	}
 }
 
@@ -896,7 +945,23 @@ int pthread_cancel(pthread_t pthread)
 
 	if (ret == 0 && cancel_state == PTHREAD_CANCEL_ENABLE &&
 	    cancel_type == PTHREAD_CANCEL_ASYNCHRONOUS) {
+#ifdef CONFIG_SYS_THREAD
+		sys_thread_finalize(t, PTHREAD_CANCELED);
+
+		/* move thread from run_q to done_q */
+		SYS_SEM_LOCK(&pthread_pool_lock) {
+			posix_thread_q_push(t, POSIX_THREAD_DONE_Q);
+		}
+
+		/* trigger recycle work */
+		(void)k_work_schedule(&posix_thread_recycle_work,
+				      K_MSEC(CONFIG_PTHREAD_RECYCLER_DELAY_MS));
+
+		/* abort the underlying k_thread */
+		k_thread_abort((struct k_thread *)t);
+#else
 		posix_thread_finalize(t, PTHREAD_CANCELED);
+#endif
 	}
 
 	return ret;
@@ -1122,7 +1187,23 @@ void pthread_exit(void *retval)
 		CODE_UNREACHABLE;
 	}
 
+#ifdef CONFIG_SYS_THREAD
+	sys_thread_finalize(self, retval);
+
+	/* move thread from run_q to done_q */
+	SYS_SEM_LOCK(&pthread_pool_lock) {
+		posix_thread_q_push(self, POSIX_THREAD_DONE_Q);
+	}
+
+	/* trigger recycle work */
+	(void)k_work_schedule(&posix_thread_recycle_work, K_MSEC(CONFIG_PTHREAD_RECYCLER_DELAY_MS));
+
+	/* abort the underlying k_thread */
+	k_thread_abort((struct k_thread *)self);
+#else
 	posix_thread_finalize(self, retval);
+#endif
+
 	CODE_UNREACHABLE;
 }
 

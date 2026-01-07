@@ -1,3 +1,38 @@
+#ifdef CONFIG_SYS_THREAD
+/* This should go into pthread.c */
+
+/*
+ * Copyright (c) The Zephyr Project Contributors
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#include <pthread.h>
+
+#include <zephyr/sys/thread.h>
+
+int pthread_key_create(pthread_key_t *key, void (*destructor)(void *value))
+{
+	return -sys_thread_key_create((sys_thread_key_t *)key, destructor);
+}
+
+int pthread_key_delete(pthread_key_t key)
+{
+	return -sys_thread_key_delete((sys_thread_key_t)key);
+}
+
+int pthread_setspecific(pthread_key_t key, const void *value)
+{
+	return -sys_thread_setspecific((sys_thread_key_t)key, value);
+}
+
+void *pthread_getspecific(pthread_key_t key)
+{
+	void *value = NULL;
+
+	return (sys_thread_getspecific((sys_thread_key_t)key, &value) < 0) ? NULL : value;
+}
+#else
 /*
  * Copyright (c) 2018 Intel Corporation
  * Copyright (c) 2023 Meta
@@ -100,7 +135,6 @@ int pthread_setspecific(pthread_key_t key, const void *value)
 	pthread_key_obj *key_obj = NULL;
 	struct posix_thread *thread;
 	struct pthread_key_data *key_data;
-	sys_snode_t *node_l = NULL;
 	int retval = 0;
 
 	thread = to_posix_thread(pthread_self());
@@ -119,22 +153,18 @@ int pthread_setspecific(pthread_key_t key, const void *value)
 			SYS_SEM_LOCK_BREAK;
 		}
 
-		SYS_SLIST_FOR_EACH_NODE(&(thread->key_list), node_l) {
-			pthread_thread_data *thread_spec_data = (pthread_thread_data *)node_l;
+		pthread_thread_data *thread_spec_data;
 
+		SYS_DLIST_FOR_EACH_CONTAINER(&thread->key_list, thread_spec_data, node) {
 			if (thread_spec_data->key == key_obj) {
 				/* Key is already present so associate thread specific data */
 				thread_spec_data->spec_data = (void *)value;
 				LOG_DBG("Paired key %x to value %p for thread %x", key, value,
 					pthread_self());
-				break;
+				/* Key is already present, so we are done */
+				retval = 0;
+				SYS_SEM_LOCK_BREAK;
 			}
-		}
-
-		retval = 0;
-		if (node_l != NULL) {
-			/* Key is already present, so we are done */
-			SYS_SEM_LOCK_BREAK;
 		}
 
 		/* Key and data need to be added */
@@ -146,6 +176,8 @@ int pthread_setspecific(pthread_key_t key, const void *value)
 			SYS_SEM_LOCK_BREAK;
 		}
 
+		retval = 0;
+
 		LOG_DBG("Allocated key data %p for key %x in thread %x", key_data, key,
 			pthread_self());
 
@@ -154,7 +186,7 @@ int pthread_setspecific(pthread_key_t key, const void *value)
 		key_data->thread_data.spec_data = (void *)value;
 
 		/* Append new thread key data to thread's key list */
-		sys_slist_append((&thread->key_list), (sys_snode_t *)(&key_data->thread_data));
+		sys_dlist_append((&thread->key_list), (sys_dnode_t *)(&key_data->thread_data));
 
 		/* Append new key data to the key object's list */
 		sys_slist_append(&(key_obj->key_data_l), (sys_snode_t *)key_data);
@@ -176,7 +208,6 @@ void *pthread_getspecific(pthread_key_t key)
 	struct posix_thread *thread;
 	pthread_thread_data *thread_spec_data;
 	void *value = NULL;
-	sys_snode_t *node_l;
 
 	thread = to_posix_thread(pthread_self());
 	if (thread == NULL) {
@@ -192,8 +223,7 @@ void *pthread_getspecific(pthread_key_t key)
 
 		/* Traverse the list of keys set by the thread, looking for key */
 
-		SYS_SLIST_FOR_EACH_NODE(&(thread->key_list), node_l) {
-			thread_spec_data = (pthread_thread_data *)node_l;
+		SYS_DLIST_FOR_EACH_CONTAINER(&thread->key_list, thread_spec_data, node) {
 			if (thread_spec_data->key == key_obj) {
 				/* Key is present, so get the set thread data */
 				value = thread_spec_data->spec_data;
@@ -204,3 +234,4 @@ void *pthread_getspecific(pthread_key_t key)
 
 	return value;
 }
+#endif

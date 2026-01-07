@@ -1,0 +1,350 @@
+diff --git a/include/zephyr/kernel/thread.h b/include/zephyr/kernel/thread.h
+index 97a5ea404c8..58f6e959fbe 100644
+--- a/include/zephyr/kernel/thread.h
++++ b/include/zephyr/kernel/thread.h
+@@ -362,7 +362,7 @@ struct k_thread {
+ 
+ #ifdef CONFIG_SYS_THREAD
+ 	sys_slist_t cleanup_list;
+-	sys_slist_t key_list;
++	sys_dlist_t key_list;
+ 	struct {
+ 		/* equivalent to struct posix_thread_attr */
+ 		void *stack;
+diff --git a/include/zephyr/sys/thread.h b/include/zephyr/sys/thread.h
+new file mode 100644
+index 00000000000..6de11f90fab
+--- /dev/null
++++ b/include/zephyr/sys/thread.h
+@@ -0,0 +1,34 @@
++/*
++ * Copyright (c) The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_INCLUDE_ZEPHYR_SYS_THREAD_H_
++#define ZEPHYR_INCLUDE_ZEPHYR_SYS_THREAD_H_
++
++#include <zephyr/kernel.h>
++#include <zephyr/toolchain.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++#define SYS_OBJ_INITIALIZER (-1)
++
++typedef unsigned long sys_thread_key_t;
++typedef void (*sys_thread_key_dtor_t)(void *value);
++
++__syscall int sys_thread_key_create(sys_thread_key_t *key, sys_thread_key_dtor_t destructor);
++__syscall int sys_thread_key_delete(sys_thread_key_t key);
++__syscall int sys_thread_setspecific(sys_thread_key_t key, const void *value);
++__syscall int sys_thread_getspecific(sys_thread_key_t key, void **value);
++__syscall void sys_thread_finalize(struct k_thread *t, const void *retval);
++
++#ifdef __cplusplus
++}
++#endif
++
++#include <zephyr/syscalls/thread.h>
++
++#endif /* ZEPHYR_INCLUDE_ZEPHYR_SYS_THREAD_H_ */
+diff --git a/kernel/Kconfig b/kernel/Kconfig
+index ab06dbd53fe..5f41b14ab8e 100644
+--- a/kernel/Kconfig
++++ b/kernel/Kconfig
+@@ -26,10 +26,24 @@ config MULTITHREADING
+ 
+ config SYS_THREAD
+ 	bool "Use common thread compatibility options"
++	select SYS_ELASTIPOOL
++	select SYS_HASH_FUNC32
++	select SYS_HASH_MAP
+ 	default y
+ 	help
+ 	  Use common thread compatibility options
+ 
++if SYS_THREAD
++
++config SYS_THREAD_KEYS_MAX
++	int "Maximum number of thread-specific-storage keys"
++	default 5
++	help
++	  Maximum number of thread-specific-storage keys. This option supports both the ISO C
++	  thrd.h API as well as the POSIX threads API.
++
++endif
++
+ config NUM_COOP_PRIORITIES
+ 	int "Number of coop priorities" if MULTITHREADING
+ 	default 1 if !MULTITHREADING
+diff --git a/lib/os/CMakeLists.txt b/lib/os/CMakeLists.txt
+index 09ef3c4e4c0..afe7687fded 100644
+--- a/lib/os/CMakeLists.txt
++++ b/lib/os/CMakeLists.txt
+@@ -5,6 +5,10 @@ zephyr_syscall_header(
+   ${ZEPHYR_BASE}/include/zephyr/sys/mutex.h
+ )
+ 
++zephyr_syscall_header_ifdef(CONFIG_SYS_THREAD
++  ${ZEPHYR_BASE}/include/zephyr/sys/thread.h
++)
++
+ zephyr_sources(
+   cbprintf_packaged.c
+   clock.c
+@@ -72,6 +76,8 @@ zephyr_sources_ifdef(CONFIG_REBOOT reboot.c)
+ 
+ zephyr_sources_ifdef(CONFIG_POWEROFF poweroff.c)
+ 
++zephyr_sources_ifdef(CONFIG_SYS_THREAD thread.c)
++
+ zephyr_library_include_directories(
+   ${ZEPHYR_BASE}/kernel/include
+   ${ZEPHYR_BASE}/arch/${ARCH}/include
+diff --git a/lib/os/thread.c b/lib/os/thread.c
+new file mode 100644
+index 00000000000..390c9427ed9
+--- /dev/null
++++ b/lib/os/thread.c
+@@ -0,0 +1,226 @@
++/*
++ * Copyright (c) The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <errno.h>
++
++#include <zephyr/internal/syscall_handler.h>
++#include <zephyr/kernel.h>
++#include <zephyr/sys/atomic.h>
++#include <zephyr/sys/dlist.h>
++#include <zephyr/sys/elastipool.h>
++#include <zephyr/sys/sem.h>
++#include <zephyr/sys/thread.h>
++#include <zephyr/sys/util.h>
++#include <zephyr/toolchain.h>
++
++struct sys_thread_key {
++	sys_dlist_t list;
++	void (*destructor)(void *value);
++};
++
++struct sys_thread_key_value {
++	/* key_node associates a key-value pair with a key */
++	sys_dnode_t key_node;
++	/* thread_node associates key-value pairs with a thread */
++	sys_dnode_t thread_node;
++	void *value;
++};
++
++static struct k_spinlock sys_thread_key_lock;
++SYS_ELASTIPOOL_DEFINE_STATIC(sys_thread_key_pool, sizeof(struct sys_thread_key), __alignof(struct sys_thread_key),
++			     CONFIG_SYS_THREAD_KEYS_MAX, CONFIG_SYS_THREAD_KEYS_MAX);
++
++int z_impl_sys_thread_key_create(sys_thread_key_t *key, sys_thread_key_dtor_t destructor)
++{
++	int ret = -ENOMEM;
++	struct sys_thread_key *key_obj = NULL;
++
++	K_SPINLOCK(&sys_thread_key_lock) {
++		ret = sys_elastipool_alloc(&sys_thread_key_pool, (void **)&key_obj);
++		if (ret < 0) {
++			K_SPINLOCK_BREAK;
++		}
++
++		*key_obj = (struct sys_thread_key){
++			.list = SYS_DLIST_STATIC_INIT(&key_obj->list),
++			.destructor = destructor,
++		};
++
++		*key = (sys_thread_key_t)key_obj;
++	}
++
++	return ret;
++}
++
++#ifdef CONFIG_USERSPACE
++int z_vrfy_sys_thread_key_create(sys_thread_key_t *key, sys_thread_key_dtor_t destructor)
++{
++	K_OOPS(K_SYSCALL_MEMORY_WRITE(key, sizeof(*key)));
++	return z_impl_sys_thread_key_create(key, destructor);
++}
++#include <zephyr/syscalls/sys_thread_key_create_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++int z_impl_sys_thread_key_delete(sys_thread_key_t key)
++{
++	int ret = -ENOMEM;
++
++	K_SPINLOCK(&sys_thread_key_lock) {
++		ret = sys_elastipool_check(&sys_thread_key_pool, (void *)key);
++		if (ret < 0) {
++			/* not a valid key */
++			K_SPINLOCK_BREAK;
++		}
++
++		struct sys_thread_key *key_obj = (struct sys_thread_key *)key;
++
++		while (!sys_dlist_is_empty(&key_obj->list)) {
++			struct sys_thread_key_value *kv;
++
++			kv = SYS_DLIST_CONTAINER(sys_dlist_get(&key_obj->list), kv, key_node);
++			k_free(kv);
++		}
++
++		ret = sys_elastipool_free(&sys_thread_key_pool, (void *)key);
++		__ASSERT_NO_MSG(ret == 0);
++
++		ret = 0;
++	}
++
++	return ret;
++}
++
++#ifdef CONFIG_USERSPACE
++int z_vrfy_sys_thread_key_delete(sys_thread_key_t key)
++{
++	return z_impl_sys_thread_key_delete(key);
++}
++#include <zephyr/syscalls/sys_thread_key_delete_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++int z_impl_sys_thread_getspecific(sys_thread_key_t key, void **value)
++{
++	void *val = NULL;
++	int ret = -EINVAL;
++
++	K_SPINLOCK(&sys_thread_key_lock) {
++		ret = sys_elastipool_check(&sys_thread_key_pool, (const void *)key);
++		if (ret < 0) {
++			/* not a valid key */
++			K_SPINLOCK_BREAK;
++		}
++
++		struct sys_thread_key_value *kv;
++		struct k_thread *const th = k_current_get();
++		const struct sys_thread_key *const key_obj = (const struct sys_thread_key *)key;
++
++		/* O(1) search is less than ideal */
++		SYS_DLIST_FOR_EACH_CONTAINER(&key_obj->list, kv, key_node) {
++			if (th == CONTAINER_OF(kv->thread_node.head, struct k_thread, key_list)) {
++				val = kv->value;
++				K_SPINLOCK_BREAK;
++			}
++		}
++
++		/* return ret = 0 here, value = NULL if no value is set for key in this thread */
++	}
++
++	if (ret == 0) {
++		*value = val;
++	}
++
++	return ret;
++}
++
++#ifdef CONFIG_USERSPACE
++int z_vrfy_sys_thread_getspecific(sys_thread_key_t key, void **value)
++{
++	K_OOPS(K_SYSCALL_MEMORY_WRITE(value, sizeof(*value)));
++	return z_impl_sys_thread_getspecific(key, value);
++}
++#include <zephyr/syscalls/sys_thread_getspecific_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++int z_impl_sys_thread_setspecific(sys_thread_key_t key, const void *value)
++{
++	int ret = -EINVAL;
++
++	K_SPINLOCK(&sys_thread_key_lock) {
++		ret = sys_elastipool_check(&sys_thread_key_pool, (const void *)key);
++		if (ret < 0) {
++			/* not a valid key */
++			K_SPINLOCK_BREAK;
++		}
++
++		struct sys_thread_key_value *kv;
++		struct k_thread *const th = k_current_get();
++		struct sys_thread_key *const key_obj = (struct sys_thread_key *)key;
++
++		/* O(1) search is less than ideal */
++		SYS_DLIST_FOR_EACH_CONTAINER(&key_obj->list, kv, key_node) {
++			if (th == CONTAINER_OF(kv->thread_node.head, struct k_thread, key_list)) {
++				kv->value = (void *)value;
++				K_SPINLOCK_BREAK;
++			}
++		}
++
++		/* need to allocate a new node for the given key in this thread */
++		kv = (CONFIG_HEAP_MEM_POOL_SIZE > 0) ? k_malloc(sizeof(*kv)) : NULL;
++		if (kv == NULL) {
++			ret = -ENOMEM;
++			K_SPINLOCK_BREAK;
++		}
++
++		*kv = (struct sys_thread_key_value){
++			.value = (void *)value,
++			.key_node = SYS_DLIST_STATIC_INIT(&kv->key_node),
++			.thread_node = SYS_DLIST_STATIC_INIT(&kv->thread_node),
++		};
++
++		sys_dlist_append(&key_obj->list, &kv->key_node);
++		sys_dlist_append(&th->key_list, &kv->thread_node);
++	}
++
++	return ret;
++}
++
++#ifdef CONFIG_USERSPACE
++int z_vrfy_sys_thread_setspecific(sys_thread_key_t key, const void *value)
++{
++	return z_impl_sys_thread_setspecific(key, value);
++}
++#include <zephyr/syscalls/sys_thread_setspecific_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++void z_impl_sys_thread_finalize(struct k_thread *t, const void *retval)
++{
++	t->retval = (void *)retval;
++
++	while (!sys_dlist_is_empty(&t->key_list)) {
++		sys_dnode_t *node = sys_dlist_get(&t->key_list);
++		struct sys_thread_key_value *kv = SYS_DLIST_CONTAINER(node, kv, thread_node);
++
++		if (kv->value != NULL) {
++			struct sys_thread_key *key = SYS_DLIST_CONTAINER(kv->key_node.head, key, list);
++
++			if (key->destructor != NULL) {
++				key->destructor(kv->value);
++				kv->value = NULL;
++			}
++		}
++		sys_dlist_remove(&kv->key_node);
++		k_free(kv);
++	}
++}
++
++#ifdef CONFIG_USERSPACE
++void z_vrfy_sys_thread_finalize(struct k_thread *t, const void *retval)
++{
++	K_OOPS(K_SYSCALL_OBJ(t, K_OBJ_THREAD));
++	z_impl_sys_thread_finalize(t, retval);
++}
++#include <zephyr/syscalls/sys_thread_finalize_mrsh.c>
++#endif /* CONFIG_USERSPACE */
+diff --git a/tests/lib/c_lib/thrd/prj.conf b/tests/lib/c_lib/thrd/prj.conf
+index a595b337ca5..4a76d82fd0e 100644
+--- a/tests/lib/c_lib/thrd/prj.conf
++++ b/tests/lib/c_lib/thrd/prj.conf
+@@ -3,6 +3,7 @@ CONFIG_TEST_USERSPACE=y
+ CONFIG_ZTEST_FATAL_HOOK=y
+ 
+ CONFIG_POSIX_AEP_CHOICE_BASE=y
++CONFIG_HEAP_MEM_POOL_SIZE=64
+ CONFIG_THREAD_STACK_INFO=y
+ CONFIG_DYNAMIC_THREAD=y
+ CONFIG_DYNAMIC_THREAD_POOL_SIZE=2

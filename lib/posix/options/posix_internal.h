@@ -58,7 +58,7 @@ struct posix_thread {
 	sys_dnode_t q_node;
 
 	/* List of keys that thread has called pthread_setspecific() on */
-	sys_slist_t key_list;
+	sys_dlist_t key_list;
 
 	/* pthread_attr_t */
 	struct posix_thread_attr attr;
@@ -101,7 +101,7 @@ typedef struct pthread_key_obj {
 } pthread_key_obj;
 
 typedef struct pthread_thread_data {
-	sys_snode_t node;
+	sys_dnode_t node;
 
 	/* Key and thread specific data passed to pthread_setspecific() */
 	pthread_key_obj *key;
