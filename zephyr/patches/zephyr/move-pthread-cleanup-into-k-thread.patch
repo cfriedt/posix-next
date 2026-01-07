@@ -1,0 +1,108 @@
+diff --git a/include/zephyr/sys/thread.h b/include/zephyr/sys/thread.h
+index 6de11f90fab..f5d5c8e82ec 100644
+--- a/include/zephyr/sys/thread.h
++++ b/include/zephyr/sys/thread.h
+@@ -16,14 +16,22 @@ extern "C" {
+ 
+ #define SYS_OBJ_INITIALIZER (-1)
+ 
++typedef void (*sys_thread_cleanup_fn_t)(void *arg);
+ typedef unsigned long sys_thread_key_t;
+ typedef void (*sys_thread_key_dtor_t)(void *value);
+ 
++__syscall int sys_thread_cleanup_pop(sys_thread_cleanup_fn_t *fn, void **arg);
++__syscall int sys_thread_cleanup_push(void **cleanup, sys_thread_cleanup_fn_t fn, void *arg);
++__syscall int sys_thread_create(struct k_thread **th, k_thread_stack_t *stack, size_t size,
++				k_thread_entry_t entry, void *p1, void *p2, void *p3, int prio,
++				uint32_t options);
++__syscall void sys_thread_exit(void *retval);
+ __syscall int sys_thread_key_create(sys_thread_key_t *key, sys_thread_key_dtor_t destructor);
+ __syscall int sys_thread_key_delete(sys_thread_key_t key);
+ __syscall int sys_thread_setspecific(sys_thread_key_t key, const void *value);
+ __syscall int sys_thread_getspecific(sys_thread_key_t key, void **value);
+ __syscall void sys_thread_finalize(struct k_thread *t, const void *retval);
++__syscall int k_thread_rejoin(struct k_thread *th, k_timeout_t timeout, void **retval);
+ 
+ #ifdef __cplusplus
+ }
+diff --git a/lib/os/thread.c b/lib/os/thread.c
+index 390c9427ed9..257c0f36fe2 100644
+--- a/lib/os/thread.c
++++ b/lib/os/thread.c
+@@ -12,10 +12,17 @@
+ #include <zephyr/sys/dlist.h>
+ #include <zephyr/sys/elastipool.h>
+ #include <zephyr/sys/sem.h>
++#include <zephyr/sys/slist.h>
+ #include <zephyr/sys/thread.h>
+ #include <zephyr/sys/util.h>
+ #include <zephyr/toolchain.h>
+ 
++struct sys_thread_cleanup {
++	void (*routine)(void *arg);
++	void *arg;
++	sys_snode_t node;
++};
++
+ struct sys_thread_key {
+ 	sys_dlist_t list;
+ 	void (*destructor)(void *value);
+@@ -33,6 +40,58 @@ static struct k_spinlock sys_thread_key_lock;
+ SYS_ELASTIPOOL_DEFINE_STATIC(sys_thread_key_pool, sizeof(struct sys_thread_key), __alignof(struct sys_thread_key),
+ 			     CONFIG_SYS_THREAD_KEYS_MAX, CONFIG_SYS_THREAD_KEYS_MAX);
+ 
++int z_impl_sys_thread_cleanup_pop(sys_thread_cleanup_fn_t *fn, void **arg)
++{
++	struct k_thread *t = k_current_get();
++
++	if (sys_slist_is_empty(&t->cleanup_list)) {
++		return -ENOENT;
++	}
++
++	sys_snode_t *node = sys_slist_get(&t->cleanup_list);
++	struct sys_thread_cleanup *c = CONTAINER_OF(node, struct sys_thread_cleanup, node);
++
++	*fn = c->routine;
++	*arg = c->arg;
++
++	return 0;
++}
++
++#ifdef CONFIG_USERSPACE
++int z_vrfy_sys_thread_cleanup_pop(sys_thread_cleanup_fn_t *fn, void **arg)
++{
++	K_OOPS(K_SYSCALL_MEMORY_WRITE(fn, sizeof(*fn)));
++	K_OOPS(K_SYSCALL_MEMORY_WRITE(arg, sizeof(*arg)));
++	return z_impl_sys_thread_cleanup_pop(fn, arg);
++}
++#include <zephyr/syscalls/sys_thread_cleanup_pop_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++int z_impl_sys_thread_cleanup_push(void **cleanup, sys_thread_cleanup_fn_t fn, void *arg)
++{
++	struct k_thread *t = k_current_get();
++	struct sys_thread_cleanup *const c = (struct sys_thread_cleanup *)cleanup;
++	BUILD_ASSERT(3 * sizeof(void *) == sizeof(*c));
++
++	*c = (struct sys_thread_cleanup){
++		.routine = fn,
++		.arg = arg,
++		.node = {0},
++	};
++
++	sys_slist_prepend(&t->cleanup_list, &c->node);
++
++	return 0;
++}
++
++#ifdef CONFIG_USERSPACE
++int z_vrfy_sys_thread_cleanup_push(void **cleanup, sys_thread_cleanup_fn_t fn, void *arg)
++{
++	return z_impl_sys_thread_cleanup_push(cleanup, fn, arg);
++}
++#include <zephyr/syscalls/sys_thread_cleanup_push_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
+ int z_impl_sys_thread_key_create(sys_thread_key_t *key, sys_thread_key_dtor_t destructor)
+ {
+ 	int ret = -ENOMEM;

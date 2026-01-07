@@ -193,6 +193,9 @@ static inline void __z_pthread_cleanup_init(struct __pthread_cleanup *c, void (*
 
 void __z_pthread_cleanup_push(void *cleanup[3], void (*routine)(void *arg), void *arg)
 {
+#ifdef CONFIG_SYS_THREAD
+	(void)sys_thread_cleanup_push(cleanup, routine, arg);
+#else
 	struct posix_thread *t = NULL;
 	struct __pthread_cleanup *const c = (struct __pthread_cleanup *)cleanup;
 	BUILD_ASSERT(3 * sizeof(void *) == sizeof(*c));
@@ -205,10 +208,23 @@ void __z_pthread_cleanup_push(void *cleanup[3], void (*routine)(void *arg), void
 		__z_pthread_cleanup_init(c, routine, arg);
 		sys_slist_prepend(&t->cleanup_list, &c->node);
 	}
+#endif
 }
 
 void __z_pthread_cleanup_pop(int execute)
 {
+#ifdef CONFIG_SYS_THREAD
+	void *arg;
+	sys_thread_cleanup_fn_t fn;
+
+	if (sys_thread_cleanup_pop(&fn, &arg) < 0) {
+		return;
+	}
+
+	if (execute) {
+		fn(arg);
+	}
+#else
 	sys_snode_t *node;
 	struct __pthread_cleanup *c = NULL;
 	struct posix_thread *t = NULL;
@@ -225,6 +241,7 @@ void __z_pthread_cleanup_pop(int execute)
 	if (execute) {
 		c->routine(c->arg);
 	}
+#endif
 }
 
 static bool is_posix_policy_prio_valid(int priority, int policy)
