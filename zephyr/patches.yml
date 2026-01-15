@@ -314,3 +314,53 @@ patches:
     upstreamable: true
     comments: |
       Allow ring-buffers to be declared statically via a macro.
+  - path: zephyr/arm-cortex-m-decouple-exception-from-switch.patch
+    sha256sum: afd69aa6da95808913e31d18001694df5d7cf0d9ace0462e72d7339ddb9ca725
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-18
+    upstreamable: true
+    comments: |
+      Decouple <zephyr/arch/exception.h> from the Cortex-M context-switch
+      machinery: factor the _EXC_* priority macros into cortex_m/cpu.h and stop
+      cortex_m/exception.h from including arm-m-switch.h (and thus kernel/thread.h),
+      restoring the cross-arch convention that the new arm-m-switch.h broke.
+      Fixes '_EXC_IRQ_DEFAULT_PRIO undeclared' and the CONFIG_SIGNAL circular
+      include on Cortex-M.
+  - path: zephyr/k-signal.patch
+    sha256sum: db639d5c86302af4fe7d2cfb6d90fa01476f1cfca21ea96c1ad9c38af32783df
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2024-06-18
+    upstreamable: true
+    comments: |
+      Add the k_signal API for inter-thread signaling.
+      A thread object set up anew drops the thread-directed entries its
+      previous occupant never claimed (z_sig_thread_drop() from
+      z_setup_new_thread()): a pooled thread that exited with a kill queued
+      to it would otherwise hand that kill to the next thread drawn on it.
+      Handlers run in series: while one is in progress (k_sig_ctx.handling,
+      set at redirection and cleared by k_sig_return()) z_sig_handle() leaves
+      further signals pending, so a second signal arriving at a system call
+      made inside a handler cannot start a nested handler. The per-thread
+      backup of the interrupted context has one slot; a nested delivery
+      overwrote it and the outer k_sig_return() resumed the wrong context.
+
+      Includes the SIGNAL_ACTION_DB_SIZE_MIN_* Kconfig contributor mechanism, a per-thread
+      count of signals delivered to a handler readable via k_sig_delivered(), a user_data
+      pointer carried with each k_sig_action (retrievable during handling via k_sig_current(),
+      for layers that interpose their own handler), and a system-wide alarm armed via
+      k_sig_alarm() that queues K_SIG_ALRM to the calling thread on expiry. The alarm
+      goes with the thread that armed it: halt_thread() cancels it through
+      z_sig_thread_exit(), so an expiry never queues to a thread object that has since
+      been retired or reused.
+      The pending-scan reclaims queue entries whose target thread has died,
+      keyed on each entry's own target rather than the querying thread.
+      The generated system call wrappers test one system-wide counter of pending signal
+      work inline (z_sig_work_pending, maintained at the queue and release sites) and only
+      reach the out-of-line checks when it is non-zero; kernel-only builds force-inline
+      every non-variadic wrapper (Z_SYSCALL_INLINE) so that test does not turn a direct
+      kernel call into two calls. Invalid actions are rejected before the action database
+      capacity check.
