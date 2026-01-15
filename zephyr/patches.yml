@@ -168,3 +168,26 @@ patches:
     upstreamable: true
     comments: |
       Allow ring-buffers to be declared statically via a macro.
+  - path: zephyr/k-signal.patch
+    sha256sum: b81af373855c7c191653b5da479d57ae6d3e8640d4cb2f2cc7146cce59450e87
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2024-06-18
+    upstreamable: true
+    comments: |
+      Add the k_signal API for inter-thread signaling.
+
+      Includes the SIGNAL_ACTION_DB_SIZE_MIN_* Kconfig contributor mechanism, a per-thread
+      count of signals delivered to a handler readable via k_sig_delivered(), a user_data
+      pointer carried with each k_sig_action (retrievable during handling via k_sig_current(),
+      for layers that interpose their own handler), and a system-wide alarm armed via
+      k_sig_alarm() that queues K_SIG_ALRM to the calling thread on expiry.
+      The pending-scan reclaims queue entries whose target thread has died,
+      keyed on each entry's own target rather than the querying thread.
+      The generated system call wrappers test one system-wide counter of pending signal
+      work inline (z_sig_work_pending, maintained at the queue and release sites) and only
+      reach the out-of-line checks when it is non-zero; kernel-only builds force-inline
+      every non-variadic wrapper (Z_SYSCALL_INLINE) so that test does not turn a direct
+      kernel call into two calls. Invalid actions are rejected before the action database
+      capacity check.
