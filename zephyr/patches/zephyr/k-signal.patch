@@ -1,0 +1,1969 @@
+diff --git a/arch/Kconfig b/arch/Kconfig
+index 4fca0c3c602..b7eb962497c 100644
+--- a/arch/Kconfig
++++ b/arch/Kconfig
+@@ -795,6 +795,19 @@ config ARCH_HAS_THREAD_PRIV_STACK_SPACE_GET
+ config ARCH_HAS_HW_SHADOW_STACK
+ 	bool
+ 
++config ARCH_SUPPORTS_USERSPACE_SIGNALS
++	bool
++	help
++	  Enabled when the architecutre supports userspace signal handling.
++
++config ARCH_USERSPACE_SIGNAL_STORAGE_SIZE
++	int
++	depends on SIGNAL
++	default 0
++	help
++	  The number of additional words of storage an architecture may require in order to
++	  handle signals with userspace threads across a context switch.
++
+ #
+ # Other architecture related options
+ #
+diff --git a/doc/kernel/services/index.rst b/doc/kernel/services/index.rst
+index c855afbbf58..bfd0c951324 100644
+--- a/doc/kernel/services/index.rst
++++ b/doc/kernel/services/index.rst
+@@ -37,6 +37,7 @@ synchronization.
+    threads/nothread.rst
+    interrupts.rst
+    polling.rst
++   signals.rst
+    synchronization/semaphores.rst
+    synchronization/mutexes.rst
+    synchronization/condvar.rst
+diff --git a/doc/kernel/services/signals.rst b/doc/kernel/services/signals.rst
+new file mode 100644
+index 00000000000..e4f7fd8a123
+--- /dev/null
++++ b/doc/kernel/services/signals.rst
+@@ -0,0 +1,210 @@
++.. _signals:
++
++Signal API
++##########
++
++The signal API supports signalling between threads.
++
++.. contents::
++    :local:
++    :depth: 2
++
++Concepts
++********
++
++The signal API provides a way for one thread to notify another thread that an
++event has occurred using a predefined integer value
++(see :zephyr_file:`include/zephyr/posix/signal.h`).
++
++Zephyr's signal API can be broken down into functions that manipulate and
++query *signal sets* (:c:struct:`k_sig_set`), and functions that are used to
++send and receive signals (see :ref:`Signal API Implementation <signals_implementation>`).
++
++Standard vs Real-time Signals
++=============================
++
++Signals may be divided into two categories; *standard* and *real-time*. The
++main differences between the two are
++
++* ISO C and POSIX do not specify whether standard signals are queued or merged.
++* ISO C and POSIX do not specify the priority of standard signals.
++
++To illustrate the former point, if ``SIGALRM`` is sent twice to an
++application, the implementation may merge those into one signal or queue them.
++On the other hand, Real-time signals are always queued in the order they are
++generated, and are never merged.
++
++Standard signals therefore have a shortcoming at the specification level; there
++can be no guarantee of determinism if a signal generated at one time instance
++is merged with another signal generated at another time instance. Zephyr removes
++this ambiguity by delivering all signals in the order they are generated, and
++not merging any signals. Zephyr's handling of standard signals is similar
++to how Zephyr handles real-time signals.
++
++.. note::
++    Zephyr queues all signals in the order they are generated, and never
++    merges any signals (real-time or otherwise).
++
++To address the latter point, real-time signals have a priority with respect to
++other real-time signals. However, the POSIX specification does not clarify the
++priority of real-time signals with respect to standard signals. To address
++this ambiguity, Zephyr always delivers unmasked, real-time signals in
++prioritized order (lowest-numbered signal) and *then* delivers standard signals
++in the order they are generated.
++
++.. note::
++    Zephyr prioritizes real-time signals before standard signals.
++
++Limitations
++===========
++
++As per ISO C and POSIX, signals should be delivered and handled to the
++application asynchronously if they are not masked. Currently, Zephyr
++does not support asynchronous signal delivery, as that may introduce
++elements of non-determinism. Therefore, all signals should be received
++synchronously via calls to :c:func:`k_sig_timedwait`.
++
++.. _signals_implementation:
++
++Implementation
++**************
++
++Signal Sets
++===========
++
++When :kconfig:option:`CONFIG_SIGNAL` is enabled, every :c:struct:`k_thread` is
++created with an initially-empty :c:struct:`k_sig_set` of masked signals. If a
++signal is masked (i.e. part of the set), the corresponding bit in the signal
++set is 1, otherwise it is 0. Thus an initially empty :c:struct:`k_sig_set` is
++zero-valued. Signal sets should not be modified directly, but indirectly via
++the functions provided in the signal API.
++
++Before a signal set can be used, it must be initialized via
++:c:func:`k_sig_emptyset` or :c:func:`k_sig_fillset`, which either create an
++empty or full signal set, respectively. Using a signal set without first
++initializing it via either of the two aforementioned functions results in
++undefined behaviour.
++
++.. code-block:: c
++    :caption: Initialize a :c:struct:`k_sig_set`
++
++    struct k_sig_set set;
++
++    k_sig_emptyset(&set);
++    /* or */
++    k_sig_fillset(&set);
++
++
++Signals may then be added via :c:func:`k_sig_addset`, removed via
++:c:func:`k_sig_delset`, and tested for via :c:func:`k_sig_ismember`.
++
++.. code-block:: c
++    :caption: Add, remove, or query signals in a :c:struct:`k_sig_set`
++
++    k_sig_addset(&set, SIGINT);
++    /* or */
++    k_sig_delset(&set, SIGTERM);
++
++    if (k_sig_ismember(&set, SIGINT) == 1) {
++        /* SIGINT is in the set */
++    }
++
++The Signal Mask
++===============
++
++The signal mask belonging to each thread may only be modified by the thread
++itself using :c:func:`k_sig_mask`. The signal mask may be manipulated in one
++of three possible ways
++
++1. :c:macro:`K_SIG_BLOCK` - the signals in the set provided are added to the mask
++2. :c:macro:`K_SIG_UNBLOCK` - the signals in the set provided are removed from
++   the mask
++3. :c:macro:`K_SIG_SETMASK` - the mask is replaced by the set provided.
++
++In order to retrieve that current value of the signal mask, or to obtain the
++value of the set before it was modified, pass a non-``NULL`` pointer for the
++``oset`` (old set) argument to :c:func:`k_sig_mask`.
++
++.. code-block:: c
++    :caption: Manipulate the signal mask of the current thread
++
++    struct k_sig_set set, oset;
++
++    k_sig_emptyset(&set);
++    k_sig_addset(&set, SIGINT);
++
++    k_sig_mask(K_SIG_BLOCK, &set, NULL);
++    /* SIGINT is now blocked */
++
++    /* Retrieve the current signal mask */
++    k_sig_mask(-1, NULL, &oset);
++    /* oset contains SIGINT and other previously masked signals */
++
++Sending Signals
++===============
++
++Signals are queued to a thread using :c:func:`k_sig_queue()`. The first
++argument to this function is of type :c:type:`k_pid_t`. Although the name of
++:c:type:`k_pid_t` may imply the opposite, Zephyr does not yet support
++processes and :c:type:`k_pid_t` is synonymous with :c:type:`k_tid_t`. Along
++with the signal number, :c:func:`k_sig_queue()` also accepts a
++:c:union:`k_sig_val` which may be used to pass additional information to the
++receiving thread in the form of a pointer or integer value.
++
++.. code-block:: c
++    :caption: Send a signal to the current thread
++
++    /* arbitrary data to be sent with the signal */
++    int data = 1234;
++    extern uint8_t shared_resource[4200];
++    k_pid_t pid = (k_pid_t) k_current_get();
++    union k_sig_val val = {
++        .sival_int = data,
++    };
++
++    /* use an integer value */
++    k_sig_queue(pid, SIGUSR1, val);
++
++    /* use a pointer value */
++    val.sival_ptr = &shared_resource;
++    k_sig_queue(pid, SIGUSR2, val);
++
++Receiving Signals
++=================
++
++A thread may query for the signals pending delivery via
++:c:func:`k_sig_pending`. This function takes only one argument, a pointer to a
++signal set, which will be filled with the signals pending delivery.
++
++To receive a signal, and wait for a configurable amount of time for one to be
++delivered, the function :c:func:`k_sig_timedwait` is used.
++
++.. code-block:: c
++    :caption: Receive a signal
++
++    struct k_sig_set set;
++    struct k_sig_info info;
++
++    k_sig_emptyset(&set);
++    k_sig_addset(&set, SIGUSR1);
++    k_sig_timedwait(&set, &info, K_FOREVER);
++    /* SIGUSR1 has been received */
++
++    /*
++     * Additional data may be in info.si_value.sival_int or
++     * info.si_value.sival_ptr
++     */
++
++Configuration Options
++*********************
++
++Related configuration options:
++
++* :kconfig:option:`CONFIG_SIGNAL`
++* :kconfig:option:`CONFIG_SIGNAL_QUEUE_SIZE`
++* :kconfig:option:`CONFIG_SIGNAL_SET_SIZE`
++
++API Reference
++*************
++
++.. doxygengroup:: k_sig_apis
+diff --git a/include/zephyr/arch/arch_interface.h b/include/zephyr/arch/arch_interface.h
+index e604a3189d7..8bfc9187099 100644
+--- a/include/zephyr/arch/arch_interface.h
++++ b/include/zephyr/arch/arch_interface.h
+@@ -1309,6 +1309,33 @@ void arch_stack_walk(stack_trace_callback_fn callback_fn, void *cookie,
+  * @}
+  */
+ 
++#if (defined(CONFIG_SIGNAL) && defined(CONFIG_USERSPACE)) || defined(__DOXYGEN__)
++/**
++ * @brief Arch specific Signal handling APIs
++ * @defgroup sig_api_arch Arch specific Signal Handling APIs
++ * @ingroup sig_api
++ *
++ * Some architecture-specific components are necessary to signals for userspace threads
++ * since doing so involves a context switch.
++ *
++ * @{
++ */
++
++/**
++ * @brief Architecture-specific hook for returning from a signal handler
++ *
++ * A required component of userspace thread signal handling includes architecture-specific
++ * code to restore the call stack for after a signal has been handled.
++ */
++void arch_sig_return(struct k_thread *thread, struct arch_esf *esf);
++
++/**
++ * sig_api_arch
++ * @}
++ */
++
++#endif /* (defined(CONFIG_SIGNAL) && defined(CONFIG_USERSPACE)) || defined(__DOXYGEN__) */
++
+ #ifdef __cplusplus
+ }
+ #endif /* __cplusplus */
+@@ -1317,4 +1344,4 @@ void arch_stack_walk(stack_trace_callback_fn callback_fn, void *cookie,
+ 
+ #endif /* _ASMLANGUAGE */
+ 
+-#endif /* ZEPHYR_INCLUDE_ARCH_ARCH_INTERFACE_H_ */
++#endif /* ZEPHYR_INCLUDE_ARCH_ARCH_INTERFACE_H_ */
+\ No newline at end of file
+diff --git a/include/zephyr/kernel.h b/include/zephyr/kernel.h
+index 9191370a93c..189c0018d57 100644
+--- a/include/zephyr/kernel.h
++++ b/include/zephyr/kernel.h
+@@ -6697,6 +6697,178 @@ void k_sys_runtime_stats_enable(void);
+  */
+ void k_sys_runtime_stats_disable(void);
+ 
++#if defined(CONFIG_SIGNAL) || defined(__DOXYGEN__)
++
++/**
++ * @addtogroup k_sig_apis
++ * @{
++ */
++
++/**
++ * @brief Add the signal @a sig to the signal set @a set.
++ *
++ * @param set the set to which @a sig should be added.
++ * @param sig the signal which should be added to @a set.
++ *
++ * @retval 0 on success.
++ * @return -EINVAL if @a sig is invalid.
++ */
++int k_sig_addset(struct k_sig_set *set, int sig);
++
++/**
++ * @brief Remove the signal @a sig from signal set @a set.
++ *
++ * @param set the set from which @a sig should be removed.
++ * @param sig the signal which should be removed from @a set.
++ *
++ * @retval 0 on success.
++ * @return -EINVAL if @a sig is invalid.
++ */
++int k_sig_delset(struct k_sig_set *set, int sig);
++
++/**
++ * @brief Check if signal @a sig is part of signal set @a set.
++ *
++ * @param set the set to check.
++ * @param sig the signal which should be checked.
++ *
++ * @retval 0 if @a sig is not part of @a set.
++ * @retval 1 if @a sig is part of @a set.
++ * @return -EINVAL if @a sig is invalid.
++ */
++int k_sig_ismember(const struct k_sig_set *set, int sig);
++
++/**
++ * @brief Initialize a signal set with the set of all signals.
++ *
++ * @param set signal set to initialize.
++ *
++ * @retval 0 on success.
++ * @return -EINVAL if @a sig is invalid.
++ */
++int k_sig_fillset(struct k_sig_set *set);
++
++/**
++ * @brief Initialize a signal set as empty.
++ *
++ * @param set signal set to initialize.
++ *
++ * @retval 0 on success.
++ * @return -EINVAL if @a sig is invalid.
++ */
++int k_sig_emptyset(struct k_sig_set *set);
++
++/**
++ * @brief Test if a signal set s empty.
++ *
++ * @param set signal set to test.
++ *
++ * @return true when @p set is empty, otherwise false. on success.
++ */
++static inline bool k_sig_setisempty(const struct k_sig_set *set)
++{
++	ARRAY_FOR_EACH(set->sig, i) {
++		if (set->sig[i] == 0) {
++			continue;
++		}
++
++		return false;
++	}
++
++	return true;
++}
++
++/**
++ * @brief Manipulate the signal mask of the calling thread.
++ *
++ * The parameter @a how may be specified as @ref K_SIG_BLOCK,
++ * @ref K_SIG_UNBLOCK, or @ref K_SIG_SETMASK. If @a how is @ref K_SIG_BLOCK,
++ * then the signals in @a set are added to the signal mask of the calling
++ * thread. If @a how is @ref K_SIG_UNBLOCK, then the signals in @a set
++ * are removed from the
++ *
++ * @param how how to manipulate the set
++ * @param set the set to manipulate
++ * @param[out] oset the resulting set
++ * @retval 0 on success
++ * @retval -EINVAL for invalid values of @a how
++ */
++__syscall int k_sig_mask(int how, const struct k_sig_set *set, struct k_sig_set *oset);
++
++/**
++ * @brief Get the set of pending signals for the calling thread.
++ *
++ * @param[out] set the set of pending signals for the calling thread.
++ * @retval 0 on success
++ * @retval -EINVAL for invalid values of @a set
++ * @retval -EFAULT if called from ISR context
++ */
++__syscall int k_sig_pending(struct k_sig_set *set);
++
++/**
++ * @brief Queue a signal for process ID @a pid.
++ *
++ * Queue the signal @a signo for process ID @a pid with value @a value.
++ *
++ * This function is safe to call in ISR context.
++ *
++ * @param pid the process ID for which to queue the signal.
++ * @param signo the signal number to queue.
++ * @param value the value associated with the signal.
++ *
++ * @retval 0 on success.
++ * @retval -EAGAIN if there were insufficient resources available.
++ * @retval -EINVAL if @a signo is invalid.
++ * @return -EPERM if the calling thread lacks permissions to signal the process with id @a pid.
++ * @return -ESRCH if a process with id @a pid does not exist.
++ * @return -EWOULDBLOCK if called from ISR context and the operation would block.
++ */
++__syscall int k_sig_queue(k_pid_t pid, int signo, union k_sig_val value);
++
++/**
++ * @brief Wait for any signal in @a set for a maximum duration specified by @a timeout.
++ *
++ * Wait for any signal in @a set to be delivered to the calling thread.
++ *
++ * This call does not block if @ref K_NO_WAIT is specified in the @a timeout parameter.
++ * This call blocks indefinitely if @ref K_FOREVER is specified in the @a timeout parameter.
++ *
++ * @param set set of signals to wait for.
++ * @param[out] info pointer to a location in which to store signal-related information.
++ * @param timeout upper bound time to wait for a signal in @a set to be delivered.
++ *
++ * @retval 0 on success.
++ * @retval -EAGAIN if no signal in @a set was received within the specified @a timeout.
++ * @retval -EINTR if the operation was interrupted by a signal.
++ * @retval -EWOULDBLOCK if the operation would block and was called in ISR context.
++ */
++__syscall int k_sig_timedwait(const struct k_sig_set *set, struct k_sig_info *info,
++			      k_timeout_t timeout);
++
++#if defined(CONFIG_USERSPACE)
++/** @cond INTERNAL_HIDDEN */
++/*
++ * This system call is used exclusively for returning from the signal handler trampoline,
++ * z_sig_trampoline(), when userspace is enabled and should never be called from regular
++ * application code.
++ */
++__syscall void k_sig_current(struct k_sig_info *info, k_sig_handler_t *handler, void **context);
++
++/*
++ * This system call is used exclusively for returning from the signal handler trampoline,
++ * z_sig_trampoline(), when userspace is enabled and should never be called from regular
++ * application code.
++ */
++__syscall void k_sig_return(void);
++/** @endcond */
++#endif
++
++/**
++ * @}
++ */
++
++#endif /* CONFIG_SIGNAL */
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/include/zephyr/kernel/signal.h b/include/zephyr/kernel/signal.h
+new file mode 100644
+index 00000000000..22f06aa42d1
+--- /dev/null
++++ b/include/zephyr/kernel/signal.h
+@@ -0,0 +1,159 @@
++/*
++ * Copyright (c) 2024, Friedt Professional Engineering Services, Inc
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_INCLUDE_ZEPHYR_KERNEL_SIGNAL_H_
++#define ZEPHYR_INCLUDE_ZEPHYR_KERNEL_SIGNAL_H_
++
++#include <zephyr/sys/util.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/**
++ * @brief Kernel Signal APIs
++ * @defgroup k_sig_apis Kernel Signal APIs
++ * @ingroup kernel_apis
++ * @{
++ */
++
++/**
++ * @brief Block signals in the accompanying @ref k_sig_set
++ *
++ * @see @ref k_sig_mask
++ */
++#define K_SIG_BLOCK 0
++
++/**
++ * @brief Set signals in the accompanying @ref k_sig_set
++ *
++ * @see @ref k_sig_mask
++ */
++#define K_SIG_SETMASK 2
++
++/**
++ * @brief Unblock signals in the accompanying @ref k_sig_set
++ *
++ * @see @ref k_sig_mask
++ */
++#define K_SIG_UNBLOCK 1
++
++/**
++ * @brief Minimum realtime signal number
++ *
++ * Programs should only attempt to iterate over real-time signals relative to K_SIG_RTMIN and
++ * @ref K_SIG_NUM_RT.
++ *
++ * For example:
++ *
++ * @code{.c}
++ * for (int i = 0; i < K_SIG_NUM_RT; ++i) {
++ *   int sig = K_SIG_RTMIN + i;
++ *   // Do something with sig
++ * }
++ * @endcode
++ *
++ * @note K_SIG_RTMAX is intentionally not defined since it would inevitably lead to off-by-one
++ * errors.
++ */
++#define K_SIG_RTMIN 32
++
++/** @brief Number of supported realtime signals */
++#define K_SIG_NUM_RT MAX(CONFIG_SIGNAL_SET_SIZE - K_SIG_RTMIN, 0)
++
++/** @brief Default signal handler with respect to a specified signal */
++#define K_SIG_DFL ((void *)0)
++/** @brief Ignore a specified signal */
++#define K_SIG_IGN ((void *)1)
++/** @brief Signal handler error indictor */
++#define K_SIG_ERR ((void *)(-1))
++
++/** @brief Signal info structure size (in words) */
++#define K_SIG_STORAGE_SIZE ( \
++	COND_CODE_1(CONFIG_USERSPACE, (CONFIG_ARCH_USERSPACE_SIGNAL_STORAGE_SIZE), (0)) \
++	+ DIV_ROUND_UP(sizeof(struct k_sig_info), sizeof(unsigned long)) \
++	+ 1 /* k_sig_handler_t */ \
++)
++
++/**
++ * @brief Signal value
++ *
++ * This union is passed to @ref k_sig_queue and is embedded in @ref k_sig_info, as an output
++ * parameter of @ref k_sig_timedwait.
++ */
++union k_sig_val {
++	int sival_int; /**< Integer signal value */
++	void *sival_ptr; /**< Pointer signal value */
++};
++
++/**
++ * @brief Signal info
++ *
++ * A pointer to an instance of this structure may be passed to @ref k_sig_timedwait to receive
++ * additional signal information.
++ */
++struct k_sig_info {
++	int si_signo; /**< Signal number */
++	int si_code; /**< Additional signal code */
++	union k_sig_val si_value; /**< Signal value */
++};
++
++/** @brief A bitset large enough to contain all signal bits. */
++struct k_sig_set {
++	unsigned long sig[DIV_ROUND_UP(MAX(CONFIG_SIGNAL_SET_SIZE, 1), BITS_PER_LONG)];
++};
++
++/**
++ * @brief Signal handler function pointer type
++ *
++ * Function handler type for signal handling.
++ */
++typedef void (*k_sig_handler_t)(int sig, struct k_sig_info *info, void *context);
++
++/* Signal numbers used by Zephyr */
++
++#define K_SIG_HUP 1 /**< Hangup */
++#define K_SIG_INT 2 /**< Interrupt */
++#define K_SIG_QUIT 3 /**< Quit */
++#define K_SIG_ILL 4 /**< Illegal instruction */
++#define K_SIG_TRAP 5 /**< Trace/breakpoint trap */
++#define K_SIG_ABRT 6 /**< Aborted */
++#define K_SIG_BUS 7 /**< Bus error */
++#define K_SIG_FPE 8 /**< Arithmetic exception */
++#define K_SIG_KILL 9 /**< Killed */
++#define K_SIG_USR1 10 /**< User-defined signal 1 */
++#define K_SIG_SEGV 11 /**< Invalid memory reference */
++#define K_SIG_USR2 12 /**< User-defined signal 2 */
++#define K_SIG_PIPE 13 /**< Broken pipe */
++#define K_SIG_ALRM 14 /**< Alarm clock */
++#define K_SIG_TERM 15 /**< Terminated */
++/* 16 not used */
++#define K_SIG_CHLD 17 /**< Child status changed */
++#define K_SIG_CONT 18 /**< Continued */
++#define K_SIG_STOP 19 /**< Stop executing */
++#define K_SIG_TSTP 20 /**< Stopped */
++#define K_SIG_TTIN 21 /**< Stopped (read) */
++#define K_SIG_TTOU 22 /**< Stopped (write) */
++#define K_SIG_URG 23 /**< Urgent I/O condition */
++#define K_SIG_XCPU 24 /**< CPU time limit exceeded */
++#define K_SIG_XFSZ 25 /**< File size limit exceeded */
++#define K_SIG_VTALRM 26 /**< Virtual timer expired */
++#define K_SIG_PROF 27 /**< Profiling timer expired */
++/* 28 not used */
++#define K_SIG_POLL 29 /**< Pollable event occurred */
++/* 30 not used */
++#define K_SIG_SYS 31 /**< Bad system call */
++/* 32 is used (typically) for thread cancellation and is equal to K_SIG_RTMIN */
++
++/**
++ * @}
++ */
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* ZEPHYR_INCLUDE_ZEPHYR_KERNEL_SIGNAL_H_ */
+diff --git a/include/zephyr/kernel/thread.h b/include/zephyr/kernel/thread.h
+index db7713d6d40..b665d134ce7 100644
+--- a/include/zephyr/kernel/thread.h
++++ b/include/zephyr/kernel/thread.h
+@@ -11,6 +11,10 @@
+ #include <zephyr/kernel/mm/demand_paging.h>
+ #endif /* CONFIG_DEMAND_PAGING_THREAD_STATS */
+ 
++#ifdef CONFIG_SIGNAL
++#include <zephyr/kernel/signal.h>
++#endif /* CONFIG_SIGNAL */
++
+ #include <zephyr/kernel/stats.h>
+ #include <zephyr/arch/arch_interface.h>
+ 
+@@ -135,6 +139,12 @@ struct _thread_base {
+ #ifdef CONFIG_SCHED_THREAD_USAGE
+ 	struct k_cycle_stats  usage;   /* Track thread usage statistics */
+ #endif /* CONFIG_SCHED_THREAD_USAGE */
++
++#ifdef CONFIG_SIGNAL
++	struct k_sig_set sig_mask; /* masked signals */
++	struct k_sig_set sig_restore; /* signal mask to restore after handling signal */
++	unsigned long sig_storage[K_SIG_STORAGE_SIZE]; /* Off-stack storage for signal context */
++#endif
+ };
+ 
+ typedef struct _thread_base _thread_base_t;
+@@ -366,5 +376,6 @@ struct k_thread {
+ 
+ typedef struct k_thread _thread_t;
+ typedef struct k_thread *k_tid_t;
++typedef k_tid_t k_pid_t;
+ 
+ #endif /* ZEPHYR_INCLUDE_KERNEL_THREAD_H_ */
+diff --git a/include/zephyr/kernel_includes.h b/include/zephyr/kernel_includes.h
+index d976c944f60..b4957a00d50 100644
+--- a/include/zephyr/kernel_includes.h
++++ b/include/zephyr/kernel_includes.h
+@@ -29,6 +29,7 @@
+ #include <zephyr/sys/sflist.h>
+ #include <zephyr/sys/util.h>
+ #include <zephyr/kernel/obj_core.h>
++#include <zephyr/kernel/signal.h>
+ #include <zephyr/kernel_structs.h>
+ #include <zephyr/kernel_version.h>
+ #include <zephyr/syscall.h>
+@@ -42,6 +43,7 @@
+ #include <zephyr/kernel/thread_stack.h>
+ #include <zephyr/app_memory/mem_domain.h>
+ #include <zephyr/sys/kobject.h>
++#include <zephyr/kernel/signal.h>
+ #include <zephyr/kernel/thread.h>
+ 
+ #endif /* ZEPHYR_INCLUDE_KERNEL_INCLUDES_H_ */
+diff --git a/kernel/CMakeLists.txt b/kernel/CMakeLists.txt
+index 8906da2f627..544f2587a5e 100644
+--- a/kernel/CMakeLists.txt
++++ b/kernel/CMakeLists.txt
+@@ -1,5 +1,8 @@
+ # SPDX-License-Identifier: Apache-2.0
+ 
++# This file cannot be compiled with __ZEPHYR_SUPERVISOR__ when userspace is enabled
++zephyr_sources_ifdef(CONFIG_SIGNAL signal.c)
++
+ # kernel is a normal CMake library and not a zephyr_library because it
+ # should usually not be --whole-archive'd
+ 
+diff --git a/kernel/Kconfig b/kernel/Kconfig
+index 9e3be0b12ab..2fb4d1a0dc8 100644
+--- a/kernel/Kconfig
++++ b/kernel/Kconfig
+@@ -715,6 +715,65 @@ config MEM_SLAB_POINTER_VALIDATE
+ 	  This enables additional runtime checks to validate the memory slab
+ 	  pointer during when allocating or freeing a memory slab.
+ 
++config SIGNAL
++	bool "Signal support"
++	depends on POLL
++	depends on RING_BUFFER
++	depends on !USERSPACE || (USERSPACE && ARCH_SUPPORTS_USERSPACE_SIGNALS)
++	select EXPERIMENTAL
++	help
++	  Select 'y' here to support signals.
++
++if SIGNAL
++
++config SIGNAL_QUEUE_SIZE_32
++	bool
++	help
++	  This is a hidden symbol used by subsystems (like POSIX) to indirectly
++	  affect a default size reflective of the standard, since we may not refer
++	  to POSIX Kconfig options here.
++
++config SIGNAL_QUEUE_SIZE
++	int "Signal queue size"
++	range 1 256
++	default 32 if SIGNAL_QUEUE_SIZE_32
++	default 1
++	help
++	  Size of kernel signal queue.
++
++config SIGNAL_POSIX_NEEDED
++	bool
++	help
++	  This is a hidden symbol used to indirectly affect the default signal set
++	  size.
++
++config SIGNAL_RT_NEEDED
++	bool
++	help
++	  This is a hidden symbol used to indirectly affect the default signal set
++	  size.
++
++module := SIGNAL
++module-str = k_sig
++source "subsys/logging/Kconfig.template.log_config"
++
++endif # SIGNAL
++
++# defined outside of the SIGNAL block to ensure struct k_sig_set is always well-defined
++config SIGNAL_SET_SIZE
++	int "Maximum number of signals"
++	default 0 if !SIGNAL
++	# 6 ISO C signals
++	default 6 if !SIGNAL_POSIX_NEEDED && !SIGNAL_RT_NEEDED
++	# 6 ISO C signals, 26 unused POSIX signals, and at least 8 Realtime signals
++	default 40 if !SIGNAL_POSIX_NEEDED && SIGNAL_RT_NEEDED
++	# 6 ISO C signals, and 26 POSIX signals
++	default 32 if SIGNAL_POSIX_NEEDED && !SIGNAL_RT_NEEDED
++	# 6 ISO C signals, 26 POSIX signals, and at least 8 Realtime signals
++	default 40 if SIGNAL_POSIX_NEEDED && SIGNAL_RT_NEEDED
++	help
++	  Maximum number of signals that can be represented in a struct k_sigset.
++
+ config MEM_SLAB_TRACE_MAX_UTILIZATION
+ 	bool "Getting maximum slab utilization"
+ 	help
+diff --git a/kernel/signal.c b/kernel/signal.c
+new file mode 100644
+index 00000000000..48a214a8704
+--- /dev/null
++++ b/kernel/signal.c
+@@ -0,0 +1,845 @@
++/*
++ * Copyright (c) 2024, Friedt Professional Engineering Services, Inc
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <errno.h>
++#include <string.h>
++#include <stdalign.h>
++
++#include <zephyr/internal/syscall_handler.h>
++#include <zephyr/kernel.h>
++#include <zephyr/logging/log.h>
++#include <zephyr/sys/math_extras.h>
++#include <zephyr/sys/ring_buffer.h>
++#include <zephyr/sys/util.h>
++
++#define K_SI_QUEUE 38
++#define K_NSIG CONFIG_SIGNAL_SET_SIZE
++
++LOG_MODULE_REGISTER(k_sig, CONFIG_SIGNAL_LOG_LEVEL);
++
++struct k_sig_info_handler {
++	struct k_sig_info info;
++	k_sig_handler_t handler;
++};
++
++struct k_sig_fifo_element {
++	k_tid_t tid;
++	struct k_sig_info info;
++	k_sig_handler_t handler;
++};
++
++/*
++ * We use a ring buffer of bytes, where each byte is an index of an allocated k_sig_fifo_element
++ * from the slab below. This should save some space, since 256 signals should be well beyond
++ * enough to queue.
++ */
++BUILD_ASSERT(CONFIG_SIGNAL_QUEUE_SIZE > 0, "SIGQUEUE_MAX is too small");
++BUILD_ASSERT(CONFIG_SIGNAL_QUEUE_SIZE <= BIT(BITS_PER_BYTE), "SIGQUEUE_MAX is too large");
++
++BUILD_ASSERT(CONFIG_SIGNAL_SET_SIZE >= 0);
++
++RING_BUF_DECLARE_STATIC(k_sig_fifo, CONFIG_SIGNAL_QUEUE_SIZE);
++static struct k_poll_signal k_sig_fifo_ready = K_POLL_SIGNAL_INITIALIZER(k_sig_fifo_ready);
++K_MEM_SLAB_DEFINE_STATIC(k_sig_slab, sizeof(struct k_sig_fifo_element), CONFIG_SIGNAL_QUEUE_SIZE,
++			 alignof(struct k_sig_fifo_element));
++static struct k_sig_fifo_element *const k_sig_array =
++	(struct k_sig_fifo_element *)_k_mem_slab_buf_k_sig_slab;
++static struct k_spinlock *const k_sig_lock = &k_sig_slab.lock;
++
++static int k_sig_set_min(const struct k_sig_set *set, bool rt);
++static bool k_sig_setisempty(const struct k_sig_set *set);
++static void k_sig_unset(struct k_sig_set *result, const struct k_sig_set *set);
++static void k_sig_orset(struct k_sig_set *result, const struct k_sig_set *set2);
++static void k_sig_fifo_dump(void);
++static k_sig_handler_t k_sighandler_select(k_tid_t tid, int sig);
++static inline void k_sig_set_dump(const struct k_sig_set *set, const char *label);
++
++/** @brief True if thread id @a tid is valid */
++static bool k_sig_pid_is_valid(k_pid_t pid)
++{
++	k_tid_t tid = (k_tid_t)pid;
++	const uint32_t invalid_states =
++		_THREAD_DUMMY | _THREAD_DEAD | _THREAD_ABORTING;
++
++	if (pid == NULL) {
++		LOG_DBG("pid is NULL");
++		return false;
++	}
++
++	if (!k_is_in_isr() && (_current == tid)) {
++		return true;
++	}
++
++	if ((tid->base.thread_state & invalid_states) == 0) {
++		return true;
++	}
++
++	LOG_DBG("thread state %x is invalid (invalid mask: %x)", tid->base.thread_state,
++		invalid_states);
++
++	return false;
++}
++
++static void z_sig_pending_unlocked(struct k_sig_set *set, struct k_thread *tid)
++{
++	k_sig_emptyset(set);
++	for (size_t i = 0, N = ring_buf_size_get(&k_sig_fifo); i < N; ++i) {
++		uint8_t p;
++		struct k_sig_fifo_element *entry;
++
++		ring_buf_get(&k_sig_fifo, &p, 1);
++		ring_buf_put(&k_sig_fifo, &p, 1);
++		entry = &((struct k_sig_fifo_element *)k_sig_slab.buffer)[p];
++
++		if (entry->tid == tid && !k_is_in_isr()) {
++			k_sig_addset(set, entry->info.si_signo);
++		}
++	}
++}
++
++/**
++ * @brief Scan the signal queue for matching signals targeting a specific thread
++ *
++ * Scan the kernel's queue of signals that are pending delivery and try to match a signal
++ * specified in @p mask destined for thread @p tid .
++ *
++ * The scan first checks for real-time signals. If no matching real-time signals are found
++ * then the scan checks for standard signals. Thus, real-time signals are given priority over
++ * standard signals.
++ *
++ * The @p pos parameter points to memory which will be updated to contain the index of the
++ * signal in the queue.
++ *
++ * Some use cases (such as timed wait) may require the signal mask of @p tid to be ignored. In
++ * those cases, please ensure @p ignore_mask is set to `true`.
++ *
++ * @param match The set of signals to try and match
++ * @param[out] pos Pointer to memory for the position of the signal in the queue
++ * @param tid The destination thread for the matching signal
++ * @param ignore_mask True if the signal mask in @p tid should be ignored during scan.
++ *
++ * @return true if a signal is found targeting @p tid and contained in @p match , otherwise false.
++ */
++static bool k_sig_match(const struct k_sig_set *match, uint8_t *pos, k_tid_t tid, bool ignore_mask)
++{
++	bool found = false;
++	/* if filter_signo <= 0, any signal will do, otherwise choose only the specified signal */
++	int filter_sig = 0;
++	struct k_sig_set set;
++	struct k_sig_set pend;
++	struct k_sig_set *const mask = &tid->base.sig_mask;
++
++	K_SPINLOCK(k_sig_lock) {
++		z_sig_pending_unlocked(&pend, tid);
++
++		k_sig_set_dump(match, "match  : ");
++		k_sig_set_dump(&pend, "pending: ");
++		k_sig_set_dump(mask, "mask:    ");
++
++		if (ignore_mask) {
++			ARRAY_FOR_EACH(set.sig, i) {
++				set.sig[i] = match->sig[i] & pend.sig[i];
++			}
++		} else {
++			ARRAY_FOR_EACH(set.sig, i) {
++				set.sig[i] = match->sig[i] & pend.sig[i] & ~mask->sig[i];
++			}
++		}
++
++		if (k_sig_setisempty(&set)) {
++			found = false;
++			K_SPINLOCK_BREAK;
++		}
++
++		filter_sig = k_sig_set_min(&set, true);
++
++		for (int i = 0, N = ring_buf_size_get(&k_sig_fifo); i < N; ++i) {
++			uint8_t p;
++			struct k_sig_fifo_element *entry;
++
++			ring_buf_get(&k_sig_fifo, &p, 1);
++			entry = &k_sig_array[p];
++
++			if (!found && (entry->tid == tid) && (filter_sig > 0) &&
++			    (entry->info.si_signo == filter_sig)) {
++				/* a signal matching 'filter_sig' was found */
++				*pos = p;
++				found = true;
++			} else if (!found && (entry->tid == tid) && (filter_sig <= 0) &&
++				   ((bool)k_sig_ismember(&set, entry->info.si_signo))) {
++				/* a signal in 'set' was found */
++				*pos = p;
++				found = true;
++			} else {
++				/* no matching signal found. replace in the correct order */
++				ring_buf_put(&k_sig_fifo, &p, 1);
++			}
++		}
++	}
++
++	return found;
++}
++
++int z_impl_k_sig_queue(k_pid_t pid, int signo, union k_sig_val value)
++{
++	uint8_t pos;
++	k_spinlock_key_t key;
++	struct k_sig_fifo_element *entry = NULL;
++
++	if ((signo < 0) || (signo > CONFIG_SIGNAL_SET_SIZE)) {
++		LOG_DBG("invalid signo %d", signo);
++		return -EINVAL;
++	}
++
++	if (!k_sig_pid_is_valid(pid)) {
++		LOG_DBG("invalid pid %p", pid);
++		return -ESRCH;
++	}
++
++	if (signo == 0) {
++		/* Only check if pid is valid. Do not attempt to deliver signo */
++		LOG_DBG("pid %lx is valid", POINTER_TO_UINT(pid));
++		return 0;
++	}
++
++#if defined(CONFIG_USERSPACE) && defined(CONFIG_DYNAMIC_OBJECTS)
++	if (k_object_validate(k_object_find(pid), K_OBJ_THREAD, _OBJ_INIT_TRUE) < 0) {
++		/* Only allow signals from threads granted access */
++		LOG_ERR("tid %lx does not have permissions for tid %lx", POINTER_TO_UINT(_current),
++			POINTER_TO_UINT(pid));
++		return -EPERM;
++	}
++#endif
++
++	if (k_mem_slab_alloc(&k_sig_slab, (void **)&entry, K_NO_WAIT) != 0) {
++		LOG_DBG("no more signals to alloc");
++		return -EAGAIN;
++	}
++
++	if (k_is_in_isr()) {
++		if (k_spin_trylock(k_sig_lock, &key) < 0) {
++			k_mem_slab_free(&k_sig_slab, entry);
++			return -EWOULDBLOCK;
++		}
++	} else {
++		key = k_spin_lock(k_sig_lock);
++	}
++
++	*entry = (struct k_sig_fifo_element){
++		.tid = pid,
++		.info = {
++			.si_signo = signo,
++			.si_code = K_SI_QUEUE,
++			.si_value = value,
++		},
++		.handler = k_sighandler_select(pid, signo),
++	};
++	pos = entry - k_sig_array;
++
++	ring_buf_put(&k_sig_fifo, &pos, 1);
++	if (IS_ENABLED(CONFIG_SIGNAL_LOG_LEVEL_DBG)) {
++		struct k_sig_set pend;
++
++		LOG_DBG("%lx: pushed signal %d", POINTER_TO_UINT(_current), signo);
++		z_sig_pending_unlocked(&pend, _current);
++		k_sig_set_dump(&pend, "pending: ");
++		k_sig_fifo_dump();
++	}
++
++	k_poll_signal_raise(&k_sig_fifo_ready, (int)(intptr_t)pid);
++
++	k_spin_unlock(k_sig_lock, key);
++
++	return 0;
++}
++
++#ifdef CONFIG_USERSPACE
++int z_vrfy_k_sig_queue(k_pid_t pid, int signo, union k_sig_val value)
++{
++	if (K_SYSCALL_OBJ(pid, K_OBJ_THREAD)) {
++		return -EPERM;
++	}
++
++	return z_impl_k_sig_queue(pid, signo, value);
++}
++#include <syscalls/k_sig_queue_mrsh.c>
++#endif
++
++int z_impl_k_sig_timedwait(const struct k_sig_set *ZRESTRICT set, struct k_sig_info *ZRESTRICT info,
++			   k_timeout_t timeout)
++{
++	int self;
++	uint8_t pos;
++	int ret = -EAGAIN;
++	k_timepoint_t end = sys_timepoint_calc(timeout);
++
++	if (k_is_in_isr()) {
++		return -EFAULT;
++	}
++
++	if (set == NULL) {
++		return -EINVAL;
++	}
++
++	self = (int)(intptr_t)_current;
++
++	do {
++		if (k_sig_match(set, &pos, _current, true)) {
++			ret = k_sig_array[pos].info.si_signo;
++			break;
++		}
++
++		timeout = sys_timepoint_timeout(end);
++		ret = k_poll(&(struct k_poll_event)K_POLL_EVENT_INITIALIZER(K_POLL_TYPE_SIGNAL,
++									    K_POLL_MODE_NOTIFY_ONLY,
++									    &k_sig_fifo_ready),
++			     1, timeout);
++		if (ret < 0) {
++			k_sig_set_dump(set, "time-out waiting for a signal");
++			ret = -EAGAIN;
++			break;
++		}
++
++		int signalled = 0;
++		int result = 0;
++
++		k_poll_signal_check(&k_sig_fifo_ready, &signalled, &result);
++
++		if ((bool)signalled) {
++			/*
++			 * We cheat slighly on 64-bit platforms by shoe-horning the
++			 * least-significant 32-bits of a k_tid_t into the signal. Not a problem on
++			 * 32-bit platforms. Even on 64-bit platforms, not really a major concern
++			 * because we check the queue every time anyway, but this allows us to
++			 * re-post signals for other threads.
++			 */
++			if (result == self) {
++				k_poll_signal_reset(&k_sig_fifo_ready);
++				if (k_sig_match(set, &pos, _current, true)) {
++					ret = k_sig_array[pos].info.si_signo;
++					break;
++				}
++
++				LOG_DBG("signaled, but failed to match! signalled: %d "
++					"result: %x ",
++					signalled, result);
++				ret = -EAGAIN;
++				break;
++			}
++		}
++
++	} while (!K_TIMEOUT_EQ(timeout, K_NO_WAIT));
++
++	if (ret > 0) {
++		if (info != NULL) {
++			*info = (struct k_sig_info){
++				.si_signo = ret,
++				.si_value = k_sig_array[pos].info.si_value,
++			};
++		}
++
++		k_mem_slab_free(&k_sig_slab, &k_sig_array[pos]);
++
++		if (IS_ENABLED(CONFIG_SIGNAL_LOG_LEVEL_DBG)) {
++			struct k_sig_set pend;
++
++			K_SPINLOCK(k_sig_lock) {
++				z_sig_pending_unlocked(&pend, _current);
++				LOG_DBG("%lx: popped signal %d", POINTER_TO_UINT(_current), ret);
++				k_sig_set_dump(&pend, "pending: ");
++				k_sig_fifo_dump();
++			}
++		}
++	}
++
++	return ret;
++}
++
++#ifdef CONFIG_USERSPACE
++int z_vrfy_k_sig_timedwait(const struct k_sig_set *ZRESTRICT set, struct k_sig_info *ZRESTRICT info,
++			   k_timeout_t timeout)
++{
++	K_OOPS(K_SYSCALL_MEMORY_READ(set, sizeof(struct k_sig_set)));
++	if (info != NULL) {
++		K_OOPS(K_SYSCALL_MEMORY_WRITE(info, sizeof(struct k_sig_info)));
++	}
++
++	return z_impl_k_sig_timedwait(set, info, timeout);
++}
++#include <syscalls/k_sig_timedwait_mrsh.c>
++#endif
++
++int z_impl_k_sig_mask(int how, const struct k_sig_set *set, struct k_sig_set *oset)
++{
++	int ret = 0;
++	k_tid_t tid = k_current_get();
++
++	if (!(how == K_SIG_BLOCK || how == K_SIG_SETMASK || how == K_SIG_UNBLOCK)) {
++		return -EINVAL;
++	}
++
++	if (oset != NULL) {
++		*oset = tid->base.sig_mask;
++	}
++
++	if (set == NULL) {
++		return 0;
++	}
++
++	switch (how) {
++	case K_SIG_BLOCK:
++		k_sig_orset(&tid->base.sig_mask, set);
++		break;
++	case K_SIG_SETMASK:
++		tid->base.sig_mask = *set;
++		break;
++	case K_SIG_UNBLOCK:
++		k_sig_unset(&tid->base.sig_mask, set);
++		break;
++	}
++
++	return ret;
++}
++
++#ifdef CONFIG_USERSPACE
++int z_vrfy_k_sig_mask(int how, const struct k_sig_set *set, struct k_sig_set *oset)
++{
++	if (set != NULL) {
++		K_OOPS(K_SYSCALL_MEMORY_READ(set, sizeof(*set)));
++	}
++
++	if (oset != NULL) {
++		K_OOPS(K_SYSCALL_MEMORY_WRITE(oset, sizeof(*oset)));
++	}
++
++	return z_impl_k_sig_mask(how, set, oset);
++}
++#include <syscalls/k_sig_mask_mrsh.c>
++#endif
++
++int z_impl_k_sig_pending(struct k_sig_set *set)
++{
++	if (k_is_in_isr()) {
++		return -EFAULT;
++	}
++
++	K_SPINLOCK(k_sig_lock) {
++		z_sig_pending_unlocked(set, _current);
++	}
++
++	return 0;
++}
++
++#ifdef CONFIG_USERSPACE
++int z_vrfy_k_sig_pending(struct k_sig_set *set)
++{
++	K_OOPS(K_SYSCALL_MEMORY_WRITE(set, sizeof(*set)));
++	return z_impl_k_sig_pending(set);
++}
++#include <syscalls/k_sig_pending_mrsh.c>
++#endif
++
++int k_sig_addset(struct k_sig_set *set, int sig)
++{
++	int bit = (sig - 1) & BIT_MASK(LOG2(BITS_PER_LONG));
++	int i = (sig - 1) >> LOG2(BITS_PER_LONG);
++
++	if (set == NULL || sig <= 0 || sig > K_NSIG) {
++		return -EINVAL;
++	}
++
++	if (IS_ENABLED(CONFIG_64BIT)) {
++		set->sig[i] |= BIT64(bit);
++	} else {
++		set->sig[i] |= BIT(bit);
++	}
++
++	return 0;
++}
++
++int k_sig_delset(struct k_sig_set *set, int sig)
++{
++	int bit = (sig - 1) & BIT_MASK(LOG2(BITS_PER_LONG));
++	int i = (sig - 1) >> LOG2(BITS_PER_LONG);
++
++	if (set == NULL || sig <= 0 || sig > K_NSIG) {
++		return -EINVAL;
++	}
++
++	if (IS_ENABLED(CONFIG_64BIT)) {
++		set->sig[i] &= ~BIT64(bit);
++	} else {
++		set->sig[i] &= ~BIT(bit);
++	}
++
++	return 0;
++}
++
++int k_sig_ismember(const struct k_sig_set *set, int sig)
++{
++	int bit = (sig - 1) & BIT_MASK(LOG2(BITS_PER_LONG));
++	int i = (sig - 1) >> LOG2(BITS_PER_LONG);
++
++	if (set == NULL || sig <= 0 || sig > K_NSIG) {
++		return -EINVAL;
++	}
++
++	if (IS_ENABLED(CONFIG_64BIT)) {
++		return (set->sig[i] & BIT64(bit)) != 0;
++	} else {
++		return (set->sig[i] & BIT(bit)) != 0;
++	}
++}
++
++int k_sig_fillset(struct k_sig_set *set)
++{
++	if (set == NULL) {
++		return -EINVAL;
++	}
++
++	ARRAY_FOR_EACH(set->sig, i) {
++		set->sig[i] = -1;
++	}
++
++	return 0;
++}
++
++int k_sig_emptyset(struct k_sig_set *set)
++{
++	if (set == NULL) {
++		return -EINVAL;
++	}
++
++	ARRAY_FOR_EACH(set->sig, i) {
++		set->sig[i] = 0;
++	}
++
++	return 0;
++}
++
++static void k_sig_orset(struct k_sig_set *result, const struct k_sig_set *set2)
++{
++	ARRAY_FOR_EACH(result->sig, i) {
++		result->sig[i] |= set2->sig[i];
++	}
++}
++
++static void k_sig_unset(struct k_sig_set *result, const struct k_sig_set *set)
++{
++	ARRAY_FOR_EACH(result->sig, i) {
++		result->sig[i] &= ~set->sig[i];
++	}
++}
++
++/*
++ * Finds the lowest-numbered signal in a set, or zero. Set 'rt' to 'true' to restrict the search
++ * to real-time signals.
++ */
++static int k_sig_set_min(const struct k_sig_set *set, bool rt)
++{
++	unsigned long word;
++
++	if ((rt && (K_SIG_NUM_RT == 0)) || k_sig_setisempty(set)) {
++		return 0;
++	}
++
++	ARRAY_FOR_EACH(set->sig, i) {
++		word = set->sig[i];
++
++		if (rt && (i == 0)) {
++			word &= ~BIT_MASK(K_SIG_RTMIN - 1);
++		}
++
++		if (word == 0) {
++			continue;
++		}
++
++		return (i * BITS_PER_LONG) +
++		       (IS_ENABLED(CONFIG_64BIT) ? u64_count_trailing_zeros(word)
++						 : u32_count_trailing_zeros(word)) +
++		       1;
++	}
++
++	return 0;
++}
++
++static void k_sig_fifo_dump(void)
++{
++	if (IS_ENABLED(CONFIG_SIGNAL_LOG_LEVEL_DBG)) {
++		uint8_t buf[CONFIG_SIGNAL_QUEUE_SIZE];
++		size_t N = ring_buf_size_get(&k_sig_fifo);
++
++		if (N == 0) {
++			LOG_DBG("sigq: (empty)");
++			return;
++		}
++
++		ring_buf_get(&k_sig_fifo, buf, N);
++		ring_buf_put(&k_sig_fifo, buf, N);
++
++		LOG_HEXDUMP_DBG(buf, N, "sigq");
++	}
++}
++
++static inline void k_sig_set_dump(const struct k_sig_set *set, const char *label)
++{
++	if (IS_ENABLED(CONFIG_SIGNAL_LOG_LEVEL_DBG)) {
++		LOG_HEXDUMP_DBG(set, sizeof(*set), label);
++	}
++}
++
++void z_sig_trampoline(void)
++{
++	void *context;
++	struct k_sig_info info;
++	k_sig_handler_t handler;
++
++	k_sig_current(&info, &handler, &context);
++	handler(info.si_signo, &info, &context);
++	k_sig_return();
++}
++
++int k_sig_handle(void)
++{
++#ifdef CONFIG_USERSPACE
++	__ASSERT(!k_is_user_context(), "k_sig_handle() should not be called from userspace");
++#endif
++
++	if (k_is_pre_kernel()) {
++		return 0;
++	}
++
++	if (k_is_in_isr()) {
++		return 0;
++	}
++
++	struct k_sig_info_handler {
++		struct k_sig_info info;
++		k_sig_handler_t handler;
++	} *const ih = (struct k_sig_info_handler *)&_current->base.sig_storage[CONFIG_ARCH_USERSPACE_SIGNAL_STORAGE_SIZE];
++
++	{
++		uint8_t pos;
++		struct k_sig_set pending;
++		struct k_sig_fifo_element *entry;
++
++		/* fill the set to indicate we are looking for any signal */
++		k_sig_fillset(&pending);
++
++		/* removes the first matching signal from the queue */
++		if (!k_sig_match(&pending, &pos, _current, false)) {
++			/* No signal has been received for tid, or all signals have been masked */
++			return 0;
++		}
++
++		/* free the signal queue entry */
++		entry = &k_sig_array[pos];
++		ih->info = entry->info;
++		ih->handler = entry->handler;
++		k_mem_slab_free(&k_sig_slab, entry);
++	}
++
++	if (ih->handler == NULL) {
++		/* the action is specified as SIG_IGN or the signal is unknown -> ignore the signal */
++		return 0;
++	}
++
++	LOG_DBG("Delivering signal %d, code %d, value %p to thread %p", ih->info.si_signo, ih->info.si_code, ih->info.si_value.sival_ptr, _current);
++
++	/* Back-up previous signal mask */
++	_current->base.sig_restore = _current->base.sig_mask;
++	/* Mask all signals to prevent delivery during signal handling */
++	(void)k_sig_fillset(&_current->base.sig_mask);
++
++	return 1;
++}
++
++void z_impl_k_sig_return(void)
++{
++#ifdef CONFIG_USERSPACE
++	if (k_is_in_user_syscall()) {
++		arch_sig_return(_current, _current->syscall_frame);
++	}
++#endif
++
++	/* Restore previous signal mask */
++	_current->base.sig_mask = _current->base.sig_restore;
++}
++
++#ifdef CONFIG_USERSPACE
++static inline void z_vrfy_k_sig_return(void)
++{
++	z_impl_k_sig_return();
++}
++#include <syscalls/k_sig_return_mrsh.c>
++#endif
++void z_impl_k_sig_current(struct k_sig_info *info, k_sig_handler_t *handler, void **context)
++{
++	if (k_is_pre_kernel()) {
++		return;
++	}
++
++	if (k_is_in_isr()) {
++		return;
++	}
++
++	struct k_sig_info_handler {
++		struct k_sig_info info;
++		k_sig_handler_t handler;
++	} *const hi = (struct k_sig_info_handler *)&_current->base.sig_storage[CONFIG_ARCH_USERSPACE_SIGNAL_STORAGE_SIZE];
++
++	*info = hi->info;
++	*handler = hi->handler;
++	*context = NULL;
++}
++
++#ifdef CONFIG_USERSPACE
++static inline void z_vrfy_k_sig_current(struct k_sig_info *info, k_sig_handler_t *handler, void **context)
++{
++	K_OOPS(K_SYSCALL_MEMORY_WRITE(info, sizeof(*info)));
++	K_OOPS(K_SYSCALL_MEMORY_WRITE(handler, sizeof(*handler)));
++	K_OOPS(K_SYSCALL_MEMORY_WRITE(context, sizeof(*context)));
++
++	z_impl_k_sig_current(info, handler, context);
++}
++#include <syscalls/k_sig_current_mrsh.c>
++#endif
++
++#if defined(CONFIG_ZTEST) && defined(CONFIG_USERSPACE)
++/**
++ * @brief The "no-op" signal handler
++ *
++ * This handler is used specifically to test that regular thread execution is properly restored
++ * after delivery of a non-terminal signal.
++ *
++ * This is specifically required for userspace, as the "restore" functionality is implemented
++ * via @ref arch_sig_return, which is only called for userspace threads from @ref k_sig_return.
++ *
++ * Once support is added for installing custom signal handlers, this can be removed since we
++ * will have sufficient test coverage.
++ *
++ * Signal 16 tied to this handler, since it is currently unused in Zephyr.
++ *
++ * @param sig signal number
++ * @param info signal information
++ * @param ucontext signal user context
++ */
++static void z_sig_handler_noop(int sig, struct k_sig_info *info, void *ucontext)
++{
++	ARG_UNUSED(sig);
++	ARG_UNUSED(info);
++	ARG_UNUSED(ucontext);
++
++	/* do nothing */
++}
++#endif
++
++/**
++ * @brief The terminating signal handler
++ *
++ * Many signals result in thread termination, in some cases, with other actions preceding.
++ *
++ * @param sig signal number
++ * @param info signal information
++ * @param ucontext signal user context
++ */
++static void z_sig_handler_term(int sig, struct k_sig_info *info, void *ucontext)
++{
++	ARG_UNUSED(info);
++	ARG_UNUSED(ucontext);
++
++	k_thread_abort(k_current_get());
++}
++
++/**
++ * @brief The coredump signal handler
++ *
++ * The coredump signal handler first triggers a coredump, and then terminates the calling thread.
++ *
++ * @param sig signal number
++ * @param info signal information
++ * @param ucontext signal user context
++ */
++static void z_sig_handler_core(int sig, struct k_sig_info *info, void *ucontext)
++{
++	/* trigger a coredump (not yet implemented) */
++
++	z_sig_handler_term(sig, info, ucontext);
++}
++
++/* Select a handler for 'sig' */
++static k_sig_handler_t k_sighandler_select(k_tid_t tid, int sig)
++{
++	ARG_UNUSED(tid);
++
++	k_sig_handler_t handler = NULL;
++
++	switch (sig) {
++	default:
++		/* expand once we support installing signal handlers */
++		handler = K_SIG_DFL;
++	}
++
++	switch((long)handler) {
++	case (long)K_SIG_DFL:
++		switch(sig) {
++		/* all signals that have default 'Term' behaviour */
++		case K_SIG_HUP:
++		case K_SIG_INT:
++		case K_SIG_KILL:
++		case K_SIG_USR1:
++		case K_SIG_USR2:
++		case K_SIG_PIPE:
++		case K_SIG_ALRM:
++		case K_SIG_TERM:
++		case K_SIG_VTALRM:
++		case K_SIG_PROF:
++			handler = z_sig_handler_term;
++			break;
++
++		/* all signals that have default 'Core' behaviour */
++		case K_SIG_QUIT:
++		case K_SIG_ILL:
++		case K_SIG_TRAP:
++		case K_SIG_ABRT:
++		case K_SIG_BUS:
++		case K_SIG_FPE:
++		case K_SIG_SEGV:
++		case K_SIG_XCPU:
++		case K_SIG_XFSZ:
++		case K_SIG_SYS:
++			handler = z_sig_handler_core;
++			break;
++
++#if defined(CONFIG_ZTEST) && defined(CONFIG_USERSPACE)
++		case 16:
++			handler = z_sig_handler_noop;
++			break;
++#endif
++
++		/* all signals that have default 'Ign' behaviour */
++		case K_SIG_CHLD:
++		case K_SIG_URG:
++		/* for now, ignore the following, since we do not support stop or continue */
++		case K_SIG_CONT:
++		case K_SIG_STOP:
++		case K_SIG_TSTP:
++		case K_SIG_TTIN:
++		case K_SIG_TTOU:
++		default:
++			handler = NULL;
++			break;
++		}
++		break;
++
++	case (long)K_SIG_IGN:
++	default:
++		handler = NULL;
++		break;
++	}
++
++	return handler;
++}
+diff --git a/kernel/thread.c b/kernel/thread.c
+index 6d603564df9..9357d4b3289 100644
+--- a/kernel/thread.c
++++ b/kernel/thread.c
+@@ -711,6 +711,16 @@ char *z_setup_new_thread(struct k_thread *new_thread,
+ 		CONFIG_SCHED_THREAD_USAGE_AUTO_ENABLE;
+ #endif /* CONFIG_SCHED_THREAD_USAGE */
+ 
++#ifdef CONFIG_SIGNAL
++	/*
++	 * TODO:
++	 * 1. start kernel threads with a full signal mask, while user threads inherit the signal
++	 *    mask of their parent?
++	 * 2. installation of independent signal handlers on a per-thread basis
++	 */
++	k_sig_emptyset(&new_thread->base.sig_mask);
++#endif
++
+ 	SYS_PORT_TRACING_OBJ_FUNC(k_thread, create, new_thread);
+ 
+ 	return stack_ptr;
+diff --git a/scripts/build/gen_syscalls.py b/scripts/build/gen_syscalls.py
+index 352130caf83..0aaa7483df3 100755
+--- a/scripts/build/gen_syscalls.py
++++ b/scripts/build/gen_syscalls.py
+@@ -29,6 +29,22 @@ import argparse
+ import os
+ import json
+ 
++# A list of system calls that are used from within k_sig_handle() or k_sig_queue().
++# Attempting to implement cancellation points in these syscalls results in infinite recursion
++# and so they cannot be used as cancellation points.
++# This list should always be kept as minimal as possible.
++not_cancellation_points = {
++    "k_sig_return",
++    "k_mem_slab_free",
++    "k_poll_signal_raise",
++    "k_thread_result_set",
++    "uart_poll_out",
++    "k_str_out",
++}
++
++def is_cancellation_point(func: str):
++    return not (func in not_cancellation_points)
++
+ # Some kernel headers cannot include automated tracing without causing unintended recursion or
+ # other serious issues.
+ # These headers typically already have very specific tracing hooks for all relevant things
+@@ -101,6 +117,9 @@ syscall_template = """/* auto-generated by gen_syscalls.py, don't edit */
+ extern "C" {{
+ #endif
+ 
++extern int k_sig_handle(void);
++extern void z_sig_trampoline(void);
++
+ {invocations}
+ 
+ #ifdef __cplusplus
+@@ -307,8 +326,24 @@ def wrapper_defs(func_name, func_type, args, fn, userspace_only):
+         impl_arglist = ", ".join([argrec[1] for argrec in args])
+         impl_call = "z_impl_%s(%s)" % (func_name, impl_arglist)
+         wrap += "\t" + "compiler_barrier();\n"
+-        wrap += "\t" + "%s%s;\n" % ("return " if func_type != "void" else "",
+-                                   impl_call)
++        if func_type == "void":
++            wrap += "\t" + "%s;\n" % (impl_call)
++            if is_cancellation_point(func_name):
++                wrap += "#ifdef CONFIG_SIGNAL\n"
++                wrap += "\t" + "if (k_sig_handle()) {\n"
++                wrap += "\t\t" + "z_sig_trampoline();\n"
++                wrap += "\t" + "}\n"
++                wrap += "#endif\n"
++            wrap += "\t" + "return;\n"
++        else:
++            wrap += "\t" + "%s ret = %s;\n" % (func_type, impl_call)
++            if is_cancellation_point(func_name):
++                wrap += "#ifdef CONFIG_SIGNAL\n"
++                wrap += "\t" + "if (k_sig_handle()) {\n"
++                wrap += "\t\t" + "z_sig_trampoline();\n"
++                wrap += "\t" + "}\n"
++                wrap += "#endif\n"
++            wrap += "\t" + "return ret;\n"
+ 
+     wrap += "}\n"
+ 
+diff --git a/tests/kernel/signal/CMakeLists.txt b/tests/kernel/signal/CMakeLists.txt
+new file mode 100644
+index 00000000000..6b458d8aa0b
+--- /dev/null
++++ b/tests/kernel/signal/CMakeLists.txt
+@@ -0,0 +1,8 @@
++# SPDX-License-Identifier: Apache-2.0
++
++cmake_minimum_required(VERSION 3.20.0)
++find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
++project(signal)
++
++FILE(GLOB app_sources src/*.c)
++target_sources(app PRIVATE ${app_sources})
+diff --git a/tests/kernel/signal/prj.conf b/tests/kernel/signal/prj.conf
+new file mode 100644
+index 00000000000..8bc39b25237
+--- /dev/null
++++ b/tests/kernel/signal/prj.conf
+@@ -0,0 +1,10 @@
++CONFIG_POLL=y
++CONFIG_RING_BUFFER=y
++CONFIG_SIGNAL=y
++CONFIG_ZTEST=y
++
++# allow up to 8 realtime signals
++CONFIG_SIGNAL_SET_SIZE=40
++
++# ensure the queue can hold our set of realtime signals
++CONFIG_SIGNAL_QUEUE_SIZE=8
+diff --git a/tests/kernel/signal/src/main.c b/tests/kernel/signal/src/main.c
+new file mode 100644
+index 00000000000..4d79594571c
+--- /dev/null
++++ b/tests/kernel/signal/src/main.c
+@@ -0,0 +1,188 @@
++/*
++ * Copyright (c) 2024, Friedt Professional Engineering Services, Inc
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <errno.h>
++
++#include <zephyr/kernel.h>
++#include <zephyr/ztest.h>
++
++BUILD_ASSERT(K_SIG_NUM_RT >= 0);
++
++static void block_rt_signals(void);
++
++static struct k_sig_set rt_sigset;
++
++ZTEST(signal, test_k_sig_queue)
++{
++	{
++		/* Degenerate cases */
++		zassert_not_ok(k_sig_queue(NULL, -1, (union k_sig_val){0}));
++		zassert_not_ok(k_sig_queue(NULL, K_SIG_RTMIN, (union k_sig_val){0}));
++		zassert_not_ok(k_sig_queue((k_pid_t)k_current_get(), -1, (union k_sig_val){0}));
++	}
++
++	struct k_sig_info info;
++	const k_timeout_t timeout = K_NO_WAIT;
++	const struct k_sig_set set = rt_sigset;
++
++	block_rt_signals();
++
++	/*
++	 * Test for multiple real-time signals of the same type being returned in the order
++	 * they were queued.
++	 */
++	for (int i = 0; i < CONFIG_SIGNAL_QUEUE_SIZE; ++i) {
++		zassert_ok(k_sig_queue((k_pid_t)k_current_get(), K_SIG_RTMIN,
++				       (union k_sig_val){.sival_int = i}),
++			   "failed to queue the %d-th signal", i);
++	}
++
++	for (int i = 0; i < CONFIG_SIGNAL_QUEUE_SIZE; ++i) {
++		int actual;
++
++		info = (struct k_sig_info){0};
++		actual = k_sig_timedwait(&set, &info, timeout);
++
++		zassert_equal(
++			K_SIG_RTMIN, actual,
++			"iteration %d expected K_SIG_RTMIN (%d) but k_sig_timedwait() returned %d "
++			"(errno: %d)",
++			i, K_SIG_RTMIN, actual, errno);
++		zassert_equal(info.si_value.sival_int, i);
++	}
++
++	/*
++	 * test for different real-time signals being delivered lowest-numbered first
++	 */
++	for (int i = K_SIG_NUM_RT - 1; i >= 0; --i) {
++		zassert_ok(k_sig_queue((k_pid_t)k_current_get(), (K_SIG_RTMIN + i),
++				       (union k_sig_val){0}),
++			   "unable to queue signal %d", (K_SIG_RTMIN + i));
++	}
++
++	for (int i = 0; i < K_SIG_NUM_RT; ++i) {
++		int actual = k_sig_timedwait(&set, NULL, timeout);
++
++		zassert_equal((K_SIG_RTMIN + i), actual,
++			      "expected signal %d, but k_sig_timedwait() returned %d",
++			      (K_SIG_RTMIN + i), actual);
++	}
++}
++
++static struct sigqueue_work {
++	struct k_work_delayable dwork;
++	k_tid_t tid;
++} sigq_work;
++
++static void do_queue(struct k_work *work)
++{
++	struct sigqueue_work *sq_work = CONTAINER_OF(
++		CONTAINER_OF(work, struct k_work_delayable, work), struct sigqueue_work, dwork);
++
++	zassert_ok(k_sig_queue(sq_work->tid, K_SIG_RTMIN, (union k_sig_val){0}));
++}
++
++static void queue_signal_after_ms(k_tid_t tid, int delay_ms)
++{
++	sigq_work.tid = tid;
++	k_work_init_delayable(&sigq_work.dwork, do_queue);
++	k_work_schedule(&sigq_work.dwork, K_MSEC(delay_ms));
++}
++
++ZTEST(signal, test_k_sig_timedwait)
++{
++	struct k_sig_info info;
++	k_pid_t self = (k_pid_t)k_current_get();
++	uint32_t begin_ms, delta_ms, end_ms;
++	const struct k_sig_set set = rt_sigset;
++
++	const struct stw_args_exp {
++		const struct k_sig_set *set;
++		struct k_sig_info *info;
++		k_timeout_t timeout;
++		int expected_error;
++	} harness[] = {
++		{NULL, NULL, K_NO_WAIT, -EINVAL},
++		{NULL, &info, K_NO_WAIT, -EINVAL},
++		{&set, NULL, K_NO_WAIT, 0},
++		{&set, &info, K_NO_WAIT, 0},
++	};
++
++	block_rt_signals();
++
++	ARRAY_FOR_EACH_PTR(harness, a) {
++		errno = 0;
++		if (a->expected_error == 0) {
++			zassert_ok(k_sig_queue(self, K_SIG_RTMIN, (union k_sig_val){0}));
++			zassert_equal(K_SIG_RTMIN, k_sig_timedwait(a->set, a->info, K_NO_WAIT));
++		} else {
++			zassert_equal(a->expected_error,
++				      k_sig_timedwait(a->set, a->info, a->timeout),
++				      "k_sig_timeout() succeeded, but error %d was expected",
++				      a->expected_error);
++		}
++	}
++
++	/* Without a queued signal, k_sig_timedwait should timeout immediately if timespec == 0.0 */
++	begin_ms = k_uptime_get_32();
++	zassert_equal(-EAGAIN, k_sig_timedwait(&set, NULL, K_NO_WAIT));
++	end_ms = k_uptime_get_32();
++	delta_ms = end_ms - begin_ms;
++	/* hard to say how fast this will execute on every platform, but 50 ms should be safe */
++	zassert_true(delta_ms < 50);
++
++	/* Without a queued signal, k_sig_timedwait should timeout after 100 ms if timeout is 100 ms
++	 */
++	begin_ms = k_uptime_get_32();
++	zassert_equal(-EAGAIN, k_sig_timedwait(&set, NULL, K_MSEC(100)));
++	end_ms = k_uptime_get_32();
++	delta_ms = end_ms - begin_ms;
++	zassert_true(delta_ms >= 100);
++
++	/*
++	 * Queue a signal after 1s. k_sig_timedwait should return successfully after 100 ms
++	 * and before 200 ms if timespec == INFINITY
++	 */
++	begin_ms = k_uptime_get_32();
++	queue_signal_after_ms(k_current_get(), 100);
++	zassert_equal(K_SIG_RTMIN, k_sig_timedwait(&set, NULL, K_SECONDS(42)));
++	end_ms = k_uptime_get_32();
++	delta_ms = end_ms - begin_ms;
++	zassert_true(delta_ms >= 100);
++	zassert_true(delta_ms < 200);
++}
++
++static void block_rt_signals(void)
++{
++	/*
++	 * We only use real-time signals in this test. k_sig_timedwait() will only work when signals
++	 * are masked, since the signals would be delivered asynchronously otherwise.
++	 * Mask real-time signals of interested in this test in order to use k_sig_timedwait().
++	 */
++	zassert_ok(k_sig_mask(K_SIG_BLOCK, &rt_sigset, NULL));
++}
++#ifdef CONFIG_USERSPACE
++ZTEST_USER(signal, test_noop_signal_handler)
++{
++	/* Test "no-op" signal handler properly resumes execution of original thread */
++	zassert_ok(k_sig_queue((k_pid_t)k_current_get(), 16, (union k_sig_val){0}));
++
++	TC_PRINT("noop signal handler OK\n");
++}
++#endif
++
++static void *setup(void)
++{
++	k_sig_emptyset(&rt_sigset);
++
++	for (int i = 0; i < K_SIG_NUM_RT; ++i) {
++		k_sig_addset(&rt_sigset, (K_SIG_RTMIN + i));
++	}
++
++	return NULL;
++}
++
++ZTEST_SUITE(signal, NULL, setup, NULL, NULL, NULL);
+diff --git a/tests/kernel/signal/testcase.yaml b/tests/kernel/signal/testcase.yaml
+new file mode 100644
+index 00000000000..ac584e1b5d4
+--- /dev/null
++++ b/tests/kernel/signal/testcase.yaml
+@@ -0,0 +1,20 @@
++common:
++  tags:
++    - kernel
++  platform_exclude:
++    # undefined reference to `bootutil_key_cnt'
++    - mps2/an521/cpu0/ns
++
++tests:
++  kernel.signal: {}
++  kernel.signal.userspace:
++    filter: CONFIG_ARCH_HAS_USERSPACE
++    tags: userspace
++    extra_configs:
++      - CONFIG_TEST_USERSPACE=y
++      - CONFIG_USERSPACE=y
++    harness: console
++    harness_config:
++      type: one_line
++      regex:
++        - "noop signal handler OK"
