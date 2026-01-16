@@ -1,0 +1,552 @@
+diff --git a/include/zephyr/kernel.h b/include/zephyr/kernel.h
+index 68934a08bb6..38e3ded05b8 100644
+--- a/include/zephyr/kernel.h
++++ b/include/zephyr/kernel.h
+@@ -6957,6 +6957,86 @@ __syscall void k_sig_return(void);
+ 
+ #endif /* CONFIG_SIGNAL */
+ 
++#if defined(CONFIG_THREAD_CANCEL) || defined(__DOXYGEN__)
++/**
++ * @addtogroup k_thread_cancel_apis
++ * @{
++ */
++
++/** The result of a cancelled thread */
++#define K_THREAD_CANCELLED INT_TO_POINTER(-1)
++
++/**
++ * @brief Request cancellation of a thread.
++ *
++ * Request that target thread @p tid is cancelled. If the target thread has cancellation enabled,
++ * it is cancelled immediately or at the next cancellation point. If thread cancellation is
++ * disabled for @p tid, then the cancellation request remains pending until thread cancellation
++ * is re-enabled.
++ *
++ * Cancelling a thread is different than aborting a thread (@ref k_thread_abort). A cancelled
++ * thread is a cooperative mechanism that allows a thread to be cancelled at a specific point in
++ * its execution. A cancelled thread is expected to run any internal cleanup handlers, whereas
++ * an aborted thread is terminated immediately without any cleanup.
++ *
++ * If a thread cancels itself (i.e. calls `k_thread_cancel(k_current_get())`) and cancellation is
++ * enabled, then the call to `k_thread_cancel()` does not return.
++ *
++ * If @kconfig{CONFIG_THREAD_RESULT} is enabled, the result of a cancelled thread will be set to
++ * @ref K_THREAD_CANCELLED.
++ *
++ * @param tid Thread ID of the thread to cancel.
++ *
++ * @retval 0 on success.
++ * @retval -EPERM if the calling thread does not have permission to cancel @p tid.
++ * @retval -ESRCH if @p tid does not represent a valid thread.
++ */
++static inline int k_thread_cancel(k_tid_t tid)
++{
++	return k_sig_queue(tid, K_SIG_CANCEL, (union k_sig_val){0});
++}
++
++/**
++ * @brief Get the cancellation state of the current thread.
++ *
++ * @retval true if the thread has cancellation enabled.
++ * @retval false if the thread has cancellation disabled.
++ */
++__syscall bool k_thread_cancel_getstate(void);
++
++/**
++ * @brief Set the cancellation state of the current thread.
++ *
++ * @param enabled true to enable cancellation, false to disable cancellation.
++ *
++ * @note If the current thread has a pending cancellation request and this call re-enables
++ * cancellation, the thread does not return from this call.
++ */
++__syscall void k_thread_cancel_setstate(bool enabled);
++
++#if defined(CONFIG_THREAD_RESULT) || defined(__DOXYGEN__)
++/**
++ * @brief Terminate the current thread gracefully and set its result.
++ *
++ * Executing this function terminates the current thread gracefully, in the same way that a
++ * cancelled thread is terminated.
++ *
++ * This system call does not return.
++ *
++ * @param result The result to set for the current thread.
++ *
++ * @note @kconfig{CONFIG_THREAD_CANCEL} and @kconfig{CONFIG_THREAD_RESULT} must
++ * be set for system call to be available.
++ */
++__syscall void k_thread_exit(void *result);
++#endif
++
++/**
++ * @}
++ */
++
++#endif /* CONFIG_THREAD_CANCEL */
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/include/zephyr/kernel/signal.h b/include/zephyr/kernel/signal.h
+index 38cf044ce1a..9f4def5b9d0 100644
+--- a/include/zephyr/kernel/signal.h
++++ b/include/zephyr/kernel/signal.h
+@@ -60,7 +60,14 @@ extern "C" {
+  * @note K_SIG_RTMAX is intentionally not defined since it would inevitably lead to off-by-one
+  * errors.
+  */
+-#define K_SIG_RTMIN 32
++#define K_SIG_RTMIN CONFIG_THREAD_CANCEL_SIGNAL_NUMBER
++
++/**
++ * @brief Cancel a thread
++ *
++ * This signal is used by @ref k_thread_cancel to request cancellation of a thread.
++ */
++#define K_SIG_CANCEL K_SIG_RTMIN
+ 
+ /** @brief Number of supported realtime signals */
+ #define K_SIG_NUM_RT MAX(SIGNAL_SET_SIZE - K_SIG_RTMIN, 0)
+diff --git a/kernel/Kconfig b/kernel/Kconfig
+index bd443e41313..c6ce29e5ebe 100644
+--- a/kernel/Kconfig
++++ b/kernel/Kconfig
+@@ -220,6 +220,45 @@ config THREAD_RESULT
+ 	help
+ 	  Say 'Y' here to support a thread result or "return value".
+ 
++config THREAD_CANCEL_SIGNAL_NUMBER
++	int "Thread cancellation signal number"
++	def_int 32
++	help
++	  k_thread_cancel() is implemented via a signal. This option configures the signal
++	  number, delivered via k_sig_queue(), that is used when k_thread_cancel() is called.
++
++	  This signal number is intentionally chosen to be compabile with Linux' usage of
++	  K_SIG_RTMIN for cancellation.
++
++	  The signal number may be defined regardless of whether CONFIG_THREAD_CANCEL is
++	  enabled.
++
++config THREAD_CANCEL
++	bool "Thread cancellation"
++	depends on SIGNAL
++	select THREAD_RESULT
++	default y
++	help
++	  Say 'Y' here to support thread cancellation. Thread cancellation differs from
++	  thread abort in that it allows the target thread to perform cleanup operations,
++	  possibly set a return value, and terminate at a cancellation point.
++
++if THREAD_CANCEL
++
++config SIGNAL_SET_SIZE_MIN_THREAD_CANCEL
++	int
++	default THREAD_CANCEL_SIGNAL_NUMBER
++	help
++	  This option represents the number of signals required for thread cancellation. While
++	  thread cancellation itself only requires one specific signal number, it is a fixed
++	  value, so there may be more signals in the set aside from just the bare minmimum
++	  required by ISO C.
++
++	  When enabled, this option ensures the value of SIGNAL_SET_SIZE is at least
++	  CONFIG_THREAD_CANCEL_SIGNAL_NUMBER.
++
++endif # THREAD_CANCEL
++
+ config THREAD_CUSTOM_DATA
+ 	bool "Thread custom data"
+ 	help
+diff --git a/kernel/signal.c b/kernel/signal.c
+index 59801fef21a..d990c3f73a9 100644
+--- a/kernel/signal.c
++++ b/kernel/signal.c
+@@ -284,6 +284,12 @@ int z_impl_k_sig_queue(k_pid_t pid, int signo, union k_sig_val value)
+ 		key = k_spin_lock(k_sig_lock);
+ 	}
+ 
++#if defined(CONFIG_THREAD_CANCEL) && defined(CONFIG_THREAD_RESULT)
++	if (signo == K_SIG_CANCEL) {
++		atomic_set(&pid->base.result, (atomic_val_t)K_THREAD_CANCELLED);
++	}
++#endif
++
+ 	*entry = (struct k_sig_fifo_element){
+ 		.tid = pid,
+ 		.info =
+@@ -841,6 +847,31 @@ static void z_sig_handler_term(int sig, struct k_sig_info *info, void *ucontext)
+ 	k_thread_abort(k_current_get());
+ }
+ 
++#ifdef CONFIG_THREAD_CANCEL
++/**
++ * @brief The cancellation signal handler
++ *
++ * In contrast to aborting a thread, cancelling a thread is a cooperative process. It
++ * permits the thread to
++ *
++ * 1. perform any thread-level clean-up routines
++ * 2. destructors for thread-specific storage are called
++ * 3. finally, the thread is terminated
++ *
++ * @param sig signal number
++ * @param info signal information
++ * @param ucontext signal user context
++ */
++static void z_sig_handler_cancel(int sig, struct k_sig_info *info, void *ucontext)
++{
++	/* Note: the K_THREAD_CANCELLED result is set in k_sig_queue() */
++
++	/* call clean-up routines (not yet implemented) */
++	/* destroy thread-specific storage (not yet implemented) */
++	z_sig_handler_term(sig, info, ucontext);
++}
++#endif /* CONFIG_THREAD_CANCEL */
++
+ /**
+  * @brief The coredump signal handler
+  *
+@@ -993,6 +1024,11 @@ static k_sig_handler_t z_sig_resolve(int sig)
+ 	case K_SIG_SYS:
+ 		return z_sig_handler_core;
+ 
++#ifdef CONFIG_THREAD_CANCEL
++	case K_SIG_CANCEL:
++		return z_sig_handler_cancel;
++#endif
++
+ 	/* all signals that have default 'Ign' behaviour */
+ 	case K_SIG_CHLD:
+ 	case K_SIG_URG:
+diff --git a/kernel/thread.c b/kernel/thread.c
+index 4dedbc3d253..b8c278154fa 100644
+--- a/kernel/thread.c
++++ b/kernel/thread.c
+@@ -1267,3 +1267,72 @@ void *z_vrfy_k_thread_result_get(void)
+ }
+ #include <zephyr/syscalls/k_thread_result_get_mrsh.c>
+ #endif
++
++#ifdef CONFIG_THREAD_CANCEL
++bool z_impl_k_thread_cancel_getstate(void)
++{
++	return !k_sig_ismember(&_current->base.sig.mask, K_SIG_CANCEL);
++}
++
++#ifdef CONFIG_USERSPACE
++bool z_vrfy_k_thread_cancel_getstate(void)
++{
++	return z_impl_k_thread_cancel_getstate();
++}
++#include <zephyr/syscalls/k_thread_cancel_getstate_mrsh.c>
++#endif
++
++void z_impl_k_thread_cancel_setstate(bool enabled)
++{
++	if (enabled) {
++		(void)k_sig_delset(&_current->base.sig.mask, K_SIG_CANCEL);
++	} else {
++		(void)k_sig_addset(&_current->base.sig.mask, K_SIG_CANCEL);
++	}
++}
++
++#ifdef CONFIG_USERSPACE
++void z_vrfy_k_thread_cancel_setstate(bool enabled)
++{
++	z_impl_k_thread_cancel_setstate(enabled);
++}
++#include <zephyr/syscalls/k_thread_cancel_setstate_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++void z_impl_k_thread_exit(void *result)
++{
++	ARG_UNUSED(result);
++
++	int __maybe_unused ret;
++
++	/* disable cancellation temporarily */
++	k_thread_cancel_setstate(false);
++
++	/* cancel the thread. the request will pend until cancellation is re-enabled */
++	ret = k_thread_cancel(_current);
++	__ASSERT(ret == 0, "%s() failed: %d", "k_thread_cancel", ret);
++
++	/* override the K_THREAD_CANCELLED result with the user-provided result */
++	k_thread_result_set(result);
++
++	/* ensure that the correct signal action is in place */
++	ret = k_sig_action(K_SIG_CANCEL, K_SIG_DFL, NULL);
++	__ASSERT(ret == 0, "%s() failed: %d", "k_sig_action", ret);
++
++	/* re-enable cancellation */
++	k_thread_cancel_setstate(true);
++
++	/* failsafe */
++	k_thread_abort(_current);
++
++	CODE_UNREACHABLE;
++}
++
++#ifdef CONFIG_USERSPACE
++void z_vrfy_k_thread_exit(void *result)
++{
++	return z_impl_k_thread_exit(result);
++}
++#include <zephyr/syscalls/k_thread_exit_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++#endif /* CONFIG_THREAD_CANCEL */
+diff --git a/lib/os/thread_entry.c b/lib/os/thread_entry.c
+index a1541b587cc..0d0f8b1abf9 100644
+--- a/lib/os/thread_entry.c
++++ b/lib/os/thread_entry.c
+@@ -45,9 +45,21 @@ FUNC_NORETURN void z_thread_entry(k_thread_entry_t entry,
+ 	__stack_chk_guard = stack_guard;
+ 	__stack_chk_guard <<= 8;
+ #endif	/* CONFIG_STACK_CANARIES */
++#if defined(CONFIG_THREAD_CANCEL)
++	/*
++	 * The `k_thread_result_get()` syscall is required until `k_thread_entry_t` is adjusted to
++	 * return `void *`. Once that is done, this code below can be simplified to
++	 * `k_thread_exit(entry(p1, p2, p3))`. That change will reduce overhead and improve
++	 * compatibility with C11 and POSIX threading APIs (possibly others).
++	 */
++	entry(p1, p2, p3);
++
++	k_thread_exit(k_thread_result_get());
++#else
+ 	entry(p1, p2, p3);
+ 
+ 	k_thread_abort(k_current_get());
++#endif
+ 
+ 	/*
+ 	 * Compiler can't tell that k_thread_abort() won't return and issues a
+diff --git a/tests/kernel/threads/thread_apis/prj.conf b/tests/kernel/threads/thread_apis/prj.conf
+index 5885c33d740..0e8c53e3af8 100644
+--- a/tests/kernel/threads/thread_apis/prj.conf
++++ b/tests/kernel/threads/thread_apis/prj.conf
+@@ -11,3 +11,7 @@ CONFIG_THREAD_RUNTIME_STATS=y
+ CONFIG_INIT_STACKS=y
+ CONFIG_MAX_THREAD_BYTES=3
+ CONFIG_THREAD_RESULT=y
++CONFIG_POLL=y
++CONFIG_SIGNAL=y
++CONFIG_SIGNAL_SET_SIZE=32
++CONFIG_THREAD_CANCEL=y
+diff --git a/tests/kernel/threads/thread_apis/src/test_threads_cancel_abort.c b/tests/kernel/threads/thread_apis/src/test_threads_cancel_abort.c
+index 18aeee280e2..e5c8deab43a 100644
+--- a/tests/kernel/threads/thread_apis/src/test_threads_cancel_abort.c
++++ b/tests/kernel/threads/thread_apis/src/test_threads_cancel_abort.c
+@@ -123,6 +123,210 @@ ZTEST_USER(threads_lifecycle, test_threads_abort_others)
+ 	zassert_true(execute_flag == 1);
+ }
+ 
++#ifdef CONFIG_THREAD_CANCEL
++static void thread_entry_cancel(void *p1, void *p2, void *p3)
++{
++	bool cancel_self = (bool)POINTER_TO_INT(p1);
++	bool cancel_enable = (bool)POINTER_TO_INT(p2);
++
++	execute_flag = BIT(0);
++
++	if (cancel_enable) {
++		/* cancellation is enabled by default */
++		execute_flag |= BIT(1);
++	} else {
++		execute_flag |= BIT(2);
++		/* disable cancellation */
++		k_thread_cancel_setstate(false);
++	}
++
++	zexpect_equal(k_thread_cancel_getstate(), cancel_enable);
++
++	while (!cancel_self) {
++		/* this thread will be cancelled by the main thread */
++		execute_flag |= BIT(3);
++		k_msleep(100); /* sleep is mostly used here as a cancellation point */
++
++		if (!cancel_enable && ((execute_flag & BIT(6)) != 0)) {
++			/*
++			 * We should only get here after the main thread has requested this thread
++			 * to be cancelled and used BIT(6) to signal to this thread that we should
++			 * re-enable cancellation.
++			 */
++			execute_flag |= BIT(7);
++			k_thread_cancel_setstate(true);
++
++			/* code will be unreachable beyond this point */
++
++			execute_flag = 0xffffffff;
++			CODE_UNREACHABLE;
++			zassert_true(false);
++		}
++	}
++
++	/* this thread cancels itself */
++	execute_flag |= BIT(4);
++	zexpect_ok(k_thread_cancel(k_current_get()));
++
++	if (!cancel_enable) {
++		execute_flag |= BIT(5);
++		k_thread_cancel_setstate(true);
++	}
++
++	/* code will be unreachable beyond this point */
++
++	execute_flag = 0xffffffff;
++	CODE_UNREACHABLE;
++	zassert_true(false);
++}
++#endif
++
++ZTEST_USER(threads_lifecycle, test_k_thread_cancel)
++{
++#ifndef CONFIG_THREAD_CANCEL
++	ztest_test_skip();
++#else
++	void *result = NULL;
++	bool cancel_self;
++	bool cancel_enable;
++	int expect_flag;
++
++	/* Spawn a self-cancelling thread */
++	{
++		execute_flag = 0;
++		cancel_self = true;
++		cancel_enable = true;
++		expect_flag = BIT(0) | BIT(1) | BIT(4);
++
++		k_thread_create(&tdata, tstack, STACK_SIZE, thread_entry_cancel,
++				INT_TO_POINTER(cancel_self), INT_TO_POINTER(cancel_enable), NULL, 0,
++				K_USER, K_NO_WAIT);
++		zexpect_ok(k_thread_rejoin(&tdata, &result, K_FOREVER));
++		zexpect_equal(execute_flag, expect_flag,
++			      "execution flag mismatch. expected: 0x%x actual: 0x%x", expect_flag,
++			      execute_flag);
++		zexpect_equal(result, K_THREAD_CANCELLED, "result %p instead of %p", result,
++			      K_THREAD_CANCELLED);
++	}
++
++	/*
++	 * Spawn a thread that
++	 * - disables cancellation
++	 * - cancels itself
++	 * - re-enables cancellation
++	 */
++	{
++		execute_flag = 0;
++		cancel_self = true;
++		cancel_enable = false;
++		expect_flag = BIT(0) | BIT(2) | BIT(4) | BIT(5);
++
++		k_thread_create(&tdata, tstack, STACK_SIZE, thread_entry_cancel,
++				INT_TO_POINTER(cancel_self), INT_TO_POINTER(cancel_enable), NULL, 0,
++				K_USER, K_NO_WAIT);
++		zexpect_ok(k_thread_rejoin(&tdata, &result, K_FOREVER));
++		zexpect_equal(execute_flag, expect_flag,
++			      "execution flag mismatch. expected: 0x%x actual: 0x%x", expect_flag,
++			      execute_flag);
++		zexpect_equal(result, K_THREAD_CANCELLED, "result %p instead of %p", result,
++			      K_THREAD_CANCELLED);
++	}
++
++	/* Spawn a thread and cancel it from this thread */
++	{
++		execute_flag = 0;
++		cancel_self = false;
++		cancel_enable = true;
++		expect_flag = BIT(0) | BIT(1) | BIT(3);
++
++		k_thread_create(&tdata, tstack, STACK_SIZE, thread_entry_cancel,
++				INT_TO_POINTER(cancel_self), INT_TO_POINTER(cancel_enable), NULL, 0,
++				K_USER, K_NO_WAIT);
++		k_msleep(500);
++		zexpect_ok(k_thread_cancel(&tdata));
++		zexpect_ok(k_thread_rejoin(&tdata, &result, K_FOREVER));
++		zexpect_equal(execute_flag, expect_flag,
++			      "execution flag mismatch. expected: 0x%x actual: 0x%x", expect_flag,
++			      execute_flag);
++		zexpect_equal(result, K_THREAD_CANCELLED, "result %p instead of %p", result,
++			      K_THREAD_CANCELLED);
++	}
++
++	/*
++	 * Spawn a thread
++	 * - disable cancellation
++	 * - cancel the spawned thread from this thread
++	 * - re-enable cancellation
++	 */
++	{
++		execute_flag = 0;
++		cancel_self = false;
++		cancel_enable = false;
++		expect_flag = BIT(0) | BIT(2) | BIT(3) | BIT(6) | BIT(7);
++
++		k_thread_create(&tdata, tstack, STACK_SIZE, thread_entry_cancel,
++				INT_TO_POINTER(cancel_self), INT_TO_POINTER(cancel_enable), NULL, 0,
++				K_USER, K_NO_WAIT);
++		k_msleep(200);
++
++		/* expect join to fail, since cancellation has not been re-enabled */
++		zexpect_not_ok(k_thread_rejoin(&tdata, &result, K_MSEC(100)));
++
++		/* mark the thread as pending cancellation */
++		zexpect_ok(k_thread_cancel(&tdata));
++
++		/* expect join to fail, since cancellation has not been re-enabled */
++		zexpect_not_ok(k_thread_rejoin(&tdata, &result, K_MSEC(100)));
++
++		/* use BIT(6) of execute_flag to signal to thread_entry_cancel that it should
++		 * re-enable cancellation */
++		execute_flag |= BIT(6);
++
++		/* finally, join should succeed since cancellation has been re-enabled */
++		zexpect_ok(k_thread_rejoin(&tdata, &result, K_FOREVER));
++		zexpect_equal(execute_flag, expect_flag,
++			      "execution flag mismatch. expected: 0x%x actual: 0x%x", expect_flag,
++			      execute_flag);
++		zexpect_equal(result, K_THREAD_CANCELLED, "result %p instead of %p", result,
++			      K_THREAD_CANCELLED);
++	}
++
++#endif
++}
++
++#ifdef CONFIG_THREAD_CANCEL
++static void thread_entry_exit(void *p1, void *p2, void *p3)
++{
++	ARG_UNUSED(p2);
++	ARG_UNUSED(p3);
++
++	execute_flag = 1;
++	k_thread_exit(p1);
++
++	execute_flag = 0xffffffff;
++	CODE_UNREACHABLE;
++	zassert_true(false);
++}
++#endif
++
++ZTEST_USER(threads_lifecycle, test_k_thread_exit)
++{
++#ifndef CONFIG_THREAD_CANCEL
++	ztest_test_skip();
++#else
++	void *actual_result = NULL;
++	const void *expected_result = INT_TO_POINTER(42);
++
++	execute_flag = 0;
++	k_thread_create(&tdata, tstack, STACK_SIZE, thread_entry_exit, (void *)expected_result,
++			NULL, NULL, 0, K_USER, K_NO_WAIT);
++	zassert_ok(k_thread_rejoin(&tdata, &actual_result, K_FOREVER));
++	zassert_equal(POINTER_TO_INT(actual_result), POINTER_TO_INT(expected_result),
++		      "result %p instead of %p", actual_result, expected_result);
++	zassert_equal(execute_flag, 1);
++#endif
++}
++
+ /**
+  * @ingroup kernel_thread_tests
+  * @brief Test abort on an already terminated thread
