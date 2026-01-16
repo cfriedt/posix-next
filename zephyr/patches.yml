@@ -334,3 +334,30 @@ patches:
     comments: |
       Support thread results. Thread results are necessary to support standard
       threading APIs such as pthread_join() and thrd_join().
+  - path: zephyr/k-thread-cancel.patch
+    sha256sum: 2c34a53a6c5f465a543bfbd160d00d2ed8880e7ee67657206bf63a13249515d7
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-01-15
+    upstreamable: true
+    comments: |
+      Support thread cancellation. Thread cancellation is necessary to support
+      standard threading APIs such as pthread_cancel() and thrd_cancel().
+      Cancellation actuates in the cancelled thread's own privilege level: a user thread's
+      request is handed to the signal path and runs through the trampoline in user mode,
+      K_SIG_CANCEL is reserved (neither caught nor ignored), and the result becomes
+      K_THREAD_CANCELLED when the request actuates rather than when it is made.
+      k_thread_exit() is not a system call: it disables cancellation, records the result
+      and actuates directly. The thread bookkeeping system calls are not cancellation
+      points.
+  - path: zephyr/sigrtmin-use-cancel-kconfig.patch
+    sha256sum: de2ca5bedbdb90994a80f8c76bf8c3a15cce3d8e90d3e7b9d4d03ff7a2111560
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-06-24
+    upstreamable: true
+    comments: |
+      Tie SIGRTMIN to CONFIG_THREAD_CANCEL_SIGNAL_NUMBER now that
+      k-thread-cancel.patch defines the Kconfig symbol.
