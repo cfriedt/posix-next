@@ -1,0 +1,199 @@
+diff --git a/arch/riscv/Kconfig b/arch/riscv/Kconfig
+index a768151bf38..a69efb57b55 100644
+--- a/arch/riscv/Kconfig
++++ b/arch/riscv/Kconfig
+@@ -523,6 +523,10 @@ config RISCV_NO_MTVAL_ON_FP_TRAP
+ 	  to contain the faulting FP instruction, requiring alternative methods
+ 	  to handle FP exceptions.
+
++config ARCH_SUPPORTS_USERSPACE_SIGNALS
++       bool
++       default y
++
+ rsource "Kconfig.isa"
+
+ rsource "custom/Kconfig"
+diff --git a/arch/riscv/core/CMakeLists.txt b/arch/riscv/core/CMakeLists.txt
+index dafbe63ff0b..c81b2d0f5e7 100644
+--- a/arch/riscv/core/CMakeLists.txt
++++ b/arch/riscv/core/CMakeLists.txt
+@@ -35,6 +35,10 @@ zephyr_library_sources_ifdef(CONFIG_ARCH_STACKWALK stacktrace.c)
+ zephyr_linker_sources(ROM_START SORT_KEY 0x0vectors vector_table.ld)
+ zephyr_library_sources_ifdef(CONFIG_LLEXT elf.c)
+
++if(CONFIG_SIGNAL AND CONFIG_USERSPACE)
++  zephyr_library_sources(signal.c)
++endif()
++
+ if(CONFIG_GEN_SW_ISR_TABLE)
+   if(CONFIG_DYNAMIC_INTERRUPTS)
+     zephyr_linker_sources(RWDATA swi_tables.ld)
+diff --git a/arch/riscv/core/isr.S b/arch/riscv/core/isr.S
+index 6eeaaa7d269..fb78522bae6 100644
+--- a/arch/riscv/core/isr.S
++++ b/arch/riscv/core/isr.S
+@@ -104,6 +104,10 @@ GDATA(_k_syscall_table)
+ GTEXT(__soc_handle_all_irqs)
+ #endif
+
++#if defined(CONFIG_SIGNAL) && defined(CONFIG_USERSPACE)
++GTEXT(z_sig_handle)
++#endif
++
+ /* exports */
+ GTEXT(_isr_wrapper)
+
+@@ -578,6 +582,67 @@ valid_syscall_id:
+ 	/* Update a0 (return value) on the stack */
+ 	sr a0, __struct_arch_esf_a0_OFFSET(sp)
+
++#ifdef CONFIG_SIGNAL
++	/* reload the syscall id: t0 is caller-saved and the syscall may have clobbered it */
++	lr t0, __struct_arch_esf_t0_OFFSET(sp)
++
++	li t1, K_SYSCALL_K_SIG_ACTION
++	beq t0, t1, skip_z_sig_handle
++	li t1, K_SYSCALL_K_SIG_CURRENT
++	beq t0, t1, skip_z_sig_handle
++	li t1, K_SYSCALL_K_SIG_RETURN
++	beq t0, t1, z_sig_return_restore
++
++	mv a0, sp
++	call z_sig_handle
++	beqz a0, skip_z_sig_handle
++
++	/*
++	 * z_sig_handle() redirected the return path into the signal trampoline. The trampoline
++	 * chain clobbers the callee-saved registers per the ABI and k_sig_return() resumes the
++	 * interrupted context without unwinding, so capture them now: at this point they still
++	 * hold the interrupted context's values (s0 is preserved via the esf).
++	 */
++	lr t1, ___cpu_t_current_OFFSET(s0)
++	li t2, __thread_sig_user_s_OFFSET
++	add t1, t1, t2
++	sr s1, (0*RV_REGSIZE)(t1)
++#if !defined(CONFIG_RISCV_ISA_RV32E)
++	sr s2, (1*RV_REGSIZE)(t1)
++	sr s3, (2*RV_REGSIZE)(t1)
++	sr s4, (3*RV_REGSIZE)(t1)
++	sr s5, (4*RV_REGSIZE)(t1)
++	sr s6, (5*RV_REGSIZE)(t1)
++	sr s7, (6*RV_REGSIZE)(t1)
++	sr s8, (7*RV_REGSIZE)(t1)
++	sr s9, (8*RV_REGSIZE)(t1)
++	sr s10, (9*RV_REGSIZE)(t1)
++	sr s11, (10*RV_REGSIZE)(t1)
++#endif
++	j skip_z_sig_handle
++
++z_sig_return_restore:
++	/* restore the callee-saved registers captured when the trampoline was entered */
++	lr t1, ___cpu_t_current_OFFSET(s0)
++	li t2, __thread_sig_user_s_OFFSET
++	add t1, t1, t2
++	lr s1, (0*RV_REGSIZE)(t1)
++#if !defined(CONFIG_RISCV_ISA_RV32E)
++	lr s2, (1*RV_REGSIZE)(t1)
++	lr s3, (2*RV_REGSIZE)(t1)
++	lr s4, (3*RV_REGSIZE)(t1)
++	lr s5, (4*RV_REGSIZE)(t1)
++	lr s6, (5*RV_REGSIZE)(t1)
++	lr s7, (6*RV_REGSIZE)(t1)
++	lr s8, (7*RV_REGSIZE)(t1)
++	lr s9, (8*RV_REGSIZE)(t1)
++	lr s10, (9*RV_REGSIZE)(t1)
++	lr s11, (10*RV_REGSIZE)(t1)
++#endif
++
++skip_z_sig_handle:
++#endif
++
+ 	/* Disable IRQs again before leaving */
+ 	csrc mstatus, MSTATUS_IEN
+ 	j might_have_rescheduled
+diff --git a/arch/riscv/core/offsets/offsets.c b/arch/riscv/core/offsets/offsets.c
+index 1a898314794..f08a06cecca 100644
+--- a/arch/riscv/core/offsets/offsets.c
++++ b/arch/riscv/core/offsets/offsets.c
+@@ -27,6 +27,11 @@
+
+ #include <kernel_offsets.h>
+
++#if defined(CONFIG_SIGNAL) && defined(CONFIG_USERSPACE)
++GEN_ABSOLUTE_SYM(__thread_sig_user_s_OFFSET,
++		 offsetof(struct k_thread, base.sig.user.s));
++#endif
++
+ /* struct _callee_saved member offsets */
+ GEN_OFFSET_SYM(_callee_saved_t, sp);
+ GEN_OFFSET_SYM(_callee_saved_t, ra);
+diff --git a/arch/riscv/core/signal.c b/arch/riscv/core/signal.c
+new file mode 100644
+index 00000000000..8b8448fe3a2
+--- /dev/null
++++ b/arch/riscv/core/signal.c
+@@ -0,0 +1,33 @@
++/*
++ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++#include <zephyr/kernel.h>
++
++void arch_sig_pre(struct k_thread *thread, void *arg)
++{
++	struct arch_esf *const esf = arg;
++	struct arch_sig_ctx *const sig = &thread->base.sig.user;
++
++	/* Backup the original RA, SP, A0, and MEPC into storage */
++	sig->ra = esf->ra;
++	sig->sp = esf->sp;
++	sig->a0 = esf->a0;
++	sig->mepc = esf->mepc;
++
++	/* Overwrite MEPC to resume execution in arch_sig_trampoline() */
++	esf->mepc = (unsigned long)arch_sig_trampoline;
++}
++
++void arch_sig_post(struct k_thread *thread, void *arg)
++{
++	struct arch_esf *const esf = arg;
++	struct arch_sig_ctx *const sig = &thread->base.sig.user;
++
++	/* Restore the original RA, SP, A0, and MEPC into esf */
++	esf->ra = sig->ra;
++	esf->sp = sig->sp;
++	esf->a0 = sig->a0;
++	esf->mepc = sig->mepc;
++}
+diff --git a/include/zephyr/arch/riscv/exception.h b/include/zephyr/arch/riscv/exception.h
+index e02037b66c0..8a89d1c9a8d 100644
+--- a/include/zephyr/arch/riscv/exception.h
++++ b/include/zephyr/arch/riscv/exception.h
+@@ -105,6 +105,26 @@ struct arch_esf {
+ typedef struct soc_esf soc_esf_t;
+ #endif
+
++#if defined(CONFIG_SIGNAL) && defined(CONFIG_USERSPACE)
++struct arch_sig_ctx {
++	unsigned long ra;		/* return address */
++	unsigned long a0;		/* function argument/return value */
++	unsigned long mepc;		/* machine exception program counter */
++	unsigned long sp;               /* preserved (user or kernel) stack pointer */
++	/*
++	 * Callee-saved registers of the interrupted context (s0 is preserved via the esf). The
++	 * signal trampoline chain clobbers them per the ABI, and k_sig_return() resumes the
++	 * interrupted context without unwinding the trampoline's frames, so they are captured at
++	 * redirection and restored on the k_sig_return() exit path.
++	 */
++#if defined(CONFIG_RISCV_ISA_RV32E)
++	unsigned long s[1];             /* s1 */
++#else
++	unsigned long s[11];            /* s1..s11 */
++#endif
++};
++#endif
++
+ #ifdef __cplusplus
+ }
+ #endif
