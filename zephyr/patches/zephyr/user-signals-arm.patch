@@ -1,0 +1,357 @@
+diff --git a/arch/arm/Kconfig b/arch/arm/Kconfig
+index 7b6b292b5c1..22b8a982b0f 100644
+--- a/arch/arm/Kconfig
++++ b/arch/arm/Kconfig
+@@ -190,4 +190,8 @@ config HAS_SWO
+ 	help
+ 	  When enabled, indicates that SoC has an SWO output
+ 
++config ARCH_SUPPORTS_USERSPACE_SIGNALS
++	bool
++	default y
++
+ endmenu
+diff --git a/arch/arm/core/CMakeLists.txt b/arch/arm/core/CMakeLists.txt
+index f0035033832..9a44c8c8d2f 100644
+--- a/arch/arm/core/CMakeLists.txt
++++ b/arch/arm/core/CMakeLists.txt
+@@ -36,6 +36,10 @@ zephyr_linker_sources(ROM_START SORT_KEY 0x0vectors vector_table.ld)
+ zephyr_linker_sources(ROM_START SORT_KEY 0x1vectors cortex_m/vector_table_pad.ld)
+ endif()
+ 
++if(CONFIG_SIGNAL AND CONFIG_USERSPACE)
++  zephyr_library_sources(signal.c)
++endif()
++
+ if(CONFIG_GEN_SW_ISR_TABLE)
+   if(CONFIG_DYNAMIC_INTERRUPTS)
+     zephyr_linker_sources(RWDATA swi_tables.ld)
+diff --git a/arch/arm/core/cortex_m/swap_helper.S b/arch/arm/core/cortex_m/swap_helper.S
+index 162208e04c6..646d2a99e77 100644
+--- a/arch/arm/core/cortex_m/swap_helper.S
++++ b/arch/arm/core/cortex_m/swap_helper.S
+@@ -577,7 +577,7 @@ SECTION_FUNC(TEXT, z_arm_svc)
+     adds r1, r1, #_thread_offset_to_priv_stack_start
+     ldr r1, [r1] /* bottom of priv stack */
+     ldr r3, =CONFIG_PRIVILEGED_STACK_SIZE
+-    subs r3, #(_EXC_HW_SAVED_BASIC_SF_SIZE+8) /* 8 for original sp and pc */
++    subs r3, #(_EXC_HW_SAVED_BASIC_SF_SIZE+16) /* original sp, lr, and pc, and r0 */
+     add r1, r3
+     mov ip, r1
+ #elif defined(CONFIG_ARMV7_M_ARMV8_M_MAINLINE)
+@@ -594,7 +594,7 @@ SECTION_FUNC(TEXT, z_arm_svc)
+ #else
+     mov r8, #_EXC_HW_SAVED_BASIC_SF_SIZE
+ #endif
+-    sub ip, #8 /* z_arm_do_syscall will use this to get original sp and pc */
++    sub ip, #16 /* original sp, lr, and pc, and r0 */
+     sub ip, r8 /* 32 for basic sf + 72 for the optional esf */
+ #endif
+ 
+diff --git a/arch/arm/core/signal.c b/arch/arm/core/signal.c
+new file mode 100644
+index 00000000000..b2ca3c529b6
+--- /dev/null
++++ b/arch/arm/core/signal.c
+@@ -0,0 +1,30 @@
++/*
++ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <zephyr/kernel.h>
++
++extern void z_sig_trampoline(void);
++
++void arch_sig_pre(struct k_thread *thread, void *arg)
++{
++	struct arch_sig_ctx *const psf = arg;
++	struct arch_sig_ctx *const backup = &thread->base.sig.user;
++
++	/* Backup the original SP, PC (return address), LR, and R0 from PSF */
++	*backup = *psf;
++
++	/* Overwrite PC (return address) to resume execution in z_sig_trampoline() */
++	psf->pc = (unsigned long)z_sig_trampoline;
++}
++
++void arch_sig_post(struct k_thread *thread, void *arg)
++{
++	struct arch_sig_ctx *const psf = arg;
++	struct arch_sig_ctx *const backup = &thread->base.sig.user;
++
++	/* Restore the original SP, PC (return address), LR, and R0 into PSF */
++	*psf = *backup;
++}
+diff --git a/arch/arm/core/userspace.S b/arch/arm/core/userspace.S
+index 92795625a1d..342f46276a6 100644
+--- a/arch/arm/core/userspace.S
++++ b/arch/arm/core/userspace.S
+@@ -32,6 +32,10 @@ GDATA(_kernel)
+ /* Imports */
+ GDATA(_k_syscall_table)
+ 
++#if defined(CONFIG_SIGNAL)
++GTEXT(z_sig_handle)
++#endif
++
+ /**
+  *
+  * User space entry function
+@@ -365,6 +369,7 @@ dispatch_syscall:
+     lsls r6, #2
+     add r0, r6
+     ldr r0, [r0]	/* load table address */
++    lsr r6, #2          /* preserve syscall id */
+     /* swap ip and r0, restore r1 from lr */
+     mov r1, ip
+     mov ip, r0
+@@ -405,6 +410,7 @@ dispatch_syscall:
+     lsl r6, #2
+     add ip, r6
+     ldr ip, [ip]	/* load table address */
++    lsr r6, #2          /* preserve syscall id */
+ 
+     /* execute function from dispatch table */
+     blx ip
+@@ -413,6 +419,42 @@ dispatch_syscall:
+     ldr lr, [sp,#16]
+ #endif
+ 
++    /* restore stack pointer to its original location */
++    pop {r4,r5,ip}
++
++#ifdef CONFIG_SIGNAL
++    ldr ip, =K_SYSCALL_K_SIG_ACTION
++    cmp ip, r6
++    beq .L_skip_k_sig_handle
++    ldr ip, =K_SYSCALL_K_SIG_CURRENT
++    cmp ip, r6
++    beq .L_skip_k_sig_handle
++    ldr ip, =K_SYSCALL_K_SIG_RETURN
++    cmp ip, r6
++    beq .L_do_sig_restore
++
++    /* Store LR into privileged stack */
++    str lr, [sp,#4]
++    /* Store R0 (syscall return value) into privileged stack */
++    str r0, [sp,#8]
++    /* Store PC (return address) into privileged stack from R8 */
++    str r8, [sp,#12]
++
++    /* Pass privileged stack to z_sig_handle() */
++    mov r0, sp
++    ldr ip, =z_sig_handle
++    blx ip
++
++.L_do_sig_restore:
++    /* Retore LR from privileged stack */
++    ldr lr, [sp,#4]
++    /* Restore R0 (syscall return value) from privileged stack */
++    ldr r0, [sp,#8]
++    /* Restore PC (return address) from privileged stack into R8 */
++    ldr r8, [sp,#12]
++
++.L_skip_k_sig_handle:
++#endif
+ 
+ #if defined(CONFIG_BUILTIN_STACK_GUARD)
+     /*
+@@ -451,14 +493,14 @@ dispatch_syscall:
+     /* set stack back to unprivileged stack */
+     mov ip, r0
+     mov r0, sp
+-    ldr r0, [r0,#12]
++    ldr r0, [r0]
+     msr PSP, r0
+     /* Restore r0 */
+     mov r0, ip
+ 
+ #elif defined(CONFIG_ARMV7_M_ARMV8_M_MAINLINE)
+     /* set stack back to unprivileged stack */
+-    ldr ip, [sp,#12]
++    ldr ip, [sp]
+     msr PSP, ip
+ #endif
+ 
+diff --git a/arch/arm64/core/CMakeLists.txt b/arch/arm64/core/CMakeLists.txt
+index 436918ccb47..ef09f933939 100644
+--- a/arch/arm64/core/CMakeLists.txt
++++ b/arch/arm64/core/CMakeLists.txt
+@@ -45,6 +45,10 @@ if((CONFIG_MP_MAX_NUM_CPUS GREATER 1) OR (CONFIG_SMP))
+   zephyr_library_sources(smp.c)
+ endif()
+ 
++if(CONFIG_SIGNAL AND CONFIG_USERSPACE)
++  zephyr_library_sources(signal.c)
++endif()
++
+ zephyr_cc_option_ifdef(CONFIG_USERSPACE -mno-outline-atomics)
+ zephyr_cc_option_ifdef(CONFIG_FRAME_POINTER -mno-omit-leaf-frame-pointer)
+ 
+diff --git a/arch/arm64/core/Kconfig b/arch/arm64/core/Kconfig
+index 45076daa77b..cf67e615ca4 100644
+--- a/arch/arm64/core/Kconfig
++++ b/arch/arm64/core/Kconfig
+@@ -145,6 +145,7 @@ config WAIT_AT_RESET_VECTOR
+ 
+ config ARM64_SAFE_EXCEPTION_STACK
+ 	bool "To enable the safe exception stack"
++	default y if SIGNAL && USERSPACE
+ 	help
+ 	  The safe exception stack is used for checking whether the kernel stack
+ 	  overflows during the exception happens from EL1. This stack is not
+@@ -166,6 +167,10 @@ config ARCH_HAS_STACKWALK
+ 	  Internal config to indicate that the arch_stack_walk() API is implemented
+ 	  and it can be enabled.
+ 
++config ARCH_SUPPORTS_USERSPACE_SIGNALS
++	bool
++	default y
++
+ config ARM64_SAFE_EXCEPTION_STACK_SIZE
+ 	int "The stack size of the safe exception stack"
+ 	default 4096
+diff --git a/arch/arm64/core/signal.c b/arch/arm64/core/signal.c
+new file mode 100644
+index 00000000000..05f477c0161
+--- /dev/null
++++ b/arch/arm64/core/signal.c
+@@ -0,0 +1,46 @@
++/*
++ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <zephyr/kernel.h>
++
++extern void z_sig_trampoline(void);
++
++void arch_sig_pre(struct k_thread *thread, void *arg)
++{
++	struct arch_esf *const esf = arg;
++	struct arch_sig_ctx *const backup = &thread->base.sig.user;
++
++	/* Backup the original FP, SP, ELR (return address), and X0 (syscall return value) from PSF */
++#ifdef CONFIG_FRAME_POINTER
++	backup->fp = esf->fp;
++#endif
++#ifdef CONFIG_ARM64_SAFE_EXCEPTION_STACK
++	backup->sp = esf->sp;
++#endif
++	backup->lr = esf->lr;
++	backup->elr = esf->elr;
++	backup->x0 = esf->x0;
++
++	/* Overwrite PC (return address) to resume execution in z_sig_trampoline() */
++	esf->elr = (unsigned long)z_sig_trampoline;
++}
++
++void arch_sig_post(struct k_thread *thread, void *arg)
++{
++	struct arch_esf *const esf = arg;
++	struct arch_sig_ctx *const backup = &thread->base.sig.user;
++
++	/* Backup the original FP, SP, ELR (return address), and X0 (syscall return value) from PSF */
++#ifdef CONFIG_FRAME_POINTER
++	esf->fp = backup->fp;
++#endif
++#ifdef CONFIG_ARM64_SAFE_EXCEPTION_STACK
++	esf->sp = backup->sp;
++#endif
++	esf->lr = backup->lr;
++	esf->elr = backup->elr;
++	esf->x0 = backup->x0;
++}
+diff --git a/arch/arm64/core/userspace.S b/arch/arm64/core/userspace.S
+index 968d2a436bc..7d5c73751fb 100644
+--- a/arch/arm64/core/userspace.S
++++ b/arch/arm64/core/userspace.S
+@@ -14,6 +14,10 @@
+ 
+ _ASM_FILE_PROLOGUE
+ 
++#if defined(CONFIG_SIGNAL)
++GTEXT(z_sig_handle)
++#endif
++
+ /*
+  * size_t arch_user_string_nlen(const char *s, size_t maxsize, int *err_arg)
+  */
+@@ -124,5 +128,23 @@ valid_syscall_id:
+ 	/* Save the return value into the ESF */
+ 	str	x0, [sp, ___esf_t_x0_x1_OFFSET]
+ 
++#ifdef CONFIG_SIGNAL
++	ldr	x0, =K_SYSCALL_K_SIG_ACTION
++	cmp	x0, x8
++	beq skip_k_sig_handle
++	ldr	x0, =K_SYSCALL_K_SIG_CURRENT
++	cmp	x0, x8
++	beq skip_k_sig_handle
++	ldr	x0, =K_SYSCALL_K_SIG_RETURN
++	cmp	x0, x8
++	beq skip_k_sig_handle
++
++	mov	x0, sp
++	ldr	x9, =z_sig_handle
++	blr	x9
++
++skip_k_sig_handle:
++#endif
++
+ 	/* Return from exception */
+ 	b	z_arm64_exit_exc
+diff --git a/include/zephyr/arch/arm/exception.h b/include/zephyr/arch/arm/exception.h
+index cc20225e483..446d3ce910a 100644
+--- a/include/zephyr/arch/arm/exception.h
++++ b/include/zephyr/arch/arm/exception.h
+@@ -23,4 +23,23 @@
+ #error Unknown ARM architecture
+ #endif /* CONFIG_CPU_CORTEX_M */
+ 
++#ifndef _ASMLANGUAGE
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++struct arch_sig_ctx {
++	unsigned long sp; /* user stack pointer */
++	unsigned long lr; /* user link register */
++	unsigned long r0; /* syscall return value */
++	unsigned long pc; /* syscall return address */
++};
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* _ASMLANGUAGE */
++
+ #endif /* ZEPHYR_INCLUDE_ARCH_ARM_EXCEPTION_H_ */
+diff --git a/include/zephyr/arch/arm64/exception.h b/include/zephyr/arch/arm64/exception.h
+index a1348f608e3..18d213deb8e 100644
+--- a/include/zephyr/arch/arm64/exception.h
++++ b/include/zephyr/arch/arm64/exception.h
+@@ -55,6 +55,18 @@ struct arch_esf {
+ #endif
+ } __aligned(16);
+ 
++struct arch_sig_ctx {
++#ifdef CONFIG_FRAME_POINTER
++	unsigned long fp; /* user frame pointer */
++#endif
++#ifdef CONFIG_ARM64_SAFE_EXCEPTION_STACK
++	unsigned long sp; /* user stack pointer */
++#endif
++	unsigned long lr; /* user stack pointer */
++	unsigned long elr; /* syscall return address */
++	unsigned long x0; /* syscall return value */
++};
++
+ #ifdef __cplusplus
+ }
+ #endif
