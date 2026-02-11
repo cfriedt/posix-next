@@ -1,0 +1,113 @@
+diff --git a/arch/arm/Kconfig b/arch/arm/Kconfig
+index 7b6b292b5c1..a73d1ae0074 100644
+--- a/arch/arm/Kconfig
++++ b/arch/arm/Kconfig
+@@ -190,4 +190,14 @@ config HAS_SWO
+ 	help
+ 	  When enabled, indicates that SoC has an SWO output
+ 
++config ARCH_SUPPORTS_USERSPACE_SIGNALS
++	bool
++	default y
++
++config ARCH_USERSPACE_SIGNAL_STORAGE_SIZE
++	int
++	depends on SIGNAL
++	default 4 if USERSPACE
++	default 0
++
+ endmenu
+diff --git a/arch/arm/core/offsets/offsets_aarch32.c b/arch/arm/core/offsets/offsets_aarch32.c
+index e4aef46179f..e90457c7d42 100644
+--- a/arch/arm/core/offsets/offsets_aarch32.c
++++ b/arch/arm/core/offsets/offsets_aarch32.c
+@@ -106,4 +106,8 @@ GEN_OFFSET_SYM(_cpu_context_t, psplim);
+ #endif /* CONFIG_CPU_CORTEX_M_HAS_SPLIM */
+ #endif /* CONFIG_PM_S2RAM */
+ 
++#if defined(CONFIG_SIGNAL) && defined(CONFIG_USERSPACE)
++GEN_OFFSET_SYM(_thread_base_t, sig_storage);
++#endif
++
+ #endif /* _ARM_OFFSETS_INC_ */
+diff --git a/arch/arm/core/userspace.S b/arch/arm/core/userspace.S
+index 92795625a1d..f2e6b26c696 100644
+--- a/arch/arm/core/userspace.S
++++ b/arch/arm/core/userspace.S
+@@ -29,9 +29,18 @@ GTEXT(z_arm_user_string_nlen_fault_end)
+ GTEXT(z_arm_user_string_nlen_fixup)
+ GDATA(_kernel)
+ 
++#if defined(CONFIG_SIGNAL) && defined(CONFIG_USERSPACE)
++GTEXT(arch_sig_return)
++#endif
++
+ /* Imports */
+ GDATA(_k_syscall_table)
+ 
++#if defined(CONFIG_SIGNAL) && defined(CONFIG_USERSPACE)
++GTEXT(z_sig_trampoline)
++GTEXT(k_sig_handle)
++#endif
++
+ /**
+  *
+  * User space entry function
+@@ -413,6 +422,35 @@ dispatch_syscall:
+     ldr lr, [sp,#16]
+ #endif
+ 
++#ifdef CONFIG_SIGNAL
++    push {r0,r1,ip,lr}
++    mov ip, r0 /* temporary backup of r0 (return value of syscall) */
++
++    /* Call k_sig_handle() to determine if a signal needs to be handled */
++    ldr r1, =k_sig_handle
++    blx r1
++
++    cmp r0, #0
++    beq 1f
++
++    mov r0, ip /* restore r0 (return value of syscall) */
++
++    /* Backup the original R0, SP, LR, and PC into _thread_base_t.sig_storage[0-3] */
++    ldr r1, =_kernel
++    ldr r1, [r1, #_kernel_offset_to_current]
++    add r1, r1, #___thread_base_t_sig_storage_OFFSET
++    str r0, [r1, #0] /* Original R0 */
++    str r7, [r1, #4] /* Original SP */
++    ldr r0, [r7, #(-0x20 + 20)]
++    str r0, [r1, #8] /* Original LR */
++    str r8, [r1, #12] /* Original PC (return address) */
++
++    /* Overwrite PC (return address) to resume user thread execution in z_sig_trampoline() */
++    ldr r8, =z_sig_trampoline
++
++1:
++    pop {r0,r1,ip,lr}
++#endif
+ 
+ #if defined(CONFIG_BUILTIN_STACK_GUARD)
+     /*
+@@ -635,3 +673,21 @@ z_arm_user_string_nlen_fixup:
+ 
+     add	sp, #12
+     pop	{r4, r5, pc}
++
++#if defined(CONFIG_SIGNAL)
++/*
++ * r0 := pointer to _current thread
++ * r1 := pointer to _current->syscall_frame
++ */
++SECTION_FUNC(TEXT, arch_sig_return)
++    /* Restore original PC, LR, SP, and R0 into esf */
++    add r0, r0, #___thread_base_t_sig_storage_OFFSET
++    ldr r8, [r0, #12] /* Original PC (return address) */
++    ldr r2, [r0, #8]
++    str r2, [r1, #4] /* Original LR */
++    ldr r2, [r0, #4]
++    str r2, [r1, #0] /* Original SP */
++    ldr r0, [r0, #0] /* Original R0 */
++
++    bx lr
++#endif
