@@ -1,0 +1,110 @@
+diff --git a/arch/riscv/Kconfig b/arch/riscv/Kconfig
+index a768151bf38..d4451e324ed 100644
+--- a/arch/riscv/Kconfig
++++ b/arch/riscv/Kconfig
+@@ -523,6 +523,16 @@ config RISCV_NO_MTVAL_ON_FP_TRAP
+ 	  to contain the faulting FP instruction, requiring alternative methods
+ 	  to handle FP exceptions.
+ 
++config ARCH_SUPPORTS_USERSPACE_SIGNALS
++       bool
++       default y
++
++config ARCH_USERSPACE_SIGNAL_STORAGE_SIZE
++       int
++       depends on SIGNAL
++       default 4 if USERSPACE
++       default 0
++
+ rsource "Kconfig.isa"
+ 
+ rsource "custom/Kconfig"
+diff --git a/arch/riscv/core/isr.S b/arch/riscv/core/isr.S
+index 6eeaaa7d269..9960454cd74 100644
+--- a/arch/riscv/core/isr.S
++++ b/arch/riscv/core/isr.S
+@@ -104,9 +104,18 @@ GDATA(_k_syscall_table)
+ GTEXT(__soc_handle_all_irqs)
+ #endif
+ 
++#if defined(CONFIG_SIGNAL) && defined(CONFIG_USERSPACE)
++GTEXT(z_sig_trampoline)
++GTEXT(k_sig_handle)
++#endif
++
+ /* exports */
+ GTEXT(_isr_wrapper)
+ 
++#if defined(CONFIG_SIGNAL) && defined(CONFIG_USERSPACE)
++GTEXT(arch_sig_return)
++#endif
++
+ /* use ABI name of registers for the sake of simplicity */
+ 
+ /*
+@@ -578,6 +587,29 @@ valid_syscall_id:
+ 	/* Update a0 (return value) on the stack */
+ 	sr a0, __struct_arch_esf_a0_OFFSET(sp)
+ 
++#ifdef CONFIG_SIGNAL
++	/* Call k_sig_handle() to determine if a signal needs to be handled */
++	call k_sig_handle
++	beqz a0, 1f
++
++	/* Backup the original MEPC, SP, RA, and A0 into _thread_base_t.sig_storage[0-3] */
++	lr t0, ___cpu_t_current_OFFSET(s0)
++	lr t1, __struct_arch_esf_mepc_OFFSET(sp)
++	sr t1, (___thread_base_t_sig_storage_OFFSET + 0 * RV_REGSIZE)(t0)
++	lr t1, __struct_arch_esf_sp_OFFSET(sp)
++	sr t1, (___thread_base_t_sig_storage_OFFSET + 1 * RV_REGSIZE)(t0)
++	lr t1, __struct_arch_esf_ra_OFFSET(sp)
++	sr t1, (___thread_base_t_sig_storage_OFFSET + 2 * RV_REGSIZE)(t0)
++	lr t1, __struct_arch_esf_a0_OFFSET(sp)
++	sr t1, (___thread_base_t_sig_storage_OFFSET + 3 * RV_REGSIZE)(t0)
++
++	/* Overwrite MEPC to resume user thread execution in z_sig_trampoline() */
++	la t0, z_sig_trampoline
++	sr t0, __struct_arch_esf_mepc_OFFSET(sp)
++
++1:
++#endif
++
+ 	/* Disable IRQs again before leaving */
+ 	csrc mstatus, MSTATUS_IEN
+ 	j might_have_rescheduled
+@@ -816,3 +845,22 @@ fp_trap_exit:
+ #endif /* CONFIG_RISCV_SOC_HAS_ISR_STACKING */
+ 
+ 	mret
++
++#if defined(CONFIG_SIGNAL) && defined(CONFIG_USERSPACE)
++/*
++ * a0 := pointer to _current thread
++ * a1 := pointer to _current->syscall_frame
++ */
++SECTION_FUNC(TEXT, arch_sig_return)
++	/* Restore original A0, RA, SP, and MEPC into esf */
++	lr t0, (___thread_base_t_sig_storage_OFFSET + 3 * RV_REGSIZE)(a0)
++	sr t0, __struct_arch_esf_a0_OFFSET(a1)
++	lr t0, (___thread_base_t_sig_storage_OFFSET + 2 * RV_REGSIZE)(a0)
++	sr t0, __struct_arch_esf_ra_OFFSET(a1)
++	lr t0, (___thread_base_t_sig_storage_OFFSET + 1 * RV_REGSIZE)(a0)
++	sr t0, __struct_arch_esf_sp_OFFSET(a1)
++	lr t0, (___thread_base_t_sig_storage_OFFSET + 0 * RV_REGSIZE)(a0)
++	sr t0, __struct_arch_esf_mepc_OFFSET(a1)
++
++	ret
++#endif
+diff --git a/arch/riscv/core/offsets/offsets.c b/arch/riscv/core/offsets/offsets.c
+index 1a898314794..a5e8ff2e07b 100644
+--- a/arch/riscv/core/offsets/offsets.c
++++ b/arch/riscv/core/offsets/offsets.c
+@@ -142,4 +142,8 @@ GEN_OFFSET_SYM(_cpu_arch_t, user_exc_tmp0);
+ GEN_OFFSET_SYM(_cpu_arch_t, user_exc_tmp1);
+ #endif
+ 
++#if defined(CONFIG_SIGNAL) && defined(CONFIG_USERSPACE)
++GEN_OFFSET_SYM(_thread_base_t, sig_storage);
++#endif
++
+ GEN_ABS_SYM_END
