@@ -1,0 +1,127 @@
+diff --git a/arch/riscv/Kconfig b/arch/riscv/Kconfig
+index a768151bf38..a69efb57b55 100644
+--- a/arch/riscv/Kconfig
++++ b/arch/riscv/Kconfig
+@@ -523,6 +523,10 @@ config RISCV_NO_MTVAL_ON_FP_TRAP
+ 	  to contain the faulting FP instruction, requiring alternative methods
+ 	  to handle FP exceptions.
+ 
++config ARCH_SUPPORTS_USERSPACE_SIGNALS
++       bool
++       default y
++
+ rsource "Kconfig.isa"
+ 
+ rsource "custom/Kconfig"
+diff --git a/arch/riscv/core/CMakeLists.txt b/arch/riscv/core/CMakeLists.txt
+index dafbe63ff0b..c81b2d0f5e7 100644
+--- a/arch/riscv/core/CMakeLists.txt
++++ b/arch/riscv/core/CMakeLists.txt
+@@ -35,6 +35,10 @@ zephyr_library_sources_ifdef(CONFIG_ARCH_STACKWALK stacktrace.c)
+ zephyr_linker_sources(ROM_START SORT_KEY 0x0vectors vector_table.ld)
+ zephyr_library_sources_ifdef(CONFIG_LLEXT elf.c)
+ 
++if(CONFIG_SIGNAL AND CONFIG_USERSPACE)
++  zephyr_library_sources(signal.c)
++endif()
++
+ if(CONFIG_GEN_SW_ISR_TABLE)
+   if(CONFIG_DYNAMIC_INTERRUPTS)
+     zephyr_linker_sources(RWDATA swi_tables.ld)
+diff --git a/arch/riscv/core/isr.S b/arch/riscv/core/isr.S
+index 6eeaaa7d269..46143ced920 100644
+--- a/arch/riscv/core/isr.S
++++ b/arch/riscv/core/isr.S
+@@ -104,6 +104,10 @@ GDATA(_k_syscall_table)
+ GTEXT(__soc_handle_all_irqs)
+ #endif
+ 
++#if defined(CONFIG_SIGNAL) && defined(CONFIG_USERSPACE)
++GTEXT(z_sig_handle)
++#endif
++
+ /* exports */
+ GTEXT(_isr_wrapper)
+ 
+@@ -578,6 +582,20 @@ valid_syscall_id:
+ 	/* Update a0 (return value) on the stack */
+ 	sr a0, __struct_arch_esf_a0_OFFSET(sp)
+ 
++#ifdef CONFIG_SIGNAL
++	li t1, K_SYSCALL_K_SIG_ACTION
++	beq t0, t1, skip_z_sig_handle
++	li t1, K_SYSCALL_K_SIG_CURRENT
++	beq t0, t1, skip_z_sig_handle
++	li t1, K_SYSCALL_K_SIG_RETURN
++	beq t0, t1, skip_z_sig_handle
++
++	mv a0, sp
++	call z_sig_handle
++
++skip_z_sig_handle:
++#endif
++
+ 	/* Disable IRQs again before leaving */
+ 	csrc mstatus, MSTATUS_IEN
+ 	j might_have_rescheduled
+diff --git a/arch/riscv/core/signal.c b/arch/riscv/core/signal.c
+new file mode 100644
+index 00000000000..42a64321160
+--- /dev/null
++++ b/arch/riscv/core/signal.c
+@@ -0,0 +1,35 @@
++/*
++ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++#include <zephyr/kernel.h>
++
++extern void z_sig_trampoline(void);
++
++void arch_sig_pre(struct k_thread *thread, void *arg)
++{
++	struct arch_esf *const esf = arg;
++	struct arch_sig_ctx *const sig = &thread->base.sig.user;
++
++	/* Backup the original RA, SP, A0, and MEPC into storage */
++	sig->ra = esf->ra;
++	sig->sp = esf->sp;
++	sig->a0 = esf->a0;
++	sig->mepc = esf->mepc;
++
++	/* Overwrite MEPC to resume execution in z_sig_trampoline() */
++	esf->mepc = (unsigned long)z_sig_trampoline;
++}
++
++void arch_sig_post(struct k_thread *thread, void *arg)
++{
++	struct arch_esf *const esf = arg;
++	struct arch_sig_ctx *const sig = &thread->base.sig.user;
++
++	/* Restore the original RA, SP, A0, and MEPC into esf */
++	esf->ra = sig->ra;
++	esf->sp = sig->sp;
++	esf->a0 = sig->a0;
++	esf->mepc = sig->mepc;
++}
+diff --git a/include/zephyr/arch/riscv/exception.h b/include/zephyr/arch/riscv/exception.h
+index e02037b66c0..043b993aa81 100644
+--- a/include/zephyr/arch/riscv/exception.h
++++ b/include/zephyr/arch/riscv/exception.h
+@@ -105,6 +105,15 @@ struct arch_esf {
+ typedef struct soc_esf soc_esf_t;
+ #endif
+ 
++#if defined(CONFIG_SIGNAL) && defined(CONFIG_USERSPACE)
++struct arch_sig_ctx {
++	unsigned long ra;		/* return address */
++	unsigned long a0;		/* function argument/return value */
++	unsigned long mepc;		/* machine exception program counter */
++	unsigned long sp;               /* preserved (user or kernel) stack pointer */
++};
++#endif
++
+ #ifdef __cplusplus
+ }
+ #endif
