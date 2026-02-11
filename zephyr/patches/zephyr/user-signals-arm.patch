@@ -1,0 +1,792 @@
+diff --git a/arch/arm/Kconfig b/arch/arm/Kconfig
+--- a/arch/arm/Kconfig
++++ b/arch/arm/Kconfig
+@@ -237,4 +237,8 @@ endchoice
+ config ARCH_HAS_LLEXT_VENEERS
+ 	bool
+ 
++config ARCH_SUPPORTS_USERSPACE_SIGNALS
++	bool
++	default y
++
+ endmenu
+diff --git a/arch/arm/core/CMakeLists.txt b/arch/arm/core/CMakeLists.txt
+--- a/arch/arm/core/CMakeLists.txt
++++ b/arch/arm/core/CMakeLists.txt
+@@ -56,6 +56,10 @@ zephyr_linker_sources(ROM_START SORT_KEY 0x0vectors vector_table.ld)
+ zephyr_linker_sources(ROM_START SORT_KEY 0x1vectors cortex_m/vector_table_pad.ld)
+ endif()
+ 
++if(CONFIG_SIGNAL AND CONFIG_USERSPACE)
++  zephyr_library_sources(signal.c)
++endif()
++
+ if(CONFIG_GEN_SW_ISR_TABLE)
+   if(CONFIG_DYNAMIC_INTERRUPTS)
+     zephyr_linker_sources(RWDATA swi_tables.ld)
+diff --git a/arch/arm/core/cortex_m/svc.S b/arch/arm/core/cortex_m/svc.S
+--- a/arch/arm/core/cortex_m/svc.S
++++ b/arch/arm/core/cortex_m/svc.S
+@@ -264,7 +264,7 @@ SECTION_FUNC(TEXT, z_arm_svc)
+     adds r1, r1, #_thread_offset_to_priv_stack_start
+     ldr r1, [r1] /* bottom of priv stack */
+     ldr r3, =CONFIG_PRIVILEGED_STACK_SIZE
+-    subs r3, #(_EXC_HW_SAVED_BASIC_SF_SIZE+8) /* 8 for original sp and pc */
++    subs r3, #(_EXC_HW_SAVED_BASIC_SF_SIZE+16) /* original sp, lr, r0, and pc */
+     add r1, r3
+     mov ip, r1
+ #elif defined(CONFIG_ARMV7_M_ARMV8_M_MAINLINE)
+@@ -281,7 +281,7 @@ SECTION_FUNC(TEXT, z_arm_svc)
+ #else
+     mov r8, #_EXC_HW_SAVED_BASIC_SF_SIZE
+ #endif
+-    sub ip, #8 /* z_arm_do_syscall will use this to get original sp and pc */
++    sub ip, #16 /* z_arm_do_syscall reserved area: original sp, lr, r0, and pc */
+     sub ip, r8 /* 32 for basic sf + 72 for the optional esf */
+ #endif
+ 
+diff --git a/arch/arm/core/offsets/offsets_aarch32.c b/arch/arm/core/offsets/offsets_aarch32.c
+--- a/arch/arm/core/offsets/offsets_aarch32.c
++++ b/arch/arm/core/offsets/offsets_aarch32.c
+@@ -57,6 +57,11 @@ GEN_OFFSET_SYM(_thread_arch_t, mode_exc_return);
+ GEN_OFFSET_SYM(_thread_arch_t, priv_stack_start);
+ GEN_OFFSET_SYM(_thread_arch_t, priv_stack_end);
+ 
++#if defined(CONFIG_SIGNAL)
++GEN_ABSOLUTE_SYM(__thread_sig_user_s_OFFSET,
++		 offsetof(struct k_thread, base.sig.user.s));
++#endif
++
+ #if defined(CONFIG_CPU_AARCH32_CORTEX_R)
+ GEN_OFFSET_SYM(_thread_arch_t, sp_usr);
+ #endif
+diff --git a/arch/arm/core/signal.c b/arch/arm/core/signal.c
+new file mode 100644
+--- /dev/null
++++ b/arch/arm/core/signal.c
+@@ -0,0 +1,38 @@
++/*
++ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <zephyr/kernel.h>
++
++void arch_sig_pre(struct k_thread *thread, void *arg)
++{
++	struct arch_sig_ctx *const psf = arg;
++	struct arch_sig_ctx *const backup = &thread->base.sig.user;
++
++	/*
++	 * Backup the original SP, PC (return address), LR, and R0 from PSF. The PSF is a
++	 * four-word stack frame: it does not carry the callee-saved registers, which are
++	 * captured separately in assembly at redirection.
++	 */
++	backup->sp = psf->sp;
++	backup->lr = psf->lr;
++	backup->r0 = psf->r0;
++	backup->pc = psf->pc;
++
++	/* Overwrite PC (return address) to resume execution in arch_sig_trampoline() */
++	psf->pc = (unsigned long)arch_sig_trampoline;
++}
++
++void arch_sig_post(struct k_thread *thread, void *arg)
++{
++	struct arch_sig_ctx *const psf = arg;
++	struct arch_sig_ctx *const backup = &thread->base.sig.user;
++
++	/* Restore the original SP, PC (return address), LR, and R0 into PSF */
++	psf->sp = backup->sp;
++	psf->lr = backup->lr;
++	psf->r0 = backup->r0;
++	psf->pc = backup->pc;
++}
+diff --git a/arch/arm/core/userspace.S b/arch/arm/core/userspace.S
+--- a/arch/arm/core/userspace.S
++++ b/arch/arm/core/userspace.S
+@@ -47,6 +47,10 @@ GDATA(_k_syscall_table)
+ # define UNLOCK(unused)
+ #endif
+ 
++#if defined(CONFIG_SIGNAL)
++GTEXT(z_sig_handle)
++#endif
++
+ /**
+  *
+  * User space entry function
+@@ -389,6 +393,7 @@ dispatch_syscall:
+     lsls r6, #2
+     add r0, r6
+     ldr r0, [r0]	/* load table address */
++    lsr r6, #2          /* preserve syscall id */
+     /* swap ip and r0, restore r1 from lr */
+     mov r1, ip
+     mov ip, r0
+@@ -429,6 +434,7 @@ dispatch_syscall:
+     lsl r6, #2
+     add ip, r6
+     ldr ip, [ip]	/* load table address */
++    lsr r6, #2          /* preserve syscall id */
+ 
+     /* execute function from dispatch table */
+     blx ip
+@@ -437,6 +443,86 @@ dispatch_syscall:
+     ldr lr, [sp,#16]
+ #endif
+ 
++    /* restore stack pointer to its original location */
++    pop {r4,r5,ip}
++
++#ifdef CONFIG_SIGNAL
++    ldr ip, =K_SYSCALL_K_SIG_ACTION
++    cmp ip, r6
++    beq .L_skip_k_sig_handle
++    ldr ip, =K_SYSCALL_K_SIG_CURRENT
++    cmp ip, r6
++    beq .L_skip_k_sig_handle
++    ldr ip, =K_SYSCALL_K_SIG_RETURN
++    cmp ip, r6
++    beq .L_do_sig_return_restore
++
++    /* Store LR into privileged stack */
++    str lr, [sp,#4]
++    /* Store R0 (syscall return value) into privileged stack */
++    str r0, [sp,#8]
++    /* Store PC (return address) into privileged stack from R8 */
++    str r8, [sp,#12]
++
++    /* Pass privileged stack to z_sig_handle() */
++    mov r0, sp
++    ldr ip, =z_sig_handle
++    blx ip
++    cmp r0, #0
++    beq .L_do_sig_restore
++
++    /*
++     * z_sig_handle() redirected the return path into the signal trampoline. The trampoline
++     * chain clobbers the callee-saved registers per the ABI and k_sig_return() resumes the
++     * interrupted context without unwinding, so capture them now: at this point they still
++     * hold the interrupted context's values.
++     */
++    ldr r0, =_kernel
++    ldr r0, [r0, #_kernel_offset_to_current]
++    ldr r1, =__thread_sig_user_s_OFFSET
++    add r0, r0, r1
++#if defined(CONFIG_ARMV6_M_ARMV8_M_BASELINE)
++    stmia r0!, {r4-r7}
++    mov r1, r8
++    mov r2, r9
++    mov r3, r10
++    stmia r0!, {r1-r3}
++    mov r1, r11
++    str r1, [r0]
++#else
++    stmia r0, {r4-r11}
++#endif
++    b .L_do_sig_restore
++
++.L_do_sig_return_restore:
++    /* restore the callee-saved registers captured when the trampoline was entered */
++    ldr r0, =_kernel
++    ldr r0, [r0, #_kernel_offset_to_current]
++    ldr r1, =__thread_sig_user_s_OFFSET
++    add r0, r0, r1
++#if defined(CONFIG_ARMV6_M_ARMV8_M_BASELINE)
++    ldmia r0!, {r4-r7}
++    ldmia r0!, {r1-r3}
++    mov r8, r1
++    mov r9, r2
++    mov r10, r3
++    ldr r1, [r0]
++    mov r11, r1
++#else
++    ldmia r0, {r4-r11}
++#endif
++
++.L_do_sig_restore:
++    /* Retore LR from privileged stack */
++    ldr lr, [sp,#4]
++    /* Restore R0 (syscall return value) from privileged stack */
++    ldr r0, [sp,#8]
++    /* Restore PC (return address) from privileged stack into R8 */
++    ldr r8, [sp,#12]
++
++.L_skip_k_sig_handle:
++#endif
++
+     LOCK(ip)
+ 
+ #if defined(CONFIG_BUILTIN_STACK_GUARD)
+@@ -478,14 +564,14 @@ dispatch_syscall:
+     /* set stack back to unprivileged stack */
+     mov ip, r0
+     mov r0, sp
+-    ldr r0, [r0,#12]
++    ldr r0, [r0]
+     msr PSP, r0
+     /* Restore r0 */
+     mov r0, ip
+ 
+ #elif defined(CONFIG_ARMV7_M_ARMV8_M_MAINLINE)
+     /* set stack back to unprivileged stack */
+-    ldr ip, [sp,#12]
++    ldr ip, [sp]
+     msr PSP, ip
+ #endif
+ 
+@@ -608,7 +694,6 @@ z_syscall_exit_race2:
+ 
+     bx ip
+ 
+-
+ /*
+  * size_t arch_user_string_nlen(const char *s, size_t maxsize, int *err_arg)
+  */
+diff --git a/arch/arm64/core/CMakeLists.txt b/arch/arm64/core/CMakeLists.txt
+--- a/arch/arm64/core/CMakeLists.txt
++++ b/arch/arm64/core/CMakeLists.txt
+@@ -54,6 +54,10 @@ if((CONFIG_MP_MAX_NUM_CPUS GREATER 1) OR (CONFIG_SMP))
+   zephyr_library_sources(smp.c)
+ endif()
+ 
++if(CONFIG_SIGNAL AND CONFIG_USERSPACE)
++  zephyr_library_sources(signal.c)
++endif()
++
+ zephyr_cc_option_ifdef(CONFIG_USERSPACE -mno-outline-atomics)
+ zephyr_cc_option_ifdef(CONFIG_FRAME_POINTER -mno-omit-leaf-frame-pointer)
+ 
+diff --git a/arch/arm64/core/Kconfig b/arch/arm64/core/Kconfig
+--- a/arch/arm64/core/Kconfig
++++ b/arch/arm64/core/Kconfig
+@@ -185,12 +185,17 @@ config WAIT_AT_RESET_VECTOR
+ 
+ config ARM64_SAFE_EXCEPTION_STACK
+ 	bool
++	default y if SIGNAL && USERSPACE
+ 	help
+ 	  The safe exception stack is used for checking whether the kernel stack
+ 	  overflows during the exception happens from EL1. This stack is not
+ 	  used for user stack overflow checking, because kernel stack support
+ 	  the checking work.
+ 
++config ARCH_SUPPORTS_USERSPACE_SIGNALS
++	bool
++	default y
++
+ config ARM64_SAFE_EXCEPTION_STACK_SIZE
+ 	int "The stack size of the safe exception stack"
+ 	default 4096
+diff --git a/arch/arm64/core/offsets/offsets.c b/arch/arm64/core/offsets/offsets.c
+--- a/arch/arm64/core/offsets/offsets.c
++++ b/arch/arm64/core/offsets/offsets.c
+@@ -33,6 +33,13 @@
+ 
+ GEN_OFFSET_SYM(_thread_arch_t, exception_depth);
+ 
++#if defined(CONFIG_SIGNAL) && defined(CONFIG_USERSPACE)
++GEN_ABSOLUTE_SYM(__thread_sig_user_x_OFFSET,
++		 offsetof(struct k_thread, base.sig.user.x));
++GEN_ABSOLUTE_SYM(__thread_sig_user_x0_OFFSET,
++		 offsetof(struct k_thread, base.sig.user.x0));
++#endif
++
+ GEN_NAMED_OFFSET_SYM(_callee_saved_t, x19, x19_x20);
+ GEN_NAMED_OFFSET_SYM(_callee_saved_t, x21, x21_x22);
+ GEN_NAMED_OFFSET_SYM(_callee_saved_t, x23, x23_x24);
+diff --git a/arch/arm64/core/signal.c b/arch/arm64/core/signal.c
+new file mode 100644
+--- /dev/null
++++ b/arch/arm64/core/signal.c
+@@ -0,0 +1,48 @@
++/*
++ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <zephyr/kernel.h>
++
++extern void z_sig_trampoline(void);
++
++void arch_sig_pre(struct k_thread *thread, void *arg)
++{
++	struct arch_esf *const esf = arg;
++	struct arch_sig_ctx *const backup = &thread->base.sig.user;
++
++	/* Backup the original FP, SP, ELR (return address), and X0 (syscall return value) from PSF */
++#ifdef CONFIG_FRAME_POINTER
++	backup->fp = esf->fp;
++#endif
++#ifdef CONFIG_ARM64_SAFE_EXCEPTION_STACK
++	backup->sp = esf->sp;
++#endif
++	backup->lr = esf->lr;
++	backup->elr = esf->elr;
++	backup->spsr = esf->spsr;
++	backup->x0 = esf->x0;
++
++	/* Overwrite PC (return address) to resume execution in arch_sig_trampoline() */
++	esf->elr = (unsigned long)arch_sig_trampoline;
++}
++
++void arch_sig_post(struct k_thread *thread, void *arg)
++{
++	struct arch_esf *const esf = arg;
++	struct arch_sig_ctx *const backup = &thread->base.sig.user;
++
++	/* Backup the original FP, SP, ELR (return address), and X0 (syscall return value) from PSF */
++#ifdef CONFIG_FRAME_POINTER
++	esf->fp = backup->fp;
++#endif
++#ifdef CONFIG_ARM64_SAFE_EXCEPTION_STACK
++	esf->sp = backup->sp;
++#endif
++	esf->lr = backup->lr;
++	esf->elr = backup->elr;
++	esf->spsr = backup->spsr;
++	esf->x0 = backup->x0;
++}
+diff --git a/arch/arm64/core/userspace.S b/arch/arm64/core/userspace.S
+--- a/arch/arm64/core/userspace.S
++++ b/arch/arm64/core/userspace.S
+@@ -14,6 +14,10 @@
+ 
+ _ASM_FILE_PROLOGUE
+ 
++#if defined(CONFIG_SIGNAL)
++GTEXT(z_sig_handle)
++#endif
++
+ /*
+  * size_t arch_user_string_nlen(const char *s, size_t maxsize, int *err_arg)
+  */
+@@ -137,6 +141,62 @@ valid_syscall_id:
+ 	/* Save the return value into the ESF */
+ 	str	x0, [sp, ___esf_t_x0_x1_OFFSET]
+ 
++#ifdef CONFIG_SIGNAL
++	/* the syscall body may have used x8: the ID again */
++	ldr	x8, [sp, ___esf_t_x8_x9_OFFSET]
++	ldr	x0, =K_SYSCALL_K_SIG_ACTION
++	cmp	x0, x8
++	beq skip_k_sig_handle
++	ldr	x0, =K_SYSCALL_K_SIG_CURRENT
++	cmp	x0, x8
++	beq skip_k_sig_handle
++	ldr	x0, =K_SYSCALL_K_SIG_RETURN
++	cmp	x0, x8
++	beq z_sig_return_restore
++
++	mov	x0, sp
++	ldr	x9, =z_sig_handle
++	blr	x9
++	cbz	x0, skip_k_sig_handle
++
++	/*
++	 * z_sig_handle() redirected the return path into the signal trampoline. The trampoline
++	 * chain clobbers the callee-saved registers per the ABI and k_sig_return() resumes the
++	 * interrupted context without unwinding, so capture them now: at this point they still
++	 * hold the interrupted context's values.
++	 */
++	get_cpu	x9
++	ldr	x9, [x9, #___cpu_t_current_OFFSET]
++	ldr	x10, =__thread_sig_user_x_OFFSET
++	add	x9, x9, x10
++	stp	x19, x20, [x9, #0]
++	stp	x21, x22, [x9, #16]
++	stp	x23, x24, [x9, #32]
++	stp	x25, x26, [x9, #48]
++	stp	x27, x28, [x9, #64]
++	b	skip_k_sig_handle
++
++z_sig_return_restore:
++	get_cpu	x9
++	ldr	x9, [x9, #___cpu_t_current_OFFSET]
++
++	/* the return-value store above overwrote the resumed context's x0 */
++	ldr	x10, =__thread_sig_user_x0_OFFSET
++	ldr	x10, [x9, x10]
++	str	x10, [sp, ___esf_t_x0_x1_OFFSET]
++
++	/* restore the callee-saved registers captured when the trampoline was entered */
++	ldr	x10, =__thread_sig_user_x_OFFSET
++	add	x9, x9, x10
++	ldp	x19, x20, [x9, #0]
++	ldp	x21, x22, [x9, #16]
++	ldp	x23, x24, [x9, #32]
++	ldp	x25, x26, [x9, #48]
++	ldp	x27, x28, [x9, #64]
++
++skip_k_sig_handle:
++#endif
++
+ 	/* Return from exception */
+ 	.cfi_endproc
+ 	b	z_arm64_exit_exc
+diff --git a/include/zephyr/arch/arm/exception.h b/include/zephyr/arch/arm/exception.h
+--- a/include/zephyr/arch/arm/exception.h
++++ b/include/zephyr/arch/arm/exception.h
+@@ -23,4 +23,31 @@
+ #error Unknown ARM architecture
+ #endif /* CONFIG_CPU_CORTEX_M */
+ 
++#ifndef _ASMLANGUAGE
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++struct arch_sig_ctx {
++	unsigned long sp; /* user stack pointer */
++	unsigned long lr; /* user link register */
++	unsigned long r0; /* syscall return value */
++	unsigned long pc; /* syscall return address */
++	/*
++	 * Callee-saved registers of the interrupted context. Not part of the privileged
++	 * syscall stack frame: the signal trampoline chain clobbers them per the ABI, and
++	 * k_sig_return() resumes the interrupted context without unwinding the trampoline's
++	 * frames, so they are captured at redirection and restored on the k_sig_return()
++	 * exit path.
++	 */
++	unsigned long s[8]; /* r4..r11 */
++};
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* _ASMLANGUAGE */
++
+ #endif /* ZEPHYR_INCLUDE_ARCH_ARM_EXCEPTION_H_ */
+diff --git a/include/zephyr/arch/arm64/exception.h b/include/zephyr/arch/arm64/exception.h
+--- a/include/zephyr/arch/arm64/exception.h
++++ b/include/zephyr/arch/arm64/exception.h
+@@ -55,6 +55,26 @@ struct arch_esf {
+ #endif
+ } __aligned(16);
+ 
++struct arch_sig_ctx {
++#ifdef CONFIG_FRAME_POINTER
++	unsigned long fp; /* user frame pointer */
++#endif
++#ifdef CONFIG_ARM64_SAFE_EXCEPTION_STACK
++	unsigned long sp; /* user stack pointer */
++#endif
++	unsigned long lr; /* user link register */
++	unsigned long elr; /* syscall return address */
++	unsigned long spsr; /* user processor state: the condition flags */
++	unsigned long x0; /* syscall return value */
++	/*
++	 * Callee-saved registers of the interrupted context. The signal trampoline chain
++	 * clobbers them per the ABI, and k_sig_return() resumes the interrupted context
++	 * without unwinding the trampoline's frames, so they are captured at redirection
++	 * and restored on the k_sig_return() exit path.
++	 */
++	unsigned long x[10]; /* x19..x28 */
++};
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/arch/arm64/core/switch.S b/arch/arm64/core/switch.S
+--- a/arch/arm64/core/switch.S
++++ b/arch/arm64/core/switch.S
+@@ -50,7 +50,8 @@ SECTION_FUNC(TEXT, z_arm64_context_switch)
+ 
+ 	/* Save the current SP_ELx and return address */
+ 	mov	x4, sp
+-	stp	x4, lr, [x1, #_thread_offset_to_callee_saved_sp_elx_lr]
++	add	x5, x1, #_thread_offset_to_callee_saved_sp_elx_lr
++	stp	x4, lr, [x5]
+ 
+ 	/* save current thread's exception depth */
+ 	mrs	x4, tpidrro_el0
+@@ -124,7 +125,8 @@ SECTION_FUNC(TEXT, z_arm64_context_switch)
+ #endif
+ 
+ 	/* Restore SP_EL1 and return address */
+-	ldp	x4, lr, [x0, #_thread_offset_to_callee_saved_sp_elx_lr]
++	add	x5, x0, #_thread_offset_to_callee_saved_sp_elx_lr
++	ldp	x4, lr, [x5]
+ 	mov	sp, x4
+ 
+ #if defined(CONFIG_ARM64_SAFE_EXCEPTION_STACK)
+diff --git a/include/zephyr/arch/arm64/syscall.h b/include/zephyr/arch/arm64/syscall.h
+--- a/include/zephyr/arch/arm64/syscall.h
++++ b/include/zephyr/arch/arm64/syscall.h
+@@ -36,6 +36,12 @@ extern "C" {
+  * Syscall invocation macros. arm-specific machine constraints used to ensure
+  * args land in the proper registers.
+  */
++
++/*
++ * A trap preserves every register, a signal handler delivered on its return path
++ * does not: the caller-saved registers come back as the handler left them, so the
++ * asm declares them clobbered, as a call would, and nothing stays live in them.
++ */
+ static inline uintptr_t arch_syscall_invoke6(uintptr_t arg1, uintptr_t arg2,
+ 					     uintptr_t arg3, uintptr_t arg4,
+ 					     uintptr_t arg5, uintptr_t arg6,
+@@ -50,11 +56,9 @@ static inline uintptr_t arch_syscall_invoke6(uintptr_t arg1, uintptr_t arg2,
+ 	register uint64_t r8 __asm__("x8") = call_id;
+ 
+ 	__asm__ volatile("svc %[svid]\n"
+-			 : "=r"(ret)
+-			 : [svid] "i" (_SVC_CALL_SYSTEM_CALL),
+-			   "r" (ret), "r" (r1), "r" (r2), "r" (r3),
+-			   "r" (r4), "r" (r5), "r" (r8)
+-			 : "memory");
++			 : "+r" (ret), "+r" (r1), "+r" (r2), "+r" (r3), "+r" (r4), "+r" (r5), "+r" (r8)
++			 : [svid] "i" (_SVC_CALL_SYSTEM_CALL)
++			 : "x6", "x7", "x9", "x10", "x11", "x12", "x13", "x14", "x15", "x16", "x17", "x18", "memory");
+ 
+ 	return ret;
+ }
+@@ -72,11 +76,9 @@ static inline uintptr_t arch_syscall_invoke5(uintptr_t arg1, uintptr_t arg2,
+ 	register uint64_t r8 __asm__("x8") = call_id;
+ 
+ 	__asm__ volatile("svc %[svid]\n"
+-			 : "=r"(ret)
+-			 : [svid] "i" (_SVC_CALL_SYSTEM_CALL),
+-			   "r" (ret), "r" (r1), "r" (r2), "r" (r3),
+-			   "r" (r4), "r" (r8)
+-			 : "memory");
++			 : "+r" (ret), "+r" (r1), "+r" (r2), "+r" (r3), "+r" (r4), "+r" (r8)
++			 : [svid] "i" (_SVC_CALL_SYSTEM_CALL)
++			 : "x5", "x6", "x7", "x9", "x10", "x11", "x12", "x13", "x14", "x15", "x16", "x17", "x18", "memory");
+ 
+ 	return ret;
+ }
+@@ -92,11 +94,9 @@ static inline uintptr_t arch_syscall_invoke4(uintptr_t arg1, uintptr_t arg2,
+ 	register uint64_t r8 __asm__("x8") = call_id;
+ 
+ 	__asm__ volatile("svc %[svid]\n"
+-			 : "=r"(ret)
+-			 : [svid] "i" (_SVC_CALL_SYSTEM_CALL),
+-			   "r" (ret), "r" (r1), "r" (r2), "r" (r3),
+-			   "r" (r8)
+-			 : "memory");
++			 : "+r" (ret), "+r" (r1), "+r" (r2), "+r" (r3), "+r" (r8)
++			 : [svid] "i" (_SVC_CALL_SYSTEM_CALL)
++			 : "x4", "x5", "x6", "x7", "x9", "x10", "x11", "x12", "x13", "x14", "x15", "x16", "x17", "x18", "memory");
+ 
+ 	return ret;
+ }
+@@ -111,10 +111,9 @@ static inline uintptr_t arch_syscall_invoke3(uintptr_t arg1, uintptr_t arg2,
+ 	register uint64_t r8 __asm__("x8") = call_id;
+ 
+ 	__asm__ volatile("svc %[svid]\n"
+-			 : "=r"(ret)
+-			 : [svid] "i" (_SVC_CALL_SYSTEM_CALL),
+-			   "r" (ret), "r" (r1), "r" (r2), "r" (r8)
+-			 : "memory");
++			 : "+r" (ret), "+r" (r1), "+r" (r2), "+r" (r8)
++			 : [svid] "i" (_SVC_CALL_SYSTEM_CALL)
++			 : "x3", "x4", "x5", "x6", "x7", "x9", "x10", "x11", "x12", "x13", "x14", "x15", "x16", "x17", "x18", "memory");
+ 
+ 	return ret;
+ }
+@@ -127,10 +126,9 @@ static inline uintptr_t arch_syscall_invoke2(uintptr_t arg1, uintptr_t arg2,
+ 	register uint64_t r8 __asm__("x8") = call_id;
+ 
+ 	__asm__ volatile("svc %[svid]\n"
+-			 : "=r"(ret)
+-			 : [svid] "i" (_SVC_CALL_SYSTEM_CALL),
+-			   "r" (ret), "r" (r1), "r" (r8)
+-			 : "memory");
++			 : "+r" (ret), "+r" (r1), "+r" (r8)
++			 : [svid] "i" (_SVC_CALL_SYSTEM_CALL)
++			 : "x2", "x3", "x4", "x5", "x6", "x7", "x9", "x10", "x11", "x12", "x13", "x14", "x15", "x16", "x17", "x18", "memory");
+ 
+ 	return ret;
+ }
+@@ -142,10 +140,9 @@ static inline uintptr_t arch_syscall_invoke1(uintptr_t arg1,
+ 	register uint64_t r8 __asm__("x8") = call_id;
+ 
+ 	__asm__ volatile("svc %[svid]\n"
+-			 : "=r"(ret)
+-			 : [svid] "i" (_SVC_CALL_SYSTEM_CALL),
+-			   "r" (ret), "r" (r8)
+-			 : "memory");
++			 : "+r" (ret), "+r" (r8)
++			 : [svid] "i" (_SVC_CALL_SYSTEM_CALL)
++			 : "x1", "x2", "x3", "x4", "x5", "x6", "x7", "x9", "x10", "x11", "x12", "x13", "x14", "x15", "x16", "x17", "x18", "memory");
+ 	return ret;
+ }
+ 
+@@ -155,10 +152,9 @@ static inline uintptr_t arch_syscall_invoke0(uintptr_t call_id)
+ 	register uint64_t r8 __asm__("x8") = call_id;
+ 
+ 	__asm__ volatile("svc %[svid]\n"
+-			 : "=r"(ret)
+-			 : [svid] "i" (_SVC_CALL_SYSTEM_CALL),
+-			   "r" (ret), "r" (r8)
+-			 : "memory");
++			 : "+r" (ret), "+r" (r8)
++			 : [svid] "i" (_SVC_CALL_SYSTEM_CALL)
++			 : "x1", "x2", "x3", "x4", "x5", "x6", "x7", "x9", "x10", "x11", "x12", "x13", "x14", "x15", "x16", "x17", "x18", "memory");
+ 
+ 	return ret;
+ }
+diff --git a/tests/kernel/signal/src/main.c b/tests/kernel/signal/src/main.c
+--- a/tests/kernel/signal/src/main.c
++++ b/tests/kernel/signal/src/main.c
+@@ -244,6 +244,154 @@ ZTEST_USER(signal, test_noop_signal_handler_user)
+ 	zassert_true(noop_handler_returned, "no-op signal handler did not return properly");
+ }
+ 
++#ifdef CONFIG_ARM64
++#include <zephyr/syscall_list.h>
++
++ZTEST_BMEM static volatile int ctx_handler_ran;
++
++/* leaves every register a handler may change as it likes */
++static void ctx_clobber_handler(int sig, struct k_sig_info *info, void *ucontext)
++{
++	ARG_UNUSED(sig);
++	ARG_UNUSED(info);
++	ARG_UNUSED(ucontext);
++	ctx_handler_ran++;
++	__asm__ volatile("mov x0, #0x90000000\n"
++			 "msr nzcv, x0\n"
++			 "mov x9, #0xdead\n mov x10, #0xdead\n mov x11, #0xdead\n mov x12, #0xdead\n"
++			 "mov x13, #0xdead\n mov x14, #0xdead\n mov x15, #0xdead\n mov x16, #0xdead\n"
++			 "mov x17, #0xdead\n mov x18, #0xdead\n"
++			 : : : "x0", "x9", "x10", "x11", "x12", "x13", "x14", "x15", "x16", "x17", "x18",
++			       "cc", "memory");
++}
++
++/*
++ * The handler runs between a syscall and the instruction after it. The callee-saved
++ * registers (x19-x29), the stack pointer, the link register, the flags and the
++ * syscall's return value must be what they were; the compiler keeps nothing else live
++ * across the trap.
++ */
++ZTEST_USER(signal, test_handler_return_restores_context)
++{
++	struct k_sig_action action = {.handler = ctx_clobber_handler, .flags = K_SIG_SA_SIGINFO};
++	uint64_t out[16] = {0}; /* ret, nzcv, sp before, sp after, lr, x19..x29 */
++	struct {
++		uint64_t o, tid, signo, id;
++	} in = {(uint64_t)out, (uint64_t)k_current_get(), K_SIG_USR1, K_SYSCALL_K_SIG_QUEUE};
++
++	zassert_ok(k_sig_action(K_SIG_USR1, &action, NULL));
++	ctx_handler_ran = 0;
++	__asm__ volatile("ldr x0, %[tid]\n"
++			 "ldr x1, %[signo]\n"
++			 "mov x2, #0\n"
++			 "ldr x8, %[id]\n"
++			 "ldr x3, %[o]\n"
++			 "mov x4, sp\n"
++			 "str x4, [x3, #16]\n"
++			 "mov x19, #0x1013\n mov x20, #0x1014\n mov x21, #0x1015\n mov x22, #0x1016\n"
++			 "mov x23, #0x1017\n mov x24, #0x1018\n mov x25, #0x1019\n mov x26, #0x101a\n"
++			 "mov x27, #0x101b\n mov x28, #0x101c\n mov x29, #0x101d\n mov x30, #0x101e\n"
++			 "mov x3, #0x60000000\n"
++			 "msr nzcv, x3\n"
++			 "svc #3\n"
++			 "ldr x1, %[o]\n"
++			 "str x0, [x1, #0]\n"
++			 "mrs x0, nzcv\n"
++			 "str x0, [x1, #8]\n"
++			 "mov x0, sp\n"
++			 "str x0, [x1, #24]\n"
++			 "str x30, [x1, #32]\n"
++			 "stp x19, x20, [x1, #40]\n stp x21, x22, [x1, #56]\n stp x23, x24, [x1, #72]\n"
++			 "stp x25, x26, [x1, #88]\n stp x27, x28, [x1, #104]\n str x29, [x1, #120]\n"
++			 :
++			 : [o] "m"(in.o), [tid] "m"(in.tid), [signo] "m"(in.signo), [id] "m"(in.id)
++			 : "x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7", "x8", "x9", "x10", "x11", "x12",
++			   "x13", "x14", "x15", "x16", "x17", "x18", "x19", "x20", "x21", "x22", "x23", "x24",
++			   "x25", "x26", "x27", "x28", "x29", "x30", "cc", "memory");
++	zassert_equal(ctx_handler_ran, 1);
++	zassert_equal(out[0], 0, "k_sig_queue() returned %lld", (long long)out[0]);
++	zassert_equal(out[1], 0x60000000, "flags 0x%llx", (unsigned long long)out[1]);
++	zassert_equal(out[2], out[3], "sp moved by %lld", (long long)(out[3] - out[2]));
++	zassert_equal(out[4], 0x101e, "lr 0x%llx", (unsigned long long)out[4]);
++	for (int i = 0; i < 11; i++) {
++		zassert_equal(out[5 + i], 0x1013 + i, "x%d 0x%llx", 19 + i,
++			      (unsigned long long)out[5 + i]);
++	}
++	action.handler = K_SIG_DFL;
++	action.flags = 0;
++	zassert_ok(k_sig_action(K_SIG_USR1, &action, NULL));
++}
++#elif defined(CONFIG_ARMV7_M_ARMV8_M_MAINLINE)
++#include <zephyr/syscall_list.h>
++
++ZTEST_BMEM static volatile int ctx_handler_ran;
++
++/* leaves every register a handler may change as it likes */
++static void ctx_clobber_handler(int sig, struct k_sig_info *info, void *ucontext)
++{
++	ARG_UNUSED(sig);
++	ARG_UNUSED(info);
++	ARG_UNUSED(ucontext);
++	ctx_handler_ran++;
++	__asm__ volatile("movs r0, #0\n"
++			 "movw r1, #0xdead\n movw r2, #0xdead\n movw r3, #0xdead\n movw ip, #0xdead\n"
++			 : : : "r0", "r1", "r2", "r3", "ip", "cc", "memory");
++}
++
++/*
++ * The handler runs between a syscall and the instruction after it. The callee-saved
++ * registers (r4-r11, less r6 and r8 that the syscall ABI owns and r7 that the test
++ * cannot touch as the frame pointer), the stack pointer, the link register and the
++ * syscall's return value must be what they were; the compiler keeps nothing else live
++ * across the trap, the flags included.
++ */
++ZTEST_USER(signal, test_handler_return_restores_context)
++{
++	struct k_sig_action action = {.handler = ctx_clobber_handler, .flags = K_SIG_SA_SIGINFO};
++	uint32_t out[9] = {0}; /* ret, sp before, sp after, lr, r4, r5, r9..r11 */
++	struct {
++		uint32_t o, tid, signo, id;
++	} in = {(uint32_t)out, (uint32_t)k_current_get(), K_SIG_USR1, K_SYSCALL_K_SIG_QUEUE};
++
++	zassert_ok(k_sig_action(K_SIG_USR1, &action, NULL));
++	ctx_handler_ran = 0;
++	__asm__ volatile("ldr r0, %[tid]\n"
++			 "ldr r1, %[signo]\n"
++			 "movs r2, #0\n"
++			 "ldr r6, %[id]\n"
++			 "ldr r3, %[o]\n"
++			 "mov r4, sp\n"
++			 "str r4, [r3, #4]\n"
++			 "movw r4, #0x1014\n movw r5, #0x1015\n"
++			 "movw r9, #0x1019\n movw r10, #0x101a\n movw r11, #0x101b\n"
++			 "movw lr, #0x101e\n"
++			 "svc #3\n"
++			 "ldr r1, %[o]\n"
++			 "str r0, [r1, #0]\n"
++			 "mov r0, sp\n"
++			 "str r0, [r1, #8]\n"
++			 "str lr, [r1, #12]\n"
++			 "str r4, [r1, #16]\n str r5, [r1, #20]\n"
++			 "str r9, [r1, #24]\n str r10, [r1, #28]\n str r11, [r1, #32]\n"
++			 :
++			 : [o] "m"(in.o), [tid] "m"(in.tid), [signo] "m"(in.signo), [id] "m"(in.id)
++			 : "r0", "r1", "r2", "r3", "r4", "r5", "r6", "r8", "r9", "r10", "r11", "ip", "lr",
++			   "cc", "memory");
++	zassert_equal(ctx_handler_ran, 1);
++	zassert_equal(out[0], 0, "k_sig_queue() returned %d", (int)out[0]);
++	zassert_equal(out[1], out[2], "sp moved by %d", (int)(out[2] - out[1]));
++	zassert_equal(out[3], 0x101e, "lr 0x%x", out[3]);
++	zassert_equal(out[4], 0x1014, "r4 0x%x", out[4]);
++	zassert_equal(out[5], 0x1015, "r5 0x%x", out[5]);
++	for (int i = 0; i < 3; i++) {
++		zassert_equal(out[6 + i], 0x1019 + i, "r%d 0x%x", 9 + i, out[6 + i]);
++	}
++	action.handler = K_SIG_DFL;
++	action.flags = 0;
++	zassert_ok(k_sig_action(K_SIG_USR1, &action, NULL));
++}
++#endif /* CONFIG_ARM64 */
++
+ ZTEST_USER(signal, test_cannot_signal_kernel_from_user)
+ {
+ 	/* By default, user threads do not have permissions on any kernel objects. So this thread
