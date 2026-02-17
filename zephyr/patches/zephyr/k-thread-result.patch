@@ -1,0 +1,249 @@
+diff --git a/include/zephyr/kernel.h b/include/zephyr/kernel.h
+index 189c0018d57..b559e5ff7a0 100644
+--- a/include/zephyr/kernel.h
++++ b/include/zephyr/kernel.h
+@@ -448,6 +448,28 @@ __syscall k_tid_t k_thread_create(struct k_thread *new_thread,
+ 				  void *p1, void *p2, void *p3,
+ 				  int prio, uint32_t options, k_timeout_t delay);
+ 
++#if defined(CONFIG_THREAD_RESULT) || defined(__DOXYGEN__)
++/**
++ * @brief Set the result of the currently running thread.
++ *
++ * Zephyr threads do not natively support a result ("return value") since the
++ * @ref k_thread_entry_t is a void function. Until that function signature is changed, this API
++ * allows a thread to manually set the result of the currently running thread to @p result.
++ *
++ * The result can then be retrieved by other threads using @ref k_thread_rejoin.
++ *
++ * @param[in] result Pointer value to set as the thread's result.
++ *
++ * @see @kconfig{CONFIG_THREAD_RESULT}
++ */
++__syscall void k_thread_result_set(void *result);
++
++static inline void z_impl_k_thread_result_set(void *result)
++{
++	_current->base.result = result;
++}
++#endif
++
+ /**
+  * @brief Drop a thread's privileges permanently to user mode
+  *
+@@ -571,6 +593,36 @@ void k_thread_system_pool_assign(struct k_thread *thread);
+  */
+ __syscall int k_thread_join(struct k_thread *thread, k_timeout_t timeout);
+ 
++/**
++ * @brief Sleep until a thread exits, saving the thread's result
++ *
++ * The caller will be put to sleep until the target thread exits, either due
++ * to being aborted, self-exiting, or taking a fatal error. This API returns
++ * immediately if the thread isn't running.
++ *
++ * This API may only be called from ISRs with a K_NO_WAIT timeout,
++ * where it can be useful as a predicate to detect when a thread has
++ * aborted.
++ *
++ * This API is slightly different than @ref k_thread_join in that it also
++ * saves the target thread's result (return value) in @p result if
++ * @kconfig{CONFIG_THREAD_RESULT} is enabled.
++ *
++ * @note If @kconfig{CONFIG_THREAD_RESULT} is not enabled, the @p result
++ * parameter is ignored, and this function behaves identically to
++ * @ref k_thread_join.
++ *
++ * @param thread Thread to wait to exit
++ * @param timeout upper bound time to wait for the thread to exit.
++ * @param result Pointer to location to store the thread's result.
++ * @retval 0 success, target thread has exited or wasn't running
++ * @retval -EBUSY returned without waiting
++ * @retval -EAGAIN waiting period timed out
++ * @retval -EDEADLK target thread is joining on the caller, or target thread
++ *                  is the caller
++ */
++__syscall int k_thread_rejoin(struct k_thread *thread, k_timeout_t timeout, void **result);
++
+ /**
+  * @brief Put the current thread to sleep.
+  *
+diff --git a/include/zephyr/kernel/thread.h b/include/zephyr/kernel/thread.h
+index b665d134ce7..b8e10d67dcf 100644
+--- a/include/zephyr/kernel/thread.h
++++ b/include/zephyr/kernel/thread.h
+@@ -145,6 +145,11 @@ struct _thread_base {
+ 	struct k_sig_set sig_restore; /* signal mask to restore after handling signal */
+ 	unsigned long sig_storage[K_SIG_STORAGE_SIZE]; /* Off-stack storage for signal context */
+ #endif
++
++#ifdef CONFIG_THREAD_RESULT
++	/** Thread result or return value */
++	void *result;
++#endif
+ };
+ 
+ typedef struct _thread_base _thread_base_t;
+diff --git a/kernel/Kconfig b/kernel/Kconfig
+index 2fb4d1a0dc8..5c26f0455e8 100644
+--- a/kernel/Kconfig
++++ b/kernel/Kconfig
+@@ -215,6 +215,11 @@ config THREAD_ABORT_NEED_CLEANUP
+ 	  k_thread_abort(_current) is called, as the cleanup cannot be
+ 	  running in the current thread stack.
+ 
++config THREAD_RESULT
++	bool "Thread result"
++	help
++	  Say 'Y' here to support a thread result or "return value".
++
+ config THREAD_CUSTOM_DATA
+ 	bool "Thread custom data"
+ 	help
+diff --git a/kernel/sched.c b/kernel/sched.c
+index f4eaa0f5627..657ecbdb9f3 100644
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -1371,7 +1371,7 @@ void z_impl_k_thread_abort(k_tid_t thread)
+ }
+ #endif /* !CONFIG_ARCH_HAS_THREAD_ABORT */
+ 
+-int z_impl_k_thread_join(struct k_thread *thread, k_timeout_t timeout)
++int z_impl_k_thread_rejoin(struct k_thread *thread, k_timeout_t timeout, void **result)
+ {
+ 	k_spinlock_key_t key = k_spin_lock(&_sched_spinlock);
+ 	int ret;
+@@ -1395,6 +1395,12 @@ int z_impl_k_thread_join(struct k_thread *thread, k_timeout_t timeout)
+ 		ret = z_swap(&_sched_spinlock, key);
+ 		SYS_PORT_TRACING_OBJ_FUNC_EXIT(k_thread, join, thread, timeout, ret);
+ 
++#ifdef CONFIG_THREAD_RESULT
++		if ((result != NULL) && (ret == 0)) {
++			*result = thread->base.result;
++		}
++#endif
++
+ 		return ret;
+ 	}
+ 
+@@ -1404,6 +1410,11 @@ int z_impl_k_thread_join(struct k_thread *thread, k_timeout_t timeout)
+ 	return ret;
+ }
+ 
++int z_impl_k_thread_join(struct k_thread *thread, k_timeout_t timeout)
++{
++	return z_impl_k_thread_rejoin(thread, timeout, NULL);
++}
++
+ #ifdef CONFIG_USERSPACE
+ /* Special case: don't oops if the thread is uninitialized.  This is because
+  * the initialization bit does double-duty for thread objects; if false, means
+@@ -1443,6 +1454,21 @@ static inline int z_vrfy_k_thread_join(struct k_thread *thread,
+ }
+ #include <zephyr/syscalls/k_thread_join_mrsh.c>
+ 
++static inline int z_vrfy_k_thread_rejoin(struct k_thread *thread, k_timeout_t timeout,
++					 void **result)
++{
++	if (thread_obj_validate(thread)) {
++		return 0;
++	}
++
++	if (result != NULL) {
++		K_OOPS(K_SYSCALL_MEMORY_WRITE(result, sizeof(*result)));
++	}
++
++	return z_impl_k_thread_rejoin(thread, timeout, result);
++}
++#include <zephyr/syscalls/k_thread_rejoin_mrsh.c>
++
+ static inline void z_vrfy_k_thread_abort(k_tid_t thread)
+ {
+ 	if (thread_obj_validate(thread)) {
+diff --git a/kernel/thread.c b/kernel/thread.c
+index 9357d4b3289..1f31e051461 100644
+--- a/kernel/thread.c
++++ b/kernel/thread.c
+@@ -721,6 +721,10 @@ char *z_setup_new_thread(struct k_thread *new_thread,
+ 	k_sig_emptyset(&new_thread->base.sig_mask);
+ #endif
+ 
++#ifdef CONFIG_THREAD_RESULT
++	new_thread->base.result = NULL;
++#endif
++
+ 	SYS_PORT_TRACING_OBJ_FUNC(k_thread, create, new_thread);
+ 
+ 	return stack_ptr;
+@@ -1233,3 +1237,11 @@ void z_dummy_thread_init(struct k_thread *dummy_thread)
+ 
+ 	z_current_thread_set(dummy_thread);
+ }
++
++#if defined(CONFIG_USERSPACE) && defined(CONFIG_THREAD_RESULT)
++void z_vrfy_k_thread_result_set(void *result)
++{
++       return z_impl_k_thread_result_set(result);
++}
++#include <zephyr/syscalls/k_thread_result_set_mrsh.c>
++#endif
+diff --git a/tests/kernel/threads/thread_apis/prj.conf b/tests/kernel/threads/thread_apis/prj.conf
+index bf192b9247c..5885c33d740 100644
+--- a/tests/kernel/threads/thread_apis/prj.conf
++++ b/tests/kernel/threads/thread_apis/prj.conf
+@@ -10,3 +10,4 @@ CONFIG_IRQ_OFFLOAD=y
+ CONFIG_THREAD_RUNTIME_STATS=y
+ CONFIG_INIT_STACKS=y
+ CONFIG_MAX_THREAD_BYTES=3
++CONFIG_THREAD_RESULT=y
+diff --git a/tests/kernel/threads/thread_apis/src/test_threads_cancel_abort.c b/tests/kernel/threads/thread_apis/src/test_threads_cancel_abort.c
+index b79f237d7a7..4a483a344af 100644
+--- a/tests/kernel/threads/thread_apis/src/test_threads_cancel_abort.c
++++ b/tests/kernel/threads/thread_apis/src/test_threads_cancel_abort.c
+@@ -13,6 +13,46 @@ static ZTEST_BMEM int execute_flag;
+ K_SEM_DEFINE(sync_sema, 0, 1);
+ #define BLOCK_SIZE 64
+ 
++static void thread_entry_result(void *p1, void *p2, void *p3)
++{
++	execute_flag = 1;
++	k_thread_result_set(p1);
++}
++
++/**
++ * @ingroup kernel_thread_tests
++ * @brief Validate @ref k_thread_result_set and @ref k_thread_rejoin
++ *
++ * @details Create a user thread and let the thread execute.
++ * Then call k_thread_rejoin() to verify that the results is as expected.
++ *
++ * @see k_thread_abort()
++ * @see k_thread_result_set()
++ * @see k_thread_rejoin()
++ */
++ZTEST_USER(threads_lifecycle, test_k_thread_rejoin)
++{
++	void *result;
++
++	execute_flag = 0;
++	result = (void *)(uintptr_t)42;
++	k_thread_create(&tdata, tstack, STACK_SIZE, thread_entry_result, NULL, NULL, NULL, 0,
++			K_USER, K_NO_WAIT);
++	zassert_ok(k_thread_rejoin(&tdata, K_FOREVER, &result));
++	zassert_equal(execute_flag, 1);
++	/* validate the default result is NULL */
++	zassert_equal(result, NULL);
++
++	execute_flag = 0;
++	result = (void *)(uintptr_t)42;
++	k_thread_create(&tdata, tstack, STACK_SIZE, thread_entry_result, &result, NULL, NULL, 0,
++			K_USER, K_NO_WAIT);
++	zassert_ok(k_thread_rejoin(&tdata, K_FOREVER, &result));
++	zassert_equal(execute_flag, 1);
++	/* validate the manually seeting the thread result */
++	zassert_equal(result, &result);
++}
++
+ static void thread_entry(void *p1, void *p2, void *p3)
+ {
+ 	execute_flag = 1;

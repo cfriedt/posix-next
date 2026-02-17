@@ -1,0 +1,53 @@
+commit bb8d6f87f9a77714e28bfb8438e870ed263642ef
+Author: Chris Friedt <chris@fr4.co>
+Date:   Tue Jun 18 21:08:30 2024 -0400
+
+    ring_buffer: support static rings
+    
+    Move initializers to a common macro and provide
+    static variants.
+    
+    Signed-off-by: Chris Friedt <chris@fr4.co>
+
+diff --git a/include/zephyr/sys/ring_buffer.h b/include/zephyr/sys/ring_buffer.h
+index 76c97107610..2d740a84d74 100644
+--- a/include/zephyr/sys/ring_buffer.h
++++ b/include/zephyr/sys/ring_buffer.h
+@@ -73,6 +73,11 @@ static inline void ring_buf_internal_reset(struct ring_buf *buf, ring_buf_idx_t
+ 	buf->get.head = buf->get.tail = buf->get.base = value;
+ }
+ 
++#define RING_BUF_DECLARE_COMMON(name, size8, ...)                                                  \
++	BUILD_ASSERT((size8) < RING_BUFFER_MAX_SIZE, RING_BUFFER_SIZE_ASSERT_MSG);                 \
++	static uint8_t __noinit __aligned(4) _ring_buffer_data_##name[(size8)];                    \
++	__VA_ARGS__ struct ring_buf name = {.buffer = _ring_buffer_data_##name, .size = (size8)}
++
+ /** @endcond */
+ 
+ #define RING_BUF_INIT(buf, size8)	\
+@@ -95,11 +100,20 @@ static inline void ring_buf_internal_reset(struct ring_buf *buf, ring_buf_idx_t
+  * @param name  Name of the ring buffer.
+  * @param size8 Size of ring buffer (in bytes).
+  */
+-#define RING_BUF_DECLARE(name, size8) \
+-	BUILD_ASSERT(size8 <= RING_BUFFER_MAX_SIZE,\
+-		RING_BUFFER_SIZE_ASSERT_MSG); \
+-	static uint8_t __noinit _ring_buffer_data_##name[size8]; \
+-	struct ring_buf name = RING_BUF_INIT(_ring_buffer_data_##name, size8)
++#define RING_BUF_DECLARE(name, size8) RING_BUF_DECLARE_COMMON(name, size8)
++
++/**
++ * @brief Define and initialize a static ring buffer for byte data.
++ *
++ * This macro establishes a ring buffer of an arbitrary size.
++ * The basic storage unit is a byte.
++ *
++ * The ring buffer cannot be accessed outside the module where it is defined.
++ *
++ * @param name  Name of the ring buffer.
++ * @param size8 Size of ring buffer (in bytes).
++ */
++#define RING_BUF_DECLARE_STATIC(name, size8) RING_BUF_DECLARE_COMMON(name, size8, static)
+ 
+ /**
+  * @brief Define and initialize an "item based" ring buffer.
