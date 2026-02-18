@@ -1,0 +1,377 @@
+diff --git a/arch/x86/Kconfig b/arch/x86/Kconfig
+index e014766f634..e3b748cc714 100644
+--- a/arch/x86/Kconfig
++++ b/arch/x86/Kconfig
+@@ -531,6 +531,10 @@ config X86_CET_SOC_PREPARE_SHADOW_STACK_SWITCH
+ 	  Code should be provided via soc_prepare_shadow_stack_switch assembler
+ 	  macro.
+ 
++config ARCH_SUPPORTS_USERSPACE_SIGNALS
++       bool
++       default y
++
+ source "arch/x86/core/Kconfig.ia32"
+ source "arch/x86/core/Kconfig.intel64"
+ 
+diff --git a/arch/x86/core/ia32.cmake b/arch/x86/core/ia32.cmake
+index 7abc0e23012..7564ca6d2de 100644
+--- a/arch/x86/core/ia32.cmake
++++ b/arch/x86/core/ia32.cmake
+@@ -23,6 +23,10 @@ zephyr_library_sources_ifdef(CONFIG_X86_USERSPACE	ia32/userspace.S)
+ zephyr_library_sources_ifdef(CONFIG_LAZY_FPU_SHARING	ia32/float.c)
+ zephyr_library_sources_ifdef(CONFIG_GDBSTUB		ia32/gdbstub.c)
+ 
++if(CONFIG_SIGNAL AND CONFIG_USERSPACE)
++  zephyr_library_sources(ia32/signal.c)
++endif()
++
+ zephyr_library_sources_ifdef(CONFIG_DEBUG_COREDUMP	ia32/coredump.c)
+ 
+ zephyr_library_sources_ifdef(
+diff --git a/arch/x86/core/ia32/signal.c b/arch/x86/core/ia32/signal.c
+new file mode 100644
+index 00000000000..7809b5fecd0
+--- /dev/null
++++ b/arch/x86/core/ia32/signal.c
+@@ -0,0 +1,46 @@
++/*
++ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <zephyr/kernel.h>
++#include <zephyr/internal/syscall_handler.h>
++
++extern void z_sig_trampoline(void);
++
++void arch_sig_pre(struct k_thread *thread, void *arg)
++{
++	uintptr_t user_sp;
++	struct _x86_syscall_stack_frame *const sf = arg;
++	struct arch_sig_ctx *const backup = &thread->base.sig.user;
++
++	/* Backup the original EAX, EFLAGS, ESP, and EIP so we can restore after signal */
++	backup->eax = thread->arch.sig_eax;
++	backup->eflags = sf->eflags;
++	backup->esp = sf->esp;
++	backup->eip = sf->eip;
++
++	/* Additional stack frame to facilitate return to original syscall epilogue */
++	user_sp = (uintptr_t)sf->esp;
++	user_sp -= sizeof(uintptr_t);
++	/* write original EIP at new top of user stack */
++	K_OOPS(K_SYSCALL_MEMORY_WRITE(user_sp, sizeof(uintptr_t)));
++	*(uintptr_t *)user_sp = (uintptr_t)backup->eip;
++	sf->esp = (unsigned long)user_sp;
++
++	/* Set EIP to z_sig_trampoline so the syscall return jumps there */
++	sf->eip = (unsigned long)z_sig_trampoline;
++}
++
++void arch_sig_post(struct k_thread *thread, void *arg)
++{
++	struct _x86_syscall_stack_frame *const sf = arg;
++	struct arch_sig_ctx *const backup = &thread->base.sig.user;
++
++	/* Restore the original EAX, EFLAGS, ESP, and EIP */
++	thread->arch.sig_eax = backup->eax;
++	sf->eflags = backup->eflags;
++	sf->esp = backup->esp;
++	sf->eip = backup->eip;
++}
+diff --git a/arch/x86/core/ia32/userspace.S b/arch/x86/core/ia32/userspace.S
+index a4ad4c69fb8..02878fca1fd 100644
+--- a/arch/x86/core/ia32/userspace.S
++++ b/arch/x86/core/ia32/userspace.S
+@@ -22,6 +22,10 @@ GTEXT(z_x86_user_string_nlen_fixup)
+ /* Imports */
+ GDATA(_k_syscall_table)
+ 
++#if defined(CONFIG_SIGNAL)
++GTEXT(z_sig_handle)
++#endif
++
+ #ifdef CONFIG_X86_KPTI
+ /* Switch from the shadow to the kernel page table, switch to the interrupted
+  * thread's kernel stack, and copy all context from the trampoline stack.
+@@ -216,6 +220,33 @@ _id_ok:
+ 	/* Run the handler, which is some entry in _k_syscall_table */
+ 	call	*%ebx
+ 
++#if defined(CONFIG_SIGNAL)
++	cmp	$K_SYSCALL_K_SIG_ACTION, %esi
++	je	_skip_z_sig_handle
++	cmp	$K_SYSCALL_K_SIG_CURRENT, %esi
++	je	_skip_z_sig_handle
++	cmp	$K_SYSCALL_K_SIG_RETURN, %esi
++	je	_do_sig_return
++
++	/* Save syscall return value in thread arch storage */
++	movl	$_kernel, %edx
++	movl	_kernel_offset_to_current(%edx), %edx
++	movl	%eax, _thread_offset_to_sig_eax(%edx)
++
++	/* Pass privileged syscall frame pointer to z_sig_handle() */
++	push	24(%esp)
++	call	z_sig_handle
++	add	$4, %esp
++
++_do_sig_return:
++	/* Restore syscall return value from thread arch storage */
++	movl	$_kernel, %edx
++	movl	_kernel_offset_to_current(%edx), %edx
++	movl	_thread_offset_to_sig_eax(%edx), %eax
++
++_skip_z_sig_handle:
++#endif
++
+ 	/* EAX now contains return value. Pop or xor everything else to prevent
+ 	 * information leak from kernel mode.
+ 	 */
+diff --git a/arch/x86/core/intel64.cmake b/arch/x86/core/intel64.cmake
+index 1cb25ebe220..1c98ab2272a 100644
+--- a/arch/x86/core/intel64.cmake
++++ b/arch/x86/core/intel64.cmake
+@@ -20,3 +20,7 @@ zephyr_library_sources_ifdef(CONFIG_IRQ_OFFLOAD		intel64/irq_offload.c)
+ zephyr_library_sources_ifdef(CONFIG_USERSPACE	intel64/userspace.S)
+ zephyr_library_sources_ifdef(CONFIG_THREAD_LOCAL_STORAGE	intel64/tls.c)
+ zephyr_library_sources_ifdef(CONFIG_DEBUG_COREDUMP	intel64/coredump.c)
++
++if(CONFIG_SIGNAL AND CONFIG_USERSPACE)
++  zephyr_library_sources(intel64/signal.c)
++endif()
+diff --git a/arch/x86/core/intel64/signal.c b/arch/x86/core/intel64/signal.c
+new file mode 100644
+index 00000000000..9477bf7d6fa
+--- /dev/null
++++ b/arch/x86/core/intel64/signal.c
+@@ -0,0 +1,44 @@
++/*
++ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <zephyr/kernel.h>
++
++extern void z_sig_trampoline(void);
++
++void arch_sig_pre(struct k_thread *thread, void *arg)
++{
++	uintptr_t user_sp;
++	struct x86_ssf *const sf = arg;
++	struct arch_sig_ctx *const backup = &thread->base.sig.user;
++
++	/* Backup the original RAX, RFLAGS, RSP, and RIP */
++	backup->rax = sf->rdi;
++	backup->rflags = sf->rflags;
++	backup->rsp = sf->rsp;
++	backup->rip = sf->rip;
++
++	/* Additional stack frame to facilitate return to original syscall epilogue */
++	user_sp = (uintptr_t)sf->rsp;
++	user_sp -= sizeof(uintptr_t);
++	/* write original RIP at new top of user stack */
++	*(uintptr_t *)user_sp = (uintptr_t)backup->rip;
++	sf->rsp = (unsigned long)user_sp;
++
++	/* Overwrite RIP (return address) to resume execution in z_sig_trampoline() */
++	sf->rip = (unsigned long)z_sig_trampoline;
++}
++
++void arch_sig_post(struct k_thread *thread, void *arg)
++{
++	struct x86_ssf *const sf = arg;
++	struct arch_sig_ctx *const backup = &thread->base.sig.user;
++
++	/* Restore the original RAX, RFLAGS, RIP */
++	sf->rdi = backup->rax;
++	sf->rflags = backup->rflags;
++	sf->rsp = backup->rsp;
++	sf->rip = backup->rip;
++}
+diff --git a/arch/x86/core/intel64/userspace.S b/arch/x86/core/intel64/userspace.S
+index d3610c300cb..67b42ec9aa2 100644
+--- a/arch/x86/core/intel64/userspace.S
++++ b/arch/x86/core/intel64/userspace.S
+@@ -10,6 +10,11 @@
+ #include <zephyr/syscall.h>
+ #include <zephyr/kernel/mm.h>
+ 
++/* Imports */
++#if defined(CONFIG_SIGNAL)
++GTEXT(z_sig_handle)
++#endif
++
+ #ifdef CONFIG_X86_KPTI
+ /* Copy interrupt return stack context to the trampoline stack, switch back
+  * to the user page table, and only then 'iret'. We jump to this instead
+@@ -70,6 +75,10 @@ z_x86_trampoline_to_user:
+ z_x86_syscall_entry_stub:
+ 	swapgs
+ 
++#if defined(CONFIG_SIGNAL)
++	movq	%rax, %gs:__x86_tss64_t_syscall_id_OFFSET
++#endif
++
+ 	/* Save original stack pointer from user mode in memory, at the
+ 	 * moment we have no free registers or stack to save it to. This
+ 	 * eventually gets put on the stack before we re-enable interrupts
+@@ -152,6 +161,31 @@ _id_ok:
+ 	/* Run the marshal function, which is some entry in _k_syscall_table */
+ 	call	*%r10
+ 
++#if defined(CONFIG_SIGNAL)
++	movq	%gs:__x86_tss64_t_syscall_id_OFFSET, %rdi
++
++	cmp	$K_SYSCALL_K_SIG_ACTION, %rdi
++	je	_skip_z_sig_handle
++	cmp	$K_SYSCALL_K_SIG_CURRENT, %rdi
++	je	_skip_z_sig_handle
++	cmp	$K_SYSCALL_K_SIG_RETURN, %rdi
++	je	_do_sig_return
++
++	/* Store RAX (syscall return value) into privileged stack */
++	movq	%rax, (__struct_x86_ssf_rdi_OFFSET + 8)(%rsp)
++
++	/* Pass privileged stack to z_sig_handle() */
++	movq	%rsp, %rdi
++	addq	$8, %rdi
++	call	z_sig_handle
++
++_do_sig_return:
++	/* Restore RAX (syscall return value) from privileged stack */
++	movq	(__struct_x86_ssf_rdi_OFFSET + 8)(%rsp), %rax
++
++_skip_z_sig_handle:
++#endif
++
+ 	/* RAX now contains the return value
+ 	 *
+ 	 * Callee-saved registers are un-touched from original values per C
+diff --git a/arch/x86/core/offsets/ia32_offsets.c b/arch/x86/core/offsets/ia32_offsets.c
+index d08db0cf06b..1eb007a4dcc 100644
+--- a/arch/x86/core/offsets/ia32_offsets.c
++++ b/arch/x86/core/offsets/ia32_offsets.c
+@@ -41,6 +41,9 @@ GEN_OFFSET_SYM(_cpu_arch_t, fpu_owner);
+ 
+ #ifdef CONFIG_USERSPACE
+ GEN_OFFSET_SYM(_thread_arch_t, psp);
++#ifdef CONFIG_SIGNAL
++GEN_OFFSET_SYM(_thread_arch_t, sig_eax);
++#endif
+ #ifndef CONFIG_X86_COMMON_PAGE_TABLE
+ GEN_OFFSET_SYM(_thread_arch_t, ptables);
+ #endif
+diff --git a/arch/x86/core/offsets/intel64_offsets.c b/arch/x86/core/offsets/intel64_offsets.c
+index 61bf0c28238..1f962ad6e97 100644
+--- a/arch/x86/core/offsets/intel64_offsets.c
++++ b/arch/x86/core/offsets/intel64_offsets.c
+@@ -50,6 +50,9 @@ GEN_OFFSET_SYM(x86_tss64_t, shstk_addr);
+ GEN_OFFSET_SYM(x86_tss64_t, exception_shstk_addr);
+ #endif
+ #ifdef CONFIG_USERSPACE
++#ifdef CONFIG_SIGNAL
++GEN_OFFSET_SYM(x86_tss64_t, syscall_id);
++#endif
+ GEN_OFFSET_SYM(x86_tss64_t, psp);
+ GEN_OFFSET_SYM(x86_tss64_t, usp);
+ #endif /* CONFIG_USERSPACE */
+@@ -61,4 +64,10 @@ GEN_OFFSET_SYM(x86_cpuboot_t, sp);
+ GEN_OFFSET_SYM(x86_cpuboot_t, stack_size);
+ GEN_ABSOLUTE_SYM(__X86_CPUBOOT_SIZEOF, sizeof(x86_cpuboot_t));
+ 
++#if defined(CONFIG_USERSPACE) && defined(CONFIG_SIGNAL)
++GEN_OFFSET_STRUCT(x86_ssf, rsp);
++GEN_OFFSET_STRUCT(x86_ssf, rdi);
++GEN_ABSOLUTE_SYM(__X86_SSF_SIZEOF, sizeof(struct x86_ssf));
++#endif
++
+ #endif /* _X86_OFFSETS_INC_ */
+diff --git a/arch/x86/include/offsets_short_arch.h b/arch/x86/include/offsets_short_arch.h
+index a117939b7c1..96054e352b1 100644
+--- a/arch/x86/include/offsets_short_arch.h
++++ b/arch/x86/include/offsets_short_arch.h
+@@ -19,6 +19,11 @@
+ #define _thread_offset_to_psp \
+ 	(___thread_t_arch_OFFSET + ___thread_arch_t_psp_OFFSET)
+ 
++#ifdef CONFIG_SIGNAL
++#define _thread_offset_to_sig_eax \
++	(___thread_t_arch_OFFSET + ___thread_arch_t_sig_eax_OFFSET)
++#endif
++
+ #define _thread_offset_to_ptables \
+ 	(___thread_t_arch_OFFSET + ___thread_arch_t_ptables_OFFSET)
+ #endif /* CONFIG_USERSPACE */
+diff --git a/include/zephyr/arch/x86/ia32/exception.h b/include/zephyr/arch/x86/ia32/exception.h
+index d1acafb3fd3..946f1596738 100644
+--- a/include/zephyr/arch/x86/ia32/exception.h
++++ b/include/zephyr/arch/x86/ia32/exception.h
+@@ -61,6 +61,15 @@ struct _x86_syscall_stack_frame {
+ 	uint32_t ss;
+ };
+ 
++#if defined(CONFIG_SIGNAL) && defined(CONFIG_USERSPACE)
++struct arch_sig_ctx {
++	unsigned long eip;
++	unsigned long eax;
++	unsigned long esp;
++	unsigned long eflags;
++};
++#endif
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/include/zephyr/arch/x86/ia32/thread.h b/include/zephyr/arch/x86/ia32/thread.h
+index b66ba31f835..970b5d8e051 100644
+--- a/include/zephyr/arch/x86/ia32/thread.h
++++ b/include/zephyr/arch/x86/ia32/thread.h
+@@ -224,6 +224,11 @@ struct _thread_arch {
+ 	 * Un-set for supervisor threads.
+ 	 */
+ 	char *psp;
++
++#if defined(CONFIG_SIGNAL)
++	/* Last syscall return value, saved/restored across signal delivery. */
++	unsigned long sig_eax;
++#endif
+ #endif
+ 
+ #if defined(CONFIG_LAZY_FPU_SHARING)
+diff --git a/include/zephyr/arch/x86/intel64/exception.h b/include/zephyr/arch/x86/intel64/exception.h
+index 7a78950334e..9cf7e5c06c0 100644
+--- a/include/zephyr/arch/x86/intel64/exception.h
++++ b/include/zephyr/arch/x86/intel64/exception.h
+@@ -66,6 +66,13 @@ struct x86_ssf {
+ 	unsigned long rsp;
+ };
+ 
++struct arch_sig_ctx {
++	unsigned long rip;
++	unsigned long rax;
++	unsigned long rsp;
++	unsigned long rflags;
++};
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/include/zephyr/arch/x86/intel64/thread.h b/include/zephyr/arch/x86/intel64/thread.h
+index 809ad77222f..c066a1cf219 100644
+--- a/include/zephyr/arch/x86/intel64/thread.h
++++ b/include/zephyr/arch/x86/intel64/thread.h
+@@ -90,6 +90,11 @@ struct x86_tss64 {
+ #endif
+ 
+ #ifdef CONFIG_USERSPACE
++#ifdef CONFIG_SIGNAL
++	/* Ran out of registers and need to preserve syscall id */
++	uintptr_t syscall_id;
++#endif
++
+ 	/* Privilege mode stack pointer value when doing a system call */
+ 	char *psp;
+ 
