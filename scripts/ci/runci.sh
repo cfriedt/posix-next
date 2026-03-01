@@ -25,6 +25,8 @@ ROOTS=( \
   $POSIX_NEXT_PATH/samples/posix \
   $POSIX_NEXT_PATH/tests/benchmarks/posix \
   $POSIX_NEXT_PATH/tests/posix \
+  $ZEPHYR_BASE/zephyr/kernel/threads/thread_apis \
+  $ZEPHYR_BASE/zephyr/kernel/signal \
   $ZEPHYR_BASE/samples/net \
   $ZEPHYR_BASE/samples/subsys/shell/shell_module \
   $ZEPHYR_BASE/tests/net \
