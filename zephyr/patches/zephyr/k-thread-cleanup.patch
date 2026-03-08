@@ -1,0 +1,324 @@
+diff --git a/include/zephyr/kernel.h b/include/zephyr/kernel.h
+index 9fee0db250e..1f10545c600 100644
+--- a/include/zephyr/kernel.h
++++ b/include/zephyr/kernel.h
+@@ -7017,6 +7017,79 @@ __syscall void k_thread_exit(void *result);
+ 
+ #endif /* CONFIG_THREAD_CANCEL */
+ 
++/**
++ * @addtogroup k_thread_cleanup_apis
++ * @{
++ */
++
++typedef void (*k_thread_cleanup_handler_t)(void *arg);
++
++#if defined(CONFIG_THREAD_CLEANUP) || defined(__DOXYGEN__)
++/**
++ * @brief Push a thread cleanup handler onto the calling thread's cleanup stack.
++ *
++ * Most callers will use this via the @ref K_THREAD_CLEANUP_PUSH macro. The @p cleanup parameter
++ * must point to an array of `void *` that is at least 3 elements in size.
++ *
++ * @param cleanup Pointer to the cleanup handler structure.
++ * @param routine Function pointer to the cleanup routine.
++ * @param arg Argument to pass to the cleanup routine.
++ */
++__syscall void k_thread_cleanup_push(void **cleanup, k_thread_cleanup_handler_t routine, void *arg);
++
++/**
++ * @brief Pop a thread cleanup handler from the calling thread's cleanup stack.
++ *
++ * @param execute If non-zero, the cleanup routine is executed.
++ *
++ * @return true if a cleanup handler was popped, false if the cleanup stack was empty.
++ */
++__syscall bool k_thread_cleanup_pop(int execute);
++
++/**
++ * @brief Push a cleanup handler onto the calling thread's stack.
++ *
++ * Cleanup handlers have the signature below.
++ *
++ * @code{.c}
++ * void cleanup_handler(void *arg);
++ * void *arg = (void *)0x42;
++ *
++ * K_THREAD_CLEANUP_PUSH(cleanup_handler, arg);
++ * .. additional code ..
++ * K_THREAD_CLEANUP_POP(1);
++ * @endcode
++ *
++ * @param routine Function pointer to the cleanup routine.
++ * @param arg Argument to pass to the cleanup routine.
++ *
++ * @note This macro must be followed by a matching call to @ref K_THREAD_CLEANUP_POP in the same
++ * lexical scope.
++ */
++#define K_THREAD_CLEANUP_PUSH(routine, arg)                                                        \
++	do /* enforce '{'-like behaviour */ {                                                      \
++		void *cleanup[3];                                                                  \
++	k_thread_cleanup_push(cleanup, routine, arg)
++
++/**
++ * @brief Pop and optionally execute a cleanup handler from the calling thread's stack.
++ *
++ * @param execute If non-zero, the cleanup routine is executed.
++ *
++ * @note This macro must be preceded by a matching call to @ref K_THREAD_CLEANUP_PUSH in the same
++ * lexical scope.
++ */
++#define K_THREAD_CLEANUP_POP(execute)                                                              \
++	k_thread_cleanup_pop(execute);                                                             \
++	} /* enforce '}'-like behaviour */                                                         \
++	while (0)
++
++#endif /* CONFIG_THREAD_CLEANUP */
++
++/**
++ * @}
++ */
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/include/zephyr/kernel/thread.h b/include/zephyr/kernel/thread.h
+index 5ab4ae4e1d5..939052af2ab 100644
+--- a/include/zephyr/kernel/thread.h
++++ b/include/zephyr/kernel/thread.h
+@@ -148,6 +148,11 @@ struct _thread_base {
+        /** Thread result or return value */
+        atomic_t result;
+ #endif
++
++#ifdef CONFIG_THREAD_CLEANUP
++       /** Cleanup handlers */
++       sys_slist_t cleanup;
++#endif
+ };
+ 
+ typedef struct _thread_base _thread_base_t;
+diff --git a/kernel/CMakeLists.txt b/kernel/CMakeLists.txt
+index 544f2587a5e..75e71f5033f 100644
+--- a/kernel/CMakeLists.txt
++++ b/kernel/CMakeLists.txt
+@@ -2,6 +2,7 @@
+ 
+ # This file cannot be compiled with __ZEPHYR_SUPERVISOR__ when userspace is enabled
+ zephyr_sources_ifdef(CONFIG_SIGNAL signal.c)
++zephyr_sources_ifdef(CONFIG_THREAD_CLEANUP cleanup.c)
+ 
+ # kernel is a normal CMake library and not a zephyr_library because it
+ # should usually not be --whole-archive'd
+diff --git a/kernel/Kconfig b/kernel/Kconfig
+index 056c26ce7ed..15ab2fbe918 100644
+--- a/kernel/Kconfig
++++ b/kernel/Kconfig
+@@ -239,6 +239,14 @@ config THREAD_CANCEL_SIGNAL_NUMBER
+ 	  The signal number may be defined regardless of whether CONFIG_THREAD_CANCEL is
+ 	  enabled.
+ 
++config THREAD_CLEANUP
++	bool "Thread cleanup"
++	depends on THREAD_CANCEL
++	help
++	  Say 'Y' here to support thread cleanup routines via k_thread_cleanup_push() and
++	  k_thread_cleanup_pop(). Cleanup routines are executed when a thread is cancelled via
++	  k_thread_cancel()
++
+ config THREAD_CUSTOM_DATA
+ 	bool "Thread custom data"
+ 	help
+diff --git a/kernel/cleanup.c b/kernel/cleanup.c
+new file mode 100644
+index 00000000000..0f751cbb028
+--- /dev/null
++++ b/kernel/cleanup.c
+@@ -0,0 +1,68 @@
++/*
++ * Copyright (c) 2024, Friedt Professional Engineering Services, Inc
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <zephyr/internal/syscall_handler.h>
++#include <zephyr/kernel.h>
++#include <zephyr/sys/util.h>
++#include <zephyr/toolchain.h>
++
++struct k_thread_cleanup {
++	k_thread_cleanup_handler_t routine;
++	void *arg;
++	sys_snode_t node;
++};
++BUILD_ASSERT(3 * sizeof(void *) == sizeof(struct k_thread_cleanup));
++
++void z_impl_k_thread_cleanup_push(void **cleanup, k_thread_cleanup_handler_t routine, void *arg)
++{
++	k_tid_t const tid = k_current_get();
++	struct k_thread_cleanup *const c = (struct k_thread_cleanup *)cleanup;
++
++	*c = (struct k_thread_cleanup){
++		.routine = routine,
++		.arg = arg,
++	};
++
++	sys_slist_prepend(&tid->base.cleanup, &c->node);
++}
++
++#ifdef CONFIG_USERSPACE
++void z_vrfy_k_thread_cleanup_push(void **cleanup, k_thread_cleanup_handler_t routine, void *arg)
++{
++	K_OOPS(K_SYSCALL_MEMORY_WRITE(cleanup, 3 * sizeof(void *)));
++
++	z_impl_k_thread_cleanup_push(cleanup, routine, arg);
++}
++#include <syscalls/k_thread_cleanup_push_mrsh.c>
++#endif
++
++bool z_impl_k_thread_cleanup_pop(int execute)
++{
++	k_tid_t const tid = k_current_get();
++	sys_snode_t *const node = sys_slist_get(&tid->base.cleanup);
++
++	if (node == NULL) {
++		return false;
++	}
++
++	struct k_thread_cleanup *const c = CONTAINER_OF(node, struct k_thread_cleanup, node);
++
++	__ASSERT_NO_MSG(c != NULL);
++
++	if (execute != 0) {
++		c->routine(c->arg);
++	}
++
++	return true;
++}
++
++#ifdef CONFIG_USERSPACE
++bool z_vrfy_k_thread_cleanup_pop(int execute)
++{
++	return z_impl_k_thread_cleanup_pop(execute);
++}
++#include <syscalls/k_thread_cleanup_pop_mrsh.c>
++#endif
+diff --git a/kernel/signal.c b/kernel/signal.c
+index de84d93771d..48ff78e5b72 100644
+--- a/kernel/signal.c
++++ b/kernel/signal.c
+@@ -859,7 +859,13 @@ static void z_sig_handler_cancel(int sig, struct k_sig_info *info, void *ucontex
+ {
+ 	/* Note: the K_THREAD_CANCELLED result is set in k_sig_queue() */
+ 
+-	/* call clean-up routines (not yet implemented) */
++#ifdef CONFIG_THREAD_CLEANUP
++	/* call clean-up routines */
++	for (bool more = true; more;) {
++		more = k_thread_cleanup_pop(true);
++	}
++#endif
++
+ 	/* destroy thread-specific storage (not yet implemented) */
+ 	z_sig_handler_term(sig, info, ucontext);
+ }
+diff --git a/kernel/thread.c b/kernel/thread.c
+index 367abd4eec8..cfb062351b0 100644
+--- a/kernel/thread.c
++++ b/kernel/thread.c
+@@ -737,6 +737,10 @@ char *z_setup_new_thread(struct k_thread *new_thread,
+ 	new_thread->base.result = (atomic_t)NULL;
+ #endif
+ 
++#ifdef CONFIG_THREAD_CLEANUP
++	sys_slist_init(&new_thread->base.cleanup);
++#endif
++
+ 	SYS_PORT_TRACING_OBJ_FUNC(k_thread, create, new_thread);
+ 
+ 	return stack_ptr;
+diff --git a/tests/kernel/threads/thread_apis/prj.conf b/tests/kernel/threads/thread_apis/prj.conf
+index 0e8c53e3af8..bf76aff7bb5 100644
+--- a/tests/kernel/threads/thread_apis/prj.conf
++++ b/tests/kernel/threads/thread_apis/prj.conf
+@@ -15,3 +15,4 @@ CONFIG_POLL=y
+ CONFIG_SIGNAL=y
+ CONFIG_SIGNAL_SET_SIZE=32
+ CONFIG_THREAD_CANCEL=y
++CONFIG_THREAD_CLEANUP=y
+diff --git a/tests/kernel/threads/thread_apis/src/test_threads_cancel_abort.c b/tests/kernel/threads/thread_apis/src/test_threads_cancel_abort.c
+index 4529d535d03..fbe462b90f8 100644
+--- a/tests/kernel/threads/thread_apis/src/test_threads_cancel_abort.c
++++ b/tests/kernel/threads/thread_apis/src/test_threads_cancel_abort.c
+@@ -327,6 +327,71 @@ ZTEST_USER(threads_lifecycle, test_k_thread_exit)
+ #endif
+ }
+ 
++#ifdef CONFIG_THREAD_CLEANUP
++static void cleanup_handler(void *arg)
++{
++	execute_flag = POINTER_TO_INT(arg);
++}
++
++static void thread_entry_cleanup(void *p1, void *p2, void *p3)
++{
++	ARG_UNUSED(p2);
++	ARG_UNUSED(p3);
++
++	K_THREAD_CLEANUP_PUSH(cleanup_handler, p1);
++
++	int flag = POINTER_TO_INT(p1);
++
++	switch (flag) {
++	case 1:
++		/* handler is run within this scope */
++		break;
++	case 2:
++		/* handler is run in cancellation signal handler */
++		while (true) {
++			k_msleep(1);
++		}
++		break;
++	case 3:
++		/* handler is run in cancellation signal handler */
++		k_thread_exit(NULL);
++		break;
++	}
++
++	K_THREAD_CLEANUP_POP(1);
++}
++#endif
++
++ZTEST_USER(threads_lifecycle, test_k_thread_cleanup_push_pop)
++{
++#ifndef CONFIG_THREAD_CLEANUP
++	ztest_test_skip();
++#else
++	/* run cleanup as part of thread's function */
++	execute_flag = 0;
++	k_thread_create(&tdata, tstack, STACK_SIZE, thread_entry_cleanup, INT_TO_POINTER(1), NULL,
++			NULL, 0, K_USER, K_NO_WAIT);
++	zassert_ok(k_thread_rejoin(&tdata, K_FOREVER, NULL));
++	zassert_equal(execute_flag, 1);
++
++	/* run cleanup via k_thread_cancel() */
++	execute_flag = 0;
++	k_thread_create(&tdata, tstack, STACK_SIZE, thread_entry_cleanup, INT_TO_POINTER(2), NULL,
++			NULL, 0, K_USER, K_NO_WAIT);
++	k_msleep(100);
++	k_thread_cancel(&tdata);
++	zassert_ok(k_thread_rejoin(&tdata, K_FOREVER, NULL));
++	zassert_equal(execute_flag, 2);
++
++	/* run cleanup via k_thread_exit() */
++	execute_flag = 0;
++	k_thread_create(&tdata, tstack, STACK_SIZE, thread_entry_cleanup, INT_TO_POINTER(3), NULL,
++			NULL, 0, K_USER, K_NO_WAIT);
++	zassert_ok(k_thread_rejoin(&tdata, K_FOREVER, NULL));
++	zassert_equal(execute_flag, 3);
++#endif
++}
++
+ /**
+  * @ingroup kernel_thread_tests
+  * @brief Test abort on an already terminated thread
