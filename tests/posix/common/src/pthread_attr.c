@@ -39,6 +39,15 @@ static void create_thread_common_entry(const pthread_attr_t *attrp, bool expect_
 {
 	pthread_t th;
 
+	if (CONFIG_SYS_THREAD_STACK_MAX == 0) {
+		/* Most of this testsuite uses automatic stack allocation, but
+		 * portability.posix.common.static_stack is specifically for testing with statically
+		 * allocated stacks. Eventually, that configuration should be removed from
+		 * common/testcase.yaml as it is already covered by the xsi_threads_ext testsuite.
+		 */
+		ztest_test_skip();
+	}
+
 	if (!joinable) {
 		detached_thread_has_finished = false;
 	}
@@ -90,14 +99,16 @@ ZTEST(pthread_attr, test_null_attr)
 	 * This test can only succeed when it is possible to call pthread_create() with a NULL
 	 * pthread_attr_t* (I.e. when we have the ability to allocate thread stacks dynamically).
 	 */
-	create_thread_common(NULL, IS_ENABLED(CONFIG_DYNAMIC_THREAD) ? true : false, true);
+	create_thread_common(NULL, CONFIG_SYS_THREAD_STACK_MAX > 0, true);
 }
 
 ZTEST(pthread_attr, test_pthread_attr_static_corner_cases)
 {
 	pthread_attr_t attr1;
 
-	Z_TEST_SKIP_IFDEF(CONFIG_DYNAMIC_THREAD);
+	if (CONFIG_SYS_THREAD_STACK_MAX > 0) {
+		ztest_test_skip();
+	}
 
 	/*
 	 * These tests are specifically for when dynamic thread stacks are disabled, so passing
@@ -400,16 +411,40 @@ ZTEST(pthread_attr, test_pthread_attr_setinheritsched)
 ZTEST(pthread_attr, test_pthread_attr_large_stacksize)
 {
 	size_t actual_size;
-	const size_t expect_size = BIT(CONFIG_POSIX_PTHREAD_ATTR_STACKSIZE_BITS);
+	const size_t expect_size = 2 * CONFIG_SYS_THREAD_STACK_SIZE;
 
-	if (pthread_attr_setstacksize(&attr, expect_size) != 0) {
-		TC_PRINT("Unable to allocate large stack of size %zu (skipping)\n", expect_size);
-		ztest_test_skip();
-		return;
-	}
-
+	/*
+	 * pthread_attr_setstacksize() only sets the desired size and does some bounds checking.
+	 * The actual allocation of the stack is done behind the call to pthread_create(). If a
+	 * dynamic stack cannot be allocated that is of sufficient size, then pthread_create() will
+	 * fail.
+	 */
+	zassert_ok(pthread_attr_setstacksize(&attr, expect_size));
 	zassert_ok(pthread_attr_getstacksize(&attr, &actual_size));
 	zassert_equal(actual_size, expect_size);
+
+	if (CONFIG_SYS_THREAD_STACK_MAX > SYS_THREAD_STACK_MIN) {
+		if (IS_ENABLED(CONFIG_SYS_THREAD_STACK_ALLOC_HEAP) &&
+		    (K_HEAP_MEM_POOL_SIZE < 2 * K_THREAD_STACK_LEN(CONFIG_SYS_THREAD_STACK_SIZE))) {
+			TC_PRINT("insufficient heap space to test large stacksize\n");
+			ztest_test_skip();
+		}
+
+		/* tests should only get here if using heap and heap is of sufficient size or using
+		 * anonymous pages */
+		__ASSERT_NO_MSG((IS_ENABLED(CONFIG_SYS_THREAD_STACK_ALLOC_HEAP) &&
+				 (K_HEAP_MEM_POOL_SIZE >=
+				  2 * K_THREAD_STACK_LEN(CONFIG_SYS_THREAD_STACK_SIZE))) ||
+				IS_ENABLED(CONFIG_SYS_THREAD_STACK_ALLOC_ANON));
+
+		/* if we have enough heap to support a thread stack of this size, then test that it
+		 * works */
+
+		can_create_thread(&attr);
+	} else {
+		/* static thread stacks is tested in the 'xsi_threads_ext' suite, which is probably
+		 * also where this test should go */
+	}
 }
 
 ZTEST(pthread_attr, test_pthread_attr_getdetachstate)
@@ -548,8 +583,8 @@ ZTEST(pthread_attr, test_pthread_attr_policy_and_priority_limits)
 		}
 
 		/* create threads with min and max priority levels for each policy */
-		ARRAY_FOR_EACH(prios, i) {
-			param.sched_priority = (i == 0) ? pmin : pmax;
+		ARRAY_FOR_EACH(prios, j) {
+			param.sched_priority = (j == 0) ? pmin : pmax;
 
 			if (!policy_enabled[policy]) {
 				zassert_not_ok(
@@ -557,19 +592,19 @@ ZTEST(pthread_attr, test_pthread_attr_policy_and_priority_limits)
 				zassert_not_ok(
 					pthread_attr_setschedparam(&attr, &param),
 					"pthread_attr_setschedparam() failed for %s (%d) of %s",
-					prios[i], param.sched_priority, policy_names[policy]);
+					prios[j], param.sched_priority, policy_names[policy]);
 				continue;
 			}
 
 			/* set policy */
 			zassert_ok(pthread_attr_setschedpolicy(&attr, policies[policy]),
 				   "pthread_attr_setschedpolicy() failed for %s (%d) of %s",
-				   prios[i], param.sched_priority, policy_names[policy]);
+				   prios[j], param.sched_priority, policy_names[policy]);
 
 			/* set priority */
 			zassert_ok(pthread_attr_setschedparam(&attr, &param),
 				   "pthread_attr_setschedparam() failed for %s (%d) of %s",
-				   prios[i], param.sched_priority, policy_names[policy]);
+				   prios[j], param.sched_priority, policy_names[policy]);
 
 			can_create_thread(&attr);
 		}
@@ -581,8 +616,6 @@ static void before(void *arg)
 	ARG_UNUSED(arg);
 
 	zassert_ok(pthread_attr_init(&attr));
-	/* TODO: pthread_attr_init() should be sufficient to initialize a thread by itself */
-	zassert_ok(pthread_attr_setstack(&attr, &static_thread_stack, STATIC_THREAD_STACK_SIZE));
 	attr_valid = true;
 }
 
