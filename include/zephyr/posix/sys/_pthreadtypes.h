@@ -8,7 +8,10 @@
 #define ZEPHYR_INCLUDE_POSIX_SYS__PTHREADTYPES_H_
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
+
+#include <zephyr/sys/atomic_types.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -18,7 +21,9 @@ extern "C" {
 	defined(__DOXYGEN__)
 typedef struct {
 	void *stack;
-	uint32_t details[2];
+	size_t stacksize;
+	size_t guardsize;
+	uint32_t details;
 } pthread_attr_t;
 #define _PTHREAD_ATTR_T_DECLARED
 #define __pthread_attr_t_defined
@@ -83,8 +88,10 @@ typedef struct {
 
 #if !(defined(_PTHREAD_ONCE_T_DECLARED) && defined(__pthread_once_t_defined)) ||                   \
 	defined(__DOXYGEN__)
+/* mirrors sys_thread_once_t (a struct k_futex): state word, kernel-maintained waiter count */
 typedef struct {
-	unsigned long flag;
+	atomic_t val;
+	atomic_t waiters;
 } pthread_once_t;
 #define _PTHREAD_ONCE_T_DECLARED
 #define __pthread_once_t_defined

@@ -9,6 +9,7 @@
 #include <time.h>
 
 #include <zephyr/sys/util.h>
+#include <zephyr/sys/timeutil.h>
 #include <zephyr/ztest.h>
 
 #define SLEEP_MS 100
@@ -47,7 +48,7 @@ static void *recursive_mutex_entry(void *p1)
 
 static void test_mutex_common(int type, void *(*entry)(void *arg))
 {
-	pthread_t th;
+	__maybe_unused pthread_t th;
 	__maybe_unused int protocol;
 	int actual_type;
 	pthread_mutexattr_t mut_attr;
@@ -82,12 +83,17 @@ static void test_mutex_common(int type, void *(*entry)(void *arg))
 	zassert_equal(protocol, PTHREAD_PRIO_NONE, "mutex protocol is not prio_none");
 #endif /* defined(_POSIX_THREAD_PRIO_INHERIT) || defined(_POSIX_THREAD_PRIO_PROTECT) */
 
-	zassert_ok(pthread_create(&th, NULL, entry, NULL));
+	if (CONFIG_SYS_THREAD_STACK_MAX > 0) {
+		zassert_ok(pthread_create(&th, NULL, entry, NULL));
+	}
 
 	k_msleep(SLEEP_MS);
 	zassert_ok(pthread_mutex_unlock(&mutex));
 
-	zassert_ok(pthread_join(th, NULL));
+	if (CONFIG_SYS_THREAD_STACK_MAX > 0) {
+		zassert_ok(pthread_join(th, NULL));
+	}
+
 	zassert_ok(pthread_mutex_destroy(&mutex), "Destroying mutex is failed");
 }
 
@@ -131,21 +137,28 @@ ZTEST(mutex, test_mutex_recursive)
 /**
  * @brief Test to demonstrate limited mutex resources
  *
- * @details Exactly CONFIG_MAX_PTHREAD_MUTEX_COUNT can be in use at once.
+ * @details Exactly SYS_THREAD_MUTEX_MIN can be in use at once (when heap allocation is
+ * unavailable).
  */
 ZTEST(mutex, test_mutex_resource_exhausted)
 {
 	size_t i;
-	pthread_mutex_t m[CONFIG_MAX_PTHREAD_MUTEX_COUNT + 1];
+	pthread_mutex_t m[SYS_THREAD_MUTEX_MIN + 1];
 
-	for (i = 0; i < CONFIG_MAX_PTHREAD_MUTEX_COUNT; ++i) {
+	for (i = 0; i < SYS_THREAD_MUTEX_MIN; ++i) {
 		zassert_ok(pthread_mutex_init(&m[i], NULL), "failed to init mutex %zu", i);
 	}
 
-	/* try to initialize one more than CONFIG_MAX_PTHREAD_MUTEX_COUNT */
-	zassert_equal(i, CONFIG_MAX_PTHREAD_MUTEX_COUNT);
-	zassert_not_equal(0, pthread_mutex_init(&m[i], NULL),
-			  "should not have initialized mutex %zu", i);
+	/* try to initialize one more than SYS_THREAD_MUTEX_MIN */
+	zassert_equal(i, SYS_THREAD_MUTEX_MIN);
+
+	if (SYS_THREAD_MUTEX_MIN == CONFIG_SYS_THREAD_MUTEX_MAX) {
+		/* This test may be removed eventally, since this assertion is successful only when
+		 * heap allocation is unavailable, which is non-standard.
+		 */
+		zassert_not_equal(0, pthread_mutex_init(&m[i], NULL),
+				  "should not have initialized mutex %zu", i);
+	}
 
 	for (; i > 0; --i) {
 		zassert_ok(pthread_mutex_destroy(&m[i - 1]), "failed to destroy mutex %zu", i - 1);
@@ -161,7 +174,7 @@ ZTEST(mutex, test_mutex_resource_leak)
 {
 	pthread_mutex_t m;
 
-	for (size_t i = 0; i < 2 * CONFIG_MAX_PTHREAD_MUTEX_COUNT; ++i) {
+	for (size_t i = 0; i < 2 * SYS_THREAD_MUTEX_MIN; ++i) {
 		zassert_ok(pthread_mutex_init(&m, NULL), "failed to init mutex %zu", i);
 		zassert_ok(pthread_mutex_destroy(&m), "failed to destroy mutex %zu", i);
 	}
@@ -174,25 +187,31 @@ BUILD_ASSERT(TIMEDLOCK_TIMEOUT_DELAY_MS >= 100, "TIMEDLOCK_TIMEOUT_DELAY_MS too 
 BUILD_ASSERT(TIMEDLOCK_TIMEOUT_MS >= 2 * TIMEDLOCK_TIMEOUT_DELAY_MS,
 	     "TIMEDLOCK_TIMEOUT_MS too small");
 
-static void timespec_add_ms(struct timespec *ts, uint32_t ms)
+static inline void timespec_add_ms(struct timespec *ts, uint32_t ms)
 {
-	bool oflow;
+	struct timespec addend;
 
-	ts->tv_nsec += ms * NSEC_PER_MSEC;
-	oflow = ts->tv_nsec >= NSEC_PER_SEC;
-	ts->tv_sec += oflow;
-	ts->tv_nsec -= oflow * NSEC_PER_SEC;
+	timespec_from_timeout(K_MSEC(ms), &addend);
+	timespec_add(ts, &addend);
 }
 
 static void *test_mutex_timedlock_fn(void *arg)
 {
+	int ret;
 	struct timespec time_point;
 	pthread_mutex_t *mtx = (pthread_mutex_t *)arg;
 
 	zassume_ok(clock_gettime(CLOCK_REALTIME, &time_point));
 	timespec_add_ms(&time_point, TIMEDLOCK_TIMEOUT_MS);
 
-	return INT_TO_POINTER(pthread_mutex_timedlock(mtx, &time_point));
+	ret = pthread_mutex_timedlock(mtx, &time_point);
+	if (ret != 0) {
+		return INT_TO_POINTER(ret);
+	}
+
+	zassert_ok(pthread_mutex_unlock(mtx));
+
+	return NULL;
 }
 
 /** @brief Test to verify @ref pthread_mutex_timedlock returns ETIMEDOUT */
@@ -200,6 +219,15 @@ ZTEST(mutex, test_mutex_timedlock)
 {
 	void *ret;
 	pthread_t th;
+
+	if (CONFIG_SYS_THREAD_STACK_MAX == 0) {
+		/* Most of this testsuite uses automatic stack allocation, but
+		 * portability.posix.common.static_stack is specifically for testing with statically
+		 * allocated stacks. Eventually, that configuration should be removed from
+		 * common/testcase.yaml as it is already covered by the xsi_threads_ext testsuite.
+		 */
+		ztest_test_skip();
+	}
 
 	zassert_ok(pthread_mutex_init(&mutex, NULL));
 
@@ -223,14 +251,11 @@ ZTEST(mutex, test_mutex_timedlock)
 	zassert_ok(pthread_mutex_destroy(&mutex));
 }
 
-static void before(void *arg)
+static void before(void *data)
 {
-	ARG_UNUSED(arg);
+	ARG_UNUSED(data);
 
-	if (!IS_ENABLED(CONFIG_DYNAMIC_THREAD)) {
-		/* skip redundant testing if there is no thread pool / heap allocation */
-		ztest_test_skip();
-	}
+	mutex = PTHREAD_MUTEX_INITIALIZER;
 }
 
 ZTEST_SUITE(mutex, NULL, NULL, before, NULL, NULL);
