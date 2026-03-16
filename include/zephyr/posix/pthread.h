@@ -120,6 +120,10 @@ int pthread_barrierattr_setpshared(pthread_barrierattr_t *attr, int pshared);
 #endif
 int pthread_cancel(pthread_t thread);
 int pthread_cond_broadcast(pthread_cond_t *cond);
+#if (_POSIX_C_SOURCE >= 202412L) || defined(__DOXYGEN__)
+int pthread_cond_clockwait(pthread_cond_t *ZRESTRICT cond, pthread_mutex_t *ZRESTRICT mutex,
+	clockid_t clock_id, const struct timespec *ZRESTRICT abstime);
+#endif
 int pthread_cond_destroy(pthread_cond_t *cond);
 int pthread_cond_init(pthread_cond_t *ZRESTRICT cond, const pthread_condattr_t *ZRESTRICT attr);
 int pthread_cond_signal(pthread_cond_t *cond);
@@ -241,16 +245,13 @@ int pthread_spin_trylock(pthread_spinlock_t *lock);
 int pthread_spin_unlock(pthread_spinlock_t *lock);
 void pthread_testcancel(void);
 
-void __z_pthread_cleanup_push(void *cleanup[3], void (*routine)(void *arg), void *arg);
-void __z_pthread_cleanup_pop(int execute);
-
 #define pthread_cleanup_push(_rtn, _arg)                                                           \
 	do /* enforce '{'-like behaviour */ {                                                      \
 		void *_z_pthread_cleanup[3];                                                       \
-	__z_pthread_cleanup_push(_z_pthread_cleanup, _rtn, _arg)
+	k_thread_cleanup_push(_z_pthread_cleanup, _rtn, _arg)
 
 #define pthread_cleanup_pop(_ex)                                                                   \
-	__z_pthread_cleanup_pop(_ex);                                                              \
+	k_thread_cleanup_pop(_ex);                                                                 \
 	} /* enforce '}'-like behaviour */                                                         \
 	while (0)
 
