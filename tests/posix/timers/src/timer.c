@@ -17,7 +17,7 @@
 #define PERIOD_SECS    0
 #define PERIOD_NSECS   100000000
 
-#define TEST_SIGNAL_VAL SIGTSTP
+#define TEST_SIGNAL_VAL 34 /* normally SIGRTMIN */
 
 LOG_MODULE_REGISTER(timer_test);
 
