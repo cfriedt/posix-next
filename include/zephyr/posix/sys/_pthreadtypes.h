@@ -8,6 +8,7 @@
 #define ZEPHYR_INCLUDE_POSIX_SYS__PTHREADTYPES_H_
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -18,7 +19,9 @@ extern "C" {
 	defined(__DOXYGEN__)
 typedef struct {
 	void *stack;
-	uint32_t details[2];
+	size_t stacksize;
+	size_t guardsize;
+	uint32_t details;
 } pthread_attr_t;
 #define _PTHREAD_ATTR_T_DECLARED
 #define __pthread_attr_t_defined
