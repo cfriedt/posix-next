@@ -71,7 +71,7 @@ BUILD_ASSERT(CONFIG_POSIX_RTSIG_MAX >= 0);
 
 #if !defined(_SIGSET_T_DECLARED) && !defined(__sigset_t_defined)
 typedef struct {
-	unsigned long sig[DIV_ROUND_UP(SIGRTMAX + 1, BITS_PER_LONG)];
+	unsigned long sig[DIV_ROUND_UP(SIGRTMAX, BITS_PER_LONG)];
 } sigset_t;
 #define _SIGSET_T_DECLARED
 #define __sigset_t_defined

@@ -90,14 +90,16 @@ ZTEST(pthread_attr, test_null_attr)
 	 * This test can only succeed when it is possible to call pthread_create() with a NULL
 	 * pthread_attr_t* (I.e. when we have the ability to allocate thread stacks dynamically).
 	 */
-	create_thread_common(NULL, IS_ENABLED(CONFIG_DYNAMIC_THREAD) ? true : false, true);
+	create_thread_common(NULL, CONFIG_SYS_THREAD_STACK_MAX > 0, true);
 }
 
 ZTEST(pthread_attr, test_pthread_attr_static_corner_cases)
 {
 	pthread_attr_t attr1;
 
-	Z_TEST_SKIP_IFDEF(CONFIG_DYNAMIC_THREAD);
+	if (CONFIG_SYS_THREAD_STACK_MAX > 0) {
+		ztest_test_skip();
+	}
 
 	/*
 	 * These tests are specifically for when dynamic thread stacks are disabled, so passing
@@ -548,8 +550,8 @@ ZTEST(pthread_attr, test_pthread_attr_policy_and_priority_limits)
 		}
 
 		/* create threads with min and max priority levels for each policy */
-		ARRAY_FOR_EACH(prios, i) {
-			param.sched_priority = (i == 0) ? pmin : pmax;
+		ARRAY_FOR_EACH(prios, j) {
+			param.sched_priority = (j == 0) ? pmin : pmax;
 
 			if (!policy_enabled[policy]) {
 				zassert_not_ok(
@@ -557,19 +559,19 @@ ZTEST(pthread_attr, test_pthread_attr_policy_and_priority_limits)
 				zassert_not_ok(
 					pthread_attr_setschedparam(&attr, &param),
 					"pthread_attr_setschedparam() failed for %s (%d) of %s",
-					prios[i], param.sched_priority, policy_names[policy]);
+					prios[j], param.sched_priority, policy_names[policy]);
 				continue;
 			}
 
 			/* set policy */
 			zassert_ok(pthread_attr_setschedpolicy(&attr, policies[policy]),
 				   "pthread_attr_setschedpolicy() failed for %s (%d) of %s",
-				   prios[i], param.sched_priority, policy_names[policy]);
+				   prios[j], param.sched_priority, policy_names[policy]);
 
 			/* set priority */
 			zassert_ok(pthread_attr_setschedparam(&attr, &param),
 				   "pthread_attr_setschedparam() failed for %s (%d) of %s",
-				   prios[i], param.sched_priority, policy_names[policy]);
+				   prios[j], param.sched_priority, policy_names[policy]);
 
 			can_create_thread(&attr);
 		}
