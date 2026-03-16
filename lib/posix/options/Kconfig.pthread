@@ -6,9 +6,14 @@
 
 menuconfig POSIX_THREADS
 	bool "POSIX thread support"
-	select SYS_ELASTIPOOL if !TC_PROVIDES_POSIX_THREADS
-	select SYS_HASH_FUNC32 if !TC_PROVIDES_POSIX_THREADS
-	select SYS_HASH_MAP if !TC_PROVIDES_POSIX_THREADS
+	select SYS_THREAD
+	select SIGNAL
+	select THREAD_CANCEL
+	select THREAD_RESULT
+	select THREAD_SPECIFIC_STORAGE
+	select THREAD_CLEANUP
+	select THREAD_DETACH
+	select MUTEX_NONRECURSIVE
 	help
 	  Select 'y' here to enable POSIX threads, mutexes, condition variables, and
 	  thread-specific storage.
@@ -38,7 +43,7 @@ config HEAP_MEM_POOL_ADD_SIZE_POSIX_THREADS
 
 config POSIX_THREAD_THREADS_MAX
 	int "Maximum number of POSIX threads"
-	default 5
+	default SYS_THREAD_THREAD_MAX
 	help
 	  Maximum simultaneously active threads in a POSIX application.
 
@@ -47,13 +52,13 @@ config POSIX_THREAD_THREADS_MAX
 
 config MAX_PTHREAD_MUTEX_COUNT
 	int "Maximum number of POSIX mutexes"
-	default 5
+	default SYS_THREAD_MUTEX_MAX
 	help
 	  Maximum simultaneously active mutexes in a POSIX application.
 
 config MAX_PTHREAD_COND_COUNT
 	int "Maximum number of POSIX condition variables"
-	default 5
+	default SYS_THREAD_CONDVAR_MAX
 	help
 	  Maximum simultaneously active condition variables in a POSIX application.
 
@@ -68,20 +73,9 @@ config POSIX_THREAD_KEYS_MAX
 
 config PTHREAD_RECYCLER_DELAY_MS
 	int "Delay for reclaiming dynamic pthread stacks (ms)"
-	default 100
+	default SYS_THREAD_RECYCLER_DELAY_MS
 	help
-	  Prior to a POSIX thread terminating via k_thread_abort(), scheduled
-	  work is added to the system workqueue (SWQ) so that any resources
-	  allocated by the thread (e.g. thread stack from a pool or the heap)
-	  can be released back to the system. Because resources are also freed
-	  on calls to pthread_create() there is no need to worry about resource
-	  starvation.
-
-	  This option sets the number of milliseconds by which to defer
-	  scheduled work.
-
-	  Note: this option should be considered temporary and will likely be
-	  removed once a more synchronous solution is available.
+	  This option is deprecated. Please use CONFIG_SYS_THREAD_RECYCLER_DELAY_MS instead.
 
 config POSIX_THREAD_ATTR_STACKADDR
 	bool "Support getting and setting POSIX thread stack addresses"

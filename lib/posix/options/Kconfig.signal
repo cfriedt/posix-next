@@ -11,12 +11,29 @@ config POSIX_REALTIME_SIGNALS
 
 if POSIX_REALTIME_SIGNALS
 
+config CONFIG_SIGNAL_QUEUE_SIZE_ADD_POSIX_REALTIME
+	def_int 32
+	help
+	  This value represents the maximum number of signals that a process may send or have pending
+	  at any given time, according to the POSIX specification (see SIGQUEUE_MAX and
+	  _POSIX_SIGQUEUE_MAX limits.h).
+
 config POSIX_RTSIG_MAX
 	int "Maximum number of realtime signals"
 	default 8
 	help
 	  Define the maximum number of realtime signals (RTSIG_MAX).
 	  The range of realtime signals is [SIGRTMIN .. (SIGRTMIN+RTSIG_MAX)]
+
+# it would be much better to use arithmetic + variables here but it does not work
+config SIGNAL_SET_SIZE_MIN_POSIX_REALTIME
+	def_int 40
+	help
+	  This number of signals required for POSIX real-time extensions.
+	  
+	  When enabled, this option ensures the value of SIGNAL_SET_SIZE is at least
+	  CONFIG_THREAD_CANCEL_SIGNAL_NUMBER + CONFIG_POSIX_RTSIG_MAX, or in
+	  other terms [SIGRTMIN .. (SIGRTMIN+RTSIG_MAX)].
 
 endif # POSIX_REALTIME_SIGNALS
 
@@ -27,6 +44,14 @@ config POSIX_SIGNALS
 	  Enable support for POSIX signals.
 
 if POSIX_SIGNALS
+
+config SIGNAL_SET_SIZE_MIN_POSIX_REALTIME
+	def_int 32
+	help
+	  This number of signals required for POSIX conformance.
+	  
+	  When enabled, this option ensures the value of SIGNAL_SET_SIZE is at least
+	  32.
 
 config POSIX_SIGNAL_STRING_DESC
 	bool "Use full description for the strsignal API"
