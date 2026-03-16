@@ -18,9 +18,6 @@
 #define WAIT_TIME_MS 100
 BUILD_ASSERT(WAIT_TIME_MS > 0, "WAIT_TIME_MS must be posistive");
 
-/* based on the current structure of this unit test */
-BUILD_ASSERT(CONFIG_DYNAMIC_THREAD_POOL_SIZE >= 2, "CONFIG_DYNAMIC_THREAD_POOL_SIZE must be >= 2");
-
 static void *child_func(void *p1)
 {
 	sem_t *sem = (sem_t *)p1;
