@@ -82,6 +82,7 @@ endif()
 
 if(NOT CONFIG_TC_PROVIDES_POSIX_SIGNALS)
   zephyr_library_sources_ifdef(CONFIG_POSIX_SIGNALS signal.c ${STRSIGNAL_TABLE_H})
+  zephyr_library_sources_ifdef(CONFIG_SIGNAL z_sig_set.c)
 endif()
 
 if(NOT CONFIG_TC_PROVIDES_POSIX_SINGLE_PROCESS)
@@ -122,7 +123,6 @@ if(NOT CONFIG_TC_PROVIDES_POSIX_THREADS)
     grp.c
     key.c
     mutex.c
-    posix_pool.c
     pthread.c
     pwd.c
   )
