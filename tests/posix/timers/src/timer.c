@@ -17,7 +17,7 @@
 #define PERIOD_SECS    0
 #define PERIOD_NSECS   100000000
 
-#define TEST_SIGNAL_VAL SIGTSTP
+#define TEST_SIGNAL_VAL 34 /* normally SIGRTMIN */
 
 LOG_MODULE_REGISTER(timer_test);
 
@@ -160,6 +160,8 @@ static void after(void *arg)
 	if (timerid != -1) {
 		(void)timer_delete(timerid);
 		timerid = -1;
+		/* Give cancelled SIGEV_THREAD worker time to be recycled */
+		k_sleep(K_MSEC(2 * CONFIG_SYS_THREAD_RECYCLER_DELAY_MS));
 	}
 }
 
