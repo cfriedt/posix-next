@@ -36,6 +36,7 @@ typedef unsigned int pthread_t;
 
 /* size_t must be defined by the libc stddef.h */
 #include <stddef.h>
+#include <stdint.h>
 
 #if !defined(_UID_T_DECLARED) && !defined(__uid_t_defined)
 typedef int uid_t;
@@ -84,7 +85,7 @@ BUILD_ASSERT((CONFIG_THREAD_CANCEL_SIGNAL_NUMBER + 2 +
 
 #if !defined(_SIGSET_T_DECLARED) && !defined(__sigset_t_defined)
 typedef struct {
-	unsigned long sig[DIV_ROUND_UP(SIGRTMAX + 1, BITS_PER_LONG)];
+	unsigned long sig[DIV_ROUND_UP(SIGRTMAX, BITS_PER_LONG)];
 } sigset_t;
 #define _SIGSET_T_DECLARED
 #define __sigset_t_defined
@@ -98,10 +99,13 @@ typedef long pid_t;
 
 #if defined(_POSIX_THREADS) || defined(__DOXYGEN__)
 
+/* must be identical to the definition in <sys/_pthreadtypes.h> */
 #if !defined(_PTHREAD_ATTR_T_DECLARED) && !defined(__pthread_attr_t_defined)
 typedef struct {
 	void *stack;
-	unsigned int details[2];
+	size_t stacksize;
+	size_t guardsize;
+	uint32_t details;
 } pthread_attr_t;
 #define _PTHREAD_ATTR_T_DECLARED
 #define __pthread_attr_t_defined
