@@ -11,21 +11,28 @@
 /**
  * @brief Test to demonstrate limited condition variable resources
  *
- * @details Exactly CONFIG_MAX_PTHREAD_COND_COUNT can be in use at once.
+ * @details Exactly SYS_THREAD_CONDVAR_MIN can be in use at once (when heap allocation is
+ * unavailable).
  */
 ZTEST(cond, test_cond_resource_exhausted)
 {
 	size_t i;
-	pthread_cond_t m[CONFIG_MAX_PTHREAD_COND_COUNT + 1];
+	pthread_cond_t m[SYS_THREAD_CONDVAR_MIN + 1];
 
-	for (i = 0; i < CONFIG_MAX_PTHREAD_COND_COUNT; ++i) {
+	for (i = 0; i < SYS_THREAD_CONDVAR_MIN; ++i) {
 		zassert_ok(pthread_cond_init(&m[i], NULL), "failed to init cond %zu", i);
 	}
 
-	/* try to initialize one more than CONFIG_MAX_PTHREAD_COND_COUNT */
-	zassert_equal(i, CONFIG_MAX_PTHREAD_COND_COUNT);
-	zassert_not_equal(0, pthread_cond_init(&m[i], NULL), "should not have initialized cond %zu",
-			  i);
+	/* try to initialize one more than SYS_THREAD_CONDVAR_MIN */
+	zassert_equal(i, SYS_THREAD_CONDVAR_MIN);
+
+	if (SYS_THREAD_CONDVAR_MIN == CONFIG_SYS_THREAD_CONDVAR_MAX) {
+		/* This test may be removed eventally, since this assertion is successful only when
+		 * heap allocation is unavailable, which is non-standard.
+		 */
+		zassert_not_equal(0, pthread_cond_init(&m[i], NULL),
+				  "should not have initialized cond %zu", i);
+	}
 
 	for (; i > 0; --i) {
 		zassert_ok(pthread_cond_destroy(&m[i - 1]), "failed to destroy cond %zu", i - 1);
@@ -41,7 +48,7 @@ ZTEST(cond, test_cond_resource_leak)
 {
 	pthread_cond_t cond;
 
-	for (size_t i = 0; i < 2 * CONFIG_MAX_PTHREAD_COND_COUNT; ++i) {
+	for (size_t i = 0; i < 2 * SYS_THREAD_CONDVAR_MIN; ++i) {
 		zassert_ok(pthread_cond_init(&cond, NULL), "failed to init cond %zu", i);
 		zassert_ok(pthread_cond_destroy(&cond), "failed to destroy cond %zu", i);
 	}
