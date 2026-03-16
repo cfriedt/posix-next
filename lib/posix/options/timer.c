@@ -69,22 +69,26 @@ static void *zephyr_thread_wrapper(void *arg)
 	int ret;
 	struct timer_obj *timer = (struct timer_obj *)arg;
 
+	if (!k_is_user_context()) {
+		ret = pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
+		__ASSERT(ret == 0, "pthread_setcancelstate() failed: %d", ret);
+	}
+
 	ret = pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
 	__ASSERT(ret == 0, "pthread_setcanceltype() failed: %d", ret);
-
-	if (timer->evp.sigev_notify_attributes == NULL) {
-		ret = pthread_detach(pthread_self());
-		__ASSERT(ret == 0, "pthread_detach() failed: %d", ret);
-	}
 
 	while (1) {
 		if (timer->reload == 0U) {
 			timer->status = NOT_ACTIVE;
-			LOG_DBG("timer %p not active", timer);
 		}
 
 		ret = k_sem_take(&timer->sem_cond, K_FOREVER);
 		__ASSERT(ret == 0, "k_sem_take() failed: %d", ret);
+
+		if (timer->status == NOT_ACTIVE) {
+			LOG_DBG("timer %p not active", timer);
+			break;
+		}
 
 		if (timer->evp.sigev_notify_function == NULL) {
 			LOG_DBG("NULL sigev_notify_function");
@@ -106,18 +110,10 @@ static void zephyr_timer_interrupt(struct k_timer *ztimer)
 	k_sem_give(&timer->sem_cond);
 }
 
-/**
- * @brief Create a per-process timer.
- *
- * This API does not accept SIGEV_THREAD as valid signal event notification
- * type.
- *
- * See IEEE 1003.1
- */
 int timer_create(clockid_t clockid, struct sigevent *evp, timer_t *timerid)
 {
 	int ret = 0;
-	int detachstate;
+	pthread_attr_t attr;
 	struct timer_obj *timer;
 	const k_timeout_t alloc_timeout = K_MSEC(CONFIG_TIMER_CREATE_WAIT);
 
@@ -156,28 +152,6 @@ int timer_create(clockid_t clockid, struct sigevent *evp, timer_t *timerid)
 		k_timer_init(&timer->ztimer, zephyr_timer_wrapper, NULL);
 		break;
 	case SIGEV_THREAD:
-		if (evp->sigev_notify_attributes != NULL) {
-			ret = pthread_attr_getdetachstate(evp->sigev_notify_attributes,
-							  &detachstate);
-			if (ret != 0) {
-				LOG_DBG("pthread_attr_getdetachstate() failed: %d", ret);
-				errno = ret;
-				ret = -1;
-				goto free_timer;
-			}
-
-			if (detachstate != PTHREAD_CREATE_DETACHED) {
-				ret = pthread_attr_setdetachstate(evp->sigev_notify_attributes,
-								  PTHREAD_CREATE_DETACHED);
-				if (ret != 0) {
-					LOG_DBG("pthread_attr_setdetachstate() failed: %d", ret);
-					errno = ret;
-					ret = -1;
-					goto free_timer;
-				}
-			}
-		}
-
 		ret = k_sem_init(&timer->sem_cond, 0, 1);
 		if (ret != 0) {
 			LOG_DBG("k_sem_init() failed: %d", ret);
@@ -186,8 +160,21 @@ int timer_create(clockid_t clockid, struct sigevent *evp, timer_t *timerid)
 			goto free_timer;
 		}
 
-		ret = pthread_create(&timer->thread, evp->sigev_notify_attributes,
-							zephyr_thread_wrapper, timer);
+		if (evp->sigev_notify_attributes != NULL) {
+			attr = *(pthread_attr_t *)evp->sigev_notify_attributes;
+		} else {
+			pthread_attr_init(&attr);
+		}
+
+		ret = pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+		if (ret != 0) {
+			LOG_DBG("pthread_attr_setdetachstate() failed: %d", ret);
+			errno = ret;
+			ret = -1;
+			goto free_timer;
+		}
+
+		ret = pthread_create(&timer->thread, &attr, zephyr_thread_wrapper, timer);
 		if (ret != 0) {
 			LOG_DBG("pthread_create() failed: %d", ret);
 			errno = ret;
@@ -343,11 +330,13 @@ int timer_delete(timer_t timerid)
 	}
 
 	if (timer->status == ACTIVE) {
-		timer->status = NOT_ACTIVE;
 		k_timer_stop(&timer->ztimer);
 	}
 
+	timer->status = NOT_ACTIVE;
+
 	if (timer->evp.sigev_notify == SIGEV_THREAD) {
+		k_sem_give(&timer->sem_cond);
 		(void)pthread_cancel(timer->thread);
 	}
 

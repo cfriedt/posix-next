@@ -120,7 +120,7 @@ ZTEST(xsi_threads_ext, test_pthread_attr_setstack)
 	{
 		if (false) {
 			/* undefined behaviour */
-			zassert_equal(pthread_attr_setstack(NULL, NULL, 0), EACCES);
+			zassert_equal(pthread_attr_setstack(NULL, NULL, 0), EINVAL);
 			zassert_equal(pthread_attr_setstack(NULL, NULL, stacksize), EINVAL);
 			zassert_equal(pthread_attr_setstack(NULL, stackaddr, 0), EINVAL);
 			zassert_equal(pthread_attr_setstack(NULL, stackaddr, stacksize), EINVAL);
@@ -128,8 +128,8 @@ ZTEST(xsi_threads_ext, test_pthread_attr_setstack)
 							    stackaddr, stacksize),
 				      EINVAL);
 		}
-		zassert_equal(pthread_attr_setstack(&attr, NULL, 0), EACCES);
-		zassert_equal(pthread_attr_setstack(&attr, NULL, stacksize), EACCES);
+		zassert_equal(pthread_attr_setstack(&attr, NULL, 0), EINVAL);
+		zassert_equal(pthread_attr_setstack(&attr, NULL, stacksize), EINVAL);
 		zassert_equal(pthread_attr_setstack(&attr, stackaddr, 0), EINVAL);
 	}
 
