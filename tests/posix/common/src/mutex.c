@@ -9,6 +9,7 @@
 #include <time.h>
 
 #include <zephyr/sys/util.h>
+#include <zephyr/sys/timeutil.h>
 #include <zephyr/ztest.h>
 
 #define SLEEP_MS 100
@@ -186,13 +187,21 @@ static void timespec_add_ms(struct timespec *ts, uint32_t ms)
 
 static void *test_mutex_timedlock_fn(void *arg)
 {
+	int ret;
 	struct timespec time_point;
 	pthread_mutex_t *mtx = (pthread_mutex_t *)arg;
 
 	zassume_ok(clock_gettime(CLOCK_REALTIME, &time_point));
 	timespec_add_ms(&time_point, TIMEDLOCK_TIMEOUT_MS);
 
-	return INT_TO_POINTER(pthread_mutex_timedlock(mtx, &time_point));
+	ret = pthread_mutex_timedlock(mtx, &time_point);
+	if (ret != 0) {
+		return INT_TO_POINTER(ret);
+	}
+
+	zassert_ok(pthread_mutex_unlock(mtx));
+
+	return NULL;
 }
 
 /** @brief Test to verify @ref pthread_mutex_timedlock returns ETIMEDOUT */
@@ -223,14 +232,4 @@ ZTEST(mutex, test_mutex_timedlock)
 	zassert_ok(pthread_mutex_destroy(&mutex));
 }
 
-static void before(void *arg)
-{
-	ARG_UNUSED(arg);
-
-	if (!IS_ENABLED(CONFIG_DYNAMIC_THREAD)) {
-		/* skip redundant testing if there is no thread pool / heap allocation */
-		ztest_test_skip();
-	}
-}
-
-ZTEST_SUITE(mutex, NULL, NULL, before, NULL, NULL);
+ZTEST_SUITE(mutex, NULL, NULL, NULL, NULL, NULL);

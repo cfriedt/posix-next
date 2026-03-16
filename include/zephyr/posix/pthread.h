@@ -241,16 +241,13 @@ int pthread_spin_trylock(pthread_spinlock_t *lock);
 int pthread_spin_unlock(pthread_spinlock_t *lock);
 void pthread_testcancel(void);
 
-void __z_pthread_cleanup_push(void *cleanup[3], void (*routine)(void *arg), void *arg);
-void __z_pthread_cleanup_pop(int execute);
-
 #define pthread_cleanup_push(_rtn, _arg)                                                           \
 	do /* enforce '{'-like behaviour */ {                                                      \
 		void *_z_pthread_cleanup[3];                                                       \
-	__z_pthread_cleanup_push(_z_pthread_cleanup, _rtn, _arg)
+	k_thread_cleanup_push(_z_pthread_cleanup, _rtn, _arg)
 
 #define pthread_cleanup_pop(_ex)                                                                   \
-	__z_pthread_cleanup_pop(_ex);                                                              \
+	k_thread_cleanup_pop(_ex);                                                                 \
 	} /* enforce '}'-like behaviour */                                                         \
 	while (0)
 
