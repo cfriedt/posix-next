@@ -69,6 +69,11 @@ static void *zephyr_thread_wrapper(void *arg)
 	int ret;
 	struct timer_obj *timer = (struct timer_obj *)arg;
 
+	if (!k_is_user_context()) {
+		ret = pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
+		__ASSERT(ret == 0, "pthread_setcancelstate() failed: %d", ret);
+	}
+
 	ret = pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
 	__ASSERT(ret == 0, "pthread_setcanceltype() failed: %d", ret);
 
@@ -80,11 +85,15 @@ static void *zephyr_thread_wrapper(void *arg)
 	while (1) {
 		if (timer->reload == 0U) {
 			timer->status = NOT_ACTIVE;
-			LOG_DBG("timer %p not active", timer);
 		}
 
 		ret = k_sem_take(&timer->sem_cond, K_FOREVER);
 		__ASSERT(ret == 0, "k_sem_take() failed: %d", ret);
+
+		if (timer->status == NOT_ACTIVE) {
+			LOG_DBG("timer %p not active", timer);
+			break;
+		}
 
 		if (timer->evp.sigev_notify_function == NULL) {
 			LOG_DBG("NULL sigev_notify_function");
@@ -106,14 +115,6 @@ static void zephyr_timer_interrupt(struct k_timer *ztimer)
 	k_sem_give(&timer->sem_cond);
 }
 
-/**
- * @brief Create a per-process timer.
- *
- * This API does not accept SIGEV_THREAD as valid signal event notification
- * type.
- *
- * See IEEE 1003.1
- */
 int timer_create(clockid_t clockid, struct sigevent *evp, timer_t *timerid)
 {
 	int ret = 0;
@@ -349,6 +350,7 @@ int timer_delete(timer_t timerid)
 
 	if (timer->evp.sigev_notify == SIGEV_THREAD) {
 		(void)pthread_cancel(timer->thread);
+		k_sem_give(&timer->sem_cond);
 	}
 
 	k_mem_slab_free(&posix_timer_slab, (void *)timer);

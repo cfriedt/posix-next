@@ -6,16 +6,18 @@
 
 #include <pthread.h>
 #include <semaphore.h>
+#include <signal.h>
 #include <time.h>
 #include <unistd.h>
 
 #include <zephyr/sys/util.h>
+#include <zephyr/sys/timeutil.h>
 #include <zephyr/ztest.h>
 
 #define DETACH_THR_ID 2
 
 #define N_THR_E    3
-#define N_THR_T    4
+#define N_THR_T    3
 #define BOUNCES    64
 #define ONE_SECOND 1
 
@@ -34,16 +36,14 @@ int pthread_timedjoin_np(pthread_t thread, void **retval, const struct timespec 
 static void *thread_top_exec(void *p1);
 static void *thread_top_term(void *p1);
 
-struct pthread_attr {
-	void *stack;
-	uint32_t details[2];
-};
-BUILD_ASSERT(sizeof(pthread_attr_t) >= sizeof(struct pthread_attr));
-
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t cvar0 = PTHREAD_COND_INITIALIZER;
 static pthread_cond_t cvar1 = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t cvar_first_iter = PTHREAD_COND_INITIALIZER;
 static pthread_barrier_t barrier;
+
+#define N_FIRST_ITER_PEERS (N_THR_E - 1)
+static int first_iter_peer_count;
 
 static sem_t main_sem;
 
@@ -56,11 +56,22 @@ static int barrier_failed;
 static int barrier_done[N_THR_E];
 static int barrier_return[N_THR_E];
 
-/* First phase bounces execution between two threads using a condition
+static struct timespec sleep_timeout_abstime;
+
+static inline void timespec_add_ms(struct timespec *ts, uint32_t ms)
+{
+	struct timespec addend;
+
+	timespec_from_timeout(K_MSEC(ms), &addend);
+	timespec_add(ts, &addend);
+}
+
+/* First phase bounces execution between threads using a condition
  * variable, continuously testing that no other thread is mucking with
- * the protected state.  This ends with all threads going back to
- * sleep on the condition variable and being woken by main() for the
- * second phase.
+ * the protected state.  The first iteration uses an explicit handshake
+ * (not timing) so peer threads block on cvar0 before thread 0 signals.
+ * This ends with all threads going back to sleep on the condition variable
+ * and being woken by main() for the second phase.
  *
  * Second phase simply lines up all the threads on a barrier, verifies
  * that none run until the last one enters, and that all run after the
@@ -99,17 +110,18 @@ static void *thread_top_exec(void *p1)
 
 		pthread_mutex_lock(&lock);
 
-		/* Wait for the current owner to signal us, unless we
-		 * are the very first thread, in which case we need to
-		 * wait a bit to be sure the other threads get
-		 * scheduled and wait on cvar0.
-		 */
-		if (!(id == 0 && i == 0)) {
-			zassert_equal(0, pthread_cond_wait(&cvar0, &lock), "");
+		if (i == 0) {
+			if (id == 0) {
+				while (first_iter_peer_count < N_FIRST_ITER_PEERS) {
+					zassert_equal(0, pthread_cond_wait(&cvar_first_iter, &lock), "");
+				}
+			} else {
+				first_iter_peer_count++;
+				zassert_equal(0, pthread_cond_signal(&cvar_first_iter), "");
+				zassert_equal(0, pthread_cond_wait(&cvar0, &lock), "");
+			}
 		} else {
-			pthread_mutex_unlock(&lock);
-			usleep(USEC_PER_MSEC * 500U);
-			pthread_mutex_lock(&lock);
+			zassert_equal(0, pthread_cond_wait(&cvar0, &lock), "");
 		}
 
 		/* Claim ownership, then try really hard to give someone
@@ -156,6 +168,9 @@ static void *thread_top_exec(void *p1)
 	barrier_return[id] = pthread_barrier_wait(&barrier);
 	barrier_done[id] = 1;
 	sem_post(&main_sem);
+
+	printk("Thread %d done\n", id);
+
 	pthread_exit(p1);
 
 	return NULL;
@@ -163,9 +178,7 @@ static void *thread_top_exec(void *p1)
 
 static void *timedjoin_thread(void *p1)
 {
-	int sleep_duration_ms = POINTER_TO_INT(p1);
-
-	usleep(USEC_PER_MSEC * sleep_duration_ms);
+	clock_nanosleep(CLOCK_REALTIME, TIMER_ABSTIME, &sleep_timeout_abstime, NULL);
 	return NULL;
 }
 
@@ -228,20 +241,26 @@ static void *thread_top_term(void *p1)
 	printk("Thread %d starting with a priority of %d\n", id, getschedparam.sched_priority);
 #endif
 
+	if (!k_is_user_context()) {
+		/* kernel threads must explicitly unmask any signals they wish to receive */
+		sigset_t mask;
+
+		zassert_ok(sigemptyset(&mask));
+		zassert_ok(sigaddset(&mask, K_SIG_CANCEL));
+		zassert_ok(pthread_sigmask(SIG_UNBLOCK, &mask, NULL));
+	}
+
 	if (id % 2) {
 		ret = pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL);
 		zassert_false(ret, "Unable to set cancel state!");
 	}
 
-	if (id >= DETACH_THR_ID) {
-		zassert_ok(pthread_detach(self), "failed to set detach state");
-		zassert_equal(pthread_detach(self), EINVAL, "re-detached thread!");
+	if ((id % 2) == 0) {
+		printk("Cancelling thread %d\n", id);
+		zassert_ok(pthread_cancel(self), "Thread %d could not be cancelled\n", id);
 	}
-
-	printk("Cancelling thread %d\n", id);
-	pthread_cancel(self);
-	printk("Thread %d could not be cancelled\n", id);
 	sleep(ONE_SECOND);
+	printk("Exiting thread %d\n", id);
 	pthread_exit(p1);
 	return NULL;
 }
@@ -288,6 +307,28 @@ ZTEST(pthread, test_pthread_execution)
 	static const char thr_name[] = "thread name";
 	char thr_name_buf[CONFIG_THREAD_MAX_NAME_LEN];
 
+	if (CONFIG_SYS_THREAD_STACK_MAX == 0) {
+		/* Most of this testsuite uses automatic stack allocation, but
+		 * portability.posix.common.static_stack is specifically for testing with statically
+		 * allocated stacks. Eventually, that configuration should be removed from
+		 * common/testcase.yaml as it is already covered by the xsi_threads_ext testsuite.
+		 */
+		ztest_test_skip();
+	}
+
+	if (lock == PTHREAD_MUTEX_INITIALIZER) {
+		zassert_ok(pthread_mutex_init(&lock, NULL));
+	}
+	if (cvar0 == PTHREAD_COND_INITIALIZER) {
+		zassert_ok(pthread_cond_init(&cvar0, NULL));
+	}
+	if (cvar1 == PTHREAD_COND_INITIALIZER) {
+		zassert_ok(pthread_cond_init(&cvar1, NULL));
+	}
+	if (cvar_first_iter == PTHREAD_COND_INITIALIZER) {
+		zassert_ok(pthread_cond_init(&cvar_first_iter, NULL));
+	}
+
 	/*
 	 * initialize barriers the standard way after deprecating
 	 * PTHREAD_BARRIER_DEFINE().
@@ -296,33 +337,23 @@ ZTEST(pthread, test_pthread_execution)
 
 	sem_init(&main_sem, 0, 1);
 
-	/* TESTPOINT: Try getting name of NULL thread (aka uninitialized
-	 * thread var).
-	 */
-	ret = pthread_getname_np(PTHREAD_INVALID, thr_name_buf, sizeof(thr_name_buf));
-	zassert_equal(ret, ESRCH, "uninitialized getname!");
+	first_iter_peer_count = 0;
 
 	for (i = 0; i < N_THR_E; i++) {
 		ret = pthread_create(&newthread[i], NULL, thread_top_exec, INT_TO_POINTER(i));
+		zassert_ok(ret, "pthread_create failed for thread %d: %d", i, ret);
 	}
-
-	/* TESTPOINT: Try setting name of NULL thread (aka uninitialized
-	 * thread var).
-	 */
-	ret = pthread_setname_np(PTHREAD_INVALID, thr_name);
-	zassert_equal(ret, ESRCH, "uninitialized setname!");
 
 	/* TESTPOINT: Try getting thread name with no buffer */
 	ret = pthread_getname_np(newthread[0], NULL, sizeof(thr_name_buf));
-	zassert_equal(ret, EINVAL, "uninitialized getname!");
-
-	/* TESTPOINT: Try setting thread name with no buffer */
-	ret = pthread_setname_np(newthread[0], NULL);
-	zassert_equal(ret, EINVAL, "uninitialized setname!");
+	zassert_equal(ret, EFAULT);
 
 	/* TESTPOINT: Try setting thread name */
 	ret = pthread_setname_np(newthread[0], thr_name);
 	zassert_false(ret, "Set thread name failed!");
+
+	ret = pthread_getname_np(newthread[0], thr_name_buf, strlen(thr_name) / 2);
+	zassert_equal(ret, ERANGE);
 
 	/* TESTPOINT: Try getting thread name */
 	ret = pthread_getname_np(newthread[0], thr_name_buf, sizeof(thr_name_buf));
@@ -354,8 +385,13 @@ ZTEST(pthread, test_pthread_execution)
 	zassert_false(barrier_failed, "Barrier test failed");
 
 	for (i = 0; i < N_THR_E; i++) {
-		pthread_join(newthread[i], &retval);
+		zassert_ok(pthread_join(newthread[i], &retval));
 	}
+
+	pthread_mutex_destroy(&lock);
+	pthread_cond_destroy(&cvar0);
+	pthread_cond_destroy(&cvar1);
+	pthread_cond_destroy(&cvar_first_iter);
 
 	for (i = 0; i < N_THR_E; i++) {
 		if (barrier_return[i] == PTHREAD_BARRIER_SERIAL_THREAD) {
@@ -367,6 +403,8 @@ ZTEST(pthread, test_pthread_execution)
 	zassert_true(serial_threads == 1, "Bungled barrier return value(s)");
 
 	printk("Barrier test OK\n");
+
+	zassert_ok(pthread_barrier_destroy(&barrier));
 }
 
 ZTEST(pthread, test_pthread_termination)
@@ -374,6 +412,15 @@ ZTEST(pthread, test_pthread_termination)
 	int32_t i, ret;
 	pthread_t newthread[N_THR_T] = {0};
 	void *retval;
+
+	if (CONFIG_SYS_THREAD_STACK_MAX == 0) {
+		/* Most of this testsuite uses automatic stack allocation, but
+		 * portability.posix.common.static_stack is specifically for testing with statically
+		 * allocated stacks. Eventually, that configuration should be removed from
+		 * common/testcase.yaml as it is already covered by the xsi_threads_ext testsuite.
+		 */
+		ztest_test_skip();
+	}
 
 	/* Creating 4 threads */
 	for (i = 0; i < N_THR_T; i++) {
@@ -385,9 +432,7 @@ ZTEST(pthread, test_pthread_termination)
 	zassert_equal(ret, EINVAL, "invalid cancel state set!");
 
 	for (i = 0; i < N_THR_T; i++) {
-		if (i < DETACH_THR_ID) {
-			zassert_ok(pthread_join(newthread[i], &retval));
-		}
+		zassert_ok(pthread_join(newthread[i], &retval));
 	}
 
 	/* TESTPOINT: Test for deadlock */
@@ -405,8 +450,20 @@ ZTEST(pthread, test_pthread_tryjoin)
 	int sleep_duration_ms = 200;
 	void *retval;
 
+	if (CONFIG_SYS_THREAD_STACK_MAX == 0) {
+		/* Most of this testsuite uses automatic stack allocation, but
+		 * portability.posix.common.static_stack is specifically for testing with statically
+		 * allocated stacks. Eventually, that configuration should be removed from
+		 * common/testcase.yaml as it is already covered by the xsi_threads_ext testsuite.
+		 */
+		ztest_test_skip();
+	}
+
+	clock_gettime(CLOCK_REALTIME, &sleep_timeout_abstime);
+	timespec_add_ms(&sleep_timeout_abstime, sleep_duration_ms);
+
 	/* Creating a thread that exits after 200ms*/
-	zassert_ok(pthread_create(&th, NULL, timedjoin_thread, INT_TO_POINTER(sleep_duration_ms)));
+	zassert_ok(pthread_create(&th, NULL, timedjoin_thread, NULL));
 
 	/* Attempting to join, when thread is still running, should fail */
 	usleep(USEC_PER_MSEC * sleep_duration_ms / 2);
@@ -421,44 +478,44 @@ ZTEST(pthread, test_pthread_tryjoin)
 
 ZTEST(pthread, test_pthread_timedjoin)
 {
+	int ret;
+	void *result;
 	pthread_t th = {0};
-	int sleep_duration_ms = 200;
-	void *ret;
-	struct timespec not_done;
 	struct timespec done;
+	struct timespec not_done;
 	struct timespec invalid[] = {
 		{.tv_nsec = -1},
 		{.tv_nsec = NSEC_PER_SEC},
 	};
+	int sleep_duration_ms = 200;
 
-	/* setup timespecs when the thread is still running and when it is done */
-	clock_gettime(CLOCK_REALTIME, &not_done);
-	clock_gettime(CLOCK_REALTIME, &done);
-	not_done.tv_nsec += sleep_duration_ms / 2 * NSEC_PER_MSEC;
-	done.tv_nsec += sleep_duration_ms * 1.5 * NSEC_PER_MSEC;
-	while (not_done.tv_nsec >= NSEC_PER_SEC) {
-		not_done.tv_sec++;
-		not_done.tv_nsec -= NSEC_PER_SEC;
-	}
-	while (done.tv_nsec >= NSEC_PER_SEC) {
-		done.tv_sec++;
-		done.tv_nsec -= NSEC_PER_SEC;
+	if (CONFIG_SYS_THREAD_STACK_MAX == 0) {
+		/* Most of this testsuite uses automatic stack allocation, but
+		 * portability.posix.common.static_stack is specifically for testing with statically
+		 * allocated stacks. Eventually, that configuration should be removed from
+		 * common/testcase.yaml as it is already covered by the xsi_threads_ext testsuite.
+		 */
+		ztest_test_skip();
 	}
 
-	/* Creating a thread that exits after 200ms*/
-	zassert_ok(pthread_create(&th, NULL, timedjoin_thread, INT_TO_POINTER(sleep_duration_ms)));
-
-	/* pthread_timedjoin-np must return EINVAL for invalid struct timespecs */
-	zassert_equal(pthread_timedjoin_np(th, &ret, NULL), EINVAL);
+	/* pthread_timedjoin_np must return EINVAL for invalid struct timespecs */
 	for (size_t i = 0; i < ARRAY_SIZE(invalid); ++i) {
-		zassert_equal(pthread_timedjoin_np(th, &ret, &invalid[i]), EINVAL);
+		zassert_equal(pthread_timedjoin_np(th, &result, &invalid[i]), EINVAL);
 	}
 
-	/* Attempting to join with a timeout, when the thread is still running should fail */
-	zassert_equal(pthread_timedjoin_np(th, &ret, &not_done), ETIMEDOUT);
+	clock_gettime(CLOCK_REALTIME, &sleep_timeout_abstime);
+	done = not_done = sleep_timeout_abstime;
+	timespec_add_ms(&sleep_timeout_abstime, sleep_duration_ms);
+	timespec_add_ms(&done, 2 * sleep_duration_ms);
+	timespec_add_ms(&not_done, sleep_duration_ms / 2);
 
-	/* Attempting to join with a timeout, when the thread is done, should succeed */
-	zassert_ok(pthread_timedjoin_np(th, &ret, &done));
+	zassert_ok(pthread_create(&th, NULL, timedjoin_thread, NULL));
+
+	ret = pthread_timedjoin_np(th, &result, &not_done);
+	zassert_equal(ret, ETIMEDOUT, "pthread_timedjoin_np failed with error %d", ret);
+
+	ret = pthread_timedjoin_np(th, &result, &done);
+	zassert_ok(ret, "pthread_timedjoin_np failed with error %d", ret);
 }
 
 static void *create_thread1(void *p1)
@@ -470,6 +527,15 @@ static void *create_thread1(void *p1)
 ZTEST(pthread, test_pthread_descriptor_leak)
 {
 	pthread_t pthread1;
+
+	if (CONFIG_SYS_THREAD_STACK_MAX == 0) {
+		/* Most of this testsuite uses automatic stack allocation, but
+		 * portability.posix.common.static_stack is specifically for testing with statically
+		 * allocated stacks. Eventually, that configuration should be removed from
+		 * common/testcase.yaml as it is already covered by the xsi_threads_ext testsuite.
+		 */
+		ztest_test_skip();
+	}
 
 	/* If we are leaking descriptors, then this loop will never complete */
 	for (size_t i = 0; i < CONFIG_POSIX_THREAD_THREADS_MAX * 2; ++i) {
@@ -483,6 +549,7 @@ ZTEST(pthread, test_pthread_equal)
 {
 	zassert_true(pthread_equal(pthread_self(), pthread_self()));
 	zassert_false(pthread_equal(pthread_self(), (pthread_t)4242));
+	zassert_true(pthread_equal(pthread_self(), (pthread_t)(uintptr_t)k_current_get()));
 }
 
 static void cleanup_handler(void *arg)
@@ -511,6 +578,15 @@ ZTEST(pthread, test_pthread_cleanup)
 {
 	pthread_t th;
 
+	if (CONFIG_SYS_THREAD_STACK_MAX == 0) {
+		/* Most of this testsuite uses automatic stack allocation, but
+		 * portability.posix.common.static_stack is specifically for testing with statically
+		 * allocated stacks. Eventually, that configuration should be removed from
+		 * common/testcase.yaml as it is already covered by the xsi_threads_ext testsuite.
+		 */
+		ztest_test_skip();
+	}
+
 	zassert_ok(pthread_create(&th, NULL, test_pthread_cleanup_entry, NULL));
 	zassert_ok(pthread_join(th, NULL));
 }
@@ -520,25 +596,28 @@ static bool testcancel_failed;
 
 static void *test_pthread_cancel_fn(void *arg)
 {
+	if (!k_is_user_context()) {
+		/* kernel threads must explicitly unmask any signals they wish to receive */
+		sigset_t mask;
+
+		zassert_ok(sigemptyset(&mask));
+		zassert_ok(sigaddset(&mask, K_SIG_CANCEL));
+		zassert_ok(pthread_sigmask(SIG_UNBLOCK, &mask, NULL));
+	}
+
 	zassert_ok(pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL));
 
 	testcancel_ignored = false;
 
-	/* this should be ignored */
+	/* this should be ignored, but will mark cancellation as pending */
 	pthread_testcancel();
 
 	testcancel_ignored = true;
 
-	/* this will mark it pending */
-	zassert_ok(pthread_cancel(pthread_self()));
-
-	/* enable the thread to be cancelled */
-	zassert_ok(pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL));
-
 	testcancel_failed = false;
 
-	/* this should terminate the thread */
-	pthread_testcancel();
+	/* enable the thread to be cancelled, the thread should not return */
+	zassert_ok(pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL));
 
 	testcancel_failed = true;
 
@@ -549,6 +628,15 @@ ZTEST(pthread, test_pthread_testcancel)
 {
 	pthread_t th;
 
+	if (CONFIG_SYS_THREAD_STACK_MAX == 0) {
+		/* Most of this testsuite uses automatic stack allocation, but
+		 * portability.posix.common.static_stack is specifically for testing with statically
+		 * allocated stacks. Eventually, that configuration should be removed from
+		 * common/testcase.yaml as it is already covered by the xsi_threads_ext testsuite.
+		 */
+		ztest_test_skip();
+	}
+
 	zassert_ok(pthread_create(&th, NULL, test_pthread_cancel_fn, NULL));
 	zassert_ok(pthread_join(th, NULL));
 	zassert_true(testcancel_ignored);
@@ -556,7 +644,7 @@ ZTEST(pthread, test_pthread_testcancel)
 }
 
 #if defined(_POSIX_THREAD_PRIORITY_SCHEDULING)
-static void *test_pthread_setschedprio_fn(void *arg)
+ZTEST(pthread, test_pthread_setschedprio)
 {
 	int policy;
 	int prio = 0;
@@ -564,33 +652,12 @@ static void *test_pthread_setschedprio_fn(void *arg)
 	pthread_t self = pthread_self();
 
 	zassert_equal(pthread_setschedprio(self, PRIO_INVALID), EINVAL, "EINVAL was expected");
-	zassert_equal(pthread_setschedprio(PTHREAD_INVALID, prio), ESRCH, "ESRCH was expected");
 
 	zassert_ok(pthread_setschedprio(self, prio));
 	param.sched_priority = ~prio;
 	zassert_ok(pthread_getschedparam(self, &policy, &param));
 	zassert_equal(param.sched_priority, prio, "Priority unchanged");
-
-	return NULL;
-}
-
-ZTEST(pthread, test_pthread_setschedprio)
-{
-	pthread_t th;
-
-	zassert_ok(pthread_create(&th, NULL, test_pthread_setschedprio_fn, NULL));
-	zassert_ok(pthread_join(th, NULL));
 }
 #endif
 
-static void before(void *arg)
-{
-	ARG_UNUSED(arg);
-
-	if (!IS_ENABLED(CONFIG_DYNAMIC_THREAD)) {
-		/* skip redundant testing if there is no thread pool / heap allocation */
-		ztest_test_skip();
-	}
-}
-
-ZTEST_SUITE(pthread, NULL, NULL, before, NULL, NULL);
+ZTEST_SUITE(pthread, NULL, NULL, NULL, NULL, NULL);
