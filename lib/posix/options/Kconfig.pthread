@@ -6,9 +6,14 @@
 
 menuconfig POSIX_THREADS
 	bool "POSIX thread support"
-	select SYS_ELASTIPOOL if !TC_PROVIDES_POSIX_THREADS
-	select SYS_HASH_FUNC32 if !TC_PROVIDES_POSIX_THREADS
-	select SYS_HASH_MAP if !TC_PROVIDES_POSIX_THREADS
+	select SYS_THREAD
+	select SIGNAL
+	select THREAD_CANCEL
+	select THREAD_RESULT
+	select THREAD_SPECIFIC_STORAGE
+	select THREAD_CLEANUP
+	select THREAD_DETACH
+	select MUTEX_OPTIONS
 	help
 	  Select 'y' here to enable POSIX threads, mutexes, condition variables, and
 	  thread-specific storage.
@@ -33,12 +38,36 @@ menuconfig POSIX_THREADS
 
 if POSIX_THREADS
 
+# There are a number of things in POSIX that assume the availability of heap space.
 config HEAP_MEM_POOL_ADD_SIZE_POSIX_THREADS
 	def_int 256
 
+# Required for _POSIX_THREAD_THREADS_MAX in <limits.h>
+# See https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/limits.h.html
+
+config SYS_THREAD_THREAD_MAX
+	int
+	default 64
+
+config SYS_THREAD_STACK_MAX
+	int
+	default 64
+
+# Required for conventional heap allocation of mutexes, condition variables, etc
+
+uint16_max := 65535
+
+config SYS_THREAD_CONDVAR_MAX
+	int
+	default $(uint16_max)
+
+config SYS_THREAD_MUTEX_MAX
+	int
+	default $(uint16_max)
+
 config POSIX_THREAD_THREADS_MAX
 	int "Maximum number of POSIX threads"
-	default 5
+	default SYS_THREAD_THREAD_MAX
 	help
 	  Maximum simultaneously active threads in a POSIX application.
 
@@ -47,13 +76,13 @@ config POSIX_THREAD_THREADS_MAX
 
 config MAX_PTHREAD_MUTEX_COUNT
 	int "Maximum number of POSIX mutexes"
-	default 5
+	default SYS_THREAD_MUTEX_MAX
 	help
 	  Maximum simultaneously active mutexes in a POSIX application.
 
 config MAX_PTHREAD_COND_COUNT
 	int "Maximum number of POSIX condition variables"
-	default 5
+	default SYS_THREAD_CONDVAR_MAX
 	help
 	  Maximum simultaneously active condition variables in a POSIX application.
 
@@ -67,21 +96,10 @@ config POSIX_THREAD_KEYS_MAX
 	  https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/limits.h.html
 
 config PTHREAD_RECYCLER_DELAY_MS
-	int "Delay for reclaiming dynamic pthread stacks (ms)"
-	default 100
+	int "Delay for reclaiming dynamic pthread stacks (ms) [DEPRECATED]"
+	default 0
 	help
-	  Prior to a POSIX thread terminating via k_thread_abort(), scheduled
-	  work is added to the system workqueue (SWQ) so that any resources
-	  allocated by the thread (e.g. thread stack from a pool or the heap)
-	  can be released back to the system. Because resources are also freed
-	  on calls to pthread_create() there is no need to worry about resource
-	  starvation.
-
-	  This option sets the number of milliseconds by which to defer
-	  scheduled work.
-
-	  Note: this option should be considered temporary and will likely be
-	  removed once a more synchronous solution is available.
+	  This option is deprecated.
 
 config POSIX_THREAD_ATTR_STACKADDR
 	bool "Support getting and setting POSIX thread stack addresses"
@@ -126,38 +144,6 @@ config POSIX_THREAD_PRIORITY_SCHEDULING
 	  For more information, please see
 	  https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap02.html#tag_02_01_06
 	  https://man7.org/linux/man-pages/man7/posixoptions.7.html
-
-config POSIX_PTHREAD_ATTR_STACKSIZE_BITS
-	int "Significant bits for pthread_attr_t stacksize"
-	range 8 31
-	default 23
-	help
-	  This value plays a part in determining the maximum supported
-	  pthread_attr_t stacksize. Valid stacksizes are in the range
-	  [1, N], where N = 1 << M, and M is this configuration value.
-
-config POSIX_PTHREAD_ATTR_GUARDSIZE_BITS
-	int "Significant bits for pthread_attr_t guardsize"
-	range 1 31
-	default 9
-	help
-	  This value plays a part in determining the maximum supported
-	  pthread_attr_t guardsize. Valid guardsizes are in the range
-	  [0, N-1], where N = 1 << M, and M is this configuration value.
-
-	  Actual guardsize values may be rounded-up.
-
-config POSIX_PTHREAD_ATTR_GUARDSIZE_DEFAULT
-	int "Default size of stack guard area"
-	default 0
-	help
-	  This is the default amount of space to reserve at the overflow end of a
-	  pthread stack. Since Zephyr already supports both software-based stack
-	  protection (canaries) and hardware-based stack protection (MMU or MPU),
-	  this is set to 0 by default. However, a conforming application would be
-	  required to set this to PAGESIZE. Eventually, this option might
-	  facilitate a more dynamic approach to guard areas (via software or
-	  hardware) but for now it simply increases the size of thread stacks.
 
 config POSIX_THREAD_PRIO_INHERIT
 	bool "POSIX mutex priority inheritance"
