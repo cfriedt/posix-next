@@ -66,6 +66,7 @@ static void create_join_common(const char *tag, create_fn create, join_fn join)
 {
 	int i;
 	int __maybe_unused ret;
+	bool created[NUM_CPUS] = { false };
 	uint64_t now_ms = k_uptime_get();
 	const uint64_t end_ms = now_ms + MSEC_PER_SEC * CONFIG_TEST_DURATION_S;
 	uint64_t update_ms = now_ms + MSEC_PER_SEC * UPDATE_INTERVAL_S;
@@ -75,6 +76,7 @@ static void create_join_common(const char *tag, create_fn create, join_fn join)
 		prev_counters[i] = 0;
 		ret = create(i);
 		__ASSERT(ret == 0, "%s_create(%d)[%zu] failed: %d", tag, i, counters[i], ret);
+		created[i] = true;
 	}
 
 	do {
@@ -89,6 +91,7 @@ static void create_join_common(const char *tag, create_fn create, join_fn join)
 				__ASSERT(ret, "%s_join(%d)[%zu] failed: %d", tag, i, counters[i],
 					 ret);
 				alive[i] = false;
+				created[i] = false;
 
 				/* update counter i after each (create,join) pair */
 				++counters[i];
@@ -102,6 +105,7 @@ static void create_join_common(const char *tag, create_fn create, join_fn join)
 				ret = create(i);
 				__ASSERT(ret == 0, "%s_create(%d)[%zu] failed: %d", tag, i,
 					 counters[i], ret);
+				created[i] = true;
 			}
 		}
 
@@ -123,6 +127,14 @@ static void create_join_common(const char *tag, create_fn create, join_fn join)
 		}
 		Z_SPIN_DELAY(100);
 	} while (end_ms > now_ms);
+
+	for (i = 0; i < NUM_CPUS; ++i) {
+		if (created[i]) {
+			ret = join(i);
+			__ASSERT(ret, "%s_join(%d)[%zu] failed: %d", tag, i, counters[i], ret);
+			alive[i] = false;
+		}
+	}
 
 	print_group_stats(tag);
 }
