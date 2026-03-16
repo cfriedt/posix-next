@@ -11,8 +11,7 @@
 #include <zephyr/sys/util.h>
 #include <zephyr/ztest.h>
 
-#define N_THR 3
-BUILD_ASSERT(N_THR <= CONFIG_DYNAMIC_THREAD_POOL_SIZE, "Insufficient number of dynamic threads");
+#define N_THR SYS_THREAD_THREAD_MIN
 
 LOG_MODULE_REGISTER(posix_rwlock_test);
 
