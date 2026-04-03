@@ -160,4 +160,85 @@ struct k_mutex *to_posix_mutex(pthread_mutex_t *mu);
 int posix_to_zephyr_priority(int priority, int policy);
 int zephyr_to_posix_priority(int priority, int *policy);
 
+BUILD_ASSERT((sizeof(void *) == sizeof(pthread_barrier_t)) ||
+		     (sizeof(void *) == 2 * sizeof(pthread_barrier_t)),
+	     "unsupported pthread_barrier_t size");
+BUILD_ASSERT((sizeof(void *) == sizeof(pthread_cond_t)) ||
+		     (sizeof(void *) == 2 * sizeof(pthread_cond_t)),
+	     "unsupported pthread_cond_t size");
+BUILD_ASSERT((sizeof(void *) == sizeof(pthread_key_t)) ||
+		     (sizeof(void *) == 2 * sizeof(pthread_key_t)),
+	     "unsupported pthread_key_t size");
+BUILD_ASSERT((sizeof(void *) == sizeof(pthread_mutex_t)) ||
+		     (sizeof(void *) == 2 * sizeof(pthread_mutex_t)),
+	     "unsupported pthread_mutex_t size");
+
+/* FIXME: Need to adjust the toolchain so that pthread_t, pthread_mutex_t, pthread_cond_t,
+ * pthread_key_t, etc are the same size of uintptr_t (i.e. void *) */
+static inline void *posix_to_kernel_object(void *input, size_t size, void *ref)
+{
+	void *output;
+
+	if (sizeof(void *) == size) {
+		output = (void *)*((uintptr_t *)input);
+	} else if ((sizeof(void *) == 2 * size) && (sizeof(uint32_t) == size)) {
+		output = (void *)(uintptr_t)(((uintptr_t)ref & GENMASK64(63, 32)) |
+					     *(uint32_t *)input);
+	}
+
+	return output;
+}
+
+static inline uintptr_t posix_from_kernel_object(void *input, size_t size)
+{
+	uintptr_t output;
+
+	if (sizeof(void *) == size) {
+		output = (uintptr_t)input;
+	} else if (sizeof(void *) == 2 * size) {
+		output = (uintptr_t)input & GENMASK64(31, 0);
+	}
+
+	return output;
+}
+
+static inline struct k_mutex *to_k_mutex(const pthread_mutex_t *mu)
+{
+	extern struct k_mutex *sys_mutex_pool;
+
+	return (struct k_mutex *)posix_to_kernel_object((void *)mu, sizeof(pthread_mutex_t),
+							sys_mutex_pool);
+}
+
+static inline pthread_mutex_t to_pthread_mutex(const struct k_mutex *kmu)
+{
+	return (pthread_mutex_t)posix_from_kernel_object((void *)kmu, sizeof(pthread_mutex_t));
+}
+
+static inline struct k_condvar *to_k_condvar(const pthread_cond_t *cv)
+{
+	extern struct k_condvar *sys_condvar_pool;
+
+	return (struct k_condvar *)posix_to_kernel_object((void *)cv, sizeof(pthread_cond_t),
+							  sys_condvar_pool);
+}
+
+static inline pthread_cond_t to_pthread_cond(const struct k_condvar *kcv)
+{
+	return (pthread_cond_t)posix_from_kernel_object((void *)kcv, sizeof(pthread_cond_t));
+}
+
+static inline struct k_thread *to_k_thread(const pthread_t *th)
+{
+	extern struct k_thread *sys_thread_pool;
+
+	return (struct k_thread *)posix_to_kernel_object((void *)th, sizeof(pthread_t),
+							 sys_thread_pool);
+}
+
+static inline pthread_t to_pthread_thread(const struct k_thread *kth)
+{
+	return (pthread_t)posix_from_kernel_object((void *)kth, sizeof(pthread_t));
+}
+
 #endif

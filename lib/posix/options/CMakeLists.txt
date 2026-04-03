@@ -126,7 +126,6 @@ if(NOT CONFIG_TC_PROVIDES_POSIX_THREADS)
     grp.c
     key.c
     mutex.c
-    posix_pool.c
     pthread.c
     pwd.c
   )

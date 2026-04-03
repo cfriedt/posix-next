@@ -20,13 +20,14 @@ BUILD_ASSERT(sizeof(pthread_mutexattr_t) >= sizeof(struct pthread_mutexattr));
 
 int pthread_mutex_destroy(pthread_mutex_t *mu)
 {
-	return -sys_mutex_destroy(*(struct k_mutex **)mu);
+	return -sys_mutex_destroy(to_k_mutex(mu));
 }
 
 static int pthread_mutexattr_to_flags(const pthread_mutexattr_t *attr, int *flags)
 {
+	*flags = 0;
+
 	if (attr == NULL) {
-		*flags = 0;
 		return 0;
 	}
 
@@ -44,7 +45,10 @@ static int pthread_mutexattr_to_flags(const pthread_mutexattr_t *attr, int *flag
 #endif
 		break;
 	case PTHREAD_MUTEX_RECURSIVE:
-		*flags = SYS_MUTEX_RECURSIVE;
+		*flags |= K_MUTEX_RECURSIVE;
+		break;
+	case PTHREAD_MUTEX_ERRORCHECK:
+		*flags |= K_MUTEX_ERRORCHECK;
 		break;
 	default:
 		return -EINVAL;
@@ -55,35 +59,65 @@ static int pthread_mutexattr_to_flags(const pthread_mutexattr_t *attr, int *flag
 
 int pthread_mutex_init(pthread_mutex_t *mu, const pthread_mutexattr_t *attr)
 {
+	int ret;
 	int flags = 0;
+	struct k_mutex *mutex;
 
 	if (pthread_mutexattr_to_flags(attr, &flags) < 0) {
 		return EINVAL;
 	}
 
-	return -sys_mutex_init((struct k_mutex **)mu, flags);
+	ret = sys_mutex_init(&mutex, flags);
+	if (ret < 0) {
+		return -ret;
+	}
+
+	*mu = (pthread_mutex_t)(uintptr_t)mutex;
+
+	return 0;
+}
+
+static int pthread_mutex_lock_common(pthread_mutex_t *m, k_timeout_t timeout)
+{
+	int ret;
+
+	if (*m == PTHREAD_MUTEX_INITIALIZER) {
+		ret = pthread_mutex_init(m, NULL);
+
+		if (ret != 0) {
+			return ret;
+		}
+	}
+
+	ret = -k_mutex_lock(to_k_mutex(m), timeout);
+
+	if (ret == EAGAIN) {
+		/* POSIX returns ETIMEDOUT rather than EAGAIN. Maybe adjust k_mutex_lock()? */
+		ret = ETIMEDOUT;
+	}
+
+	return ret;
 }
 
 int pthread_mutex_lock(pthread_mutex_t *m)
 {
-	return -k_mutex_lock(*(struct k_mutex **)m, K_FOREVER);
+	return pthread_mutex_lock_common(m, K_FOREVER);
 }
 
 int pthread_mutex_timedlock(pthread_mutex_t *m,
 			    const struct timespec *abstime)
 {
-	return -k_mutex_lock(*(struct k_mutex **)m,
-			     sys_timepoint_timeout(timespec_to_timepoint(abstime)));
+	return pthread_mutex_lock_common(m, sys_timepoint_timeout(timespec_to_timepoint(abstime)));
 }
 
 int pthread_mutex_trylock(pthread_mutex_t *m)
 {
-	return -k_mutex_lock(*(struct k_mutex **)m, K_NO_WAIT);
+	return pthread_mutex_lock_common(m, K_NO_WAIT);
 }
 
 int pthread_mutex_unlock(pthread_mutex_t *mu)
 {
-	return -k_mutex_unlock(*(struct k_mutex **)mu);
+	return -k_mutex_unlock(to_k_mutex(mu));
 }
 
 #if defined(_POSIX_THREAD_PRIO_PROTECT)

@@ -1,0 +1,1513 @@
+diff --git a/include/zephyr/kernel.h b/include/zephyr/kernel.h
+index 193c811b9ac..211151e2932 100644
+--- a/include/zephyr/kernel.h
++++ b/include/zephyr/kernel.h
+@@ -347,6 +347,15 @@ void k_thread_foreach_unlocked_filter_by_cpu(unsigned int cpu,
+  */
+ #define K_SSE_REGS (BIT(7))
+ 
++/**
++ * @brief Detached thread
++ *
++ * This option indicates that the thread is detached. Detached threads
++ * are not joinable. This option has no effect if @kconfig{CONFIG_THREAD_DETACH}
++ * is not enabled.
++ */
++#define K_DETACHED (BIT(8))
++
+ /* end - thread options */
+ 
+ #if !defined(_ASMLANGUAGE)
+@@ -374,7 +383,7 @@ void k_thread_foreach_unlocked_filter_by_cpu(unsigned int cpu,
+  *
+  * @see @kconfig{CONFIG_DYNAMIC_THREAD}
+  */
+-__syscall k_thread_stack_t *k_thread_stack_alloc(size_t size, int flags);
++__syscall k_thread_stack_t *k_thread_stack_alloc(size_t size, uint32_t flags);
+ 
+ /**
+  * @brief Free a dynamically allocated thread stack.
+@@ -643,6 +652,25 @@ __syscall int k_thread_join(struct k_thread *thread, k_timeout_t timeout);
+  */
+ __syscall int k_thread_rejoin(struct k_thread *thread, void **result, k_timeout_t timeout);
+ 
++/**
++ * @brief Detach a thread.
++ *
++ * A detached thread cannot be joined.
++ *
++ * @param thread Thread to detach.
++ * @retval 0 success
++ * @retval -EINVAL thread is already detached
++ */
++__syscall int k_thread_detach(struct k_thread *thread);
++
++/**
++ * @brief Check whether the current thread is detached.
++ *
++ * @retval true current thread is detached
++ * @retval false current thread is joinable
++ */
++__syscall bool k_thread_is_detached(void);
++
+ /**
+  * @brief Put the current thread to sleep.
+  *
+@@ -3299,6 +3327,15 @@ extern struct k_work_q k_sys_work_q;
+  * @{
+  */
+ 
++/** Mask to isolate mutex type from other mutex flags */
++#define K_MUTEX_TYPE_MASK BIT_MASK(8)
++
++/** Mutex option for recursive locking */
++#define K_MUTEX_RECURSIVE 1
++
++/** Mutex option for error checking */
++#define K_MUTEX_ERRORCHECK 2
++
+ /**
+  * Mutex Structure
+  * @ingroup mutex_apis
+@@ -3312,6 +3349,9 @@ struct k_mutex {
+ 	/** Current lock count */
+ 	uint32_t lock_count;
+ 
++	/** Mutex options */
++	uint32_t options;
++
+ 	/** Original thread priority */
+ 	int owner_orig_prio;
+ 
+@@ -3325,12 +3365,13 @@ struct k_mutex {
+ /**
+  * @cond INTERNAL_HIDDEN
+  */
+-#define Z_MUTEX_INITIALIZER(obj) \
+-	{ \
+-	.wait_q = Z_WAIT_Q_INIT(&(obj).wait_q), \
+-	.owner = NULL, \
+-	.lock_count = 0, \
+-	.owner_orig_prio = K_LOWEST_APPLICATION_THREAD_PRIO, \
++#define Z_MUTEX_INITIALIZER(obj)                                                                   \
++	{                                                                                          \
++		.wait_q = Z_WAIT_Q_INIT(&(obj).wait_q),                                            \
++		.owner = NULL,                                                                     \
++		.lock_count = 0,                                                                   \
++		.options = K_MUTEX_RECURSIVE,                                                      \
++		.owner_orig_prio = K_LOWEST_APPLICATION_THREAD_PRIO,                               \
+ 	}
+ 
+ /**
+@@ -3364,6 +3405,23 @@ struct k_mutex {
+  */
+ __syscall int k_mutex_init(struct k_mutex *mutex);
+ 
++/**
++ * @brief Initialize a mutex with options.
++ *
++ * This routine initializes a mutex object, prior to its first use.
++ *
++ * The main difference between this and @ref k_mutex_init is that this routine
++ * allows the caller to specify options for the mutex, such as
++ * @ref K_MUTEX_RECURSIVE.
++ *
++ * Upon completion, the mutex is available and does not have an owner.
++ *
++ * @param mutex Address of the mutex.
++ * @param options Options for mutex initialization.
++ *
++ * @retval 0 Mutex object created
++ */
++__syscall int k_mutex_init_ext(struct k_mutex *mutex, uint32_t options);
+ 
+ /**
+  * @brief Lock a mutex.
+diff --git a/include/zephyr/kernel/thread.h b/include/zephyr/kernel/thread.h
+index da690b21b6e..c719eee5cb1 100644
+--- a/include/zephyr/kernel/thread.h
++++ b/include/zephyr/kernel/thread.h
+@@ -61,7 +61,7 @@ struct _thread_base {
+ 	_wait_q_t *pended_on;
+ 
+ 	/* user facing 'thread options'; values defined in include/kernel.h */
+-	uint8_t user_options;
++	uint32_t user_options;
+ 
+ 	/* thread state */
+ 	uint8_t thread_state;
+@@ -154,6 +154,9 @@ struct _thread_base {
+        sys_slist_t cleanup;
+ #endif
+ 
++	/* TODO: need to wrap this in a kconfig */
++	sys_dlist_t sys_thread_free_node;
++
+ #ifdef CONFIG_THREAD_SPECIFIC_STORAGE
+        /** Thread-specific storage keys */
+        sys_dlist_t key_list;
+diff --git a/include/zephyr/sys/elastipool.h b/include/zephyr/sys/elastipool.h
+index 1fe70a464da..e1953eb6a10 100644
+--- a/include/zephyr/sys/elastipool.h
++++ b/include/zephyr/sys/elastipool.h
+@@ -10,7 +10,9 @@
+ #include <stdint.h>
+ 
+ #include <zephyr/kernel.h>
++#ifdef CONFIG_SYS_HASH_MAP
+ #include <zephyr/sys/hash_map.h>
++#endif
+ #include <zephyr/sys/util.h>
+ #include <zephyr/toolchain.h>
+ 
+@@ -37,6 +39,8 @@ extern "C" {
+  * @{
+  */
+ 
++struct sys_hashmap;
++
+ /**
+  * @brief Elastipool configuration
+  *
+@@ -95,7 +99,7 @@ struct sys_elastipool;
+  * @retval 0 on success
+  * @retval -ENOMEM when an allocation was not successful
+  */
+-typedef int (*sys_elastipool_api_alloc_t)(const struct sys_elastipool *pool, void **obj);
++typedef int (*sys_elastipool_api_alloc_t)(const struct sys_elastipool *pool, void **obj, uint32_t flags);
+ 
+ /**
+  * @brief Elastipool pointer validation
+@@ -152,12 +156,13 @@ typedef int (*sys_elastipool_api_free_t)(const struct sys_elastipool *pool, cons
+  * @param ptr a pointer to previously allocated memory, when @p size is zero
+  * @param size the size of the allocation, in bytes, or zero to de-allocate memory
+  * @param align the alignment requirement of the allocation, when @p size is non-zero
++ * @param flags allocator-specific flags
+  *
+  * @return `NULL` on failure or a non-`NULL` pointer to allocated memory on success.
+  *
+  * @see <a href="https://en.cppreference.com/w/c/memory/aligned_alloc">aligned_alloc</a>
+  */
+-typedef void *(*sys_elastipool_api_heap_alloc_t)(const void *ptr, size_t size, size_t align);
++typedef void *(*sys_elastipool_api_heap_alloc_t)(const void *ptr, size_t size, size_t align, uint32_t flags);
+ 
+ /**
+  * @brief Generic Elastipool API
+@@ -231,7 +236,22 @@ int sys_elastipool_init(struct sys_elastipool *pool, struct sys_elastipool_api *
+  */
+ static inline int sys_elastipool_alloc(const struct sys_elastipool *pool, void **obj)
+ {
+-	return pool->api->alloc(pool, obj);
++	return pool->api->alloc(pool, obj, 0);
++}
++
++/**
++ * @brief Allocate an object using an elastic object pool
++ *
++ * @param pool the elastipool instance
++ * @param[out] obj storage for the pointer resulting from a successful allocation
++ * @param flags allocation flags that are passed to the elastipool heap allocator when heap allocation is necessary
++ *
++ * @retval 0 on success
++ * @retval -ENOMEM when an allocation was not successful
++ */
++static inline int sys_elastipool_alloc_flags(const struct sys_elastipool *pool, void **obj, uint32_t flags)
++{
++	return pool->api->alloc(pool, obj, flags);
+ }
+ 
+ /**
+@@ -275,9 +295,9 @@ static inline int sys_elastipool_check(const struct sys_elastipool *pool, const
+ 
+ /** @cond INTERNAL_HIDDEN */
+ 
+-int sys_elastipool_api_alloc_dyn(const struct sys_elastipool *pool, void **obj);
+-int sys_elastipool_api_alloc_elastic(const struct sys_elastipool *pool, void **obj);
+-int sys_elastipool_api_alloc_static(const struct sys_elastipool *pool, void **obj);
++int sys_elastipool_api_alloc_dyn(const struct sys_elastipool *pool, void **obj, uint32_t flags);
++int sys_elastipool_api_alloc_elastic(const struct sys_elastipool *pool, void **obj, uint32_t flags);
++int sys_elastipool_api_alloc_static(const struct sys_elastipool *pool, void **obj, uint32_t flags);
+ 
+ int sys_elastipool_api_check_dyn(const struct sys_elastipool *pool, const void *ptr);
+ int sys_elastipool_api_check_elastic(const struct sys_elastipool *pool, const void *ptr);
+@@ -291,7 +311,7 @@ int sys_elastipool_api_free_dyn(const struct sys_elastipool *pool, const void *p
+ int sys_elastipool_api_free_elastic(const struct sys_elastipool *pool, const void *ptr);
+ int sys_elastipool_api_free_static(const struct sys_elastipool *pool, const void *ptr);
+ 
+-void *sys_elastipool_api_heap_alloc(const void *ptr, size_t size, size_t align);
++void *sys_elastipool_api_heap_alloc(const void *ptr, size_t size, size_t align, uint32_t flags);
+ 
+ #define SYS_ELASTIPOOL_ALLOC_FN(min, max)                                                          \
+ 	(((min) == 0) ? sys_elastipool_api_alloc_dyn                                               \
+@@ -315,7 +335,14 @@ void *sys_elastipool_api_heap_alloc(const void *ptr, size_t size, size_t align);
+ 	(((min) > 0) ? _elastipool_slab_storage_##name : NULL)
+ #define SYS_ELASTIPOOL_SLAB_BITMAP(name, min, max)                                                 \
+ 	(((min) > 0) ? _elastipool_slab_bitmap_##name : NULL)
++
++#ifdef CONFIG_SYS_HASH_MAP
++#define SYS_ELASTIPOOL_DEFINE_MAP(name) __maybe_unused SYS_HASHMAP_DEFINE_STATIC(_elastipool_map_##name)
+ #define SYS_ELASTIPOOL_MAP(name, min, max) (((max) > (min)) ? &_elastipool_map_##name : NULL)
++#else
++#define SYS_ELASTIPOOL_DEFINE_MAP(name)
++#define SYS_ELASTIPOOL_MAP(name, min, max) NULL
++#endif
+ 
+ /** @endcond */
+ 
+@@ -331,28 +358,27 @@ void *sys_elastipool_api_heap_alloc(const void *ptr, size_t size, size_t align);
+  * @param min the minimum number of objects guaranteed to be allocatable by the elastipool instance
+  * @param max the maximum number of objects possible to allocate by the elastipool instance
+  * @param allocator a user-supplied heap allocator for object-specific allocation requirements
++ * @param slab_storage pointer to a block of appropriately sized and aligned memory for pool allocation
+  *
+  * @note Users may specify the `static` keyword after @p allocator in case the elastipool instance
+  * should not be visible in the global namespace.
+  */
+-#define SYS_ELASTIPOOL_DEFINE_ADVANCED(name, size, align, min, max, allocator, ...)                \
++#define SYS_ELASTIPOOL_DEFINE_MORE_ADVANCED(name, size, align, min, max, allocator, slab_storage, ...) \
+ 	BUILD_ASSERT((size) > 0, "size must be > 0");                                              \
+ 	BUILD_ASSERT((align) >= 0, "align must be >= 0");                                          \
+ 	BUILD_ASSERT((min) >= 0, "min must be >= 0");                                              \
+ 	BUILD_ASSERT((max) > 0, "max must be > 0");                                                \
+ 	BUILD_ASSERT((max) >= (min), "max must be >= min");                                        \
+ 	BUILD_ASSERT(((align) == 0) || IS_POWER_OF_TWO(align), "align must be a power of two");    \
+-	__maybe_unused __noinit __aligned(WB_UP(align)) static uint8_t                             \
+-		_elastipool_slab_storage_##name[ROUND_UP((size), (align)) * (size)];               \
+ 	__maybe_unused static unsigned long _elastipool_slab_bitmap_##name[DIV_ROUND_UP(           \
+ 		(min), BITS_PER_BYTE * sizeof(unsigned long))];                                    \
+-	__maybe_unused SYS_HASHMAP_DEFINE_STATIC(_elastipool_map_##name);                          \
++	SYS_ELASTIPOOL_DEFINE_MAP(name);                                         \
+ 	static const struct sys_elastipool_config _elastipool_config_##name = {                    \
+ 		.obj_size = (size),                                                                \
+ 		.obj_align = (((align) == 0) ? 1 : (align)),                                       \
+ 		.min_obj = (min),                                                                  \
+ 		.max_obj = (max),                                                                  \
+-		.storage = SYS_ELASTIPOOL_SLAB_STORAGE(name, (min), (max)),                        \
++		.storage = (uint8_t *)slab_storage,                                                \
+ 		.bmp = SYS_ELASTIPOOL_SLAB_BITMAP(name, (min), (max)),                             \
+ 		.map = SYS_ELASTIPOOL_MAP(name, (min), (max)),                                     \
+ 	};                                                                                         \
+@@ -370,6 +396,28 @@ void *sys_elastipool_api_heap_alloc(const void *ptr, size_t size, size_t align);
+ 		.data = &_elastipool_data_##name,                                                  \
+ 	}
+ 
++/**
++ * @brief Define and initialize an elastipool instance at compile time (advanced)
++ *
++ * This is the advanced interface that may be used as an alternative to @ref SYS_ELASTIPOOL_DEFINE
++ * or @ref SYS_ELASTIPOOL_DEFINE_STATIC.
++ *
++ * @param name the name of the elastipool instance
++ * @param size the un-padded size of each object
++ * @param align the alignment requirement of each object
++ * @param min the minimum number of objects guaranteed to be allocatable by the elastipool instance
++ * @param max the maximum number of objects possible to allocate by the elastipool instance
++ * @param allocator a user-supplied heap allocator for object-specific allocation requirements
++ *
++ * @note Users may specify the `static` keyword after @p allocator in case the elastipool instance
++ * should not be visible in the global namespace.
++ */
++#define SYS_ELASTIPOOL_DEFINE_ADVANCED(name, size, align, min, max, allocator, ...)                \
++	__maybe_unused __noinit __aligned(WB_UP(align)) static uint8_t                             \
++		_elastipool_slab_storage_##name[ROUND_UP((size), (align)) * (size)];               \
++	SYS_ELASTIPOOL_DEFINE_MORE_ADVANCED(name, size, align, min, max, allocator,                   \
++					  _elastipool_slab_storage_##name, __VA_ARGS__)
++
+ /**
+  * @brief Define and initialize an elastipool instance at compile time
+  *
+diff --git a/include/zephyr/sys/thread.h b/include/zephyr/sys/thread.h
+new file mode 100644
+index 00000000000..7ad967f3452
+--- /dev/null
++++ b/include/zephyr/sys/thread.h
+@@ -0,0 +1,53 @@
++/*
++ * Copyright (c) The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_INCLUDE_ZEPHYR_SYS_THREAD_H_
++#define ZEPHYR_INCLUDE_ZEPHYR_SYS_THREAD_H_
++
++#include <errno.h>
++
++#include <zephyr/kernel.h>
++#include <zephyr/toolchain.h>
++#include <zephyr/sys/atomic.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++#define SYS_THREAD_PROCESS_SHARED  1
++#define SYS_THREAD_PROCESS_PRIVATE 0
++
++#define SYS_OBJ_INITIALIZER (-1)
++
++#define SYS_PROCESS_SHARED 1
++
++typedef atomic_t sys_thread_once_t;
++
++static inline void sys_thread_once(sys_thread_once_t *flag, void (*func)(void))
++{
++      if (atomic_cas((atomic_t *)flag, 0, 1)) {
++              func();
++      }
++}
++
++__syscall int sys_condvar_destroy(struct k_condvar *cond);
++__syscall int sys_condvar_init(struct k_condvar **cond);
++
++__syscall int sys_mutex_destroy(struct k_mutex *mutex);
++__syscall int sys_mutex_init(struct k_mutex **mutex, uint32_t options);
++
++__syscall int sys_thread_create(struct k_thread **th, k_thread_stack_t *stack, size_t size,
++                           k_thread_entry_t entry, void *p1, void *p2, void *p3, int prio,
++                           uint32_t options);
++__syscall int sys_thread_destroy(struct k_thread *th);
++
++#ifdef __cplusplus
++}
++#endif
++
++#include <zephyr/syscalls/thread.h>
++
++#endif /* ZEPHYR_INCLUDE_ZEPHYR_SYS_THREAD_H_ */
+diff --git a/kernel/CMakeLists.txt b/kernel/CMakeLists.txt
+index 440c5ae7a1c..390ed49f3b1 100644
+--- a/kernel/CMakeLists.txt
++++ b/kernel/CMakeLists.txt
+@@ -186,7 +186,6 @@ target_sources_ifdef(
+   )
+ 
+ if(${CONFIG_DYNAMIC_THREAD})
+-  target_sources(kernel PRIVATE dynamic.c)
+ else()
+   target_sources(kernel PRIVATE dynamic_disabled.c)
+ endif()
+diff --git a/kernel/Kconfig b/kernel/Kconfig
+index 28471dd315b..e4267bc1f02 100644
+--- a/kernel/Kconfig
++++ b/kernel/Kconfig
+@@ -267,6 +267,22 @@ config THREAD_CLEANUP
+ 	  k_thread_cleanup_pop(). Cleanup routines are executed when a thread is cancelled via
+ 	  k_thread_cancel()
+ 
++config THREAD_DETACH
++	bool "Detached threads"
++	help
++	  Say 'Y' here to support detached threads. Detached threads are not joinable and
++	  terminate only by running to completion, being aborted, receiving a terminal signal,
++	  or exiting.
++
++config MUTEX_NONRECURSIVE
++	bool "Nonrecursive mutexes"
++	help
++	  Say 'Y' here to support nonrecursive mutexes. Normally, all Zephyr mutexes are recursive
++	  by default. This option enables the flags K_MUTEX_RECURSIVE and K_MUTEX_ERRORCHECK. which
++	  can be used to control the behaviour of mutexes when threads attempt to reacquire a mutex
++	  that has already been acquired. Typed mutexes should be initialized with the function
++	  k_mutex_init_ext() prior to first use.
++
+ config THREAD_CUSTOM_DATA
+ 	bool "Thread custom data"
+ 	help
+diff --git a/kernel/cleanup.c b/kernel/cleanup.c
+index 0f751cbb028..134a40bc409 100644
+--- a/kernel/cleanup.c
++++ b/kernel/cleanup.c
+@@ -41,7 +41,7 @@ void z_vrfy_k_thread_cleanup_push(void **cleanup, k_thread_cleanup_handler_t rou
+ 
+ bool z_impl_k_thread_cleanup_pop(int execute)
+ {
+-	k_tid_t const tid = k_current_get();
++	k_tid_t const tid = _current;
+ 	sys_snode_t *const node = sys_slist_get(&tid->base.cleanup);
+ 
+ 	if (node == NULL) {
+diff --git a/kernel/dynamic.c b/kernel/dynamic.c
+index aecba3fbf97..6b1b81ba4f9 100644
+--- a/kernel/dynamic.c
++++ b/kernel/dynamic.c
+@@ -107,9 +107,18 @@ static void dyn_cb(const struct k_thread *thread, void *user_data)
+ 	struct dyn_cb_data *const data = (struct dyn_cb_data *)user_data;
+ 
+ 	if (data->stack == (k_thread_stack_t *)thread->stack_info.start) {
+-		__ASSERT(data->tid == NULL, "stack %p is associated with more than one thread!",
+-			 (void *)thread->stack_info.start);
++		if (data->tid == NULL) {
+ 		data->tid = (k_tid_t)thread;
++		} else {
++			if (data->tid == thread) {
++				/* This is the expected case where the stack is still associated
++				 * with the same thread. */
++				return;
++			}
++			__ASSERT(data->tid == thread,
++				 "stack %p is associated with more than one thread! %p and %p",
++				 (void *)thread->stack_info.start, data->tid, thread);
++		}
+ 	}
+ }
+ 
+diff --git a/kernel/init.c b/kernel/init.c
+index 14fb8074940..025164be76b 100644
+--- a/kernel/init.c
++++ b/kernel/init.c
+@@ -334,6 +334,12 @@ static void bg_thread_main(void *unused1, void *unused2, void *unused3)
+ 	z_mem_manage_boot_finish();
+ #endif /* CONFIG_MMU */
+ 
++#ifdef CONFIG_CURRENT_THREAD_USE_TLS
++	extern Z_THREAD_LOCAL k_tid_t z_tls_current;
++
++	z_tls_current = &z_main_thread;
++#endif
++
+ #ifdef CONFIG_BOOTARGS
+ 	extern int main(int, char **);
+ 	extern char **prepare_main_args(int *argc);
+diff --git a/kernel/mutex.c b/kernel/mutex.c
+index ce76e5a2af5..b446f3e116e 100644
+--- a/kernel/mutex.c
++++ b/kernel/mutex.c
+@@ -52,10 +52,11 @@ static struct k_spinlock lock;
+ static struct k_obj_type obj_type_mutex;
+ #endif /* CONFIG_OBJ_CORE_MUTEX */
+ 
+-int z_impl_k_mutex_init(struct k_mutex *mutex)
++int z_impl_k_mutex_init_ext(struct k_mutex *mutex, uint32_t options)
+ {
+ 	mutex->owner = NULL;
+ 	mutex->lock_count = 0U;
++	mutex->options = options;
+ 
+ 	z_waitq_init(&mutex->wait_q);
+ 
+@@ -70,6 +71,20 @@ int z_impl_k_mutex_init(struct k_mutex *mutex)
+ 	return 0;
+ }
+ 
++#ifdef CONFIG_USERSPACE
++static inline int z_vrfy_k_mutex_init_ext(struct k_mutex *mutex, uint32_t options)
++{
++	K_OOPS(K_SYSCALL_OBJ_INIT(mutex, K_OBJ_MUTEX));
++	return z_impl_k_mutex_init_ext(mutex, options);
++}
++#include <zephyr/syscalls/k_mutex_init_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++int z_impl_k_mutex_init(struct k_mutex *mutex)
++{
++	return z_impl_k_mutex_init_ext(mutex, K_MUTEX_RECURSIVE);
++}
++
+ #ifdef CONFIG_USERSPACE
+ static inline int z_vrfy_k_mutex_init(struct k_mutex *mutex)
+ {
+@@ -102,11 +117,23 @@ static bool adjust_owner_prio(struct k_mutex *mutex, int32_t new_prio)
+ 	return false;
+ }
+ 
++static inline int z_mutex_gettype(struct k_mutex *mutex)
++{
++	return mutex->options & K_MUTEX_TYPE_MASK;
++}
++
+ int z_impl_k_mutex_lock(struct k_mutex *mutex, k_timeout_t timeout)
+ {
+ 	int new_prio;
+ 	k_spinlock_key_t key;
+ 	bool resched = false;
++#ifdef CONFIG_MUTEX_NONRECURSIVE
++	bool recursive = z_mutex_gettype(mutex) == K_MUTEX_RECURSIVE;
++	bool errorcheck = z_mutex_gettype(mutex) == K_MUTEX_ERRORCHECK;
++#else
++	const bool recursive = true;
++	const bool errorcheck = false;
++#endif
+ 
+ 	__ASSERT(!arch_is_in_isr(), "mutexes cannot be used inside ISRs");
+ 
+@@ -114,7 +141,7 @@ int z_impl_k_mutex_lock(struct k_mutex *mutex, k_timeout_t timeout)
+ 
+ 	key = k_spin_lock(&lock);
+ 
+-	if (likely((mutex->lock_count == 0U) || (mutex->owner == _current))) {
++	if (likely((mutex->lock_count == 0U) || (recursive && (mutex->owner == _current)))) {
+ 
+ 		mutex->owner_orig_prio = (mutex->lock_count == 0U) ?
+ 					_current->base.prio :
+@@ -134,6 +161,17 @@ int z_impl_k_mutex_lock(struct k_mutex *mutex, k_timeout_t timeout)
+ 		return 0;
+ 	}
+ 
++	if (unlikely(!recursive && (mutex->owner == _current))) {
++		if (errorcheck) {
++			/* Deadlock detected */
++			k_spin_unlock(&lock, key);
++
++			SYS_PORT_TRACING_OBJ_FUNC_EXIT(k_mutex, lock, mutex, timeout, -EDEADLK);
++
++			return -EDEADLK;
++		}
++	}
++
+ 	if (unlikely(K_TIMEOUT_EQ(timeout, K_NO_WAIT))) {
+ 		k_spin_unlock(&lock, key);
+ 
+@@ -273,6 +311,7 @@ int z_impl_k_mutex_unlock(struct k_mutex *mutex)
+ 		z_reschedule(&lock, key);
+ 	} else {
+ 		mutex->lock_count = 0U;
++		mutex->owner = NULL;
+ 		k_spin_unlock(&lock, key);
+ 	}
+ 
+diff --git a/kernel/sched.c b/kernel/sched.c
+index a25535f2105..1400964033a 100644
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -1371,6 +1371,20 @@ void z_impl_k_thread_abort(k_tid_t thread)
+ }
+ #endif /* !CONFIG_ARCH_HAS_THREAD_ABORT */
+ 
++static void z_thread_postprocessing(struct k_thread *thread, void **result)
++{
++#ifdef CONFIG_THREAD_RESULT
++	if (result != NULL) {
++		*result = (void *)atomic_get(&thread->base.result);
++	}
++#endif
++
++	/* Safe even if thread or stack were statically allocated */
++	void z_thread_destroy(k_tid_t tid);
++
++	z_thread_destroy(thread);
++}
++
+ int z_impl_k_thread_rejoin(struct k_thread *thread, void **result, k_timeout_t timeout)
+ {
+ 	k_spinlock_key_t key = k_spin_lock(&_sched_spinlock);
+@@ -1378,6 +1392,11 @@ int z_impl_k_thread_rejoin(struct k_thread *thread, void **result, k_timeout_t t
+ 
+ 	SYS_PORT_TRACING_OBJ_FUNC_ENTER(k_thread, join, thread, timeout);
+ 
++#ifdef CONFIG_THREAD_DETACH
++	if ((thread->base.user_options & K_DETACHED) != 0) {
++		ret = -EINVAL;
++	} else
++#endif
+ 	if (z_is_thread_dead(thread)) {
+ 		z_sched_switch_spin(thread);
+ 		ret = 0;
+@@ -1395,16 +1414,18 @@ int z_impl_k_thread_rejoin(struct k_thread *thread, void **result, k_timeout_t t
+ 		ret = z_swap(&_sched_spinlock, key);
+ 		SYS_PORT_TRACING_OBJ_FUNC_EXIT(k_thread, join, thread, timeout, ret);
+ 
+-#ifdef CONFIG_THREAD_RESULT
+-		if ((result != NULL) && (ret == 0)) {
+-			*result = (void *)atomic_get(&thread->base.result);
++		if (ret == 0) {
++			z_thread_postprocessing(thread, result);
+ 		}
+-#endif
+ 
+ 		return ret;
+ 	}
+ 
+ 	SYS_PORT_TRACING_OBJ_FUNC_EXIT(k_thread, join, thread, timeout, ret);
++	if (ret == 0) {
++		z_thread_postprocessing(thread, result);
++	}
++
+ 
+ 	k_spin_unlock(&_sched_spinlock, key);
+ 	return ret;
+diff --git a/kernel/signal.c b/kernel/signal.c
+index 672c27538db..419d800428d 100644
+--- a/kernel/signal.c
++++ b/kernel/signal.c
+@@ -878,6 +878,19 @@ static void z_sig_handler_cancel(int sig, struct k_sig_info *info, void *ucontex
+ 	}
+ #endif
+ 
++#ifdef CONFIG_THREAD_DETACH
++	if (k_thread_is_detached()) {
++		void z_thread_destroy(k_tid_t tid);
++
++		/*
++		 * Detached threads cannot be joined, so they must queue their own thread objects
++		 * and stacks for cleanup. This is safe even if the thread and stack were statically
++		 * allocated, since dynamic allocations are tracked.
++		 */
++		z_thread_destroy(k_current_get());
++	}
++#endif
++
+ 	z_sig_handler_term(sig, info, ucontext);
+ }
+ #endif /* CONFIG_THREAD_CANCEL */
+diff --git a/kernel/thread.c b/kernel/thread.c
+index a8f8ed0a6cb..4fd28f5a540 100644
+--- a/kernel/thread.c
++++ b/kernel/thread.c
+@@ -745,6 +745,8 @@ char *z_setup_new_thread(struct k_thread *new_thread,
+ 	sys_dlist_init(&new_thread->base.key_list);
+ #endif
+ 
++	sys_dlist_init(&new_thread->base.sys_thread_free_node);
++
+ 	SYS_PORT_TRACING_OBJ_FUNC(k_thread, create, new_thread);
+ 
+ 	return stack_ptr;
+@@ -842,12 +844,12 @@ k_tid_t z_vrfy_k_thread_create(struct k_thread *new_thread,
+ #include <zephyr/syscalls/k_thread_create_mrsh.c>
+ #endif /* CONFIG_USERSPACE */
+ 
+-void z_init_thread_base(struct _thread_base *thread_base, int priority,
+-		       uint32_t initial_state, unsigned int options)
++void z_init_thread_base(struct _thread_base *thread_base, int priority, uint32_t initial_state,
++			uint32_t options)
+ {
+ 	/* k_q_node is initialized upon first insertion in a list */
+ 	thread_base->pended_on = NULL;
+-	thread_base->user_options = (uint8_t)options;
++	thread_base->user_options = options;
+ 	thread_base->thread_state = (uint8_t)initial_state;
+ 
+ 	thread_base->prio = priority;
+@@ -1262,7 +1264,8 @@ void z_dummy_thread_init(struct k_thread *dummy_thread)
+ 	z_current_thread_set(dummy_thread);
+ }
+ 
+-#if defined(CONFIG_USERSPACE) && defined(CONFIG_THREAD_RESULT)
++#ifdef CONFIG_THREAD_RESULT
++#ifdef CONFIG_USERSPACE
+ void z_vrfy_k_thread_result_set(void *result)
+ {
+        return z_impl_k_thread_result_set(result);
+@@ -1274,7 +1277,8 @@ void *z_vrfy_k_thread_result_get(void)
+        return z_impl_k_thread_result_get();
+ }
+ #include <zephyr/syscalls/k_thread_result_get_mrsh.c>
+-#endif
++#endif /* CONFIG_USERSPACE */
++#endif /* CONFIG_THREAD_RESULT */
+ 
+ #ifdef CONFIG_THREAD_CANCEL
+ bool z_impl_k_thread_cancel_getstate(void)
+@@ -1316,7 +1320,7 @@ void z_impl_k_thread_exit(void *result)
+ 	k_thread_cancel_setstate(false);
+ 
+ 	/* cancel the thread. the request will pend until cancellation is re-enabled */
+-	ret = k_thread_cancel(k_current_get());
++	ret = k_thread_cancel(_current);
+ 	__ASSERT(ret == 0, "%s() failed: %d", "k_thread_cancel", ret);
+ 
+ 	/* override the K_THREAD_CANCELLED result with the user-provided result */
+@@ -1341,3 +1345,38 @@ void z_vrfy_k_thread_exit(void *result)
+ #endif /* CONFIG_USERSPACE */
+ #endif /* CONFIG_THREAD_RESULT */
+ #endif /* CONFIG_THREAD_CANCEL */
++
++#ifdef CONFIG_THREAD_DETACH
++int z_impl_k_thread_detach(struct k_thread *th)
++{
++	if ((th->base.user_options & K_DETACHED) != 0U) {
++		return -EINVAL;
++	}
++
++	th->base.user_options |= K_DETACHED;
++	return 0;
++}
++
++#ifdef CONFIG_USERSPACE
++int z_vrfy_k_thread_detach(struct k_thread *th)
++{
++	K_OOPS(K_SYSCALL_OBJ(th, K_OBJ_THREAD));
++	return z_impl_k_thread_detach(th);
++}
++#include <zephyr/syscalls/k_thread_detach_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++bool z_impl_k_thread_is_detached(void)
++{
++	return (_current->base.user_options & K_DETACHED) != 0;
++}
++
++#ifdef CONFIG_USERSPACE
++bool z_vrfy_k_thread_is_detached(void)
++{
++	return z_impl_k_thread_is_detached();
++}
++#include <zephyr/syscalls/k_thread_is_detached_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++#endif /* CONFIG_THREAD_DETACH */
+diff --git a/kernel/thread_monitor.c b/kernel/thread_monitor.c
+index f6f7217b6f0..222ba66657e 100644
+--- a/kernel/thread_monitor.c
++++ b/kernel/thread_monitor.c
+@@ -51,7 +51,8 @@ static void thread_foreach_helper(k_thread_user_cb_t user_cb, void *user_data,
+ 
+ 	key = k_spin_lock(&z_thread_monitor_lock);
+ 
+-	for (thread = _kernel.threads; thread; thread = thread->next_thread) {
++	for (thread = _kernel.threads; thread;
++	     thread = (thread->next_thread == _kernel.threads) ? NULL : thread->next_thread) {
+ 		/* cpu is only defined when SMP=y*/
+ #ifdef CONFIG_SMP
+ 		bool on_cpu = (thread->base.cpu == cpu);
+diff --git a/kernel/tss.c b/kernel/tss.c
+index a653e925991..4c058344f6e 100644
+--- a/kernel/tss.c
++++ b/kernel/tss.c
+@@ -304,7 +304,7 @@ int z_vrfy_k_thread_setspecific(void *key, void *value)
+ int z_impl_k_thread_qspecific(void **key, void **value, k_thread_key_destructor_t *dtor)
+ {
+ 	struct k_thread_key_obj *key_obj;
+-	struct k_thread *const tid = k_current_get();
++	struct k_thread *const tid = _current;
+ 	struct k_thread_key_data *key_data;
+ 	sys_dnode_t *node_l;
+ 	int ret = -EINVAL;
+diff --git a/lib/elastipool/elastipool.c b/lib/elastipool/elastipool.c
+index ef02a45f4bc..cdcb815fa2b 100644
+--- a/lib/elastipool/elastipool.c
++++ b/lib/elastipool/elastipool.c
+@@ -103,7 +103,7 @@ static int sys_elastipool_bmp_free(unsigned long *bmp, size_t bit, size_t num_bi
+ 	return 0;
+ }
+ 
+-int sys_elastipool_api_alloc_dyn(const struct sys_elastipool *pool, void **obj)
++int sys_elastipool_api_alloc_dyn(const struct sys_elastipool *pool, void **obj, uint32_t flags)
+ {
+ 	int ret;
+ 
+@@ -114,7 +114,7 @@ int sys_elastipool_api_alloc_dyn(const struct sys_elastipool *pool, void **obj)
+ 		return -ENOMEM;
+ 	}
+ 
+-	*obj = pool->api->heap_alloc(NULL, pool->config->obj_size, pool->config->obj_align);
++	*obj = pool->api->heap_alloc(NULL, pool->config->obj_size, pool->config->obj_align, flags);
+ 	if (*obj == NULL) {
+ 		return -ENOMEM;
+ 	}
+@@ -123,7 +123,7 @@ int sys_elastipool_api_alloc_dyn(const struct sys_elastipool *pool, void **obj)
+ 
+ 	ret = sys_hashmap_insert(pool->config->map, kv, kv, NULL);
+ 	if (ret < 0) {
+-		pool->api->heap_alloc(*obj, 0, 0);
++		pool->api->heap_alloc(*obj, 0, 0, flags);
+ 		*obj = NULL;
+ 		return ret;
+ 	}
+@@ -132,17 +132,19 @@ int sys_elastipool_api_alloc_dyn(const struct sys_elastipool *pool, void **obj)
+ 	return 0;
+ }
+ 
+-int sys_elastipool_api_alloc_elastic(const struct sys_elastipool *pool, void **obj)
++int sys_elastipool_api_alloc_elastic(const struct sys_elastipool *pool, void **obj, uint32_t flags)
+ {
+-	if (sys_elastipool_api_alloc_static(pool, obj) == 0) {
++	if (sys_elastipool_api_alloc_static(pool, obj, flags) == 0) {
+ 		return 0;
+ 	}
+ 
+-	return sys_elastipool_api_alloc_dyn(pool, obj);
++	return sys_elastipool_api_alloc_dyn(pool, obj, flags);
+ }
+ 
+-int sys_elastipool_api_alloc_static(const struct sys_elastipool *pool, void **obj)
++int sys_elastipool_api_alloc_static(const struct sys_elastipool *pool, void **obj, uint32_t flags)
+ {
++	ARG_UNUSED(flags);
++
+ 	__ASSERT_NO_MSG(pool != NULL);
+ 	__ASSERT_NO_MSG(obj != NULL);
+ 
+@@ -176,7 +178,8 @@ int sys_elastipool_api_free_dyn(const struct sys_elastipool *pool, const void *o
+ 		return -EINVAL;
+ 	}
+ 
+-	(void)pool->api->heap_alloc(obj, 0, 0);
++	(void)pool->api->heap_alloc(obj, 0, 0, 0);
++	--pool->data->pool_size;
+ 
+ 	return 0;
+ }
+@@ -193,10 +196,10 @@ int sys_elastipool_api_free_elastic(const struct sys_elastipool *pool, const voi
+ int sys_elastipool_api_free_static(const struct sys_elastipool *pool, const void *obj)
+ {
+ 	__ASSERT_NO_MSG(pool != NULL);
+-	__ASSERT_NO_MSG(obj != NULL);
+ 
+ 	size_t block_size = ROUND_UP(pool->config->obj_size, pool->config->obj_align);
+-	size_t bit = (uintptr_t)((uint8_t *)obj - pool->config->storage) / block_size;
++	ptrdiff_t offset = (uint8_t *)obj - pool->config->storage;
++	size_t bit = offset / block_size;
+ 
+ 	int ret = sys_elastipool_bmp_free(pool->config->bmp, bit, pool->config->min_obj);
+ 
+@@ -214,7 +217,7 @@ static void test_hashmap_clear_callback(uint64_t key, uint64_t value, void *cook
+ 
+ 	const struct sys_elastipool *pool = (const struct sys_elastipool *)cookie;
+ 
+-	(void)pool->api->heap_alloc((void *)(uintptr_t)key, 0, 0);
++	(void)pool->api->heap_alloc((void *)(uintptr_t)key, 0, 0, 0);
+ }
+ 
+ void sys_elastipool_api_clear_dyn(const struct sys_elastipool *pool)
+@@ -236,8 +239,10 @@ void sys_elastipool_api_clear_static(const struct sys_elastipool *pool)
+ 	pool->data->pool_size = 0;
+ }
+ 
+-void *sys_elastipool_api_heap_alloc(const void *ptr, size_t size, size_t align)
++void *sys_elastipool_api_heap_alloc(const void *ptr, size_t size, size_t align, uint32_t flags)
+ {
++	ARG_UNUSED(flags);
++
+ 	/* newlib doesn't declare this by default */
+ 	void *aligned_alloc(size_t alignment, size_t size);
+ 
+diff --git a/lib/libc/picolibc/include/pthread.h b/lib/libc/picolibc/include/pthread.h
+index fc5c6fd545a..42860d72b6d 100644
+--- a/lib/libc/picolibc/include/pthread.h
++++ b/lib/libc/picolibc/include/pthread.h
+@@ -32,18 +32,17 @@
+ /* The minimum allowable stack size */
+ #define PTHREAD_STACK_MIN K_KERNEL_STACK_LEN(0)
+ 
+-void __z_pthread_cleanup_push(void *cleanup[3], void (*routine)(void *arg), void *arg);
+-void __z_pthread_cleanup_pop(int execute);
++#include <zephyr/kernel.h>
+ 
+ #undef pthread_cleanup_push
+ #define pthread_cleanup_push(_rtn, _arg)                                                           \
+ 	do /* enforce '{'-like behaviour */ {                                                      \
+ 		void *_z_pthread_cleanup[3];                                                       \
+-	__z_pthread_cleanup_push(_z_pthread_cleanup, _rtn, _arg)
++	k_thread_cleanup_push(_z_pthread_cleanup, _rtn, _arg)
+ 
+ #undef pthread_cleanup_pop
+ #define pthread_cleanup_pop(_ex)                                                                   \
+-	__z_pthread_cleanup_pop(_ex);                                                              \
++	k_thread_cleanup_pop(_ex);                                                              \
+ 	} /* enforce '}'-like behaviour */                                                         \
+ 	while (0)
+ 
+diff --git a/lib/os/CMakeLists.txt b/lib/os/CMakeLists.txt
+index 09ef3c4e4c0..c4a0f6e6098 100644
+--- a/lib/os/CMakeLists.txt
++++ b/lib/os/CMakeLists.txt
+@@ -11,6 +11,7 @@ zephyr_sources(
+   printk.c
+   sem.c
+   thread_entry.c
++  thread.c
+   )
+ 
+ if(CONFIG_ZVFS_OPEN_IGNORE_MIN)
+diff --git a/lib/os/thread.c b/lib/os/thread.c
+new file mode 100644
+index 00000000000..47952459d32
+--- /dev/null
++++ b/lib/os/thread.c
+@@ -0,0 +1,594 @@
++#include "../../kernel/include/kthread.h"
++
++#include <zephyr/internal/syscall_handler.h>
++#include <zephyr/logging/log.h>
++#include <zephyr/kernel.h>
++#include <zephyr/kernel/thread_stack.h>
++#include <zephyr/sys/internal/kobject_internal.h>
++#include <zephyr/sys/thread.h>
++#include <zephyr/sys/elastipool.h>
++#include <zephyr/toolchain.h>
++
++/* For declaring an array of k_condvar */
++#define K_CONDVAR_ARRAY_DEFINE_ELEM(idx, name) Z_CONDVAR_INITIALIZER(name[idx])
++#define K_CONDVAR_ARRAY_DEFINE(name, num)                                                          \
++	__maybe_unused struct k_condvar name[] = {                                                 \
++		LISTIFY(num, K_CONDVAR_ARRAY_DEFINE_ELEM, (,), name) };
++
++/* For declaring an array of k_mutex */
++#define K_MUTEX_ARRAY_DEFINE_ELEM(idx, name) Z_MUTEX_INITIALIZER(name[idx])
++#define K_MUTEX_ARRAY_DEFINE(name, num)                                                            \
++	__maybe_unused struct k_mutex name[] = {LISTIFY(num, K_MUTEX_ARRAY_DEFINE_ELEM, (,), name) };
++
++/* For declaring an array of k_thread */
++#define K_THREAD_ARRAY_DEFINE_ELEM(idx, name)                                                      \
++	Z_THREAD_INITIALIZER(&name[idx], (k_thread_stack_t *)z_main_stack, CONFIG_MAIN_STACK_SIZE, \
++			     NULL, NULL, NULL, NULL, 0, 0, SYS_FOREVER_MS, name##idx)
++#define K_THREAD_ARRAY_DEFINE(name, num)                                                           \
++	__maybe_unused struct k_thread name[num];                                                  \
++	STRUCT_SECTION_ITERABLE_ARRAY(_static_thread_data, name##_data,                            \
++				      num) = {LISTIFY(num, K_THREAD_ARRAY_DEFINE_ELEM, (,), name) }
++
++#ifdef CONFIG_ZTEST
++static bool print_1pool_stats(const struct sys_elastipool *pool, const char *const name);
++#endif
++
++static void *heap_obj_allocator(const void *ptr, size_t size, size_t align, uint32_t flags,
++				enum k_objects otype);
++static void sys_thread_recycle(void);
++static void sys_thread_recycle_work_handler(struct k_work *work);
++
++LOG_MODULE_REGISTER(sys_thread, LOG_LEVEL_DBG);
++static K_WORK_DELAYABLE_DEFINE(sys_thread_recycle_work, sys_thread_recycle_work_handler);
++
++static inline void *cond_pool_heap_alloc(const void *ptr, size_t size, size_t align, uint32_t flags)
++{
++	return heap_obj_allocator(ptr, size, align, flags, K_OBJ_CONDVAR);
++}
++
++static inline void *mutex_pool_heap_alloc(const void *ptr, size_t size, size_t align,
++					  uint32_t flags)
++{
++	return heap_obj_allocator(ptr, size, align, flags, K_OBJ_MUTEX);
++}
++
++static inline void *stack_pool_heap_alloc(const void *ptr, size_t size, size_t align,
++					  uint32_t flags)
++{
++	return heap_obj_allocator(ptr, size, align, flags, K_OBJ_THREAD_STACK_ELEMENT);
++}
++
++static inline void *thread_pool_heap_alloc(const void *ptr, size_t size, size_t align,
++					   uint32_t flags)
++{
++	return heap_obj_allocator(ptr, size, align, flags, K_OBJ_THREAD);
++}
++
++#if defined(CONFIG_SYS_HASH_MAP) && (CONFIG_HEAP_MEM_POOL_SIZE > 0) &&                             \
++	(!defined(CONFIG_USERSPACE) ||                                                             \
++	 (defined(CONFIG_USERSPACE) && defined(CONFIG_DYNAMIC_OBJECTS)))
++#define LIB_OS_THREAD_DYN_OBJECTS 1
++#else
++#define LIB_OS_THREAD_DYN_OBJECTS 0
++#endif
++
++#undef M
++#undef N
++#if LIB_OS_THREAD_DYN_OBJECTS
++#define M 0
++#else
++#define M CONFIG_MAX_PTHREAD_COND_COUNT
++#endif
++#define N CONFIG_MAX_PTHREAD_COND_COUNT
++
++static struct k_spinlock cond_pool_lock;
++K_CONDVAR_ARRAY_DEFINE(sys_condvar_pool, CONFIG_MAX_PTHREAD_COND_COUNT);
++SYS_ELASTIPOOL_DEFINE_MORE_ADVANCED(cond_pool, sizeof(struct k_condvar),
++				    __alignof(struct k_condvar), CONFIG_MAX_PTHREAD_COND_COUNT,
++				    CONFIG_MAX_PTHREAD_COND_COUNT, cond_pool_heap_alloc,
++				    sys_condvar_pool, static);
++
++#undef M
++#undef N
++#if LIB_OS_THREAD_DYN_OBJECTS
++#define M 0
++#else
++#define M CONFIG_MAX_PTHREAD_MUTEX_COUNT
++#endif
++#define N CONFIG_MAX_PTHREAD_MUTEX_COUNT
++
++static struct k_spinlock mutex_pool_lock;
++K_MUTEX_ARRAY_DEFINE(sys_mutex_pool, CONFIG_MAX_PTHREAD_MUTEX_COUNT);
++SYS_ELASTIPOOL_DEFINE_MORE_ADVANCED(mutex_pool, sizeof(struct k_mutex), __alignof(struct k_mutex),
++				    CONFIG_MAX_PTHREAD_MUTEX_COUNT, CONFIG_MAX_PTHREAD_MUTEX_COUNT,
++				    mutex_pool_heap_alloc, sys_mutex_pool, static);
++
++#undef M
++#undef N
++#if LIB_OS_THREAD_DYN_OBJECTS
++#define M 0
++#else
++#define M CONFIG_POSIX_THREAD_THREADS_MAX
++#endif
++#define N CONFIG_POSIX_THREAD_THREADS_MAX
++
++static struct k_spinlock stack_pool_lock;
++K_THREAD_STACK_ARRAY_DEFINE(sys_stack_pool, CONFIG_POSIX_THREAD_THREADS_MAX,
++			    CONFIG_DYNAMIC_THREAD_STACK_SIZE);
++#ifdef CONFIG_USERSPACE
++SYS_ELASTIPOOL_DEFINE_MORE_ADVANCED(stack_pool, CONFIG_DYNAMIC_THREAD_STACK_SIZE,
++				    Z_THREAD_STACK_OBJ_ALIGN(CONFIG_DYNAMIC_THREAD_STACK_SIZE),
++				    CONFIG_POSIX_THREAD_THREADS_MAX,
++				    CONFIG_POSIX_THREAD_THREADS_MAX, stack_pool_heap_alloc,
++				    sys_stack_pool, static);
++#else
++SYS_ELASTIPOOL_DEFINE_MORE_ADVANCED(stack_pool, CONFIG_DYNAMIC_THREAD_STACK_SIZE,
++				    ARCH_STACK_PTR_ALIGN, CONFIG_POSIX_THREAD_THREADS_MAX,
++				    CONFIG_POSIX_THREAD_THREADS_MAX, stack_pool_heap_alloc,
++				    sys_stack_pool, static);
++#endif
++
++#undef M
++#if LIB_OS_THREAD_DYN_OBJECTS
++#define M 0
++#else
++#define M CONFIG_POSIX_THREAD_THREADS_MAX
++#endif
++#define N CONFIG_POSIX_THREAD_THREADS_MAX
++
++static const char *const heap_obj_str(enum k_objects otype);
++
++static struct k_spinlock thread_pool_lock;
++K_THREAD_ARRAY_DEFINE(sys_thread_pool, N);
++static sys_dlist_t thread_pool_free_list = SYS_DLIST_STATIC_INIT(&thread_pool_free_list);
++SYS_ELASTIPOOL_DEFINE_MORE_ADVANCED(thread_pool, sizeof(struct k_thread),
++				    __alignof(struct k_thread), M, N, thread_pool_heap_alloc,
++				    sys_thread_pool, static);
++
++int z_impl_sys_condvar_destroy(struct k_condvar *cond)
++{
++	int ret = -EINVAL;
++
++	K_SPINLOCK(&cond_pool_lock) {
++		ret = sys_elastipool_free(&cond_pool, cond);
++	}
++
++	return ret;
++}
++
++#ifdef CONFIG_USERSPACE
++int z_vrfy_sys_condvar_destroy(struct k_condvar *cond)
++{
++	K_OOPS(K_SYSCALL_OBJ(cond, K_OBJ_CONDVAR));
++	return z_impl_sys_condvar_destroy(cond);
++}
++#include <zephyr/syscalls/sys_condvar_destroy_mrsh.c>
++#endif
++
++int z_impl_sys_condvar_init(struct k_condvar **cond)
++{
++	int ret = -ENOMEM;
++
++	K_SPINLOCK(&cond_pool_lock) {
++		ret = sys_elastipool_alloc(&cond_pool, (void **)cond);
++	}
++
++	if (ret < 0) {
++		return ret;
++	}
++
++	ret = k_condvar_init(*cond);
++	if (ret < 0) {
++		LOG_DBG("%s() failed: %d", "k_condvar_init", ret);
++		goto out;
++	}
++
++out:
++	if (ret != 0) {
++		K_SPINLOCK(&cond_pool_lock) {
++			sys_elastipool_free(&cond_pool, *cond);
++		}
++	}
++
++	return ret;
++}
++
++#ifdef CONFIG_USERSPACE
++int z_vrfy_sys_condvar_init(struct k_condvar **cond)
++{
++	K_OOPS(K_SYSCALL_MEMORY_WRITE(cond, sizeof(*cond)));
++	return z_impl_sys_condvar_init(cond);
++}
++#include <zephyr/syscalls/sys_condvar_init_mrsh.c>
++#endif
++
++int z_impl_sys_mutex_destroy(struct k_mutex *mutex)
++{
++	int ret = -EINVAL;
++
++	K_SPINLOCK(&mutex_pool_lock) {
++		ret = sys_elastipool_free(&mutex_pool, mutex);
++	}
++
++	return ret;
++}
++
++#ifdef CONFIG_USERSPACE
++int z_vrfy_sys_mutex_destroy(struct k_mutex *mutex)
++{
++	K_OOPS(K_SYSCALL_OBJ(mutex, K_OBJ_MUTEX));
++	return z_impl_sys_mutex_destroy(mutex);
++}
++#include <zephyr/syscalls/sys_mutex_destroy_mrsh.c>
++#endif
++
++int z_impl_sys_mutex_init(struct k_mutex **mutex, uint32_t options)
++{
++	int ret = -ENOMEM;
++
++	K_SPINLOCK(&mutex_pool_lock) {
++		ret = sys_elastipool_alloc(&mutex_pool, (void **)mutex);
++	}
++
++	if (ret < 0) {
++		return ret;
++	}
++
++	ret = k_mutex_init_ext(*mutex, options);
++	if (ret < 0) {
++		LOG_DBG("%s() failed: %d", "k_mutex_init_ext", ret);
++		goto out;
++	}
++
++out:
++	if (ret != 0) {
++		K_SPINLOCK(&mutex_pool_lock) {
++			sys_elastipool_free(&mutex_pool, *mutex);
++		}
++	}
++
++	return ret;
++}
++
++#ifdef CONFIG_USERSPACE
++int z_vrfy_sys_mutex_init(struct k_mutex **mutex, uint32_t options)
++{
++	K_OOPS(K_SYSCALL_OBJ(mutex, K_OBJ_MUTEX));
++	return z_impl_sys_mutex_init(mutex, options);
++}
++#include <zephyr/syscalls/sys_mutex_init_mrsh.c>
++#endif
++
++k_thread_stack_t *z_impl_k_thread_stack_alloc(size_t size, uint32_t flags)
++{
++	int ret = -ENOMEM;
++	k_thread_stack_t *stack = NULL;
++
++	K_SPINLOCK(&stack_pool_lock) {
++		ret = sys_elastipool_alloc_flags(&stack_pool, (void **)&stack, flags);
++	}
++
++	if (ret < 0) {
++		return NULL;
++	}
++
++	return stack;
++}
++
++#ifdef CONFIG_USERSPACE
++static inline k_thread_stack_t *z_vrfy_k_thread_stack_alloc(size_t size, uint32_t flags)
++{
++	return z_impl_k_thread_stack_alloc(size, flags);
++}
++#include <zephyr/syscalls/k_thread_stack_alloc_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++struct dyn_cb_data {
++	k_tid_t tid;
++	k_thread_stack_t *stack;
++};
++
++static void dyn_cb(const struct k_thread *thread, void *user_data)
++{
++	struct dyn_cb_data *const data = (struct dyn_cb_data *)user_data;
++
++	if (data->stack == (k_thread_stack_t *)thread->stack_info.start) {
++		if (data->tid == NULL) {
++			data->tid = (k_tid_t)thread;
++		} else {
++			if (data->tid == thread) {
++				/* This is the expected case where the stack is still associated
++				 * with the same thread. */
++				return;
++			}
++			__ASSERT(data->tid == thread,
++				 "stack %p is associated with more than one thread! %p and %p",
++				 (void *)thread->stack_info.start, data->tid, thread);
++		}
++	}
++}
++
++int z_impl_k_thread_stack_free(k_thread_stack_t *stack)
++{
++	struct dyn_cb_data data = {.stack = stack};
++
++	/* Get a possible tid associated with stack */
++	k_thread_foreach(dyn_cb, &data);
++
++	if (data.tid != NULL) {
++		if (!(z_is_thread_state_set(data.tid, _THREAD_DUMMY) ||
++		      z_is_thread_state_set(data.tid, _THREAD_DEAD))) {
++			LOG_DBG("tid %p is in use!", data.tid);
++			return -EBUSY;
++		}
++	}
++
++	int ret = -EINVAL;
++
++	K_SPINLOCK(&stack_pool_lock) {
++		ret = sys_elastipool_free(&stack_pool, stack);
++	}
++
++	return ret;
++}
++
++#ifdef CONFIG_USERSPACE
++static inline int z_vrfy_k_thread_stack_free(k_thread_stack_t *stack)
++{
++	/* The thread stack object must not be in initialized state.
++	 *
++	 * Thread stack objects are initialized when the thread is created
++	 * and de-initialized when the thread is destroyed. Since we can't
++	 * free a stack that is in use, we have to check that the caller
++	 * has access to the object but that it is not in use anymore.
++	 */
++	K_OOPS(K_SYSCALL_OBJ_NEVER_INIT(stack, K_OBJ_THREAD_STACK_ELEMENT));
++
++	return z_impl_k_thread_stack_free(stack);
++}
++#include <zephyr/syscalls/k_thread_stack_free_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++static void sys_thread_recycle_work_handler(struct k_work *work)
++{
++	ARG_UNUSED(work);
++
++	K_SPINLOCK(&thread_pool_lock) {
++		sys_thread_recycle();
++	}
++}
++
++static void sys_thread_recycle(void)
++{
++	/* maybe dont go through the whole list? */
++	while (!sys_dlist_is_empty(&thread_pool_free_list)) {
++		struct k_thread *thread = CONTAINER_OF(sys_dlist_get(&thread_pool_free_list),
++						       struct k_thread, base.sys_thread_free_node);
++		k_thread_stack_t *stack = (k_thread_stack_t *)((char *)thread->stack_info.start -
++							       K_KERNEL_STACK_RESERVED);
++
++		if (!(z_is_thread_state_set(thread, _THREAD_DUMMY) ||
++		      z_is_thread_state_set(thread, _THREAD_DEAD))) {
++			LOG_DBG("Skipping tid %p since it is in use", thread);
++			continue;
++		}
++
++		sys_elastipool_free(&thread_pool, thread);
++		sys_elastipool_free(&stack_pool, stack);
++	}
++}
++
++int z_impl_sys_thread_create(struct k_thread **th, k_thread_stack_t *stack, size_t size,
++			     k_thread_entry_t entry, void *p1, void *p2, void *p3, int prio,
++			     uint32_t options)
++{
++	int ret = -ENOMEM;
++
++	K_SPINLOCK(&thread_pool_lock) {
++		sys_thread_recycle();
++		ret = sys_elastipool_alloc(&thread_pool, (void **)th);
++	}
++
++	if (ret < 0) {
++		return ret;
++	}
++
++	k_thread_create(*th, stack, size, entry, p1, p2, p3, prio, options, K_NO_WAIT);
++
++	return 0;
++}
++
++#ifdef CONFIG_USERSPACE
++int z_vrfy_sys_thread_create(struct k_thread **th, k_thread_stack_t *stack, size_t size,
++			     k_thread_entry_t entry, void *p1, void *p2, void *p3, int prio,
++			     uint32_t options)
++{
++	K_OOPS(K_SYSCALL_MEMORY_WRITE(th, sizeof(*th)));
++	K_OOPS(K_SYSCALL_MEMORY_WRITE(*stack, size));
++
++	return z_impl_sys_thread_create(th, stack, size, entry, p1, p2, p3, prio, options);
++}
++#include <zephyr/syscalls/sys_thread_create_mrsh.c>
++#endif
++
++int z_impl_sys_thread_destroy(struct k_thread *th)
++{
++	K_SPINLOCK(&thread_pool_lock) {
++		sys_dlist_append(&thread_pool_free_list, &th->base.sys_thread_free_node);
++	}
++
++	return k_work_schedule(&sys_thread_recycle_work, K_MSEC(CONFIG_PTHREAD_RECYCLER_DELAY_MS));
++}
++
++#ifdef CONFIG_USERSPACE
++int z_vrfy_sys_thread_destroy(struct k_thread *th)
++{
++	K_OOPS(K_SYSCALL_OBJ(th, K_OBJ_THREAD));
++	return z_impl_sys_thread_destroy(th);
++}
++#include <zephyr/syscalls/sys_thread_destroy_mrsh.c>
++#endif
++
++void z_thread_destroy(k_tid_t tid)
++{
++	(void)sys_thread_destroy(tid);
++}
++
++/* k_object allocator */
++
++static size_t heap_obj_align(enum k_objects otype)
++{
++	switch (otype) {
++	case K_OBJ_THREAD_STACK_ELEMENT:
++		return Z_KERNEL_STACK_OBJ_ALIGN;
++#ifdef ARCH_DYNAMIC_OBJ_K_THREAD_ALIGNMENT
++	case K_OBJ_THREAD:
++		return ARCH_DYNAMIC_OBJ_K_THREAD_ALIGNMENT;
++#endif /* ARCH_DYNAMIC_OBJ_K_THREAD_ALIGNMENT */
++	default:
++		return __alignof(z_max_align_t);
++	}
++}
++
++static size_t heap_obj_size(enum k_objects otype)
++{
++	switch (otype) {
++	case K_OBJ_CONDVAR:
++		return sizeof(struct k_condvar);
++	case K_OBJ_MUTEX:
++		return sizeof(struct k_mutex);
++	case K_OBJ_THREAD_STACK_ELEMENT:
++		return K_KERNEL_STACK_LEN(CONFIG_DYNAMIC_THREAD_STACK_SIZE);
++	case K_OBJ_THREAD:
++		return sizeof(struct k_thread);
++	default:
++		__ASSERT(false, "invalid object type");
++	}
++}
++
++static const char *const heap_obj_str(enum k_objects otype)
++{
++	switch (otype) {
++	case K_OBJ_CONDVAR:
++		return "k_condvar";
++	case K_OBJ_MUTEX:
++		return "k_mutex";
++	case K_OBJ_THREAD_STACK_ELEMENT:
++		return "k_thread_stack_t";
++	case K_OBJ_THREAD:
++		return "k_thread";
++	default:
++		return "(unknown)";
++	}
++}
++
++static const struct sys_elastipool *heap_obj_pool(enum k_objects otype)
++{
++	switch (otype) {
++	case K_OBJ_CONDVAR:
++		return &cond_pool;
++	case K_OBJ_MUTEX:
++		return &mutex_pool;
++	case K_OBJ_THREAD_STACK_ELEMENT:
++		return &stack_pool;
++	case K_OBJ_THREAD:
++		return &thread_pool;
++	default:
++		return NULL;
++	}
++}
++
++static void *heap_obj_allocator(const void *obj, size_t size, size_t align, uint32_t flags,
++				enum k_objects otype)
++{
++	if (obj == NULL) {
++		void *ret = NULL;
++
++		/* allocate an object */
++		if ((flags & K_USER) != 0) {
++#if defined(CONFIG_USERSPACE) && defined(CONFIG_DYNAMIC_OBJECTS)
++			switch (otype) {
++			case K_OBJ_CONDVAR:
++				ret = k_object_alloc(K_OBJ_CONDVAR);
++				break;
++			case K_OBJ_MUTEX:
++				ret = k_object_alloc(K_OBJ_MUTEX);
++				break;
++			case K_OBJ_THREAD_STACK_ELEMENT:
++				ret = k_object_alloc_size(K_OBJ_THREAD_STACK_ELEMENT, size);
++				break;
++			case K_OBJ_THREAD:
++				ret = k_object_alloc(K_OBJ_THREAD);
++				break;
++			default:
++				__ASSERT(false, "invalid object type");
++			}
++#else
++			LOG_WRN_ONCE(
++				"Dynamic object allocation is not enabled, cannot allocate %s\n",
++				heap_obj_str(otype));
++			return NULL;
++#endif /* defined(CONFIG_USERSPACE) && defined(CONFIG_DYNAMIC_OBJECTS) */
++		} else {
++			ret = z_thread_aligned_alloc(heap_obj_align(otype), heap_obj_size(otype));
++		}
++
++		return ret;
++	}
++
++	/* deallocate an object */
++	__ASSERT(size == 0, "freeing object with non-zero size");
++
++#ifdef CONFIG_USERSPACE
++	if (k_object_find(obj)) {
++		k_object_free(obj);
++	} else {
++		k_free((void *)obj);
++	}
++#else
++	k_free((void *)obj);
++#endif /* CONFIG_USERSPACE */
++
++	const struct sys_elastipool *pool = heap_obj_pool(otype);
++
++	__ASSERT_NO_MSG(pool != NULL);
++
++	return NULL;
++}
++
++#ifdef CONFIG_ZTEST
++#include <zephyr/ztest.h>
++static bool print_1pool_stats(const struct sys_elastipool *pool, const char *const name)
++{
++	if (pool->data->pool_size == 0) {
++		return false;
++	}
++	LOG_DBG("%s pool usage: %zu/%zu", name, pool->data->pool_size, pool->config->max_obj);
++	return true;
++}
++
++static void print_stats(const struct ztest_unit_test *test, void *data)
++{
++	ARG_UNUSED(test);
++	ARG_UNUSED(data);
++
++	bool leak = false;
++	int type[] = {K_OBJ_CONDVAR, K_OBJ_MUTEX, K_OBJ_THREAD_STACK_ELEMENT, K_OBJ_THREAD};
++	const struct sys_elastipool *const pool[] = {&cond_pool, &mutex_pool, &stack_pool,
++						     &thread_pool};
++
++	/* clean up before the sys workq does to avoid false positives */
++	K_SPINLOCK(&thread_pool_lock) {
++		sys_thread_recycle();
++	}
++
++	ARRAY_FOR_EACH(type, i) {
++		leak = leak || print_1pool_stats(pool[i], heap_obj_str(type[i]));
++	}
++
++	/* This will assert if any tests leak objects*/
++	__ASSERT(!leak, "object pool leak detected");
++}
++
++ZTEST_RULE(sys_thread_rule, NULL, print_stats);
++#endif /* CONFIG_ZTEST */

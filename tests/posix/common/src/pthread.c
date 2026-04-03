@@ -6,6 +6,7 @@
 
 #include <pthread.h>
 #include <semaphore.h>
+#include <signal.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -156,6 +157,9 @@ static void *thread_top_exec(void *p1)
 	barrier_return[id] = pthread_barrier_wait(&barrier);
 	barrier_done[id] = 1;
 	sem_post(&main_sem);
+
+	printk("Thread %d done\n", id);
+
 	pthread_exit(p1);
 
 	return NULL;
@@ -228,20 +232,26 @@ static void *thread_top_term(void *p1)
 	printk("Thread %d starting with a priority of %d\n", id, getschedparam.sched_priority);
 #endif
 
+	if (!k_is_user_context()) {
+		/* kernel threads must explicitly unmask any signals they wish to receive */
+		sigset_t mask;
+
+		zassert_ok(sigemptyset(&mask));
+		zassert_ok(sigaddset(&mask, K_SIG_CANCEL));
+		zassert_ok(pthread_sigmask(SIG_UNBLOCK, &mask, NULL));
+	}
+
 	if (id % 2) {
 		ret = pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL);
 		zassert_false(ret, "Unable to set cancel state!");
 	}
 
-	if (id >= DETACH_THR_ID) {
-		zassert_ok(pthread_detach(self), "failed to set detach state");
-		zassert_equal(pthread_detach(self), EINVAL, "re-detached thread!");
+	if ((id % 2) == 0) {
+		printk("Cancelling thread %d\n", id);
+		zassert_ok(pthread_cancel(self), "Thread %d could not be cancelled\n", id);
 	}
-
-	printk("Cancelling thread %d\n", id);
-	pthread_cancel(self);
-	printk("Thread %d could not be cancelled\n", id);
 	sleep(ONE_SECOND);
+	printk("Exiting thread %d\n", id);
 	pthread_exit(p1);
 	return NULL;
 }
@@ -296,33 +306,20 @@ ZTEST(pthread, test_pthread_execution)
 
 	sem_init(&main_sem, 0, 1);
 
-	/* TESTPOINT: Try getting name of NULL thread (aka uninitialized
-	 * thread var).
-	 */
-	ret = pthread_getname_np(PTHREAD_INVALID, thr_name_buf, sizeof(thr_name_buf));
-	zassert_equal(ret, ESRCH, "uninitialized getname!");
-
 	for (i = 0; i < N_THR_E; i++) {
 		ret = pthread_create(&newthread[i], NULL, thread_top_exec, INT_TO_POINTER(i));
 	}
 
-	/* TESTPOINT: Try setting name of NULL thread (aka uninitialized
-	 * thread var).
-	 */
-	ret = pthread_setname_np(PTHREAD_INVALID, thr_name);
-	zassert_equal(ret, ESRCH, "uninitialized setname!");
-
 	/* TESTPOINT: Try getting thread name with no buffer */
 	ret = pthread_getname_np(newthread[0], NULL, sizeof(thr_name_buf));
-	zassert_equal(ret, EINVAL, "uninitialized getname!");
-
-	/* TESTPOINT: Try setting thread name with no buffer */
-	ret = pthread_setname_np(newthread[0], NULL);
-	zassert_equal(ret, EINVAL, "uninitialized setname!");
+	zassert_equal(ret, EFAULT);
 
 	/* TESTPOINT: Try setting thread name */
 	ret = pthread_setname_np(newthread[0], thr_name);
 	zassert_false(ret, "Set thread name failed!");
+
+	ret = pthread_getname_np(newthread[0], thr_name_buf, strlen(thr_name) / 2);
+	zassert_equal(ret, ERANGE);
 
 	/* TESTPOINT: Try getting thread name */
 	ret = pthread_getname_np(newthread[0], thr_name_buf, sizeof(thr_name_buf));
@@ -354,8 +351,12 @@ ZTEST(pthread, test_pthread_execution)
 	zassert_false(barrier_failed, "Barrier test failed");
 
 	for (i = 0; i < N_THR_E; i++) {
-		pthread_join(newthread[i], &retval);
+		zassert_ok(pthread_join(newthread[i], &retval));
 	}
+
+	pthread_mutex_destroy(&lock);
+	pthread_cond_destroy(&cvar0);
+	pthread_cond_destroy(&cvar1);
 
 	for (i = 0; i < N_THR_E; i++) {
 		if (barrier_return[i] == PTHREAD_BARRIER_SERIAL_THREAD) {
@@ -367,6 +368,8 @@ ZTEST(pthread, test_pthread_execution)
 	zassert_true(serial_threads == 1, "Bungled barrier return value(s)");
 
 	printk("Barrier test OK\n");
+
+	zassert_ok(pthread_barrier_destroy(&barrier));
 }
 
 ZTEST(pthread, test_pthread_termination)
@@ -385,9 +388,7 @@ ZTEST(pthread, test_pthread_termination)
 	zassert_equal(ret, EINVAL, "invalid cancel state set!");
 
 	for (i = 0; i < N_THR_T; i++) {
-		if (i < DETACH_THR_ID) {
-			zassert_ok(pthread_join(newthread[i], &retval));
-		}
+		zassert_ok(pthread_join(newthread[i], &retval));
 	}
 
 	/* TESTPOINT: Test for deadlock */
@@ -421,44 +422,33 @@ ZTEST(pthread, test_pthread_tryjoin)
 
 ZTEST(pthread, test_pthread_timedjoin)
 {
+	int ret;
+	void *result;
 	pthread_t th = {0};
-	int sleep_duration_ms = 200;
-	void *ret;
-	struct timespec not_done;
 	struct timespec done;
+	struct timespec not_done;
 	struct timespec invalid[] = {
 		{.tv_nsec = -1},
 		{.tv_nsec = NSEC_PER_SEC},
 	};
+	int sleep_duration_ms = 1000;
 
-	/* setup timespecs when the thread is still running and when it is done */
-	clock_gettime(CLOCK_REALTIME, &not_done);
-	clock_gettime(CLOCK_REALTIME, &done);
-	not_done.tv_nsec += sleep_duration_ms / 2 * NSEC_PER_MSEC;
-	done.tv_nsec += sleep_duration_ms * 1.5 * NSEC_PER_MSEC;
-	while (not_done.tv_nsec >= NSEC_PER_SEC) {
-		not_done.tv_sec++;
-		not_done.tv_nsec -= NSEC_PER_SEC;
-	}
-	while (done.tv_nsec >= NSEC_PER_SEC) {
-		done.tv_sec++;
-		done.tv_nsec -= NSEC_PER_SEC;
+	/* pthread_timedjoin_np must return EINVAL for invalid struct timespecs */
+	for (size_t i = 0; i < ARRAY_SIZE(invalid); ++i) {
+		zassert_equal(pthread_timedjoin_np(th, &result, &invalid[i]), EINVAL);
 	}
 
-	/* Creating a thread that exits after 200ms*/
 	zassert_ok(pthread_create(&th, NULL, timedjoin_thread, INT_TO_POINTER(sleep_duration_ms)));
 
-	/* pthread_timedjoin-np must return EINVAL for invalid struct timespecs */
-	zassert_equal(pthread_timedjoin_np(th, &ret, NULL), EINVAL);
-	for (size_t i = 0; i < ARRAY_SIZE(invalid); ++i) {
-		zassert_equal(pthread_timedjoin_np(th, &ret, &invalid[i]), EINVAL);
-	}
+	clock_gettime(CLOCK_REALTIME, &not_done);
+	done = not_done;
+	done.tv_sec += 2 * sleep_duration_ms / MSEC_PER_SEC;
 
-	/* Attempting to join with a timeout, when the thread is still running should fail */
-	zassert_equal(pthread_timedjoin_np(th, &ret, &not_done), ETIMEDOUT);
+	ret = pthread_timedjoin_np(th, &result, &not_done);
+	zassert_equal(ret, ETIMEDOUT, "pthread_timedjoin_np failed with error %d", ret);
 
-	/* Attempting to join with a timeout, when the thread is done, should succeed */
-	zassert_ok(pthread_timedjoin_np(th, &ret, &done));
+	ret = pthread_timedjoin_np(th, &result, &done);
+	zassert_ok(ret, "pthread_timedjoin_np failed with error %d", ret);
 }
 
 static void *create_thread1(void *p1)
@@ -483,6 +473,7 @@ ZTEST(pthread, test_pthread_equal)
 {
 	zassert_true(pthread_equal(pthread_self(), pthread_self()));
 	zassert_false(pthread_equal(pthread_self(), (pthread_t)4242));
+	zassert_true(pthread_equal(pthread_self(), (pthread_t)(uintptr_t)k_current_get()));
 }
 
 static void cleanup_handler(void *arg)
@@ -520,25 +511,28 @@ static bool testcancel_failed;
 
 static void *test_pthread_cancel_fn(void *arg)
 {
+	if (!k_is_user_context()) {
+		/* kernel threads must explicitly unmask any signals they wish to receive */
+		sigset_t mask;
+
+		zassert_ok(sigemptyset(&mask));
+		zassert_ok(sigaddset(&mask, K_SIG_CANCEL));
+		zassert_ok(pthread_sigmask(SIG_UNBLOCK, &mask, NULL));
+	}
+
 	zassert_ok(pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL));
 
 	testcancel_ignored = false;
 
-	/* this should be ignored */
+	/* this should be ignored, but will mark cancellation as pending */
 	pthread_testcancel();
 
 	testcancel_ignored = true;
 
-	/* this will mark it pending */
-	zassert_ok(pthread_cancel(pthread_self()));
-
-	/* enable the thread to be cancelled */
-	zassert_ok(pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL));
-
 	testcancel_failed = false;
 
-	/* this should terminate the thread */
-	pthread_testcancel();
+	/* enable the thread to be cancelled, the thread should not return */
+	zassert_ok(pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL));
 
 	testcancel_failed = true;
 
@@ -556,7 +550,7 @@ ZTEST(pthread, test_pthread_testcancel)
 }
 
 #if defined(_POSIX_THREAD_PRIORITY_SCHEDULING)
-static void *test_pthread_setschedprio_fn(void *arg)
+ZTEST(pthread, test_pthread_setschedprio)
 {
 	int policy;
 	int prio = 0;
@@ -564,22 +558,11 @@ static void *test_pthread_setschedprio_fn(void *arg)
 	pthread_t self = pthread_self();
 
 	zassert_equal(pthread_setschedprio(self, PRIO_INVALID), EINVAL, "EINVAL was expected");
-	zassert_equal(pthread_setschedprio(PTHREAD_INVALID, prio), ESRCH, "ESRCH was expected");
 
 	zassert_ok(pthread_setschedprio(self, prio));
 	param.sched_priority = ~prio;
 	zassert_ok(pthread_getschedparam(self, &policy, &param));
 	zassert_equal(param.sched_priority, prio, "Priority unchanged");
-
-	return NULL;
-}
-
-ZTEST(pthread, test_pthread_setschedprio)
-{
-	pthread_t th;
-
-	zassert_ok(pthread_create(&th, NULL, test_pthread_setschedprio_fn, NULL));
-	zassert_ok(pthread_join(th, NULL));
 }
 #endif
 

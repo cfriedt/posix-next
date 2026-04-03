@@ -9,6 +9,7 @@
 #include <time.h>
 
 #include <zephyr/sys/util.h>
+#include <zephyr/sys/timeutil.h>
 #include <zephyr/ztest.h>
 
 #define SLEEP_MS 100

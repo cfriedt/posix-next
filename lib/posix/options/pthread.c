@@ -12,11 +12,13 @@
 
 #include <limits.h>
 #include <pthread.h>
+#include <stdalign.h>
 #include <stdio.h>
 #include <unistd.h>
 
 #include <zephyr/init.h>
 #include <zephyr/kernel.h>
+#include <zephyr/logging/log.h>
 #include <zephyr/sys/atomic.h>
 #include <zephyr/sys/elastipool.h>
 #include <zephyr/sys/sem.h>
@@ -63,6 +65,10 @@ BUILD_ASSERT((PTHREAD_CANCEL_ENABLE == 0 || PTHREAD_CANCEL_DISABLE == 0) &&
 BUILD_ASSERT(CONFIG_POSIX_PTHREAD_ATTR_STACKSIZE_BITS + CONFIG_POSIX_PTHREAD_ATTR_GUARDSIZE_BITS <=
 	     32);
 
+LOG_MODULE_REGISTER(pthread, CONFIG_PTHREAD_LOG_LEVEL);
+
+static atomic_t pthread_concurrency;
+
 static inline size_t posix_thread_attr_get_stacksize(const struct posix_thread_attr *attr)
 {
 	return attr->stacksize + 1;
@@ -73,7 +79,7 @@ static inline void posix_thread_attr_set_stacksize(struct posix_thread_attr *att
 	attr->stacksize = stacksize - 1;
 }
 
-static int pthread_concurrency;
+static int posix_thread_attr_init(struct posix_thread_attr *attr);
 
 pthread_t pthread_self(void)
 {
@@ -175,7 +181,6 @@ int pthread_attr_setschedparam(pthread_attr_t *_attr, const struct sched_param *
 
 int pthread_attr_setstack(pthread_attr_t *_attr, void *stackaddr, size_t stacksize)
 {
-	int ret;
 	struct posix_thread_attr *attr = (struct posix_thread_attr *)_attr;
 
 	if (stackaddr == NULL) {
@@ -266,13 +271,14 @@ static void zephyr_thread_wrapper(void *arg1, void *arg2, void *arg3)
 int pthread_create(pthread_t *ZRESTRICT thread, const pthread_attr_t *ZRESTRICT attr,
 		   void *(*start_routine)(void *), void *ZRESTRICT arg)
 {
+	int options = 0;
 	struct posix_thread_attr *attrp;
-	struct posix_thread_attr default_attr;
+	struct posix_thread_attr default_attr __aligned(alignof(pthread_attr_t));
 
 	if (attr == NULL) {
-		attrp = &default_attrp;
+		attrp = &default_attr;
 
-		int ret = pthread_attr_init((pthread_attr_t *)attrp);
+		int ret = posix_thread_attr_init(attrp);
 
 		if (ret != 0) {
 			return ret;
@@ -285,9 +291,26 @@ int pthread_create(pthread_t *ZRESTRICT thread, const pthread_attr_t *ZRESTRICT 
 		}
 	}
 
-	return -sys_thread_create((struct kthread **)th, attrp->stack, attrp->stacksize,
-				  zephyr_thread_wrapper, arg, start_routine, NULL, attrp->priority,
-				  k_is_user_context() ? K_USER : 0);
+	if (k_is_user_context()) {
+		options |= K_USER;
+	}
+	if (attrp->detachstate == PTHREAD_CREATE_DETACHED) {
+		options |= K_DETACHED;
+	}
+
+	int prio;
+
+#ifdef _POSIX_THREAD_PRIORITY_SCHEDULING
+	if (attrp->inheritsched == PTHREAD_INHERIT_SCHED) {
+		prio = k_thread_priority_get(k_current_get());
+	} else
+#endif /* _POSIX_THREAD_PRIORITY_SCHEDULING */
+	{
+		prio = posix_to_zephyr_priority(attrp->priority, attrp->schedpolicy);
+	}
+
+	return -sys_thread_create((struct k_thread **)thread, attrp->stack, attrp->stacksize,
+				  zephyr_thread_wrapper, arg, start_routine, NULL, prio, options);
 }
 
 int pthread_getconcurrency(void)
@@ -305,19 +328,40 @@ int pthread_setconcurrency(int new_level)
 		return EAGAIN;
 	}
 
-	(void)atomic_set(&pthread_concurrency, value);
+	(void)atomic_set(&pthread_concurrency, new_level);
 
 	return 0;
 }
 
 int pthread_setcancelstate(int state, int *oldstate)
 {
-	return -k_thread_cancel_setstate(state, oldstate);
+	bool enabled;
+
+	if (oldstate != NULL) {
+		enabled = k_thread_cancel_getstate();
+		*oldstate = enabled ? PTHREAD_CANCEL_ENABLE : PTHREAD_CANCEL_DISABLE;
+	}
+
+	switch (state) {
+	case PTHREAD_CANCEL_ENABLE:
+		enabled = true;
+		break;
+	case PTHREAD_CANCEL_DISABLE:
+		enabled = false;
+		break;
+	default:
+		return EINVAL;
+	}
+
+	k_thread_cancel_setstate(enabled);
+
+	return 0;
 }
 
 int pthread_setcanceltype(int type, int *oldtype)
 {
-	return -k_thread_cancel_settype(type, oldtype);
+	return -ENOSYS;
+	// return -k_thread_cancel_settype(type, oldtype);
 }
 
 void pthread_testcancel(void)
@@ -327,14 +371,12 @@ void pthread_testcancel(void)
 
 int pthread_cancel(pthread_t pthread)
 {
-	return -k_thread_cancel((struct k_thread *)pthread);
+	return -k_thread_cancel(to_k_thread(&pthread));
 }
 
 int pthread_setschedparam(pthread_t pthread, int policy, const struct sched_param *param)
 {
-	int ret = ESRCH;
 	int new_prio = K_LOWEST_APPLICATION_THREAD_PRIO;
-	struct posix_thread *t = NULL;
 
 	if (param == NULL || !valid_posix_policy(policy) ||
 	    !is_posix_policy_prio_valid(param->sched_priority, policy)) {
@@ -342,15 +384,15 @@ int pthread_setschedparam(pthread_t pthread, int policy, const struct sched_para
 	}
 
 	new_prio = posix_to_zephyr_priority(param->sched_priority, policy);
+	k_thread_priority_set(to_k_thread(&pthread), new_prio);
 
-	return -k_thread_priority_set((struct k_thread *)(uintptr_t)pthread, new_prio);
+	return 0;
 }
 
 int pthread_setschedprio(pthread_t thread, int prio)
 {
 	int ret;
 	int new_prio = K_LOWEST_APPLICATION_THREAD_PRIO;
-	struct posix_thread *t = NULL;
 	int policy = -1;
 	struct sched_param param;
 
@@ -364,14 +406,13 @@ int pthread_setschedprio(pthread_t thread, int prio)
 	}
 
 	new_prio = posix_to_zephyr_priority(prio, policy);
+	k_thread_priority_set(to_k_thread(&thread), new_prio);
 
-	return -k_thread_priority_set((struct k_thread *)(uintptr_t)thread, new_prio);
+	return 0;
 }
 
-int pthread_attr_init(pthread_attr_t *_attr)
+static int posix_thread_attr_init(struct posix_thread_attr *attr)
 {
-	struct posix_thread_attr *const attr = (struct posix_thread_attr *)_attr;
-
 	if (attr == NULL) {
 		return ENOMEM;
 	}
@@ -394,8 +435,7 @@ int pthread_attr_init(pthread_attr_t *_attr)
 	if (DYNAMIC_STACK_SIZE > 0) {
 		attr->stack = k_thread_stack_alloc(DYNAMIC_STACK_SIZE + attr->guardsize,
 						   k_is_user_context() ? K_USER : 0);
-		if (attr->stack == NULL) {
-		} else {
+		if (attr->stack != NULL) {
 			posix_thread_attr_set_stacksize(attr, DYNAMIC_STACK_SIZE);
 			__ASSERT_NO_MSG(__attr_is_initialized(attr));
 			LOG_DBG("Allocated thread stack %zu@%p",
@@ -406,9 +446,14 @@ int pthread_attr_init(pthread_attr_t *_attr)
 	/* caller responsible for destroying attr */
 	attr->initialized = true;
 
-	LOG_DBG("Initialized attr %p", _attr);
+	LOG_DBG("Initialized attr %p", attr);
 
 	return 0;
+}
+
+int pthread_attr_init(pthread_attr_t *attr)
+{
+	return posix_thread_attr_init((struct posix_thread_attr *)attr);
 }
 
 int pthread_getschedparam(pthread_t pthread, int *policy, struct sched_param *param)
@@ -418,8 +463,9 @@ int pthread_getschedparam(pthread_t pthread, int *policy, struct sched_param *pa
 	}
 
 	*param = (struct sched_param){
-		.sched_priority = zephyr_to_posix_priority(k_thread_priority_get((struct k_thread *)(uintptr_t)pthread), policy),
-	};		
+		.sched_priority = zephyr_to_posix_priority(
+			k_thread_priority_get(to_k_thread(&pthread)), policy),
+	};
 
 	return 0;
 }
@@ -440,25 +486,37 @@ void pthread_exit(void *retval)
 
 int pthread_timedjoin_np(pthread_t pthread, void **status, const struct timespec *abstime)
 {
-	return -k_thread_rejoin((struct k_thread *)pthread, status,
-				 (abstime == NULL)
-					 ? K_FOREVER
-					 : sys_timepoint_timeout(timespec_to_timepoint(abstime)));
+	if (!timespec_is_valid(abstime)) {
+		return EINVAL;
+	}
+
+	/* TODO: does k_thread_(re)join() handle absolute timeouts? */
+
+	int ret = -k_thread_rejoin(to_k_thread(&pthread), status,
+				   (abstime == NULL)
+					   ? K_FOREVER
+					   : sys_timepoint_timeout(timespec_to_timepoint(abstime)));
+
+	if (ret == EBUSY) {
+		ret = ETIMEDOUT;
+	}
+
+	return ret;
 }
 
 int pthread_tryjoin_np(pthread_t pthread, void **status)
 {
-	return -k_thread_rejoin((struct k_thread *)pthread, status, K_NO_WAIT);
+	return -k_thread_rejoin(to_k_thread(&pthread), status, K_NO_WAIT);
 }
 
 int pthread_join(pthread_t pthread, void **status)
 {
-	return -k_thread_rejoin((struct k_thread *)pthread, status, K_FOREVER);
+	return -k_thread_rejoin(to_k_thread(&pthread), status, K_FOREVER);
 }
 
 int pthread_detach(pthread_t pthread)
 {
-	return sys_thread_detach((struct k_thread *)pthread);
+	return -k_thread_detach(to_k_thread(&pthread));
 }
 
 int pthread_attr_getdetachstate(const pthread_attr_t *_attr, int *detachstate)
@@ -643,21 +701,7 @@ int pthread_attr_destroy(pthread_attr_t *_attr)
 int pthread_setname_np(pthread_t thread, const char *name)
 {
 #ifdef CONFIG_THREAD_NAME
-	k_tid_t kthread;
-	struct posix_thread *t;
-
-	t = posix_get_pool_obj(&posix_thread_pool, &pthread_pool_lock, thread);
-	if (t == NULL) {
-		return ESRCH;
-	}
-
-	kthread = &t->thread;
-
-	if (name == NULL) {
-		return EINVAL;
-	}
-
-	return k_thread_name_set(kthread, name);
+	return k_thread_name_set((struct k_thread *)(uintptr_t)thread, name);
 #else
 	ARG_UNUSED(thread);
 	ARG_UNUSED(name);
@@ -668,7 +712,31 @@ int pthread_setname_np(pthread_t thread, const char *name)
 int pthread_getname_np(pthread_t thread, char *name, size_t len)
 {
 #ifdef CONFIG_THREAD_NAME
-	return k_thread_name_copy((struct k_thread *)(uintptr_t)thread, name, len - 1);
+	char buf[CONFIG_THREAD_MAX_NAME_LEN + 1];
+	struct k_thread *const th = (struct k_thread *)(uintptr_t)thread;
+
+	if (name == NULL) {
+		return EFAULT;
+	}
+
+	if (len < sizeof(buf)) {
+		int ret = k_thread_name_copy(th, buf, sizeof(buf) - 1);
+
+		if (ret < 0) {
+			return -ret;
+		}
+
+		size_t blen = strnlen(buf, sizeof(buf));
+		if (blen > len) {
+			return ERANGE;
+		}
+
+		strncpy(name, buf, len);
+
+		return 0;
+	}
+
+	return k_thread_name_copy(th, name, len - 1);
 #else
 	ARG_UNUSED(thread);
 	ARG_UNUSED(name);
@@ -686,7 +754,6 @@ int pthread_atfork(void (*prepare)(void), void (*parent)(void), void (*child)(vo
 	return ENOSYS;
 }
 
-/* this should probably go into signal.c but we need access to the lock */
 int pthread_sigmask(int how, const sigset_t *ZRESTRICT set, sigset_t *ZRESTRICT oset)
 {
 	int k_how;
@@ -705,7 +772,12 @@ int pthread_sigmask(int how, const sigset_t *ZRESTRICT set, sigset_t *ZRESTRICT 
 		return EINVAL;
 	}
 
-	return -k_thread_sigmask(k_how, (const struct k_sig_set *)set, (struct k_sig_set *)oset);
+	return -k_sig_mask(k_how, (const struct k_sig_set *)set, (struct k_sig_set *)oset);
+}
+
+int pthread_kill(pthread_t thread, int sig)
+{
+	return -k_sig_queue((struct k_thread *)(uintptr_t)thread, sig, (union k_sig_val){0});
 }
 
 int sched_yield(void)

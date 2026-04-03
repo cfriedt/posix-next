@@ -19,7 +19,7 @@ int pthread_key_delete(pthread_key_t key)
 
 int pthread_setspecific(pthread_key_t key, const void *value)
 {
-	return -k_thread_setspecific((void *)(uintptr_t)key, value);
+	return -k_thread_setspecific((void *)(uintptr_t)key, (void *)value);
 }
 
 void *pthread_getspecific(pthread_key_t key)

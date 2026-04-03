@@ -548,8 +548,8 @@ ZTEST(pthread_attr, test_pthread_attr_policy_and_priority_limits)
 		}
 
 		/* create threads with min and max priority levels for each policy */
-		ARRAY_FOR_EACH(prios, i) {
-			param.sched_priority = (i == 0) ? pmin : pmax;
+		ARRAY_FOR_EACH(prios, j) {
+			param.sched_priority = (j == 0) ? pmin : pmax;
 
 			if (!policy_enabled[policy]) {
 				zassert_not_ok(
@@ -557,19 +557,19 @@ ZTEST(pthread_attr, test_pthread_attr_policy_and_priority_limits)
 				zassert_not_ok(
 					pthread_attr_setschedparam(&attr, &param),
 					"pthread_attr_setschedparam() failed for %s (%d) of %s",
-					prios[i], param.sched_priority, policy_names[policy]);
+					prios[j], param.sched_priority, policy_names[policy]);
 				continue;
 			}
 
 			/* set policy */
 			zassert_ok(pthread_attr_setschedpolicy(&attr, policies[policy]),
 				   "pthread_attr_setschedpolicy() failed for %s (%d) of %s",
-				   prios[i], param.sched_priority, policy_names[policy]);
+				   prios[j], param.sched_priority, policy_names[policy]);
 
 			/* set priority */
 			zassert_ok(pthread_attr_setschedparam(&attr, &param),
 				   "pthread_attr_setschedparam() failed for %s (%d) of %s",
-				   prios[i], param.sched_priority, policy_names[policy]);
+				   prios[j], param.sched_priority, policy_names[policy]);
 
 			can_create_thread(&attr);
 		}
