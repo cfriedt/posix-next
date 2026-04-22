@@ -287,9 +287,6 @@ int pthread_create(pthread_t *ZRESTRICT thread, const pthread_attr_t *ZRESTRICT 
 		return EINVAL;
 	}
 
-	if (k_is_user_context()) {
-		options |= K_USER;
-	}
 	if (attrp->detachstate == PTHREAD_CREATE_DETACHED) {
 		options |= K_DETACHED;
 	}

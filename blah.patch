@@ -1,330 +1,3 @@
-diff --git a/arch/Kconfig b/arch/Kconfig
-index b6ddc22b1e8..343a48ced43 100644
---- a/arch/Kconfig
-+++ b/arch/Kconfig
-@@ -85,6 +85,7 @@ config X86
- 	bool
- 	select ARCH_IS_SET
- 	select ATOMIC_OPERATIONS_BUILTIN
-+	select ARCH_HAS_SIG_TRAMPOLINE
- 	select ARCH_SUPPORTS_COREDUMP
- 	select ARCH_SUPPORTS_COREDUMP_PRIV_STACKS
- 	select ARCH_SUPPORTS_ROM_START if !X86_64
-diff --git a/arch/arm/core/signal.c b/arch/arm/core/signal.c
-index b2ca3c529b6..f10f80f1708 100644
---- a/arch/arm/core/signal.c
-+++ b/arch/arm/core/signal.c
-@@ -6,7 +6,7 @@
- 
- #include <zephyr/kernel.h>
- 
--extern void z_sig_trampoline(void);
-+extern void arch_sig_trampoline(void);
- 
- void arch_sig_pre(struct k_thread *thread, void *arg)
- {
-@@ -16,8 +16,8 @@ void arch_sig_pre(struct k_thread *thread, void *arg)
- 	/* Backup the original SP, PC (return address), LR, and R0 from PSF */
- 	*backup = *psf;
- 
--	/* Overwrite PC (return address) to resume execution in z_sig_trampoline() */
--	psf->pc = (unsigned long)z_sig_trampoline;
-+	/* Overwrite PC (return address) to resume execution in arch_sig_trampoline() */
-+	psf->pc = (unsigned long)arch_sig_trampoline;
- }
- 
- void arch_sig_post(struct k_thread *thread, void *arg)
-diff --git a/arch/arm64/core/signal.c b/arch/arm64/core/signal.c
-index 05f477c0161..b9f9aff4b3e 100644
---- a/arch/arm64/core/signal.c
-+++ b/arch/arm64/core/signal.c
-@@ -6,8 +6,6 @@
- 
- #include <zephyr/kernel.h>
- 
--extern void z_sig_trampoline(void);
--
- void arch_sig_pre(struct k_thread *thread, void *arg)
- {
- 	struct arch_esf *const esf = arg;
-@@ -24,8 +22,8 @@ void arch_sig_pre(struct k_thread *thread, void *arg)
- 	backup->elr = esf->elr;
- 	backup->x0 = esf->x0;
- 
--	/* Overwrite PC (return address) to resume execution in z_sig_trampoline() */
--	esf->elr = (unsigned long)z_sig_trampoline;
-+	/* Overwrite PC (return address) to resume execution in arch_sig_trampoline() */
-+	esf->elr = (unsigned long)arch_sig_trampoline;
- }
- 
- void arch_sig_post(struct k_thread *thread, void *arg)
-diff --git a/arch/riscv/core/signal.c b/arch/riscv/core/signal.c
-index 42a64321160..8b8448fe3a2 100644
---- a/arch/riscv/core/signal.c
-+++ b/arch/riscv/core/signal.c
-@@ -5,8 +5,6 @@
-  */
- #include <zephyr/kernel.h>
- 
--extern void z_sig_trampoline(void);
--
- void arch_sig_pre(struct k_thread *thread, void *arg)
- {
- 	struct arch_esf *const esf = arg;
-@@ -18,8 +16,8 @@ void arch_sig_pre(struct k_thread *thread, void *arg)
- 	sig->a0 = esf->a0;
- 	sig->mepc = esf->mepc;
- 
--	/* Overwrite MEPC to resume execution in z_sig_trampoline() */
--	esf->mepc = (unsigned long)z_sig_trampoline;
-+	/* Overwrite MEPC to resume execution in arch_sig_trampoline() */
-+	esf->mepc = (unsigned long)arch_sig_trampoline;
- }
- 
- void arch_sig_post(struct k_thread *thread, void *arg)
-diff --git a/arch/x86/Kconfig b/arch/x86/Kconfig
-index e3b748cc714..b6d65f8c362 100644
---- a/arch/x86/Kconfig
-+++ b/arch/x86/Kconfig
-@@ -198,6 +198,16 @@ config X86_DEBUG_INFO
- 	  used by debuggers in debugging the system, or enable additional
- 	  debugging information to be reported at runtime.
- 
-+config X86_EH_FRAME_REGISTER
-+	bool "Register .eh_frame for x86 unwind"
-+	depends on CPP_EXCEPTIONS
-+	depends on THREAD_CANCEL
-+	default y
-+	help
-+	  Register __eh_frame_start with libgcc's unwind tables at boot time.
-+	  This is needed for reliable _Unwind_ForcedUnwind() behavior through
-+	  x86 signal/cancellation trampoline frames.
-+
- config SRAM_OFFSET
- 	default 0x100000 if X86_PC_COMPATIBLE
- 	help
-diff --git a/arch/x86/core/CMakeLists.txt b/arch/x86/core/CMakeLists.txt
-index 80200f4015b..7008fbc3fb0 100644
---- a/arch/x86/core/CMakeLists.txt
-+++ b/arch/x86/core/CMakeLists.txt
-@@ -30,6 +30,7 @@ zephyr_library_sources_ifdef(CONFIG_THREAD_LOCAL_STORAGE tls.c)
- zephyr_library_sources_ifdef(CONFIG_LLEXT elf.c)
- 
- zephyr_library_sources_ifdef(CONFIG_X86_CET cet.c)
-+zephyr_library_sources_ifdef(CONFIG_X86_EH_FRAME_REGISTER eh_frame_register.c)
- 
- if(CONFIG_X86_64)
-   include(intel64.cmake)
-diff --git a/arch/x86/core/eh_frame_register.c b/arch/x86/core/eh_frame_register.c
-new file mode 100644
-index 00000000000..c5b353ea308
---- /dev/null
-+++ b/arch/x86/core/eh_frame_register.c
-@@ -0,0 +1,27 @@
-+/*
-+ * Copyright (c) 2026
-+ *
-+ * SPDX-License-Identifier: Apache-2.0
-+ */
-+
-+#include <zephyr/init.h>
-+#include <stdint.h>
-+
-+/* Provided by the linker script when C++ unwind tables are present. */
-+extern char __eh_frame_start[];
-+
-+/* Provided by libgcc unwinder; keep weak so feature degrades safely. */
-+extern void __register_frame(void *begin) __attribute__((weak));
-+
-+static int z_x86_register_eh_frame(void)
-+{
-+	uintptr_t eh_frame_start = (uintptr_t)__eh_frame_start;
-+
-+	if ((__register_frame != NULL) && (eh_frame_start != 0U)) {
-+		__register_frame(__eh_frame_start);
-+	}
-+
-+	return 0;
-+}
-+
-+SYS_INIT(z_x86_register_eh_frame, POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
-diff --git a/arch/x86/core/ia32.cmake b/arch/x86/core/ia32.cmake
-index 7564ca6d2de..6f796080d83 100644
---- a/arch/x86/core/ia32.cmake
-+++ b/arch/x86/core/ia32.cmake
-@@ -24,7 +24,7 @@ zephyr_library_sources_ifdef(CONFIG_LAZY_FPU_SHARING	ia32/float.c)
- zephyr_library_sources_ifdef(CONFIG_GDBSTUB		ia32/gdbstub.c)
- 
- if(CONFIG_SIGNAL AND CONFIG_USERSPACE)
--  zephyr_library_sources(ia32/signal.c)
-+  zephyr_library_sources(ia32/signal.c ia32/signal_trampoline.S)
- endif()
- 
- zephyr_library_sources_ifdef(CONFIG_DEBUG_COREDUMP	ia32/coredump.c)
-diff --git a/arch/x86/core/ia32/signal.c b/arch/x86/core/ia32/signal.c
-index 7809b5fecd0..bd5c20f5222 100644
---- a/arch/x86/core/ia32/signal.c
-+++ b/arch/x86/core/ia32/signal.c
-@@ -5,10 +5,9 @@
-  */
- 
- #include <zephyr/kernel.h>
-+#include <zephyr/arch/arch_interface.h>
- #include <zephyr/internal/syscall_handler.h>
- 
--extern void z_sig_trampoline(void);
--
- void arch_sig_pre(struct k_thread *thread, void *arg)
- {
- 	uintptr_t user_sp;
-@@ -29,8 +28,10 @@ void arch_sig_pre(struct k_thread *thread, void *arg)
- 	*(uintptr_t *)user_sp = (uintptr_t)backup->eip;
- 	sf->esp = (unsigned long)user_sp;
- 
--	/* Set EIP to z_sig_trampoline so the syscall return jumps there */
--	sf->eip = (unsigned long)z_sig_trampoline;
-+	/* Set EIP to arch_sig_trampoline so the syscall return jumps there. When unwinding is
-+	 * needed, this trampoline should also perform any necessary setup.
-+	 */
-+	sf->eip = (unsigned long)arch_sig_trampoline;
- }
- 
- void arch_sig_post(struct k_thread *thread, void *arg)
-diff --git a/arch/x86/core/ia32/signal_trampoline.S b/arch/x86/core/ia32/signal_trampoline.S
-new file mode 100644
-index 00000000000..2ba458ca781
---- /dev/null
-+++ b/arch/x86/core/ia32/signal_trampoline.S
-@@ -0,0 +1,26 @@
-+/*
-+ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
-+ *
-+ * SPDX-License-Identifier: Apache-2.0
-+ */
-+
-+#include <zephyr/toolchain.h>
-+
-+GTEXT(arch_sig_trampoline)
-+
-+/*
-+ * Small arch trampoline with explicit CFI so unwinding can traverse signal
-+ * delivery into user code.
-+ */
-+SECTION_FUNC(text, arch_sig_trampoline)
-+pushl %ebp
-+.cfi_startproc
-+.cfi_def_cfa_offset 8
-+.cfi_offset %ebp, -8
-+movl %esp, %ebp
-+.cfi_def_cfa_register %ebp
-+call z_sig_trampoline
-+leave
-+.cfi_def_cfa %esp, 4
-+ret
-+.cfi_endproc
-diff --git a/arch/x86/core/intel64.cmake b/arch/x86/core/intel64.cmake
-index 1c98ab2272a..9dbf00fb31a 100644
---- a/arch/x86/core/intel64.cmake
-+++ b/arch/x86/core/intel64.cmake
-@@ -22,5 +22,5 @@ zephyr_library_sources_ifdef(CONFIG_THREAD_LOCAL_STORAGE	intel64/tls.c)
- zephyr_library_sources_ifdef(CONFIG_DEBUG_COREDUMP	intel64/coredump.c)
- 
- if(CONFIG_SIGNAL AND CONFIG_USERSPACE)
--  zephyr_library_sources(intel64/signal.c)
-+  zephyr_library_sources(intel64/signal.c intel64/signal_trampoline.S)
- endif()
-diff --git a/arch/x86/core/intel64/signal.c b/arch/x86/core/intel64/signal.c
-index 9477bf7d6fa..b4f5093635f 100644
---- a/arch/x86/core/intel64/signal.c
-+++ b/arch/x86/core/intel64/signal.c
-@@ -6,8 +6,6 @@
- 
- #include <zephyr/kernel.h>
- 
--extern void z_sig_trampoline(void);
--
- void arch_sig_pre(struct k_thread *thread, void *arg)
- {
- 	uintptr_t user_sp;
-@@ -27,8 +25,8 @@ void arch_sig_pre(struct k_thread *thread, void *arg)
- 	*(uintptr_t *)user_sp = (uintptr_t)backup->rip;
- 	sf->rsp = (unsigned long)user_sp;
- 
--	/* Overwrite RIP (return address) to resume execution in z_sig_trampoline() */
--	sf->rip = (unsigned long)z_sig_trampoline;
-+	/* Overwrite RIP (return address) to resume execution in unwind-aware trampoline */
-+	sf->rip = (unsigned long)arch_sig_trampoline;
- }
- 
- void arch_sig_post(struct k_thread *thread, void *arg)
-diff --git a/arch/x86/core/intel64/signal_trampoline.S b/arch/x86/core/intel64/signal_trampoline.S
-new file mode 100644
-index 00000000000..57512b04979
---- /dev/null
-+++ b/arch/x86/core/intel64/signal_trampoline.S
-@@ -0,0 +1,26 @@
-+/*
-+ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
-+ *
-+ * SPDX-License-Identifier: Apache-2.0
-+ */
-+
-+#include <zephyr/toolchain.h>
-+
-+GTEXT(arch_sig_trampoline)
-+
-+/*
-+ * Small arch trampoline with explicit CFI so unwinding can traverse signal
-+ * delivery into user code.
-+ */
-+SECTION_FUNC(text, arch_sig_trampoline)
-+pushq %rbp
-+.cfi_startproc
-+.cfi_def_cfa_offset 16
-+.cfi_offset %rbp, -16
-+movq %rsp, %rbp
-+.cfi_def_cfa_register %rbp
-+call z_sig_trampoline
-+leave
-+.cfi_def_cfa %rsp, 8
-+ret
-+.cfi_endproc
-diff --git a/include/zephyr/arch/arch_interface.h b/include/zephyr/arch/arch_interface.h
-index eccfed1c362..4ff6180b6ff 100644
---- a/include/zephyr/arch/arch_interface.h
-+++ b/include/zephyr/arch/arch_interface.h
-@@ -1329,6 +1329,11 @@ void arch_stack_walk(stack_trace_callback_fn callback_fn, void *cookie,
-  */
- void arch_sig_pre(struct k_thread *thread, void *arg);
- 
-+/**
-+ * @brief Architecture-specific signal trampoline entry point
-+ */
-+void arch_sig_trampoline(void);
-+
- /**
-  * @brief Architecture-specific hook to return from a userspace thread signal handler
-  *
-diff --git a/include/zephyr/kernel.h b/include/zephyr/kernel.h
-index 193c811b9ac..533d7c73041 100644
---- a/include/zephyr/kernel.h
-+++ b/include/zephyr/kernel.h
-@@ -347,6 +347,15 @@ void k_thread_foreach_unlocked_filter_by_cpu(unsigned int cpu,
-  */
- #define K_SSE_REGS (BIT(7))
- 
-+/**
-+ * @brief Detached thread
-+ *
-+ * This option indicates that the thread is detached. Detached threads
-+ * are not joinable. This option has no effect if @kconfig{CONFIG_THREAD_DETACH}
-+ * is not enabled.
-+ */
-+#define K_DETACHED (BIT(8))
-+
- /* end - thread options */
- 
- #if !defined(_ASMLANGUAGE)
 @@ -374,7 +383,7 @@ void k_thread_foreach_unlocked_filter_by_cpu(unsigned int cpu,
   *
   * @see @kconfig{CONFIG_DYNAMIC_THREAD}
@@ -478,21 +151,6 @@ index da690b21b6e..290aedea9c9 100644
  #ifdef CONFIG_THREAD_SPECIFIC_STORAGE
         /** Thread-specific storage keys */
         sys_dlist_t key_list;
-diff --git a/include/zephyr/spinlock.h b/include/zephyr/spinlock.h
-index e6f444ff05f..d189d4e4ae7 100644
---- a/include/zephyr/spinlock.h
-+++ b/include/zephyr/spinlock.h
-@@ -133,7 +133,9 @@ static ALWAYS_INLINE void z_spinlock_validate_pre(struct k_spinlock *l)
- {
- 	ARG_UNUSED(l);
- #ifdef CONFIG_SPIN_VALIDATE
--	__ASSERT(z_spin_lock_valid(l), "Invalid spinlock %p", l);
-+	if (!z_spin_lock_valid(l)) {
-+		__ASSERT(z_spin_lock_valid(l), "Invalid spinlock %p", l);
-+	}
- #ifdef CONFIG_KERNEL_COHERENCE
- 	__ASSERT_NO_MSG(z_spin_lock_mem_coherent(l));
- #endif
 diff --git a/include/zephyr/sys/elastipool.h b/include/zephyr/sys/elastipool.h
 index 94bdd199831..b6048ae1916 100644
 --- a/include/zephyr/sys/elastipool.h
@@ -1766,10 +1424,10 @@ index 00000000000..f43743a9f6c
 +endif # SYS_THREAD
 diff --git a/lib/os/thread.c b/lib/os/thread.c
 new file mode 100644
-index 00000000000..a49c366c01c
+index 00000000000..f1c05ef5119
 --- /dev/null
 +++ b/lib/os/thread.c
-@@ -0,0 +1,781 @@
+@@ -0,0 +1,770 @@
 +/*
 + * Copyright (c) 2026, Friedt Professional Engineering Services, Inc
 + *
@@ -2119,10 +1777,6 @@ index 00000000000..a49c366c01c
 +		__ASSERT_NO_MSG(IS_ARRAY_ELEMENT(sys_stack_pool, stack));
 +	}
 +
-+	if (stack != NULL) {
-+		k_thread_access_grant(_current, stack);
-+	}
-+
 +	return stack;
 +}
 +
@@ -2262,39 +1916,29 @@ index 00000000000..a49c366c01c
 +		return ret;
 +	}
 +
-+#ifdef CONFIG_USERSPACE
-+	k_object_recycle(*th);
-+	k_object_uninit(*th);
-+	if (k_is_user_context()) {
-+		k_object_access_grant(*th, _current);
-+	}
-+#endif
-+
 +	if ((stack == NULL) && (size == 0)) {
 +		size = CONFIG_SYS_THREAD_STACK_SIZE;
 +		stack = k_thread_stack_alloc(size, options);
-+	}
-+
-+	if (stack == NULL) {
-+		K_SPINLOCK(&thread_pool_lock) {
-+			(void)sys_elastipool_free(&thread_pool, *th);
++		if (stack == NULL) {
++			K_SPINLOCK(&thread_pool_lock) {
++				(void)sys_elastipool_free(&thread_pool, *th);
++			}
++			return -ENOMEM;
 +		}
-+		return -ENOMEM;
++#ifdef CONFIG_USERSPACE
++		k_object_access_grant(stack, *th);
++		k_object_access_grant(stack, _current);
++#endif
 +	}
 +
 +#ifdef CONFIG_USERSPACE
-+	extern k_tid_t z_vrfy_k_thread_create(struct k_thread *new_thread,
-+				  k_thread_stack_t *stack,
-+				  size_t stack_size,
-+				  k_thread_entry_t entry,
-+				  void *p1, void *p2, void *p3,
-+				  int prio, uint32_t options, k_timeout_t delay);
-+	/*
-+	 * If userspace is enabled, and k_thread_create() is called here, we would
-+	 * inadvertantly skip object verification for both the thread and the stack. That's
-+	 * something we definitely want to avoid doing. See e.g. generated syscall wrappers and
-+	 * z_syscall_trap().
-+	 */
++	k_tid_t z_vrfy_k_thread_create(struct k_thread * new_thread, k_thread_stack_t * stack,
++				       size_t stack_size, k_thread_entry_t entry, void *p1,
++				       void *p2, void *p3, int prio, uint32_t options,
++				       k_timeout_t delay);
++
++	k_object_access_grant(*th, _current);
++	k_object_uninit(*th);
 +	z_vrfy_k_thread_create(*th, stack, size, entry, p1, p2, p3, prio, options, K_NO_WAIT);
 +#else
 +	k_thread_create(*th, stack, size, entry, p1, p2, p3, prio, options, K_NO_WAIT);
@@ -2309,6 +1953,9 @@ index 00000000000..a49c366c01c
 +			     uint32_t options)
 +{
 +	K_OOPS(K_SYSCALL_MEMORY_WRITE(th, sizeof(*th)));
++
++	/* user threads may only create other user threads */
++	options |= K_USER;
 +
 +	/* Further verification is performed in z_vrfy_k_thread_create() */
 +	return z_impl_sys_thread_create(th, stack, size, entry, p1, p2, p3, prio, options);

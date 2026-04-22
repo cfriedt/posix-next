@@ -74,7 +74,7 @@ static void specific_destructor(void *arg)
 /* Test thread that allocates resources and gets cancelled */
 static void *thread_func(void *arg)
 {
-	pthread_key_t key = *(pthread_key_t *)arg;
+	pthread_key_t key = static_cast<pthread_key_t>(reinterpret_cast<uintptr_t>(arg));
 
 	/* Set thread-specific data */
 	int *tsd_value = new int(42);
@@ -131,7 +131,8 @@ ZTEST(posix_threads, test_pthread_cancel_cpp)
 	zassert_ok(pthread_key_create(&key, specific_destructor));
 
 	/* Create thread */
-	zassert_ok(pthread_create(&thread, NULL, thread_func, &key));
+	zassert_ok(pthread_create(&thread, NULL, thread_func,
+				 (void *)static_cast<uintptr_t>(key)));
 
 	/* Give thread time to start and allocate resources */
 	k_msleep(100);
@@ -314,7 +315,8 @@ ZTEST_USER(posix_threads, test_pthread_cancel_cpp_userspace)
 	zassert_ok(pthread_key_create(&userspace_key, specific_destructor));
 
 	/* Create thread */
-	zassert_ok(pthread_create(&thread, NULL, thread_func, &userspace_key));
+	zassert_ok(pthread_create(&thread, NULL, thread_func,
+				 (void *)static_cast<uintptr_t>(userspace_key)));
 
 	/* Give thread time to start and allocate resources */
 	k_msleep(100);
