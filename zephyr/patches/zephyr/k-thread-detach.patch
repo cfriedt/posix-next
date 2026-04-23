@@ -1,0 +1,170 @@
+diff --git a/include/zephyr/kernel.h b/include/zephyr/kernel.h
+index 193c811b9ac..2e07c2c5285 100644
+--- a/include/zephyr/kernel.h
++++ b/include/zephyr/kernel.h
+@@ -347,6 +347,15 @@ void k_thread_foreach_unlocked_filter_by_cpu(unsigned int cpu,
+  */
+ #define K_SSE_REGS (BIT(7))
+ 
++/**
++ * @brief Detached thread
++ *
++ * This option indicates that the thread is detached. Detached threads
++ * are not joinable. This option has no effect if @kconfig{CONFIG_THREAD_DETACH}
++ * is not enabled.
++ */
++#define K_DETACHED (BIT(8))
++
+ /* end - thread options */
+ 
+ #if !defined(_ASMLANGUAGE)
+@@ -643,6 +652,28 @@ __syscall int k_thread_join(struct k_thread *thread, k_timeout_t timeout);
+  */
+ __syscall int k_thread_rejoin(struct k_thread *thread, void **result, k_timeout_t timeout);
+ 
++#if defined(CONFIG_THREAD_DETACH) || defined(__DOXYGEN__)
++/**
++ * @brief Detach a thread.
++ *
++ * A detached thread cannot be joined.
++ *
++ * @param thread Thread to detach.
++ * @retval 0 success
++ * @retval -EINVAL thread is already detached
++ */
++__syscall int k_thread_detach(struct k_thread *thread);
++
++/**
++ * @brief Check whether a thread is detached.
++ *
++ * @param thread Thread to check.
++ * @retval true thread is detached
++ * @retval false thread is joinable
++ */
++__syscall bool k_thread_is_detached(struct k_thread *thread);
++#endif /* defined(CONFIG_THREAD_DETACH) || defined(__DOXYGEN__) */
++
+ /**
+  * @brief Put the current thread to sleep.
+  *
+diff --git a/include/zephyr/kernel/thread.h b/include/zephyr/kernel/thread.h
+index da690b21b6e..b0d3b32e778 100644
+--- a/include/zephyr/kernel/thread.h
++++ b/include/zephyr/kernel/thread.h
+@@ -61,7 +61,7 @@ struct _thread_base {
+ 	_wait_q_t *pended_on;
+ 
+ 	/* user facing 'thread options'; values defined in include/kernel.h */
+-	uint8_t user_options;
++	uint32_t user_options;
+ 
+ 	/* thread state */
+ 	uint8_t thread_state;
+diff --git a/kernel/Kconfig b/kernel/Kconfig
+index cdc0ca8163e..76b7a25d4ea 100644
+--- a/kernel/Kconfig
++++ b/kernel/Kconfig
+@@ -287,6 +287,13 @@ config THREAD_CLEANUP
+ 	  k_thread_cleanup_pop(). Cleanup routines are executed when a thread is cancelled via
+ 	  k_thread_cancel()
+ 
++config THREAD_DETACH
++	bool "Detached threads"
++	help
++	  Say 'Y' here to support detached threads. Detached threads are not joinable and
++	  terminate only by running to completion, being aborted, receiving a terminal signal,
++	  or exiting.
++
+ config THREAD_CUSTOM_DATA
+ 	bool "Thread custom data"
+ 	help
+diff --git a/kernel/sched.c b/kernel/sched.c
+index 092f56f0d1d..02b39e54e9c 100644
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -1392,6 +1392,11 @@ int z_impl_k_thread_rejoin(struct k_thread *thread, void **result, k_timeout_t t
+ 
+ 	SYS_PORT_TRACING_OBJ_FUNC_ENTER(k_thread, join, thread, timeout);
+ 
++#ifdef CONFIG_THREAD_DETACH
++	if (k_thread_is_detached(thread)) {
++		ret = -EINVAL;
++	} else
++#endif
+ 	if (z_is_thread_dead(thread)) {
+ 		z_sched_switch_spin(thread);
+ 		ret = 0;
+diff --git a/kernel/thread.c b/kernel/thread.c
+index b71b3f02efd..a6ac55c6216 100644
+--- a/kernel/thread.c
++++ b/kernel/thread.c
+@@ -843,11 +843,11 @@ k_tid_t z_vrfy_k_thread_create(struct k_thread *new_thread,
+ #endif /* CONFIG_USERSPACE */
+ 
+ void z_init_thread_base(struct _thread_base *thread_base, int priority,
+-		       uint32_t initial_state, unsigned int options)
++		       uint32_t initial_state, uint32_t options)
+ {
+ 	/* k_q_node is initialized upon first insertion in a list */
+ 	thread_base->pended_on = NULL;
+-	thread_base->user_options = (uint8_t)options;
++	thread_base->user_options = options;
+ 	thread_base->thread_state = (uint8_t)initial_state;
+ 
+ 	thread_base->prio = priority;
+@@ -1344,3 +1344,55 @@ void z_vrfy_k_thread_exit(void *result)
+ #include <zephyr/syscalls/k_thread_exit_mrsh.c>
+ #endif /* CONFIG_USERSPACE */
+ #endif /* CONFIG_THREAD_CANCEL */
++
++#ifdef CONFIG_THREAD_DETACH
++int z_impl_k_thread_detach(struct k_thread *th)
++{
++	int ret = 0;
++
++	K_SPINLOCK(&_sched_spinlock) {
++		if ((th->base.user_options & K_DETACHED) != 0U) {
++			ret = -EINVAL;
++			K_SPINLOCK_BREAK;
++		}
++
++		th->base.user_options |= K_DETACHED;
++	}
++
++	return ret;
++}
++
++#ifdef CONFIG_USERSPACE
++int z_vrfy_k_thread_detach(struct k_thread *th)
++{
++	K_OOPS(K_SYSCALL_OBJ(th, K_OBJ_THREAD));
++	return z_impl_k_thread_detach(th);
++}
++#include <zephyr/syscalls/k_thread_detach_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++bool z_impl_k_thread_is_detached(struct k_thread *thread)
++{
++#if 0
++	bool detached = false;
++
++	K_SPINLOCK(&_sched_spinlock) {
++		detached = (thread->base.user_options & K_DETACHED) != 0;
++	}
++
++	return detached;
++#else
++	return (thread->base.user_options & K_DETACHED) != 0;
++#endif
++}
++
++#ifdef CONFIG_USERSPACE
++bool z_vrfy_k_thread_is_detached(struct k_thread *thread)
++{
++	K_OOPS(K_SYSCALL_OBJ(thread, K_OBJ_THREAD));
++	return z_impl_k_thread_is_detached(thread);
++}
++#include <zephyr/syscalls/k_thread_is_detached_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++#endif /* CONFIG_THREAD_DETACH */
