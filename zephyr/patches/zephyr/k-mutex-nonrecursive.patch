@@ -1,0 +1,315 @@
+diff --git a/include/zephyr/kernel.h b/include/zephyr/kernel.h
+--- a/include/zephyr/kernel.h
++++ b/include/zephyr/kernel.h
+@@ -3411,6 +3411,21 @@ struct k_lifo {
+ 	lap_ret; \
+ 	})
+ 
++/** Mask to isolate mutex type from other mutex flags */
++#define K_MUTEX_TYPE_MASK BIT_MASK(3)
++
++/** Extract mutex type from @p opts */
++#define K_MUTEX_TYPE(opts) ((opts) & K_MUTEX_TYPE_MASK)
++
++/** Mutex option for recursive locking */
++#define K_MUTEX_RECURSIVE 0
++
++/** Mutex option for normal (non-recursive) locking */
++#define K_MUTEX_NORMAL 1
++
++/** Mutex option for error checking */
++#define K_MUTEX_ERRORCHECK 2
++
+ /**
+  * @brief Get an element from a LIFO queue.
+  *
+@@ -3623,6 +3638,11 @@ struct k_mutex {
+ 	/** Current lock count */
+ 	uint32_t lock_count;
+ 
++#if defined(CONFIG_MUTEX_OPTIONS) || defined(__DOXYGEN__)
++	/** Mutex options */
++	uint32_t options;
++#endif
++
+ #if Z_MUTEX_PI_ENABLED
+ 	/** Node for linking this mutex into the owner thread's held_mutexes list */
+ 	sys_snode_t held_node;
+@@ -3645,13 +3665,16 @@ struct k_mutex {
+ #define Z_MUTEX_HELD_NODE_INIT
+ #endif
+ 
+-#define Z_MUTEX_INITIALIZER(obj) \
++#define Z_MUTEX_INITIALIZER_EXT(obj, opts) \
+ 	{ \
+ 	.wait_q = Z_WAIT_Q_INIT(&(obj).wait_q), \
+ 	.owner = NULL, \
+ 	.lock_count = 0, \
++	COND_CODE_1(CONFIG_MUTEX_OPTIONS, (.options = (opts),), ()) \
+ 	Z_MUTEX_HELD_NODE_INIT \
+ 	}
++
++#define Z_MUTEX_INITIALIZER(obj) Z_MUTEX_INITIALIZER_EXT(obj, K_MUTEX_RECURSIVE)
+ /**
+  * INTERNAL_HIDDEN @endcond
+  */
+@@ -3669,6 +3692,28 @@ struct k_mutex {
+ 	STRUCT_SECTION_ITERABLE(k_mutex, name) = \
+ 		Z_MUTEX_INITIALIZER(name)
+ 
++#if defined(CONFIG_MUTEX_OPTIONS) || defined(__DOXYGEN__)
++/**
++ * @brief Statically define and initialize a mutex, with options.
++ *
++ * The mutex can be accessed outside the module where it is defined using:
++ *
++ * @code extern struct k_mutex <name>; @endcode
++ *
++ * @param name Name of the mutex.
++ * @param opts Options for mutex initialization.
++ */
++#define K_MUTEX_DEFINE_EXT(name, opts)                                                             \
++	STRUCT_SECTION_ITERABLE(k_mutex, name) = Z_MUTEX_INITIALIZER_EXT(name, opts);              \
++	BUILD_ASSERT((K_MUTEX_TYPE(opts) != K_MUTEX_NORMAL) ||                                     \
++		     IS_ENABLED(CONFIG_MUTEX_NONRECURSIVE));                                       \
++	BUILD_ASSERT((K_MUTEX_TYPE(opts) != K_MUTEX_ERRORCHECK) ||                                 \
++		     IS_ENABLED(CONFIG_MUTEX_ERRORCHECK));                                         \
++	BUILD_ASSERT((K_MUTEX_TYPE(opts) == K_MUTEX_RECURSIVE) ||                                  \
++		     (K_MUTEX_TYPE(opts) == K_MUTEX_NORMAL) ||                                     \
++		     K_MUTEX_TYPE(opts) == K_MUTEX_ERRORCHECK)
++#endif
++
+ /**
+  * @brief Initialize a mutex.
+  *
+@@ -3683,6 +3728,25 @@ struct k_mutex {
+  */
+ __syscall int k_mutex_init(struct k_mutex *mutex);
+ 
++#ifdef CONFIG_MUTEX_OPTIONS
++/**
++ * @brief Initialize a mutex with options.
++ *
++ * This routine initializes a mutex object, prior to its first use.
++ *
++ * The main difference between this and @ref k_mutex_init is that this routine
++ * allows the caller to specify options for the mutex, such as
++ * @ref K_MUTEX_RECURSIVE.
++ *
++ * Upon completion, the mutex is available and does not have an owner.
++ *
++ * @param mutex Address of the mutex.
++ * @param options Options for mutex initialization.
++ *
++ * @retval 0 Mutex object created
++ */
++__syscall int k_mutex_init_ext(struct k_mutex *mutex, uint32_t options);
++#endif /* CONFIG_MUTEX_OPTIONS */
+ 
+ /**
+  * @brief Lock a mutex.
+diff --git a/kernel/Kconfig b/kernel/Kconfig
+--- a/kernel/Kconfig
++++ b/kernel/Kconfig
+@@ -716,6 +716,37 @@ endmenu
+ 
+ menu "Other Kernel Object Options"
+ 
++config MUTEX_OPTIONS
++	bool "Support optional mutex features"
++	help
++	  Say 'Y' here to support mutex options such as those required for non-recursive,
++	  and error-checking mutex types.
++
++	  This option is not required to support recursive mutexes, which are the default
++	  type in Zephyr.
++
++config MUTEX_NONRECURSIVE
++	bool "Nonrecursive mutexes"
++	depends on MUTEX_OPTIONS
++	default y
++	help
++	  Say 'Y' here to enable nonrecursive (normal) mutex types. When enabled,
++	  mutexes can be configured as error-checking or nonrecursive (normal).
++
++	  This option is required to support the standard C, C++, and POSIX threading models.
++
++config MUTEX_ERRORCHECK
++	bool "Error-check mutexes"
++	depends on MUTEX_OPTIONS
++	depends on MUTEX_NONRECURSIVE
++	default y
++	help
++	  Say 'Y' here to support errorcheck mutex types. When enabled, error-check mutexes will
++	  detect when a thread already holds a mutex and attempts to reacquire it (i.e. will
++	  avoid deadlocks).
++
++	  This option is required to support the standard C, C++, and POSIX threading models.
++
+ config POLL
+ 	bool "Async I/O Framework"
+ 	help
+diff --git a/kernel/mutex.c b/kernel/mutex.c
+--- a/kernel/mutex.c
++++ b/kernel/mutex.c
+@@ -82,6 +82,9 @@ int z_impl_k_mutex_init(struct k_mutex *mutex)
+ {
+ 	mutex->owner = NULL;
+ 	mutex->lock_count = 0U;
++#ifdef CONFIG_MUTEX_OPTIONS
++	mutex->options = K_MUTEX_RECURSIVE;
++#endif
+ 
+ 	z_waitq_init(&mutex->wait_q);
+ 
+@@ -109,6 +112,46 @@ static inline int z_vrfy_k_mutex_init(struct k_mutex *mutex)
+ #include <zephyr/syscalls/k_mutex_init_mrsh.c>
+ #endif /* CONFIG_USERSPACE */
+ 
++#ifdef CONFIG_MUTEX_OPTIONS
++int z_impl_k_mutex_init_ext(struct k_mutex *mutex, uint32_t options)
++{
++	uint32_t type = K_MUTEX_TYPE(options);
++
++	switch (type) {
++	case K_MUTEX_RECURSIVE:
++#if defined(CONFIG_MUTEX_NONRECURSIVE)
++	case K_MUTEX_NORMAL:
++#endif
++#if defined(CONFIG_MUTEX_ERRORCHECK)
++	case K_MUTEX_ERRORCHECK:
++#endif
++		break;
++	default:
++		return -EINVAL;
++	}
++
++	int ret = z_impl_k_mutex_init(mutex);
++
++	if (ret < 0) {
++		return ret;
++	}
++
++	mutex->options &= ~K_MUTEX_TYPE_MASK;
++	mutex->options |= type;
++
++	return 0;
++}
++
++#ifdef CONFIG_USERSPACE
++int z_vrfy_k_mutex_init_ext(struct k_mutex *mutex, uint32_t options)
++{
++	K_OOPS(K_SYSCALL_OBJ_INIT(mutex, K_OBJ_MUTEX));
++	return z_impl_k_mutex_init_ext(mutex, options);
++}
++#include <zephyr/syscalls/k_mutex_init_ext_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++#endif /* CONFIG_MUTEX_OPTIONS */
++
+ #if Z_MUTEX_PI_ENABLED
+ /*
+  * Upper bound on ownership-chain walk hops. This is a bound on walk cost
+@@ -169,6 +212,14 @@ static int32_t held_mutexes_highest_waiter_prio(struct k_thread *thread,
+ }
+ #endif
+ 
++static inline int z_mutex_gettype(struct k_mutex *mutex)
++{
++	ARG_UNUSED(mutex);
++
++	return COND_CODE_1(CONFIG_MUTEX_OPTIONS, (K_MUTEX_TYPE(mutex->options)),
++			   (K_MUTEX_RECURSIVE));
++}
++
+ int z_impl_k_mutex_lock(struct k_mutex *mutex, k_timeout_t timeout)
+ {
+ 	k_spinlock_key_t key;
+@@ -176,13 +227,16 @@ int z_impl_k_mutex_lock(struct k_mutex *mutex, k_timeout_t timeout)
+ 	bool resched = false;
+ #endif
+ 
++	const bool recursive = z_mutex_gettype(mutex) == K_MUTEX_RECURSIVE;
++	const bool errorcheck = z_mutex_gettype(mutex) == K_MUTEX_ERRORCHECK;
++
+ 	__ASSERT(!arch_is_in_isr(), "mutexes cannot be used inside ISRs");
+ 
+ 	SYS_PORT_TRACING_OBJ_FUNC_ENTER(k_mutex, lock, mutex, timeout);
+ 
+ 	key = k_spin_lock(&mutex_lock);
+ 
+-	if (likely((mutex->lock_count == 0U) || (mutex->owner == _current))) {
++	if (likely((mutex->lock_count == 0U) || (recursive && (mutex->owner == _current)))) {
+ 
+ 		mutex->lock_count++;
+ 		mutex->owner = _current;
+@@ -214,6 +268,17 @@ int z_impl_k_mutex_lock(struct k_mutex *mutex, k_timeout_t timeout)
+ 		return 0;
+ 	}
+ 
++	if (unlikely(!recursive && (mutex->owner == _current))) {
++		if (errorcheck) {
++			/* Deadlock detected */
++			k_spin_unlock(&mutex_lock, key);
++
++			SYS_PORT_TRACING_OBJ_FUNC_EXIT(k_mutex, lock, mutex, timeout, -EDEADLK);
++
++			return -EDEADLK;
++		}
++	}
++
+ 	if (unlikely(K_TIMEOUT_EQ(timeout, K_NO_WAIT))) {
+ 		k_spin_unlock(&mutex_lock, key);
+ 
+diff --git a/tests/kernel/mutex/mutex_api/prj.conf b/tests/kernel/mutex/mutex_api/prj.conf
+--- a/tests/kernel/mutex/mutex_api/prj.conf
++++ b/tests/kernel/mutex/mutex_api/prj.conf
+@@ -2,3 +2,4 @@ CONFIG_ZTEST=y
+ CONFIG_IRQ_OFFLOAD=y
+ CONFIG_TEST_USERSPACE=y
+ CONFIG_MP_MAX_NUM_CPUS=1
++CONFIG_MUTEX_OPTIONS=y
+diff --git a/tests/kernel/mutex/mutex_api/src/test_mutex_apis.c b/tests/kernel/mutex/mutex_api/src/test_mutex_apis.c
+--- a/tests/kernel/mutex/mutex_api/src/test_mutex_apis.c
++++ b/tests/kernel/mutex/mutex_api/src/test_mutex_apis.c
+@@ -580,6 +580,41 @@ ZTEST(mutex_api_1cpu, test_mutex_timeout_race_during_priority_inversion)
+ 	k_mutex_unlock(&tmutex);
+ }
+ 
++ZTEST(mutex_api, test_mutex_options)
++{
++	static K_MUTEX_DEFINE_EXT(norm_mutex, K_MUTEX_NORMAL);
++	static K_MUTEX_DEFINE_EXT(rec_mutex, K_MUTEX_RECURSIVE);
++	static K_MUTEX_DEFINE_EXT(ec_mutex, K_MUTEX_ERRORCHECK);
++	static K_MUTEX_DEFINE_EXT(zero_mutex, 0);
++	struct k_mutex inval_mutex;
++
++	zassert_equal(K_MUTEX_NORMAL, norm_mutex.options & K_MUTEX_TYPE_MASK);
++	zassert_ok(k_mutex_init_ext(&norm_mutex, K_MUTEX_ERRORCHECK));
++	zassert_equal(K_MUTEX_ERRORCHECK, norm_mutex.options & K_MUTEX_TYPE_MASK);
++	zassert_ok(k_mutex_init_ext(&norm_mutex, K_MUTEX_NORMAL));
++
++	zassert_equal(K_MUTEX_RECURSIVE, rec_mutex.options & K_MUTEX_TYPE_MASK);
++	zassert_equal(K_MUTEX_ERRORCHECK, ec_mutex.options & K_MUTEX_TYPE_MASK);
++	/* this is effectively K_MUTEX_RECURSIVE, but is here for completeness */
++	zassert_equal(0, zero_mutex.options & K_MUTEX_TYPE_MASK);
++
++	/* verify that recursive mutexes (still) work recursively */
++	zassert_ok(k_mutex_lock(&rec_mutex, K_FOREVER));
++	zassert_ok(k_mutex_lock(&rec_mutex, K_FOREVER));
++	zassert_ok(k_mutex_unlock(&rec_mutex));
++	zassert_ok(k_mutex_unlock(&rec_mutex));
++
++	/* verify that errorcheck mutexes detect deadlocks */
++	zassert_ok(k_mutex_lock(&ec_mutex, K_FOREVER));
++	zassert_equal(-EDEADLK, k_mutex_lock(&ec_mutex, K_FOREVER));
++	zassert_ok(k_mutex_unlock(&ec_mutex));
++
++	/* ensure we do not init invalid mutex types */
++	zassert_equal(-EINVAL, k_mutex_init_ext(&inval_mutex, -1));
++
++	/* TODO: add support for robust mutexes */
++}
++
+ static void *mutex_api_tests_setup(void)
+ {
+ #ifdef CONFIG_USERSPACE
