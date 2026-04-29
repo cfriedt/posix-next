@@ -1,0 +1,20 @@
+diff --git a/lib/libc/picolibc/include/signal.h b/lib/libc/picolibc/include/signal.h
+--- a/lib/libc/picolibc/include/signal.h
++++ b/lib/libc/picolibc/include/signal.h
+@@ -33,6 +33,15 @@ typedef __pid_t pid_t;
+ #endif
+ 
+ #if defined(_POSIX_THREADS) || defined(__DOXYGEN__)
++
++/* POSIX requires <signal.h> to declare pthread_t when _POSIX_THREADS is defined */
++#if !(defined(_PTHREAD_T_DECLARED) && defined(__pthread_t_defined)) || defined(__DOXYGEN__)
++typedef __uint32_t pthread_t;
++#define _PTHREAD_T_DECLARED
++#define __pthread_t_defined
++#endif
++
++int pthread_kill(pthread_t thread, int sig);
+ int pthread_sigmask(int how, const sigset_t *ZRESTRICT set, sigset_t *ZRESTRICT oset);
+ #endif
+ 
+ 

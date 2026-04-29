@@ -924,6 +924,21 @@ patches:
       CONFIG_SYS_THREAD_STACK_SIZE is an int like every other stack size
       symbol.
 
+  - path: zephyr/kernel-migrate-dynamic-thread-stack-apis-to-sys-thread.patch
+    sha256sum: 209631afb1dbe7696c9108da98203641da78a42c9b41a3475f013d3b27ea3339
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-04-25
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/kernel-k-thread-stack-alloc-flags-uint32.patch
+    comments: |
+      Rebased onto v4.5.0-rc1: the test keeps upstream's new size-overflow case and doc comments
+      (reworded for the pool), its scenarios live in tests.yaml, and the rpi_zero_2w excludes stay.
+      kernel: migrate dynamic thread stack APIs to SYS_THREAD
   - path: zephyr/c11-thrd-use-sys-thread-and-k-thread.patch
     sha256sum: fb3f9c6afc6629c9f0cf3c8164b42dcc04ba64c14b4b04e35722e0ee9e083c7d
     module: zephyr
@@ -933,3 +948,33 @@ patches:
     upstreamable: true
     comments: |
       libc: common: use sys_thread/k_thread in C11 threads
+  - path: zephyr/libc-pthread-cleanup-push-pop.patch
+    sha256sum: 90e962356f6d2dfea1537760bc5cc6cb048d8868e234bcd05196aa0593730b19
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-04-25
+    upstreamable: true
+    comments: |
+      libc: use k_thread_cleanup_push/pop and CONFIG_IDLE_STACK_SIZE in
+      newlib/picolibc/arcmwdt pthread.h overlays (post deprecate/move).
+  - path: zephyr/libc-signal-h-pthread-kill.patch
+    sha256sum: 9db8dc468a348bb0603646373dbe308174a5711ddbcfd454197b47f18992eb48
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-20
+    upstreamable: true
+    comments: |
+      POSIX requires <signal.h> to declare pthread_t and pthread_kill() when _POSIX_THREADS is defined;
+      have picolibc's <signal.h> shim do so.
+  - path: zephyr/libc-picolibc-limits-h.patch
+    sha256sum: c215c69901f9cd028c994f9ef07ad551165f672410334468b332b5253244b4eb
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-01
+    upstreamable: true
+    comments: |
+      The picolibc shipped with the Zephyr SDK does not provide the POSIX limits (PTHREAD_DESTRUCTOR_ITERATIONS,
+      PTHREAD_KEYS_MAX, ...); wrap its <limits.h> so they follow from the POSIX module's posix_limits.h.
