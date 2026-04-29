@@ -1,0 +1,30 @@
+From fe6d455a0f92026db2a030e67112c7603c5783fc Mon Sep 17 00:00:00 2001
+From: Chris Friedt <chris@fr4.co>
+Date: Sat, 25 Apr 2026 17:38:37 -0400
+Subject: [PATCH] kernel: thread_monitor: fix circular list traversal
+
+Terminate iteration when the next node wraps back to _kernel.threads
+so traversal over the circular monitor list does not loop forever.
+
+Signed-off-by: Friedt Professional Engineering Services, Inc
+---
+ kernel/thread_monitor.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/kernel/thread_monitor.c b/kernel/thread_monitor.c
+index f6f7217b6f0..222ba66657e 100644
+--- a/kernel/thread_monitor.c
++++ b/kernel/thread_monitor.c
+@@ -51,7 +51,8 @@ static void thread_foreach_helper(k_thread_user_cb_t user_cb, void *user_data,
+ 
+ 	key = k_spin_lock(&z_thread_monitor_lock);
+ 
+-	for (thread = _kernel.threads; thread; thread = thread->next_thread) {
++	for (thread = _kernel.threads; thread;
++	     thread = (thread->next_thread == _kernel.threads) ? NULL : thread->next_thread) {
+ 		/* cpu is only defined when SMP=y*/
+ #ifdef CONFIG_SMP
+ 		bool on_cpu = (thread->base.cpu == cpu);
+-- 
+2.43.0
+
