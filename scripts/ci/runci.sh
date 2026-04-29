@@ -34,8 +34,9 @@ DEFAULT_ROOTS=( \
   $POSIX_NEXT_PATH/samples/posix \
   $POSIX_NEXT_PATH/tests/benchmarks/posix \
   $POSIX_NEXT_PATH/tests/posix \
-  $ZEPHYR_BASE/zephyr/kernel/threads/thread_apis \
   $ZEPHYR_BASE/zephyr/kernel/signal \
+  $ZEPHYR_BASE/zephyr/kernel/threads/thread_apis \
+  $ZEPHYR_BASE/zephyr/kernel/threads/sys_thread \
   $ZEPHYR_BASE/samples/net \
   $ZEPHYR_BASE/samples/subsys/shell/shell_module \
   $ZEPHYR_BASE/tests/net \
@@ -146,7 +147,7 @@ if [ "$EVENT_NAME" = "pull_request" ]; then
   "${ROOTS[@]}"
 
 ./scripts/twister \
-  -i -c \
+  -c \
   -O "$POSIX_NEXT_PATH"/twister-out \
   --load-tests "$POSIX_NEXT_PATH"/testplan.json \
   ${PLATFORMS[@]} \
@@ -155,7 +156,7 @@ if [ "$EVENT_NAME" = "pull_request" ]; then
 else
 
 ./scripts/twister \
-  -i -c \
+  -c \
   -O "$POSIX_NEXT_PATH"/twister-out \
   ${PLATFORMS[@]} \
   ${ROOTS[@]} \
