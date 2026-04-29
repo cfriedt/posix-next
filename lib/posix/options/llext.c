@@ -344,6 +344,7 @@ EXPORT_SYMBOL(pthread_getspecific);
 EXPORT_SYMBOL(pthread_join);
 EXPORT_SYMBOL(pthread_key_create);
 EXPORT_SYMBOL(pthread_key_delete);
+EXPORT_SYMBOL(pthread_kill);
 EXPORT_SYMBOL(pthread_mutex_destroy);
 EXPORT_SYMBOL(pthread_mutex_init);
 EXPORT_SYMBOL(pthread_mutex_lock);

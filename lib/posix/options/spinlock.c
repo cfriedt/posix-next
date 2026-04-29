@@ -74,7 +74,7 @@ int pthread_spin_destroy(pthread_spinlock_t *lock)
 
 static int pthread_spin_lock_common(pthread_spinlock_t *lock, bool wait)
 {
-	atomic_t *l;
+	atomic_t *l = NULL;
 	int ret = EINVAL;
 
 	if (lock == NULL) {
@@ -119,7 +119,7 @@ int pthread_spin_trylock(pthread_spinlock_t *lock)
 
 int pthread_spin_unlock(pthread_spinlock_t *lock)
 {
-	atomic_t *l;
+	atomic_t *l = NULL;
 	int ret = EINVAL;
 
 	if (lock == NULL) {

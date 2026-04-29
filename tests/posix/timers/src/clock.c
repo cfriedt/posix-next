@@ -159,6 +159,7 @@ ZTEST(posix_timers, test_realtime)
 	zassert_between_inclusive(cma, lo, hi);
 }
 
+#if 0 /* This test does not belong in the timers testsuite, but the advanced_realtime testsuite */
 ZTEST(posix_timers, test_clock_getcpuclockid)
 {
 	int ret = 0;
@@ -171,6 +172,7 @@ ZTEST(posix_timers, test_clock_getcpuclockid)
 	ret = clock_getcpuclockid((pid_t)2482, &clock_id);
 	zassert_equal(ret, EPERM, "POSIX clock_getcpuclock id failed");
 }
+#endif
 
 ZTEST(posix_timers, test_clock_getres)
 {

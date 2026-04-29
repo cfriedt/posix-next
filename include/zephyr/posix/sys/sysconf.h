@@ -299,7 +299,7 @@ enum {
 #define __z_posix_sysconf_SC_OPEN_MAX                     CONFIG_POSIX_OPEN_MAX
 #define __z_posix_sysconf_SC_PAGE_SIZE                    CONFIG_POSIX_PAGE_SIZE
 #define __z_posix_sysconf_SC_PAGESIZE                     CONFIG_POSIX_PAGE_SIZE
-#define __z_posix_sysconf_SC_THREAD_DESTRUCTOR_ITERATIONS _POSIX_THREAD_DESTRUCTOR_ITERATIONS
+#define __z_posix_sysconf_SC_THREAD_DESTRUCTOR_ITERATIONS PTHREAD_DESTRUCTOR_ITERATIONS
 #define __z_posix_sysconf_SC_THREAD_KEYS_MAX                                                       \
 	COND_CODE_1(CONFIG_POSIX_THREADS, (CONFIG_POSIX_THREAD_KEYS_MAX), (0))
 #define __z_posix_sysconf_SC_THREAD_STACK_MIN             0
