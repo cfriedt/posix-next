@@ -1,0 +1,410 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Multi-Process Design &mdash; posix-next</title>
+      <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=03e43079" />
+      <link rel="stylesheet" type="text/css" href="../../_static/css/theme.css?v=e59714d7" />
+      <link rel="stylesheet" type="text/css" href="../../_static/graphviz.css?v=4ae1632d" />
+      <link rel="stylesheet" type="text/css" href="../../_static/doxytooltip.css?v=07852572" />
+      <link rel="stylesheet" type="text/css" href="../../_static/posix-symbols.css?v=d6beee15" />
+      <link rel="stylesheet" type="text/css" href="../../_static/posix-badges.css?v=1e6233d9" />
+      <link rel="stylesheet" type="text/css" href="../../_static/copybutton.css?v=76b2166b" />
+      <link rel="stylesheet" type="text/css" href="../../_static/css/custom.css?v=b2ece5be" />
+      <link rel="stylesheet" type="text/css" href="../../_static/posix-next.css?v=b1cda821" />
+
+  
+    <link rel="shortcut icon" href="../../_static/favicon.png"/>
+    <link rel="canonical" href="https://cfriedt.github.io/posix-next/posix/design/index.html" />
+      <script src="../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../_static/documentation_options.js?v=01f34227"></script>
+      <script src="../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../_static/sphinx_highlight.js?v=dc90522c"></script>
+      <script src="../../_static/tippy/popper.min.js?v=f051b558"></script>
+      <script src="../../_static/tippy/tippy-bundle.umd.min.js?v=873d6056"></script>
+      <script src="../../_static/doxytooltip.js?v=ab77ca7a"></script>
+      <script type="module" src="../../_static/posix-symbols.mjs?v=c8eac069"></script>
+      <script defer="defer" src="../../_static/posix-badges.js?v=5a27f10a"></script>
+      <script src="../../_static/clipboard.min.js?v=a7894cd8"></script>
+      <script src="../../_static/copybutton.js?v=f281be69"></script>
+      <script src="../../_static/doxytooltip-patch.js?v=1d0b1edc"></script>
+      <script src="../../_static/aep-tabs.js?v=a18bfba4"></script>
+    <script src="../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="POSIX Option Groups" href="../option_groups/index.html" />
+    <link rel="prev" title="Implementation Details" href="../implementation/index.html" />
+  <meta name="color-scheme" content="dark light">
+  
+  <noscript id="dark-mode-toggle-stylesheets">
+    <link rel="stylesheet" href="../../_static/css/light.css" type="text/css" media="(prefers-color-scheme: light)"/>
+    <link rel="stylesheet" href="../../_static/css/dark.css" type="text/css" media="(prefers-color-scheme: dark)"/>
+  </noscript>
+  <script src="../../_static/js/dark-mode-toggle-stylesheets-loader.min.js"></script>
+  <script type="module" src="../../_static/js/dark-mode-toggle.min.mjs"></script>
+
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../index.html" class="icon icon-home">
+            posix-next
+              <img src="../../_static/posix-next-logo.png" class="logo" alt="Logo"/>
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+  <div data-nosnippet>
+    
+              <ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../../getting_started/index.html">Getting Started</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="../index.html">POSIX-next</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="../overview/index.html">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../conformance/index.html">POSIX Conformance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../conformance/index.html#xsi-conformance">XSI Conformance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../aep/index.html">POSIX Application Environment Profiles (AEP)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../implementation/index.html">Implementation Details</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">Multi-Process Design</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#process-model">Process model</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#creation-sys-clone">Creation: sys_clone</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#the-fork-model-and-its-substrate">The fork model and its substrate</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#per-process-permissions">Per-process permissions</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#signals">Signals</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#exec">Exec</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#known-deviations">Known deviations</a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../option_groups/index.html">POSIX Option Groups</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../options/index.html">POSIX Options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../kconfig/index.html">Additional Configuration Options</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../symbols.html">POSIX API Search</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../samples/posix/posix.html">Samples</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../metrics/index.html">Metrics</a></li>
+</ul>
+
+    
+    <div class="toctree-wrapper compound">
+      <p class="caption"><span class="caption-text">Reference</span></p>
+      <ul>
+        
+        <li class="toctree-l1">
+          <a class="reference internal" href="https://docs.zephyrproject.org/4.4.1/">Zephyr 4.4.1 docs</a>
+        </li>
+        
+        <li class="toctree-l1">
+          <a class="reference internal" href="https://docs.zephyrproject.org/4.4.1/services/portability/posix/index.html">Zephyr POSIX docs</a>
+        </li>
+        
+        <li class="toctree-l1">
+          <a class="reference internal" href="https://pubs.opengroup.org/onlinepubs/9699919799/">Open Group POSIX</a>
+        </li>
+        
+      </ul>
+    </div>
+    
+  </div>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../index.html">posix-next</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content style-external-links">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+  
+
+  <li><a href="../../index.html">posix-next</a> &raquo;</li>
+  
+     <li><a href="../index.html">POSIX-next</a> &raquo;</li>
+  
+  <li>Multi-Process Design</li>
+
+
+  <li class="wy-breadcrumbs-aside">
+    <dark-mode-toggle id="dark-mode-toggle" appearance="three-way" permanent="true"/>
+  </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="multi-process-design">
+<span id="posix-multi-process-design"></span><h1>Multi-Process Design<a class="headerlink" href="#multi-process-design" title="Link to this heading"></a></h1>
+<p>This chapter documents the kernel and system-layer substrate that backs the
+<a class="reference internal" href="../../doxygen/html/group__posix__option__group__multi__process.html#gaa4e4714e6e8927c80b2553a40094b6d9" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">fork()</span></code></a>, <a class="reference internal" href="../../doxygen/html/group__posix__option__group__multi__process.html#ga7098c10773c2fc8fd4bd5bb20c9f89c9" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">execve()</span></code></a>, and <code class="docutils literal notranslate"><span class="pre">posix_spawn</span></code> families in the
+<code class="docutils literal notranslate"><span class="pre">POSIX_MULTI_PROCESS</span></code> and <code class="docutils literal notranslate"><span class="pre">POSIX_SPAWN</span></code> Option Groups.</p>
+<nav class="contents local" id="contents">
+<ul class="simple">
+<li><p><a class="reference internal" href="#process-model" id="id1">Process model</a></p></li>
+<li><p><a class="reference internal" href="#creation-sys-clone" id="id2">Creation: sys_clone</a></p></li>
+<li><p><a class="reference internal" href="#the-fork-model-and-its-substrate" id="id3">The fork model and its substrate</a></p></li>
+<li><p><a class="reference internal" href="#per-process-permissions" id="id4">Per-process permissions</a></p></li>
+<li><p><a class="reference internal" href="#signals" id="id5">Signals</a></p></li>
+<li><p><a class="reference internal" href="#exec" id="id6">Exec</a></p></li>
+<li><p><a class="reference internal" href="#known-deviations" id="id7">Known deviations</a></p></li>
+</ul>
+</nav>
+<section id="process-model">
+<h2><a class="toc-backref" href="#id1" role="doc-backlink">Process model</a><a class="headerlink" href="#process-model" title="Link to this heading"></a></h2>
+<p>A process is a <strong>thread group</strong>: its identity is its thread-group leader, so a
+process handle (<code class="docutils literal notranslate"><span class="pre">k_pid_t</span></code>) is a thread handle. <code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">k_process</span></code> is the
+kernel-owned record of one thread group and hangs off the leader; it is not a
+handle and, except when a caller-provided record crosses the user/kernel
+boundary, not a kernel object. Foreign handles are resolved by identity-value
+scans under a lock and never dereferenced, so a handle stays meaningful from
+creation to reap - including after the leader thread has exited.</p>
+<p>Numeric process, group, and session IDs are a <em>system-layer</em> concept, not a
+kernel one: the kernel speaks only in handles, and <code class="docutils literal notranslate"><span class="pre">lib/os</span></code> maintains the
+numbering tables behind <code class="xref c c-func docutils literal notranslate"><span class="pre">sys_process_id()</span></code> and friends. All allocation is
+likewise confined to <code class="docutils literal notranslate"><span class="pre">lib/os</span></code>: the kernel never allocates and never calls an
+allocator, only initializing caller-provided or statically defined records.</p>
+<div class="graphviz"><img src="../../_images/graphviz-46974e90bc602816896ef79e77df3d12585fd4d3.png" alt="digraph process_layers {
+    rankdir=LR;
+    node [shape=box, fontname=&quot;Helvetica&quot;];
+    app [label=&quot;POSIX layer\nfork / execve / posix_spawn\n(numeric pid_t)&quot;];
+    sys [label=&quot;system layer (lib/os)\nsys_clone / sys_setsid\nnumbering, pools&quot;];
+    kern [label=&quot;kernel\nk_process_init / k_kill / k_waitpid\n(handles only, no allocation)&quot;];
+    app -&gt; sys -&gt; kern;
+    app -&gt; kern [label=&quot;handle APIs&quot;, style=dotted];
+}" class="graphviz" /></div>
+</section>
+<section id="creation-sys-clone">
+<h2><a class="toc-backref" href="#id2" role="doc-backlink">Creation: sys_clone</a><a class="headerlink" href="#creation-sys-clone" title="Link to this heading"></a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">sys_clone()</span></code> is the creation primitive; <a class="reference internal" href="../../doxygen/html/group__posix__option__group__multi__process.html#gaa4e4714e6e8927c80b2553a40094b6d9" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">fork()</span></code></a>, <code class="docutils literal notranslate"><span class="pre">posix_spawn</span></code>,
+<a class="reference internal" href="../../doxygen/html/group__posix__option__group__threads__base.html#ga5c8267655376cf33af9222f9194cc503" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">pthread_create()</span></code></a>, and <code class="docutils literal notranslate"><span class="pre">sys_thread_create()</span></code> are library constructs
+over it. With no flags it produces a fresh process from a
+pooled record and a pool-drawn leader thread. <code class="docutils literal notranslate"><span class="pre">SYS_CLONE_THREAD</span></code> selects
+the thread tier: the new thread joins the caller’s thread group instead -
+and without <code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_PROCESS</span></code> it is simply a new thread, so
+thread creation behaves identically in process-less builds.
+<code class="docutils literal notranslate"><span class="pre">SYS_CLONE_PAUSED</span></code> leaves the created thread stopped so a caller can apply
+attributes (process group, signal mask, scheduling) before starting it.
+<code class="docutils literal notranslate"><span class="pre">SYS_CLONE_VM_COPY</span></code> selects the fork model. Beneath the system layer,
+<code class="docutils literal notranslate"><span class="pre">k_clone()</span></code> is the kernel primitive with the same two tiers over entirely
+caller-provided memory - record, thread, and stack - allocating nothing.</p>
+<div class="graphviz"><img src="../../_images/graphviz-9821d11f80bb86b01d741c650eb8433b52b19925.png" alt="digraph clone {
+    node [shape=box, fontname=&quot;Helvetica&quot;];
+    args [label=&quot;sys_clone(args)&quot;];
+    vm   [label=&quot;SYS_CLONE_VM_COPY?&quot;; shape=diamond];
+    fork [label=&quot;z_sys_clone_vm_copy\n(duplicate address space,\nkernel-assisted resume)&quot;];
+    thr  [label=&quot;SYS_CLONE_THREAD?&quot;; shape=diamond];
+    member[label=&quot;thread in the\ncalling process&quot;];
+    fresh[label=&quot;fresh leader\n(pool thread + entry)&quot;];
+    init [label=&quot;k_process_init\n(adopt leader, register)&quot;];
+    start[label=&quot;SYS_CLONE_PAUSED?\nstart or hand back stopped&quot;; shape=diamond];
+    args -&gt; vm;
+    vm -&gt; fork [label=&quot;yes&quot;];
+    vm -&gt; thr [label=&quot;no&quot;];
+    thr -&gt; member [label=&quot;yes&quot;];
+    thr -&gt; fresh [label=&quot;no&quot;];
+    member -&gt; start;
+    fresh -&gt; init -&gt; start;
+    fork -&gt; init;
+}" class="graphviz" /></div>
+</section>
+<section id="the-fork-model-and-its-substrate">
+<h2><a class="toc-backref" href="#id3" role="doc-backlink">The fork model and its substrate</a><a class="headerlink" href="#the-fork-model-and-its-substrate" title="Link to this heading"></a></h2>
+<p>The fork model duplicates the caller’s writable memory into the child at
+identical virtual addresses and resumes the child at the call site. Copied
+memory at identical addresses is what makes the model sound where <code class="docutils literal notranslate"><span class="pre">vfork</span></code>
+was not: the child cannot disturb the parent’s stack, and a plain
+<code class="docutils literal notranslate"><span class="pre">setjmp</span></code>/<code class="docutils literal notranslate"><span class="pre">longjmp</span></code> resumes the child because every address it restores is
+valid in its own copy - no architecture context-copy code is required.</p>
+<p>The substrate is experimental (<code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_PROCESS_VM</span></code>, x86 only).
+<code class="docutils literal notranslate"><span class="pre">process_vm_clone()</span></code> builds the child’s memory domain by mirroring the
+parent’s partitions, then repoints the writable ranges and the stack at fresh
+frames through the architecture hook <code class="docutils literal notranslate"><span class="pre">z_mem_domain_clone_remap()</span></code> (no TLB
+shootdown, since the child is not yet live on any CPU).</p>
+<p>The child’s resume is <strong>kernel-assisted</strong> (<code class="docutils literal notranslate"><span class="pre">ARCH_HAS_FORK_RESUME</span></code>; x86_64,
+ia32, and arm64):
+the syscall entry captures the caller’s complete register state - the
+callee-saved registers are saved alongside the frame precisely because the C
+convention would otherwise leave a forked child with no history to restore
+them from - and the child’s first run enters the common syscall exit path
+from a staged copy of that frame with the return-value register zeroed. The
+child’s TLS is the parent’s address: the clone already copied that region,
+so captured TLS-variable addresses and register-relative accesses agree,
+as fork demands. This is possible because <code class="docutils literal notranslate"><span class="pre">CONFIG_PROCESS_VM</span></code> excludes
+<a class="reference external" href="https://docs.zephyrproject.org/4.4.1/kconfig.html#CONFIG_CURRENT_THREAD_USE_TLS" title="(in Zephyr Project v4.4.1)"><code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_CURRENT_THREAD_USE_TLS</span></code></a>, leaving kernel mode with
+no reason to dereference user TLS. fork() is therefore a user-mode
+operation: a kernel-mode caller has no syscall frame to resume and receives
+<code class="docutils literal notranslate"><span class="pre">ENOSYS</span></code>.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p><strong>Confirmed working (x86_64, ia32, and arm64):</strong> fork() returns twice through
+the kernel resume, the child diverges on its own stack and data copies,
+and the parent - whose view is asserted unchanged - reaps it. On arm64
+no dedicated resume path was needed at all: every arm64 thread is born
+through the exception return path popping a synthetic ESF, so the forked
+child’s birth context simply <em>is</em> the parent’s captured syscall frame
+with the return-value register zeroed.</p>
+</div>
+</section>
+<section id="per-process-permissions">
+<h2><a class="toc-backref" href="#id4" role="doc-backlink">Per-process permissions</a><a class="headerlink" href="#per-process-permissions" title="Link to this heading"></a></h2>
+<p>With <code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_PROCESS</span></code> and userspace, the process - not the
+thread - is the kernel-object permission principal: threads sharing an address
+space can already reach each other’s memory, so per-thread object permissions
+within a process add no isolation. Each object’s permission bitmap is sized by
+<code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_MAX_PROCESS_BYTES</span></code> rather than
+<code class="docutils literal notranslate"><span class="pre">CONFIG_MAX_THREAD_BYTES</span></code>, the principal index lives once in
+<code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">k_process</span></code>, and one sweep at reap replaces the per-thread-death walk.
+Granting to any member thread grants the whole process, and a forking child
+inherits the parent’s grants.</p>
+</section>
+<section id="signals">
+<h2><a class="toc-backref" href="#id5" role="doc-backlink">Signals</a><a class="headerlink" href="#signals" title="Link to this heading"></a></h2>
+<p>Signals are delivered either to a specific thread (<a class="reference internal" href="../../doxygen/html/group__posix__option__group__threads__base.html#ga5aafacc071cdfafd0eb992004dee3e62" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">pthread_kill()</span></code></a>) or to
+a process (<a class="reference internal" href="../../doxygen/html/group__posix__option__group__signals.html#ga4539db972bcf3dd8c8b429af0dc3789d" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">kill()</span></code></a>). A process-directed signal is delivered to one member
+thread that has it unblocked, preferring the caller for a self-signal. When
+every member has the signal masked it pends at <strong>process scope</strong> and is claimed
+by whichever member first unblocks or waits for it - strict POSIX semantics for
+fully-masked processes. Kernel-resolved process delivery bypasses the
+per-thread-object permission check, since <a class="reference internal" href="../../doxygen/html/group__posix__option__group__signals.html#ga4539db972bcf3dd8c8b429af0dc3789d" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">kill()</span></code></a> authorization is
+process-level.</p>
+</section>
+<section id="exec">
+<h2><a class="toc-backref" href="#id6" role="doc-backlink">Exec</a><a class="headerlink" href="#exec" title="Link to this heading"></a></h2>
+<p>An exec <em>path</em> resolves in two tiers. First, prelinked images: a lookup
+through <code class="docutils literal notranslate"><span class="pre">posix_spawn_image_lookup()</span></code> (a weak function applications and test
+suites override). Second, with <code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_POSIX_EXEC_LLEXT</span></code>,
+real executable loading: the path is loaded from the filesystem as a linkable
+loadable extension (llext), and its exported <code class="docutils literal notranslate"><span class="pre">main()</span></code> runs as the new
+process image - the image ABI is <code class="docutils literal notranslate"><span class="pre">int</span> <span class="pre">main(int</span> <span class="pre">argc,</span> <span class="pre">char</span> <span class="pre">**argv,</span> <span class="pre">char</span>
+<span class="pre">**envp)</span></code>, and the return value becomes the process’s exit status.</p>
+<p>Either way <a class="reference internal" href="../../doxygen/html/group__posix__option__group__multi__process.html#ga7098c10773c2fc8fd4bd5bb20c9f89c9" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">execve()</span></code></a> replaces the image in place: it aborts every
+other member thread with <code class="docutils literal notranslate"><span class="pre">k_process_prune()</span></code> and continues on the calling
+thread, preserving the process’s identity, parent, and group membership;
+handled signal dispositions revert to default and <code class="docutils literal notranslate"><span class="pre">FD_CLOEXEC</span></code> descriptors
+are closed. An extension image cannot unload itself - its caller executes
+from the extension - so a table sized by
+<code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_POSIX_EXEC_LLEXT_MAX</span></code> records which extension backs
+which exec’d process: a <code class="docutils literal notranslate"><span class="pre">main()</span></code> that returns unloads in place, an image
+terminated by <code class="docutils literal notranslate"><span class="pre">_exit()</span></code> or a signal is unloaded by the <code class="docutils literal notranslate"><span class="pre">wait()</span></code> family
+when the process is reaped, and a chain-exec’ing image is unloaded by its
+successor past exec’s point of no return. The new image then runs on the
+calling thread, restarted in place. The argument
+and environment vectors are staged at the top of the thread’s own stack
+(<code class="docutils literal notranslate"><span class="pre">sys_thread_stack_stage()</span></code>, bounded by
+<code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_POSIX_EXEC_ARG_BYTES</span></code> else <code class="docutils literal notranslate"><span class="pre">E2BIG</span></code> - the
+<code class="docutils literal notranslate"><span class="pre">setup_arg_pages()</span></code> analog), and <code class="docutils literal notranslate"><span class="pre">sys_thread_restart()</span></code> resets the
+stack pointer just below them and enters the image
+(<code class="docutils literal notranslate"><span class="pre">arch_stack_jump()</span></code>, the <code class="docutils literal notranslate"><span class="pre">start_thread()</span></code> analog) - same thread,
+same stack, pid, signal mask, and priority all trivially preserved.
+Memory protection composes per class: MMU platforms map kernel RAM
+executable and PMP does not constrain machine-mode execution, so both
+run images as-is; XIP MPU platforms map RAM execute-never, so under
+<code class="docutils literal notranslate"><span class="pre">CONFIG_USERSPACE</span></code> the image’s llext partitions enter a per-image
+memory domain that the exec’ing thread joins before the jump.
+Remaining deviations: architectures without stack-jump support
+(native_sim, whose threads run on host stacks) run the image on the
+calling thread’s live frames instead, and a child that is never
+collected by <code class="docutils literal notranslate"><span class="pre">wait()</span></code> holds its extension-table slot until the slot
+is swept on a later exec.</p>
+</section>
+<section id="known-deviations">
+<h2><a class="toc-backref" href="#id7" role="doc-backlink">Known deviations</a><a class="headerlink" href="#known-deviations" title="Link to this heading"></a></h2>
+<p>The following deviations from strict POSIX are documented for
+<code class="docutils literal notranslate"><span class="pre">POSIX_MULTI_PROCESS</span></code> and <code class="docutils literal notranslate"><span class="pre">POSIX_SPAWN</span></code> in the current implementation.
+Each is expected to be retired as the corresponding substrate lands.</p>
+<table class="docutils align-default">
+<colgroup>
+<col style="width: 30.0%" />
+<col style="width: 70.0%" />
+</colgroup>
+<thead>
+<tr class="row-odd"><th class="head"><p>Interface</p></th>
+<th class="head"><p>Deviation</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><a class="reference internal" href="../../doxygen/html/group__posix__option__group__multi__process.html#gaa4e4714e6e8927c80b2553a40094b6d9" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">fork()</span></code></a></p></td>
+<td><p>Requires <code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_PROCESS_VM</span></code> and a kernel-assisted
+resume architecture (x86-64, ia32, arm64); returns <code class="docutils literal notranslate"><span class="pre">ENOSYS</span></code>
+otherwise. <code class="docutils literal notranslate"><span class="pre">CONFIG_PROCESS_VM</span></code> excludes
+<a class="reference external" href="https://docs.zephyrproject.org/4.4.1/kconfig.html#CONFIG_CURRENT_THREAD_USE_TLS" title="(in Zephyr Project v4.4.1)"><code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_CURRENT_THREAD_USE_TLS</span></code></a> (the current thread
+resolves through the per-CPU arch path instead), since kernel-mode
+reads of user TLS would alias the parent’s physical memory through
+the shared kernel page tables.</p></td>
+</tr>
+<tr class="row-odd"><td><p><a class="reference internal" href="../../doxygen/html/group__posix__option__group__multi__process.html#ga7098c10773c2fc8fd4bd5bb20c9f89c9" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">execve()</span></code></a> family</p></td>
+<td><p>A path names a prelinked image or, with
+<code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_POSIX_EXEC_LLEXT</span></code>, a filesystem ELF
+extension; the new image runs on the calling thread restarted at
+the base of its own stack (on its live frames only where the
+architecture lacks stack-jump support, e.g. native_sim).
+<code class="docutils literal notranslate"><span class="pre">execvp</span></code>/<code class="docutils literal notranslate"><span class="pre">execlp</span></code> resolve bare names against
+<code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_POSIX_EXEC_PATH_PREFIX</span></code> rather than a
+<code class="docutils literal notranslate"><span class="pre">PATH</span></code> environment variable.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">posix_spawn</span></code></p></td>
+<td><p>File actions apply to the paused child’s own descriptor table
+before it starts; the caller’s descriptors are untouched, as POSIX
+requires.</p></td>
+</tr>
+<tr class="row-odd"><td><p>Process-directed pending signals</p></td>
+<td><p>Held at process scope and claimed by the first member to unblock or
+wait; conforms to POSIX.</p></td>
+</tr>
+</tbody>
+</table>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="../implementation/index.html" class="btn btn-neutral float-left" title="Implementation Details" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="../option_groups/index.html" class="btn btn-neutral float-right" title="POSIX Option Groups" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2015-2026 Zephyr Project members and individual contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
