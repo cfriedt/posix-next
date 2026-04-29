@@ -1,0 +1,1772 @@
+diff --git a/include/zephyr/kernel/thread.h b/include/zephyr/kernel/thread.h
+index b0d3b32e778..5ea5bc95e68 100644
+--- a/include/zephyr/kernel/thread.h
++++ b/include/zephyr/kernel/thread.h
+@@ -154,6 +154,11 @@ struct _thread_base {
+        sys_slist_t cleanup;
+ #endif
+ 
++#ifdef CONFIG_SYS_THREAD
++	/** Node for recycling detached threads and thread stacks from the system pool */
++	sys_dnode_t sys_thread_free_node;
++#endif
++
+ #ifdef CONFIG_THREAD_SPECIFIC_STORAGE
+        /** Thread-specific storage keys */
+        sys_dlist_t key_list;
+diff --git a/include/zephyr/sys/thread.h b/include/zephyr/sys/thread.h
+new file mode 100644
+index 00000000000..f2cec1fb388
+--- /dev/null
++++ b/include/zephyr/sys/thread.h
+@@ -0,0 +1,244 @@
++/*
++ * Copyright (c) 2025, Friedt Professional Engineering Services, Inc
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_INCLUDE_ZEPHYR_SYS_THREAD_H_
++#define ZEPHYR_INCLUDE_ZEPHYR_SYS_THREAD_H_
++
++#include <stdint.h>
++
++#include <zephyr/toolchain.h>
++#include <zephyr/sys/atomic.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++#if defined(CONFIG_SYS_THREAD) || defined(__DOXYGEN__)
++
++struct k_condvar;
++struct k_mutex;
++struct k_thread;
++
++/**
++ * @defgroup sys_thread_apis System Thread Pool APIs
++ * @ingroup kernel_apis
++ * @{
++ */
++
++/**
++ * @brief Flag indicating the synchronization object is process-shared.
++ *
++ * When passed to e.g. @ref sys_mutex_alloc or @ref sys_condvar_alloc, the created object is
++ * accessible to any thread that is able to access the object in memory. Passing this option is
++ * equivalent to calling @ref k_object_access_all_grant after initialization.
++ */
++#define SYS_THREAD_PROCESS_SHARED 1
++
++/**
++ * @brief Flag indicating the synchronization object is process-private.
++ *
++ * This is the default sharing mode for synchronization objects and may be omitted.
++ */
++#define SYS_THREAD_PROCESS_PRIVATE 0
++
++/**
++ * @brief Type for a one-time initialization flag.
++ *
++ * Used with @ref sys_thread_once to ensure a function is called exactly once,
++ * regardless of how many threads call it concurrently.
++ */
++typedef atomic_t sys_thread_once_t;
++
++/**
++ * @brief Execute a function exactly once.
++ *
++ * Regardless of how many threads call this function with the same @p flag, @p func will be
++ * invoked at most once.
++ *
++ * @param flag Pointer to an initialised (zero) @ref sys_thread_once_t.
++ * @param func Function to call on the first invocation.
++ *
++ * @note This function will assert if the memory pointed to by @p flag has not been
++ * zero-initialized. Behaviour is undefined if @p flag points to automatic storage.
++ */
++void sys_thread_once(sys_thread_once_t *flag, void (*func)(void));
++
++/**
++ * @brief Destroy a condition variable obtained from the system pool.
++ *
++ * Returns the condition variable pointed to by @p cond to the system condition
++ * variable pool.  If @p cond was not allocated from the pool this function
++ * returns @c -EINVAL.
++ * @retval 0 on success.
++ * @retval -ENOTSUP if the system condition variable pool is disabled
++ *                  (@kconfig{CONFIG_SYS_THREAD_CONDVAR_MAX} == 0).
++ * @retval -ENOMEM if the pool is exhausted.
++ * @retval -EINVAL if @p cond is not a pool-allocated condition variable.
++ */
++__syscall int sys_condvar_destroy(struct k_condvar *cond);
++
++/**
++ * @brief Allocate and initialise a condition variable from the system pool.
++ *
++ * Allocates a @ref k_condvar from the system condition variable pool, calls
++ * @ref k_condvar_init on it, and stores a pointer to it at @p *cond.
++ *
++ * @param[out] cond Address of a pointer that will be set to the newly
++ *                  allocated condition variable.
++ * @param options Option flags (e.g. @ref SYS_THREAD_PROCESS_SHARED).
++ *
++ * @retval 0 on success.
++ * @retval -ENOTSUP if the system condition variable pool is disabled
++ *                  (@kconfig{CONFIG_SYS_THREAD_CONDVAR_MAX} == 0).
++ * @retval -ENOMEM if the pool is exhausted.
++ */
++__syscall int sys_condvar_alloc(struct k_condvar **cond, uint32_t options);
++
++/**
++ * @brief Destroy a mutex obtained from the system pool.
++ *
++ * Returns the mutex pointed to by @p mutex to the system mutex pool.  If
++ * @p mutex was not allocated from the pool this function returns @c -EINVAL.
++ *
++ * @param mutex Pointer to the mutex to destroy.
++ * @retval 0 on success.
++ * @retval -ENOTSUP if the system mutex pool is disabled
++ *                  (@kconfig{CONFIG_SYS_THREAD_MUTEX_MAX} == 0).
++ * @retval -ENOMEM if the pool is exhausted.
++ */
++__syscall int sys_mutex_destroy(struct k_mutex *mutex);
++
++/**
++ * @brief Allocate and initialise a mutex from the system pool.
++ *
++ * Allocates a @ref k_mutex from the system mutex pool, calls
++ * @ref k_mutex_init_ext on it with @p options, and stores a pointer to it at
++ * @p *mutex.
++ *
++ * @param[out] mutex Address of a pointer that will be set to the newly
++ *                   allocated mutex.
++ * @param options Option flags (e.g. @ref SYS_THREAD_PROCESS_SHARED).
++ *
++ * @retval 0 on success.
++ * @retval -ENOTSUP if the system mutex pool is disabled
++ *                  (@kconfig{CONFIG_SYS_THREAD_MUTEX_MAX} == 0).
++ * @retval -ENOMEM if the pool is exhausted.
++ */
++__syscall int sys_mutex_alloc(struct k_mutex **mutex, uint32_t options);
++
++/**
++ * @brief Create a thread using resource from the system pool.
++ *
++ * Allocates a @ref k_thread and from the system pool and starts it.
++ *
++ * If @p stack is @c NULL, a stack will be allocated for the thread from the system pool using
++ * the specified @p stack_size and @p guard_size via @ref sys_thread_stack_alloc. If
++ * @p stack_size is zero, a thread stack is allocated using a default size of
++ * @kconfig{CONFIG_SYS_THREAD_STACK_SIZE}, or a suitable size when @kconfig{CONFIG_MMU} is
++ * enabled.
++ *
++ * If @p stack is not @c NULL, then the provided stack is used rather than allocating one.
++ *
++ * When the thread terminates and is joined, both the thread object and its associated stack are
++ * automatically returned to their respective pools.
++ *
++ * @param[out] th Address of a pointer that will be set to the newly
++ *                created thread.
++ * @param stack Stack to use, or @c NULL to allocate one from the pool.
++ * @param stack_size Desired or actual stack size in bytes.
++ * @param guard_size Desired or actual guard size in bytes.
++ * @param entry Thread entry point.
++ * @param p1 First argument to @p entry.
++ * @param p2 Second argument to @p entry.
++ * @param p3 Third argument to @p entry.
++ * @param prio Thread priority.
++ * @param options Thread creation option flags (e.g. @ref K_USER).
++ *
++ * @retval 0 on success.
++ * @retval -EINVAL if an argument was invalid.
++ * @retval -ENOMEM if the pool is exhausted.
++ *
++ * @note The @p guard_size parameter is currently unused, as Zephyr thread stacks have fixed guard
++ * region sizes when they are present.
++ */
++__syscall int sys_thread_create(struct k_thread **th, k_thread_stack_t *stack, uint32_t stack_size,
++				uint32_t guard_size, k_thread_entry_t entry, void *p1, void *p2,
++				void *p3, int prio, uint32_t options);
++
++/**
++ * @brief Allocate and initialize a thread stack from the system pool.
++ *
++ * If @p stack_size is less than or equal to @kconfig{CONFIG_SYS_THREAD_STACK_SIZE}, a stack of size
++ * @kconfig{CONFIG_SYS_THREAD_STACK_SIZE} will be allocated from the system pool. If @p stack_size
++ * is greater than @kconfig{CONFIG_SYS_THREAD_STACK_SIZE}, then a thread will be allocated from
++ * the system heap when @kconfig{CONFIG_SYS_THREAD_STACK_ALLOC_HEAP} is enabled, or using
++ * anonymous memory maps, when @kconfig{CONFIG_SYS_THREAD_STACK_ALLOC_ANON} is enabled.
++ *
++ * The @p flags parameter must include @ref
++ * K_USER when allocating a user-capable thread stack from a kernel thread. The @ref K_USER flag is
++ * implicit when allocating a thread stack from a user thread.
++ *
++ * @param[out] stack Address of a pointer that will be set to the newly allocated stack.
++ * @param[in,out] stack_size Desired or actual stack size in bytes.
++ * @param guard_size Desired or actual guard size in bytes.
++ * @param flags Allocation flags.
++ *
++ * @return 0 on success.
++ * @retval -ENOMEM if the requested allocation cannot be satisfied.
++ * @retval -EINVAL if an argument was invalid.
++ *
++ * @note The @p guard_size parameter is currently unused, as Zephyr thread stacks have fixed guard
++ * region sizes when they are present.
++ */
++__syscall int sys_thread_stack_alloc(k_thread_stack_t **stack, uint32_t *stack_size,
++				     uint32_t guard_size, uint32_t flags);
++
++/**
++ * @brief Free a thread stack obtained from the system pool.
++ *
++ * @retval 0 on success.
++ * @retval -ENOTSUP if the system thread stack pool is disabled
++ * (@kconfig{CONFIG_SYS_THREAD_STACK_MAX} == 0).
++ * @retval -EBUSY if the stack is still in use by a thread.
++ */
++__syscall int sys_thread_stack_destroy(k_thread_stack_t *stack);
++
++/**
++ * @cond INTERNAL_HIDDEN
++ */
++
++/**
++ * @brief Destroy a thread obtained from the system pool.
++ *
++ * Returns @p th (and its associated stack, if applicable) to the system pool.
++ * This call is mainly used by the kernel when a thread terminates or is joined.
++ *
++ * @note This function is safe to call even if @p th or its stack were
++ *       statically allocated; in that case it is a no-op for those objects.
++ *
++ * @param th Pointer to the thread to destroy.
++ *
++ * @retval 0 on success.
++ * @retval -ENOTSUP if the system thread and stack pools are disabled
++ * (@kconfig{CONFIG_SYS_THREAD_STACK_MAX} == 0 and @kconfig{CONFIG_SYS_THREAD_THREAD_MAX} == 0).
++ */
++__syscall int sys_thread_destroy(struct k_thread *th);
++
++/**
++ * INTERNAL_HIDDEN @endcond
++ */
++
++/** @} */
++
++#ifdef __cplusplus
++}
++#endif
++
++#include <zephyr/syscalls/thread.h>
++
++#endif /* defined(CONFIG_SYS_THREAD) || defined(__DOXYGEN__) */
++
++#endif /* ZEPHYR_INCLUDE_ZEPHYR_SYS_THREAD_H_ */
+diff --git a/kernel/sched.c b/kernel/sched.c
+index 015138ae24c..f661f5077da 100644
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -20,6 +20,7 @@
+ #include <zephyr/sys/atomic.h>
+ #include <zephyr/sys/math_extras.h>
+ #include <zephyr/timing/timing.h>
++#include <zephyr/sys/thread.h>
+ #include <zephyr/sys/util.h>
+ 
+ LOG_MODULE_DECLARE(os, CONFIG_KERNEL_LOG_LEVEL);
+@@ -1352,6 +1353,12 @@ static ALWAYS_INLINE void halt_thread(struct k_thread *thread, uint8_t new_state
+ 		k_thread_abort_cleanup(thread);
+ #endif /* CONFIG_THREAD_ABORT_NEED_CLEANUP */
+ 
++#if defined(CONFIG_SYS_THREAD) && defined(CONFIG_THREAD_DETACH)
++		if (k_thread_is_detached(thread)) {
++			sys_thread_destroy(thread);
++		}
++#endif
++
+ 		/* Do this "set _current to dummy" step last so that
+ 		 * subsystems above can rely on _current being
+ 		 * unchanged.  Disabled for posix as that arch
+@@ -1409,21 +1416,29 @@ void z_impl_k_thread_abort(k_tid_t thread)
+ }
+ #endif /* !CONFIG_ARCH_HAS_THREAD_ABORT */
+ 
+-static void z_thread_epilogue(struct k_thread *thread, void **result, bool now)
++static int z_thread_epilogue(struct k_thread *thread, void **result)
+ {
+ 	ARG_UNUSED(thread);
+ 	ARG_UNUSED(result);
+-	ARG_UNUSED(now);
+ 
+ #ifdef CONFIG_THREAD_RESULT
+ 	if (result != NULL) {
+ 		*result = (void *)atomic_get(&thread->base.result);
+ 	}
+ #endif
++#ifdef CONFIG_SYS_THREAD
++	return sys_thread_destroy(thread);
++#endif
++
++	return 0;
+ }
+ 
+ int z_impl_k_thread_rejoin(struct k_thread *thread, void **result, k_timeout_t timeout)
+ {
++	if (thread == NULL) {
++		return -EINVAL;
++	}
++
+ 	k_spinlock_key_t key = k_spin_lock(&_sched_spinlock);
+ 	int ret;
+ 	bool do_epilogue = false;
+@@ -1451,7 +1466,7 @@ int z_impl_k_thread_rejoin(struct k_thread *thread, void **result, k_timeout_t t
+ 		SYS_PORT_TRACING_OBJ_FUNC_BLOCKING(k_thread, join, thread, timeout);
+ 		ret = z_swap(&_sched_spinlock, key);
+ 		if (ret == 0) {
+-			z_thread_epilogue(thread, result, true);
++			ret = z_thread_epilogue(thread, result);
+ 		}
+ 		SYS_PORT_TRACING_OBJ_FUNC_EXIT(k_thread, join, thread, timeout, ret);
+ 
+@@ -1464,7 +1479,7 @@ int z_impl_k_thread_rejoin(struct k_thread *thread, void **result, k_timeout_t t
+ 	k_spin_unlock(&_sched_spinlock, key);
+ 
+ 	if (do_epilogue) {
+-		z_thread_epilogue(thread, result, true);
++		ret = z_thread_epilogue(thread, result);
+ 	}
+ 
+ 	return ret;
+@@ -1507,8 +1522,12 @@ static inline int z_vrfy_k_thread_join(struct k_thread *thread,
+ 				       k_timeout_t timeout)
+ {
+ 	if (thread_obj_validate(thread)) {
+-		z_thread_epilogue(thread, NULL, true);
+-		return 0;
++#ifdef CONFIG_THREAD_DETACH
++		if ((thread->base.user_options & K_DETACHED) != 0U) {
++			return -EINVAL;
++		}
++#endif
++		return z_thread_epilogue(thread, NULL);
+ 	}
+ 
+ 	return z_impl_k_thread_join(thread, timeout);
+@@ -1522,8 +1541,12 @@ static inline int z_vrfy_k_thread_rejoin(struct k_thread *thread, void **result,
+ 		if (result != NULL) {
+ 			K_OOPS(K_SYSCALL_MEMORY_WRITE(result, sizeof(*result)));
+ 		}
+-		z_thread_epilogue(thread, result, true);
+-		return 0;
++#ifdef CONFIG_THREAD_DETACH
++		if ((thread->base.user_options & K_DETACHED) != 0U) {
++			return -EINVAL;
++		}
++#endif
++		return z_thread_epilogue(thread, result);
+ 	}
+ 
+ 	return z_impl_k_thread_rejoin(thread, result, timeout);
+diff --git a/kernel/signal.c b/kernel/signal.c
+index c3998b81e33..48104739d84 100644
+--- a/kernel/signal.c
++++ b/kernel/signal.c
+@@ -14,6 +14,7 @@
+ #include <zephyr/sys/math_extras.h>
+ #include <zephyr/sys/ring_buffer.h>
+ #include <zephyr/sys/thread.h>
++#include <zephyr/sys/thread.h>
+ #include <zephyr/sys/util.h>
+ 
+ #define K_SI_QUEUE      38
+diff --git a/kernel/thread.c b/kernel/thread.c
+index d2ed53ec57a..1ade8b7b4d3 100644
+--- a/kernel/thread.c
++++ b/kernel/thread.c
+@@ -745,6 +745,10 @@ char *z_setup_new_thread(struct k_thread *new_thread,
+ 	sys_dlist_init(&new_thread->base.key_list);
+ #endif
+ 
++#ifdef CONFIG_SYS_THREAD
++	sys_dnode_init(&new_thread->base.sys_thread_free_node);
++#endif
++
+ 	SYS_PORT_TRACING_OBJ_FUNC(k_thread, create, new_thread);
+ 
+ 	return stack_ptr;
+@@ -1162,7 +1166,7 @@ void defer_thread_cleanup(struct k_thread *thread)
+ 	 */
+ 	thread->stack_info.mapped.addr = NULL;
+ 	thread->stack_info.mapped.sz = 0;
+-#endif /* CONFIG_THREAD_STACK_MEM_MAPPED */
++#endif /* CONFIG_THREAD_STACK_MEM_MAPPED || CONFIG_SYS_THREAD_STACK_ALLOC_ANON */
+ }
+ 
+ void do_thread_cleanup(struct k_thread *thread)
+@@ -1383,6 +1387,7 @@ void z_vrfy_k_thread_exit(void *result)
+ int z_impl_k_thread_detach(struct k_thread *th)
+ {
+ 	int ret = 0;
++	__maybe_unused bool destroy = false;
+ 
+ 	if (th == NULL) {
+ 		return -EINVAL;
+@@ -1395,8 +1400,19 @@ int z_impl_k_thread_detach(struct k_thread *th)
+ 		}
+ 
+ 		th->base.user_options |= K_DETACHED;
++
++		if (IS_ENABLED(CONFIG_SYS_THREAD)) {
++			/* in case the thread is already dead, destroy it */
++			destroy = z_is_thread_dead(th);
++		}
+ 	}
+ 
++#ifdef CONFIG_SYS_THREAD
++	if (destroy) {
++		ret = sys_thread_destroy(th);
++	}
++#endif
++
+ 	return ret;
+ }
+ 
+diff --git a/lib/os/CMakeLists.txt b/lib/os/CMakeLists.txt
+index 09ef3c4e4c0..eaf6ec021a5 100644
+--- a/lib/os/CMakeLists.txt
++++ b/lib/os/CMakeLists.txt
+@@ -13,6 +13,21 @@ zephyr_sources(
+   thread_entry.c
+   )
+ 
++zephyr_sources_ifdef(CONFIG_SYS_THREAD thread.c)
++zephyr_syscall_header_ifdef(CONFIG_SYS_THREAD ${ZEPHYR_BASE}/include/zephyr/sys/thread.h)
++
++if(CONFIG_SYS_THREAD)
++  foreach(_pool CONDVAR MUTEX STACK THREAD)
++    # Sum CONFIG_SYS_THREAD_${_pool}_MIN with any CONFIG_SYS_THREAD_${_pool}_MIN_ADD_* additions
++    import_kconfig(CONFIG_SYS_THREAD_${_pool}_MIN_ADD_ ${DOTCONFIG} _sys_thread_${_pool}_min_add_keys)
++    set(_sys_thread_${_pool}_min ${CONFIG_SYS_THREAD_${_pool}_MIN})
++    foreach(_add ${_sys_thread_${_pool}_min_add_keys})
++      math(EXPR _sys_thread_${_pool}_min "${_sys_thread_${_pool}_min} + ${${_add}}")
++    endforeach()
++    zephyr_compile_definitions(SYS_THREAD_${_pool}_MIN=${_sys_thread_${_pool}_min})
++  endforeach()
++endif()
++
+ if(CONFIG_ZVFS_OPEN_IGNORE_MIN)
+   set(final_fd_size ${CONFIG_ZVFS_OPEN_MAX})
+ else()
+diff --git a/lib/os/Kconfig b/lib/os/Kconfig
+index ece806dcdea..f5506565c9e 100644
+--- a/lib/os/Kconfig
++++ b/lib/os/Kconfig
+@@ -150,6 +150,7 @@ config POWEROFF
+ 	  Enable support for system power off.
+ 
+ rsource "Kconfig.cbprintf"
++rsource "Kconfig.sys_thread"
+ rsource "zvfs/Kconfig"
+ rsource "cpu_load/Kconfig"
+ 
+diff --git a/lib/os/Kconfig.sys_thread b/lib/os/Kconfig.sys_thread
+new file mode 100644
+index 00000000000..eb9a70d1346
+--- /dev/null
++++ b/lib/os/Kconfig.sys_thread
+@@ -0,0 +1,153 @@
++# Copyright (c) 2026, Friedt Professional Engineering Services, Inc
++# SPDX-License-Identifier: Apache-2.0
++
++config SYS_THREAD
++	bool "Support shared pools of threading primitives"
++	select CONDVAR_OPTIONS
++	select DYNAMIC_OBJECTS if USERSPACE
++	select MUTEX_OPTIONS
++	select SIGNAL
++	select SYS_ELASTIPOOL
++	select THREAD_MONITOR
++	select THREAD_STACK_INFO
++	# to support heap-based allocation by default, can be disabled
++	imply SYS_HASH_MAP
++	imply SYS_HASH_FUNC32
++	help
++	  Select 'y' here to support shared system pools of threading primitives such as
++	    - k_condvar
++		- k_mutex
++		- k_thread_stack_t
++		- k_thread
++
++if SYS_THREAD
++
++config SYS_THREAD_CONDVAR_MAX
++	int "Maximum size of system k_condvar pool"
++	default SYS_THREAD_CONDVAR_MIN
++	help
++	  This value represents the maximum number of condition variables that may be available to
++	  kernel or user threads in the system condition variable pool. If this value is equal to
++	  SYS_THREAD_CONDVAR_MIN, then only static allocations permitted via the system
++	  condition variable pool. If this value is greater than SYS_THREAD_CONDVAR_MIN, then
++	  maximally CONFIG_SYS_THREAD_CONDVAR_MAX - SYS_THREAD_CONDVAR_MIN condition
++	  variables may be allocated from the heap.
++
++	  CONFIG_SYS_THREAD_CONDVAR_MAX must be >= SYS_THREAD_CONDVAR_MIN.
++
++config SYS_THREAD_CONDVAR_MIN
++	int "Minimum size of system k_condvar pool"
++	default 0
++	help
++	  This value represents the minimum number of condition variables that are guaranteed to be
++	  available to kernel or user threads in the system condition variable pool. The minimum
++	  number is guaranteed via static allocation.
++
++	  SYS_THREAD_CONDVAR_MIN must be >= 0.
++
++config SYS_THREAD_MUTEX_MAX
++	int "Maximum size of system k_mutex pool"
++	default SYS_THREAD_MUTEX_MIN
++	help
++	  This value represents the maximum number of mutexes that may be available to
++	  kernel or user threads in the system mutex pool. If this value is equal to
++	  SYS_THREAD_MUTEX_MIN, then only static allocations are permitted via the system
++	  condition variable pool. If this value is greater than SYS_THREAD_MUTEX_MIN, then
++	  maximally CONFIG_SYS_THREAD_MUTEX_MAX - SYS_THREAD_MUTEX_MIN condition
++	  variables may be allocated from the heap.
++
++	  CONFIG_SYS_THREAD_MUTEX_MAX must be >= SYS_THREAD_MUTEX_MIN.
++
++config SYS_THREAD_MUTEX_MIN
++	int "Minimum size of system k_mutex pool"
++	default 0
++	help
++	  This value represents the minimum number of mutexes that are guaranteed to be
++	  available to kernel or user threads in the system mutex pool. The minimum
++	  number is guaranteed via static allocation.
++
++	  SYS_THREAD_MUTEX_MIN must be >= 0.
++
++config SYS_THREAD_STACK_MAX
++	int "Maximum size of system k_thread_stack_t pool"
++	default SYS_THREAD_STACK_MIN
++	help
++	  This value represents the maximum number of thread stacks that may be available to
++	  kernel or user threads in the system stack pool. If this value is equal to
++	  SYS_THREAD_STACK_MIN, then only static allocations are permitted via the system
++	  stack pool. If this value is greater than SYS_THREAD_STACK_MIN, then
++	  maximally CONFIG_SYS_THREAD_STACK_MAX - SYS_THREAD_STACK_MIN stacks
++	  may be allocated from the heap.
++
++	  CONFIG_SYS_THREAD_STACK_MAX must be >= SYS_THREAD_STACK_MIN.
++
++config SYS_THREAD_STACK_MIN
++	int "Minimum size of system k_thread_stack_t pool"
++	default 0
++	help
++	  This value represents the minimum number of thread stacks that are guaranteed to be
++	  available to kernel or user threads in the system stack pool. The minimum
++	  number is guaranteed via static allocation.
++
++	  SYS_THREAD_STACK_MIN must be >= 0.
++
++config SYS_THREAD_STACK_ALLOC_ANON
++	bool
++	default y if MMU
++	help
++	  On systems where an MMU is present, anonymously mapped pages of memory may be used
++	  for allocating thread stacks. Allocation is performed using `k_mem_map()`. The size
++	  of those thread stacks are rouded up to a multiple of CONFIG_MMU_PAGE_SIZE. Two
++	  additional guard pages accompany the anonymous mapping; one before the thread stack,
++	  and the other after the thread stack.
++
++config SYS_THREAD_STACK_ALLOC_HEAP
++	bool
++	default y if !MMU
++	help
++	  Allocate thread stacks from the heap.
++
++config SYS_THREAD_STACK_SIZE
++	hex "Size of system thread stacks"
++	default 0x1000 if COVERAGE_GCOV
++	default MMU_PAGE_SIZE if MMU
++	default 0x800 if !MMU && 64BIT
++	default 0x400
++	help
++	  Size of each thread stack in the system thread stack pool.
++
++config SYS_THREAD_THREAD_MAX
++	int "Maximum size of system k_thread pool"
++	default SYS_THREAD_THREAD_MIN
++	help
++	  This value represents the maximum number of threads that may be available to
++	  kernel or user threads in the system thread pool. If this value is equal to
++	  SYS_THREAD_THREAD_MIN, then only static allocations are permitted via the system
++	  thread pool. If this value is greater than SYS_THREAD_THREAD_MIN, then
++	  maximally CONFIG_SYS_THREAD_THREAD_MAX - SYS_THREAD_THREAD_MIN threads
++	  may be allocated from the heap.
++
++	  CONFIG_SYS_THREAD_THREAD_MAX must be >= SYS_THREAD_THREAD_MIN.
++
++config SYS_THREAD_THREAD_MIN
++	int "Minimum size of system k_thread pool"
++	default 0
++	help
++	  This value represents the minimum number of threads that are guaranteed to be
++	  available to kernel or user threads in the system thread pool. The minimum
++	  number is guaranteed via static allocation.
++
++	  SYS_THREAD_THREAD_MIN must be >= 0.
++
++config SYS_THREAD_RECYCLER_DELAY_MS
++       int "Delay for reclaiming dynamic thread stacks (ms)"
++       default 100
++       help
++         Scheduled delay for recycling threads after a detached thread has terminated.
++
++module = SYS_THREAD
++module-str = Log level for system thread library
++module-help = Enables system thread logging.
++source "subsys/logging/Kconfig.template.log_config"
++
++endif # SYS_THREAD
+diff --git a/lib/os/thread.c b/lib/os/thread.c
+new file mode 100644
+index 00000000000..83580d9d28e
+--- /dev/null
++++ b/lib/os/thread.c
+@@ -0,0 +1,925 @@
++/*
++ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include "../../kernel/include/kthread.h"
++#include <ksched.h>
++
++#include <zephyr/internal/syscall_handler.h>
++#include <zephyr/logging/log.h>
++#include <zephyr/kernel.h>
++#include <zephyr/kernel/mm.h>
++#include <zephyr/kernel/thread_stack.h>
++#include <zephyr/kernel/internal/mm.h>
++#include <zephyr/sys/internal/kobject_internal.h>
++#include <zephyr/sys/thread.h>
++#include <zephyr/sys/elastipool.h>
++#include <zephyr/toolchain.h>
++
++#ifdef CONFIG_USERSPACE
++#define K_THREAD_STACK_ALIGN(size) Z_THREAD_STACK_OBJ_ALIGN(size)
++#else
++#define K_THREAD_STACK_ALIGN(size) Z_KERNEL_STACK_OBJ_ALIGN
++#endif
++
++/* For declaring an array of k_condvar */
++#define K_CONDVAR_ARRAY_DEFINE_ELEM(idx, name) Z_CONDVAR_INITIALIZER(name[idx])
++#define K_CONDVAR_ARRAY_DEFINE(name, num)                                                          \
++	__maybe_unused struct k_condvar name[] = {                                                 \
++		LISTIFY(num, K_CONDVAR_ARRAY_DEFINE_ELEM, (,), name) };
++
++/* For declaring an array of k_mutex */
++#define K_MUTEX_ARRAY_DEFINE_ELEM(idx, name) Z_MUTEX_INITIALIZER(name[idx])
++#define K_MUTEX_ARRAY_DEFINE(name, num)                                                            \
++	__maybe_unused struct k_mutex name[] = {LISTIFY(num, K_MUTEX_ARRAY_DEFINE_ELEM, (,), name) };
++
++/* For declaring an array of k_thread */
++#define K_THREAD_ARRAY_DEFINE(name, num) __maybe_unused struct k_thread name[num]
++
++#ifdef CONFIG_ZTEST
++static bool print_1pool_stats(const struct sys_elastipool *pool, const char *const name);
++#endif
++
++static void *heap_obj_allocator(void *obj, size_t size, enum k_objects otype, uint32_t flags);
++static void sys_thread_recycle(void);
++static void sys_thread_recycle_work_handler(struct k_work *work);
++static k_thread_stack_t *sys_thread_stack_obj(struct k_thread *thread);
++
++LOG_MODULE_REGISTER(sys_thread, CONFIG_SYS_THREAD_LOG_LEVEL);
++static K_WORK_DELAYABLE_DEFINE(sys_thread_recycle_work, sys_thread_recycle_work_handler);
++
++/* FIXME: should probably change the signature of sys_elastipool_api_heap_alloc_t so that
++ * the first argument is non-const */
++static inline void *cond_pool_heap_alloc(const void *ptr, size_t size, size_t align,
++					 uint32_t flags)
++{
++	return heap_obj_allocator((void *)ptr, size, K_OBJ_CONDVAR, flags);
++}
++
++static inline void *mutex_pool_heap_alloc(const void *ptr, size_t size, size_t align,
++					  uint32_t flags)
++{
++	return heap_obj_allocator((void *)ptr, size, K_OBJ_MUTEX, flags);
++}
++
++static inline void *stack_pool_heap_alloc(const void *ptr, size_t size, size_t align,
++					  uint32_t flags)
++{
++	return heap_obj_allocator((void *)ptr, size, K_OBJ_THREAD_STACK_ELEMENT, flags);
++}
++
++static inline void *thread_pool_heap_alloc(const void *ptr, size_t size, size_t align,
++					   uint32_t flags)
++{
++	return heap_obj_allocator((void *)ptr, size, K_OBJ_THREAD, flags);
++}
++
++static const char *const heap_obj_str(enum k_objects otype);
++
++BUILD_ASSERT(SYS_THREAD_CONDVAR_MIN >= 0);
++BUILD_ASSERT(CONFIG_SYS_THREAD_CONDVAR_MAX >= SYS_THREAD_CONDVAR_MIN);
++
++static struct k_spinlock cond_pool_lock;
++K_CONDVAR_ARRAY_DEFINE(sys_condvar_pool, SYS_THREAD_CONDVAR_MIN);
++SYS_ELASTIPOOL_DEFINE_ADVANCED(cond_pool, sizeof(struct k_condvar), __alignof(struct k_condvar),
++			       SYS_THREAD_CONDVAR_MIN, CONFIG_SYS_THREAD_CONDVAR_MAX,
++			       cond_pool_heap_alloc, sys_condvar_pool, static);
++
++BUILD_ASSERT(SYS_THREAD_MUTEX_MIN >= 0);
++BUILD_ASSERT(CONFIG_SYS_THREAD_MUTEX_MAX >= SYS_THREAD_MUTEX_MIN);
++
++static struct k_spinlock mutex_pool_lock;
++K_MUTEX_ARRAY_DEFINE(sys_mutex_pool, SYS_THREAD_MUTEX_MIN);
++SYS_ELASTIPOOL_DEFINE_ADVANCED(mutex_pool, sizeof(struct k_mutex), __alignof(struct k_mutex),
++			       SYS_THREAD_MUTEX_MIN, CONFIG_SYS_THREAD_MUTEX_MAX,
++			       mutex_pool_heap_alloc, sys_mutex_pool, static);
++
++BUILD_ASSERT(SYS_THREAD_STACK_MIN >= 0);
++BUILD_ASSERT(CONFIG_SYS_THREAD_STACK_MAX >= SYS_THREAD_STACK_MIN);
++
++static struct k_spinlock stack_pool_lock;
++K_THREAD_STACK_ARRAY_DEFINE(sys_stack_pool, SYS_THREAD_STACK_MIN, CONFIG_SYS_THREAD_STACK_SIZE);
++SYS_ELASTIPOOL_DEFINE_ADVANCED(stack_pool, K_THREAD_STACK_LEN(CONFIG_SYS_THREAD_STACK_SIZE),
++			       K_THREAD_STACK_ALIGN(CONFIG_SYS_THREAD_STACK_SIZE),
++			       SYS_THREAD_STACK_MIN, CONFIG_SYS_THREAD_STACK_MAX,
++			       stack_pool_heap_alloc, sys_stack_pool, );
++
++BUILD_ASSERT(SYS_THREAD_THREAD_MIN >= 0);
++BUILD_ASSERT(CONFIG_SYS_THREAD_THREAD_MAX >= SYS_THREAD_THREAD_MIN);
++
++static struct k_spinlock thread_pool_lock;
++K_THREAD_ARRAY_DEFINE(sys_thread_pool, SYS_THREAD_THREAD_MIN);
++__maybe_unused
++static sys_dlist_t thread_pool_free_list = SYS_DLIST_STATIC_INIT(&thread_pool_free_list);
++SYS_ELASTIPOOL_DEFINE_ADVANCED(thread_pool, sizeof(struct k_thread), __alignof(struct k_thread),
++			       SYS_THREAD_THREAD_MIN, CONFIG_SYS_THREAD_THREAD_MAX,
++			       thread_pool_heap_alloc, sys_thread_pool, static);
++
++int z_impl_sys_condvar_destroy(struct k_condvar *cond)
++{
++	if (CONFIG_SYS_THREAD_CONDVAR_MAX == 0) {
++		LOG_WRN_ONCE("%s pool is disabled", heap_obj_str(K_OBJ_CONDVAR));
++		return -ENOTSUP;
++	}
++
++	int ret = -EINVAL;
++
++	K_SPINLOCK(&cond_pool_lock) {
++		if (sys_elastipool_check(&cond_pool, cond) != 0) {
++			ret = -EINVAL;
++			K_SPINLOCK_BREAK;
++		}
++
++		ret = sys_elastipool_free(&cond_pool, cond);
++	}
++
++	return ret;
++}
++
++#ifdef CONFIG_USERSPACE
++int z_vrfy_sys_condvar_destroy(struct k_condvar *cond)
++{
++	K_OOPS(K_SYSCALL_OBJ(cond, K_OBJ_CONDVAR));
++	return z_impl_sys_condvar_destroy(cond);
++}
++#include <zephyr/syscalls/sys_condvar_destroy_mrsh.c>
++#endif
++
++int z_impl_sys_condvar_alloc(struct k_condvar **cond, uint32_t options)
++{
++	if (CONFIG_SYS_THREAD_CONDVAR_MAX == 0) {
++		LOG_WRN_ONCE("%s pool is disabled", heap_obj_str(K_OBJ_CONDVAR));
++		return -ENOTSUP;
++	}
++
++	int ret = -ENOMEM;
++
++	K_SPINLOCK(&cond_pool_lock) {
++		ret = sys_elastipool_alloc(&cond_pool, (void **)cond);
++	}
++
++	if (ret < 0) {
++		return ret;
++	}
++
++#ifdef CONFIG_USERSPACE
++	if (k_is_in_user_syscall()) {
++		extern int z_vrfy_k_condvar_init_ext(struct k_condvar * cond, uint32_t options);
++
++		/* do not skip checks in z_vrfy_k_condvar_init() due to z_syscall_trap() */
++		k_object_access_grant(*cond, _current);
++		ret = z_vrfy_k_condvar_init_ext(*cond, options);
++	} else
++#endif
++	{
++		ret = k_condvar_init_ext(*cond, options);
++	}
++	if (ret < 0) {
++		LOG_DBG("%s() failed: %d", "k_condvar_init", ret);
++		goto out;
++	}
++
++	if (IS_ENABLED(CONFIG_TEST) && (CONFIG_SYS_THREAD_CONDVAR_MAX == SYS_THREAD_CONDVAR_MIN)) {
++		__ASSERT_NO_MSG(IS_ARRAY_ELEMENT(sys_condvar_pool, *cond));
++	}
++
++out:
++	if (ret != 0) {
++		K_SPINLOCK(&cond_pool_lock) {
++			sys_elastipool_free(&cond_pool, *cond);
++		}
++	}
++
++	return ret;
++}
++
++#ifdef CONFIG_USERSPACE
++int z_vrfy_sys_condvar_alloc(struct k_condvar **cond, uint32_t options)
++{
++	K_OOPS(K_SYSCALL_MEMORY_WRITE(cond, sizeof(*cond)));
++	return z_impl_sys_condvar_alloc(cond, options);
++}
++#include <zephyr/syscalls/sys_condvar_alloc_mrsh.c>
++#endif
++
++int z_impl_sys_mutex_destroy(struct k_mutex *mutex)
++{
++	if (CONFIG_SYS_THREAD_MUTEX_MAX == 0) {
++		LOG_WRN_ONCE("%s pool is disabled", heap_obj_str(K_OBJ_MUTEX));
++		return -ENOTSUP;
++	}
++
++	int ret = -EINVAL;
++
++	if (mutex->lock_count != 0) {
++		LOG_DBG("mutex %p is locked!", mutex);
++		return -EBUSY;
++	}
++
++	K_SPINLOCK(&mutex_pool_lock) {
++		if (sys_elastipool_check(&mutex_pool, mutex) != 0) {
++			ret = -EINVAL;
++			K_SPINLOCK_BREAK;
++		}
++
++		ret = sys_elastipool_free(&mutex_pool, mutex);
++	}
++
++	return ret;
++}
++
++#ifdef CONFIG_USERSPACE
++int z_vrfy_sys_mutex_destroy(struct k_mutex *mutex)
++{
++	K_OOPS(K_SYSCALL_OBJ(mutex, K_OBJ_MUTEX));
++	return z_impl_sys_mutex_destroy(mutex);
++}
++#include <zephyr/syscalls/sys_mutex_destroy_mrsh.c>
++#endif
++
++int z_impl_sys_mutex_alloc(struct k_mutex **mutex, uint32_t options)
++{
++	if (CONFIG_SYS_THREAD_MUTEX_MAX == 0) {
++		LOG_WRN_ONCE("%s pool is disabled", heap_obj_str(K_OBJ_MUTEX));
++		return -ENOTSUP;
++	}
++
++	int ret = -ENOMEM;
++
++	K_SPINLOCK(&mutex_pool_lock) {
++		ret = sys_elastipool_alloc(&mutex_pool, (void **)mutex);
++	}
++
++	if (ret < 0) {
++		return ret;
++	}
++
++#ifdef CONFIG_USERSPACE
++	if (k_is_in_user_syscall()) {
++		extern int z_vrfy_k_mutex_init_ext(struct k_mutex * mutex, uint32_t options);
++
++		/* do not skip checks in z_vrfy_k_mutex_init_ext() due to z_syscall_trap() */
++		k_object_access_grant(*mutex, _current);
++		ret = z_vrfy_k_mutex_init_ext(*mutex, options);
++	} else
++#endif
++	{
++		ret = k_mutex_init_ext(*mutex, options);
++	}
++
++	if (ret < 0) {
++		LOG_DBG("%s() failed: %d", "k_mutex_init_ext", ret);
++		goto out;
++	}
++
++	if (IS_ENABLED(CONFIG_TEST) && (CONFIG_SYS_THREAD_MUTEX_MAX == SYS_THREAD_MUTEX_MIN)) {
++		__ASSERT_NO_MSG(IS_ARRAY_ELEMENT(sys_mutex_pool, *mutex));
++	}
++
++out:
++	if (ret != 0) {
++		K_SPINLOCK(&mutex_pool_lock) {
++			sys_elastipool_free(&mutex_pool, *mutex);
++		}
++	}
++
++	return ret;
++}
++
++#ifdef CONFIG_USERSPACE
++int z_vrfy_sys_mutex_alloc(struct k_mutex **mutex, uint32_t options)
++{
++	K_OOPS(K_SYSCALL_MEMORY_WRITE(mutex, sizeof(*mutex)));
++	return z_impl_sys_mutex_alloc(mutex, options);
++}
++#include <zephyr/syscalls/sys_mutex_alloc_mrsh.c>
++#endif
++
++struct dyn_cb_data {
++	k_tid_t tid;
++	k_thread_stack_t *stack;
++};
++
++static void dyn_cb(const struct k_thread *thread, void *user_data)
++{
++	struct dyn_cb_data *const data = (struct dyn_cb_data *)user_data;
++
++	if (data->stack == (k_thread_stack_t *)thread->stack_info.start) {
++		__ASSERT(data->tid == NULL, "stack %p is associated with more than one thread!",
++			 (void *)thread->stack_info.start);
++		data->tid = (k_tid_t)thread;
++	}
++}
++
++int z_impl_sys_thread_stack_alloc(k_thread_stack_t **stack, uint32_t *stack_size,
++				  uint32_t guard_size, uint32_t flags)
++{
++	ARG_UNUSED(stack_size);
++	ARG_UNUSED(guard_size);
++	ARG_UNUSED(flags);
++
++	if (CONFIG_SYS_THREAD_STACK_MAX == 0) {
++		LOG_WRN_ONCE("%s pool is disabled", heap_obj_str(K_OBJ_THREAD_STACK_ELEMENT));
++		return -ENOTSUP;
++	}
++
++	if ((*stack_size > CONFIG_SYS_THREAD_STACK_SIZE) &&
++	    (CONFIG_SYS_THREAD_STACK_MAX == SYS_THREAD_STACK_MIN)) {
++		/* If the pool is not configured to allow allocations from heap or anonymous memory
++		 * then the request cannot be satisfied */
++		LOG_WRN_ONCE("%s of size %u exceeds CONFIG_SYS_THREAD_STACK_SIZE (%u)",
++			     heap_obj_str(K_OBJ_THREAD_STACK_ELEMENT), *stack_size,
++			     CONFIG_SYS_THREAD_STACK_SIZE);
++		return -ENOMEM;
++	}
++
++	int ret = -ENOMEM;
++	bool use_mem_map = false;
++
++	if (*stack_size < CONFIG_SYS_THREAD_STACK_SIZE) {
++		*stack_size = CONFIG_SYS_THREAD_STACK_SIZE;
++	}
++
++	K_SPINLOCK(&stack_pool_lock) {
++		if (*stack_size <= CONFIG_SYS_THREAD_STACK_SIZE) {
++			if (SYS_THREAD_STACK_MIN > 0) {
++				/* Try the guaranteed-static entries first */
++				ret = sys_elastipool_api_alloc_static(&stack_pool, (void **)stack,
++								      flags);
++				if (ret == 0) {
++					K_SPINLOCK_BREAK;
++				}
++			}
++			if (!IS_ENABLED(CONFIG_SYS_THREAD_STACK_ALLOC_ANON)) {
++				/* Non-MMU: heap via elastipool (handles both dyn and elastic cases)
++				 */
++				ret = sys_elastipool_alloc(&stack_pool, (void **)stack);
++				K_SPINLOCK_BREAK;
++			}
++			/* ALLOC_ANON: static pool empty/exhausted; fall through to k_mem_map below
++			 */
++		}
++
++		/* Oversized stacks, or normal-size on ALLOC_ANON after static pool exhausted */
++		if (IS_ENABLED(CONFIG_SYS_THREAD_STACK_ALLOC_HEAP)) {
++			*stack = heap_obj_allocator(NULL, *stack_size, K_OBJ_THREAD_STACK_ELEMENT,
++						    flags);
++			ret = (*stack == NULL) ? -ENOMEM : 0;
++		} else if (IS_ENABLED(CONFIG_MMU) &&
++			   IS_ENABLED(CONFIG_SYS_THREAD_STACK_ALLOC_ANON)) {
++			/* Temporarily increase the size of the stack pool to reserve the stack, so
++			 * that we can map a new page without holding the spinlock */
++			if (stack_pool.data->pool_size >= stack_pool.config->max_obj) {
++				ret = -ENOMEM;
++				K_SPINLOCK_BREAK;
++			}
++			++stack_pool.data->pool_size;
++			use_mem_map = true;
++			ret = 0;
++		} else {
++			__ASSERT(false, "Invalid CONFIG_SYS_THREAD_STACK_ALLOC");
++		}
++	}
++
++	if (ret < 0) {
++		return ret;
++	}
++
++	if (use_mem_map) {
++#ifdef CONFIG_MMU
++		__ASSERT_NO_MSG(IS_ENABLED(CONFIG_MMU));
++
++		uint32_t map_size = 0;
++
++		if (IS_ENABLED(CONFIG_USERSPACE) && ((flags & K_USER) != 0)) {
++			*stack = k_object_map_size(K_OBJ_THREAD_STACK_ELEMENT, *stack_size);
++		} else {
++			map_size = (uint32_t)ROUND_UP(K_KERNEL_STACK_LEN(*stack_size),
++						      CONFIG_MMU_PAGE_SIZE);
++			*stack = k_mem_map(map_size,
++					   K_MEM_PERM_RW | K_MEM_MAP_LOCK | K_MEM_MAP_UNINIT);
++		}
++		K_SPINLOCK(&stack_pool_lock) {
++			if (*stack == NULL) {
++				ret = -ENOMEM;
++				--stack_pool.data->pool_size;
++				K_SPINLOCK_BREAK;
++			}
++
++			if (sys_hashmap_insert(stack_pool.config->map, (uint64_t)(uintptr_t)*stack,
++					       (uint64_t)map_size, NULL) < 0) {
++				k_mem_unmap(*stack, map_size);
++				*stack = NULL;
++				ret = -ENOMEM;
++				--stack_pool.data->pool_size;
++				K_SPINLOCK_BREAK;
++			}
++
++			ret = 0;
++		}
++#endif
++	}
++
++	if (ret == 0 && IS_ENABLED(CONFIG_USERSPACE) && ((flags & K_USER) != 0)) {
++		k_object_access_grant(*stack, _current);
++	}
++
++	return ret;
++}
++
++#ifdef CONFIG_USERSPACE
++int z_vrfy_sys_thread_stack_alloc(k_thread_stack_t **stack, uint32_t *stack_size,
++				  uint32_t guard_size, uint32_t flags)
++{
++	K_OOPS(K_SYSCALL_MEMORY_WRITE(stack, sizeof(*stack)));
++	K_OOPS(K_SYSCALL_MEMORY_WRITE(stack_size, sizeof(*stack_size)));
++	return z_impl_sys_thread_stack_alloc(stack, stack_size, guard_size, flags);
++}
++#include <zephyr/syscalls/sys_thread_stack_alloc_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++static bool is_thread_stack_in_use(k_thread_stack_t *stack)
++{
++	struct dyn_cb_data data = {.stack = stack};
++
++	/* verify no live thread is associated with this stack */
++	k_thread_foreach(dyn_cb, &data);
++	if (data.tid != NULL) {
++		if (!(z_is_thread_state_set(data.tid, _THREAD_DUMMY) ||
++		      z_is_thread_state_set(data.tid, _THREAD_DEAD))) {
++			return true;
++		}
++	}
++
++	return false;
++}
++
++int z_impl_sys_thread_stack_destroy(k_thread_stack_t *stack)
++{
++	if (CONFIG_SYS_THREAD_STACK_MAX == 0) {
++		LOG_WRN_ONCE("%s pool is disabled", heap_obj_str(K_OBJ_THREAD_STACK_ELEMENT));
++		return -ENOTSUP;
++	}
++
++	if (is_thread_stack_in_use(stack)) {
++		return -EBUSY;
++	}
++
++	int ret = -EINVAL;
++
++	K_SPINLOCK(&stack_pool_lock) {
++#ifdef CONFIG_SYS_THREAD_STACK_ALLOC_ANON
++		if (SYS_THREAD_STACK_MIN > 0) {
++			ret = sys_elastipool_api_free_static(&stack_pool, stack);
++			if (ret == 0) {
++				K_SPINLOCK_BREAK;
++			}
++		}
++
++		uint64_t map_size;
++
++		if (sys_hashmap_remove(stack_pool.config->map, (uint64_t)(uintptr_t)stack,
++				       &map_size)) {
++			k_mem_unmap(stack, (size_t)map_size);
++			--stack_pool.data->pool_size;
++			ret = 0;
++			K_SPINLOCK_BREAK;
++		}
++#else
++		ret = sys_elastipool_free(&stack_pool, stack);
++#endif
++	}
++
++	return ret;
++}
++
++#ifdef CONFIG_USERSPACE
++static inline int z_vrfy_sys_thread_stack_destroy(k_thread_stack_t *stack)
++{
++	/* stack object must have been initialised (i.e. used) and is now dead */
++	K_OOPS(K_SYSCALL_OBJ_NEVER_INIT(stack, K_OBJ_THREAD_STACK_ELEMENT));
++	return z_impl_sys_thread_stack_destroy(stack);
++}
++#include <zephyr/syscalls/sys_thread_stack_destroy_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++static void sys_thread_recycle_work_handler(struct k_work *work)
++{
++	ARG_UNUSED(work);
++
++	K_SPINLOCK(&thread_pool_lock) {
++		sys_thread_recycle();
++	}
++}
++
++static int sys_thread_recycle_one(struct k_thread *thread)
++{
++	k_thread_stack_t *stack = sys_thread_stack_obj(thread);
++	int ret = 0;
++
++	if (sys_elastipool_check(&thread_pool, thread) == 0) {
++		ret = sys_elastipool_free(&thread_pool, thread);
++	}
++
++#ifdef CONFIG_SYS_THREAD_STACK_ALLOC_ANON
++	if (CONFIG_SYS_THREAD_STACK_MAX != 0) {
++		K_SPINLOCK(&stack_pool_lock) {
++			if (SYS_THREAD_STACK_MIN > 0 && stack != NULL) {
++				if (sys_elastipool_api_free_static(&stack_pool, stack) == 0) {
++					K_SPINLOCK_BREAK;
++				}
++			}
++
++			/* Hash map keys must match z_impl_sys_thread_stack_alloc(): the pointer
++			 * returned from k_mem_map(), not necessarily stack_info.start minus reserved.
++			 */
++			if (stack != NULL) {
++				uint64_t map_size_val;
++
++				if (sys_hashmap_remove(stack_pool.config->map, (uint64_t)(uintptr_t)stack,
++						       &map_size_val)) {
++					k_mem_unmap(stack, (size_t)map_size_val);
++					--stack_pool.data->pool_size;
++				}
++			}
++		}
++	}
++#else
++	if (sys_elastipool_check(&stack_pool, stack) == 0) {
++		(void)sys_elastipool_free(&stack_pool, stack);
++	}
++#endif
++
++	return ret;
++}
++
++__maybe_unused static void sys_thread_recycle(void)
++{
++	for (size_t i = 0, n = sys_dlist_len(&thread_pool_free_list); i < n; ++i) {
++		struct k_thread *th = CONTAINER_OF(sys_dlist_get(&thread_pool_free_list),
++						   struct k_thread, base.sys_thread_free_node);
++
++		if (!(z_is_thread_state_set(th, _THREAD_DUMMY) ||
++		      z_is_thread_state_set(th, _THREAD_DEAD))) {
++			LOG_DBG("Skipping tid %p since it is in use", th);
++			sys_dlist_append(&thread_pool_free_list, &th->base.sys_thread_free_node);
++			continue;
++		}
++
++		(void)sys_thread_recycle_one(th);
++	}
++}
++
++int z_impl_sys_thread_create(struct k_thread **th, k_thread_stack_t *stack, uint32_t stack_size,
++			     uint32_t guard_size, k_thread_entry_t entry, void *p1, void *p2,
++			     void *p3, int prio, uint32_t options)
++{
++	int ret = -ENOMEM;
++
++	K_SPINLOCK(&thread_pool_lock) {
++		if (IS_ENABLED(CONFIG_THREAD_DETACH)) {
++			sys_thread_recycle();
++		}
++		ret = sys_elastipool_alloc(&thread_pool, (void **)th);
++	}
++
++	if (ret < 0) {
++		return ret;
++	}
++
++	if (stack == NULL) {
++		ret = sys_thread_stack_alloc(&stack, &stack_size, guard_size, options);
++		if (ret < 0) {
++			K_SPINLOCK(&thread_pool_lock) {
++				(void)sys_elastipool_free(&thread_pool, *th);
++			}
++			return ret;
++		}
++		/* sys_thread_stack_alloc() normalizes stack_size up to at least
++		 * CONFIG_SYS_THREAD_STACK_SIZE; reflect that here so k_thread_create()
++		 * receives the correct usable size. */
++		if (stack_size < CONFIG_SYS_THREAD_STACK_SIZE) {
++			stack_size = CONFIG_SYS_THREAD_STACK_SIZE;
++		}
++	}
++
++#ifdef CONFIG_USERSPACE
++	if (k_is_in_user_syscall()) {
++		k_object_access_grant(stack, *th);
++
++		k_tid_t z_vrfy_k_thread_create(struct k_thread * new_thread,
++					       k_thread_stack_t * stack, size_t stack_size,
++					       k_thread_entry_t entry, void *p1, void *p2, void *p3,
++					       int prio, uint32_t options, k_timeout_t delay);
++
++		k_object_access_grant(*th, *th);
++		k_object_access_grant(*th, _current);
++		k_object_uninit(*th);
++		z_vrfy_k_thread_create(*th, stack, stack_size, entry, p1, p2, p3, prio, options,
++				       K_NO_WAIT);
++		return 0;
++	}
++#endif
++
++	k_thread_create(*th, stack, stack_size, entry, p1, p2, p3, prio, options, K_NO_WAIT);
++
++	return 0;
++}
++
++#ifdef CONFIG_USERSPACE
++int z_vrfy_sys_thread_create(struct k_thread **th, k_thread_stack_t *stack, uint32_t stack_size,
++			     uint32_t guard_size, k_thread_entry_t entry, void *p1, void *p2,
++			     void *p3, int prio, uint32_t options)
++{
++	K_OOPS(K_SYSCALL_MEMORY_WRITE(th, sizeof(*th)));
++
++	/* user threads may only create other user threads and also must inherit permissions */
++	options |= K_USER | K_INHERIT_PERMS;
++
++	/* Further verification is performed in z_vrfy_k_thread_create() */
++	return z_impl_sys_thread_create(th, stack, stack_size, guard_size, entry, p1, p2, p3, prio,
++					options);
++}
++#include <zephyr/syscalls/sys_thread_create_mrsh.c>
++#endif
++
++int z_impl_sys_thread_destroy(struct k_thread *th)
++{
++	if ((CONFIG_SYS_THREAD_STACK_MAX == 0) && (CONFIG_SYS_THREAD_THREAD_MAX == 0)) {
++		LOG_WRN_ONCE("%s and %s pool are disabled", heap_obj_str(K_OBJ_THREAD), heap_obj_str(K_OBJ_THREAD_STACK_ELEMENT));
++		return -ENOTSUP;
++	}
++
++	int ret = -EBUSY;
++	bool schedule_work = false;
++
++	K_SPINLOCK(&thread_pool_lock) {
++		if (th != _current) {
++			__ASSERT(z_is_thread_state_set(th, _THREAD_DUMMY) ||
++					 z_is_thread_state_set(th, _THREAD_DEAD),
++				 "invalid state %x for thread %p", th->base.thread_state, th);
++
++			ret = sys_thread_recycle_one(th);
++			K_SPINLOCK_BREAK;
++		}
++
++		if (IS_ENABLED(CONFIG_THREAD_DETACH)) {
++			sys_dlist_append(&thread_pool_free_list, &th->base.sys_thread_free_node);
++			schedule_work = true;
++			ret = 0;
++			K_SPINLOCK_BREAK;
++		}
++
++		__ASSERT(false, "Non-detached thread attempted to destroy itself");
++	}
++
++	if (schedule_work) {
++		return k_work_schedule(&sys_thread_recycle_work,
++				       K_MSEC(CONFIG_SYS_THREAD_RECYCLER_DELAY_MS));
++	}
++
++	return ret;
++}
++
++#ifdef CONFIG_USERSPACE
++int z_vrfy_sys_thread_destroy(struct k_thread *th)
++{
++	K_OOPS(K_SYSCALL_OBJ(th, K_OBJ_THREAD));
++	return z_impl_sys_thread_destroy(th);
++}
++#include <zephyr/syscalls/sys_thread_destroy_mrsh.c>
++#endif
++
++static inline const char *const heap_obj_str(enum k_objects otype)
++{
++	switch (otype) {
++	case K_OBJ_CONDVAR:
++		return "k_condvar";
++	case K_OBJ_MUTEX:
++		return "k_mutex";
++	case K_OBJ_THREAD_STACK_ELEMENT:
++		return "k_thread_stack_t";
++	case K_OBJ_THREAD:
++		return "k_thread";
++	default:
++		__ASSERT(false, "invalid object type %d", otype);
++	}
++
++	return "";
++}
++
++static void *heap_obj_allocator(void *obj, size_t size, enum k_objects otype, uint32_t flags)
++{
++	if (obj == NULL) {
++		/* allocate an object */
++
++		if (IS_ENABLED(CONFIG_DYNAMIC_OBJECTS)) {
++			switch (otype) {
++			case K_OBJ_CONDVAR:
++			case K_OBJ_MUTEX:
++			case K_OBJ_THREAD:
++				return k_object_alloc(otype);
++			case K_OBJ_THREAD_STACK_ELEMENT:
++#ifdef CONFIG_USERSPACE
++				if (k_is_in_user_syscall() || ((flags & K_USER) != 0)) {
++					return k_object_alloc_size(K_OBJ_THREAD_STACK_ELEMENT,
++								   size);
++				} else
++#endif
++				{
++					return z_thread_aligned_alloc(Z_KERNEL_STACK_OBJ_ALIGN,
++								      K_KERNEL_STACK_LEN(size));
++				}
++			default:
++				__ASSERT(false, "invalid object type %d", otype);
++				return NULL;
++			}
++		}
++
++		if (IS_ENABLED(CONFIG_USERSPACE) && k_is_user_context()) {
++			LOG_WRN_ONCE("CONFIG_DYNAMIC_OBJECTS is not enabled");
++			return NULL;
++		}
++
++		size_t align;
++
++		switch (otype) {
++		case K_OBJ_CONDVAR:
++			size = sizeof(struct k_condvar);
++			align = __alignof(struct k_condvar);
++			break;
++		case K_OBJ_MUTEX:
++			size = sizeof(struct k_mutex);
++			align = __alignof(struct k_mutex);
++			break;
++		case K_OBJ_THREAD:
++			size = sizeof(struct k_thread);
++			align = __alignof(struct k_thread);
++			break;
++		case K_OBJ_THREAD_STACK_ELEMENT:
++			size = K_KERNEL_STACK_LEN(size);
++			align = Z_KERNEL_STACK_OBJ_ALIGN;
++			break;
++		default:
++			__ASSERT(false, "invalid object type %d", otype);
++			return NULL;
++		}
++
++		return z_thread_aligned_alloc(align, size);
++	}
++
++	/* deallocate an object */
++	__ASSERT(size == 0, "freeing object with non-zero size");
++
++#ifdef CONFIG_USERSPACE
++	if (k_object_find(obj)) {
++		k_object_free(obj);
++	} else {
++		k_free((void *)obj);
++	}
++#else
++	k_free((void *)obj);
++#endif /* CONFIG_USERSPACE */
++
++	return NULL;
++}
++
++static k_thread_stack_t *sys_thread_stack_obj(struct k_thread *thread)
++{
++#ifdef CONFIG_USERSPACE
++	if (sys_elastipool_check(&stack_pool, thread->stack_obj) == 0) {
++		return thread->stack_obj;
++	}
++
++	return NULL;
++#else
++	k_thread_stack_t *stack;
++
++#ifdef CONFIG_THREAD_STACK_MEM_MAPPED
++	void *mapped_base = (void *)((char *)thread->stack_info.start - K_KERNEL_STACK_RESERVED);
++	uintptr_t phys;
++
++	if (arch_page_phys_get(mapped_base, &phys) == 0) {
++		stack = (k_thread_stack_t *)phys;
++		if (sys_elastipool_check(&stack_pool, stack) == 0) {
++			return stack;
++		}
++	}
++
++	if (thread->stack_info.mapped.addr != NULL) {
++		if (arch_page_phys_get(thread->stack_info.mapped.addr, &phys) == 0) {
++			stack = (k_thread_stack_t *)phys;
++			if (sys_elastipool_check(&stack_pool, stack) == 0) {
++				return stack;
++			}
++		}
++	}
++#endif
++
++	/* Try common stack object base derivations used across architectures. */
++	stack = (k_thread_stack_t *)((char *)thread->stack_info.start - K_KERNEL_STACK_RESERVED);
++	if (sys_elastipool_check(&stack_pool, stack) == 0) {
++		return stack;
++	}
++
++	stack = (k_thread_stack_t *)thread->stack_info.start;
++	if (sys_elastipool_check(&stack_pool, stack) == 0) {
++		return stack;
++	}
++
++	if (thread->stack_info.delta > 0U) {
++		stack = (k_thread_stack_t *)((char *)thread->stack_info.start - K_KERNEL_STACK_RESERVED -
++					     thread->stack_info.delta);
++		if (sys_elastipool_check(&stack_pool, stack) == 0) {
++			return stack;
++		}
++
++		stack = (k_thread_stack_t *)((char *)thread->stack_info.start -
++					     thread->stack_info.delta);
++		if (sys_elastipool_check(&stack_pool, stack) == 0) {
++			return stack;
++		}
++	}
++
++	return NULL;
++#endif
++}
++
++void sys_thread_once(sys_thread_once_t *flag, void (*func)(void))
++{
++#ifdef CONFIG_64BIT
++	const atomic_val_t once_wait = 0x3a173a173a173a17;
++	const atomic_val_t once_done = 0xd02ed02ed02ed02e;
++#else
++	const atomic_val_t once_wait = 0x3a173a17;
++	const atomic_val_t once_done = 0xd02ed02e;
++#endif
++	if (atomic_cas(flag, 0, once_wait)) {
++		func();
++		atomic_set(flag, once_done);
++		return;
++	}
++
++#ifdef CONFIG_ASSERT
++	atomic_val_t val = atomic_get(flag);
++
++	if (val == once_done) {
++		return;
++	}
++
++	if (val != once_wait) {
++		__ASSERT(false,"%s(): uninitialized flag %p with value %lx", __func__, flag, val);
++	}
++#endif
++
++	/* sys_thread_once() may itself not be a cancellation point, and given that sched_yield()
++	 * is not a cancellation point in POSIX, it's probably safe to use k_yield() here.
++	 * https://pubs.opengroup.org/onlinepubs/9799919799/functions/V2_chap02.html#tag_16_09_05_02
++	 */
++	while (atomic_get(flag) != once_done) {
++		if (k_can_yield()) {
++			k_yield();
++		}
++	}
++}
++
++#ifdef CONFIG_ZTEST
++#include <zephyr/ztest.h>
++static bool print_1pool_stats(const struct sys_elastipool *pool, const char *const name)
++{
++	if (pool->data->pool_size == 0) {
++		return false;
++	}
++	TC_PRINT("%s pool usage: %zu/%zu\n", name, pool->data->pool_size, pool->config->max_obj);
++	return true;
++}
++
++static void print_stats(const struct ztest_unit_test *test, void *data)
++{
++	ARG_UNUSED(test);
++	ARG_UNUSED(data);
++
++	bool leak = false;
++	int type[] = {K_OBJ_CONDVAR, K_OBJ_MUTEX, K_OBJ_THREAD_STACK_ELEMENT, K_OBJ_THREAD};
++	const struct sys_elastipool *const pool[] = {&cond_pool, &mutex_pool, &stack_pool,
++						     &thread_pool};
++
++	if (IS_ENABLED(CONFIG_THREAD_DETACH)) {
++		/* Drain pending recycled objects to avoid false positives in leak checks. */
++		K_SPINLOCK(&thread_pool_lock) {
++			sys_thread_recycle();
++		}
++	}
++
++	ARRAY_FOR_EACH(type, i) {
++		leak = print_1pool_stats(pool[i], heap_obj_str(type[i])) || leak;
++	}
++
++	/* This will assert if any tests leak objects */
++	__ASSERT(!leak, "object pool leak detected");
++}
++
++ZTEST_RULE(sys_thread_rule, NULL, print_stats);
++#endif /* CONFIG_ZTEST */
+diff --git a/tests/kernel/threads/sys_thread/CMakeLists.txt b/tests/kernel/threads/sys_thread/CMakeLists.txt
+new file mode 100644
+index 00000000000..740660e5ee8
+--- /dev/null
++++ b/tests/kernel/threads/sys_thread/CMakeLists.txt
+@@ -0,0 +1,7 @@
++# SPDX-License-Identifier: Apache-2.0
++
++cmake_minimum_required(VERSION 3.20.0)
++find_package(Zephyr HINTS $ENV{ZEPHYR_BASE})
++project(sys_thread)
++
++target_sources(app PRIVATE src/main.c)
+diff --git a/tests/kernel/threads/sys_thread/Kconfig b/tests/kernel/threads/sys_thread/Kconfig
+new file mode 100644
+index 00000000000..55d97f97a62
+--- /dev/null
++++ b/tests/kernel/threads/sys_thread/Kconfig
+@@ -0,0 +1,21 @@
++# Copyright (c) 2026, Friedt Professional Engineering Services, Inc
++# SPDX-License-Identifier: Apache-2.0
++
++config SYS_THREAD_CONDVAR_MIN_ADD_TEST
++	def_int 2
++
++config SYS_THREAD_MUTEX_MIN_ADD_TEST
++	def_int 2
++
++config SYS_THREAD_STACK_MIN_ADD_TEST
++	def_int 2
++
++config SYS_THREAD_THREAD_MIN_ADD_TEST
++	def_int 2
++
++# Thread stacks on e.g. x86* can be quite large due to guard regions
++config HEAP_MEM_POOL_ADD_SIZE_TEST
++	def_int 65536 if USERSPACE
++	def_int 16384
++
++source "Kconfig.zephyr"
+diff --git a/tests/kernel/threads/sys_thread/prj.conf b/tests/kernel/threads/sys_thread/prj.conf
+new file mode 100644
+index 00000000000..b053540d14e
+--- /dev/null
++++ b/tests/kernel/threads/sys_thread/prj.conf
+@@ -0,0 +1,17 @@
++CONFIG_ZTEST=y
++CONFIG_SYS_THREAD=y
++
++# these should be 1 larger than the corresponding MIN_ADD values in Kconfig
++CONFIG_SYS_THREAD_CONDVAR_MAX=3
++CONFIG_SYS_THREAD_MUTEX_MAX=3
++CONFIG_SYS_THREAD_STACK_MAX=3
++CONFIG_SYS_THREAD_THREAD_MAX=3
++
++CONFIG_MAIN_STACK_SIZE=4096
++CONFIG_ZTEST_STACK_SIZE=4096
++
++# This is to avoid ballooning stack sizes with large guard regions on x86*
++CONFIG_INIT_STACKS=y
++CONFIG_MAX_THREAD_BYTES=6
++CONFIG_HW_STACK_PROTECTION=n
++CONFIG_TEST_HW_STACK_PROTECTION=n
+diff --git a/tests/kernel/threads/sys_thread/src/main.c b/tests/kernel/threads/sys_thread/src/main.c
+new file mode 100644
+index 00000000000..0faf66dd449
+--- /dev/null
++++ b/tests/kernel/threads/sys_thread/src/main.c
+@@ -0,0 +1,93 @@
++/*
++ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <zephyr/kernel.h>
++#include <zephyr/sys/thread.h>
++#include <zephyr/ztest.h>
++
++
++ZTEST_USER(sys_thread, test_condvar_pool)
++{
++	int i;
++	struct k_condvar *cv[SYS_THREAD_CONDVAR_MIN + 1];
++	uint32_t options = SYS_CLOCK_REALTIME;
++
++	for (i = 0; i < SYS_THREAD_CONDVAR_MIN; ++i) {
++		zassert_ok(sys_condvar_alloc(&cv[i], options));
++	}
++
++	if (CONFIG_SYS_THREAD_CONDVAR_MAX == SYS_THREAD_CONDVAR_MIN) {
++		/* if min and max are the same, only statically allocated condvars are in the pool */
++		zassert_equal(-ENOMEM, sys_condvar_alloc(&cv[i], options));
++	} else {
++		/* allocate one more from the heap */
++		zassert_ok(sys_condvar_alloc(&cv[i], options));
++		++i;
++	}
++
++	for (--i; i >= 0; --i) {
++		zassert_ok(sys_condvar_destroy(cv[i]));
++	}
++}
++
++ZTEST_USER(sys_thread, test_mutex_pool)
++{
++	int i;
++	struct k_mutex *m[SYS_THREAD_MUTEX_MIN + 1];
++
++	for (i = 0; i < SYS_THREAD_MUTEX_MIN; ++i) {
++		zassert_ok(sys_mutex_alloc(&m[i], 0));
++	}
++
++	if (CONFIG_SYS_THREAD_MUTEX_MAX == SYS_THREAD_MUTEX_MIN) {
++		/* if min and max are the same, only statically allocated mutexes are in the pool */
++		zassert_equal(-ENOMEM, sys_mutex_alloc(&m[i], 0));
++	} else {
++		/* allocate one more from the heap */
++		zassert_ok(sys_mutex_alloc(&m[i], 0));
++		++i;
++	}
++
++	for (--i; i >= 0; --i) {
++		zassert_ok(sys_mutex_destroy(m[i]));
++	}
++}
++
++static void thread_entry(void *p1, void *p2, void *p3)
++{
++	ARG_UNUSED(p1);
++	ARG_UNUSED(p2);
++	ARG_UNUSED(p3);
++}
++
++ZTEST_USER(sys_thread, test_thread_pool)
++{
++	int i;
++	struct k_thread *th[SYS_THREAD_THREAD_MIN + 1];
++
++	for (i = 0; i < SYS_THREAD_THREAD_MIN; ++i) {
++		zassert_ok(sys_thread_create(&th[i], NULL, 0, 0, thread_entry, NULL, NULL, NULL,
++					K_LOWEST_APPLICATION_THREAD_PRIO,
++					K_INHERIT_PERMS));
++	}
++
++	if (CONFIG_SYS_THREAD_THREAD_MAX == SYS_THREAD_THREAD_MIN) {
++		/* if min and max are the same, only statically allocated threads are in the pool */
++		zassert_equal(-ENOMEM, sys_thread_create(&th[i], NULL, 0, 0, thread_entry, NULL, NULL, NULL,
++					K_LOWEST_APPLICATION_THREAD_PRIO, 0));
++	} else {
++		/* allocate one more from the heap */
++		zassert_ok(sys_thread_create(&th[i], NULL, 0, 0, thread_entry, NULL, NULL, NULL,
++					K_LOWEST_APPLICATION_THREAD_PRIO, 0));
++		++i;
++	}
++
++	for (--i; i >= 0; --i) {
++		zassert_ok(k_thread_join(th[i], K_FOREVER));
++	}
++}
++
++ZTEST_SUITE(sys_thread, NULL, NULL, NULL, NULL, NULL);
+diff --git a/tests/kernel/threads/sys_thread/testcase.yaml b/tests/kernel/threads/sys_thread/testcase.yaml
+new file mode 100644
+index 00000000000..2b2efd2dacd
+--- /dev/null
++++ b/tests/kernel/threads/sys_thread/testcase.yaml
+@@ -0,0 +1,41 @@
++common:
++  tags:
++    - kernel
++  min_ram: 64
++
++tests:
++  kernel.threads.sys_thread:
++    integration_platforms:
++      - native_sim
++      - qemu_x86
++      - qemu_x86/atom/nommu
++      - qemu_x86_64
++      - qemu_cortex_a53
++      - qemu_cortex_a53/qemu_cortex_a53/smp
++      - qemu_cortex_m3
++      - qemu_riscv32
++      - qemu_riscv32e
++      - qemu_riscv64
++      - qemu_riscv64/qemu_virt_riscv64/smp
++
++  kernel.threads.sys_thread.userspace:
++    filter: ARCH_HAS_USERSPACE
++    # skip x86* here because of the extremely large guard regions required
++    # See tests/kernel/threads/dynamic_thread_stack for those platforms.
++    # Probably should have an elastipool option that uses paged memory and
++    # make that the default on systems with paged memory.
++    platform_exclude:
++      - qemu_x86
++      - qemu_x86/atom/nommu
++      - qemu_x86_64
++    integration_platforms:
++      - qemu_cortex_a53
++      - qemu_cortex_a53/qemu_cortex_a53/smp
++      - qemu_cortex_m3
++      - qemu_riscv32
++      - qemu_riscv32e
++      - qemu_riscv64
++      - qemu_riscv64/qemu_virt_riscv64/smp
++    extra_configs:
++      - CONFIG_USERSPACE=y
++      - CONFIG_TEST_USERSPACE=y
