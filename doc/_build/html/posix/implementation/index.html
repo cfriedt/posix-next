@@ -1,0 +1,1073 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Implementation Details &mdash; posix-next</title>
+      <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=03e43079" />
+      <link rel="stylesheet" type="text/css" href="../../_static/css/theme.css?v=e59714d7" />
+      <link rel="stylesheet" type="text/css" href="../../_static/graphviz.css?v=4ae1632d" />
+      <link rel="stylesheet" type="text/css" href="../../_static/doxytooltip.css?v=07852572" />
+      <link rel="stylesheet" type="text/css" href="../../_static/posix-symbols.css?v=d6beee15" />
+      <link rel="stylesheet" type="text/css" href="../../_static/posix-badges.css?v=1e6233d9" />
+      <link rel="stylesheet" type="text/css" href="../../_static/copybutton.css?v=76b2166b" />
+      <link rel="stylesheet" type="text/css" href="../../_static/css/custom.css?v=b2ece5be" />
+      <link rel="stylesheet" type="text/css" href="../../_static/posix-next.css?v=b1cda821" />
+
+  
+    <link rel="shortcut icon" href="../../_static/favicon.png"/>
+    <link rel="canonical" href="https://cfriedt.github.io/posix-next/posix/implementation/index.html" />
+      <script src="../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../_static/documentation_options.js?v=01f34227"></script>
+      <script src="../../_static/doctools.js?v=9bcbadda"></script>
+      <script src="../../_static/sphinx_highlight.js?v=dc90522c"></script>
+      <script src="../../_static/tippy/popper.min.js?v=f051b558"></script>
+      <script src="../../_static/tippy/tippy-bundle.umd.min.js?v=873d6056"></script>
+      <script src="../../_static/doxytooltip.js?v=ab77ca7a"></script>
+      <script type="module" src="../../_static/posix-symbols.mjs?v=c8eac069"></script>
+      <script defer="defer" src="../../_static/posix-badges.js?v=5a27f10a"></script>
+      <script src="../../_static/clipboard.min.js?v=a7894cd8"></script>
+      <script src="../../_static/copybutton.js?v=f281be69"></script>
+      <script src="../../_static/doxytooltip-patch.js?v=1d0b1edc"></script>
+      <script src="../../_static/aep-tabs.js?v=a18bfba4"></script>
+    <script src="../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Multi-Process Design" href="../design/index.html" />
+    <link rel="prev" title="POSIX Application Environment Profiles (AEP)" href="../aep/index.html" />
+  <meta name="color-scheme" content="dark light">
+  
+  <noscript id="dark-mode-toggle-stylesheets">
+    <link rel="stylesheet" href="../../_static/css/light.css" type="text/css" media="(prefers-color-scheme: light)"/>
+    <link rel="stylesheet" href="../../_static/css/dark.css" type="text/css" media="(prefers-color-scheme: dark)"/>
+  </noscript>
+  <script src="../../_static/js/dark-mode-toggle-stylesheets-loader.min.js"></script>
+  <script type="module" src="../../_static/js/dark-mode-toggle.min.mjs"></script>
+
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../index.html" class="icon icon-home">
+            posix-next
+              <img src="../../_static/posix-next-logo.png" class="logo" alt="Logo"/>
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+  <div data-nosnippet>
+    
+              <ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="../../getting_started/index.html">Getting Started</a></li>
+<li class="toctree-l1 current"><a class="reference internal" href="../index.html">POSIX-next</a><ul class="current">
+<li class="toctree-l2"><a class="reference internal" href="../overview/index.html">Overview</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../conformance/index.html">POSIX Conformance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../conformance/index.html#xsi-conformance">XSI Conformance</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../aep/index.html">POSIX Application Environment Profiles (AEP)</a></li>
+<li class="toctree-l2 current"><a class="current reference internal" href="#">Implementation Details</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#design">Design</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#organization-and-source-layout-of-posix-options-and-option-groups">Organization and Source Layout of POSIX Options and Option Groups</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#native-posix-thread-library-nptl">Native POSIX Thread Library (NPTL)</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#scheduling-priorities">Scheduling Priorities</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#sporadic-server-scheduling">Sporadic Server Scheduling</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#signal-implementation-details">Signal Implementation Details</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#elastipool-elastic-object-pools">Elastipool: Elastic Object Pools</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#static-only-pools-min-max">Static-only pools (<code class="docutils literal notranslate"><span class="pre">min</span> <span class="pre">==</span> <span class="pre">max</span></code>)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#dynamic-only-pools-min-0">Dynamic-only pools (<code class="docutils literal notranslate"><span class="pre">min</span> <span class="pre">==</span> <span class="pre">0</span></code>)</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#hybrid-pools-0-min-max">Hybrid pools (<code class="docutils literal notranslate"><span class="pre">0</span> <span class="pre">&lt;</span> <span class="pre">min</span> <span class="pre">&lt;</span> <span class="pre">max</span></code>)</a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#distributed-kconfig">Distributed Kconfig</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#posix-timers">POSIX Timers</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#posix-message-queues">POSIX Message Queues</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#posix-asynchronous-i-o">POSIX Asynchronous I/O</a></li>
+<li class="toctree-l3"><a class="reference internal" href="#file-system-implementation-details">File System Implementation Details</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#zephyr-kernel-caveats">Zephyr kernel caveats</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#zephyr-fs-subsystem-caveats">Zephyr FS subsystem caveats</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#fat-specific-caveats">FAT-specific caveats</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#littlefs-specific-caveats">LittleFS-specific caveats</a></li>
+<li class="toctree-l4"><a class="reference internal" href="#ext2-specific-caveats">ext2-specific caveats</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../design/index.html">Multi-Process Design</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../option_groups/index.html">POSIX Option Groups</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../options/index.html">POSIX Options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../kconfig/index.html">Additional Configuration Options</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../symbols.html">POSIX API Search</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../samples/posix/posix.html">Samples</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../metrics/index.html">Metrics</a></li>
+</ul>
+
+    
+    <div class="toctree-wrapper compound">
+      <p class="caption"><span class="caption-text">Reference</span></p>
+      <ul>
+        
+        <li class="toctree-l1">
+          <a class="reference internal" href="https://docs.zephyrproject.org/4.4.1/">Zephyr 4.4.1 docs</a>
+        </li>
+        
+        <li class="toctree-l1">
+          <a class="reference internal" href="https://docs.zephyrproject.org/4.4.1/services/portability/posix/index.html">Zephyr POSIX docs</a>
+        </li>
+        
+        <li class="toctree-l1">
+          <a class="reference internal" href="https://pubs.opengroup.org/onlinepubs/9699919799/">Open Group POSIX</a>
+        </li>
+        
+      </ul>
+    </div>
+    
+  </div>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../index.html">posix-next</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content style-external-links">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+  
+
+  <li><a href="../../index.html">posix-next</a> &raquo;</li>
+  
+     <li><a href="../index.html">POSIX-next</a> &raquo;</li>
+  
+  <li>Implementation Details</li>
+
+
+  <li class="wy-breadcrumbs-aside">
+    <dark-mode-toggle id="dark-mode-toggle" appearance="three-way" permanent="true"/>
+  </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="implementation-details">
+<span id="posix-details"></span><h1>Implementation Details<a class="headerlink" href="#implementation-details" title="Link to this heading"></a></h1>
+<p>In many ways, Zephyr provides support like any POSIX OS; API bindings are provided in the C
+programming language, POSIX headers are available in the standard include path, when configured.</p>
+<p>Unlike other multi-purpose POSIX operating systems</p>
+<ul class="simple">
+<li><p>Zephyr is not “a POSIX OS”. The Zephyr kernel was not designed around the POSIX standard, and
+POSIX support is an opt-in feature</p></li>
+<li><p>Zephyr apps are not linked separately, nor do they execute as subprocesses</p></li>
+<li><p>Zephyr, libraries, and application code are compiled and linked together, running similarly to
+a single-process application, in a single (possibly virtual) address space</p></li>
+<li><p>Zephyr does not provide a POSIX shell, compiler, utilities, and is not self-hosting.</p></li>
+</ul>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Unlike the Linux kernel or FreeBSD, Zephyr does not maintain a static table of system call
+numbers for each supported architecture, but instead generates system calls dynamically at
+build time. See <a class="reference external" href="https://docs.zephyrproject.org/4.4.1/kernel/usermode/syscalls.html#syscalls" title="(in Zephyr Project v4.4.1)"><span class="xref std std-ref">System Calls</span></a> for more information.</p>
+</div>
+<section id="design">
+<h2>Design<a class="headerlink" href="#design" title="Link to this heading"></a></h2>
+<p>As a library, Zephyr’s POSIX API implementation makes an effort to be a thin abstraction layer
+between the application, middleware, and the Zephyr kernel.</p>
+<p>Some general design considerations:</p>
+<ul class="simple">
+<li><p>The POSIX interface and implementations should be part of Zephyr’s POSIX library, and not
+elsewhere, unless required both by the POSIX API implementation and some other feature. An
+example where the implementation should remain part of the POSIX implementation is
+<code class="docutils literal notranslate"><span class="pre">getopt()</span></code>. Examples where the implementation should be part of separate libraries are
+multithreading and networking.</p></li>
+<li><p>When the POSIX API and another Zephyr subsystem both rely on a feature, the implementation of
+that feature should be as a separate Zephyr library that can be used by both the POSIX API and
+the other library or subsystem. This reduces the likelihood of dependency cycles in code. When
+practical, that rule should expand to include macros. In the example below, <code class="docutils literal notranslate"><span class="pre">libposix</span></code>
+depends on <code class="docutils literal notranslate"><span class="pre">libzfoo</span></code> for the implementation of some functionality “foo” in Zephyr. If
+<code class="docutils literal notranslate"><span class="pre">libzfoo</span></code> also depends on <code class="docutils literal notranslate"><span class="pre">libposix</span></code>, then there is a dependency cycle. The cycle can be
+removed via mutual dependency, <code class="docutils literal notranslate"><span class="pre">libcommon</span></code>.</p></li>
+</ul>
+<figure class="align-default" id="id2">
+<div class="graphviz"><img src="../../_images/graphviz-cf6b0de7d0f759e26540e8aa29a8e2f8c6b5cdd3.png" alt="digraph {
+    node [shape=rect, style=rounded];
+    rankdir=LR;
+
+    libposix [fillcolor=&quot;#d5e8d4&quot;];
+    libzfoo [fillcolor=&quot;#dae8fc&quot;];
+
+    libposix -&gt; libzfoo;
+    libzfoo -&gt; libposix;
+}" class="graphviz" /></div>
+<figcaption>
+<p><span class="caption-text">Dependency cycle between POSIX and another Zephyr library</span><a class="headerlink" href="#id2" title="Link to this image"></a></p>
+</figcaption>
+</figure>
+<figure class="align-default" id="id3">
+<div class="graphviz"><img src="../../_images/graphviz-484b984eb8f63f9dc6fac2d8dd4cee8c66e77ff3.png" alt="digraph {
+    node [shape=rect, style=rounded];
+    rankdir=LR;
+
+    libposix [fillcolor=&quot;#d5e8d4&quot;];
+    libzfoo [fillcolor=&quot;#dae8fc&quot;];
+    libcommon [fillcolor=&quot;#f8cecc&quot;];
+
+    libposix -&gt; libzfoo;
+    libposix -&gt; libcommon;
+    libzfoo -&gt; libcommon;
+}" class="graphviz" /></div>
+<figcaption>
+<p><span class="caption-text">Mutual dependencies between POSIX and other Zephyr libraries</span><a class="headerlink" href="#id3" title="Link to this image"></a></p>
+</figcaption>
+</figure>
+<ul class="simple">
+<li><p>POSIX API calls should be provided as regular callable C functions; if a Zephyr
+<a class="reference external" href="https://docs.zephyrproject.org/4.4.1/kernel/usermode/syscalls.html#syscalls" title="(in Zephyr Project v4.4.1)"><span class="xref std std-ref">System Call</span></a> is needed as part of the implementation, the declaration and the
+implementation of that system call should be hidden behind the POSIX API.</p></li>
+</ul>
+</section>
+<section id="organization-and-source-layout-of-posix-options-and-option-groups">
+<h2>Organization and Source Layout of POSIX Options and Option Groups<a class="headerlink" href="#organization-and-source-layout-of-posix-options-and-option-groups" title="Link to this heading"></a></h2>
+<p>IEEE Std 1003.1 defines POSIX
+<a class="reference external" href="https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap02.html#tag_02_01_03">Options</a>
+and
+<a class="reference external" href="https://pubs.opengroup.org/onlinepubs/9699919799/xrat/V4_subprofiles.html">Subprofiling Option Groups</a>
+separately. Zephyr usually maps each standard Option Group to a directory under</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">lib/posix/</span></code>
+- for groups such as C extensions that generally do not require OS involvement, and</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">lib/posix/options</span></code>
+- for features that generally do require OS involvement.</p></li>
+</ul>
+<p>When an implementation supports an Option Group (or an Option), it is required to define a constant
+to indicate support for that Option Group (or Option) for C source files. For example, if the
+implementation supports the <code class="docutils literal notranslate"><span class="pre">POSIX_TIMERS</span></code> Option Group, it is required to define the macro
+<code class="docutils literal notranslate"><span class="pre">_POSIX_TIMERS</span></code> to a specific value. In most cases, the Option Group names and the associated Option
+(and macro) names differ by only one character (the prefixing underscore).</p>
+<p>However, some Options and Option Groups are intentionally not published as Subprofiling Option
+Groups because they do not meet the criteria established by
+<a class="reference external" href="https://standards.ieee.org/ieee/1003.13/3322/">IEEE Std 1003.13</a>. Namely, that Subprofiling Option
+Groups must</p>
+<ul class="simple">
+<li><p>have a minimal footprint
+- to facilitate specialized, embedded, resource-constrained target devices, and</p></li>
+<li><p>independence
+- to decouple functionality from other Options and Subprofiling Option Groups.</p></li>
+</ul>
+<p>See also <a class="reference internal" href="../aep/index.html#posix-aep"><span class="std std-ref">POSIX Application Environment Profiles (AEP)</span></a> for how Zephyr maps PSE51/52/53 choices onto individual Kconfig options.</p>
+<p>For example, the <a class="reference internal" href="../option_groups/xsi_realtime.html#posix-option-group-xsi-realtime"><span class="std std-ref">XSI_REALTIME</span></a> Option Group and
+the <a class="reference internal" href="../options/message_passing.html#posix-option-message-passing"><span class="std std-ref">_POSIX_MESSAGE_PASSING</span></a> depend on other Options or Option
+Groups (<a class="reference internal" href="../option_groups/device_io.html#posix-option-group-device-io"><span class="std std-ref">POSIX_DEVICE_IO</span></a>,
+<a class="reference internal" href="../option_groups/realtime_signals.html#posix-option-group-realtime-signals"><span class="std std-ref">POSIX_REALTIME_SIGNALS</span></a>, etc) and therefore are not
+qualified to be standard Subprofiling Option Groups.</p>
+<p>For simplicity and maintainability, Zephyr organizes such Options and Option Groups the same as
+standard Subprofiling Option Groups (at the discretion of the maintainer), under
+<code class="docutils literal notranslate"><span class="pre">lib/posix/options/</span></code>.</p>
+<p>The general rule is that Option Groups will <em>always</em> have an associated Kconfig option and <em>some</em>
+Options (but not all) have an associated Kconfig option in Zephyr. The latter is mostly for
+maintainability.</p>
+</section>
+<section id="native-posix-thread-library-nptl">
+<h2>Native POSIX Thread Library (NPTL)<a class="headerlink" href="#native-posix-thread-library-nptl" title="Link to this heading"></a></h2>
+<p>Zephyr’s POSIX threading implementation follows the same design philosophy as the
+<a class="reference external" href="https://www.akkadia.org/drepper/nptl-design.pdf">Native POSIX Thread Library (NPTL)</a>
+found in glibc on Linux: every POSIX primitive maps 1:1 to a native kernel object. There is no
+user-space scheduler or M:N multiplexing layer — each <code class="docutils literal notranslate"><span class="pre">pthread_t</span></code> <em>is</em> a <code class="docutils literal notranslate"><span class="pre">k_thread</span></code>, each
+<code class="docutils literal notranslate"><span class="pre">pthread_mutex_t</span></code> <em>is</em> a <code class="docutils literal notranslate"><span class="pre">k_mutex</span></code>, and each <code class="docutils literal notranslate"><span class="pre">pthread_cond_t</span></code> <em>is</em> a <code class="docutils literal notranslate"><span class="pre">k_condvar</span></code>.</p>
+<figure class="align-default" id="id4">
+<div class="graphviz"><img src="../../_images/graphviz-4e1471ee9074e10c6c5d9bd042233bdfb200931f.png" alt="digraph {
+    rankdir=LR;
+    node [shape=record, style=filled];
+
+    subgraph cluster_posix {
+        label=&quot;POSIX API&quot;;
+        style=filled;
+        color=&quot;#e8f5e9&quot;;
+        fillcolor=&quot;#e8f5e9&quot;;
+        pt  [label=&quot;pthread_t&quot;        fillcolor=&quot;#c8e6c9&quot;];
+        pm  [label=&quot;pthread_mutex_t&quot;  fillcolor=&quot;#c8e6c9&quot;];
+        pc  [label=&quot;pthread_cond_t&quot;   fillcolor=&quot;#c8e6c9&quot;];
+    }
+
+    subgraph cluster_kernel {
+        label=&quot;Zephyr Kernel&quot;;
+        style=filled;
+        color=&quot;#e3f2fd&quot;;
+        fillcolor=&quot;#e3f2fd&quot;;
+        kt  [label=&quot;k_thread&quot;   fillcolor=&quot;#bbdefb&quot;];
+        km  [label=&quot;k_mutex&quot;    fillcolor=&quot;#bbdefb&quot;];
+        kc  [label=&quot;k_condvar&quot;  fillcolor=&quot;#bbdefb&quot;];
+    }
+
+    pt -&gt; kt [label=&quot;1:1&quot; style=bold];
+    pm -&gt; km [label=&quot;1:1&quot; style=bold];
+    pc -&gt; kc [label=&quot;1:1&quot; style=bold];
+}" class="graphviz" /></div>
+<figcaption>
+<p><span class="caption-text">1:1 mapping between POSIX and Zephyr kernel objects</span><a class="headerlink" href="#id4" title="Link to this image"></a></p>
+</figcaption>
+</figure>
+<p>The POSIX types (<code class="docutils literal notranslate"><span class="pre">pthread_t</span></code>, <code class="docutils literal notranslate"><span class="pre">pthread_mutex_t</span></code>, <code class="docutils literal notranslate"><span class="pre">pthread_cond_t</span></code>) are opaque integer handles
+whose value is derived from the address of the underlying kernel object in a system-wide pool. The
+conversion is performed by <code class="docutils literal notranslate"><span class="pre">to_k_thread()</span></code>, <code class="docutils literal notranslate"><span class="pre">to_k_mutex()</span></code>, and <code class="docutils literal notranslate"><span class="pre">to_k_condvar()</span></code> (and their
+inverses) defined in the internal header <code class="docutils literal notranslate"><span class="pre">posix_internal.h</span></code>.</p>
+<p>This 1:1 design means:</p>
+<ul class="simple">
+<li><p>No extra scheduling layer — every POSIX thread is a kernel thread (and vice versa)</p></li>
+<li><p>Kernel-level visibility — debuggers and trace tools see the same objects as the application.</p></li>
+<li><p><strong>Full userspace support</strong> — because every POSIX call bottoms out in a Zephyr system call
+operating on a kernel object, the entire POSIX API is available to both privileged and
+unprivileged (userspace) threads. As with everything userspace, it is important to keep in mind
+that user threads do not have permission on any kernel objects by default.</p></li>
+<li><p><strong>POSIX is optional</strong> - POSIX is entirely optional in Zephyr. However, in order to use POSIX
+features, it is highly recommended to enable one of the
+<a class="reference internal" href="../aep/index.html#posix-aep"><span class="std std-ref">POSIX subprofiles</span></a> such as <code class="docutils literal notranslate"><span class="pre">CONFIG_POSIX_AEP_CHOICE_PSE51</span></code>.</p></li>
+</ul>
+</section>
+<section id="scheduling-priorities">
+<span id="posix-scheduling-priorities"></span><h2>Scheduling Priorities<a class="headerlink" href="#scheduling-priorities" title="Link to this heading"></a></h2>
+<p>POSIX and Zephyr order their scheduling priorities in opposite directions. POSIX priorities
+are non-negative and numerically <em>larger is more urgent</em>: each policy advertises its range
+through <a class="reference internal" href="../../doxygen/html/group__posix__option__priority__scheduling.html#gaf1f370fc36ea6b22ed42b5ee3cf82a81" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">sched_get_priority_min()</span></code></a> and <a class="reference internal" href="../../doxygen/html/group__posix__option__priority__scheduling.html#gafaebd1698caeb9b9b9e614ad84edd609" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">sched_get_priority_max()</span></code></a>. Zephyr’s
+native priorities are numerically <em>smaller is more urgent</em>: cooperative threads occupy the
+negative values and preemptible threads the non-negative ones.</p>
+<figure class="align-default" id="id5">
+<div class="graphviz"><img src="../../_images/graphviz-5914f08c1a4ebe388ef046860f55bb18b6ab83ca.png" alt="digraph zephyr_priority_axis {
+    rankdir=LR;
+    node [shape=box, style=rounded, fontname=&quot;sans-serif&quot;, fontsize=10];
+    edge [fontname=&quot;sans-serif&quot;, fontsize=9, arrowsize=0.6];
+
+    urgent [label=&quot;most urgent\n(POSIX max)&quot;, shape=plaintext];
+    relaxed [label=&quot;least urgent\n(POSIX min)&quot;, shape=plaintext];
+
+    subgraph cluster_coop {
+        label=&quot;cooperative (SCHED_FIFO)&quot;;
+        fontname=&quot;sans-serif&quot;;
+        fontsize=10;
+        style=dashed;
+        cm [label=&quot;-CONFIG_NUM_COOP_PRIORITIES&quot;];
+        cd [label=&quot;…&quot;, shape=plaintext];
+        c1 [label=&quot;-1&quot;];
+    }
+
+    subgraph cluster_preempt {
+        label=&quot;preemptible (SCHED_RR, SCHED_OTHER)&quot;;
+        fontname=&quot;sans-serif&quot;;
+        fontsize=10;
+        style=dashed;
+        p0 [label=&quot;0&quot;];
+        pd [label=&quot;…&quot;, shape=plaintext];
+        pn [label=&quot;CONFIG_NUM_PREEMPT_PRIORITIES - 1&quot;];
+    }
+
+    urgent -&gt; cm [dir=none];
+    cm -&gt; cd -&gt; c1 [dir=none];
+    c1 -&gt; p0 [dir=none];
+    p0 -&gt; pd -&gt; pn [dir=none];
+    pn -&gt; relaxed [dir=none];
+}" class="graphviz" /></div>
+<figcaption>
+<p><span class="caption-text">Zephyr’s native priority axis. POSIX priorities map onto it reversed, so the
+POSIX maximum for a policy corresponds to the most negative (leftmost) Zephyr
+value in that policy’s band.</span><a class="headerlink" href="#id5" title="Link to this image"></a></p>
+</figcaption>
+</figure>
+<p>The POSIX layer converts exactly once, at its boundary: <a class="reference internal" href="../../doxygen/html/group__posix__option__thread__priority__scheduling.html#ga14f50e1f5d815c90f1f4225eca5d3a8c" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">pthread_setschedparam()</span></code></a>,
+<a class="reference internal" href="../../doxygen/html/group__posix__option__priority__scheduling.html#ga84ad29a6f2ad27370df09c664ac65eac" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">sched_setscheduler()</span></code></a>, and friends map a POSIX priority into the Zephyr band for the
+requested policy, and everything below the boundary works exclusively in Zephyr’s native
+space.</p>
+<p>This is why prioritized I/O orders its ready queue with a <em>min</em>-heap even though POSIX
+phrases the ordering as a maximum. <code class="docutils literal notranslate"><span class="pre">aio_reqprio</span></code> is a non-negative delta that can only
+<em>lower</em> a request below its submitting thread - by itself it orders nothing, being relative
+to the submitter - so the effective POSIX priority is the thread’s priority <em>minus</em> the
+delta, and selecting the next request would take the numeric <em>maximum</em> of those values.
+Expressed in Zephyr’s native space the same subtraction becomes
+<code class="docutils literal notranslate"><span class="pre">k_thread_priority_get()</span> <span class="pre">+</span> <span class="pre">aio_reqprio</span></code> - one Zephyr level per unit, moving <em>right</em> along
+the axis above - and the most urgent request is now the numeric <em>minimum</em>. <code class="docutils literal notranslate"><span class="pre">sys_aio</span></code> keys
+its ready heap on that native value paired with a wraparound-safe submission sequence
+number, so equal-priority requests complete first-in-first-out, as prioritized I/O
+requires.</p>
+</section>
+<section id="sporadic-server-scheduling">
+<span id="posix-sporadic-server"></span><h2>Sporadic Server Scheduling<a class="headerlink" href="#sporadic-server-scheduling" title="Link to this heading"></a></h2>
+<p>The Sporadic Server options (<code class="docutils literal notranslate"><span class="pre">_POSIX_SPORADIC_SERVER</span></code> and <code class="docutils literal notranslate"><span class="pre">_POSIX_THREAD_SPORADIC_SERVER</span></code>)
+describe the <code class="docutils literal notranslate"><span class="pre">SCHED_SPORADIC</span></code> scheduling policy, under which a thread runs at a foreground
+priority while it has execution budget remaining, is demoted to a background priority
+(<code class="docutils literal notranslate"><span class="pre">sched_ss_low_priority</span></code>) when the budget is exhausted, and has its budget restored through a
+queue of pending replenishment operations scheduled one replenishment period after each
+activation.</p>
+<p>With the Thread Sporadic Server option
+(<code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_POSIX_THREAD_SPORADIC_SERVER</span></code>), Zephyr accepts <code class="docutils literal notranslate"><span class="pre">SCHED_SPORADIC</span></code> and
+validates the sporadic server scheduling parameters, but does not enforce execution-time
+budgets: a thread scheduled under <code class="docutils literal notranslate"><span class="pre">SCHED_SPORADIC</span></code> executes as if scheduled under
+<code class="docutils literal notranslate"><span class="pre">SCHED_RR</span></code> at <code class="docutils literal notranslate"><span class="pre">sched_priority</span></code>. This deviation is denoted with the
+<a class="reference internal" href="../conformance/index.html#posix-undefined-behaviour"><span class="std std-ref">† (obelus)</span></a> wherever the option is listed. The process-level
+option, <code class="docutils literal notranslate"><span class="pre">_POSIX_SPORADIC_SERVER</span></code>, is reported as unsupported (<code class="docutils literal notranslate"><span class="pre">-1</span></code>).</p>
+<p>The decision not to implement the sporadic server algorithm itself is deliberate:</p>
+<dl class="simple">
+<dt><strong>Known specification defects.</strong></dt><dd><p>The replenishment algorithm as specified in IEEE Std 1003.1 contains well-documented defects.
+Under certain preemption and blocking patterns, a literal implementation of the specified
+rules produces premature replenishments, allowing a thread scheduled under <code class="docutils literal notranslate"><span class="pre">SCHED_SPORADIC</span></code>
+to consume substantially more processor time than its nominal budget — up to the entire
+processor in the worst case — thereby defeating the temporal isolation the policy is intended
+to provide. See M. Stanovich, T. P. Baker, A. Wang, and M. González Harbour, <em>Defects of the
+POSIX Sporadic Server and How to Correct Them</em>, in Proceedings of the 16th IEEE Real-Time and
+Embedded Technology and Applications Symposium (RTAS), 2010. Corrected variants exist in the
+literature, but they deviate from the standardized algorithm; an implementation must choose
+between fidelity to the specification and correct budget enforcement.</p>
+</dd>
+<dt><strong>Cost imposed on the scheduler hot path.</strong></dt><dd><p>Budget enforcement requires the kernel to maintain per-thread execution-time accounting,
+per-thread queues of pending replenishment operations (bounded by <code class="docutils literal notranslate"><span class="pre">sched_ss_max_repl</span></code>,
+with merging logic when replenishments coalesce), and automatic priority switching on budget
+exhaustion and replenishment. Every context switch, preemption, and blocking operation
+touches this state. That bookkeeping conflicts with Zephyr’s goals of small, deterministic,
+low-overhead kernel primitives and would tax all users of the scheduler, including those who
+do not use the policy.</p>
+</dd>
+<dt><strong>Limited adoption.</strong></dt><dd><p>The algorithm is rarely implemented. Linux, FreeBSD, and most embedded and general-purpose
+operating systems omit <code class="docutils literal notranslate"><span class="pre">SCHED_SPORADIC</span></code> entirely; conforming applications must already
+handle its absence or partial support via the standard feature-test mechanisms.</p>
+</dd>
+<dt><strong>Mature alternatives.</strong></dt><dd><p>Applications requiring bounded execution or temporal isolation are better served by
+mechanisms that are already available and better understood:</p>
+<ul class="simple">
+<li><p><a class="reference external" href="https://docs.zephyrproject.org/4.4.1/kconfig.html#CONFIG_SCHED_DEADLINE" title="(in Zephyr Project v4.4.1)"><code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_SCHED_DEADLINE</span></code></a> provides earliest-deadline-first scheduling,
+the same family of algorithms adopted by Linux in preference to the sporadic server model.</p></li>
+<li><p><a class="reference internal" href="../options/thread_cputime.html#posix-option-thread-cputime"><span class="std std-ref">_POSIX_THREAD_CPUTIME</span></a> (<code class="docutils literal notranslate"><span class="pre">CLOCK_THREAD_CPUTIME_ID</span></code>)
+permits per-thread execution-time measurement, and together with
+<a class="reference internal" href="../options/timers.html#posix-option-timers"><span class="std std-ref">_POSIX_TIMERS</span></a> allows an application to implement
+budget-monitoring policies in user space, with policy decisions (demotion, throttling,
+logging) tailored to the application rather than fixed by the kernel.</p></li>
+</ul>
+</dd>
+</dl>
+</section>
+<section id="signal-implementation-details">
+<span id="posix-implementation-signals"></span><h2>Signal Implementation Details<a class="headerlink" href="#signal-implementation-details" title="Link to this heading"></a></h2>
+<p>The <a class="reference internal" href="../option_groups/signals.html#posix-option-group-signals"><span class="std std-ref">POSIX_SIGNALS</span></a> option group is implemented on top of the
+kernel signal API (<code class="docutils literal notranslate"><span class="pre">k_sig_*</span></code>). Zephyr does not yet conventionally support interrupted or
+restarted system calls. As a result, signals are delivered to a thread on its return from a
+system call, so a thread that never enters the kernel does not run a signal handler
+<a class="reference internal" href="../conformance/index.html#posix-undefined-behaviour"><span class="std std-ref">†</span></a>.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Efforts to support the standard behaviour (interrupting blocking system calls, with
+<code class="docutils literal notranslate"><span class="pre">EINTR</span></code> and optional restart semantics) are underway.</p>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">abort()</span></code>, <code class="docutils literal notranslate"><span class="pre">raise()</span></code>, and <code class="docutils literal notranslate"><span class="pre">signal()</span></code> are the three functions of the option group that ISO C
+also requires, so they must work in a freestanding-plus-ISO-C environment where
+<a class="reference external" href="https://docs.zephyrproject.org/4.4.1/kconfig.html#CONFIG_POSIX_SIGNALS" title="(in Zephyr Project v4.4.1)"><code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_POSIX_SIGNALS</span></code></a> is not selected. They are implemented once, in the common
+C library behind <code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_COMMON_LIBC_SIGNAL</span></code>, and behave identically whichever
+standard they are reached through: the calling thread is the same thread in ISO C, POSIX, and the
+kernel. When the option group is linked, weak references pick up its signal number table and its
+delivery shim, so <code class="docutils literal notranslate"><span class="pre">signal()</span></code> makes the same kernel registration <a class="reference internal" href="../../doxygen/html/group__posix__option__group__signals.html#ga5dabd0b7783afd0e4cab78446436e25c" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">sigaction()</span></code></a> makes and a
+disposition installed through either is visible to the other. Without it, only the six signal
+numbers ISO C defines (<code class="docutils literal notranslate"><span class="pre">SIGABRT</span></code>, <code class="docutils literal notranslate"><span class="pre">SIGFPE</span></code>, <code class="docutils literal notranslate"><span class="pre">SIGILL</span></code>, <code class="docutils literal notranslate"><span class="pre">SIGINT</span></code>, <code class="docutils literal notranslate"><span class="pre">SIGSEGV</span></code>, and
+<code class="docutils literal notranslate"><span class="pre">SIGTERM</span></code>) are reachable, and those coincide with the kernel’s numbering, so handlers take
+delivery directly.</p>
+<p>Note that only the six ISO C signal numbers can be assumed: a C library is free to number every
+other signal however it likes, and the numbering shipped with a given toolchain need not match
+the Linux-aligned numbering used by the kernel and the POSIX option group.</p>
+<p>Zephyr does not support processes, which shapes the implementation in several ways:</p>
+<dl class="simple">
+<dt>No processes</dt><dd><p>Zephyr has a single process, so a <code class="docutils literal notranslate"><span class="pre">pid_t</span></code> is either the value returned by <a class="reference internal" href="../../doxygen/html/group__posix__option__group__multi__process.html#gac61b207337ca21b3b309593fd1a0cb82" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">getpid()</span></code></a>,
+which names the calling thread, or the <code class="docutils literal notranslate"><span class="pre">pthread_t</span></code> of a specific thread. Sending a signal to
+a process group is not supported and fails with <code class="docutils literal notranslate"><span class="pre">ESRCH</span></code>.</p>
+</dd>
+<dt>Dispositions are per-thread</dt><dd><p>POSIX associates a signal action with the process, but the kernel action database is keyed by
+(signal, thread), so an action installed by one thread is not in force for another. A thread
+that needs to catch a signal must install the action itself.</p>
+</dd>
+<dt>Kernel threads block all signals by default</dt><dd><p>A kernel thread must opt in to signal delivery, with <a class="reference internal" href="../../doxygen/html/group__posix__option__group__signals.html#ga6e6b04897703c43b2ad10013041ad152" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">sigprocmask()</span></code></a> or
+<code class="docutils literal notranslate"><span class="pre">pthread_sigmask()</span></code>, before any signal can be delivered to it. User-mode threads start with
+no signals blocked, in line with the POSIX specification.</p>
+</dd>
+<dt>Faults are not signals</dt><dd><p>A CPU exception or kernel error is reported through the fatal error path rather than by
+generating <code class="docutils literal notranslate"><span class="pre">SIGILL</span></code>, <code class="docutils literal notranslate"><span class="pre">SIGFPE</span></code>, <code class="docutils literal notranslate"><span class="pre">SIGSEGV</span></code>, or <code class="docutils literal notranslate"><span class="pre">SIGBUS</span></code> for the offending thread.</p>
+</dd>
+</dl>
+</section>
+<section id="elastipool-elastic-object-pools">
+<h2>Elastipool: Elastic Object Pools<a class="headerlink" href="#elastipool-elastic-object-pools" title="Link to this heading"></a></h2>
+<p>Every 1:1 mapping requires a pool of kernel objects from which to allocate. Zephyr uses
+<strong>elastipool</strong> (<code class="docutils literal notranslate"><span class="pre">&lt;zephyr/sys/elastipool.h&gt;</span></code>) — an elastic object pool that bridges the gap
+between guaranteed static allocation and on-demand dynamic growth.</p>
+<p>An elastipool instance is parameterized by two values:</p>
+<ul class="simple">
+<li><p><strong>min</strong> — the number of objects pre-allocated in a static array at compile time (guaranteed to
+be available, zero-latency allocation via bitmap).</p></li>
+<li><p><strong>max</strong> — the upper bound on total objects. When <code class="docutils literal notranslate"><span class="pre">max</span> <span class="pre">&gt;</span> <span class="pre">min</span></code>, up to <code class="docutils literal notranslate"><span class="pre">max</span> <span class="pre">−</span> <span class="pre">min</span></code> additional
+objects may be allocated from the heap (or other desired memory pool) at runtime.</p></li>
+</ul>
+<p>It is useful on larger systems (e.g., those with an MMU) where the exact number of required
+objects is not known at compile time.</p>
+<p>The relationship between <code class="docutils literal notranslate"><span class="pre">min</span></code> and <code class="docutils literal notranslate"><span class="pre">max</span></code> selects one of three operational modes:</p>
+<section id="static-only-pools-min-max">
+<h3>Static-only pools (<code class="docutils literal notranslate"><span class="pre">min</span> <span class="pre">==</span> <span class="pre">max</span></code>)<a class="headerlink" href="#static-only-pools-min-max" title="Link to this heading"></a></h3>
+<p>When <code class="docutils literal notranslate"><span class="pre">min</span></code> equals <code class="docutils literal notranslate"><span class="pre">max</span></code>, the pool uses only statically allocated objects. No heap is required.
+Allocation and deallocation are O(1) bitmap operations.</p>
+<figure class="align-default" id="id6">
+<div class="graphviz"><img src="../../_images/graphviz-4a7e6612fdc85a0e9f4826c38318cdcceeb2280c.png" alt="digraph {
+    rankdir=LR;
+    node [shape=record, style=filled];
+
+    subgraph cluster_pool {
+        label=&quot;Static Pool (min == max)&quot;;
+        style=filled;
+        color=&quot;#fff3e0&quot;;
+        fillcolor=&quot;#fff3e0&quot;;
+        bmp [label=&quot;Bitmap&quot; fillcolor=&quot;#ffe0b2&quot;];
+        obj [label=&quot;{obj[0]|obj[1]|...|obj[min−1]}&quot; fillcolor=&quot;#ffcc80&quot;];
+        bmp -&gt; obj [label=&quot;index&quot;];
+    }
+}" class="graphviz" /></div>
+<figcaption>
+<p><span class="caption-text">Static-only pool (min == max)</span><a class="headerlink" href="#id6" title="Link to this image"></a></p>
+</figcaption>
+</figure>
+<p>This is the most deterministic mode. It is appropriate for safety-critical or memory-constrained
+systems where heap allocation is undesirable or unavailable.</p>
+</section>
+<section id="dynamic-only-pools-min-0">
+<h3>Dynamic-only pools (<code class="docutils literal notranslate"><span class="pre">min</span> <span class="pre">==</span> <span class="pre">0</span></code>)<a class="headerlink" href="#dynamic-only-pools-min-0" title="Link to this heading"></a></h3>
+<p>When <code class="docutils literal notranslate"><span class="pre">min</span></code> is zero, all objects are allocated from the heap. A hash map tracks outstanding
+allocations so that <code class="docutils literal notranslate"><span class="pre">free</span></code> and <code class="docutils literal notranslate"><span class="pre">check</span></code> operations can validate pointers.</p>
+<figure class="align-default" id="id7">
+<div class="graphviz"><img src="../../_images/graphviz-dfc340b35abd943eda1bc361246eb11a348700de.png" alt="digraph {
+    rankdir=LR;
+    node [shape=record, style=filled];
+
+    subgraph cluster_pool {
+        label=&quot;Dynamic Pool (min == 0)&quot;;
+        style=filled;
+        color=&quot;#e8eaf6&quot;;
+        fillcolor=&quot;#e8eaf6&quot;;
+        heap [label=&quot;Heap\n(aligned_alloc)&quot; fillcolor=&quot;#c5cae9&quot;];
+        map  [label=&quot;Hash Map\n(pointer tracking)&quot; fillcolor=&quot;#c5cae9&quot;];
+        heap -&gt; map [label=&quot;register&quot;];
+    }
+}" class="graphviz" /></div>
+<figcaption>
+<p><span class="caption-text">Dynamic-only pool (min == 0)</span><a class="headerlink" href="#id7" title="Link to this image"></a></p>
+</figcaption>
+</figure>
+<p>This mode requires <code class="docutils literal notranslate"><span class="pre">CONFIG_SYS_HASH_MAP</span></code> and <code class="docutils literal notranslate"><span class="pre">CONFIG_SYS_HASH_FUNC32</span></code>.</p>
+</section>
+<section id="hybrid-pools-0-min-max">
+<h3>Hybrid pools (<code class="docutils literal notranslate"><span class="pre">0</span> <span class="pre">&lt;</span> <span class="pre">min</span> <span class="pre">&lt;</span> <span class="pre">max</span></code>)<a class="headerlink" href="#hybrid-pools-0-min-max" title="Link to this heading"></a></h3>
+<p>When both <code class="docutils literal notranslate"><span class="pre">min</span></code> and <code class="docutils literal notranslate"><span class="pre">max</span></code> are non-zero and <code class="docutils literal notranslate"><span class="pre">max</span> <span class="pre">&gt;</span> <span class="pre">min</span></code>, the pool operates in hybrid
+(“elastic”) mode. Allocation first attempts the static bitmap; only when the static slab is
+exhausted does it fall through to the heap.</p>
+<figure class="align-default" id="id8">
+<div class="graphviz"><img src="../../_images/graphviz-da0aefebd5bf176565048aa945158042ad800185.png" alt="digraph {
+    rankdir=TB;
+    node [shape=record, style=filled];
+
+    alloc [label=&quot;sys_elastipool_alloc()&quot; shape=ellipse fillcolor=&quot;#e0f7fa&quot;];
+
+    subgraph cluster_static {
+        label=&quot;Static Slab&quot;;
+        style=filled;
+        color=&quot;#e8f5e9&quot;;
+        fillcolor=&quot;#e8f5e9&quot;;
+        bmp [label=&quot;Bitmap&quot; fillcolor=&quot;#c8e6c9&quot;];
+        slab [label=&quot;{obj[0]|...|obj[min−1]}&quot; fillcolor=&quot;#a5d6a7&quot;];
+    }
+
+    subgraph cluster_dynamic {
+        label=&quot;Dynamic Allocation&quot;;
+        style=filled;
+        color=&quot;#fce4ec&quot;;
+        fillcolor=&quot;#fce4ec&quot;;
+        heap [label=&quot;Heap&quot; fillcolor=&quot;#f8bbd0&quot;];
+        map  [label=&quot;Hash Map&quot; fillcolor=&quot;#f8bbd0&quot;];
+    }
+
+    alloc -&gt; bmp;
+    bmp -&gt; slab [label=&quot;index&quot;];
+    alloc -&gt; heap [style=dashed];
+    heap -&gt; map [label=&quot;register&quot; style=dashed];
+}" class="graphviz" /></div>
+<figcaption>
+<p><span class="caption-text">Hybrid (elastic) pool (0 &lt; min &lt; max)</span><a class="headerlink" href="#id8" title="Link to this image"></a></p>
+</figcaption>
+</figure>
+<p>This mode gives the best of both worlds: guaranteed availability of the first <code class="docutils literal notranslate"><span class="pre">min</span></code> objects with
+the ability to allocate up to <code class="docutils literal notranslate"><span class="pre">max</span></code>.</p>
+<p>In the threading subsystem, the pools are instantiated in <code class="docutils literal notranslate"><span class="pre">zephyr/lib/os/thread.c</span></code>:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">K_MUTEX_ARRAY_DEFINE</span><span class="p">(</span><span class="n">sys_mutex_pool</span><span class="p">,</span><span class="w"> </span><span class="n">SYS_THREAD_MUTEX_MIN</span><span class="p">);</span>
+<span class="n">SYS_ELASTIPOOL_DEFINE_ADVANCED</span><span class="p">(</span><span class="n">mutex_pool</span><span class="p">,</span>
+<span class="w">    </span><span class="k">sizeof</span><span class="p">(</span><span class="k">struct</span><span class="w"> </span><span class="nc">k_mutex</span><span class="p">),</span><span class="w"> </span><span class="n">__alignof</span><span class="p">(</span><span class="k">struct</span><span class="w"> </span><span class="nc">k_mutex</span><span class="p">),</span>
+<span class="w">    </span><span class="n">SYS_THREAD_MUTEX_MIN</span><span class="p">,</span><span class="w"> </span><span class="n">CONFIG_SYS_THREAD_MUTEX_MAX</span><span class="p">,</span>
+<span class="w">    </span><span class="n">mutex_pool_heap_alloc</span><span class="p">,</span><span class="w"> </span><span class="n">sys_mutex_pool</span><span class="p">,</span><span class="w"> </span><span class="k">static</span><span class="p">);</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="distributed-kconfig">
+<h2>Distributed Kconfig<a class="headerlink" href="#distributed-kconfig" title="Link to this heading"></a></h2>
+<p>A recurring problem in embedded systems is knowing <em>at compile time</em> how many of a given resource
+the final application will need. Different subsystems, libraries, and tests each require some
+number of mutexes, threads, stacks, etc.</p>
+<p>Zephyr solves this with <strong>distributed Kconfig variables</strong>: each subsystem declares its own
+<code class="docutils literal notranslate"><span class="pre">CONFIG_SYS_THREAD_&lt;POOL&gt;_MIN_ADD_&lt;SUBSYSTEM&gt;</span></code> symbol that contributes to the total minimum
+pool size. At build time, CMake sums all <code class="docutils literal notranslate"><span class="pre">_MIN_ADD_*</span></code> contributions together with the base
+<code class="docutils literal notranslate"><span class="pre">CONFIG_SYS_THREAD_&lt;POOL&gt;_MIN</span></code> value and emits a single <code class="docutils literal notranslate"><span class="pre">SYS_THREAD_&lt;POOL&gt;_MIN</span></code> compile
+definition.</p>
+<figure class="align-default" id="id9">
+<div class="graphviz"><img src="../../_images/graphviz-5dc78cb57374fd3b7cb66a367a16800fb2e009f3.png" alt="digraph {
+    rankdir=LR;
+    node [shape=rect, style=&quot;filled,rounded&quot;];
+
+    app   [label=&quot;Application\nCONFIG_SYS_THREAD_MUTEX_MIN=2&quot; fillcolor=&quot;#c8e6c9&quot;];
+    test  [label=&quot;Test suite\n_MIN_ADD_TEST=4&quot;                 fillcolor=&quot;#bbdefb&quot;];
+    lib   [label=&quot;Library\n_MIN_ADD_MYLIB=1&quot;                   fillcolor=&quot;#ffe0b2&quot;];
+
+    sum   [label=&quot;CMake\nΣ = 2 + 4 + 1 = 7&quot; shape=ellipse     fillcolor=&quot;#f3e5f5&quot;];
+    def   [label=&quot;SYS_THREAD_MUTEX_MIN=7&quot;                      fillcolor=&quot;#d1c4e9&quot;];
+
+    app  -&gt; sum;
+    test -&gt; sum;
+    lib  -&gt; sum;
+    sum  -&gt; def;
+}" class="graphviz" /></div>
+<figcaption>
+<p><span class="caption-text">Distributed Kconfig aggregation for SYS_THREAD_MUTEX_MIN</span><a class="headerlink" href="#id9" title="Link to this image"></a></p>
+</figcaption>
+</figure>
+<p>The aggregation is performed by this CMake loop in <code class="docutils literal notranslate"><span class="pre">zephyr/lib/os/CMakeLists.txt</span></code>:</p>
+<div class="highlight-cmake notranslate"><div class="highlight"><pre><span></span><span class="nb">foreach</span><span class="p">(</span><span class="s">_pool</span><span class="w"> </span><span class="s">CONDVAR</span><span class="w"> </span><span class="s">MUTEX</span><span class="w"> </span><span class="s">STACK</span><span class="w"> </span><span class="s">THREAD</span><span class="p">)</span>
+<span class="w">  </span><span class="nb">import_kconfig</span><span class="p">(</span>
+<span class="w">    </span><span class="s">CONFIG_SYS_THREAD_</span><span class="o">${</span><span class="nv">_pool</span><span class="o">}</span><span class="s">_MIN_ADD_</span>
+<span class="w">    </span><span class="o">${</span><span class="nv">DOTCONFIG</span><span class="o">}</span>
+<span class="w">    </span><span class="s">_sys_thread_</span><span class="o">${</span><span class="nv">_pool</span><span class="o">}</span><span class="s">_min_add_keys</span>
+<span class="w">  </span><span class="p">)</span>
+<span class="w">  </span><span class="nb">set</span><span class="p">(</span><span class="s">_min</span><span class="w"> </span><span class="o">${</span><span class="nv">CONFIG_SYS_THREAD_${_pool</span><span class="o">}</span><span class="s">_MIN}</span><span class="p">)</span>
+<span class="w">  </span><span class="nb">foreach</span><span class="p">(</span><span class="s">_add</span><span class="w"> </span><span class="o">${</span><span class="nv">_sys_thread_${_pool</span><span class="o">}</span><span class="s">_min_add_keys}</span><span class="p">)</span>
+<span class="w">    </span><span class="nb">math</span><span class="p">(</span><span class="s">EXPR</span><span class="w"> </span><span class="s">_min</span><span class="w"> </span><span class="s2">&quot;${_min} + ${${_add}}&quot;</span><span class="p">)</span>
+<span class="w">  </span><span class="nb">endforeach</span><span class="p">()</span>
+<span class="w">  </span><span class="nb">zephyr_compile_definitions</span><span class="p">(</span>
+<span class="w">    </span><span class="s">SYS_THREAD_</span><span class="o">${</span><span class="nv">_pool</span><span class="o">}</span><span class="s">_MIN=</span><span class="o">${</span><span class="nv">_min</span><span class="o">}</span>
+<span class="w">  </span><span class="p">)</span>
+<span class="nb">endforeach</span><span class="p">()</span>
+</pre></div>
+</div>
+<p>The result is a non-<code class="docutils literal notranslate"><span class="pre">CONFIG_</span></code> prefixed compile definition (e.g., <code class="docutils literal notranslate"><span class="pre">SYS_THREAD_MUTEX_MIN=7</span></code>)
+that is used to size the static portion of the corresponding elastipool. The <code class="docutils literal notranslate"><span class="pre">CONFIG_</span></code>-prefixed
+<code class="docutils literal notranslate"><span class="pre">_MAX</span></code> value (e.g., <code class="docutils literal notranslate"><span class="pre">CONFIG_SYS_THREAD_MUTEX_MAX</span></code>) sets the upper bound.</p>
+<p>This pattern has several advantages:</p>
+<ul class="simple">
+<li><p><strong>Decentralized</strong> — each library or test declares exactly what it needs; no central manifest to
+maintain.</p></li>
+<li><p><strong>Additive</strong> — contributions are summed, so adding a new subsystem cannot reduce the pool below
+what existing consumers require.</p></li>
+<li><p><strong>Extensible</strong> — the same <code class="docutils literal notranslate"><span class="pre">import_kconfig</span></code> / sum / <code class="docutils literal notranslate"><span class="pre">zephyr_compile_definitions</span></code> pattern is
+already used for file descriptors (<code class="docutils literal notranslate"><span class="pre">ZVFS_OPEN_ADD_SIZE_*</span></code>) and is expected to expand to
+other bounded resources in the future.</p></li>
+</ul>
+<p>To add a new contributor, create a Kconfig symbol in your subsystem:</p>
+<div class="highlight-kconfig notranslate"><div class="highlight"><pre><span></span><span class="k">config</span><span class="w"> </span>SYS_THREAD_MUTEX_MIN_ADD_MYLIB
+<span class="w">    </span><span class="nb">int</span><span class="w"> </span><span class="s2">&quot;Mutexes required by mylib&quot;</span>
+<span class="w">    </span><span class="k">default</span><span class="w"> </span><span class="mi">3</span>
+</pre></div>
+</div>
+<p>Then set it in your <code class="docutils literal notranslate"><span class="pre">prj.conf</span></code> or <code class="docutils literal notranslate"><span class="pre">testcase.yaml</span></code>:</p>
+<div class="highlight-cfg notranslate"><div class="highlight"><pre><span></span><span class="na">CONFIG_SYS_THREAD_MUTEX_MIN_ADD_MYLIB</span><span class="o">=</span><span class="s">3</span>
+</pre></div>
+</div>
+<p>The build system automatically discovers all <code class="docutils literal notranslate"><span class="pre">_MIN_ADD_*</span></code> symbols and includes them in the sum.</p>
+</section>
+<section id="posix-timers">
+<h2>POSIX Timers<a class="headerlink" href="#posix-timers" title="Link to this heading"></a></h2>
+<p>POSIX timers map ~1:1 onto kernel timers: <code class="docutils literal notranslate"><span class="pre">timer_t</span></code> handles are <code class="xref c c-struct docutils literal notranslate"><span class="pre">k_timer</span></code> objects
+allocated from the OS-managed system timer pool (<code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_SYS_TIMER</span></code>), armed at
+full tick resolution with the clock-based kernel timer APIs
+(<code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_TIMER_CLOCK</span></code>), and validated as kernel objects in user mode - a stale
+or foreign <code class="docutils literal notranslate"><span class="pre">timer_t</span></code> faults instead of corrupting memory.</p>
+<p><strong>Allocation.</strong> Applications and libraries reserve guaranteed, statically-allocated timers by
+defining int Kconfig symbols named <code class="docutils literal notranslate"><span class="pre">CONFIG_SYS_TIMER_MIN_ADD_&lt;NAME&gt;</span></code>; the build system sums
+them with <code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_SYS_TIMER_MIN</span></code>. Up to
+<code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_SYS_TIMER_MAX</span></code> (default <code class="docutils literal notranslate"><span class="pre">INT_MAX</span></code>) timers in total may be created,
+the excess allocated dynamically without guarantees; setting the maximum equal to the
+accumulated minimum prohibits dynamic allocation entirely. <a class="reference internal" href="../../doxygen/html/group__posix__option__group__timers.html#ga5d4a389821dbcc362e93e8ecb895344e" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">timer_create()</span></code></a> reports pool
+exhaustion as <code class="docutils literal notranslate"><span class="pre">EAGAIN</span></code>.</p>
+<p><strong>Expiry notification</strong> is signal-based (never a callback in interrupt context, so it is
+robust for user-mode callers) with POSIX one-pending semantics: at most one expiry signal per
+timer is queued at a time, further expiries are accounted as overruns, and
+<a class="reference internal" href="../../doxygen/html/group__posix__option__group__timers.html#gad779f0bc22f64bd3bd977221b0ce1b8f" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">timer_getoverrun()</span></code></a> reads the count latched at the most recent delivery,
+non-destructively, computed from the exact scheduled-expiry grid (expiries coalesced by
+tickless wakeups are counted correctly). <code class="docutils literal notranslate"><span class="pre">SIGEV_THREAD</span></code> maps onto the kernel’s
+function-notification dispatch (see <code class="xref c c-member docutils literal notranslate"><span class="pre">k_timer_notify.fn</span></code>): each expiry runs the
+notification function in a fresh detached thread, as POSIX specifies, spawned by a single
+kernel dispatcher woken through a reserved signal number just past <code class="docutils literal notranslate"><span class="pre">SIGRTMAX</span></code> that
+applications can neither send, mask, nor wait on. <code class="docutils literal notranslate"><span class="pre">sigev_notify_attributes</span></code> are translated
+at <a class="reference internal" href="../../doxygen/html/group__posix__option__group__timers.html#ga5d4a389821dbcc362e93e8ecb895344e" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">timer_create()</span></code></a> time - stack size and priority are honored, the detach state is
+always detached - and the caller may destroy the attribute object afterwards; no
+per-timer allocation is made by the POSIX layer. <a class="reference internal" href="../../doxygen/html/group__posix__option__group__timers.html#gad779f0bc22f64bd3bd977221b0ce1b8f" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">timer_getoverrun()</span></code></a> is valid
+inside the notification function. The Linux-compatible <code class="docutils literal notranslate"><span class="pre">SIGEV_THREAD_ID</span></code> extension is
+available under <code class="docutils literal notranslate"><span class="pre">_GNU_SOURCE</span></code> (the <code class="docutils literal notranslate"><span class="pre">sigev_notify_thread_id</span></code> member carries a
+<code class="docutils literal notranslate"><span class="pre">pthread_t</span></code> value). A <code class="docutils literal notranslate"><span class="pre">NULL</span></code> <code class="docutils literal notranslate"><span class="pre">evp</span></code> behaves as POSIX specifies: <code class="docutils literal notranslate"><span class="pre">SIGEV_SIGNAL</span></code> with
+<code class="docutils literal notranslate"><span class="pre">SIGALRM</span></code> and the timer ID as the value.</p>
+<p><strong>Clocks.</strong> <code class="docutils literal notranslate"><span class="pre">TIMER_ABSTIME</span></code> deadlines are honored on both <code class="docutils literal notranslate"><span class="pre">CLOCK_MONOTONIC</span></code> and
+<code class="docutils literal notranslate"><span class="pre">CLOCK_REALTIME</span></code>; with <code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_TIMER_REALTIME</span></code> (selected by
+<a class="reference external" href="https://docs.zephyrproject.org/4.4.1/kconfig.html#CONFIG_POSIX_TIMERS" title="(in Zephyr Project v4.4.1)"><code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_POSIX_TIMERS</span></code></a>), armed absolute <code class="docutils literal notranslate"><span class="pre">CLOCK_REALTIME</span></code> timers are
+re-targeted when <a class="reference internal" href="../../doxygen/html/group__posix__option__group__timers.html#gadab8a7307d547eb2b882dd1cda3a7655" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">clock_settime()</span></code></a> moves the wall clock - a forward jump past the
+deadline fires the timer immediately, a backward jump defers it. Re-targeting applies to the
+initial expiry only; afterwards a periodic timer’s interval continues on the monotonic grid,
+matching Linux.</p>
+<p><strong>Reduced mode.</strong> When signal-based expiry notification
+(<code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_TIMER_SIGNAL</span></code>) is unavailable, <code class="docutils literal notranslate"><span class="pre">SIGEV_NONE</span></code> timers remain fully
+functional as time sources, while <code class="docutils literal notranslate"><span class="pre">SIGEV_SIGNAL</span></code>, <code class="docutils literal notranslate"><span class="pre">SIGEV_THREAD</span></code>, and
+<code class="docutils literal notranslate"><span class="pre">SIGEV_THREAD_ID</span></code> report <code class="docutils literal notranslate"><span class="pre">ENOTSUP</span></code> from <a class="reference internal" href="../../doxygen/html/group__posix__option__group__timers.html#ga5d4a389821dbcc362e93e8ecb895344e" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">timer_create()</span></code></a> (<code class="docutils literal notranslate"><span class="pre">SIGEV_THREAD</span></code>
+additionally requires the system thread pool, <code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_SYS_THREAD</span></code> with
+<code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_THREAD_DETACH</span></code>). All AEP profiles select the signal subsystem.</p>
+<p>Migration from earlier releases: <a class="reference external" href="https://docs.zephyrproject.org/4.4.1/kconfig.html#CONFIG_POSIX_TIMER_MAX" title="(in Zephyr Project v4.4.1)"><code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_POSIX_TIMER_MAX</span></code></a> (still reported by
+<code class="docutils literal notranslate"><span class="pre">TIMER_MAX</span></code> and <code class="docutils literal notranslate"><span class="pre">sysconf(_SC_TIMER_MAX)</span></code>) is no longer user configurable - it is derived
+from <code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_SYS_TIMER_MAX</span></code>, which bounds the pool; guaranteed capacity moved
+to the distributed <code class="docutils literal notranslate"><span class="pre">CONFIG_SYS_TIMER_MIN_ADD_&lt;NAME&gt;</span></code> minimum, and
+<code class="docutils literal notranslate"><span class="pre">CONFIG_TIMER_CREATE_WAIT</span></code> was removed because <a class="reference internal" href="../../doxygen/html/group__posix__option__group__timers.html#ga5d4a389821dbcc362e93e8ecb895344e" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">timer_create()</span></code></a> no longer blocks.</p>
+</section>
+<section id="posix-message-queues">
+<h2>POSIX Message Queues<a class="headerlink" href="#posix-message-queues" title="Link to this heading"></a></h2>
+<p>POSIX message queues map 1:1 onto kernel message queues: a queue is a <code class="xref c c-struct docutils literal notranslate"><span class="pre">k_msgq</span></code>
+object allocated from the OS-managed system message queue pool
+(<code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_SYS_MSGQ</span></code>), and <code class="docutils literal notranslate"><span class="pre">mqd_t</span></code> is a file descriptor naming it. Every
+<code class="docutils literal notranslate"><span class="pre">mq_*()</span></code> call is one system call plus <code class="docutils literal notranslate"><span class="pre">errno</span></code> translation, so the whole option group is
+usable from user mode: no kernel object pointer is ever exposed, and a stale or foreign
+descriptor reports <code class="docutils literal notranslate"><span class="pre">EBADF</span></code> instead of corrupting memory.</p>
+<p><strong>Allocation.</strong> Applications and libraries reserve guaranteed, statically-allocated queues by
+defining int Kconfig symbols named <code class="docutils literal notranslate"><span class="pre">CONFIG_SYS_MSGQ_MIN_ADD_&lt;NAME&gt;</span></code>; the build system sums
+them with <code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_SYS_MSGQ_MIN</span></code>. Up to <code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_SYS_MSGQ_MAX</span></code>
+(default <code class="docutils literal notranslate"><span class="pre">INT_MAX</span></code>) queues may exist, the excess allocated dynamically without guarantees;
+setting the maximum equal to the accumulated minimum prohibits dynamic allocation entirely.
+Statically allocated queues draw message storage from a fixed per-queue budget
+(<code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_SYS_MSGQ_BUF_SIZE</span></code>) and <a class="reference internal" href="../../doxygen/html/group__posix__option__message__passing.html#ga6e6c4881ac0fd3ad18d733b96d088b8b" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">mq_open()</span></code></a> reports a geometry that
+does not fit as <code class="docutils literal notranslate"><span class="pre">ENOSPC</span></code>; dynamically allocated queues size their storage to the request and
+are not bound by that budget. Queue names are at most
+<code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_SYS_MSGQ_NAMELEN_MAX</span></code> characters.</p>
+<p><strong>Messages</strong> carry a priority and a length. <a class="reference internal" href="../../doxygen/html/group__posix__option__message__passing.html#gaf13b6f0b3b15e14624b0c50050d062a4" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">mq_send()</span></code></a> orders messages by descending
+priority, FIFO within a priority, and <a class="reference internal" href="../../doxygen/html/group__posix__option__message__passing.html#gab89c825740fe27d3821ccbe32bd68dfa" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">mq_receive()</span></code></a> reports the priority of the message
+it returns along with its actual length - messages shorter than <code class="docutils literal notranslate"><span class="pre">mq_msgsize</span></code> are delivered
+as sent, not padded. Priorities range from <code class="docutils literal notranslate"><span class="pre">0</span></code> to
+<a class="reference external" href="https://docs.zephyrproject.org/4.4.1/kconfig.html#CONFIG_POSIX_MQ_PRIO_MAX" title="(in Zephyr Project v4.4.1)"><code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_POSIX_MQ_PRIO_MAX</span></code></a> - 1 (reported by <code class="docutils literal notranslate"><span class="pre">MQ_PRIO_MAX</span></code>).</p>
+<p><strong>Descriptors.</strong> The access mode and <code class="docutils literal notranslate"><span class="pre">O_NONBLOCK</span></code> are per open file description, as POSIX
+specifies: two descriptors for one queue may differ in both, and <a class="reference internal" href="../../doxygen/html/group__posix__option__message__passing.html#ga83b7aa93cb6f1f5a4fd938baea5579a6" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">mq_setattr()</span></code></a> changes
+<code class="docutils literal notranslate"><span class="pre">O_NONBLOCK</span></code> for the calling descriptor alone. A queue persists after its last descriptor is
+closed and is destroyed only once it has been unlinked and no descriptor remains; the name is
+released immediately by <a class="reference internal" href="../../doxygen/html/group__posix__option__message__passing.html#gaccd8c5ee36e60d990963e1d544ef4140" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">mq_unlink()</span></code></a>, so it may be reused for a new queue while the old
+one is still being drained. Both timed calls take absolute <code class="docutils literal notranslate"><span class="pre">CLOCK_REALTIME</span></code> deadlines,
+report expiry as <code class="docutils literal notranslate"><span class="pre">ETIMEDOUT</span></code>, and are distinguished from a non-blocking descriptor’s
+<code class="docutils literal notranslate"><span class="pre">EAGAIN</span></code>.</p>
+<p><strong>Notification.</strong> <a class="reference internal" href="../../doxygen/html/group__posix__option__message__passing.html#ga5eadbb82e0b9702d77f384a27827b334" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">mq_notify()</span></code></a> supports <code class="docutils literal notranslate"><span class="pre">SIGEV_NONE</span></code>, <code class="docutils literal notranslate"><span class="pre">SIGEV_SIGNAL</span></code>,
+<code class="docutils literal notranslate"><span class="pre">SIGEV_THREAD</span></code>, and (under <code class="docutils literal notranslate"><span class="pre">_GNU_SOURCE</span></code>) the Linux-compatible <code class="docutils literal notranslate"><span class="pre">SIGEV_THREAD_ID</span></code>. The
+registration is armed in the kernel, so the empty-to-non-empty transition is detected
+atomically with the send rather than by sampling the queue depth around it; it fires exactly
+once and is consumed as it fires, after which a new registration may be armed. Arming while
+one is already armed reports <code class="docutils literal notranslate"><span class="pre">EBUSY</span></code>; removing one that was never armed succeeds, matching
+Linux. <code class="docutils literal notranslate"><span class="pre">SIGEV_SIGNAL</span></code> targets the registering thread until Zephyr gains process support and
+delivers <code class="docutils literal notranslate"><span class="pre">si_code</span></code> <code class="docutils literal notranslate"><span class="pre">SI_MESGQ</span></code>. <code class="docutils literal notranslate"><span class="pre">SIGEV_THREAD</span></code> maps onto the kernel’s function
+notification dispatch (see <code class="xref c c-member docutils literal notranslate"><span class="pre">sys_msgq_notify.fn</span></code>): each arrival runs the
+notification function in a fresh detached system-pool thread, spawned by a kernel dispatcher
+woken through a reserved signal number past <code class="docutils literal notranslate"><span class="pre">SIGRTMAX</span></code> that applications can neither send,
+mask, nor wait on - notification threads for registrations made by user threads run in user
+mode, in the registrant’s memory domain, with the registrant’s object permissions.
+<code class="docutils literal notranslate"><span class="pre">sigev_notify_attributes</span></code> are translated at registration time - stack size and priority are
+honored, the detach state is always detached - and the caller may destroy the attribute
+object afterwards; no POSIX-side state or service thread is involved, so every notification
+form works from user mode.</p>
+<p>Migration from earlier releases: <code class="docutils literal notranslate"><span class="pre">mqd_t</span></code> is now an <code class="docutils literal notranslate"><span class="pre">int</span></code> file descriptor rather than an
+opaque pointer, so a failed <a class="reference internal" href="../../doxygen/html/group__posix__option__message__passing.html#ga6e6c4881ac0fd3ad18d733b96d088b8b" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">mq_open()</span></code></a> compares against <code class="docutils literal notranslate"><span class="pre">(mqd_t)-1</span></code> and descriptors
+count against the ZVFS descriptor table
+(<code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_ZVFS_OPEN_ADD_SIZE_SYS_MSGQ</span></code>). <a class="reference internal" href="../../doxygen/html/group__posix__option__message__passing.html#gab89c825740fe27d3821ccbe32bd68dfa" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">mq_receive()</span></code></a> and
+<a class="reference internal" href="../../doxygen/html/group__posix__option__message__passing.html#gaecc8eadefb7895daca3c0092a5b084d5" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">mq_timedreceive()</span></code></a> return <code class="docutils literal notranslate"><span class="pre">ssize_t</span></code>, as POSIX specifies.
+<a class="reference external" href="https://docs.zephyrproject.org/4.4.1/kconfig.html#CONFIG_POSIX_MQ_OPEN_MAX" title="(in Zephyr Project v4.4.1)"><code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_POSIX_MQ_OPEN_MAX</span></code></a>, <code class="docutils literal notranslate"><span class="pre">CONFIG_MSG_SIZE_MAX</span></code>, and
+<code class="docutils literal notranslate"><span class="pre">CONFIG_MQUEUE_NAMELEN_MAX</span></code> are no longer user configurable - they derive from the
+corresponding <code class="docutils literal notranslate"><span class="pre">SYS_MSGQ</span></code> bounds.</p>
+</section>
+<section id="posix-asynchronous-i-o">
+<h2>POSIX Asynchronous I/O<a class="headerlink" href="#posix-asynchronous-i-o" title="Link to this heading"></a></h2>
+<p>Asynchronous I/O is a thin veneer over <code class="docutils literal notranslate"><span class="pre">sys_aio</span></code>, an OS-managed pool of asynchronous I/O
+requests (<code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_SYS_AIO</span></code>) performed by a dedicated kernel service queue.
+<a class="reference internal" href="../../doxygen/html/structaiocb.html" title=""><code class="xref c c-struct docutils literal notranslate"><span class="pre">aiocb</span></code></a> carries the request handle, and every <code class="docutils literal notranslate"><span class="pre">aio_*()</span></code> call is one system call
+plus <code class="docutils literal notranslate"><span class="pre">errno</span></code> translation - no POSIX-side request state or service thread exists - so the
+whole option group works from user mode. Handles are validated by pool membership on every
+call: a stale or foreign handle reports <code class="docutils literal notranslate"><span class="pre">EINVAL</span></code> instead of corrupting memory.</p>
+<p><strong>Dispatch.</strong> Submission classifies the descriptor once: descriptors with a waitable
+readiness condition (sockets, eventfds) are armed on <code class="docutils literal notranslate"><span class="pre">ZVFS_POLLIN</span></code>/<code class="docutils literal notranslate"><span class="pre">ZVFS_POLLOUT</span></code>
+readiness with a triggered work item over the events their backend registers for
+<a class="reference internal" href="../../doxygen/html/group__posix__option__group__device__io.html#ga923eecc5bdbccb0c250fff89ba1500f0" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">poll()</span></code></a>, so no thread parks while a request waits; always-ready descriptors (regular
+files - see below), already-ready ones, and offloaded sockets execute directly on the
+service queue thread. Operations execute one at a time in completion order
+(<code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_SYS_AIO_WORKQ_PRIO</span></code>,
+<code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_SYS_AIO_WORKQ_STACK_SIZE</span></code>): a slow operation delays those queued
+behind it, the file-system driver runs on the service queue’s stack, and a request whose
+readiness regresses between the wakeup and the transfer may briefly block the queue. This
+dispatcher is deliberately a small internal seam: a future backend with uniform,
+driver-level asynchronous submission can replace it without changing the system call
+contract or the POSIX layer above it. Connecting POSIX asynchronous I/O to <a class="reference external" href="https://docs.zephyrproject.org/4.4.1/services/rtio/index.html#rtio" title="(in Zephyr Project v4.4.1)"><span class="xref std std-ref">RTIO</span></a> is in the early planning stages - RTIO would first need to express operations on
+integer file descriptors and file offsets (today its submissions address <code class="docutils literal notranslate"><span class="pre">iodev</span></code> objects
+with no offset field), possibly by way of a <code class="docutils literal notranslate"><span class="pre">posix_devctl()</span></code>-style uniform device
+interface.</p>
+<p>As a prerequisite, <a class="reference internal" href="../../doxygen/html/group__posix__option__group__device__io.html#ga923eecc5bdbccb0c250fff89ba1500f0" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">poll()</span></code></a> was taught that descriptors whose backends have no poll
+support - regular files, shared memory, message queues, and the standard streams - are
+always ready for input and output, as POSIX requires of regular files, rather than failing
+with an unspecified error.</p>
+<p><strong>Completion</strong> is recorded in the request and is sticky: <a class="reference internal" href="../../doxygen/html/group__posix__option__group__asynchronous__io.html#ga64d319c5b3bbb17bb6d7abea7bb24a6d" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">aio_error()</span></code></a> reports
+<code class="docutils literal notranslate"><span class="pre">EINPROGRESS</span></code> until the operation finishes, <a class="reference internal" href="../../doxygen/html/group__posix__option__group__asynchronous__io.html#gaeba1fa0903a60c511db8d887272aedec" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">aio_suspend()</span></code></a> waits any-of on
+per-request completion signals (at most <code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_SYS_AIO_WAIT_MAX</span></code> entries),
+and <a class="reference internal" href="../../doxygen/html/group__posix__option__group__asynchronous__io.html#ga407c314becddbc48abff898635458ed8" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">aio_return()</span></code></a> reaps the request, returning its slot to the pool. Closing a
+descriptor with requests in flight completes them with <code class="docutils literal notranslate"><span class="pre">EBADF</span></code>: the service queue
+re-validates the descriptor’s backing object before every transfer. <a class="reference internal" href="../../doxygen/html/group__posix__option__group__asynchronous__io.html#gaf58145bd3d3635ec51be3cb0100eef9c" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">aio_cancel()</span></code></a>
+removes armed and queued requests race-free - a claimed request completes with
+<code class="docutils literal notranslate"><span class="pre">ECANCELED</span></code>, wakes waiters, and still fires its notification - and reports
+<code class="docutils literal notranslate"><span class="pre">AIO_NOTCANCELED</span></code> for one already executing.</p>
+<p><strong>Notification</strong> mirrors the message queue model: <code class="docutils literal notranslate"><span class="pre">SIGEV_SIGNAL</span></code> generates the signal
+kernel-side with an <code class="docutils literal notranslate"><span class="pre">SI_ASYNCIO</span></code> code (the target is validated at submission, so no
+sender permissions apply at completion time), and <code class="docutils literal notranslate"><span class="pre">SIGEV_THREAD</span></code> runs the notification
+function in a fresh detached system-pool thread - in user mode, in the submitter’s memory
+domain, when the request was submitted from a user thread. Completion groups back
+<a class="reference internal" href="../../doxygen/html/group__posix__option__group__asynchronous__io.html#ga97086846f51b2b0c2c046df4eb7296b8" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">lio_listio()</span></code></a>’s <code class="docutils literal notranslate"><span class="pre">LIO_NOWAIT</span></code> list notification: each submission joins the group,
+and the group’s single notification fires the moment its last member completes, after which
+the group destroys itself.</p>
+<p><strong>Allocation</strong> follows the distributed-minimum idiom shared with <code class="docutils literal notranslate"><span class="pre">sys_thread</span></code>,
+<code class="docutils literal notranslate"><span class="pre">sys_timer</span></code>, and <code class="docutils literal notranslate"><span class="pre">sys_msgq</span></code>: <code class="docutils literal notranslate"><span class="pre">CONFIG_SYS_AIO_MIN_ADD_&lt;NAME&gt;</span></code> contributions are summed
+with <code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_SYS_AIO_MIN</span></code> into a statically allocated, guaranteed pool
+minimum, with <code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_SYS_AIO_MAX</span></code> bounding the heap-allocated remainder.
+<code class="docutils literal notranslate"><span class="pre">AIO_MAX</span></code> and <code class="docutils literal notranslate"><span class="pre">AIO_LISTIO_MAX</span></code> derive from those bounds
+(<code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_POSIX_AIO_MAX</span></code>, <code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_POSIX_AIO_LISTIO_MAX</span></code>).
+<a class="reference internal" href="../../doxygen/html/group__posix__option__group__asynchronous__io.html#gab5ae668e7d7ce54ab14e17f6aea2f8bd" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">aio_fsync()</span></code></a> synchronizes data and metadata together: <code class="docutils literal notranslate"><span class="pre">O_DSYNC</span></code> and <code class="docutils literal notranslate"><span class="pre">O_SYNC</span></code> are
+equivalent.</p>
+<p><strong>Prioritization</strong>: with <code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_POSIX_PRIORITIZED_IO</span></code> (enabled by default;
+selects <code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_SYS_AIO_PRIORITY</span></code>), <code class="docutils literal notranslate"><span class="pre">_POSIX_PRIORITIZED_IO</span></code> is defined and
+the service queue performs ready requests in priority order from a min-heap rather than in
+submission order: each request is ordered by the calling thread’s scheduling priority lowered
+by <code class="docutils literal notranslate"><span class="pre">aio_reqprio</span></code> (0 through <code class="docutils literal notranslate"><span class="pre">AIO_PRIO_DELTA_MAX</span></code>, one Zephyr priority level per unit),
+first-in-first-out among equal priorities, for every descriptor served by the request pool.
+<a class="reference internal" href="#posix-scheduling-priorities"><span class="std std-ref">Scheduling Priorities</span></a> explains why that ordering is a min-heap in Zephyr’s
+native priority space.
+When disabled, <code class="docutils literal notranslate"><span class="pre">AIO_PRIO_DELTA_MAX</span></code> is 0, <code class="docutils literal notranslate"><span class="pre">aio_reqprio</span></code> must be 0, and ready requests
+are performed in submission order.</p>
+</section>
+<section id="file-system-implementation-details">
+<h2>File System Implementation Details<a class="headerlink" href="#file-system-implementation-details" title="Link to this heading"></a></h2>
+<p>The <a class="reference internal" href="../option_groups/file_system.html#posix-option-group-file-system"><span class="std std-ref">POSIX_FILE_SYSTEM</span></a> option group is a thin layer over
+the Zephyr Virtual File System (ZVFS) and, through it, the <a class="reference external" href="https://docs.zephyrproject.org/4.4.1/services/storage/file_system/index.html#file-system-api" title="(in Zephyr Project v4.4.1)"><span class="xref std std-ref">file system API</span></a>.
+Path, directory-stream, and working-directory operations are ZVFS system calls, so the whole
+option group works from user mode when <a class="reference external" href="https://docs.zephyrproject.org/4.4.1/kconfig.html#CONFIG_USERSPACE" title="(in Zephyr Project v4.4.1)"><code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_USERSPACE</span></code></a> is enabled.</p>
+<p>ZVFS is the common waypoint for every file-descriptor consumer. The POSIX file API and the C
+library’s <code class="docutils literal notranslate"><span class="pre">&lt;stdio.h&gt;</span></code> both bottom out in the same ZVFS entry points - <code class="docutils literal notranslate"><span class="pre">fopen()</span></code> and
+<code class="docutils literal notranslate"><span class="pre">open()</span></code> are two spellings of <code class="docutils literal notranslate"><span class="pre">zvfs_open()</span></code> - so an application reaches one file system
+implementation whichever interface it uses.</p>
+<figure class="align-default" id="id10">
+<div class="graphviz"><img src="../../_images/graphviz-006d073cc57b88008eecd63370531232d38a6834.png" alt="digraph {
+    node [shape=rect, style=&quot;rounded,filled&quot;];
+    rankdir=TB;
+
+    app        [label=&quot;application&quot;, fillcolor=&quot;#ffffff&quot;];
+    libc       [label=&quot;C library\n(fopen, fread, ...)&quot;, fillcolor=&quot;#dae8fc&quot;];
+    posix      [label=&quot;POSIX file API\n(open, stat, opendir, ...)&quot;, fillcolor=&quot;#d5e8d4&quot;];
+    zvfs       [label=&quot;ZVFS\n(fd table + per-fd vtable)&quot;, fillcolor=&quot;#ffe6cc&quot;];
+    fs         [label=&quot;file system subsystem\n(fs_open, fs_readdir, ...)&quot;, fillcolor=&quot;#f8cecc&quot;];
+    backend    [label=&quot;FatFs / LittleFS / ext2 / ...&quot;, fillcolor=&quot;#f8cecc&quot;];
+
+    app -&gt; libc;
+    app -&gt; posix;
+    libc -&gt; zvfs;
+    posix -&gt; zvfs;
+    zvfs -&gt; fs;
+    fs -&gt; backend;
+}" class="graphviz" /></div>
+<figcaption>
+<p><span class="caption-text">libc and the POSIX API both reach the file system through ZVFS</span><a class="headerlink" href="#id10" title="Link to this image"></a></p>
+</figcaption>
+</figure>
+<p>The file system is only one of several descriptor types ZVFS multiplexes. Every open descriptor
+is a slot in the ZVFS fd table carrying a vtable; a read, write, or <code class="docutils literal notranslate"><span class="pre">ioctl</span></code> on the descriptor
+dispatches through that vtable to the owning backend, so the same <code class="docutils literal notranslate"><span class="pre">read()</span></code>/<code class="docutils literal notranslate"><span class="pre">write()</span></code>/
+<code class="docutils literal notranslate"><span class="pre">close()</span></code>/<code class="docutils literal notranslate"><span class="pre">poll()</span></code> reach a regular file, a socket, an eventfd, or a message queue without the
+caller knowing which.</p>
+<figure class="align-default" id="id11">
+<div class="graphviz"><img src="../../_images/graphviz-e14650a2f83ef75a9a7ec8569c5497f2f504949d.png" alt="digraph {
+    node [shape=rect, style=&quot;rounded,filled&quot;];
+    rankdir=TB;
+
+    fd    [label=&quot;ZVFS fd (K_OBJ_FILE slot + fd_op_vtable)&quot;, fillcolor=&quot;#ffe6cc&quot;];
+    file  [label=&quot;regular file\n(file system subsystem)&quot;, fillcolor=&quot;#f8cecc&quot;];
+    sock  [label=&quot;socket\n(network stack)&quot;, fillcolor=&quot;#dae8fc&quot;];
+    efd   [label=&quot;eventfd&quot;, fillcolor=&quot;#d5e8d4&quot;];
+    mq    [label=&quot;message queue&quot;, fillcolor=&quot;#e1d5e7&quot;];
+
+    fd -&gt; file;
+    fd -&gt; sock;
+    fd -&gt; efd;
+    fd -&gt; mq;
+}" class="graphviz" /></div>
+<figcaption>
+<p><span class="caption-text">A ZVFS descriptor dispatches through its vtable to one of many backends</span><a class="headerlink" href="#id11" title="Link to this image"></a></p>
+</figcaption>
+</figure>
+<section id="zephyr-kernel-caveats">
+<h3>Zephyr kernel caveats<a class="headerlink" href="#zephyr-kernel-caveats" title="Link to this heading"></a></h3>
+<p>These reflect Zephyr’s single-process kernel model rather than the file system.</p>
+<dl class="simple">
+<dt>Working directory</dt><dd><p>The current working directory is a single, process-wide string maintained by ZVFS, matching
+the POSIX per-process model on a single-process system. Every path operation resolves its
+argument against it, so relative paths work throughout - including through ISO C
+<code class="xref c c-func docutils literal notranslate"><span class="pre">fopen()</span></code> and POSIX <a class="reference internal" href="../../doxygen/html/group__posix__option__group__device__io.html#gac843f2e35e60c3bbf1da47d84306f29b" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">open()</span></code></a>, which share the same ZVFS entry point.
+<a class="reference internal" href="../../doxygen/html/group__posix__option__group__file__system.html#ga03af571dfb595681bfa203c83385c07b" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">chdir()</span></code></a>, <a class="reference internal" href="../../doxygen/html/group__posix__option__group__file__system.html#gac6e28fc647aaa7fcb3287327e69bb3ef" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">fchdir()</span></code></a>, and <a class="reference internal" href="../../doxygen/html/group__posix__option__group__file__system.html#gaccd163a8f517941cc628473b4812e0a1" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">getcwd()</span></code></a> read and update it. Resolution is
+purely lexical: <code class="docutils literal notranslate"><span class="pre">.</span></code>, <code class="docutils literal notranslate"><span class="pre">..</span></code>, and repeated separators are collapsed without consulting the
+file system. On a backend that supports symbolic links (such as ext2) this is a simplification
+- full POSIX pathname resolution would resolve a <code class="docutils literal notranslate"><span class="pre">..</span></code> component relative to the target of a
+preceding symbolic link, whereas lexical resolution collapses it textually.</p>
+</dd>
+<dt>Temporary files</dt><dd><p><code class="xref c c-func docutils literal notranslate"><span class="pre">tmpfile()</span></code> and <code class="xref c c-func docutils literal notranslate"><span class="pre">tmpnam()</span></code> are provided by the common C library
+(<code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_COMMON_LIBC_TMPFILE</span></code>) for every libc, and require <code class="docutils literal notranslate"><span class="pre">/tmp</span></code> to exist
+on a mounted file system. ISO C removes the <code class="xref c c-func docutils literal notranslate"><span class="pre">tmpfile()</span></code> stream when it is closed or at
+normal program termination; Zephyr runs as a single process with no such termination boundary
+at which to reclaim it, so the file is left in place - a documented deviation.</p>
+</dd>
+</dl>
+</section>
+<section id="zephyr-fs-subsystem-caveats">
+<h3>Zephyr FS subsystem caveats<a class="headerlink" href="#zephyr-fs-subsystem-caveats" title="Link to this heading"></a></h3>
+<p>Because the POSIX layer is thin, its capabilities track the Zephyr FS subsystem - the
+<code class="docutils literal notranslate"><span class="pre">fs_*</span></code> API and its <code class="docutils literal notranslate"><span class="pre">fs_file_system_t</span></code> back-end interface - rather than the on-disk features
+of any particular file system. The deviations below are gaps in what the subsystem exposes, not in
+the POSIX code or the backing file system; when the subsystem grows an operation, the POSIX layer
+surfaces it with little or no change.</p>
+<dl class="simple">
+<dt>No hard links</dt><dd><p>The Zephyr FS subsystem exposes no hard-link operation, so <a class="reference internal" href="../../doxygen/html/group__posix__option__group__file__system.html#ga8c94afd0b7e5bb4ce95fefd964241f7f" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">link()</span></code></a> always fails with
+<code class="docutils literal notranslate"><span class="pre">EPERM</span></code> - which POSIX permits for an implementation that prohibits the operation - and
+<code class="docutils literal notranslate"><span class="pre">st_nlink</span></code> is always 1. This is a subsystem limitation, not a file system one: ext2, for
+example, stores hard links on disk, but the subsystem offers no way to create or count them.</p>
+</dd>
+<dt>No symbolic links</dt><dd><p>The subsystem exposes no symbolic-link operations, so path resolution never follows a symlink
+and stays purely lexical (see <em>Working directory</em> above). As with hard links this is a subsystem
+limitation, not a file system one - ext2 stores symbolic links on disk, but the subsystem offers
+no way to create or read them.</p>
+</dd>
+<dt>Permission bits are not exposed</dt><dd><p>The subsystem’s <code class="docutils literal notranslate"><span class="pre">struct</span> <span class="pre">fs_dirent</span></code> carries no mode bits, so <a class="reference internal" href="../../doxygen/html/group__posix__option__group__file__system.html#ga8981b2dc8c3ed46a4788f0badb99a281" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">stat()</span></code></a> cannot report a
+file system’s stored permissions even when it has them - ext2 again being the example. It
+reports a synthesised mode instead: read and search for everyone, plus write unless the mount
+is read-only. <a class="reference internal" href="../../doxygen/html/group__posix__option__group__file__system.html#gaa6adc1f71f9027c8bdd8e88e8c843049" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">access()</span></code></a> and <a class="reference internal" href="../../doxygen/html/group__posix__option__group__file__system.html#ga548e5b744ca2e97beb61ad7aa41114e2" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">mkdir()</span></code></a> follow suit - <code class="docutils literal notranslate"><span class="pre">mkdir()</span></code> accepts its
+<code class="docutils literal notranslate"><span class="pre">mode</span></code> argument and ignores it, and <a class="reference internal" href="../../doxygen/html/group__posix__option__group__file__system.html#gaa6adc1f71f9027c8bdd8e88e8c843049" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">access()</span></code></a> grants <code class="docutils literal notranslate"><span class="pre">X_OK</span></code> only for directories.</p>
+</dd>
+<dt>Timestamps</dt><dd><p>File timestamps are surfaced only when the backend records them, gated by
+<code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_FS_DIRENT_EXT</span></code>. Where a backend stores no timestamps, <code class="docutils literal notranslate"><span class="pre">fs_utime()</span></code>
+returns <code class="docutils literal notranslate"><span class="pre">-ENOTSUP</span></code> - which <a class="reference internal" href="../../doxygen/html/group__posix__option__group__file__system.html#gae868610ab18204355b60113d0895586b" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">utime()</span></code></a> surfaces as <code class="docutils literal notranslate"><span class="pre">errno</span></code> <code class="docutils literal notranslate"><span class="pre">ENOTSUP</span></code> - and
+<a class="reference internal" href="../../doxygen/html/group__posix__option__group__file__system.html#ga8981b2dc8c3ed46a4788f0badb99a281" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">stat()</span></code></a> reports zero for <code class="docutils literal notranslate"><span class="pre">st_atim</span></code>/<code class="docutils literal notranslate"><span class="pre">st_mtim</span></code>/<code class="docutils literal notranslate"><span class="pre">st_ctim</span></code>. Per-backend behaviour is
+noted under the file-system-specific caveats below.</p>
+</dd>
+</dl>
+</section>
+<section id="fat-specific-caveats">
+<h3>FAT-specific caveats<a class="headerlink" href="#fat-specific-caveats" title="Link to this heading"></a></h3>
+<p>FatFs (the ELM ChaN library behind <a class="reference external" href="https://docs.zephyrproject.org/4.4.1/kconfig.html#CONFIG_FAT_FILESYSTEM_ELM" title="(in Zephyr Project v4.4.1)"><code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_FAT_FILESYSTEM_ELM</span></code></a>) predates and
+ignores POSIX naming conventions, which leaks through the abstraction in a few ways worth knowing
+when FatFs is the backend.</p>
+<dl class="simple">
+<dt>Type-name collision with <code class="docutils literal notranslate"><span class="pre">&lt;dirent.h&gt;</span></code></dt><dd><p>FatFs declares its public types with unprefixed names - <code class="docutils literal notranslate"><span class="pre">DIR</span></code>, <code class="docutils literal notranslate"><span class="pre">FIL</span></code>, <code class="docutils literal notranslate"><span class="pre">FATFS</span></code>,
+<code class="docutils literal notranslate"><span class="pre">FRESULT</span></code> - in <code class="docutils literal notranslate"><span class="pre">ff.h</span></code>. <code class="docutils literal notranslate"><span class="pre">DIR</span></code> collides with the POSIX <code class="docutils literal notranslate"><span class="pre">DIR</span></code> from <code class="docutils literal notranslate"><span class="pre">&lt;dirent.h&gt;</span></code>, so a
+single translation unit cannot include both <code class="docutils literal notranslate"><span class="pre">ff.h</span></code> (needed to declare a <code class="docutils literal notranslate"><span class="pre">FATFS</span></code> mount
+object, for example) and <code class="docutils literal notranslate"><span class="pre">&lt;dirent.h&gt;</span></code>. Code that mounts a FAT volume <em>and</em> walks directories
+with POSIX <a class="reference internal" href="../../doxygen/html/group__posix__option__group__file__system.html#gae27c7f260a652b74c43296993d14ef0b" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">opendir()</span></code></a>/<a class="reference internal" href="../../doxygen/html/group__posix__option__group__file__system.html#ga824e3b8c5995631b373ddb65cb674318" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">readdir()</span></code></a> must split those uses across separate
+translation units, or use the <code class="docutils literal notranslate"><span class="pre">fs_*</span></code> directory API on the FatFs side. This is a namespacing
+defect in the FatFs module, not in the POSIX layer, but the POSIX layer inherits the
+constraint.</p>
+</dd>
+<dt>Short file names</dt><dd><p>Without <a class="reference external" href="https://docs.zephyrproject.org/4.4.1/kconfig.html#CONFIG_FS_FATFS_LFN" title="(in Zephyr Project v4.4.1)"><code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_FS_FATFS_LFN</span></code></a>, FatFs is limited to 8.3 short names, so
+<code class="docutils literal notranslate"><span class="pre">pathconf(_PC_NAME_MAX)</span></code> reports 12 and longer names fail. Short names are stored
+upper-cased, so <a class="reference internal" href="../../doxygen/html/group__posix__option__group__file__system.html#ga824e3b8c5995631b373ddb65cb674318" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">readdir()</span></code></a> returns <code class="docutils literal notranslate"><span class="pre">FILE.TXT</span></code> for a file created as <code class="docutils literal notranslate"><span class="pre">file.txt</span></code>.</p>
+</dd>
+<dt>Coarse, modification-only timestamps</dt><dd><p>FAT records a single modification time with two-second granularity and no access time, so
+<code class="docutils literal notranslate"><span class="pre">st_atim</span></code> mirrors <code class="docutils literal notranslate"><span class="pre">st_mtim</span></code> and <code class="docutils literal notranslate"><span class="pre">pathconf(_PC_TIMESTAMP_RESOLUTION)</span></code> reflects the coarser
+value. Timestamp writes additionally require <code class="xref kconfig kconfig-option docutils literal notranslate"><span class="pre">CONFIG_FS_FATFS_FF_USE_CHMOD</span></code>.</p>
+</dd>
+<dt>Non-canonical <code class="docutils literal notranslate"><span class="pre">errno</span></code> values</dt><dd><p>FatFs maps several conditions onto <code class="docutils literal notranslate"><span class="pre">errno</span></code> values that differ from the POSIX-preferred
+spelling: opening a non-directory as a directory reports <code class="docutils literal notranslate"><span class="pre">ENOENT</span></code> rather than <code class="docutils literal notranslate"><span class="pre">ENOTDIR</span></code>,
+and removing a non-empty directory reports <code class="docutils literal notranslate"><span class="pre">EACCES</span></code> rather than <code class="docutils literal notranslate"><span class="pre">ENOTEMPTY</span></code>. Tests that
+assert these paths accept either spelling.</p>
+</dd>
+<dt>rename() is not an atomic replace</dt><dd><p>FatFs <code class="xref c c-func docutils literal notranslate"><span class="pre">rename()</span></code> fails with <code class="docutils literal notranslate"><span class="pre">EEXIST</span></code> when the target already exists, rather than
+atomically replacing it as POSIX requires.</p>
+</dd>
+</dl>
+</section>
+<section id="littlefs-specific-caveats">
+<h3>LittleFS-specific caveats<a class="headerlink" href="#littlefs-specific-caveats" title="Link to this heading"></a></h3>
+<dl class="simple">
+<dt>No timestamps</dt><dd><p>LittleFS records no per-file timestamps, so <a class="reference internal" href="../../doxygen/html/group__posix__option__group__file__system.html#gae868610ab18204355b60113d0895586b" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">utime()</span></code></a> fails with <code class="docutils literal notranslate"><span class="pre">ENOTSUP</span></code> and
+<a class="reference internal" href="../../doxygen/html/group__posix__option__group__file__system.html#ga8981b2dc8c3ed46a4788f0badb99a281" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">stat()</span></code></a> reports zero for <code class="docutils literal notranslate"><span class="pre">st_atim</span></code>/<code class="docutils literal notranslate"><span class="pre">st_mtim</span></code>/<code class="docutils literal notranslate"><span class="pre">st_ctim</span></code>.</p>
+</dd>
+</dl>
+</section>
+<section id="ext2-specific-caveats">
+<h3>ext2-specific caveats<a class="headerlink" href="#ext2-specific-caveats" title="Link to this heading"></a></h3>
+<p>Among the in-tree backends, ext2 is the notable case where the on-disk format <em>does</em> support the
+features the Zephyr FS subsystem withholds. The limitations in <em>Zephyr FS subsystem caveats</em> above
+therefore still apply to ext2, even though the volume itself could satisfy them:</p>
+<dl class="simple">
+<dt>Hard links are not supported</dt><dd><p><a class="reference internal" href="../../doxygen/html/group__posix__option__group__file__system.html#ga8c94afd0b7e5bb4ce95fefd964241f7f" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">link()</span></code></a> fails with <code class="docutils literal notranslate"><span class="pre">EPERM</span></code> and <code class="docutils literal notranslate"><span class="pre">st_nlink</span></code> is always 1, though ext2 stores hard links
+on disk.</p>
+</dd>
+<dt>Symbolic links are not supported</dt><dd><p>Symbolic links are neither created nor followed, though ext2 stores them on disk.</p>
+</dd>
+<dt>Permissions may not be reported accurately</dt><dd><p><a class="reference internal" href="../../doxygen/html/group__posix__option__group__file__system.html#ga8981b2dc8c3ed46a4788f0badb99a281" title=""><code class="xref c c-func docutils literal notranslate"><span class="pre">stat()</span></code></a> reports a synthesised mode rather than the file’s stored permission bits.</p>
+</dd>
+</dl>
+</section>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="../aep/index.html" class="btn btn-neutral float-left" title="POSIX Application Environment Profiles (AEP)" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="../design/index.html" class="btn btn-neutral float-right" title="Multi-Process Design" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2015-2026 Zephyr Project members and individual contributors.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
