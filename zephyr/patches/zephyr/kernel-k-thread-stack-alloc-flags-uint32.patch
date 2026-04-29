@@ -1,0 +1,86 @@
+From 9d735540eadbec072990286ce74bdd045b1ec061 Mon Sep 17 00:00:00 2001
+From: Chris Friedt <chris@fr4.co>
+Date: Sat, 25 Apr 2026 17:28:40 -0400
+Subject: [PATCH] kernel: change k_thread_stack_alloc() flags to uint32_t
+
+The flags parameter for k_thread_stack_alloc() and its internal
+helpers used int, but the values passed (e.g. K_USER) are unsigned
+constants. Change the type to uint32_t to match the actual usage
+and avoid implicit signed/unsigned comparison warnings.
+
+Signed-off-by: Friedt Professional Engineering Services, Inc
+---
+ include/zephyr/kernel.h   | 2 +-
+ kernel/dynamic.c          | 8 ++++----
+ kernel/dynamic_disabled.c | 2 +-
+ 3 files changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/include/zephyr/kernel.h b/include/zephyr/kernel.h
+index 3c70faf7466..b78d94e2414 100644
+--- a/include/zephyr/kernel.h
++++ b/include/zephyr/kernel.h
+@@ -383,7 +383,7 @@ void k_thread_foreach_unlocked_filter_by_cpu(unsigned int cpu,
+  *
+  * @see @kconfig{CONFIG_DYNAMIC_THREAD}
+  */
+-__syscall k_thread_stack_t *k_thread_stack_alloc(size_t size, int flags);
++__syscall k_thread_stack_t *k_thread_stack_alloc(size_t size, uint32_t flags);
+ 
+ /**
+  * @brief Free a dynamically allocated thread stack.
+diff --git a/kernel/dynamic.c b/kernel/dynamic.c
+index aecba3fbf97..987efdf1b6d 100644
+--- a/kernel/dynamic.c
++++ b/kernel/dynamic.c
+@@ -31,7 +31,7 @@ static K_THREAD_STACK_ARRAY_DEFINE(dynamic_stack, CONFIG_DYNAMIC_THREAD_POOL_SIZ
+ 				   K_THREAD_STACK_LEN(CONFIG_DYNAMIC_THREAD_STACK_SIZE));
+ SYS_BITARRAY_DEFINE_STATIC(dynamic_ba, BA_SIZE);
+ 
+-static k_thread_stack_t *z_thread_stack_alloc_pool(size_t size, int flags)
++static k_thread_stack_t *z_thread_stack_alloc_pool(size_t size, uint32_t flags)
+ {
+ 	int rv;
+ 	size_t offset;
+@@ -56,7 +56,7 @@ static k_thread_stack_t *z_thread_stack_alloc_pool(size_t size, int flags)
+ 	return stack;
+ }
+ 
+-static k_thread_stack_t *z_thread_stack_alloc_dyn(size_t size, int flags)
++static k_thread_stack_t *z_thread_stack_alloc_dyn(size_t size, uint32_t flags)
+ {
+ 	if ((flags & K_USER) == K_USER) {
+ #ifdef CONFIG_DYNAMIC_OBJECTS
+@@ -72,7 +72,7 @@ static k_thread_stack_t *z_thread_stack_alloc_dyn(size_t size, int flags)
+ 	return z_thread_aligned_alloc(Z_KERNEL_STACK_OBJ_ALIGN, K_KERNEL_STACK_LEN(size));
+ }
+ 
+-k_thread_stack_t *z_impl_k_thread_stack_alloc(size_t size, int flags)
++k_thread_stack_t *z_impl_k_thread_stack_alloc(size_t size, uint32_t flags)
+ {
+ 	k_thread_stack_t *stack = NULL;
+ 
+@@ -95,7 +95,7 @@ k_thread_stack_t *z_impl_k_thread_stack_alloc(size_t size, int flags)
+ }
+ 
+ #ifdef CONFIG_USERSPACE
+-static inline k_thread_stack_t *z_vrfy_k_thread_stack_alloc(size_t size, int flags)
++static inline k_thread_stack_t *z_vrfy_k_thread_stack_alloc(size_t size, uint32_t flags)
+ {
+ 	return z_impl_k_thread_stack_alloc(size, flags);
+ }
+diff --git a/kernel/dynamic_disabled.c b/kernel/dynamic_disabled.c
+index 47ce077304f..8e23adab8c9 100644
+--- a/kernel/dynamic_disabled.c
++++ b/kernel/dynamic_disabled.c
+@@ -9,7 +9,7 @@
+ #include <zephyr/kernel.h>
+ #include <zephyr/kernel/thread_stack.h>
+ 
+-k_thread_stack_t *z_impl_k_thread_stack_alloc(size_t size, int flags)
++k_thread_stack_t *z_impl_k_thread_stack_alloc(size_t size, uint32_t flags)
+ {
+ 	ARG_UNUSED(size);
+ 	ARG_UNUSED(flags);
+-- 
+2.43.0
+
