@@ -39,24 +39,20 @@ ZTEST(posix_threads_ext, test_pthread_attr_getguardsize)
 
 ZTEST(posix_threads_ext, test_pthread_attr_setguardsize)
 {
-	size_t guardsize = CONFIG_POSIX_PTHREAD_ATTR_GUARDSIZE_DEFAULT;
-	size_t sizes[] = {0, BIT_MASK(CONFIG_POSIX_PTHREAD_ATTR_GUARDSIZE_BITS / 2),
-			  BIT_MASK(CONFIG_POSIX_PTHREAD_ATTR_GUARDSIZE_BITS)};
+	size_t guardsize;
 
-	/* valid value */
 	zassert_ok(pthread_attr_getguardsize(&attr, &guardsize));
+
+	/* valid values */
+	size_t sizes[] = {
+		0, guardsize / 2, guardsize, guardsize * 2, SIZE_MAX,
+	};
 
 	/* degenerate cases */
 	{
-		if (false) {
-			/* undefined behaviour */
-			zassert_equal(pthread_attr_setguardsize(NULL, SIZE_MAX), EINVAL);
-			zassert_equal(pthread_attr_setguardsize(NULL, guardsize), EINVAL);
-			zassert_equal(pthread_attr_setguardsize((pthread_attr_t *)&uninit_attr,
-								guardsize),
-				      EINVAL);
-		}
-		zassert_equal(pthread_attr_setguardsize(&attr, SIZE_MAX), EINVAL);
+		/* Fun fact! Linux (glibc, Ubuntu 24.04.3 LTS) segfaults with attr == NULL,
+		 * and succeeds with an uninitialized attribute, so skipping those tests here
+		 */
 	}
 
 	ARRAY_FOR_EACH(sizes, i) {

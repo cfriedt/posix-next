@@ -28,7 +28,10 @@ extern "C" {
 #include <zephyr/net/net_compat.h>
 #undef ZEPHYR_INCLUDE_NET_COMPAT_MODE_SYMBOLS
 
+/* Temporary workaround required to build with Zephyr 4.4+ */
+#ifndef socklen_t
 typedef uint32_t socklen_t;
+#endif
 #define _SOCKLEN_T_DECLARED
 #define __socklen_t_defined
 #endif
