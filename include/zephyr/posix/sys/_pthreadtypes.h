@@ -8,7 +8,13 @@
 #define ZEPHYR_INCLUDE_POSIX_SYS__PTHREADTYPES_H_
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
+
+#include <zephyr/sys/atomic_types.h>
+#include <zephyr/sys/condvar.h>
+#include <zephyr/sys/mutex.h>
+#include <zephyr/sys/thread_once.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -18,7 +24,9 @@ extern "C" {
 	defined(__DOXYGEN__)
 typedef struct {
 	void *stack;
-	uint32_t details[2];
+	size_t stacksize;
+	size_t guardsize;
+	uint32_t details;
 } pthread_attr_t;
 #define _PTHREAD_ATTR_T_DECLARED
 #define __pthread_attr_t_defined
@@ -42,8 +50,7 @@ typedef struct {
 
 #if !(defined(_PTHREAD_COND_T_DECLARED) && defined(__pthread_cond_t_defined)) ||                   \
 	defined(__DOXYGEN__)
-/* TODO: convert this to a long so that it can refer to a k_condvar (pointer) */
-typedef uint32_t pthread_cond_t;
+typedef struct sys_condvar pthread_cond_t;
 #define _PTHREAD_COND_T_DECLARED
 #define __pthread_cond_t_defined
 #endif
@@ -65,8 +72,7 @@ typedef uint32_t pthread_key_t;
 
 #if !(defined(_PTHREAD_MUTEX_T_DECLARED) && defined(__pthread_mutex_t_defined)) ||                 \
 	defined(__DOXYGEN__)
-/* TODO: convert this to a long so that it can refer to a k_mutex (pointer) */
-typedef uint32_t pthread_mutex_t;
+typedef struct sys_mutex pthread_mutex_t;
 #define _PTHREAD_MUTEX_T_DECLARED
 #define __pthread_mutex_t_defined
 #endif
@@ -83,9 +89,7 @@ typedef struct {
 
 #if !(defined(_PTHREAD_ONCE_T_DECLARED) && defined(__pthread_once_t_defined)) ||                   \
 	defined(__DOXYGEN__)
-typedef struct {
-	unsigned long flag;
-} pthread_once_t;
+typedef sys_thread_once_t pthread_once_t;
 #define _PTHREAD_ONCE_T_DECLARED
 #define __pthread_once_t_defined
 #endif
@@ -119,13 +123,15 @@ typedef uint32_t pthread_t;
 #define __pthread_t_defined
 #endif
 
+/* clang-format off */
 #ifndef _PTHREAD_MUTEX_INITIALIZER
-#define _PTHREAD_MUTEX_INITIALIZER (-1)
+/* a struct sys_mutex whose options are K_MUTEX_NORMAL */
+#define _PTHREAD_MUTEX_INITIALIZER {0, 0, 0, 0, 1}
 #endif
-
 #ifndef _PTHREAD_COND_INITIALIZER
-#define _PTHREAD_COND_INITIALIZER (-1)
+#define _PTHREAD_COND_INITIALIZER {0}
 #endif
+/* clang-format on */
 
 #ifndef _PTHREAD_RWLOCK_INITIALIZER
 #define _PTHREAD_RWLOCK_INITIALIZER (-1)
