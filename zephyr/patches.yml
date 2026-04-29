@@ -654,3 +654,77 @@ patches:
     upstreamable: true
     comments: |
       provide a means of using k_mem_map() to map a thread stack instead of using the heap.
+  - path: zephyr/sys-thread.patch
+    sha256sum: 30257170f3ea50e5bc6369cdb919c0ef8ae64cd08ba6eed79b98293ab9a4ab99
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-04-25
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/k-tss.patch
+          - zephyr/k-thread-detach.patch
+          - zephyr/k-obj-map-size.patch
+          - zephyr/kernel-userspace-dynamic-thread-index-leak.patch
+    comments: |
+      lib: os: add sys_thread api for pooled condvar, mutex, thread, and stack
+
+      Pooled thread and stack objects are torn down by the kernel-object
+      collector. A thread or stack object is live from k_object_init() until
+      halt_thread() is done with it, marked by K_OBJ_FLAG_HALTING, and neither
+      unref_check() nor k_object_free() disposes of a live one: the last
+      permission drop of a running thread only clears the bit, and the halt
+      collects the object once nothing references it. A collected dynamic
+      object is not freed where it is found: the heap reaches the scheduler
+      lock to wake waiters, and lists_lock and obj_lock are taken under the
+      scheduler lock by halt, so the record goes onto an object graveyard and
+      z_kobj_graveyard_flush() releases and frees it with no lock held, at
+      allocation, k_object_free(), a permission drop, and the collect and reap
+      entry points once their locks are dropped. An object drawn from a pool
+      (K_OBJ_FLAG_OWNED) tells its owner through the weak z_kobj_owner_release()
+      before it goes; a stack bound to its thread (K_OBJ_FLAG_BOUND) is reaped
+      with the thread; a thread is granted its own stack at setup; and a stack
+      from k_object_map_size() carries K_OBJ_FLAG_ALLOC so that the collector
+      can unmap it. The kernel's entry points are z_kobj_halt_begin(),
+      z_kobj_halt_clear(), z_kobj_halt_end(), z_kobj_collect() and
+      z_kobj_reap(), the last of which ends every reference to a collectable
+      thread object and its bound stack while leaving an application's static
+      object, which outlives its thread, untouched.
+
+      halt_thread() frees nothing. It moves the thread's objects to halting,
+      sweeps the thread's own permissions as before, and parks a kernel-owned
+      thread, a pool entry or a dynamic object, on the graveyard, a list
+      through the k_thread that only the kernel owns; an application-owned
+      k_thread is never parked and never touched again once its abort returns,
+      which the thread_apis abort-from-ISR test relies on. The drains dispose
+      with no lock held, after the parked thread has switched out: thread and
+      stack allocation, reuse of the k_thread, and the reap events, which are
+      the join in z_thread_epilogue() and k_thread_detach() of a dead thread.
+      A detached thread's death is its reap. Without CONFIG_USERSPACE the same
+      drains reclaim a pooled thread explicitly through z_sys_thread_reclaim().
+      The one-slot mapped-stack stash stays for application-owned threads.
+      DYNAMIC_OBJECTS and SYS_THREAD select THREAD_ABORT_NEED_CLEANUP. The
+      dynamic_thread suite checks that a running thread's object survives its
+      creator's release and k_object_free(), that the join disposes of it, and
+      that a detached thread's index returns.
+
+      The pool locks are leaf locks, since the collector calls back into the
+      pool while holding its own: elastic entries are reserved under the pool
+      lock, allocated without it and registered under it again. Every pool
+      stack is bound to the thread that runs on it, the pool records how each
+      elastic stack was obtained so that releasing one never asks the
+      kernel-object layer, z_kobj_owner_release() drops bookkeeping only, and
+      z_sys_thread_reclaim() follows a pooled thread's stack that is not a
+      kernel object and, without CONFIG_USERSPACE, reclaims the pooled thread
+      itself. sys_thread_destroy() and sys_thread_stack_destroy() drop the
+      caller's reference with CONFIG_USERSPACE and CHECKIF() a live object
+      without it; the uninitialized-flag check of sys_thread_once() is a
+      CHECKIF() too. The ztest rule only observes: it records the pool usage
+      before each test and waits a bounded time for it to return. The
+      sys_thread suite covers detached and aborted pooled threads.
+
+      CONFIG_SYS_THREAD_STACK_SIZE is an int like every other stack size
+      symbol.
+
