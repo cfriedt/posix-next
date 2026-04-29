@@ -1,0 +1,43 @@
+diff --git a/include/zephyr/net/midi2.h b/include/zephyr/net/midi2.h
+index 4af8edc3258..e7bda15a82a 100644
+--- a/include/zephyr/net/midi2.h
++++ b/include/zephyr/net/midi2.h
+@@ -31,7 +31,6 @@
+ #include <stdint.h>
+ #include <zephyr/audio/midi.h>
+ #include <zephyr/net/socket.h>
+-#include <zephyr/posix/poll.h>
+ 
+ /**
+  * Size, in bytes, of the nonce sent to the client for authentication
+@@ -214,7 +213,7 @@ struct netmidi2_ep {
+ 		struct sockaddr_in6 addr6;
+ 	};
+ 	/** The listening socket wrapped in a poll descriptor */
+-	struct pollfd pollsock;
++	struct zsock_pollfd pollsock;
+ 	/** The function to call when data is received from a client */
+ 	void (*rx_packet_cb)(struct netmidi2_session *session,
+ 			     const struct midi_ump ump);
+diff --git a/subsys/net/lib/midi2/netmidi2.c b/subsys/net/lib/midi2/netmidi2.c
+index 4ab8ec6a3a6..32ced2166b2 100644
+--- a/subsys/net/lib/midi2/netmidi2.c
++++ b/subsys/net/lib/midi2/netmidi2.c
+@@ -714,7 +714,7 @@ static void netmidi2_service_handler(struct net_socket_service_event *pev)
+ {
+ 	int ret;
+ 	struct netmidi2_ep *ep = pev->user_data;
+-	struct pollfd *pfd = &pev->event;
++	struct zsock_pollfd *pfd = &pev->event;
+ 	struct sockaddr peer_addr;
+ 	socklen_t peer_addr_len = sizeof(peer_addr);
+ 	struct net_buf *rxbuf;
+@@ -798,7 +798,7 @@ int netmidi2_host_ep_start(struct netmidi2_ep *ep)
+ 	}
+ 
+ 	ep->pollsock.fd = sock;
+-	ep->pollsock.events = POLLIN;
++	ep->pollsock.events = ZSOCK_POLLIN;
+ 	ret = net_socket_service_register(&netmidi2_service, &ep->pollsock, 1, ep);
+ 	if (ret < 0) {
+ 		zsock_close(sock);
