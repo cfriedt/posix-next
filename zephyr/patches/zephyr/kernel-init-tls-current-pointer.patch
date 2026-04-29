@@ -1,0 +1,33 @@
+From b72ab6e3a651b1c9a21f1cdff24fb58ead8ee482 Mon Sep 17 00:00:00 2001
+From: Chris Friedt <chris@fr4.co>
+Date: Sat, 25 Apr 2026 17:39:22 -0400
+Subject: [PATCH] kernel: init tls current pointer for main thread
+
+Initialize z_tls_current to &z_main_thread in bg_thread_main()
+when CONFIG_CURRENT_THREAD_USE_TLS is enabled.
+
+Signed-off-by: Friedt Professional Engineering Services, Inc
+---
+ kernel/init.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/kernel/init.c b/kernel/init.c
+index 14fb8074940..025164be76b 100644
+--- a/kernel/init.c
++++ b/kernel/init.c
+@@ -334,6 +334,12 @@ static void bg_thread_main(void *unused1, void *unused2, void *unused3)
+ 	z_mem_manage_boot_finish();
+ #endif /* CONFIG_MMU */
+ 
++#ifdef CONFIG_CURRENT_THREAD_USE_TLS
++	extern Z_THREAD_LOCAL k_tid_t z_tls_current;
++
++	z_tls_current = &z_main_thread;
++#endif
++
+ #ifdef CONFIG_BOOTARGS
+ 	extern int main(int, char **);
+ 	extern char **prepare_main_args(int *argc);
+-- 
+2.43.0
+
