@@ -1,0 +1,14 @@
+diff --git a/kernel/thread_monitor.c b/kernel/thread_monitor.c
+index f6f7217b6f0..222ba66657e 100644
+--- a/kernel/thread_monitor.c
++++ b/kernel/thread_monitor.c
+@@ -51,7 +51,8 @@ static void thread_foreach_helper(k_thread_user_cb_t user_cb, void *user_data,
+ 
+ 	key = k_spin_lock(&z_thread_monitor_lock);
+ 
+-	for (thread = _kernel.threads; thread; thread = thread->next_thread) {
++	for (thread = _kernel.threads; thread;
++	     thread = (thread->next_thread == _kernel.threads) ? NULL : thread->next_thread) {
+ 		/* cpu is only defined when SMP=y*/
+ #ifdef CONFIG_SMP
+ 		bool on_cpu = (thread->base.cpu == cpu);
