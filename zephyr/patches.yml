@@ -399,3 +399,25 @@ patches:
     upstreamable: true
     comments: |
       kernel: change k_thread_stack_alloc() flags to uint32_t
+  - path: zephyr/sys-timepoint-user-callable.patch
+    sha256sum: 995dfff2fc39c41c00dbb6639b6a25c46bc4a153f92659b7d555ecfbcb339428
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-04-25
+    upstreamable: true
+    comments: |
+      Make the timepoint API safe to call from user mode.
+      sys_timepoint_calc() and sys_timepoint_timeout() are executed in
+      the caller's context (the POSIX layer computes deadlines for
+      sem_timedwait() and friends from user threads), but their bodies
+      in kernel/timeout.c read the tick counter under timeout_lock,
+      faulting any user-mode caller. Turn the helpers into static
+      inlines in their own header, <zephyr/sys/clock.h>, reading ticks
+      through a new sys_clock_ticks() system call implemented over
+      sys_clock_tick_get(): the arithmetic then compiles in the
+      caller's domain, so kernel callers keep the direct tick read and
+      user-compiled callers trap for the tick only. This replaces an
+      earlier approach that compiled timeout.c a second time without
+      __ZEPHYR_SUPERVISOR__, which produced duplicate definitions under
+      LLEXT's whole-archive kernel linking.

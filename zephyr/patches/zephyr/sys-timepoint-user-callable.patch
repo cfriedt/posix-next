@@ -1,0 +1,128 @@
+diff --git a/include/zephyr/sys/clock.h b/include/zephyr/sys/clock.h
+index b46de7fe835..709448e3809 100644
+--- a/include/zephyr/sys/clock.h
++++ b/include/zephyr/sys/clock.h
+@@ -249,6 +249,18 @@ typedef struct {
+ 	uint64_t tick;
+ } k_timepoint_t;
+ 
++/**
++ * @brief Get the current tick count, as a system call
++ *
++ * Functionally equivalent to sys_clock_tick_get(), but callable from user
++ * mode: the timepoint helpers below execute in the caller's context, so a
++ * user-mode caller must reach the tick counter through a system call
++ * rather than reading it under the kernel's timeout lock.
++ *
++ * @return the current system uptime in ticks
++ */
++__syscall int64_t sys_clock_ticks(void);
++
+ /**
+  * @brief Calculate a timepoint value
+  *
+@@ -265,7 +277,26 @@ typedef struct {
+  * @see sys_timepoint_timeout()
+  * @see sys_timepoint_expired()
+  */
+-k_timepoint_t sys_timepoint_calc(k_timeout_t timeout);
++static inline k_timepoint_t sys_timepoint_calc(k_timeout_t timeout)
++{
++	k_timepoint_t timepoint;
++
++	if (K_TIMEOUT_EQ(timeout, Z_FOREVER)) {
++		timepoint.tick = UINT64_MAX;
++	} else if (K_TIMEOUT_EQ(timeout, Z_TIMEOUT_NO_WAIT)) {
++		timepoint.tick = 0;
++	} else {
++		k_ticks_t dt = timeout.ticks;
++
++		if (Z_IS_TIMEOUT_RELATIVE(timeout)) {
++			timepoint.tick = (uint64_t)(sys_clock_ticks() + MAX(1, dt));
++		} else {
++			timepoint.tick = (uint64_t)Z_TICK_ABS(dt);
++		}
++	}
++
++	return timepoint;
++}
+ 
+ /**
+  * @brief Remaining time to given timepoint
+@@ -280,7 +311,21 @@ k_timepoint_t sys_timepoint_calc(k_timeout_t timeout);
+  *
+  * @see sys_timepoint_calc()
+  */
+-k_timeout_t sys_timepoint_timeout(k_timepoint_t timepoint);
++static inline k_timeout_t sys_timepoint_timeout(k_timepoint_t timepoint)
++{
++	uint64_t now, remaining;
++
++	if (timepoint.tick == UINT64_MAX) {
++		return Z_FOREVER;
++	}
++	if (timepoint.tick == 0) {
++		return Z_TIMEOUT_NO_WAIT;
++	}
++
++	now = (uint64_t)sys_clock_ticks();
++	remaining = (timepoint.tick > now) ? (timepoint.tick - now) : 0;
++	return Z_TIMEOUT_TICKS((k_ticks_t)remaining);
++}
+ 
+ /**
+  * @brief Compare two timepoint values.
+diff --git a/kernel/timeout.c b/kernel/timeout.c
+index 3dcdd03f80b..69c81174150 100644
+--- a/kernel/timeout.c
++++ b/kernel/timeout.c
+@@ -317,42 +317,18 @@ static inline int64_t z_vrfy_k_uptime_ticks(void)
+ #include <zephyr/syscalls/k_uptime_ticks_mrsh.c>
+ #endif /* CONFIG_USERSPACE */
+ 
+-k_timepoint_t sys_timepoint_calc(k_timeout_t timeout)
++int64_t z_impl_sys_clock_ticks(void)
+ {
+-	k_timepoint_t timepoint;
+-
+-	if (K_TIMEOUT_EQ(timeout, K_FOREVER)) {
+-		timepoint.tick = UINT64_MAX;
+-	} else if (K_TIMEOUT_EQ(timeout, K_NO_WAIT)) {
+-		timepoint.tick = 0;
+-	} else {
+-		k_ticks_t dt = timeout.ticks;
+-
+-		if (Z_IS_TIMEOUT_RELATIVE(timeout)) {
+-			timepoint.tick = sys_clock_tick_get() + max(1, dt);
+-		} else {
+-			timepoint.tick = Z_TICK_ABS(dt);
+-		}
+-	}
+-
+-	return timepoint;
++	return sys_clock_tick_get();
+ }
+ 
+-k_timeout_t sys_timepoint_timeout(k_timepoint_t timepoint)
++#ifdef CONFIG_USERSPACE
++static inline int64_t z_vrfy_sys_clock_ticks(void)
+ {
+-	uint64_t now, remaining;
+-
+-	if (timepoint.tick == UINT64_MAX) {
+-		return K_FOREVER;
+-	}
+-	if (timepoint.tick == 0) {
+-		return K_NO_WAIT;
+-	}
+-
+-	now = sys_clock_tick_get();
+-	remaining = (timepoint.tick > now) ? (timepoint.tick - now) : 0;
+-	return K_TICKS(remaining);
++	return z_impl_sys_clock_ticks();
+ }
++#include <zephyr/syscalls/sys_clock_ticks_mrsh.c>
++#endif /* CONFIG_USERSPACE */
+ 
+ #ifdef CONFIG_ZTEST
+ void z_impl_sys_clock_tick_set(uint64_t tick)
