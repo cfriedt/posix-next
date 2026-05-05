@@ -304,3 +304,17 @@ patches:
     upstreamable: true
     comments: |
       make sys_clock_tick_get() a syscall so it can be used by userspace code as well.
+  - path: zephyr/arm-mpu-priv-stack-wrn.patch
+    sha256sum: 7aac0e495b033b20851a47f9d0a3c0843af4f81d771fa8d14c57386e9fbcd8ce
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-05-04
+    upstreamable: true
+    comments: |
+      No other zephyr architectures assert on assumptions about where userspace thread
+      stacks lie in memory. While it's true that statically allocated thread stacks are
+      in specific regions, dynamically allocated stacks could be anywhere. Older ARM MPUs
+      have fairly stringent requirements on power-of-two size and alignment of MPU regions,
+      so the concern is warranted, but downgrade it to a LOG_WRN_ONCE() so that zephyr code
+      that is hardware agnostic can still be coherent with other architectures.
