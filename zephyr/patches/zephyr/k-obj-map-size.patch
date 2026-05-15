@@ -1,0 +1,162 @@
+diff --git a/include/zephyr/sys/kobject.h b/include/zephyr/sys/kobject.h
+index 9fe9b5ad212..633f09fc97d 100644
+--- a/include/zephyr/sys/kobject.h
++++ b/include/zephyr/sys/kobject.h
+@@ -78,6 +78,8 @@ enum k_objects {
+ #define K_OBJ_FLAG_ALLOC	BIT(2)
+ /** Driver Object */
+ #define K_OBJ_FLAG_DRIVER	BIT(3)
++/** Object is mapped */
++#define K_OBJ_FLAG_MAP          BIT(4)
+ 
+ /**
+  * Grant a thread access to a kernel object
+@@ -250,6 +252,28 @@ __syscall void *k_object_alloc_size(enum k_objects otype, size_t size);
+  * @param obj Pointer to the kernel object memory address.
+  */
+ void k_object_free(void *obj);
++
++/**
++ * Map a kernel object of a designated type and a given size
++ *
++ * This will instantiate at runtime a kernel object of the specified type,
++ * returning a pointer to it. The object will be returned in an uninitialized
++ * state, with the calling thread being granted permission on it. The memory
++ * for the object will be mapped from anonymous memory.
++ *
++ * This function is mainly helpful for thread stack objects since gaurd page
++ * size and alignment requirements can consume heap resources quickly.
++ *
++ * @note This function is available only if @kconfig{CONFIG_DYNAMIC_OBJECTS}
++ * is selected, the platform has an MMU, and firmware is built with
++ * @kconfig{CONFIG_MMU}.
++ *
++ * @param otype Requested kernel object type
++ * @param size Requested kernel object size
++ * @return A pointer to the allocated kernel object, or NULL if memory wasn't
++ * available
++ */
++__syscall void *k_object_map_size(enum k_objects otype, size_t size);
+ #else
+ 
+ /* LCOV_EXCL_START */
+@@ -278,6 +302,15 @@ static inline void k_object_free(void *obj)
+ {
+ 	ARG_UNUSED(obj);
+ }
++
++static inline void *z_impl_k_object_map_size(enum k_objects otype, size_t size)
++{
++	ARG_UNUSED(otype);
++	ARG_UNUSED(size);
++
++	return NULL;
++}
++
+ /* LCOV_EXCL_STOP */
+ #endif /* CONFIG_DYNAMIC_OBJECTS */
+ 
+diff --git a/kernel/userspace.c b/kernel/userspace.c
+index 61e00afcbc4..05f7b39e033 100644
+--- a/kernel/userspace.c
++++ b/kernel/userspace.c
+@@ -150,10 +150,9 @@ uint8_t *z_priv_stack_find(k_thread_stack_t *stack)
+ #define DYN_OBJ_DATA_ALIGN_K_THREAD	(sizeof(void *))
+ #endif /* ARCH_DYNAMIC_OBJ_K_THREAD_ALIGNMENT */
+ 
+-#ifdef CONFIG_DYNAMIC_THREAD_STACK_SIZE
++#ifdef CONFIG_SYS_THREAD_STACK_SIZE
+ #if defined(CONFIG_MPU_STACK_GUARD) || defined(CONFIG_PMP_STACK_GUARD)
+-#define DYN_OBJ_DATA_ALIGN_K_THREAD_STACK \
+-	Z_THREAD_STACK_OBJ_ALIGN(CONFIG_DYNAMIC_THREAD_STACK_SIZE)
++#define DYN_OBJ_DATA_ALIGN_K_THREAD_STACK Z_THREAD_STACK_OBJ_ALIGN(CONFIG_SYS_THREAD_STACK_SIZE)
+ #else
+ #define DYN_OBJ_DATA_ALIGN_K_THREAD_STACK \
+ 	Z_THREAD_STACK_OBJ_ALIGN(CONFIG_PRIVILEGED_STACK_SIZE)
+@@ -519,6 +518,65 @@ void k_object_wordlist_foreach(_wordlist_cb_func_t func, void *context)
+ 	}
+ 	k_spin_unlock(&lists_lock, key);
+ }
++
++#ifdef CONFIG_MMU
++void *z_impl_k_object_map_size(enum k_objects otype, size_t size)
++{
++	switch (otype) {
++	case K_OBJ_THREAD_STACK_ELEMENT:
++		break;
++	default:
++		LOG_WRN_ONCE("%s() does not support object type '%s'",
++			     __func__, otype_to_str(otype));
++		return NULL;
++	}
++
++	struct dyn_obj *dyn;
++
++	dyn = z_thread_aligned_alloc(obj_align_get(otype), sizeof(struct dyn_obj));
++	if (dyn == NULL) {
++		return NULL;
++	}
++
++	size_t adjusted_size;
++
++	adjusted_size = ROUND_UP(STACK_ELEMENT_DATA_SIZE(size), CONFIG_MMU_PAGE_SIZE);
++	dyn->data = k_mem_map(adjusted_size, K_MEM_PERM_RW);
++	if (dyn->data == NULL) {
++		k_free(dyn);
++		return NULL;
++	}
++
++#ifdef CONFIG_GEN_PRIV_STACKS
++	struct z_stack_data *stack_data =
++		(struct z_stack_data *)((uint8_t *)dyn->data + adjusted_size - sizeof(*stack_data));
++	stack_data->priv = (uint8_t *)dyn->data;
++	stack_data->size = adjusted_size;
++	dyn->kobj.data.stack_data = stack_data;
++#if defined(CONFIG_ARM_MPU) || defined(CONFIG_ARC_MPU) || defined(CONFIG_RISCV_PMP)
++	dyn->kobj.name = (void *)ROUND_UP(((uint8_t *)dyn->data + CONFIG_PRIVILEGED_STACK_SIZE),
++					  Z_THREAD_STACK_OBJ_ALIGN(size));
++#else
++	dyn->kobj.name = dyn->data;
++#endif /* CONFIG_ARM_MPU || CONFIG_ARC_MPU || CONFIG_RISCV_PMP */
++#else
++	dyn->kobj.name = dyn->data;
++	dyn->kobj.data.stack_size = adjusted_size;
++#endif /* CONFIG_GEN_PRIV_STACKS */
++
++	dyn->kobj.name = dyn->data;
++
++	dyn->kobj.type = otype;
++	dyn->kobj.flags = K_OBJ_FLAG_MAP;
++	(void)memset(dyn->kobj.perms, 0, CONFIG_MAX_THREAD_BYTES);
++
++	K_SPINLOCK(&lists_lock) {
++		sys_dlist_append(&obj_list, &dyn->dobj_list);
++	}
++
++	return &dyn->kobj.name;
++}
++#endif /* CONFIG_MMU */
+ #endif /* CONFIG_DYNAMIC_OBJECTS */
+ 
+ /* In the earlier linker-passes before we have the real generated
+diff --git a/kernel/userspace_handler.c b/kernel/userspace_handler.c
+index ab6e4f0623c..22d0f136226 100644
+--- a/kernel/userspace_handler.c
++++ b/kernel/userspace_handler.c
+@@ -87,3 +87,16 @@ static inline void *z_vrfy_k_object_alloc_size(enum k_objects otype, size_t size
+ 	return z_impl_k_object_alloc_size(otype, size);
+ }
+ #include <zephyr/syscalls/k_object_alloc_size_mrsh.c>
++
++#ifdef CONFIG_MMU
++static inline void *z_vrfy_k_object_map_size(enum k_objects otype, size_t size)
++{
++	return z_impl_k_object_map_size(otype, size);
++}
++#include <zephyr/syscalls/k_object_map_size_mrsh.c>
++#else
++static inline void *z_vrfy_k_object_map_size(enum k_objects otype, size_t size)
++{
++	return NULL;
++}
++#endif /* CONFIG_MMU */
