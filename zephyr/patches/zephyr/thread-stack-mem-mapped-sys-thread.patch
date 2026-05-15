@@ -1,0 +1,83 @@
+diff --git a/arch/x86/core/Kconfig.ia32 b/arch/x86/core/Kconfig.ia32
+index f24e7d37758..7a39571d9e0 100644
+--- a/arch/x86/core/Kconfig.ia32
++++ b/arch/x86/core/Kconfig.ia32
+@@ -67,7 +67,7 @@ config X86_STACK_PROTECTION
+ 	select SET_GDT
+ 	select GDT_DYNAMIC
+ 	select X86_ENABLE_TSS
+-	imply THREAD_STACK_MEM_MAPPED if !DEMAND_PAGING
++	imply THREAD_STACK_MEM_MAPPED if !(DEMAND_PAGING || SYS_THREAD)
+ 	help
+ 	  This option leverages the MMU to cause a system fatal error if the
+ 	  bounds of the current process stack are overflowed. This is done
+diff --git a/arch/x86/core/Kconfig.intel64 b/arch/x86/core/Kconfig.intel64
+index 0f73341db31..186627726fa 100644
+--- a/arch/x86/core/Kconfig.intel64
++++ b/arch/x86/core/Kconfig.intel64
+@@ -75,7 +75,7 @@ config X86_STACK_PROTECTION
+ 	bool
+ 	default y if HW_STACK_PROTECTION
+ 	select THREAD_STACK_INFO
+-	imply THREAD_STACK_MEM_MAPPED
++	imply THREAD_STACK_MEM_MAPPED if ! SYS_THREAD
+ 	help
+ 	  This option leverages the MMU to cause a system fatal error if the
+ 	  bounds of the current process stack are overflowed. This is done
+diff --git a/include/zephyr/kernel/thread.h b/include/zephyr/kernel/thread.h
+index db7713d6d407..4e477a670d3b 100644
+--- a/include/zephyr/kernel/thread.h
++++ b/include/zephyr/kernel/thread.h
+@@ -162,7 +162,7 @@ struct _thread_stack_info {
+ 	 */
+ 	size_t delta;
+ 
+-#if defined(CONFIG_THREAD_STACK_MEM_MAPPED)
++#if defined(CONFIG_THREAD_STACK_MEM_MAPPED) || defined(CONFIG_SYS_THREAD_STACK_ALLOC_ANON)
+ 	struct {
+ 		/** Base address of the memory mapped thread stack */
+ 		k_thread_stack_t *addr;
+@@ -170,7 +170,7 @@ struct _thread_stack_info {
+ 		/** Size of whole mapped stack object */
+ 		size_t sz;
+ 	} mapped;
+-#endif /* CONFIG_THREAD_STACK_MEM_MAPPED */
++#endif /* CONFIG_THREAD_STACK_MEM_MAPPED || CONFIG_SYS_THREAD_STACK_ALLOC_ANON */
+ };
+ 
+ typedef struct _thread_stack_info _thread_stack_info_t;
+diff --git a/kernel/thread.c b/kernel/thread.c
+index 6d603564df92..b56fda8ad02e 100644
+--- a/kernel/thread.c
++++ b/kernel/thread.c
+@@ -1105,18 +1105,20 @@ void defer_thread_cleanup(struct k_thread *thread)
+ 	 */
+ 	thread_to_cleanup = thread;
+ 
+-#ifdef CONFIG_THREAD_STACK_MEM_MAPPED
++#if defined(CONFIG_THREAD_STACK_MEM_MAPPED) || defined(CONFIG_SYS_THREAD_STACK_ALLOC_ANON)
+ 	/* Note that the permission of the stack should have been
+ 	 * stripped of user thread access due to the thread having
+ 	 * already exited from a memory domain. That is done via
+ 	 * k_thread_abort().
+ 	 */
+ 
++#ifdef CONFIG_THREAD_ABORT_NEED_CLEANUP
+ 	/* Stash the address and size so the region can be unmapped
+ 	 * later.
+ 	 */
+ 	thread_cleanup_stack_addr = thread->stack_info.mapped.addr;
+ 	thread_cleanup_stack_sz = thread->stack_info.mapped.sz;
++#endif
+ 
+ 	/* The stack is now considered un-usable. This should prevent any functions
+ 	 * from looking directly into the mapped stack if they are made to be aware
+@@ -1124,7 +1126,7 @@ void defer_thread_cleanup(struct k_thread *thread)
+ 	 */
+ 	thread->stack_info.mapped.addr = NULL;
+ 	thread->stack_info.mapped.sz = 0;
+-#endif /* CONFIG_THREAD_STACK_MEM_MAPPED */
++#endif /* CONFIG_THREAD_STACK_MEM_MAPPED || CONFIG_SYS_THREAD_STACK_ALLOC_ANON */
+ }
+ 
+ void do_thread_cleanup(struct k_thread *thread)
