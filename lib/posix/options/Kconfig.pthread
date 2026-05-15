@@ -207,6 +207,7 @@ source "subsys/logging/Kconfig.template.log_config"
 endif # POSIX_THREADS
 
 config DYNAMIC_THREAD_STACK_SIZE
-	# kernel stacks are page-aligned under the RISC-V MMU, which makes PTHREAD_STACK_MIN a
-	# page: the stack pthread_attr_init() gives an attribute must hold one
-	default 4096 if RISCV && MMU
+	# PTHREAD_STACK_MIN is the idle stack size, a page on arm64, and a page where kernel
+	# stacks are page-aligned, as under the RISC-V MMU: the stack pthread_attr_init() gives
+	# an attribute must hold one
+	default 4096 if (RISCV && MMU) || ARM64
