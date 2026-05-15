@@ -1,0 +1,20 @@
+diff --git a/kernel/mmu.c b/kernel/mmu.c
+--- a/kernel/mmu.c
++++ b/kernel/mmu.c
+@@ -643,12 +643,15 @@ static int unmap_anon_pages(void *virt, size_t sz)
+ 			 * No pf is associated with this mapping.
+ 			 * Simply get rid of the MMU entry and free
+ 			 * corresponding backing store.
++			 * Use page_finalize() instead of location_free() to
++			 * correctly handle demand-mapped pages that were never
++			 * faulted in (ARCH_UNPAGED_ANON_ZERO / UNINIT).
+ 			 */
+ 			ret = arch_mem_unmap(pos, CONFIG_MMU_PAGE_SIZE);
+ 			__ASSERT(ret == 0, "%s: arch_mem_unmap() returned %d", __func__,
+ 				 ret);
+ 
+-			k_mem_paging_backing_store_location_free(location);
++			k_mem_paging_backing_store_page_finalize(NULL, location);
+ 
+ 			if (ret != 0) {
+ 				goto unmap_anon_out;
