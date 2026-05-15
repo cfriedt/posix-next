@@ -5,22 +5,31 @@
 
 set -e
 
+REALPATH="realpath"
+
 PR_DEST="origin/main"
 
-SCRIPT_PATH="$(realpath -s "$(dirname "$0")")"
+SCRIPT_PATH="$($REALPATH "$(dirname "$0")")"
 
-POSIX_NEXT_PATH="$(realpath -s "$SCRIPT_PATH"/../..)"
-WORKSPACE_PATH="$(realpath -s "$POSIX_NEXT_PATH"/../../..)"
+POSIX_NEXT_PATH="$($REALPATH "$SCRIPT_PATH"/../..)"
+WORKSPACE_PATH="$($REALPATH "$POSIX_NEXT_PATH"/../../..)"
 ZEPHYR_BASE="$WORKSPACE_PATH/zephyr"
 
 DEFAULT_PLATFORMS=( \
   mps2/an385 \
-  native_sim \
   qemu_cortex_a53 \
+  qemu_riscv32 \
   qemu_riscv64 \
   qemu_x86 \
   qemu_x86_64 \
 )
+if [ "$(uname -s)" = "Linux" ]; then
+  DEFAULT_PLATFORMS+=( \
+    native_sim \
+    native_sim/native/64 \
+  )
+fi
+
 DEFAULT_ROOTS=( \
   $POSIX_NEXT_PATH/samples/posix \
   $POSIX_NEXT_PATH/tests/benchmarks/posix \
@@ -92,7 +101,7 @@ while [ $# -gt 0 ]; do
         exit 1
       fi
       # Convert to absolute path using realpath
-      root_path="$(realpath -s "$2" 2>/dev/null || echo "$2")"
+      root_path="$($REALPATH "$2" 2>/dev/null || echo "$2")"
       ROOTS+=("$root_path")
       shift
       ;;
@@ -106,13 +115,14 @@ done
 if [ ${#PLATFORMS[@]} -eq 0 ]; then
   PLATFORMS=("${DEFAULT_PLATFORMS[@]}")
 fi
-mapfile -t PLATFORMS < <(addprefix "-p" "${PLATFORMS[@]}")
+# Use instead of 'mapfile'. This works in bash, zsh, as well as older versions of bash
+{ _tmp=("${PLATFORMS[@]}"); PLATFORMS=(); while IFS= read -r line; do PLATFORMS+=("$line"); done < <(addprefix "-p" "${_tmp[@]}"); unset _tmp; }
 
 if [ ${#ROOTS[@]} -eq 0 ]; then
   ROOTS=("${DEFAULT_ROOTS[@]}")
 fi
-
-mapfile -t ROOTS < <(addprefix "-T" "${ROOTS[@]}")
+# Use instead of 'mapfile'. This works in bash, zsh, as well as older versions of bash
+{ _tmp=("${ROOTS[@]}"); ROOTS=(); while IFS= read -r line; do ROOTS+=("$line"); done < <(addprefix "-T" "${_tmp[@]}"); unset _tmp; }
 
 cd $POSIX_NEXT_PATH
 rm -f west_old.yml
