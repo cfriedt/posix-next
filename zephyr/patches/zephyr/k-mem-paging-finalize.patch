@@ -1,0 +1,18 @@
+diff --git a/kernel/mmu.c b/kernel/mmu.c
+index fa9f6351be0..1fd3fa1a15a 100644
+--- a/kernel/mmu.c
++++ b/kernel/mmu.c
+@@ -731,9 +731,12 @@ void k_mem_unmap_phys_guard(void *addr, size_t size, bool is_anon)
+ 				 * No pf is associated with this mapping.
+ 				 * Simply get rid of the MMU entry and free
+ 				 * corresponding backing store.
++				 * Use page_finalize() instead of location_free() to
++				 * correctly handle demand-mapped pages that were never
++				 * faulted in (ARCH_UNPAGED_ANON_ZERO / UNINIT).
+ 				 */
+ 				arch_mem_unmap(pos, CONFIG_MMU_PAGE_SIZE);
+-				k_mem_paging_backing_store_location_free(location);
++				k_mem_paging_backing_store_page_finalize(NULL, location);
+ 				continue;
+ 			case ARCH_PAGE_LOCATION_PAGED_IN:
+ 				/*
