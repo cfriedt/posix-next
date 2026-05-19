@@ -1,0 +1,372 @@
+diff --git a/lib/libc/arcmwdt/include/fcntl.h b/lib/libc/arcmwdt/include/fcntl.h
+index 84c91e118d7..8073e2182b1 100644
+--- a/lib/libc/arcmwdt/include/fcntl.h
++++ b/lib/libc/arcmwdt/include/fcntl.h
+@@ -8,21 +8,36 @@
+ #define ZEPHYR_LIB_LIBC_ARCMWDT_INCLUDE_FCNTL_H_
+ 
+ #include_next <fcntl.h>
++#include <zephyr/sys/fdtable.h>
+ 
+ #define F_DUPFD 0
+-#define F_GETFL 3
+-#define F_SETFL 4
++#if defined(F_GETFL) && F_GETFL != ZVFS_F_GETFL
++#undef F_GETFL
++#endif
++#ifndef F_GETFL
++#define F_GETFL ZVFS_F_GETFL
++#endif
++
++#if defined(F_SETFL) && F_SETFL != ZVFS_F_SETFL
++#undef F_SETFL
++#endif
++#ifndef F_SETFL
++#define F_SETFL ZVFS_F_SETFL
++#endif
+ 
+ /*
+  * MWDT fcntl.h doesn't provide O_NONBLOCK, however it provides other file IO
+  * definitions. Let's define O_NONBLOCK and check that it doesn't overlap with
+  * any other file IO defines.
+  */
++#if defined(O_NONBLOCK) && O_NONBLOCK != ZVFS_O_NONBLOCK
++#undef O_NONBLOCK
++#endif
+ #ifndef O_NONBLOCK
+-  #define O_NONBLOCK 0x4000
+-  #if O_NONBLOCK & (O_RDONLY | O_WRONLY | O_RDWR | O_NDELAY | O_CREAT | O_APPEND | O_TRUNC | O_EXCL)
+-    #error "O_NONBLOCK conflicts with other O_*** file IO defines!"
+-  #endif
++  #define O_NONBLOCK ZVFS_O_NONBLOCK
++#endif
++#if O_NONBLOCK & (O_RDONLY | O_WRONLY | O_RDWR | O_NDELAY | O_CREAT | O_APPEND | O_TRUNC | O_EXCL)
++  #error "O_NONBLOCK conflicts with other O_*** file IO defines!"
+ #endif
+ 
+ #endif /* ZEPHYR_LIB_LIBC_ARCMWDT_INCLUDE_FCNTL_H_ */
+diff --git a/lib/libc/armstdc/include/fcntl.h b/lib/libc/armstdc/include/fcntl.h
+index 2341803e37a..c79fae36282 100644
+--- a/lib/libc/armstdc/include/fcntl.h
++++ b/lib/libc/armstdc/include/fcntl.h
+@@ -7,14 +7,16 @@
+ #ifndef ZEPHYR_LIB_LIBC_ARMSTDC_INCLUDE_FCNTL_H_
+ #define ZEPHYR_LIB_LIBC_ARMSTDC_INCLUDE_FCNTL_H_
+ 
++#include <zephyr/sys/fdtable.h>
++
+ #define O_CREAT    0x0200
+ #define O_APPEND   0x0400
+ #define O_EXCL     0x0800
+-#define O_NONBLOCK 0x4000
++#define O_NONBLOCK ZVFS_O_NONBLOCK
+ 
+ #define F_DUPFD 0
+-#define F_GETFL 3
+-#define F_SETFL 4
++#define F_GETFL ZVFS_F_GETFL
++#define F_SETFL ZVFS_F_SETFL
+ 
+ int open(const char *name, int flags, ...);
+ 
+diff --git a/lib/libc/newlib/include/fcntl.h b/lib/libc/newlib/include/fcntl.h
+new file mode 100644
+index 00000000000..c817572f191
+--- /dev/null
++++ b/lib/libc/newlib/include/fcntl.h
+@@ -0,0 +1,35 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_FCNTL_H_
++#define ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_FCNTL_H_
++
++#include_next <fcntl.h>
++
++#include <zephyr/sys/fdtable.h>
++
++#if defined(F_GETFL) && F_GETFL != ZVFS_F_GETFL
++#undef F_GETFL
++#endif
++#ifndef F_GETFL
++#define F_GETFL ZVFS_F_GETFL
++#endif
++
++#if defined(F_SETFL) && F_SETFL != ZVFS_F_SETFL
++#undef F_SETFL
++#endif
++#ifndef F_SETFL
++#define F_SETFL ZVFS_F_SETFL
++#endif
++
++#if defined(O_NONBLOCK) && O_NONBLOCK != ZVFS_O_NONBLOCK
++#undef O_NONBLOCK
++#endif
++#ifndef O_NONBLOCK
++#define O_NONBLOCK ZVFS_O_NONBLOCK
++#endif
++
++#endif /* ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_FCNTL_H_ */
+diff --git a/lib/libc/picolibc/include/fcntl.h b/lib/libc/picolibc/include/fcntl.h
+new file mode 100644
+index 00000000000..fe701829808
+--- /dev/null
++++ b/lib/libc/picolibc/include/fcntl.h
+@@ -0,0 +1,35 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_FCNTL_H_
++#define ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_FCNTL_H_
++
++#include_next <fcntl.h>
++
++#include <zephyr/sys/fdtable.h>
++
++#if defined(F_GETFL) && F_GETFL != ZVFS_F_GETFL
++#undef F_GETFL
++#endif
++#ifndef F_GETFL
++#define F_GETFL ZVFS_F_GETFL
++#endif
++
++#if defined(F_SETFL) && F_SETFL != ZVFS_F_SETFL
++#undef F_SETFL
++#endif
++#ifndef F_SETFL
++#define F_SETFL ZVFS_F_SETFL
++#endif
++
++#if defined(O_NONBLOCK) && O_NONBLOCK != ZVFS_O_NONBLOCK
++#undef O_NONBLOCK
++#endif
++#ifndef O_NONBLOCK
++#define O_NONBLOCK ZVFS_O_NONBLOCK
++#endif
++
++#endif /* ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_FCNTL_H_ */
+diff --git a/samples/net/sockets/echo_service/src/main.c b/samples/net/sockets/echo_service/src/main.c
+index 250f3e1e606..bf694542d58 100644
+--- a/samples/net/sockets/echo_service/src/main.c
++++ b/samples/net/sockets/echo_service/src/main.c
+@@ -4,6 +4,10 @@
+  * SPDX-License-Identifier: Apache-2.0
+  */
+ 
++#ifndef _POSIX_C_SOURCE
++#define _POSIX_C_SOURCE 200809L
++#endif
++
+ #include <zephyr/logging/log.h>
+ LOG_MODULE_REGISTER(net_echo_server_svc_sample, LOG_LEVEL_DBG);
+ 
+diff --git a/subsys/net/lib/sockets/sockets.c b/subsys/net/lib/sockets/sockets.c
+index e495b5c3928..2371d2409ae 100644
+--- a/subsys/net/lib/sockets/sockets.c
++++ b/subsys/net/lib/sockets/sockets.c
+@@ -7,6 +7,21 @@
+  */
+ 
+ /* Zephyr headers */
++#include <fcntl.h>
++#include <zephyr/sys/fdtable.h>
++
++#ifndef F_GETFL
++#define F_GETFL ZVFS_F_GETFL
++#endif
++
++#ifndef F_SETFL
++#define F_SETFL ZVFS_F_SETFL
++#endif
++
++#ifndef O_NONBLOCK
++#define O_NONBLOCK ZVFS_O_NONBLOCK
++#endif
++
+ #include <zephyr/logging/log.h>
+ LOG_MODULE_REGISTER(net_sock, CONFIG_NET_SOCKETS_LOG_LEVEL);
+ 
+@@ -718,10 +719,30 @@ int z_impl_zsock_fcntl_impl(int sock, int cmd, int flags)
+ 	const struct socket_op_vtable *vtable;
+ 	struct k_mutex *lock;
+ 	void *obj;
++	int zvfs_cmd = cmd;
++	int zvfs_flags = flags;
+ 	int ret;
+ 
+ 	SYS_PORT_TRACING_OBJ_FUNC_ENTER(socket, fcntl, sock, cmd, flags);
+ 
++	if (cmd == F_GETFL) {
++#if F_GETFL != ZVFS_F_GETFL
++		LOG_WRN_ONCE("zsock_fcntl() called with F_GETFL; use ZVFS_F_GETFL instead");
++#endif
++		zvfs_cmd = ZVFS_F_GETFL;
++	} else if (cmd == F_SETFL) {
++#if F_SETFL != ZVFS_F_SETFL
++		LOG_WRN_ONCE("zsock_fcntl() called with F_SETFL; use ZVFS_F_SETFL instead");
++#endif
++		zvfs_cmd = ZVFS_F_SETFL;
++		if (flags & O_NONBLOCK) {
++#if O_NONBLOCK != ZVFS_O_NONBLOCK
++			LOG_WRN_ONCE("zsock_fcntl() called with O_NONBLOCK; use ZVFS_O_NONBLOCK instead");
++#endif
++			zvfs_flags |= ZVFS_O_NONBLOCK;
++		}
++	}
++
+ 	obj = get_sock_vtable(sock, &vtable, &lock);
+ 	if (obj == NULL) {
+ 		errno = EBADF;
+@@ -732,7 +753,7 @@ int z_impl_zsock_fcntl_impl(int sock, int cmd, int flags)
+ 	(void)k_mutex_lock(lock, K_FOREVER);
+ 
+ 	ret = zvfs_fdtable_call_ioctl((const struct fd_op_vtable *)vtable,
+-				   obj, cmd, flags);
++				   obj, zvfs_cmd, zvfs_flags);
+ 
+ 	k_mutex_unlock(lock);
+ 
+diff --git a/subsys/net/lib/sockets/sockets_tls.c b/subsys/net/lib/sockets/sockets_tls.c
+index 0691ea13f6a..db20d576073 100644
+--- a/subsys/net/lib/sockets/sockets_tls.c
++++ b/subsys/net/lib/sockets/sockets_tls.c
+@@ -7,16 +7,6 @@
+ 
+ #include <stdbool.h>
+ 
+-/*
+- * TODO: avoid using POSIX APIs within the networking subsystem implementation because it creates
+- * a dependency cycle. POSIX_NETWORKING depends on NET_SOCKETS, but NET_SOCKETS depends on
+- * POSIX_NETWORKING.
+- * - O_NONBLOCK
+- * - F_GETFL
+- * - F_SETFL
+- */
+-#include <fcntl.h>
+-
+ #include <zephyr/logging/log.h>
+ LOG_MODULE_REGISTER(net_sock_tls, CONFIG_NET_SOCKETS_LOG_LEVEL);
+ 
+@@ -805,13 +795,13 @@ static int wait_for_reason(int sock, int timeout, int reason)
+ 
+ static bool is_blocking(int sock, int flags)
+ {
+-	int sock_flags = zsock_fcntl(sock, F_GETFL, 0);
++	int sock_flags = zsock_fcntl(sock, ZVFS_F_GETFL, 0);
+ 
+ 	if (sock_flags == -1) {
+ 		return false;
+ 	}
+ 
+-	return !((flags & ZSOCK_MSG_DONTWAIT) || (sock_flags & O_NONBLOCK));
++	return !((flags & ZSOCK_MSG_DONTWAIT) || (sock_flags & ZVFS_O_NONBLOCK));
+ }
+ 
+ static int timeout_to_ms(k_timeout_t *timeout)
+@@ -2370,15 +2360,15 @@ int ztls_connect_ctx(struct tls_context *ctx, const struct sockaddr *addr,
+ 	int sock_flags;
+ 	bool is_non_block;
+ 
+-	sock_flags = zsock_fcntl(ctx->sock, F_GETFL, 0);
++	sock_flags = zsock_fcntl(ctx->sock, ZVFS_F_GETFL, 0);
+ 	if (sock_flags < 0) {
+ 		return -EIO;
+ 	}
+ 
+-	is_non_block = sock_flags & O_NONBLOCK;
++	is_non_block = sock_flags & ZVFS_O_NONBLOCK;
+ 	if (is_non_block) {
+-		(void)zsock_fcntl(ctx->sock, F_SETFL,
+-				  sock_flags & ~O_NONBLOCK);
++		(void)zsock_fcntl(ctx->sock, ZVFS_F_SETFL,
++				  sock_flags & ~ZVFS_O_NONBLOCK);
+ 	}
+ 
+ 	ret = zsock_connect(ctx->sock, addr, addrlen);
+@@ -2387,7 +2377,7 @@ int ztls_connect_ctx(struct tls_context *ctx, const struct sockaddr *addr,
+ 	}
+ 
+ 	if (is_non_block) {
+-		(void)zsock_fcntl(ctx->sock, F_SETFL, sock_flags);
++		(void)zsock_fcntl(ctx->sock, ZVFS_F_SETFL, sock_flags);
+ 	}
+ 
+ #if defined(CONFIG_NET_SOCKETS_ENABLE_DTLS)
+@@ -3927,8 +3917,8 @@ static int tls_sock_ioctl_vmeth(void *obj, unsigned int request, va_list args)
+ 
+ 	switch (request) {
+ 	/* fcntl() commands */
+-	case F_GETFL:
+-	case F_SETFL: {
++	case ZVFS_F_GETFL:
++	case ZVFS_F_SETFL: {
+ 		const struct fd_op_vtable *vtable;
+ 		struct k_mutex *lock;
+ 		void *fd_obj;
+diff --git a/tests/net/socket/socketpair/src/fcntl.c b/tests/net/socket/socketpair/src/fcntl.c
+index 55d36282700..5b35f4b49ff 100644
+--- a/tests/net/socket/socketpair/src/fcntl.c
++++ b/tests/net/socket/socketpair/src/fcntl.c
+@@ -11,19 +11,19 @@ ZTEST_USER_F(net_socketpair, test_fcntl)
+ 	int res;
+ 	int flags;
+ 
+-	res = zsock_fcntl(fixture->sv[0], F_GETFL, 0);
++	res = zsock_fcntl(fixture->sv[0], ZVFS_F_GETFL, 0);
+ 	zassert_not_equal(res, -1,
+-		"fcntl(fixture->sv[0], F_GETFL) failed. errno: %d", errno);
++		"fcntl(fixture->sv[0], ZVFS_F_GETFL) failed. errno: %d", errno);
+ 
+ 	flags = res;
+-	zassert_equal(res & O_NONBLOCK, 0,
++	zassert_equal(res & ZVFS_O_NONBLOCK, 0,
+ 		"socketpair should block by default");
+ 
+-	res = zsock_fcntl(fixture->sv[0], F_SETFL, flags | O_NONBLOCK);
++	res = zsock_fcntl(fixture->sv[0], ZVFS_F_SETFL, flags | ZVFS_O_NONBLOCK);
+ 	zassert_not_equal(res, -1,
+-		"fcntl(fixture->sv[0], F_SETFL, flags | O_NONBLOCK) failed. errno: %d",
++		"fcntl(fixture->sv[0], ZVFS_F_SETFL, flags | ZVFS_O_NONBLOCK) failed. errno: %d",
+ 		errno);
+ 
+-	res = zsock_fcntl(fixture->sv[0], F_GETFL, 0);
+-	zassert_equal(res ^ flags, O_NONBLOCK, "expected O_NONBLOCK set");
++	res = zsock_fcntl(fixture->sv[0], ZVFS_F_GETFL, 0);
++	zassert_equal(res ^ flags, ZVFS_O_NONBLOCK, "expected ZVFS_O_NONBLOCK set");
+ }
+diff --git a/tests/net/socket/tcp/src/main.c b/tests/net/socket/tcp/src/main.c
+index b0aa15cecdb..52f55d3c40d 100644
+--- a/tests/net/socket/tcp/src/main.c
++++ b/tests/net/socket/tcp/src/main.c
+@@ -4,6 +4,10 @@
+  * SPDX-License-Identifier: Apache-2.0
+  */
+ 
++#ifndef _POSIX_C_SOURCE
++#define _POSIX_C_SOURCE 200809L
++#endif
++
+ #include <zephyr/logging/log.h>
+ LOG_MODULE_REGISTER(net_test, CONFIG_NET_SOCKETS_LOG_LEVEL);
+ 
+diff --git a/tests/net/socket/tls/src/main.c b/tests/net/socket/tls/src/main.c
+index 6c7174e92cb..d6a65e229cd 100644
+--- a/tests/net/socket/tls/src/main.c
++++ b/tests/net/socket/tls/src/main.c
+@@ -4,6 +4,10 @@
+  * SPDX-License-Identifier: Apache-2.0
+  */
+ 
++#ifndef _POSIX_C_SOURCE
++#define _POSIX_C_SOURCE 200809L
++#endif
++
+ #include <zephyr/logging/log.h>
+ LOG_MODULE_REGISTER(net_test, CONFIG_NET_SOCKETS_LOG_LEVEL);
+ 
