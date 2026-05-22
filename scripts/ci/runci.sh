@@ -72,11 +72,7 @@ roots() {
 }
 
 usage() {
-  echo "Usage: $0 [options]"
-  echo "Options:"
-  echo "  -h, --help    Show this help message and exit"
-  echo "  -p, --platform <platform>  Specify a platform to test (can be used multiple times)"
-  echo "  -T, --test-root <root>     Specify a test root to include (can be used multiple times)"
+  "$ZEPHYR_BASE/scripts/twister" --help
 }
 
 while [ $# -gt 0 ]; do
