@@ -461,3 +461,21 @@ patches:
     upstreamable: true
     comments: |
       Provide a function to convert absolute timespec values to k_timepoint_t.
+  - path: zephyr/k-condvar-clockwait.patch
+    sha256sum: 85442786728aa4bfdd0a8950ff0d4beccc49fbd4ee31a60c3f3cdf4fcdc87ed7
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-05-22
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/k-mutex-nonrecursive.patch
+    comments: |
+      Rebased onto v4.5.0-rc1, which already re-acquires the mutex on a timed-out wait.
+      Support timespec-based absolute timeouts for condition variables. These functions are used
+      to support standard threading APIs such as C11, C++11, and POSIX. Moving the
+      absolute-to-relative conversion into the kernel ensures that there are fewer race conditions
+      and sources of error which are common when multiple timepoint conversion happens in several
+      places.
