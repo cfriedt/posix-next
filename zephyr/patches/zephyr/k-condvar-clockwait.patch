@@ -1,0 +1,299 @@
+diff --git a/include/zephyr/kernel.h b/include/zephyr/kernel.h
+index 070ddeae679..b9614f393b2 100644
+--- a/include/zephyr/kernel.h
++++ b/include/zephyr/kernel.h
+@@ -3525,13 +3525,24 @@ struct k_condvar {
+ #ifdef CONFIG_OBJ_CORE_CONDVAR
+ 	struct k_obj_core  obj_core;
+ #endif
++
++#ifdef CONFIG_CONDVAR_OPTIONS
++	uint32_t options;
++#endif
+ };
+ 
+-#define Z_CONDVAR_INITIALIZER(obj)                                             \
++/** @cond INTERNAL_HIDDEN */
++
++#define Z_CONDVAR_INITIALIZER_EXT(obj, opts)                                             \
+ 	{                                                                      \
+-		.wait_q = Z_WAIT_Q_INIT(&obj.wait_q),                          \
++		.wait_q = Z_WAIT_Q_INIT(&(obj).wait_q),                        \
++		COND_CODE_1(CONFIG_CONDVAR_OPTIONS, (.options = (opts),), ()) \
+ 	}
+ 
++#define Z_CONDVAR_INITIALIZER(obj) Z_CONDVAR_INITIALIZER_EXT((obj), SYS_CLOCK_REALTIME)
++
++/** INTERNAL_HIDDEN @endcond */
++
+ /**
+  * @defgroup condvar_apis Condition Variables APIs
+  * @ingroup kernel_apis
+@@ -3546,6 +3557,70 @@ struct k_condvar {
+  */
+ __syscall int k_condvar_init(struct k_condvar *condvar);
+ 
++#ifdef CONFIG_CONDVAR_OPTIONS
++/**
++ * @brief Initialize a condition variable with options.
++ *
++ * This routine initializes a condition variable object, prior to its first use.
++ *
++ * @param condvar Address of the condition variable.
++ * @param options Options for condition variable initialization.
++ *
++ * Currently, valid options include:
++ * - @ref SYS_CLOCK_REALTIME
++ * - @ref SYS_CLOCK_MONOTONIC
++ *
++ * @retval 0 Condition variable object created
++ * @retval -EINVAL Invalid options
++ */
++__syscall int k_condvar_init_ext(struct k_condvar *condvar, uint32_t options);
++
++/**
++ * @brief Waits on the condition variable releasing the mutex lock until an absolute time.
++ *
++ * Atomically releases the currently owned mutex, blocks the current thread
++ * waiting on the condition variable specified by @a condvar,
++ * and finally acquires the mutex again.
++ *
++ * The waiting thread unblocks only after another thread calls
++ * @ref k_condvar_signal, or @ref k_condvar_broadcast with the same condition variable.
++ *
++ * This call measures @a abstime against the clock specified via the `options` parameter in @ref k_condvar_init_ext.
++ *
++ * @param condvar pointer to a @ref k_condvar structure
++ * @param mutex Address of the mutex.
++ * @param abstime Absolute timepoint to wait until
++ *
++ * @retval 0 On success
++ * @retval -ETIMEDOUT The absolute timepoint has passed.
++ */
++ __syscall int k_condvar_timedwait(struct k_condvar *condvar, struct k_mutex *mutex,
++	const struct timespec *abstime);
++
++/**
++ * @brief Waits on the condition variable releasing the mutex lock until an absolute time.
++ *
++ * Atomically releases the currently owned mutex, blocks the current thread
++ * waiting on the condition variable specified by @a condvar,
++ * and finally acquires the mutex again.
++ *
++ * The waiting thread unblocks only after another thread calls
++ * @ref k_condvar_signal, or @ref k_condvar_broadcast with the same condition variable.
++ *
++ * This call measures @a abstime against the clock specified via the @a clock_id parameter.
++ *
++ * @param condvar pointer to a @ref k_condvar structure
++ * @param mutex Address of the mutex.
++ * @param clock_id Clock to wait on.
++ * @param abstime Absolute timepoint to wait until on the specified clock.
++ *
++ * @retval 0 On success
++ * @retval -ETIMEDOUT The absolute timepoint has passed.
++ */
++ __syscall int k_condvar_clockwait(struct k_condvar *condvar, struct k_mutex *mutex,
++	uint32_t clock_id, const struct timespec *abstime);
++#endif /* CONFIG_CONDVAR_OPTIONS */
++
+ /**
+  * @brief Signals one thread that is pending on the condition variable
+  *
+@@ -3596,6 +3671,23 @@ __syscall int k_condvar_wait(struct k_condvar *condvar, struct k_mutex *mutex,
+ #define K_CONDVAR_DEFINE(name)                                                 \
+ 	STRUCT_SECTION_ITERABLE(k_condvar, name) =                             \
+ 		Z_CONDVAR_INITIALIZER(name)
++
++#if defined(CONFIG_CONDVAR_OPTIONS) || defined(__DOXYGEN__)
++/**
++	* @brief Statically define and initialize a condition variable, with options.
++	*
++	* The condition variable can be accessed outside the module where it is defined using:
++	*
++	* @code extern struct k_condvar <name>; @endcode
++	*
++	* @param name Name of the mutex.
++	* @param opts Options for condition variable initialization.
++	*/
++#define K_CONDVAR_DEFINE_EXT(name, opts)                                                             \
++	STRUCT_SECTION_ITERABLE(k_condvar, name) = Z_CONDVAR_INITIALIZER_EXT(name, opts);              \
++	BUILD_ASSERT(((opts) == SYS_CLOCK_REALTIME) || ((opts) == SYS_CLOCK_MONOTONIC))
++#endif
++
+ /**
+  * @}
+  */
+diff --git a/include/zephyr/sys/clock.h b/include/zephyr/sys/clock.h
+index 34f490dc642..b46de7fe835 100644
+--- a/include/zephyr/sys/clock.h
++++ b/include/zephyr/sys/clock.h
+@@ -373,6 +373,13 @@ static inline bool sys_timepoint_expired(k_timepoint_t timepoint)
+  */
+ #define SYS_CLOCK_MONOTONIC 4
+ 
++/**
++ * @brief A mask useful for selecting a clock from the SYS_CLOCK_MASK family.
++ *
++ * This mask can be used to select a clock from the SYS_CLOCK_MASK family.
++ */
++ #define SYS_CLOCK_MASK BIT_MASK(3)
++
+ /**
+  * @brief The flag used for specifying absolute timeouts
+  *
+diff --git a/kernel/Kconfig b/kernel/Kconfig
+index 61225ca0bf4..7f89e4cb2e8 100644
+--- a/kernel/Kconfig
++++ b/kernel/Kconfig
+@@ -779,6 +779,12 @@ endmenu
+ 
+ menu "Other Kernel Object Options"
+ 
++config CONDVAR_OPTIONS
++	bool "Support optional condition variable features"
++	help
++	  Say 'Y' here to support condition variable options such as those required for clock-based
++	  waiting.
++
+ config MUTEX_OPTIONS
+ 	bool "Support optional mutex features"
+ 	help
+diff --git a/kernel/condvar.c b/kernel/condvar.c
+index 42590839c86..860f191f3a3 100644
+--- a/kernel/condvar.c
++++ b/kernel/condvar.c
+@@ -6,6 +6,8 @@
+ 
+ #include <zephyr/kernel.h>
+ #include <zephyr/kernel_structs.h>
++#include <zephyr/sys/clock.h>
++#include <zephyr/sys/timeutil.h>
+ #include <zephyr/toolchain.h>
+ #include <ksched.h>
+ #include <wait_q.h>
+@@ -21,6 +23,10 @@ static struct k_spinlock lock;
+ int z_impl_k_condvar_init(struct k_condvar *condvar)
+ {
+ 	z_waitq_init(&condvar->wait_q);
++#ifdef CONFIG_CONDVAR_OPTIONS
++	condvar->options = SYS_CLOCK_REALTIME;
++#endif
++
+ 	k_object_init(condvar);
+ 
+ #ifdef CONFIG_OBJ_CORE_CONDVAR
+@@ -161,3 +167,93 @@ static int init_condvar_obj_core_list(void)
+ SYS_INIT(init_condvar_obj_core_list, PRE_KERNEL_1,
+ 	 CONFIG_KERNEL_INIT_PRIORITY_OBJECTS);
+ #endif /* CONFIG_OBJ_CORE_CONDVAR */
++
++#ifdef CONFIG_CONDVAR_OPTIONS
++int z_impl_k_condvar_clockwait(struct k_condvar *condvar, struct k_mutex *mutex,
++	uint32_t clock_id, const struct timespec *abstime)
++{
++	int ret;
++	k_timeout_t timeout;
++	k_timepoint_t timepoint;
++
++	switch (clock_id) {
++	case SYS_CLOCK_REALTIME:
++	case SYS_CLOCK_MONOTONIC:
++		break;
++	default:
++		return -EINVAL;
++	}
++
++	if (!timespec_is_valid(abstime)) {
++		return EINVAL;
++	}
++
++	timepoint = timespec_abs_to_timepoint(clock_id, abstime);
++	if (sys_timepoint_expired(timepoint)) {
++		return -ETIMEDOUT;
++	}
++
++	timeout = sys_timepoint_timeout(timepoint);
++
++	ret = k_condvar_wait(condvar, mutex, timeout);
++	switch (ret) {
++	case -EAGAIN:
++		ret = -ETIMEDOUT;
++		__fallthrough;
++	default:
++		break;
++	}
++
++	return ret;
++}
++
++int z_impl_k_condvar_init_ext(struct k_condvar *condvar, uint32_t options)
++{
++	switch (SYS_CLOCK_MASK & options) {
++	case SYS_CLOCK_REALTIME:
++	case SYS_CLOCK_MONOTONIC:
++		break;
++	default:
++		return -EINVAL;
++	}
++
++	condvar->options = options;
++
++	return z_impl_k_condvar_init(condvar);
++}
++
++int z_impl_k_condvar_timedwait(struct k_condvar *condvar, struct k_mutex *mutex,
++	const struct timespec *abstime)
++{
++	return z_impl_k_condvar_clockwait(condvar, mutex, (SYS_CLOCK_MASK & condvar->options), abstime);
++}
++
++#ifdef CONFIG_USERSPACE
++int z_vrfy_k_condvar_clockwait(struct k_condvar *condvar, struct k_mutex *mutex,
++	uint32_t clock_id, const struct timespec *abstime)
++{
++	K_OOPS(K_SYSCALL_OBJ(condvar, K_OBJ_CONDVAR));
++	K_OOPS(K_SYSCALL_OBJ(mutex, K_OBJ_MUTEX));
++	K_OOPS(K_SYSCALL_MEMORY_READ(abstime, sizeof(*abstime)));
++	return z_impl_k_condvar_clockwait(condvar, mutex, clock_id, abstime);
++}
++#include <zephyr/syscalls/k_condvar_clockwait_mrsh.c>
++
++int z_vrfy_k_condvar_init_ext(struct k_condvar *condvar, uint32_t options)
++{
++	K_OOPS(K_SYSCALL_OBJ_INIT(condvar, K_OBJ_CONDVAR));
++	return z_impl_k_condvar_init_ext(condvar, options);
++}
++#include <zephyr/syscalls/k_condvar_init_ext_mrsh.c>
++
++int z_vrfy_k_condvar_timedwait(struct k_condvar *condvar, struct k_mutex *mutex,
++	const struct timespec *abstime)
++{
++	K_OOPS(K_SYSCALL_OBJ(condvar, K_OBJ_CONDVAR));
++	K_OOPS(K_SYSCALL_OBJ(mutex, K_OBJ_MUTEX));
++	K_OOPS(K_SYSCALL_MEMORY_READ(abstime, sizeof(*abstime)));
++	return z_impl_k_condvar_timedwait(condvar, mutex, abstime);
++}
++#include <zephyr/syscalls/k_condvar_timedwait_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++#endif /* CONFIG_CONDVAR_OPTIONS */
+diff --git a/lib/os/fdtable.c b/lib/os/fdtable.c
+index 26667e33d78..d1ce548e0c9 100644
+--- a/lib/os/fdtable.c
++++ b/lib/os/fdtable.c
+@@ -167,9 +167,14 @@ bool fdtable_fd_is_initialized(int fd)
+ #endif
+ 
+ 	ref_cond = (struct k_condvar)Z_CONDVAR_INITIALIZER(fdtable[fd].cond);
+-	if (memcmp(&ref_cond, &fdtable[fd].cond, sizeof(ref_cond)) != 0) {
++	if (memcmp(&ref_cond.wait_q, &fdtable[fd].cond.wait_q, sizeof(ref_cond.wait_q)) != 0) {
+ 		return false;
+ 	}
++#ifdef CONFIG_CONDVAR_OPTIONS
++	if (ref_cond.options != fdtable[fd].cond.options) {
++		return false;
++	}
++#endif
+ 
+ 	return true;
+ }
