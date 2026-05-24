@@ -1,0 +1,43 @@
+diff --git a/boards/qemu/x86/qemu_x86_tiny.ld b/boards/qemu/x86/qemu_x86_tiny.ld
+--- a/boards/qemu/x86/qemu_x86_tiny.ld
++++ b/boards/qemu/x86/qemu_x86_tiny.ld
+@@ -382,8 +382,6 @@ SECTIONS
+ 
+ 	_image_ram_all = (KERNEL_BASE_ADDR + KERNEL_RAM_SIZE) - _image_ram_start;
+ 
+-	z_mapped_size = z_mapped_end - z_mapped_start;
+-
+ #ifndef LINKER_ZEPHYR_FINAL
+ 	/* static interrupts */
+ 	SECTION_PROLOGUE(intList,,)
+@@ -414,6 +412,9 @@ SECTIONS
+ 
+ #include <zephyr/linker/ram-end.ld>
+ 
++	. = ALIGN(CONFIG_MMU_PAGE_SIZE);
++	z_mapped_size = . - z_mapped_start;
++
+     GROUP_END(RAMABLE_REGION)
+ 
+ #include <zephyr/linker/debug-sections.ld>
+diff --git a/include/zephyr/arch/x86/ia32/linker.ld b/include/zephyr/arch/x86/ia32/linker.ld
+--- a/include/zephyr/arch/x86/ia32/linker.ld
++++ b/include/zephyr/arch/x86/ia32/linker.ld
+@@ -417,7 +417,6 @@ SECTION_PROLOGUE(.x86shadowstack.arr,,)
+ 	_image_ram_all = (KERNEL_BASE_ADDR + KERNEL_RAM_SIZE) - _image_ram_start;
+ 
+ 	z_mapped_end = .;
+-	z_mapped_size = z_mapped_end - z_mapped_start;
+ 
+ #ifndef LINKER_ZEPHYR_FINAL
+ 	/* static interrupts */
+@@ -447,6 +446,9 @@ SECTION_PROLOGUE(.x86shadowstack.arr,,)
+ 
+ #include <zephyr/linker/ram-end.ld>
+ 
++	. = ALIGN(CONFIG_MMU_PAGE_SIZE);
++	z_mapped_size = . - z_mapped_start;
++
+     GROUP_END(RAMABLE_REGION)
+ 
+ #include <zephyr/linker/debug-sections.ld>
