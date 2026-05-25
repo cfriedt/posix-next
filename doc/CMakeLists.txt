@@ -42,6 +42,11 @@ if(NOT SPHINXBUILD)
   message(FATAL_ERROR "'sphinx-build' not found. Install it with: pip install -r ${ZEPHYR_BASE}/doc/requirements.txt")
 endif()
 
+find_program(DOXYGEN_EXECUTABLE doxygen)
+if(NOT DOXYGEN_EXECUTABLE)
+  message(WARNING "'doxygen' not found — API documentation will not be built")
+endif()
+
 find_program(SPHINXAUTOBUILD sphinx-autobuild)
 
 # ---------------------------------------------------------------------------
@@ -62,6 +67,7 @@ set(SPHINX_ENV
   DOCS_HTML_DIR=${DOCS_HTML_DIR}
   OUTPUT_DIR=${DOCS_HTML_DIR}
   DOCS_HTML_BASEURL=https://cfriedt.github.io/posix-next/
+  $<$<BOOL:${DOXYGEN_EXECUTABLE}>:DOXYGEN_EXECUTABLE=${DOXYGEN_EXECUTABLE}>
 )
 
 set(SPHINX_TAGS_ARGS "-t" "${DOC_TAG}")
