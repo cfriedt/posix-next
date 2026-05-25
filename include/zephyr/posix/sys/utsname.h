@@ -44,6 +44,7 @@ struct utsname {
  * @ingroup posix_option_group_single_process
  * @param name Output: system identification structure to fill in.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/uname.html
  */
 int uname(struct utsname *name);
 
