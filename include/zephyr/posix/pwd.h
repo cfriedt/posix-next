@@ -12,7 +12,7 @@
  *      POSIX.1-2017 &lt;pwd.h&gt;</a>
  *
  * @defgroup posix_pwd POSIX Password Database
- * @ingroup posix_option_group_threads_base
+ * @ingroup posix_option_thread_safe_functions
  * @{
  */
 
