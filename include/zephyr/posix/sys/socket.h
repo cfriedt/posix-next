@@ -63,6 +63,7 @@ struct linger {
  * @param addr    Output: address of the connecting peer, or NULL.
  * @param addrlen Input: size of @p addr; output: actual address size.
  * @return New socket file descriptor on success, or -1 on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/accept.html
  */
 int accept(int sock, struct sockaddr *addr, socklen_t *addrlen);
 
@@ -73,6 +74,7 @@ int accept(int sock, struct sockaddr *addr, socklen_t *addrlen);
  * @param addr    Local address to bind.
  * @param addrlen Size of @p addr in bytes.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/bind.html
  */
 int bind(int sock, const struct sockaddr *addr, socklen_t addrlen);
 
@@ -83,6 +85,7 @@ int bind(int sock, const struct sockaddr *addr, socklen_t addrlen);
  * @param addr    Remote address to connect to.
  * @param addrlen Size of @p addr in bytes.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/connect.html
  */
 int connect(int sock, const struct sockaddr *addr, socklen_t addrlen);
 
@@ -93,6 +96,7 @@ int connect(int sock, const struct sockaddr *addr, socklen_t addrlen);
  * @param addr    Output: peer address.
  * @param addrlen Input: size of @p addr; output: actual size.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/getpeername.html
  */
 int getpeername(int sock, struct sockaddr *addr, socklen_t *addrlen);
 
@@ -103,6 +107,7 @@ int getpeername(int sock, struct sockaddr *addr, socklen_t *addrlen);
  * @param addr    Output: local address.
  * @param addrlen Input: size of @p addr; output: actual size.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/getsockname.html
  */
 int getsockname(int sock, struct sockaddr *addr, socklen_t *addrlen);
 
@@ -115,6 +120,7 @@ int getsockname(int sock, struct sockaddr *addr, socklen_t *addrlen);
  * @param optval  Output: option value.
  * @param optlen  Input: size of @p optval; output: actual size.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/getsockopt.html
  */
 int getsockopt(int sock, int level, int optname, void *optval, socklen_t *optlen);
 
@@ -124,6 +130,7 @@ int getsockopt(int sock, int level, int optname, void *optval, socklen_t *optlen
  * @param sock    Socket file descriptor.
  * @param backlog Maximum number of pending connections to queue.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/listen.html
  */
 int listen(int sock, int backlog);
 
@@ -135,6 +142,7 @@ int listen(int sock, int backlog);
  * @param max_len Maximum number of bytes to receive.
  * @param flags   MSG_* flags (MSG_PEEK, MSG_DONTWAIT, etc.).
  * @return Number of bytes received, 0 on connection closed, or -1 on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/recv.html
  */
 ssize_t recv(int sock, void *buf, size_t max_len, int flags);
 
@@ -148,6 +156,7 @@ ssize_t recv(int sock, void *buf, size_t max_len, int flags);
  * @param src_addr Output: sender's address, or NULL.
  * @param addrlen  Input: size of @p src_addr; output: actual size.
  * @return Number of bytes received on success, or -1 on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/recvfrom.html
  */
 ssize_t recvfrom(int sock, void *buf, size_t max_len, int flags, struct sockaddr *src_addr,
 		 socklen_t *addrlen);
@@ -159,6 +168,7 @@ ssize_t recvfrom(int sock, void *buf, size_t max_len, int flags, struct sockaddr
  * @param msg  Message header specifying I/O vectors and address buffer.
  * @param flags MSG_* flags.
  * @return Number of bytes received on success, or -1 on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/recvmsg.html
  */
 ssize_t recvmsg(int sock, struct msghdr *msg, int flags);
 
@@ -170,6 +180,7 @@ ssize_t recvmsg(int sock, struct msghdr *msg, int flags);
  * @param len  Number of bytes to send.
  * @param flags MSG_* flags (MSG_DONTWAIT, MSG_NOSIGNAL, etc.).
  * @return Number of bytes sent on success, or -1 on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/send.html
  */
 ssize_t send(int sock, const void *buf, size_t len, int flags);
 
@@ -180,6 +191,7 @@ ssize_t send(int sock, const void *buf, size_t len, int flags);
  * @param message Message header specifying I/O vectors and destination.
  * @param flags   MSG_* flags.
  * @return Number of bytes sent on success, or -1 on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/sendmsg.html
  */
 ssize_t sendmsg(int sock, const struct msghdr *message, int flags);
 
@@ -193,6 +205,7 @@ ssize_t sendmsg(int sock, const struct msghdr *message, int flags);
  * @param dest_addr Destination address.
  * @param addrlen   Size of @p dest_addr in bytes.
  * @return Number of bytes sent on success, or -1 on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/sendto.html
  */
 ssize_t sendto(int sock, const void *buf, size_t len, int flags, const struct sockaddr *dest_addr,
 	       socklen_t addrlen);
@@ -206,6 +219,7 @@ ssize_t sendto(int sock, const void *buf, size_t len, int flags, const struct so
  * @param optval  Pointer to the new option value.
  * @param optlen  Size of @p optval in bytes.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/setsockopt.html
  */
 int setsockopt(int sock, int level, int optname, const void *optval, socklen_t optlen);
 
@@ -215,6 +229,7 @@ int setsockopt(int sock, int level, int optname, const void *optval, socklen_t o
  * @param sock Socket file descriptor.
  * @param how  SHUT_RD, SHUT_WR, or SHUT_RDWR.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/shutdown.html
  */
 int shutdown(int sock, int how);
 
@@ -223,6 +238,7 @@ int shutdown(int sock, int how);
  * @ingroup posix_option_group_networking
  * @param s Socket file descriptor.
  * @return 1 if at the mark, 0 if not, or -1 on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/sockatmark.html
  */
 int sockatmark(int s);
 
@@ -233,6 +249,7 @@ int sockatmark(int s);
  * @param type   Socket type (SOCK_STREAM, SOCK_DGRAM, SOCK_RAW, etc.).
  * @param proto  Protocol number (IPPROTO_TCP, IPPROTO_UDP, 0 for default).
  * @return New socket file descriptor on success, or -1 on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/socket.html
  */
 int socket(int family, int type, int proto);
 
@@ -244,6 +261,7 @@ int socket(int family, int type, int proto);
  * @param proto  Protocol.
  * @param sv     Output: two-element array receiving the socket descriptors.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/socketpair.html
  */
 int socketpair(int family, int type, int proto, int sv[2]);
 
