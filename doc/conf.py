@@ -9,12 +9,8 @@ import sys
 from pathlib import Path
 
 POSIX_NEXT_BASE = Path(__file__).resolve().parent.parent
-ZEPHYR_BASE = Path(
-    os.environ.get("ZEPHYR_BASE", str(POSIX_NEXT_BASE.parent / "zephyr"))
-).resolve()
-POSIX_NEXT_BUILD = Path(
-    os.environ.get("OUTPUT_DIR", str(Path(__file__).parent / "_build" / "html"))
-).resolve()
+ZEPHYR_BASE = Path(os.environ.get("ZEPHYR_BASE", str(POSIX_NEXT_BASE.parent / "zephyr"))).resolve()
+POSIX_NEXT_BUILD = Path(os.environ.get("OUTPUT_DIR", str(Path(__file__).parent / "_build" / "html"))).resolve()
 
 # Zephyr extension + script paths
 sys.path.insert(0, str(ZEPHYR_BASE / "doc" / "_extensions"))
@@ -22,9 +18,6 @@ sys.path.insert(0, str(ZEPHYR_BASE / "doc" / "_scripts"))
 sys.path.insert(0, str(ZEPHYR_BASE / "scripts"))
 sys.path.insert(0, str(ZEPHYR_BASE / "scripts" / "kconfig"))
 sys.path.insert(0, str(ZEPHYR_BASE / "scripts" / "west_commands"))
-
-# posix_symbols extension (local)
-sys.path.insert(0, str(Path(__file__).parent / "extensions"))
 
 # -- Project -------------------------------------------------------------------
 
@@ -44,15 +37,12 @@ extensions = [
     "sphinx.ext.graphviz",
     "sphinx.ext.todo",
     # Zephyr extensions needed by the POSIX RST content
-    "zephyr.kconfig",  # :kconfig:option: role
-    "zephyr.link-roles",  # :zephyr:file:, etc.
-    # Doxygen integration — doxyrunner MUST come before posix_symbols so that
-    # Doxygen XML exists when posix_symbols parses it (env-before-read-docs).
-    "zephyr.doxyrunner",  # runs Doxygen before Sphinx
-    "zephyr.doxybridge",  # .. doxygengroup:: etc. directives
-    "zephyr.doxytooltip",  # hover tooltips on Doxygen symbols
-    # POSIX symbol search page (local extension)
-    "posix_symbols",
+    "zephyr.kconfig",       # :kconfig:option: role
+    "zephyr.link-roles",    # :zephyr:file:, etc.
+    # Doxygen integration
+    "zephyr.doxyrunner",    # runs Doxygen before Sphinx
+    "zephyr.doxybridge",    # .. doxygengroup:: etc. directives
+    "zephyr.doxytooltip",   # hover tooltips on Doxygen symbols
     # Quality-of-life
     "sphinx_copybutton",
     "sphinx_tabs.tabs",
@@ -90,18 +80,14 @@ html_theme_options = {
 html_title = "posix-next"
 html_short_title = "posix-next"
 
-# Reuse Zephyr static assets (logo, favicon, CSS overrides) plus our own
+# Reuse Zephyr static assets (logo, favicon, CSS overrides)
 html_static_path = [
     str(ZEPHYR_BASE / "doc" / "_static"),
-    str(Path(__file__).parent / "_static"),
 ]
-html_css_files = ["posix-next.css"]
-html_logo = str(Path(__file__).parent / "_static" / "posix-next-logo.png")
+html_logo = str(ZEPHYR_BASE / "doc" / "_static" / "images" / "kite.png")
 html_favicon = str(ZEPHYR_BASE / "doc" / "_static" / "images" / "favicon.png")
 
-html_baseurl = os.environ.get(
-    "DOCS_HTML_BASEURL", "https://cfriedt.github.io/posix-next/"
-)
+html_baseurl = os.environ.get("DOCS_HTML_BASEURL", "https://cfriedt.github.io/posix-next/")
 
 html_context = {
     "show_license": True,
@@ -136,13 +122,9 @@ doxyrunner_projects = {
 }
 doxybridge_projects = {"posix": doxyrunner_projects["posix"]["outdir"]}
 
-# posix_symbols: point to the Doxygen XML directory and the deployed HTML path
-posix_symbols_doxy_xml_dir = str(doxyrunner_projects["posix"]["outdir"] / "xml")
-posix_symbols_doxy_html_url = "../doxygen/html"
-
 # -- Suppress known warnings from stripped-down build -------------------------
 # :zephyr:code-sample-category: is provided by zephyr.domain which we don't
 # load (it crashes without the full west workspace). Suppress the warning.
 suppress_warnings = [
-    "ref.ref",  # unresolved :ref: that Intersphinx also can't find
+    "ref.ref",        # unresolved :ref: that Intersphinx also can't find
 ]
