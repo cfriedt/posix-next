@@ -6,7 +6,7 @@
 
 /**
  * @file
- * @brief POSIX symbolic constants for limits (<limits.h> supplement)
+ * @brief \<limits.h\>: POSIX symbolic constants for limits
  *
  * Defines minimum, maximum, and runtime-invariant POSIX limits as required
  * by POSIX.1-2017.  These constants complement the C standard @c <limits.h>
