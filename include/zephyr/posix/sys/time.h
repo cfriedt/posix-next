@@ -12,7 +12,7 @@
  *      POSIX.1-2017 &lt;sys/time.h&gt;</a>
  *
  * @defgroup posix_sys_time POSIX Time of Day
- * @ingroup posix_option_group_timers
+ * @ingroup posix_option_group_xsi_single_process
  * @{
  */
 
