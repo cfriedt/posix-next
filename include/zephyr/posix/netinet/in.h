@@ -14,9 +14,7 @@
  * @see <a href="https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/netinet_in.h.html">
  *      POSIX.1-2017 &lt;netinet/in.h&gt;</a>
  *
- * @defgroup posix_netinet_in Internet Address Types
  * @ingroup posix_option_group_networking
- * @{
  */
 
 #ifndef ZEPHYR_INCLUDE_POSIX_NETINET_IN_H_
@@ -30,13 +28,12 @@
 extern "C" {
 #endif
 
-/** @brief Unsigned 16-bit Internet port number. */
+/** @brief Unsigned 16-bit Internet port number.  @ingroup posix_option_group_networking*/
 typedef uint16_t in_port_t;
 
-/** @brief Unsigned 32-bit IPv4 address. */
+/** @brief Unsigned 32-bit IPv4 address.  @ingroup posix_option_group_networking*/
 typedef uint32_t in_addr_t;
 
-/** @} */
 
 #ifdef __cplusplus
 }
