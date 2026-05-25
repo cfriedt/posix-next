@@ -15,7 +15,7 @@
  *      POSIX.1-2017 &lt;mqueue.h&gt;</a>
  *
  * @defgroup posix_mqueue POSIX Message Queues
- * @ingroup posix_option_group_message_passing
+ * @ingroup posix_option_message_passing
  * @{
  */
 
