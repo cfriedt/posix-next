@@ -291,6 +291,7 @@ typedef void (*sighandler_t)(int sig);
  * @param pid  Target process ID (positive), process group (negative), or 0.
  * @param sig  Signal number, or 0 to check process existence.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/kill.html
  */
 int kill(pid_t pid, int sig);
 
@@ -301,6 +302,7 @@ int kill(pid_t pid, int sig);
  * @param pgrp Process group ID (0 = calling process's group).
  * @param sig  Signal number.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/killpg.html
  */
 int killpg(pid_t pgrp, int sig);
 #endif
@@ -310,6 +312,7 @@ int killpg(pid_t pgrp, int sig);
  * @ingroup posix_option_group_signals
  * @param info    Signal information.
  * @param message Prefix string.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/psiginfo.html
  */
 void psiginfo(const siginfo_t *info, const char *message);
 
@@ -318,6 +321,7 @@ void psiginfo(const siginfo_t *info, const char *message);
  * @ingroup posix_option_group_signals
  * @param sig     Signal number.
  * @param message Prefix string.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/psignal.html
  */
 void psignal(int sig, const char *message);
 
@@ -328,6 +332,7 @@ void psignal(int sig, const char *message);
  * @param thread Target thread.
  * @param sig    Signal number, or 0 to check thread existence.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_kill.html
  */
 int pthread_kill(pthread_t thread, int sig);
 
@@ -338,6 +343,7 @@ int pthread_kill(pthread_t thread, int sig);
  * @param set  Signal set to apply, or NULL.
  * @param oset Output: previous signal mask, or NULL.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_sigmask.html
  */
 int pthread_sigmask(int how, const sigset_t *ZRESTRICT set, sigset_t *ZRESTRICT oset);
 #endif
@@ -351,6 +357,7 @@ TOOLCHAIN_DISABLE_WARNING(TOOLCHAIN_WARNING_SHADOW);
  * @param act  New action, or NULL to query.
  * @param oact Output: previous action, or NULL.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/sigaction.html
  */
 int sigaction(int sig, const struct sigaction *ZRESTRICT act, struct sigaction *ZRESTRICT oact);
 TOOLCHAIN_ENABLE_WARNING(TOOLCHAIN_WARNING_SHADOW);
@@ -362,6 +369,7 @@ TOOLCHAIN_ENABLE_WARNING(TOOLCHAIN_WARNING_SHADOW);
  * @param set Signal set.
  * @param sig Signal number to add.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/sigaddset.html
  */
 int sigaddset(sigset_t *set, int sig);
 
@@ -372,6 +380,7 @@ int sigaddset(sigset_t *set, int sig);
  * @param ss  New alternate stack descriptor, or NULL.
  * @param oss Output: previous descriptor, or NULL.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/sigaltstack.html
  */
 int sigaltstack(const stack_t *ZRESTRICT ss, stack_t *ZRESTRICT oss);
 #endif
@@ -382,6 +391,7 @@ int sigaltstack(const stack_t *ZRESTRICT ss, stack_t *ZRESTRICT oss);
  * @param set Signal set.
  * @param sig Signal number to remove.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/sigdelset.html
  */
 int sigdelset(sigset_t *set, int sig);
 
@@ -390,6 +400,7 @@ int sigdelset(sigset_t *set, int sig);
  * @ingroup posix_option_group_signals
  * @param set Signal set to clear.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/sigemptyset.html
  */
 int sigemptyset(sigset_t *set);
 
@@ -398,6 +409,7 @@ int sigemptyset(sigset_t *set);
  * @ingroup posix_option_group_signals
  * @param set Signal set to fill.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/sigfillset.html
  */
 int sigfillset(sigset_t *set);
 
@@ -407,6 +419,7 @@ int sigfillset(sigset_t *set);
  * @ingroup posix_option_group_signals
  * @param sig Signal to block.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/sighold.html
  */
 int sighold(int sig);
 
@@ -415,6 +428,7 @@ int sighold(int sig);
  * @ingroup posix_option_group_signals
  * @param sig Signal to ignore.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/sigignore.html
  */
 int sigignore(int sig);
 
@@ -424,6 +438,7 @@ int sigignore(int sig);
  * @param sig  Signal number.
  * @param flag Non-zero to interrupt; 0 to restart.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/siginterrupt.html
  */
 int siginterrupt(int sig, int flag);
 #endif
@@ -434,6 +449,7 @@ int siginterrupt(int sig, int flag);
  * @param set Signal set to query.
  * @param sig Signal number to test.
  * @return 1 if the signal is a member, 0 if not, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/sigismember.html
  */
 int sigismember(const sigset_t *set, int sig);
 
@@ -443,6 +459,7 @@ int sigismember(const sigset_t *set, int sig);
  * @ingroup posix_option_group_signals
  * @param sig Signal whose blocking is temporarily removed.
  * @return Always returns -1 with @c errno set to @c EINTR.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/sigpause.html
  */
 int sigpause(int sig);
 #endif
@@ -452,6 +469,7 @@ int sigpause(int sig);
  * @ingroup posix_option_group_signals
  * @param set Output: set of signals pending delivery to the calling process.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/sigpending.html
  */
 int sigpending(sigset_t *set);
 
@@ -462,6 +480,7 @@ int sigpending(sigset_t *set);
  * @param set  Signal set to apply, or NULL.
  * @param oset Output: previous mask, or NULL.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/sigprocmask.html
  */
 int sigprocmask(int how, const sigset_t *ZRESTRICT set, sigset_t *ZRESTRICT oset);
 
@@ -473,6 +492,7 @@ int sigprocmask(int how, const sigset_t *ZRESTRICT set, sigset_t *ZRESTRICT oset
  * @param sig   Signal number.
  * @param value Value to deliver along with the signal.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/sigqueue.html
  */
 int sigqueue(pid_t pid, int sig, union sigval value);
 #endif
@@ -483,6 +503,7 @@ int sigqueue(pid_t pid, int sig, union sigval value);
  * @ingroup posix_option_group_signals
  * @param sig Signal to unblock.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/sigrelse.html
  */
 int sigrelse(int sig);
 
@@ -492,6 +513,7 @@ int sigrelse(int sig);
  * @param sig  Signal number.
  * @param disp New disposition (SIG_DFL, SIG_IGN, SIG_HOLD, or a handler).
  * @return Previous disposition on success, or SIG_ERR on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/sigset.html
  */
 sighandler_t sigset(int sig, sighandler_t disp);
 #endif
@@ -501,6 +523,7 @@ sighandler_t sigset(int sig, sighandler_t disp);
  * @ingroup posix_option_group_signals
  * @param set New signal mask to apply while waiting.
  * @return Always returns -1 with @c errno set to @c EINTR.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/sigsuspend.html
  */
 int sigsuspend(const sigset_t *set);
 
@@ -512,6 +535,7 @@ int sigsuspend(const sigset_t *set);
  * @param info    Output: information about the accepted signal, or NULL.
  * @param timeout Maximum time to wait.
  * @return Signal number on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/sigtimedwait.html
  */
 int sigtimedwait(const sigset_t *ZRESTRICT set, siginfo_t *ZRESTRICT info,
 		 const struct timespec *ZRESTRICT timeout);
@@ -523,6 +547,7 @@ int sigtimedwait(const sigset_t *ZRESTRICT set, siginfo_t *ZRESTRICT info,
  * @param set Output signal set to wait on.
  * @param sig Output: number of the accepted signal.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/sigwait.html
  */
 int sigwait(const sigset_t *ZRESTRICT set, int *ZRESTRICT sig);
 
@@ -533,6 +558,7 @@ int sigwait(const sigset_t *ZRESTRICT set, int *ZRESTRICT sig);
  * @param set  Set of signals to wait for.
  * @param info Output: information about the accepted signal, or NULL.
  * @return Signal number on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/sigwaitinfo.html
  */
 int sigwaitinfo(const sigset_t *ZRESTRICT set, siginfo_t *ZRESTRICT info);
 #endif

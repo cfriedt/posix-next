@@ -41,6 +41,7 @@ struct passwd {
  * @param bufsize Size of @p buffer.
  * @param result  Output: pointer to @p pwd on success, or NULL if not found.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/getpwnam_r.html
  */
 int getpwnam_r(const char *nam, struct passwd *pwd, char *buffer, size_t bufsize,
 	       struct passwd **result);
@@ -54,6 +55,7 @@ int getpwnam_r(const char *nam, struct passwd *pwd, char *buffer, size_t bufsize
  * @param bufsize Size of @p buffer.
  * @param result  Output: pointer to @p pwd on success, or NULL if not found.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/getpwuid_r.html
  */
 int getpwuid_r(uid_t uid, struct passwd *pwd, char *buffer, size_t bufsize, struct passwd **result);
 
