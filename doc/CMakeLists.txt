@@ -111,6 +111,16 @@ foreach(svg ${INTERACTIVE_SVGS})
   )
 endforeach()
 
+# Rename posix_<name>.h → <name>.h in Doxygen HTML display text so users
+# see standard header names instead of the collision-avoidance prefixes.
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+add_custom_command(TARGET html POST_BUILD
+  COMMAND ${Python3_EXECUTABLE}
+    ${DOCS_SRC_DIR}/scripts/rename_posix_headers.py
+    ${DOCS_HTML_DIR}/doxygen/html
+  COMMENT "Renaming posix_ header display names in Doxygen output"
+)
+
 # ---------------------------------------------------------------------------
 # html-live target (auto-rebuild on change)
 # ---------------------------------------------------------------------------
