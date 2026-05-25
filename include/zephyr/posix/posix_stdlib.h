@@ -39,6 +39,7 @@ extern "C" {
  * @param len  Size of @p buf.
  * @return 0 on success, or a positive error number on failure (ENOENT if not set,
  *         ERANGE if @p buf is too small).
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/getenv_r.html
  */
 int getenv_r(const char *name, char *buf, size_t len);
 #endif
@@ -54,6 +55,7 @@ int getenv_r(const char *name, char *buf, size_t len);
  * @param keylistp NULL-terminated array of recognised keyword strings.
  * @param valuep   Output: pointer to the value part after '=', or NULL.
  * @return Index into @p keylistp of the matched keyword, or -1 if not found.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/getsubopt.html
  */
 int getsubopt(char **optionp, char *const *keylistp, char **valuep);
 #endif
@@ -69,6 +71,7 @@ int getsubopt(char **optionp, char *const *keylistp, char **valuep);
  *
  * @param string Environment entry of the form "NAME=value".
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/putenv.html
  */
 int putenv(char *string);
 #endif
@@ -81,6 +84,7 @@ int putenv(char *string);
  * @param envval    New value string.
  * @param overwrite Non-zero to overwrite an existing value; 0 to preserve it.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/setenv.html
  */
 int setenv(const char *envname, const char *envval, int overwrite);
 
@@ -89,6 +93,7 @@ int setenv(const char *envname, const char *envval, int overwrite);
  * @ingroup posix_option_group_single_process
  * @param name Name of the variable to remove.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/unsetenv.html
  */
 int unsetenv(const char *name);
 #endif /* defined(_POSIX_C_SOURCE) || defined(__DOXYGEN__) */

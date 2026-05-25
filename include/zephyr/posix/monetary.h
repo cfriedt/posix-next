@@ -40,6 +40,7 @@ extern "C" {
  * @param format  Conversion format string (%-based, similar to printf).
  * @param ...     Monetary values to format (type double).
  * @return Number of bytes written (excluding NUL) on success, or -1 on error.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/strfmon.html
  */
 ssize_t strfmon(char *ZRESTRICT s, size_t maxsize, const char *ZRESTRICT format, ...);
 
@@ -52,6 +53,7 @@ ssize_t strfmon(char *ZRESTRICT s, size_t maxsize, const char *ZRESTRICT format,
  * @param format  Conversion format string.
  * @param ...     Monetary values to format (type double).
  * @return Number of bytes written (excluding NUL) on success, or -1 on error.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/strfmon_l.html
  */
 ssize_t strfmon_l(char *ZRESTRICT s, size_t maxsize, locale_t locale,
 		  const char *ZRESTRICT format, ...);

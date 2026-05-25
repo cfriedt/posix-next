@@ -100,6 +100,7 @@ struct timeval;
  * @param sigmask   Signal mask to apply during the wait, or NULL.
  * @return Number of ready file descriptors on success, 0 on timeout,
  *         or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pselect.html
  */
 int pselect(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
 	    const struct timespec *timeout, const sigset_t *sigmask);
@@ -114,6 +115,7 @@ int pselect(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
  * @param timeout   Maximum wait time, or NULL to block indefinitely.
  * @return Number of ready file descriptors on success, 0 on timeout,
  *         or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/select.html
  */
 int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *errorfds, struct timeval *timeout);
 
@@ -122,6 +124,7 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *errorfds, struct
  * @ingroup posix_option_group_device_io
  * @param fd    File descriptor to clear.
  * @param fdset File descriptor set to modify.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/FD_CLR.html
  */
 void FD_CLR(int fd, fd_set *fdset);
 
@@ -131,6 +134,7 @@ void FD_CLR(int fd, fd_set *fdset);
  * @param fd    File descriptor to test.
  * @param fdset File descriptor set.
  * @return Non-zero if @p fd is set, 0 otherwise.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/FD_ISSET.html
  */
 int FD_ISSET(int fd, fd_set *fdset);
 
@@ -139,6 +143,7 @@ int FD_ISSET(int fd, fd_set *fdset);
  * @ingroup posix_option_group_device_io
  * @param fd    File descriptor to add.
  * @param fdset File descriptor set to modify.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/FD_SET.html
  */
 void FD_SET(int fd, fd_set *fdset);
 
@@ -146,6 +151,7 @@ void FD_SET(int fd, fd_set *fdset);
  * @brief Clear all file descriptors from an fd_set.
  * @ingroup posix_option_group_device_io
  * @param fdset File descriptor set to clear.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/FD_ZERO.html
  */
 void FD_ZERO(fd_set *fdset);
 
