@@ -11,9 +11,7 @@
  * @see <a href="https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/arpa_inet.h.html">
  *      POSIX.1-2017 &lt;arpa/inet.h&gt;</a>
  *
- * @defgroup posix_arpa_inet Internet Address Conversions
  * @ingroup posix_option_group_networking
- * @{
  */
 
 #ifndef ZEPHYR_INCLUDE_POSIX_ARPA_INET_H_
@@ -30,11 +28,12 @@
 extern "C" {
 #endif
 
-/** @brief Unsigned 32-bit IPv4 address (alias for in_addr_t). */
+/** @brief Unsigned 32-bit IPv4 address (alias for in_addr_t).  @ingroup posix_option_group_networking*/
 typedef uint32_t in_addr_t;
 
 /**
  * @brief Convert an IPv4 address from dotted-decimal text to binary.
+ * @ingroup posix_option_group_networking
  *
  * @note Deprecated; use inet_pton() for new code.
  *
@@ -45,6 +44,7 @@ in_addr_t inet_addr(const char *cp);
 
 /**
  * @brief Convert an IPv4 address from binary to dotted-decimal text.
+ * @ingroup posix_option_group_networking
  *
  * @note Deprecated; use inet_ntop() for new code.  The returned pointer
  *       is to a static buffer that may be overwritten by subsequent calls.
@@ -56,6 +56,7 @@ char *inet_ntoa(struct in_addr in);
 
 /**
  * @brief Convert an IPv4 or IPv6 address from binary to text form.
+ * @ingroup posix_option_group_networking
  * @param family Address family: AF_INET or AF_INET6.
  * @param src    Source address in network byte order.
  * @param dst    Output buffer for the text form.
@@ -66,6 +67,7 @@ char *inet_ntop(sa_family_t family, const void *src, char *dst, size_t size);
 
 /**
  * @brief Convert an IPv4 or IPv6 address from text form to binary.
+ * @ingroup posix_option_group_networking
  * @param family Address family: AF_INET or AF_INET6.
  * @param src    Text form of the address.
  * @param dst    Output buffer for the binary address.
@@ -73,7 +75,6 @@ char *inet_ntop(sa_family_t family, const void *src, char *dst, size_t size);
  */
 int inet_pton(sa_family_t family, const char *src, void *dst);
 
-/** @} */
 
 #ifdef __cplusplus
 }

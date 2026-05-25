@@ -11,9 +11,7 @@
  * @see <a href="https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/sys_time.h.html">
  *      POSIX.1-2017 &lt;sys/time.h&gt;</a>
  *
- * @defgroup posix_sys_time POSIX Time of Day
  * @ingroup posix_option_group_xsi_single_process
- * @{
  */
 
 #ifndef ZEPHYR_INCLUDE_POSIX_SYS_TIME_H_
@@ -44,6 +42,7 @@ extern "C" {
 
 /**
  * @brief Get the current time with microsecond resolution.
+ * @ingroup posix_option_group_xsi_single_process
  *
  * @param tv Output: current time; @c tv_sec is seconds and @c tv_usec is microseconds
  *           since the Epoch.
@@ -52,7 +51,6 @@ extern "C" {
  */
 int gettimeofday(struct timeval *tv, void *tz);
 
-/** @} */
 
 #ifdef __cplusplus
 }
