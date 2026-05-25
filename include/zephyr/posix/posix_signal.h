@@ -14,9 +14,6 @@
  * @see <a href="https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/signal.h.html">
  *      POSIX.1-2017 &lt;signal.h&gt;</a>
  *
- * @defgroup posix_signals POSIX Signals
- * @ingroup posix_option_group_signals
- * @{
  */
 
 #ifndef ZEPHYR_INCLUDE_POSIX_POSIX_SIGNAL_H_
@@ -288,6 +285,7 @@ typedef void (*sighandler_t)(int sig);
 
 /**
  * @brief Send a signal to a process or process group.
+ * @ingroup posix_option_group_signals
  * @param pid  Target process ID (positive), process group (negative), or 0.
  * @param sig  Signal number, or 0 to check process existence.
  * @return 0 on success, or -1 with errno set on failure.
@@ -297,6 +295,7 @@ int kill(pid_t pid, int sig);
 #if defined(_XOPEN_SOURCE) || defined(__DOXYGEN__)
 /**
  * @brief Send a signal to a process group (XSI extension).
+ * @ingroup posix_option_group_signals
  * @param pgrp Process group ID (0 = calling process's group).
  * @param sig  Signal number.
  * @return 0 on success, or -1 with errno set on failure.
@@ -306,6 +305,7 @@ int killpg(pid_t pgrp, int sig);
 
 /**
  * @brief Print a signal description with additional siginfo_t context.
+ * @ingroup posix_option_group_signals
  * @param info    Signal information.
  * @param message Prefix string.
  */
@@ -313,6 +313,7 @@ void psiginfo(const siginfo_t *info, const char *message);
 
 /**
  * @brief Print a signal description to stderr.
+ * @ingroup posix_option_group_signals
  * @param sig     Signal number.
  * @param message Prefix string.
  */
@@ -321,6 +322,7 @@ void psignal(int sig, const char *message);
 #if defined(_POSIX_THREADS) || defined(__DOXYGEN__)
 /**
  * @brief Send a signal to a specific thread.
+ * @ingroup posix_option_group_threads_base
  * @param thread Target thread.
  * @param sig    Signal number, or 0 to check thread existence.
  * @return 0 on success, or a positive error number on failure.
@@ -329,6 +331,7 @@ int pthread_kill(pthread_t thread, int sig);
 
 /**
  * @brief Examine and change blocked signals for the calling thread.
+ * @ingroup posix_option_group_threads_base
  * @param how  @c SIG_BLOCK, @c SIG_UNBLOCK, or @c SIG_SETMASK.
  * @param set  Signal set to apply, or NULL.
  * @param oset Output: previous signal mask, or NULL.
@@ -341,6 +344,7 @@ int pthread_sigmask(int how, const sigset_t *ZRESTRICT set, sigset_t *ZRESTRICT 
 TOOLCHAIN_DISABLE_WARNING(TOOLCHAIN_WARNING_SHADOW);
 /**
  * @brief Examine and change a signal action.
+ * @ingroup posix_option_group_signals
  * @param sig  Signal number.
  * @param act  New action, or NULL to query.
  * @param oact Output: previous action, or NULL.
@@ -352,6 +356,7 @@ TOOLCHAIN_ENABLE_WARNING(TOOLCHAIN_WARNING_SHADOW);
 
 /**
  * @brief Add a signal to a signal set.
+ * @ingroup posix_option_group_signals
  * @param set Signal set.
  * @param sig Signal number to add.
  * @return 0 on success, or -1 with errno set on failure.
@@ -361,6 +366,7 @@ int sigaddset(sigset_t *set, int sig);
 #if defined(_XOPEN_SOURCE) || defined(__DOXYGEN__)
 /**
  * @brief Set or get the alternate signal stack (XSI extension).
+ * @ingroup posix_option_group_signals
  * @param ss  New alternate stack descriptor, or NULL.
  * @param oss Output: previous descriptor, or NULL.
  * @return 0 on success, or -1 with errno set on failure.
@@ -370,6 +376,7 @@ int sigaltstack(const stack_t *ZRESTRICT ss, stack_t *ZRESTRICT oss);
 
 /**
  * @brief Delete a signal from a signal set.
+ * @ingroup posix_option_group_signals
  * @param set Signal set.
  * @param sig Signal number to remove.
  * @return 0 on success, or -1 with errno set on failure.
@@ -378,6 +385,7 @@ int sigdelset(sigset_t *set, int sig);
 
 /**
  * @brief Initialise a signal set to the empty set.
+ * @ingroup posix_option_group_signals
  * @param set Signal set to clear.
  * @return 0 on success, or -1 with errno set on failure.
  */
@@ -385,6 +393,7 @@ int sigemptyset(sigset_t *set);
 
 /**
  * @brief Initialise a signal set to the full set (all signals).
+ * @ingroup posix_option_group_signals
  * @param set Signal set to fill.
  * @return 0 on success, or -1 with errno set on failure.
  */
@@ -393,6 +402,7 @@ int sigfillset(sigset_t *set);
 #if defined(_XOPEN_SOURCE) || defined(__DOXYGEN__)
 /**
  * @brief Add a signal to the calling process's signal mask (XSI, obsolescent).
+ * @ingroup posix_option_group_signals
  * @param sig Signal to block.
  * @return 0 on success, or -1 with errno set on failure.
  */
@@ -400,6 +410,7 @@ int sighold(int sig);
 
 /**
  * @brief Set a signal's disposition to SIG_IGN (XSI, obsolescent).
+ * @ingroup posix_option_group_signals
  * @param sig Signal to ignore.
  * @return 0 on success, or -1 with errno set on failure.
  */
@@ -407,6 +418,7 @@ int sigignore(int sig);
 
 /**
  * @brief Control whether a signal restarts or interrupts system calls (XSI, obsolescent).
+ * @ingroup posix_option_group_signals
  * @param sig  Signal number.
  * @param flag Non-zero to interrupt; 0 to restart.
  * @return 0 on success, or -1 with errno set on failure.
@@ -416,6 +428,7 @@ int siginterrupt(int sig, int flag);
 
 /**
  * @brief Test whether a signal is a member of a signal set.
+ * @ingroup posix_option_group_signals
  * @param set Signal set to query.
  * @param sig Signal number to test.
  * @return 1 if the signal is a member, 0 if not, or -1 with errno set on failure.
@@ -425,6 +438,7 @@ int sigismember(const sigset_t *set, int sig);
 #if defined(_XOPEN_SOURCE) || defined(__DOXYGEN__)
 /**
  * @brief Suspend execution until a signal is delivered (XSI, obsolescent).
+ * @ingroup posix_option_group_signals
  * @param sig Signal whose blocking is temporarily removed.
  * @return Always returns -1 with @c errno set to @c EINTR.
  */
@@ -433,6 +447,7 @@ int sigpause(int sig);
 
 /**
  * @brief Retrieve the set of pending signals.
+ * @ingroup posix_option_group_signals
  * @param set Output: set of signals pending delivery to the calling process.
  * @return 0 on success, or -1 with errno set on failure.
  */
@@ -440,6 +455,7 @@ int sigpending(sigset_t *set);
 
 /**
  * @brief Examine and change the calling process's signal mask.
+ * @ingroup posix_option_group_signals
  * @param how  @c SIG_BLOCK, @c SIG_UNBLOCK, or @c SIG_SETMASK.
  * @param set  Signal set to apply, or NULL.
  * @param oset Output: previous mask, or NULL.
@@ -450,6 +466,7 @@ int sigprocmask(int how, const sigset_t *ZRESTRICT set, sigset_t *ZRESTRICT oset
 #if defined(_POSIX_REALTIME_SIGNALS) || defined(__DOXYGEN__)
 /**
  * @brief Queue a signal and data to a process.
+ * @ingroup posix_option_group_realtime_signals
  * @param pid   Target process ID.
  * @param sig   Signal number.
  * @param value Value to deliver along with the signal.
@@ -461,6 +478,7 @@ int sigqueue(pid_t pid, int sig, union sigval value);
 #if defined(_XOPEN_SOURCE) || defined(__DOXYGEN__)
 /**
  * @brief Remove a signal from the process signal mask (XSI, obsolescent).
+ * @ingroup posix_option_group_signals
  * @param sig Signal to unblock.
  * @return 0 on success, or -1 with errno set on failure.
  */
@@ -468,6 +486,7 @@ int sigrelse(int sig);
 
 /**
  * @brief Set the disposition of a signal, optionally blocking it first (XSI, obsolescent).
+ * @ingroup posix_option_group_signals
  * @param sig  Signal number.
  * @param disp New disposition (SIG_DFL, SIG_IGN, SIG_HOLD, or a handler).
  * @return Previous disposition on success, or SIG_ERR on failure.
@@ -477,6 +496,7 @@ sighandler_t sigset(int sig, sighandler_t disp);
 
 /**
  * @brief Wait for a signal, atomically replacing the process signal mask.
+ * @ingroup posix_option_group_signals
  * @param set New signal mask to apply while waiting.
  * @return Always returns -1 with @c errno set to @c EINTR.
  */
@@ -485,6 +505,7 @@ int sigsuspend(const sigset_t *set);
 #if defined(_POSIX_REALTIME_SIGNALS) || defined(__DOXYGEN__)
 /**
  * @brief Wait for a queued signal with a timeout.
+ * @ingroup posix_option_group_realtime_signals
  * @param set     Set of signals to wait for.
  * @param info    Output: information about the accepted signal, or NULL.
  * @param timeout Maximum time to wait.
@@ -496,6 +517,7 @@ int sigtimedwait(const sigset_t *ZRESTRICT set, siginfo_t *ZRESTRICT info,
 
 /**
  * @brief Wait for a signal from a set.
+ * @ingroup posix_option_group_signals
  * @param set Output signal set to wait on.
  * @param sig Output: number of the accepted signal.
  * @return 0 on success, or a positive error number on failure.
@@ -505,6 +527,7 @@ int sigwait(const sigset_t *ZRESTRICT set, int *ZRESTRICT sig);
 #if defined(_POSIX_REALTIME_SIGNALS) || defined(__DOXYGEN__)
 /**
  * @brief Wait for a queued signal (no timeout).
+ * @ingroup posix_option_group_realtime_signals
  * @param set  Set of signals to wait for.
  * @param info Output: information about the accepted signal, or NULL.
  * @return Signal number on success, or -1 with errno set on failure.
@@ -622,7 +645,6 @@ int sigwaitinfo(const sigset_t *ZRESTRICT set, siginfo_t *ZRESTRICT info);
 
 #endif
 
-/** @} */ /* posix_signals */
 
 #ifdef __cplusplus
 }

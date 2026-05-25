@@ -23,6 +23,9 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_BARRIERS`.
     pthread_barrierattr_destroy(),yes
     pthread_barrierattr_init(),yes
 
+.. doxygengroup:: posix_option_group_barriers
+   :project: posix
+
 .. _posix_option_group_c_lang_jump:
 
 POSIX_C_LANG_JUMP
@@ -91,6 +94,9 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_C_LANG_SUPPORT_R`.
     strerror_r(),yes
     strtok_r(),yes
 
+.. doxygengroup:: posix_option_group_c_lang_support_r
+   :project: posix
+
 .. _posix_option_group_c_lib_ext:
 
 POSIX_C_LIB_EXT
@@ -118,6 +124,9 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_C_LIB_EXT`.
     strndup(),
     strnlen(), yes
 
+.. doxygengroup:: posix_option_group_c_lib_ext
+   :project: posix
+
 .. _posix_option_group_clock_selection:
 
 POSIX_CLOCK_SELECTION
@@ -132,6 +141,9 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_CLOCK_SELECTION`.
     pthread_condattr_getclock(),yes
     pthread_condattr_setclock(),yes
     clock_nanosleep(),yes
+
+.. doxygengroup:: posix_option_group_clock_selection
+   :project: posix
 
 .. _posix_option_group_device_io:
 
@@ -198,6 +210,9 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_DEVICE_IO`.
     vscanf(),yes
     write(),yes
 
+.. doxygengroup:: posix_option_group_device_io
+   :project: posix
+
 .. _posix_option_group_fd_mgmt:
 
 POSIX_FD_MGMT
@@ -222,6 +237,9 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_FD_MGMT`.
     lseek(),
     rewind(),
 
+.. doxygengroup:: posix_option_group_fd_mgmt
+   :project: posix
+
 .. _posix_option_group_file_locking:
 
 POSIX_FILE_LOCKING
@@ -238,6 +256,9 @@ POSIX_FILE_LOCKING
     getchar_unlocked(),
     putc_unlocked(),
     putchar_unlocked(),
+
+.. doxygengroup:: posix_option_group_file_locking
+   :project: posix
 
 .. _posix_option_group_file_system:
 
@@ -277,6 +298,9 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_FILE_SYSTEM`.
     unlink(), yes
     utime(),
 
+.. doxygengroup:: posix_option_group_file_system
+   :project: posix
+
 .. _posix_option_group_file_system_r:
 
 POSIX_FILE_SYSTEM_R
@@ -304,6 +328,9 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_MAPPED_FILES`.
     mmap(),yes
     msync(),yes
     munmap(),yes
+
+.. doxygengroup:: posix_option_group_mapped_files
+   :project: posix
 
 .. _posix_option_group_memory_protection:
 
@@ -353,6 +380,9 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_MULTI_PROCESS`.
     wait(),:ref:`†<posix_undefined_behaviour>`
     waitid(),:ref:`†<posix_undefined_behaviour>`
     waitpid(),:ref:`†<posix_undefined_behaviour>`
+
+.. doxygengroup:: posix_option_group_multi_process
+   :project: posix
 
 .. _posix_option_group_networking:
 
@@ -433,6 +463,9 @@ POSIX_PIPE
 
     pipe(),
 
+.. doxygengroup:: posix_option_group_pipe
+   :project: posix
+
 .. _posix_option_group_realtime_signals:
 
 POSIX_REALTIME_SIGNALS
@@ -450,6 +483,9 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_REALTIME_SIGNALS`.
 
 ..
    this link is "deprecated" - mainly left here so that older links still work
+
+.. doxygengroup:: posix_option_group_realtime_signals
+   :project: posix
 
 .. _posix_option_reader_writer_locks:
 
@@ -475,6 +511,9 @@ Enable this option with :kconfig:option:`CONFIG_POSIX_RW_LOCKS`.
     pthread_rwlockattr_getpshared(),yes
     pthread_rwlockattr_init(),yes
     pthread_rwlockattr_setpshared(),yes
+
+.. doxygengroup:: posix_option_group_rw_locks
+   :project: posix
 
 .. _posix_option_group_semaphores:
 
@@ -546,6 +585,9 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_SIGNALS`.
     sigwait(),yes :ref:`†<posix_undefined_behaviour>`
     strsignal(),yes
 
+.. doxygengroup:: posix_option_group_signals
+   :project: posix
+
 .. _posix_option_group_single_process:
 
 POSIX_SINGLE_PROCESS
@@ -569,6 +611,9 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_SINGLE_PROCESS`.
     uname(),yes
     unsetenv(),yes
 
+.. doxygengroup:: posix_option_group_single_process
+   :project: posix
+
 .. _posix_option_group_spin_locks:
 
 POSIX_SPIN_LOCKS
@@ -585,6 +630,9 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_SPIN_LOCKS`.
     pthread_spin_lock(),yes
     pthread_spin_trylock(),yes
     pthread_spin_unlock(),yes
+
+.. doxygengroup:: posix_option_group_spin_locks
+   :project: posix
 
 .. _posix_option_group_threads_base:
 
@@ -652,6 +700,9 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_THREADS`.
     pthread_testcancel(),yes
     sched_yield(),yes
 
+.. doxygengroup:: posix_option_group_threads_base
+   :project: posix
+
 .. _posix_option_group_posix_threads_ext:
 
 POSIX_THREADS_EXT
@@ -667,6 +718,9 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_THREADS_EXT`.
     pthread_attr_setguardsize(),yes
     pthread_mutexattr_gettype(),yes
     pthread_mutexattr_settype(),yes
+
+.. doxygengroup:: posix_option_group_posix_threads_ext
+   :project: posix
 
 .. _posix_option_group_timers:
 
@@ -688,6 +742,9 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_TIMERS`.
     timer_gettime(),yes
     timer_getoverrun(),yes
     timer_settime(),yes
+
+.. doxygengroup:: posix_option_group_timers
+   :project: posix
 
 .. _posix_option_group_xsi_realtime:
 
@@ -722,6 +779,9 @@ Enable this option group with :kconfig:option:`CONFIG_XSI_SINGLE_PROCESS`.
     gettimeofday(),yes
     putenv(),yes
 
+.. doxygengroup:: posix_option_group_xsi_single_process
+   :project: posix
+
 .. _posix_option_group_xsi_system_logging:
 
 XSI_SYSTEM_LOGGING
@@ -737,6 +797,9 @@ Enable this option group with :kconfig:option:`CONFIG_XSI_SYSTEM_LOGGING`.
     openlog(),yes
     setlogmask(),yes
     syslog(),yes
+
+.. doxygengroup:: posix_option_group_xsi_system_logging
+   :project: posix
 
 .. _posix_option_group_xsi_threads_ext:
 
@@ -757,6 +820,9 @@ Enable this option group with :kconfig:option:`CONFIG_XSI_THREADS_EXT`.
     pthread_attr_setstack(),yes
     pthread_getconcurrency(),yes
     pthread_setconcurrency(),yes
+
+.. doxygengroup:: posix_option_group_xsi_threads_ext
+   :project: posix
 
 .. _posix_options:
 
@@ -800,6 +866,9 @@ Enable this option with :kconfig:option:`CONFIG_POSIX_CPUTIME`.
 
     CLOCK_PROCESS_CPUTIME_ID,yes
 
+.. doxygengroup:: posix_option_cputime
+   :project: posix
+
 .. _posix_option_fsync:
 
 _POSIX_FSYNC
@@ -812,6 +881,9 @@ Enable this option with :kconfig:option:`CONFIG_POSIX_FSYNC`.
    :widths: 50,10
 
     fsync(),yes
+
+.. doxygengroup:: posix_option_fsync
+   :project: posix
 
 .. _posix_option_ipv6:
 
@@ -842,6 +914,9 @@ Enable this option with :kconfig:option:`CONFIG_POSIX_MEMLOCK`.
     mlockall(), yes
     munlockall(), yes
 
+.. doxygengroup:: posix_option_memlock
+   :project: posix
+
 .. _posix_option_memlock_range:
 
 _POSIX_MEMLOCK_RANGE
@@ -855,6 +930,9 @@ Enable this option with :kconfig:option:`CONFIG_POSIX_MEMLOCK_RANGE`.
 
     mlock(), yes
     munlock(), yes
+
+.. doxygengroup:: posix_option_memlock_range
+   :project: posix
 
 .. _posix_option_message_passing:
 
@@ -889,6 +967,9 @@ Enable this option with :kconfig:option:`CONFIG_POSIX_MONOTONIC_CLOCK`.
 
     CLOCK_MONOTONIC,yes
 
+.. doxygengroup:: posix_option_monotonic_clock
+   :project: posix
+
 .. _posix_option_priority_scheduling:
 
 _POSIX_PRIORITY_SCHEDULING
@@ -911,6 +992,9 @@ Enable this option with :kconfig:option:`CONFIG_POSIX_PRIORITY_SCHEDULING`.
     sched_rr_get_interval(),yes :ref:`†<posix_undefined_behaviour>`
     sched_setparam(),yes :ref:`†<posix_undefined_behaviour>`
     sched_setscheduler(),yes :ref:`†<posix_undefined_behaviour>`
+
+.. doxygengroup:: posix_option_priority_scheduling
+   :project: posix
 
 .. _posix_option_raw_sockets:
 
@@ -941,6 +1025,9 @@ Enable this option with :kconfig:option:`CONFIG_POSIX_SHARED_MEMORY_OBJECTS`.
     shm_open(), yes
     shm_unlink(), yes
 
+.. doxygengroup:: posix_option_shared_memory_objects
+   :project: posix
+
 .. _posix_option_synchronized_io:
 
 _POSIX_SYNCHRONIZED_IO
@@ -956,6 +1043,9 @@ Enable this option with :kconfig:option:`CONFIG_POSIX_SYNCHRONIZED_IO`.
     fsync(),yes
     msync(),yes
 
+.. doxygengroup:: posix_option_synchronized_io
+   :project: posix
+
 .. _posix_option_thread_attr_stackaddr:
 
 _POSIX_THREAD_ATTR_STACKADDR
@@ -969,6 +1059,9 @@ Enable this option with :kconfig:option:`CONFIG_POSIX_THREAD_ATTR_STACKADDR`.
 
     pthread_attr_getstackaddr(),yes
     pthread_attr_setstackaddr(),yes
+
+.. doxygengroup:: posix_option_thread_attr_stackaddr
+   :project: posix
 
 .. _posix_option_thread_attr_stacksize:
 
@@ -984,6 +1077,9 @@ Enable this option with :kconfig:option:`CONFIG_POSIX_THREAD_ATTR_STACKSIZE`.
     pthread_attr_getstacksize(),yes
     pthread_attr_setstacksize(),yes
 
+.. doxygengroup:: posix_option_thread_attr_stacksize
+   :project: posix
+
 .. _posix_option_thread_cputime:
 
 _POSIX_THREAD_CPUTIME
@@ -998,6 +1094,9 @@ Enable this option with :kconfig:option:`CONFIG_POSIX_THREAD_CPUTIME`.
     CLOCK_THREAD_CPUTIME_ID,yes
     pthread_getcpuclockid(),yes
 
+.. doxygengroup:: posix_option_thread_cputime
+   :project: posix
+
 .. _posix_option_thread_prio_inherit:
 
 _POSIX_THREAD_PRIO_INHERIT
@@ -1011,6 +1110,9 @@ Enable this option with :kconfig:option:`CONFIG_POSIX_THREAD_PRIO_INHERIT`.
 
     pthread_mutexattr_getprotocol(),yes
     pthread_mutexattr_setprotocol(),yes
+
+.. doxygengroup:: posix_option_thread_prio_inherit
+   :project: posix
 
 .. _posix_option_thread_prio_protect:
 
@@ -1029,6 +1131,9 @@ Enable this option with :kconfig:option:`CONFIG_POSIX_THREAD_PRIO_PROTECT`.
     pthread_mutexattr_getprotocol(),yes
     pthread_mutexattr_setprioceiling(),yes
     pthread_mutexattr_setprotocol(),yes
+
+.. doxygengroup:: posix_option_thread_prio_protect
+   :project: posix
 
 .. _posix_option_thread_priority_scheduling:
 
@@ -1050,6 +1155,9 @@ Enable this option with :kconfig:option:`CONFIG_POSIX_THREAD_PRIORITY_SCHEDULING
     pthread_getschedparam(),yes
     pthread_setschedparam(),yes
     pthread_setschedprio(),yes
+
+.. doxygengroup:: posix_option_thread_priority_scheduling
+   :project: posix
 
 .. _posix_option_thread_safe_functions:
 
@@ -1081,6 +1189,9 @@ Enable this option with :kconfig:option:`CONFIG_POSIX_THREAD_SAFE_FUNCTIONS`.
     readdir_r(), yes
     strerror_r(), yes
     strtok_r(), yes
+
+.. doxygengroup:: posix_option_thread_safe_functions
+   :project: posix
 
 .. _posix_option_timeouts:
 
@@ -1129,3 +1240,4 @@ Enable this option with :kconfig:option:`CONFIG_XSI_STREAMS`.
 
 .. _Subprofiling Considerations:
     https://pubs.opengroup.org/onlinepubs/9699919799/xrat/V4_subprofiles.html
+

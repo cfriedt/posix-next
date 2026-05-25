@@ -14,9 +14,6 @@
  * @see <a href="https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/stdlib.h.html">
  *      POSIX.1-2017 &lt;stdlib.h&gt;</a>
  *
- * @defgroup posix_stdlib POSIX stdlib Extensions
- * @ingroup posix_option_group_single_process
- * @{
  */
 
 #ifndef ZEPHYR_INCLUDE_POSIX_POSIX_STDLIB_H_
@@ -33,6 +30,7 @@ extern "C" {
 #if defined(_BSD_SOURCE) || defined(__DOXYGEN__)
 /**
  * @brief Get an environment variable into a caller-supplied buffer (BSD extension).
+ * @ingroup posix_option_thread_safe_functions
  *
  * Thread-safe alternative to getenv().
  *
@@ -48,6 +46,7 @@ int getenv_r(const char *name, char *buf, size_t len);
 #if defined(_POSIX_C_SOURCE) || defined(__DOXYGEN__)
 /**
  * @brief Parse sub-options from a command-line argument string.
+ * @ingroup posix_option_group_c_lib_ext
  *
  * Modifies @p *optionp in place, separating comma-delimited sub-options.
  *
@@ -62,6 +61,7 @@ int getsubopt(char **optionp, char *const *keylistp, char **valuep);
 #if defined(_XOPEN_SOURCE) || defined(__DOXYGEN__)
 /**
  * @brief Add or change an environment variable (XSI extension).
+ * @ingroup posix_option_group_xsi_single_process
  *
  * @p string must be of the form @c "NAME=value".  The string is placed
  * directly in the environment, so it must remain valid for the lifetime of
@@ -76,6 +76,7 @@ int putenv(char *string);
 #if defined(_POSIX_C_SOURCE) || defined(__DOXYGEN__)
 /**
  * @brief Set the value of an environment variable.
+ * @ingroup posix_option_group_single_process
  * @param envname   Name of the variable (must not contain '=').
  * @param envval    New value string.
  * @param overwrite Non-zero to overwrite an existing value; 0 to preserve it.
@@ -85,13 +86,12 @@ int setenv(const char *envname, const char *envval, int overwrite);
 
 /**
  * @brief Remove an environment variable.
+ * @ingroup posix_option_group_single_process
  * @param name Name of the variable to remove.
  * @return 0 on success, or -1 with errno set on failure.
  */
 int unsetenv(const char *name);
 #endif /* defined(_POSIX_C_SOURCE) || defined(__DOXYGEN__) */
-
-/** @} */
 
 #ifdef __cplusplus
 }
