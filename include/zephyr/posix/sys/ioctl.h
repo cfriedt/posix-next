@@ -14,9 +14,7 @@
  * @note sys/ioctl.h is not part of the strict POSIX.1-2017 standard but is a
  *       widely-supported extension available on Linux and BSD systems.
  *
- * @defgroup posix_ioctl Device I/O Control
  * @ingroup posix_option_group_xsi_streams
- * @{
  */
 
 #ifndef ZEPHYR_INCLUDE_POSIX_SYS_IOCTL_H_
@@ -24,9 +22,9 @@
 
 #include <zephyr/sys/fdtable.h>
 
-/** @brief Set or clear non-blocking I/O mode on a file descriptor. */
+/** @brief Set or clear non-blocking I/O mode on a file descriptor.  @ingroup posix_option_group_xsi_streams*/
 #define FIONBIO  ZFD_IOCTL_FIONBIO
-/** @brief Return the number of bytes available to read without blocking. */
+/** @brief Return the number of bytes available to read without blocking.  @ingroup posix_option_group_xsi_streams*/
 #define FIONREAD ZFD_IOCTL_FIONREAD
 
 #ifdef __cplusplus
@@ -35,6 +33,7 @@ extern "C" {
 
 /**
  * @brief Perform a device-specific control operation.
+ * @ingroup posix_option_group_xsi_streams
  * @param fd      File descriptor.
  * @param request Implementation-defined request code.
  * @param ...     Optional argument (typically a pointer or int) whose type
@@ -43,7 +42,6 @@ extern "C" {
  */
 int ioctl(int fd, unsigned long request, ...);
 
-/** @} */
 
 #ifdef __cplusplus
 }

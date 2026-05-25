@@ -14,9 +14,7 @@
  * @see <a href="https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/sys_select.h.html">
  *      POSIX.1-2017 &lt;sys/select.h&gt;</a>
  *
- * @defgroup posix_select POSIX select
  * @ingroup posix_option_group_device_io
- * @{
  */
 
 #ifndef ZEPHYR_INCLUDE_POSIX_SYS_SELECT_H_
@@ -28,7 +26,7 @@
 extern "C" {
 #endif
 
-/** @brief Maximum number of file descriptors in an fd_set. */
+/** @brief Maximum number of file descriptors in an fd_set.  @ingroup posix_option_group_device_io*/
 #define FD_SETSIZE ZVFS_FD_SETSIZE
 
 #if !defined(_SIGSET_T_DECLARED) && !defined(__sigset_t_defined)
@@ -38,13 +36,13 @@ extern "C" {
 #endif
 #if defined(_POSIX_REALTIME_SIGNALS) || defined(__DOXYGEN__)
 BUILD_ASSERT(CONFIG_POSIX_RTSIG_MAX >= 0);
-/** @brief Largest real-time signal number. */
+/** @brief Largest real-time signal number.  @ingroup posix_option_group_device_io*/
 #define SIGRTMAX (SIGRTMIN + CONFIG_POSIX_RTSIG_MAX)
 #else
 #define SIGRTMAX SIGRTMIN
 #endif
 
-/** @brief Set of signals (bitmask). */
+/** @brief Set of signals (bitmask).  @ingroup posix_option_group_device_io*/
 typedef struct {
 	unsigned long sig[DIV_ROUND_UP(SIGRTMAX + 1, BITS_PER_LONG)];
 } sigset_t;
@@ -53,7 +51,7 @@ typedef struct {
 #endif
 
 #if !defined(_SUSECONDS_T_DECLARED) && !defined(__suseconds_t_defined)
-/** @brief Microsecond time component type. */
+/** @brief Microsecond time component type.  @ingroup posix_option_group_device_io*/
 typedef long suseconds_t;
 #define _SUSECONDS_T_DECLARED
 #define __suseconds_t_defined
@@ -86,13 +84,14 @@ struct timeval {
 #define __timeval_defined
 #endif
 
-/** @brief Set of file descriptors for select()/pselect(). */
+/** @brief Set of file descriptors for select()/pselect().  @ingroup posix_option_group_device_io*/
 typedef struct zvfs_fd_set fd_set;
 
 struct timeval;
 
 /**
  * @brief Synchronous multiplexed I/O with signal-mask and nanosecond timeout.
+ * @ingroup posix_option_group_device_io
  * @param nfds    Highest-numbered file descriptor in any set + 1.
  * @param readfds   Set of file descriptors to watch for readability, or NULL.
  * @param writefds  Set of file descriptors to watch for writability, or NULL.
@@ -107,6 +106,7 @@ int pselect(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
 
 /**
  * @brief Synchronous multiplexed I/O (legacy interface, use pselect() for new code).
+ * @ingroup posix_option_group_device_io
  * @param nfds      Highest-numbered file descriptor in any set + 1.
  * @param readfds   Set of file descriptors to watch for readability, or NULL.
  * @param writefds  Set of file descriptors to watch for writability, or NULL.
@@ -119,6 +119,7 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *errorfds, struct
 
 /**
  * @brief Remove a file descriptor from an fd_set.
+ * @ingroup posix_option_group_device_io
  * @param fd    File descriptor to clear.
  * @param fdset File descriptor set to modify.
  */
@@ -126,6 +127,7 @@ void FD_CLR(int fd, fd_set *fdset);
 
 /**
  * @brief Test whether a file descriptor is in an fd_set.
+ * @ingroup posix_option_group_device_io
  * @param fd    File descriptor to test.
  * @param fdset File descriptor set.
  * @return Non-zero if @p fd is set, 0 otherwise.
@@ -134,6 +136,7 @@ int FD_ISSET(int fd, fd_set *fdset);
 
 /**
  * @brief Add a file descriptor to an fd_set.
+ * @ingroup posix_option_group_device_io
  * @param fd    File descriptor to add.
  * @param fdset File descriptor set to modify.
  */
@@ -141,11 +144,11 @@ void FD_SET(int fd, fd_set *fdset);
 
 /**
  * @brief Clear all file descriptors from an fd_set.
+ * @ingroup posix_option_group_device_io
  * @param fdset File descriptor set to clear.
  */
 void FD_ZERO(fd_set *fdset);
 
-/** @} */
 
 #ifdef __cplusplus
 }
