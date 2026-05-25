@@ -39,6 +39,7 @@ extern "C" {
  * @param ...     Optional argument (typically a pointer or int) whose type
  *                is determined by @p request.
  * @return Request-specific return value on success, or -1 with errno set.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/ioctl.html
  */
 int ioctl(int fd, unsigned long request, ...);
 
