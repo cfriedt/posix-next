@@ -15,7 +15,7 @@
  *      POSIX.1-2017 &lt;string.h&gt;</a>
  *
  * @defgroup posix_string POSIX String Extensions
- * @ingroup posix_option_group_c_lang_support_r
+ * @ingroup posix_option_group_signals
  * @{
  */
 
