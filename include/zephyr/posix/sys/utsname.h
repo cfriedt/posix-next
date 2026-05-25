@@ -11,9 +11,7 @@
  * @see <a href="https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/sys_utsname.h.html">
  *      POSIX.1-2017 &lt;sys/utsname.h&gt;</a>
  *
- * @defgroup posix_utsname POSIX System Identification
  * @ingroup posix_option_group_single_process
- * @{
  */
 
 #ifndef ZEPHYR_INCLUDE_POSIX_SYS_UTSNAME_H_
@@ -43,12 +41,12 @@ struct utsname {
 
 /**
  * @brief Get the name of the current system.
+ * @ingroup posix_option_group_single_process
  * @param name Output: system identification structure to fill in.
  * @return 0 on success, or -1 with errno set on failure.
  */
 int uname(struct utsname *name);
 
-/** @} */
 
 #ifdef __cplusplus
 }

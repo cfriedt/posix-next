@@ -14,9 +14,7 @@
  * @see <a href="https://pubs.opengroup.org/onlinepubs/9699919799/functions/confstr.html">
  *      POSIX.1-2017 confstr()</a>
  *
- * @defgroup posix_confstr POSIX Configuration Strings
  * @ingroup posix_option_group_single_process
- * @{
  */
 
 #ifndef ZEPHYR_INCLUDE_POSIX_SYS_CONFSTR_H_
@@ -61,7 +59,6 @@ enum {
 	_CS_V6_ENV,                          /**< Environments with width restrictions (alias). */
 };
 
-/** @} */
 
 #ifdef __cplusplus
 }

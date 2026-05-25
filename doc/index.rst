@@ -3,11 +3,49 @@
 posix-next
 ##########
 
-An out-of-tree Zephyr POSIX module that tracks ahead of the upstream Zephyr
-release, hosted at `github.com/cfriedt/posix-next
-<https://github.com/cfriedt/posix-next>`_.
+.. raw:: html
+
+   <p class="pn-tagline">
+     An out-of-tree Zephyr POSIX module that tracks ahead of the upstream
+     release &mdash; bringing more of POSIX.1-2017 to embedded systems, faster.
+   </p>
+
+   <div class="pn-tiles">
+     <a class="pn-tile" href="getting_started/index.html">
+       <span class="pn-tile-icon">&#128640;</span>
+       <span class="pn-tile-title">Getting Started</span>
+       <span class="pn-tile-desc">Set up the workspace and build your first app</span>
+     </a>
+     <a class="pn-tile" href="posix/overview/index.html">
+       <span class="pn-tile-icon">&#128366;</span>
+       <span class="pn-tile-title">Overview</span>
+       <span class="pn-tile-desc">Architecture &amp; design rationale</span>
+     </a>
+     <a class="pn-tile" href="posix/option_groups/index.html">
+       <span class="pn-tile-icon">&#127381;</span>
+       <span class="pn-tile-title">Option Groups</span>
+       <span class="pn-tile-desc">POSIX conformance by feature set</span>
+     </a>
+     <a class="pn-tile" href="posix/symbols.html">
+       <span class="pn-tile-icon">&#128269;</span>
+       <span class="pn-tile-title">API Search</span>
+       <span class="pn-tile-desc">Live symbol search across all headers</span>
+     </a>
+     <a class="pn-tile" href="posix/conformance/index.html">
+       <span class="pn-tile-icon">&#9989;</span>
+       <span class="pn-tile-title">Conformance</span>
+       <span class="pn-tile-desc">What passes, what is planned</span>
+     </a>
+     <a class="pn-tile" href="samples/posix/posix.html">
+       <span class="pn-tile-icon">&#128187;</span>
+       <span class="pn-tile-title">Samples</span>
+       <span class="pn-tile-desc">Example POSIX applications for Zephyr</span>
+     </a>
+   </div>
 
 .. toctree::
    :maxdepth: 2
+   :hidden:
 
+   getting_started/index.rst
    posix/index.rst
