@@ -316,7 +316,7 @@ def setup(app: Sphinx):
     app.add_config_value("posix_symbols_doxy_html_url", "../doxygen/html", "env")
     app.add_config_value("posix_symbols_opengroup_base", OPENGROUP_BASE, "env")
 
-    app.add_directive("posix:search", PosixSearchDirective)
+    app.add_directive("posix-search", PosixSearchDirective)
 
     app.connect("builder-inited", on_builder_inited)
     app.connect("env-before-read-docs", on_env_before_read_docs)
