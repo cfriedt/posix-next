@@ -6,8 +6,7 @@ posix-next
 .. raw:: html
 
    <p class="pn-tagline">
-     An out-of-tree Zephyr POSIX module that tracks ahead of the upstream
-     release &mdash; bringing more of POSIX.1-2017 to embedded systems, faster.
+     The next-generation of Zephyr&rsquo;s POSIX reference design.
    </p>
 
    <div class="pn-tiles">
