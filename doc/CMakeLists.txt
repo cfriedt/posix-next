@@ -73,6 +73,20 @@ set(SPHINX_ENV
 set(SPHINX_TAGS_ARGS "-t" "${DOC_TAG}")
 
 # ---------------------------------------------------------------------------
+# Symlink directories into the Sphinx source tree so that toctree / glob
+# directives can discover content that lives outside doc/.
+# ---------------------------------------------------------------------------
+
+set(SYMLINK_DIRS samples)
+foreach(dir ${SYMLINK_DIRS})
+  set(_src ${CMAKE_CURRENT_LIST_DIR}/../${dir})
+  set(_dst ${CMAKE_CURRENT_LIST_DIR}/${dir})
+  if(NOT EXISTS ${_dst})
+    file(CREATE_LINK ${_src} ${_dst} SYMBOLIC)
+  endif()
+endforeach()
+
+# ---------------------------------------------------------------------------
 # html target
 # ---------------------------------------------------------------------------
 
