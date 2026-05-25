@@ -4,6 +4,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+/**
+ * @file
+ * @brief POSIX filename pattern matching (<fnmatch.h>)
+ *
+ * @see <a href="https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/fnmatch.h.html">
+ *      POSIX.1-2017 &lt;fnmatch.h&gt;</a>
+ *
+ * @defgroup posix_fnmatch POSIX Filename Matching
+ * @ingroup posix_option_group_file_system
+ * @{
+ */
+
 #ifndef ZEPHYR_INCLUDE_POSIX_FNMATCH_H_
 #define ZEPHYR_INCLUDE_POSIX_FNMATCH_H_
 
@@ -11,18 +23,36 @@
 extern "C" {
 #endif
 
+/** @brief Return value of fnmatch() indicating the string did not match the pattern. */
 #define FNM_NOMATCH  1
+/** @brief Flag: treat backslash as an ordinary character rather than an escape character. */
 #define FNM_NOESCAPE 0x01
+/** @brief Flag: a slash must be matched by a slash (not '?' or '*' or a bracket expression). */
 #define FNM_PATHNAME 0x02
+/** @brief Flag: a leading '.' must be matched explicitly. */
 #define FNM_PERIOD   0x04
 #if defined(_GNU_SOURCE)
+/** @brief GNU extension: match a leading directory portion (stops at '/'). */
 #define FNM_LEADING_DIR 0x08
+/** @brief GNU extension: case-insensitive matching. */
 #define FNM_CASEFOLD    0x10
+/** @brief GNU extension: extended pattern matching (?, *, +, @, ! prefixes). */
 #define FNM_EXTMATCH    0x20
 #endif
+/** @brief Alias for FNM_CASEFOLD. */
 #define FNM_IGNORECASE FNM_CASEFOLD
 
+/**
+ * @brief Match a filename or path against a shell-style pattern.
+ * @param pattern Shell pattern (using ?, *, and bracket expressions).
+ * @param string  String to test against @p pattern.
+ * @param flags   Combination of FNM_* flags, or 0 for default matching.
+ * @return 0 if @p string matches @p pattern, @c FNM_NOMATCH if it does not,
+ *         or a non-zero value on error.
+ */
 int fnmatch(const char *pattern, const char *string, int flags);
+
+/** @} */
 
 #ifdef __cplusplus
 }
