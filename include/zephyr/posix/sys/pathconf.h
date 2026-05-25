@@ -13,9 +13,7 @@
  * @see <a href="https://pubs.opengroup.org/onlinepubs/9699919799/functions/pathconf.html">
  *      POSIX.1-2017 pathconf()</a>
  *
- * @defgroup posix_pathconf POSIX Path Configuration
  * @ingroup posix_option_group_file_system
- * @{
  */
 
 #ifndef ZEPHYR_INCLUDE_POSIX_SYS_PATHCONF_H_
@@ -50,7 +48,6 @@ enum {
 	_PC_VDISABLE,             /**< Terminal special characters can be disabled. */
 };
 
-/** @} */
 
 #ifdef __cplusplus
 }
