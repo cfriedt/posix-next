@@ -40,6 +40,7 @@ struct if_nameindex {
  * @param ifindex Numeric interface index.
  * @param ifname  Output buffer of at least IF_NAMESIZE bytes.
  * @return @p ifname on success, or NULL with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/if_indextoname.html
  */
 char *if_indextoname(unsigned int ifindex, char *ifname);
 
@@ -47,6 +48,7 @@ char *if_indextoname(unsigned int ifindex, char *ifname);
  * @brief Free a list returned by if_nameindex().
  * @ingroup posix_option_group_networking
  * @param ptr List to free (must have been returned by if_nameindex()).
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/if_freenameindex.html
  */
 void if_freenameindex(struct if_nameindex *ptr);
 

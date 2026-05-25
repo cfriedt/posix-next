@@ -42,6 +42,7 @@ extern "C" {
  * @param signo Signal number.
  * @return Pointer to a string describing the signal, or an unspecified string
  *         if @p signo is an unknown signal number.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/strsignal.html
  */
 char *strsignal(int signo);
 
