@@ -15,8 +15,6 @@
  * @note eventfd is a Linux extension, not part of POSIX.1-2017, but is
  *       widely available on Linux and implemented here for compatibility.
  *
- * @defgroup posix_eventfd Event Notification File Descriptor
- * @{
  */
 
 #ifndef ZEPHYR_INCLUDE_POSIX_SYS_EVENTFD_H_
@@ -28,16 +26,17 @@
 extern "C" {
 #endif
 
-/** @brief Semaphore-mode flag: each read decrements the counter by 1 instead of resetting to 0. */
+/** @brief Semaphore-mode flag: each read decrements the counter by 1 instead of resetting to 0.  @ingroup posix_option_group_device_io*/
 #define EFD_SEMAPHORE ZVFS_EFD_SEMAPHORE
-/** @brief Non-blocking flag: reads and writes return EAGAIN instead of blocking. */
+/** @brief Non-blocking flag: reads and writes return EAGAIN instead of blocking.  @ingroup posix_option_group_device_io*/
 #define EFD_NONBLOCK  ZVFS_EFD_NONBLOCK
 
-/** @brief Counter value type for eventfd operations. */
+/** @brief Counter value type for eventfd operations.  @ingroup posix_option_group_device_io*/
 typedef zvfs_eventfd_t eventfd_t;
 
 /**
  * @brief Create a file descriptor for event notification.
+ * @ingroup posix_option_group_device_io
  *
  * The returned file descriptor can be used with POSIX read()/write() or with
  * eventfd_read()/eventfd_write().  It also integrates with poll(), allowing a
@@ -54,6 +53,7 @@ int eventfd(unsigned int initval, int flags);
 
 /**
  * @brief Read the current counter value from an eventfd.
+ * @ingroup posix_option_group_device_io
  *
  * In normal mode the counter is reset to 0; in EFD_SEMAPHORE mode it is
  * decremented by 1.  Blocks if the counter is 0 (unless EFD_NONBLOCK).
@@ -66,6 +66,7 @@ int eventfd_read(int fd, eventfd_t *value);
 
 /**
  * @brief Add a value to an eventfd counter.
+ * @ingroup posix_option_group_device_io
  *
  * Wakes any thread blocked in eventfd_read(), read(), or poll() on @p fd.
  *
@@ -75,7 +76,6 @@ int eventfd_read(int fd, eventfd_t *value);
  */
 int eventfd_write(int fd, eventfd_t value);
 
-/** @} */
 
 #ifdef __cplusplus
 }
