@@ -15,9 +15,6 @@
  * @see <a href="https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/time.h.html">
  *      POSIX.1-2017 &lt;time.h&gt;</a>
  *
- * @defgroup posix_time POSIX Clocks and Timers
- * @ingroup posix_option_group_timers
- * @{
  */
 
 #ifndef ZEPHYR_INCLUDE_ZEPHYR_POSIX_POSIX_TIME_H_
@@ -105,12 +102,12 @@ struct itimerspec {
 
 /* NULL must be defined in the libc stddef.h */
 
-/** @brief Clock measuring real (wall-clock) time. */
+/** @brief Clock measuring real (wall-clock) time.  @ingroup posix_option_group_timers*/
 #ifndef CLOCK_REALTIME
 #define CLOCK_REALTIME ((clockid_t)SYS_CLOCK_REALTIME)
 #endif
 
-/** @brief Number of clock ticks per second as seen by clock(). */
+/** @brief Number of clock ticks per second as seen by clock().  @ingroup posix_option_group_timers*/
 #ifndef CLOCKS_PER_SEC
 #if defined(_XOPEN_SOURCE)
 #define CLOCKS_PER_SEC 1000000
@@ -120,27 +117,27 @@ struct itimerspec {
 #endif
 
 #if defined(_POSIX_CPUTIME) || defined(__DOXYGEN__)
-/** @brief CPU-time clock for the calling process. */
+/** @brief CPU-time clock for the calling process.  @ingroup posix_option_cputime*/
 #ifndef CLOCK_PROCESS_CPUTIME_ID
 #define CLOCK_PROCESS_CPUTIME_ID ((clockid_t)2)
 #endif
 #endif
 
 #if defined(_POSIX_THREAD_CPUTIME) || defined(__DOXYGEN__)
-/** @brief CPU-time clock for the calling thread. */
+/** @brief CPU-time clock for the calling thread.  @ingroup posix_option_thread_cputime*/
 #ifndef CLOCK_THREAD_CPUTIME_ID
 #define CLOCK_THREAD_CPUTIME_ID ((clockid_t)3)
 #endif
 #endif
 
 #if defined(_POSIX_MONOTONIC_CLOCK) || defined(__DOXYGEN__)
-/** @brief Monotonically increasing clock that cannot be set. */
+/** @brief Monotonically increasing clock that cannot be set.  @ingroup posix_option_monotonic_clock*/
 #ifndef CLOCK_MONOTONIC
 #define CLOCK_MONOTONIC ((clockid_t)SYS_CLOCK_MONOTONIC)
 #endif
 #endif
 
-/** @brief Flag for clock_nanosleep() and timer_settime(): interpret time as absolute. */
+/** @brief Flag for clock_nanosleep() and timer_settime(): interpret time as absolute.  @ingroup posix_option_group_timers*/
 #ifndef TIMER_ABSTIME
 #define TIMER_ABSTIME SYS_TIMER_ABSTIME
 #endif
@@ -150,6 +147,7 @@ struct itimerspec {
 #if defined(_POSIX_THREAD_SAFE_FUNCTIONS) || defined(__DOXYGEN__)
 /**
  * @brief Convert broken-down time to a string (thread-safe version of asctime()).
+ * @ingroup posix_option_group_c_lang_support_r
  * @param tm  Broken-down time.
  * @param buf Caller-supplied buffer of at least 26 bytes.
  * @return @p buf on success, or NULL on failure.
@@ -162,6 +160,7 @@ char *asctime_r(const struct tm *ZRESTRICT tm, char *ZRESTRICT buf);
 #if defined(_POSIX_CPUTIME) || defined(__DOXYGEN__)
 /**
  * @brief Get the CPU-time clock ID for a process.
+ * @ingroup posix_option_cputime
  * @param pid      Process ID (0 = calling process).
  * @param clock_id Output: clock ID.
  * @return 0 on success, or a positive error number on failure.
@@ -172,6 +171,7 @@ int clock_getcpuclockid(pid_t pid, clockid_t *clock_id);
 #if defined(_POSIX_TIMERS) || defined(__DOXYGEN__)
 /**
  * @brief Get the resolution of a clock.
+ * @ingroup posix_option_group_timers
  * @param clock_id Clock to query.
  * @param ts       Output: resolution (smallest representable interval).
  * @return 0 on success, or -1 with errno set on failure.
@@ -180,6 +180,7 @@ int clock_getres(clockid_t clock_id, struct timespec *ts);
 
 /**
  * @brief Get the current time of a clock.
+ * @ingroup posix_option_group_timers
  * @param clock_id Clock to read.
  * @param ts       Output: current time.
  * @return 0 on success, or -1 with errno set on failure.
@@ -190,6 +191,7 @@ int clock_gettime(clockid_t clock_id, struct timespec *ts);
 #if defined(_POSIX_CLOCK_SELECTION) || defined(__DOXYGEN__)
 /**
  * @brief High-resolution sleep against a specified clock.
+ * @ingroup posix_option_group_clock_selection
  * @param clock_id Clock to measure the sleep against.
  * @param flags    0 for a relative sleep, @c TIMER_ABSTIME for an absolute wakeup time.
  * @param rqtp     Requested sleep duration or absolute wakeup time.
@@ -203,6 +205,7 @@ int clock_nanosleep(clockid_t clock_id, int flags, const struct timespec *rqtp,
 #if defined(_POSIX_TIMERS) || defined(__DOXYGEN__)
 /**
  * @brief Set the time of a clock.
+ * @ingroup posix_option_group_timers
  * @param clock_id Clock to set.
  * @param ts       New time value.
  * @return 0 on success, or -1 with errno set on failure.
@@ -215,6 +218,7 @@ int clock_settime(clockid_t clock_id, const struct timespec *ts);
 #if defined(_POSIX_THREAD_SAFE_FUNCTIONS) || defined(__DOXYGEN__)
 /**
  * @brief Convert a time_t to a string (thread-safe version of ctime()).
+ * @ingroup posix_option_group_c_lang_support_r
  * @param clock Pointer to a time_t value.
  * @param buf   Caller-supplied buffer of at least 26 bytes.
  * @return @p buf on success, or NULL on failure.
@@ -227,6 +231,7 @@ char *ctime_r(const time_t *clock, char *buf);
 #if defined(_XOPEN_SOURCE) || defined(__DOXYGEN__)
 /**
  * @brief Convert a date-time string to broken-down time (XSI extension).
+ * @ingroup posix_option_group_xsi_single_process
  * @param string Date-time string; the format is determined by the DATEMSK environment variable.
  * @return Pointer to a broken-down time, or NULL on failure.
  */
@@ -240,6 +245,7 @@ struct tm *getdate(const char *string);
 #if defined(_POSIX_THREAD_SAFE_FUNCTIONS) || defined(__DOXYGEN__)
 /**
  * @brief Convert a time_t to UTC broken-down time (thread-safe version of gmtime()).
+ * @ingroup posix_option_group_c_lang_support_r
  * @param timer  Pointer to the time_t value.
  * @param result Caller-supplied storage for the result.
  * @return @p result on success, or NULL on failure.
@@ -255,6 +261,7 @@ struct tm *gmtime_r(const time_t *ZRESTRICT timer, struct tm *ZRESTRICT result);
 #if defined(_POSIX_THREAD_SAFE_FUNCTIONS) || defined(__DOXYGEN__)
 /**
  * @brief Convert a time_t to local broken-down time (thread-safe version of localtime()).
+ * @ingroup posix_option_group_c_lang_support_r
  * @param timer  Pointer to the time_t value.
  * @param result Caller-supplied storage for the result.
  * @return @p result on success, or NULL on failure.
@@ -268,6 +275,7 @@ struct tm *localtime_r(const time_t *ZRESTRICT timer, struct tm *ZRESTRICT resul
 #if defined(_POSIX_TIMERS) || defined(__DOXYGEN__)
 /**
  * @brief Sleep for a specified number of nanoseconds (high-resolution sleep).
+ * @ingroup posix_option_group_timers
  * @param rqtp Requested sleep duration.
  * @param rmtp Output: remaining time if the call was interrupted, or NULL.
  * @return 0 on success, or a positive error number on failure.
@@ -279,6 +287,7 @@ int nanosleep(const struct timespec *rqtp, struct timespec *rmtp);
 
 /**
  * @brief Format broken-down time into a string using the specified locale.
+ * @ingroup posix_option_group_c_lib_ext
  * @param s       Output buffer.
  * @param maxsize Maximum number of bytes to write including the NUL terminator.
  * @param format  Format string (same syntax as strftime()).
@@ -292,6 +301,7 @@ size_t strftime_l(char *ZRESTRICT s, size_t maxsize, const char *ZRESTRICT forma
 #if defined(_XOPEN_SOURCE) || defined(__DOXYGEN__)
 /**
  * @brief Parse a date/time string according to a format (XSI extension).
+ * @ingroup posix_option_group_xsi_single_process
  * @param s      Input string to parse.
  * @param format Format string describing the date/time fields to parse.
  * @param tm     Output: filled-in broken-down time structure.
@@ -306,6 +316,7 @@ char *strptime(const char *ZRESTRICT s, const char *ZRESTRICT format, struct tm 
 #if defined(_POSIX_TIMERS) || defined(__DOXYGEN__)
 /**
  * @brief Create a per-process timer.
+ * @ingroup posix_option_group_timers
  * @param clockId Clock to base the timer on.
  * @param evp     Notification specification, or NULL for SIGALRM delivery.
  * @param timerid Output: new timer ID.
@@ -315,6 +326,7 @@ int timer_create(clockid_t clockId, struct sigevent *ZRESTRICT evp, timer_t *ZRE
 
 /**
  * @brief Delete a per-process timer.
+ * @ingroup posix_option_group_timers
  * @param timerid Timer to delete.
  * @return 0 on success, or -1 with errno set on failure.
  */
@@ -322,6 +334,7 @@ int timer_delete(timer_t timerid);
 
 /**
  * @brief Get the number of timer overruns since the last timer expiration notification.
+ * @ingroup posix_option_group_timers
  * @param timerid Timer to query.
  * @return Overrun count on success, or -1 with errno set on failure.
  */
@@ -329,6 +342,7 @@ int timer_getoverrun(timer_t timerid);
 
 /**
  * @brief Get the time remaining until the next timer expiration.
+ * @ingroup posix_option_group_timers
  * @param timerid Timer to query.
  * @param its     Output: current timer value and interval.
  * @return 0 on success, or -1 with errno set on failure.
@@ -337,6 +351,7 @@ int timer_gettime(timer_t timerid, struct itimerspec *its);
 
 /**
  * @brief Arm or disarm a per-process timer.
+ * @ingroup posix_option_group_timers
  * @param timerid Timer to set.
  * @param flags   0 for a relative time, @c TIMER_ABSTIME for an absolute time.
  * @param value   New expiration time and interval; set it_value to zero to disarm.
@@ -349,15 +364,18 @@ int timer_settime(timer_t timerid, int flags, const struct itimerspec *value,
 
 #if defined(_XOPEN_SOURCE) || defined(__DOXYGEN__)
 /** @brief Non-zero if Daylight Saving Time is in effect. */
+/** @ingroup posix_option_group_xsi_single_process */
 extern int daylight;
 /** @brief Offset in seconds from UTC for the current timezone. */
+/** @ingroup posix_option_group_xsi_single_process */
 extern long timezone;
 #endif
 
-/** @brief Timezone abbreviations; tzname[0] = standard, tzname[1] = DST. */
+/** @brief Timezone abbreviations; tzname[0] = std, tzname[1] = dst */
+/** @ingroup posix_option_group_c_lang_support */
 extern char *tzname[];
 
-/** @} */ /* posix_time */
+
 
 #ifdef __cplusplus
 }

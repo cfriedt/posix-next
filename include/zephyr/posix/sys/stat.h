@@ -11,9 +11,7 @@
  * @see <a href="https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/sys_stat.h.html">
  *      POSIX.1-2017 &lt;sys/stat.h&gt;</a>
  *
- * @defgroup posix_stat POSIX File Status
  * @ingroup posix_option_group_file_system
- * @{
  */
 
 #ifndef ZEPHYR_INCLUDE_ZEPHYR_POSIX_SYS_STAT_H_
@@ -130,135 +128,134 @@ struct stat {
 #define __stat_defined
 #endif
 
-/** @brief Bit mask for the file type bits in st_mode. */
+/** @brief Bit mask for the file type bits in st_mode.  @ingroup posix_option_group_file_system*/
 #define S_IFMT ZVFS_MODE_IFMT
 
 #if defined(_XOPEN_SOURCE) || defined(__DOXYGEN__)
-/** @brief Block special file. */
+/** @brief Block special file.  @ingroup posix_option_group_file_system*/
 #define S_IFBLK  ZVFS_MODE_IFBLK
-/** @brief Character special file. */
+/** @brief Character special file.  @ingroup posix_option_group_file_system*/
 #define S_IFCHR  ZVFS_MODE_IFCHR
-/** @brief FIFO special file. */
+/** @brief FIFO special file.  @ingroup posix_option_group_file_system*/
 #define S_IFIFO  ZVFS_MODE_IFIFO
-/** @brief Regular file. */
+/** @brief Regular file.  @ingroup posix_option_group_file_system*/
 #define S_IFREG  ZVFS_MODE_IFREG
-/** @brief Directory. */
+/** @brief Directory.  @ingroup posix_option_group_file_system*/
 #define S_IFDIR  ZVFS_MODE_IFDIR
-/** @brief Symbolic link. */
+/** @brief Symbolic link.  @ingroup posix_option_group_file_system*/
 #define S_IFLNK  ZVFS_MODE_IFLNK
-/** @brief Socket. */
+/** @brief Socket.  @ingroup posix_option_group_file_system*/
 #define S_IFSOCK ZVFS_MODE_IFSOCK
-/** @brief Shared memory object (Zephyr extension). */
+/** @brief Shared memory object (Zephyr extension).  @ingroup posix_option_group_file_system*/
 #define S_IFSHM  ZVFS_MODE_IFSHM
 #endif
 
-/** @brief Read, write, execute permission for owner. */
+/** @brief Read, write, execute permission for owner.  @ingroup posix_option_group_file_system*/
 #define S_IRWXU ZVFS_S_IRWXU
-/** @brief Read permission for owner. */
+/** @brief Read permission for owner.  @ingroup posix_option_group_file_system*/
 #define S_IRUSR ZVFS_S_IRUSR
-/** @brief Write permission for owner. */
+/** @brief Write permission for owner.  @ingroup posix_option_group_file_system*/
 #define S_IWUSR ZVFS_S_IWUSR
-/** @brief Execute permission for owner. */
+/** @brief Execute permission for owner.  @ingroup posix_option_group_file_system*/
 #define S_IXUSR ZVFS_S_IXUSR
-/** @brief Read, write, execute permission for group. */
+/** @brief Read, write, execute permission for group.  @ingroup posix_option_group_file_system*/
 #define S_IRWXG ZVFS_S_IRWXG
-/** @brief Read permission for group. */
+/** @brief Read permission for group.  @ingroup posix_option_group_file_system*/
 #define S_IRGRP ZVFS_S_IRGRP
-/** @brief Write permission for group. */
+/** @brief Write permission for group.  @ingroup posix_option_group_file_system*/
 #define S_IWGRP ZVFS_S_IWGRP
-/** @brief Execute permission for group. */
+/** @brief Execute permission for group.  @ingroup posix_option_group_file_system*/
 #define S_IXGRP ZVFS_S_IXGRP
-/** @brief Read, write, execute permission for others. */
+/** @brief Read, write, execute permission for others.  @ingroup posix_option_group_file_system*/
 #define S_IRWXO ZVFS_S_IRWXO
-/** @brief Read permission for others. */
+/** @brief Read permission for others.  @ingroup posix_option_group_file_system*/
 #define S_IROTH ZVFS_S_IROTH
-/** @brief Write permission for others. */
+/** @brief Write permission for others.  @ingroup posix_option_group_file_system*/
 #define S_IWOTH ZVFS_S_IWOTH
-/** @brief Execute permission for others. */
+/** @brief Execute permission for others.  @ingroup posix_option_group_file_system*/
 #define S_IXOTH ZVFS_S_IXOTH
-/** @brief Set-user-ID bit. */
+/** @brief Set-user-ID bit.  @ingroup posix_option_group_file_system*/
 #define S_ISUID ZVFS_S_ISUID
-/** @brief Set-group-ID bit. */
+/** @brief Set-group-ID bit.  @ingroup posix_option_group_file_system*/
 #define S_ISGID ZVFS_S_ISGID
 #if defined(_XOPEN_SOURCE) || defined(__DOXYGEN__)
-/** @brief Sticky bit (restricted deletion). */
+/** @brief Sticky bit (restricted deletion).  @ingroup posix_option_group_file_system*/
 #define S_ISVTX ZVFS_S_ISVTX
 #endif
 
-/** @brief Test whether @p m is a block special file. */
+/** @brief Test whether @p m is a block special file.  @ingroup posix_option_group_file_system*/
 #define S_ISBLK(m)  (((m) & S_IFMT) == S_IFBLK)
 #if defined(_XOPEN_SOURCE) || defined(__DOXYGEN__)
-/** @brief Test whether @p m is a character special file. */
+/** @brief Test whether @p m is a character special file.  @ingroup posix_option_group_file_system*/
 #define S_ISCHR(m)  (((m) & S_IFMT) == S_IFCHR)
-/** @brief Test whether @p m is a directory. */
+/** @brief Test whether @p m is a directory.  @ingroup posix_option_group_file_system*/
 #define S_ISDIR(m)  (((m) & S_IFMT) == S_IFDIR)
-/** @brief Test whether @p m is a FIFO. */
+/** @brief Test whether @p m is a FIFO.  @ingroup posix_option_group_file_system*/
 #define S_ISFIFO(m) (((m) & S_IFMT) == S_IFIFO)
-/** @brief Test whether @p m is a regular file. */
+/** @brief Test whether @p m is a regular file.  @ingroup posix_option_group_file_system*/
 #define S_ISREG(m)  (((m) & S_IFMT) == S_IFREG)
-/** @brief Test whether @p m is a symbolic link. */
+/** @brief Test whether @p m is a symbolic link.  @ingroup posix_option_group_file_system*/
 #define S_ISLNK(m)  (((m) & S_IFMT) == S_IFLNK)
-/** @brief Test whether @p m is a socket. */
+/** @brief Test whether @p m is a socket.  @ingroup posix_option_group_file_system*/
 #define S_ISSOCK(m) (((m) & S_IFMT) == S_IFSOCK)
 #endif
 
 #if defined(_XOPEN_SOURCE) || defined(__DOXYGEN__)
-/** @brief Test whether the file is a message queue (always 0). */
+/** @brief Test whether the file is a message queue (always 0).  @ingroup posix_option_group_file_system*/
 #define S_TYPEISMQ(buf)  (0)
-/** @brief Test whether the file is a semaphore (always 0). */
+/** @brief Test whether the file is a semaphore (always 0).  @ingroup posix_option_group_file_system*/
 #define S_TYPEISSEM(buf) (0)
-/** @brief Test whether the file is a shared memory object. */
+/** @brief Test whether the file is a shared memory object.  @ingroup posix_option_group_file_system*/
 #define S_TYPEISSHM(st)  (((st)->st_mode & S_IFMT) == S_IFSHM)
 #endif
 
 #if defined(_POSIX_TYPED_MEMORY_OBJECTS) || defined(__DOXYGEN__)
-/** @brief Test whether the file is a typed memory object (always 0). */
+/** @brief Test whether the file is a typed memory object (always 0).  @ingroup posix_option_group_file_system*/
 #define S_TYPEISTMO(buf) (0)
 #endif
 
-/** @brief Set st_atim or st_mtim to the current time (utimensat flag). */
+/** @brief Set st_atim or st_mtim to the current time (utimensat flag).  @ingroup posix_option_group_file_system*/
 #define UTIME_NOW  -1
-/** @brief Leave st_atim or st_mtim unchanged (utimensat flag). */
+/** @brief Leave st_atim or st_mtim unchanged (utimensat flag).  @ingroup posix_option_group_file_system*/
 #define UTIME_OMIT -2
 
-/** @brief Change the mode of a file. */
+/** @brief Change the mode of a file.  @ingroup posix_option_group_file_system*/
 int chmod(const char *path, mode_t mode);
-/** @brief Change the mode of an open file. */
+/** @brief Change the mode of an open file.  @ingroup posix_option_group_file_system*/
 int fchmod(int fildes, mode_t mode);
-/** @brief Change the mode of a file relative to a directory descriptor. */
+/** @brief Change the mode of a file relative to a directory descriptor.  @ingroup posix_option_group_file_system*/
 int fchmodat(int fd, const char *path, mode_t mode, int flag);
-/** @brief Get status of an open file. */
+/** @brief Get status of an open file.  @ingroup posix_option_group_file_system*/
 int fstat(int fildes, struct stat *buf);
-/** @brief Get status of a file relative to a directory descriptor. */
+/** @brief Get status of a file relative to a directory descriptor.  @ingroup posix_option_group_file_system*/
 int fstatat(int fd, const char *ZRESTRICT path, struct stat *ZRESTRICT buf, int flag);
-/** @brief Set file access and modification times of an open file (nanosecond resolution). */
+/** @brief Set file access and modification times of an open file (nanosecond resolution).  @ingroup posix_option_group_file_system*/
 int futimens(int fildes, const struct timespec times[2]);
-/** @brief Get status of a file (does not follow symbolic links). */
+/** @brief Get status of a file (does not follow symbolic links).  @ingroup posix_option_group_file_system*/
 int lstat(const char *ZRESTRICT path, struct stat *ZRESTRICT buf);
-/** @brief Create a directory. */
+/** @brief Create a directory.  @ingroup posix_option_group_file_system*/
 int mkdir(const char *path, mode_t mode);
-/** @brief Create a directory relative to a directory descriptor. */
+/** @brief Create a directory relative to a directory descriptor.  @ingroup posix_option_group_file_system*/
 int mkdirat(int fd, const char *path, mode_t mode);
-/** @brief Create a FIFO special file. */
+/** @brief Create a FIFO special file.  @ingroup posix_option_group_file_system*/
 int mkfifo(const char *path, mode_t mode);
-/** @brief Create a FIFO special file relative to a directory descriptor. */
+/** @brief Create a FIFO special file relative to a directory descriptor.  @ingroup posix_option_group_file_system*/
 int mkfifoat(int fd, const char *path, mode_t mode);
 #if defined(_XOPEN_SOURCE) || defined(__DOXYGEN__)
-/** @brief Create a special or regular file (XSI extension). */
+/** @brief Create a special or regular file (XSI extension).  @ingroup posix_option_group_xsi_single_process*/
 int mknod(const char *path, mode_t mode, dev_t dev);
-/** @brief Create a special or regular file relative to a directory descriptor (XSI). */
+/** @brief Create a special or regular file relative to a directory descriptor (XSI).  @ingroup posix_option_group_xsi_single_process*/
 int mknodat(int fd, const char *path, mode_t mode, dev_t dev);
 #endif
 TOOLCHAIN_DISABLE_WARNING(TOOLCHAIN_WARNING_SHADOW);
-/** @brief Get status of a file by path (follows symbolic links). */
+/** @brief Get status of a file by path (follows symbolic links).  @ingroup posix_option_group_file_system*/
 int stat(const char *ZRESTRICT path, struct stat *ZRESTRICT buf);
 TOOLCHAIN_ENABLE_WARNING(TOOLCHAIN_WARNING_SHADOW);
-/** @brief Set the file mode creation mask. */
+/** @brief Set the file mode creation mask.  @ingroup posix_option_group_file_system*/
 mode_t umask(mode_t cmask);
-/** @brief Set file access and modification times relative to a directory descriptor. */
+/** @brief Set file access and modification times relative to a directory descriptor.  @ingroup posix_option_group_file_system*/
 int utimensat(int fd, const char *path, const struct timespec times[2], int flag);
 
-/** @} */ /* posix_stat */
 
 #endif
 
