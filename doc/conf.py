@@ -86,10 +86,12 @@ html_theme_options = {
 html_title = "posix-next"
 html_short_title = "posix-next"
 
-# Reuse Zephyr static assets (logo, favicon, CSS overrides)
+# Reuse Zephyr static assets (logo, favicon, CSS overrides) plus our own
 html_static_path = [
     str(ZEPHYR_BASE / "doc" / "_static"),
+    str(Path(__file__).parent / "_static"),
 ]
+html_css_files = ["posix-next.css"]
 html_logo = str(ZEPHYR_BASE / "doc" / "_static" / "images" / "kite.png")
 html_favicon = str(ZEPHYR_BASE / "doc" / "_static" / "images" / "favicon.png")
 
@@ -130,7 +132,7 @@ doxybridge_projects = {"posix": doxyrunner_projects["posix"]["outdir"]}
 
 # posix_symbols: point to the Doxygen XML directory and the deployed HTML path
 posix_symbols_doxy_xml_dir = str(doxyrunner_projects["posix"]["outdir"] / "xml")
-posix_symbols_doxy_html_url = "doxygen/posix/html"
+posix_symbols_doxy_html_url = "../doxygen/html"
 
 # -- Suppress known warnings from stripped-down build -------------------------
 # :zephyr:code-sample-category: is provided by zephyr.domain which we don't
