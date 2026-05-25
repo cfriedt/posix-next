@@ -6,7 +6,9 @@
  * Structurally equivalent to Zephyr's kconfig.mjs.
  */
 
-const DB_FILE = 'posix-symbols.json';
+// Resolve relative to this module's own URL (_static/posix-symbols.mjs),
+// so the path is correct regardless of which page embeds it.
+const DB_FILE = new URL('posix-symbols.json', import.meta.url).href;
 const RESULTS_PER_PAGE_OPTIONS = [10, 25, 50];
 
 /* search state */

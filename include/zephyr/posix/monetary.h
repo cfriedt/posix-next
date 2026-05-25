@@ -14,9 +14,7 @@
  * @see <a href="https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/monetary.h.html">
  *      POSIX.1-2017 &lt;monetary.h&gt;</a>
  *
- * @defgroup posix_monetary POSIX Monetary Formatting
  * @ingroup posix_option_group_c_lib_ext
- * @{
  */
 
 #ifndef ZEPHYR_INCLUDE_POSIX_MONETARY_H_
@@ -36,6 +34,7 @@ extern "C" {
 
 /**
  * @brief Format a monetary value into a string according to the current locale.
+ * @ingroup posix_option_group_c_lib_ext
  * @param s       Output buffer.
  * @param maxsize Maximum number of bytes (including NUL) to write.
  * @param format  Conversion format string (%-based, similar to printf).
@@ -46,6 +45,7 @@ ssize_t strfmon(char *ZRESTRICT s, size_t maxsize, const char *ZRESTRICT format,
 
 /**
  * @brief Format a monetary value using the specified locale.
+ * @ingroup posix_option_group_c_lib_ext
  * @param s       Output buffer.
  * @param maxsize Maximum number of bytes (including NUL) to write.
  * @param locale  Locale to use for formatting.
@@ -62,6 +62,5 @@ ssize_t strfmon_l(char *ZRESTRICT s, size_t maxsize, locale_t locale,
 
 #endif /* defined(_POSIX_C_SOURCE) || defined(__DOXYGEN__) */
 
-/** @} */
 
 #endif /* ZEPHYR_INCLUDE_POSIX_MONETARY_H_ */

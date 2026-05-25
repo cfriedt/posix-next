@@ -15,9 +15,7 @@
  * @see <a href="https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/limits.h.html">
  *      POSIX.1-2017 &lt;limits.h&gt;</a>
  *
- * @defgroup posix_limits POSIX Limits
  * @ingroup posix_option_group_threads_base
- * @{
  */
 
 #ifndef ZEPHYR_INCLUDE_ZEPHYR_POSIX_POSIX_LIMITS_H_
@@ -33,15 +31,9 @@
 /* clang-format off */
 
 #undef _POSIX_CLOCKRES_MIN
-/** @name Maximum values */
-/** @{ */
 /** @brief Maximum nanoseconds between clock ticks (20 ms). */
 #define _POSIX_CLOCKRES_MIN (20000000L)
-/** @} */
-
 #undef _POSIX_AIO_LISTIO_MAX
-/** @name Minimum values (portable lower bounds guaranteed by POSIX) */
-/** @{ */
 /** @brief Minimum number of I/O operations in a single list I/O call. */
 #define _POSIX_AIO_LISTIO_MAX               (2)
 #undef _POSIX_AIO_MAX
@@ -139,11 +131,8 @@
 #undef _XOPEN_PATH_MAX
 #define _XOPEN_PATH_MAX                     (1024)
 
-/** @} */ /* minimum values */
 
 #undef NL_LANGMAX
-/** @name Other invariant values */
-/** @{ */
 /** @brief Maximum number of bytes in a LANG name. */
 #define NL_LANGMAX (14)
 #undef NL_MSGMAX
@@ -158,11 +147,7 @@
 #undef NZERO
 /** @brief Default process priority (nice value). */
 #define NZERO      (20)
-/** @} */
-
 #undef AIO_LISTIO_MAX
-/** @name Runtime invariant values (actual limits for this implementation) */
-/** @{ */
 #define AIO_LISTIO_MAX                _POSIX_AIO_LISTIO_MAX
 #undef AIO_MAX
 #define AIO_MAX                       _POSIX_AIO_MAX
@@ -232,11 +217,8 @@
 #undef TZNAME_MAX
 #define TZNAME_MAX                    _POSIX_TZNAME_MAX
 
-/** @} */ /* runtime invariant values */
 
 #undef FILESIZEBITS
-/** @name Pathname variable values */
-/** @{ */
 /** @brief Minimum number of bits needed to represent file size. */
 #define FILESIZEBITS             (32)
 #undef POSIX_ALLOC_SIZE_MIN
@@ -252,11 +234,9 @@
 #undef SYMLINK_MAX
 #define SYMLINK_MAX              _POSIX_SYMLINK_MAX
 
-/** @} */ /* pathname variable values */
 
 /* clang-format on */
 
-/** @} */ /* posix_limits */
 
 #endif
 
