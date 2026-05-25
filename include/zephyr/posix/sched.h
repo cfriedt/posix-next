@@ -12,7 +12,7 @@
  *      POSIX.1-2017 &lt;sched.h&gt;</a>
  *
  * @defgroup posix_sched POSIX Scheduling
- * @ingroup posix_option_group_threads_base
+ * @ingroup posix_option_priority_scheduling
  * @{
  */
 
