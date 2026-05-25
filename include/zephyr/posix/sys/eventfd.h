@@ -48,6 +48,7 @@ typedef zvfs_eventfd_t eventfd_t;
  * @param initval Initial counter value.
  * @param flags   0, EFD_SEMAPHORE, EFD_NONBLOCK, or their combination.
  * @return New eventfd file descriptor on success, -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/eventfd.html
  */
 int eventfd(unsigned int initval, int flags);
 
@@ -61,6 +62,7 @@ int eventfd(unsigned int initval, int flags);
  * @param fd    Eventfd file descriptor.
  * @param value Output: counter value read.
  * @return 0 on success, -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/eventfd_read.html
  */
 int eventfd_read(int fd, eventfd_t *value);
 
@@ -73,6 +75,7 @@ int eventfd_read(int fd, eventfd_t *value);
  * @param fd    Eventfd file descriptor.
  * @param value Value to add to the counter.
  * @return 0 on success, -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/eventfd_write.html
  */
 int eventfd_write(int fd, eventfd_t value);
 
