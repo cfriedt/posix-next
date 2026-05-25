@@ -14,9 +14,7 @@
  * @see <a href="https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/netinet_tcp.h.html">
  *      POSIX.1-2017 &lt;netinet/tcp.h&gt;</a>
  *
- * @defgroup posix_netinet_tcp TCP Definitions
  * @ingroup posix_option_group_networking
- * @{
  */
 
 #ifndef ZEPHYR_INCLUDE_POSIX_NETINET_TCP_H_
@@ -28,7 +26,6 @@
 extern "C" {
 #endif
 
-/** @} */
 
 #ifdef __cplusplus
 }

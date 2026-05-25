@@ -18,15 +18,13 @@
  * @see <a href="https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/stropts.h.html">
  *      POSIX.1-2017 &lt;stropts.h&gt;</a>
  *
- * @defgroup posix_stropts XSI STREAMS
  * @ingroup posix_option_group_xsi_streams
- * @{
  */
 
 #ifndef ZEPHYR_INCLUDE_POSIX_STROPTS_H_
 #define ZEPHYR_INCLUDE_POSIX_STROPTS_H_
 
-/** @brief Flag: message carries high-priority data. */
+/** @brief Flag: message carries high-priority data.  @ingroup posix_option_xopen_streams*/
 #define RS_HIPRI BIT(0)
 
 #ifdef __cplusplus
@@ -42,6 +40,7 @@ struct strbuf {
 
 /**
  * @brief Send a STREAMS message downstream.
+ * @ingroup posix_option_xopen_streams
  * @param fildes  STREAMS file descriptor.
  * @param ctlptr  Control part of the message, or NULL.
  * @param dataptr Data part of the message, or NULL.
@@ -52,6 +51,7 @@ int putmsg(int fildes, const struct strbuf *ctlptr, const struct strbuf *dataptr
 
 /**
  * @brief Detach a STREAMS-based file descriptor from a mount point.
+ * @ingroup posix_option_xopen_streams
  * @param path Pathname previously used with fattach().
  * @return 0 on success, or -1 with errno set on failure.
  */
@@ -59,6 +59,7 @@ int fdetach(const char *path);
 
 /**
  * @brief Attach a STREAMS file descriptor to a pathname in the filesystem.
+ * @ingroup posix_option_xopen_streams
  * @param fildes STREAMS file descriptor to attach.
  * @param path   Existing pathname to attach the STREAMS fd to.
  * @return 0 on success, or -1 with errno set on failure.
@@ -67,6 +68,7 @@ int fattach(int fildes, const char *path);
 
 /**
  * @brief Receive the next message from a STREAMS file descriptor.
+ * @ingroup posix_option_xopen_streams
  * @param fildes  STREAMS file descriptor.
  * @param ctlptr  Output: control part buffer, or NULL.
  * @param dataptr Output: data part buffer, or NULL.
@@ -77,6 +79,7 @@ int getmsg(int fildes, struct strbuf *ctlptr, struct strbuf *dataptr, int *flags
 
 /**
  * @brief Receive a priority-banded message from a STREAMS file descriptor.
+ * @ingroup posix_option_xopen_streams
  * @param fildes  STREAMS file descriptor.
  * @param ctlptr  Output: control part buffer, or NULL.
  * @param dataptr Output: data part buffer, or NULL.
@@ -88,12 +91,12 @@ int getpmsg(int fildes, struct strbuf *ctlptr, struct strbuf *dataptr, int *band
 
 /**
  * @brief Test whether a file descriptor refers to a STREAMS file.
+ * @ingroup posix_option_xopen_streams
  * @param fildes File descriptor to test.
  * @return 1 if @p fildes is a STREAMS file, 0 if not, -1 with errno set on error.
  */
 int isastream(int fildes);
 
-/** @} */
 
 #ifdef __cplusplus
 }
