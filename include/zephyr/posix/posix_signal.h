@@ -6,7 +6,7 @@
 
 /**
  * @file
- * @brief POSIX signal types and functions (<signal.h>)
+ * @brief \<signal.h\>: POSIX signal types and functions
  *
  * Provides signal numbers, signal sets, signal actions, real-time signal
  * extensions, and the full set of POSIX signal-management functions.
