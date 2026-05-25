@@ -15,9 +15,7 @@
  * @see <a href="https://pubs.opengroup.org/onlinepubs/9699919799/functions/sysconf.html">
  *      POSIX.1-2017 sysconf()</a>
  *
- * @defgroup posix_sysconf POSIX Runtime Configuration
  * @ingroup posix_option_group_single_process
- * @{
  */
 
 #ifndef ZEPHYR_INCLUDE_POSIX_SYS_SYSCONF_H_
@@ -343,8 +341,6 @@ enum {
 /* clang-format on */
 
 #endif
-
-/** @} */
 
 #ifdef __cplusplus
 }
