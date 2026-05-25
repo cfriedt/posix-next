@@ -55,12 +55,16 @@ For that reason, POSIX defined the following :ref:`Application Environment Profi
 as part of `IEEE 1003.13-2003`_ (also known as POSIX.13-2003). Each AEP adds incrementally more
 features over the required :ref:`POSIX System Interfaces <posix_system_interfaces>`.
 
-..  figure:: aep.svg
-    :align: center
-    :scale: 150%
-    :alt: POSIX Application Environment Profiles (AEP)
+.. raw:: html
 
-    POSIX Application Environment Profiles (AEP)
+   <div style="text-align: center; margin: 1.5em 0;">
+     <object data="aep.svg" type="image/svg+xml"
+             width="340" height="340"
+             aria-label="POSIX Application Environment Profiles (AEP)">
+       <img src="aep.svg" alt="POSIX Application Environment Profiles (AEP)" />
+     </object>
+     <p class="caption">POSIX Application Environment Profiles (AEP)</p>
+   </div>
 
 * Minimal Realtime System Profile (:ref:`PSE51 <posix_aep_pse51>`)
 * Realtime Controller System Profile (:ref:`PSE52 <posix_aep_pse52>`)
