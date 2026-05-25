@@ -52,7 +52,8 @@ function doxyUrl(refid) {
     const sep = refid.lastIndexOf('_1');
     if (sep < 0) return null;
     const file = refid.substring(0, sep) + '.html';
-    return `${doxyHtmlUrl}/${file}#${refid}`;
+    const anchor = refid.substring(sep + 2);
+    return `${doxyHtmlUrl}/${file}#${anchor}`;
 }
 
 /**
