@@ -19,6 +19,9 @@ sys.path.insert(0, str(ZEPHYR_BASE / "scripts"))
 sys.path.insert(0, str(ZEPHYR_BASE / "scripts" / "kconfig"))
 sys.path.insert(0, str(ZEPHYR_BASE / "scripts" / "west_commands"))
 
+# posix_symbols extension (local)
+sys.path.insert(0, str(Path(__file__).parent / "extensions"))
+
 # -- Project -------------------------------------------------------------------
 
 project = "posix-next"
@@ -39,10 +42,13 @@ extensions = [
     # Zephyr extensions needed by the POSIX RST content
     "zephyr.kconfig",       # :kconfig:option: role
     "zephyr.link-roles",    # :zephyr:file:, etc.
-    # Doxygen integration
+    # Doxygen integration — doxyrunner MUST come before posix_symbols so that
+    # Doxygen XML exists when posix_symbols parses it (env-before-read-docs).
     "zephyr.doxyrunner",    # runs Doxygen before Sphinx
     "zephyr.doxybridge",    # .. doxygengroup:: etc. directives
     "zephyr.doxytooltip",   # hover tooltips on Doxygen symbols
+    # POSIX symbol search page (local extension)
+    "posix_symbols",
     # Quality-of-life
     "sphinx_copybutton",
     "sphinx_tabs.tabs",
@@ -121,6 +127,10 @@ doxyrunner_projects = {
     },
 }
 doxybridge_projects = {"posix": doxyrunner_projects["posix"]["outdir"]}
+
+# posix_symbols: point to the Doxygen XML directory and the deployed HTML path
+posix_symbols_doxy_xml_dir = str(doxyrunner_projects["posix"]["outdir"] / "xml")
+posix_symbols_doxy_html_url = "doxygen/posix/html"
 
 # -- Suppress known warnings from stripped-down build -------------------------
 # :zephyr:code-sample-category: is provided by zephyr.domain which we don't
