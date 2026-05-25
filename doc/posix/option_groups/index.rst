@@ -17,11 +17,11 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_BARRIERS`.
    :header: API, Supported
    :widths: 50,10
 
-    pthread_barrier_destroy(),yes
-    pthread_barrier_init(),yes
-    pthread_barrier_wait(),yes
-    pthread_barrierattr_destroy(),yes
-    pthread_barrierattr_init(),yes
+    :c:func:`pthread_barrier_destroy`,yes
+    :c:func:`pthread_barrier_init`,yes
+    :c:func:`pthread_barrier_wait`,yes
+    :c:func:`pthread_barrierattr_destroy`,yes
+    :c:func:`pthread_barrierattr_init`,yes
 
 .. doxygengroup:: posix_option_group_barriers
    :project: posix
@@ -41,8 +41,8 @@ The ``POSIX_C_LANG_JUMP`` Option Group is included in the ISO C standard.
    :header: API, Supported
    :widths: 50,10
 
-    setjmp(), yes
-    longjmp(), yes
+    :c:func:`setjmp`, yes
+    :c:func:`longjmp`, yes
 
 .. _posix_option_group_c_lang_math:
 
@@ -86,13 +86,13 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_C_LANG_SUPPORT_R`.
    :header: API, Supported
    :widths: 50,10
 
-    asctime_r(),yes
-    ctime_r(),yes
-    gmtime_r(),yes
-    localtime_r(),yes
-    rand_r(),yes
-    strerror_r(),yes
-    strtok_r(),yes
+    :c:func:`asctime_r`,yes
+    :c:func:`ctime_r`,yes
+    :c:func:`gmtime_r`,yes
+    :c:func:`localtime_r`,yes
+    :c:func:`rand_r`,yes
+    :c:func:`strerror_r`,yes
+    :c:func:`strtok_r`,yes
 
 .. doxygengroup:: posix_option_group_c_lang_support_r
    :project: posix
@@ -108,21 +108,21 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_C_LIB_EXT`.
    :header: API, Supported
    :widths: 50,10
 
-    fnmatch(), yes
-    getopt(), yes
-    getsubopt(),
+    :c:func:`fnmatch`, yes
+    :c:func:`getopt`, yes
+    :c:func:`getsubopt`,
     optarg, yes
     opterr, yes
     optind, yes
     optopt, yes
-    stpcpy(),
-    stpncpy(),
-    strcasecmp(),
-    strdup(),
-    strfmon(),
-    strncasecmp(), yes
-    strndup(),
-    strnlen(), yes
+    :c:func:`stpcpy`,
+    :c:func:`stpncpy`,
+    :c:func:`strcasecmp`,
+    :c:func:`strdup`,
+    :c:func:`strfmon`,
+    :c:func:`strncasecmp`, yes
+    :c:func:`strndup`,
+    :c:func:`strnlen`, yes
 
 .. doxygengroup:: posix_option_group_c_lib_ext
    :project: posix
@@ -138,9 +138,9 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_CLOCK_SELECTION`.
    :header: API, Supported
    :widths: 50,10
 
-    pthread_condattr_getclock(),yes
-    pthread_condattr_setclock(),yes
-    clock_nanosleep(),yes
+    :c:func:`pthread_condattr_getclock`,yes
+    :c:func:`pthread_condattr_setclock`,yes
+    :c:func:`clock_nanosleep`,yes
 
 .. doxygengroup:: posix_option_group_clock_selection
    :project: posix
@@ -160,55 +160,55 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_DEVICE_IO`.
    :header: API, Supported
    :widths: 50,10
 
-    FD_CLR(),yes
-    FD_ISSET(),yes
-    FD_SET(),yes
-    FD_ZERO(),yes
-    clearerr(),yes
-    close(),yes
-    fclose(),yes
-    fdopen(),yes
-    feof(),yes
-    ferror(),yes
-    fflush(),yes
-    fgetc(),yes
-    fgets(),yes
-    fileno(),yes
-    fopen(),yes
-    fprintf(),yes
-    fputc(),yes
-    fputs(),yes
-    fread(),yes
-    freopen(),yes
-    fscanf(),yes
-    fwrite(),yes
-    getc(),yes
-    getchar(),yes
-    gets(),yes
-    open(),yes
-    perror(),yes
-    poll(),yes
-    printf(),yes
-    pread(),yes
-    pselect(),yes
-    putc(),yes
-    putchar(),yes
-    puts(),yes
-    pwrite(),yes
-    read(),yes
-    scanf(),yes
-    select(),yes
-    setbuf(),yes
-    setvbuf(),yes
+    :c:func:`FD_CLR`,yes
+    :c:func:`FD_ISSET`,yes
+    :c:func:`FD_SET`,yes
+    :c:func:`FD_ZERO`,yes
+    :c:func:`clearerr`,yes
+    :c:func:`close`,yes
+    :c:func:`fclose`,yes
+    :c:func:`fdopen`,yes
+    :c:func:`feof`,yes
+    :c:func:`ferror`,yes
+    :c:func:`fflush`,yes
+    :c:func:`fgetc`,yes
+    :c:func:`fgets`,yes
+    :c:func:`fileno`,yes
+    :c:func:`fopen`,yes
+    :c:func:`fprintf`,yes
+    :c:func:`fputc`,yes
+    :c:func:`fputs`,yes
+    :c:func:`fread`,yes
+    :c:func:`freopen`,yes
+    :c:func:`fscanf`,yes
+    :c:func:`fwrite`,yes
+    :c:func:`getc`,yes
+    :c:func:`getchar`,yes
+    :c:func:`gets`,yes
+    :c:func:`open`,yes
+    :c:func:`perror`,yes
+    :c:func:`poll`,yes
+    :c:func:`printf`,yes
+    :c:func:`pread`,yes
+    :c:func:`pselect`,yes
+    :c:func:`putc`,yes
+    :c:func:`putchar`,yes
+    :c:func:`puts`,yes
+    :c:func:`pwrite`,yes
+    :c:func:`read`,yes
+    :c:func:`scanf`,yes
+    :c:func:`select`,yes
+    :c:func:`setbuf`,yes
+    :c:func:`setvbuf`,yes
     stderr,yes
     stdin,yes
     stdout,yes
-    ungetc(),yes
-    vfprintf(),yes
-    vfscanf(),yes
-    vprintf(),yes
-    vscanf(),yes
-    write(),yes
+    :c:func:`ungetc`,yes
+    :c:func:`vfprintf`,yes
+    :c:func:`vfscanf`,yes
+    :c:func:`vprintf`,yes
+    :c:func:`vscanf`,yes
+    :c:func:`write`,yes
 
 .. doxygengroup:: posix_option_group_device_io
    :project: posix
@@ -224,18 +224,18 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_FD_MGMT`.
    :header: API, Supported
    :widths: 50,10
 
-    dup(),
-    dup2(),
-    fcntl(),
-    fgetpos(),
-    fseek(),
-    fseeko(),
-    fsetpos(),
-    ftell(),
-    ftello(),
-    ftruncate(),yes
-    lseek(),
-    rewind(),
+    :c:func:`dup`,
+    :c:func:`dup2`,
+    :c:func:`fcntl`,
+    :c:func:`fgetpos`,
+    :c:func:`fseek`,
+    :c:func:`fseeko`,
+    :c:func:`fsetpos`,
+    :c:func:`ftell`,
+    :c:func:`ftello`,
+    :c:func:`ftruncate`,yes
+    :c:func:`lseek`,
+    :c:func:`rewind`,
 
 .. doxygengroup:: posix_option_group_fd_mgmt
    :project: posix
@@ -249,13 +249,13 @@ POSIX_FILE_LOCKING
    :header: API, Supported
    :widths: 50,10
 
-    flockfile(),
-    ftrylockfile(),
-    funlockfile(),
-    getc_unlocked(),
-    getchar_unlocked(),
-    putc_unlocked(),
-    putchar_unlocked(),
+    :c:func:`flockfile`,
+    :c:func:`ftrylockfile`,
+    :c:func:`funlockfile`,
+    :c:func:`getc_unlocked`,
+    :c:func:`getchar_unlocked`,
+    :c:func:`putc_unlocked`,
+    :c:func:`putchar_unlocked`,
 
 .. doxygengroup:: posix_option_group_file_locking
    :project: posix
@@ -271,32 +271,32 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_FILE_SYSTEM`.
    :header: API, Supported
    :widths: 50,10
 
-    access(),
-    chdir(),
-    closedir(), yes
-    creat(),
-    fchdir(),
-    fpathconf(),
-    fstat(), yes
-    fstatvfs(),
-    getcwd(),
-    link(),
-    mkdir(), yes
-    mkstemp(),
-    opendir(), yes
-    pathconf(),
-    readdir(), yes
-    remove(), yes
-    rename(), yes
-    rewinddir(),
-    rmdir(), yes
-    stat(), yes
-    statvfs(),
-    tmpfile(),
-    tmpnam(),
-    truncate(),
-    unlink(), yes
-    utime(),
+    :c:func:`access`,
+    :c:func:`chdir`,
+    :c:func:`closedir`, yes
+    :c:func:`creat`,
+    :c:func:`fchdir`,
+    :c:func:`fpathconf`,
+    :c:func:`fstat`, yes
+    :c:func:`fstatvfs`,
+    :c:func:`getcwd`,
+    :c:func:`link`,
+    :c:func:`mkdir`, yes
+    :c:func:`mkstemp`,
+    :c:func:`opendir`, yes
+    :c:func:`pathconf`,
+    :c:func:`readdir`, yes
+    :c:func:`remove`, yes
+    :c:func:`rename`, yes
+    :c:func:`rewinddir`,
+    :c:func:`rmdir`, yes
+    :c:func:`stat`, yes
+    :c:func:`statvfs`,
+    :c:func:`tmpfile`,
+    :c:func:`tmpnam`,
+    :c:func:`truncate`,
+    :c:func:`unlink`, yes
+    :c:func:`utime`,
 
 .. doxygengroup:: posix_option_group_file_system
    :project: posix
@@ -312,7 +312,7 @@ Enable this option with :kconfig:option:`CONFIG_POSIX_FILE_SYSTEM_R`.
    :header: API, Supported
    :widths: 50,10
 
-    readdir_r(), yes
+    :c:func:`readdir_r`, yes
 
 .. _posix_option_group_mapped_files:
 
@@ -325,9 +325,9 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_MAPPED_FILES`.
    :header: API, Supported
    :widths: 50,10
 
-    mmap(),yes
-    msync(),yes
-    munmap(),yes
+    :c:func:`mmap`,yes
+    :c:func:`msync`,yes
+    :c:func:`munmap`,yes
 
 .. doxygengroup:: posix_option_group_mapped_files
    :project: posix
@@ -343,7 +343,7 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_MEMORY_PROTECTION`.
    :header: API, Supported
    :widths: 50,10
 
-    mprotect(), yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`mprotect`, yes :ref:`†<posix_undefined_behaviour>`
 
 .. _posix_option_group_multi_process:
 
@@ -356,30 +356,30 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_MULTI_PROCESS`.
    :header: API, Supported
    :widths: 50,10
 
-    _Exit(), yes
-    _exit(), yes
-    assert(), yes
-    atexit(),:ref:`†<posix_undefined_behaviour>`
-    clock(),
-    execl(),:ref:`†<posix_undefined_behaviour>`
-    execle(),:ref:`†<posix_undefined_behaviour>`
-    execlp(),:ref:`†<posix_undefined_behaviour>`
-    execv(),:ref:`†<posix_undefined_behaviour>`
-    execve(),:ref:`†<posix_undefined_behaviour>`
-    execvp(),:ref:`†<posix_undefined_behaviour>`
-    exit(), yes
-    fork(),:ref:`†<posix_undefined_behaviour>`
-    getpgrp(),:ref:`†<posix_undefined_behaviour>`
-    getpgid(),:ref:`†<posix_undefined_behaviour>`
-    getpid(), yes :ref:`†<posix_undefined_behaviour>`
-    getppid(),:ref:`†<posix_undefined_behaviour>`
-    getsid(),:ref:`†<posix_undefined_behaviour>`
-    setsid(),:ref:`†<posix_undefined_behaviour>`
-    sleep(),yes
-    times(),
-    wait(),:ref:`†<posix_undefined_behaviour>`
-    waitid(),:ref:`†<posix_undefined_behaviour>`
-    waitpid(),:ref:`†<posix_undefined_behaviour>`
+    :c:func:`_Exit`, yes
+    :c:func:`_exit`, yes
+    :c:func:`assert`, yes
+    :c:func:`atexit`,:ref:`†<posix_undefined_behaviour>`
+    :c:func:`clock`,
+    :c:func:`execl`,:ref:`†<posix_undefined_behaviour>`
+    :c:func:`execle`,:ref:`†<posix_undefined_behaviour>`
+    :c:func:`execlp`,:ref:`†<posix_undefined_behaviour>`
+    :c:func:`execv`,:ref:`†<posix_undefined_behaviour>`
+    :c:func:`execve`,:ref:`†<posix_undefined_behaviour>`
+    :c:func:`execvp`,:ref:`†<posix_undefined_behaviour>`
+    :c:func:`exit`, yes
+    :c:func:`fork`,:ref:`†<posix_undefined_behaviour>`
+    :c:func:`getpgrp`,:ref:`†<posix_undefined_behaviour>`
+    :c:func:`getpgid`,:ref:`†<posix_undefined_behaviour>`
+    :c:func:`getpid`, yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`getppid`,:ref:`†<posix_undefined_behaviour>`
+    :c:func:`getsid`,:ref:`†<posix_undefined_behaviour>`
+    :c:func:`setsid`,:ref:`†<posix_undefined_behaviour>`
+    :c:func:`sleep`,yes
+    :c:func:`times`,
+    :c:func:`wait`,:ref:`†<posix_undefined_behaviour>`
+    :c:func:`waitid`,:ref:`†<posix_undefined_behaviour>`
+    :c:func:`waitpid`,:ref:`†<posix_undefined_behaviour>`
 
 .. doxygengroup:: posix_option_group_multi_process
    :project: posix
@@ -398,59 +398,59 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_NETWORKING`.
    :header: API, Supported
    :widths: 50,10
 
-    accept(),yes
-    bind(),yes
-    connect(),yes
-    endhostent(),yes
-    endnetent(),yes
-    endprotoent(),yes
-    endservent(),yes
-    freeaddrinfo(),yes
-    gai_strerror(),yes
-    getaddrinfo(),yes
-    gethostent(),yes
-    gethostname(),yes
-    getnameinfo(),yes
-    getnetbyaddr(),yes
-    getnetbyname(),yes
-    getnetent(),yes
-    getpeername(),yes
-    getprotobyname(),yes
-    getprotobynumber(),yes
-    getprotoent(),yes
-    getservbyname(),yes
-    getservbyport(),yes
-    getservent(),yes
-    getsockname(),yes
-    getsockopt(),yes
-    htonl(),yes
-    htons(),yes
-    if_freenameindex(),yes
-    if_indextoname(),yes
-    if_nameindex(),yes
-    if_nametoindex(),yes
-    inet_addr(),yes
-    inet_ntoa(),yes
-    inet_ntop(),yes
-    inet_pton(),yes
-    listen(),yes
-    ntohl(),yes
-    ntohs(),yes
-    recv(),yes
-    recvfrom(),yes
-    recvmsg(),yes
-    send(),yes
-    sendmsg(),yes
-    sendto(),yes
-    sethostent(),yes
-    setnetent(),yes
-    setprotoent(),yes
-    setservent(),yes
-    setsockopt(),yes
-    shutdown(),yes
-    socket(),yes
-    sockatmark(),yes :ref:`†<posix_undefined_behaviour>`
-    socketpair(),yes
+    :c:func:`accept`,yes
+    :c:func:`bind`,yes
+    :c:func:`connect`,yes
+    :c:func:`endhostent`,yes
+    :c:func:`endnetent`,yes
+    :c:func:`endprotoent`,yes
+    :c:func:`endservent`,yes
+    :c:func:`freeaddrinfo`,yes
+    :c:func:`gai_strerror`,yes
+    :c:func:`getaddrinfo`,yes
+    :c:func:`gethostent`,yes
+    :c:func:`gethostname`,yes
+    :c:func:`getnameinfo`,yes
+    :c:func:`getnetbyaddr`,yes
+    :c:func:`getnetbyname`,yes
+    :c:func:`getnetent`,yes
+    :c:func:`getpeername`,yes
+    :c:func:`getprotobyname`,yes
+    :c:func:`getprotobynumber`,yes
+    :c:func:`getprotoent`,yes
+    :c:func:`getservbyname`,yes
+    :c:func:`getservbyport`,yes
+    :c:func:`getservent`,yes
+    :c:func:`getsockname`,yes
+    :c:func:`getsockopt`,yes
+    :c:func:`htonl`,yes
+    :c:func:`htons`,yes
+    :c:func:`if_freenameindex`,yes
+    :c:func:`if_indextoname`,yes
+    :c:func:`if_nameindex`,yes
+    :c:func:`if_nametoindex`,yes
+    :c:func:`inet_addr`,yes
+    :c:func:`inet_ntoa`,yes
+    :c:func:`inet_ntop`,yes
+    :c:func:`inet_pton`,yes
+    :c:func:`listen`,yes
+    :c:func:`ntohl`,yes
+    :c:func:`ntohs`,yes
+    :c:func:`recv`,yes
+    :c:func:`recvfrom`,yes
+    :c:func:`recvmsg`,yes
+    :c:func:`send`,yes
+    :c:func:`sendmsg`,yes
+    :c:func:`sendto`,yes
+    :c:func:`sethostent`,yes
+    :c:func:`setnetent`,yes
+    :c:func:`setprotoent`,yes
+    :c:func:`setservent`,yes
+    :c:func:`setsockopt`,yes
+    :c:func:`shutdown`,yes
+    :c:func:`socket`,yes
+    :c:func:`sockatmark`,yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`socketpair`,yes
 
 .. _posix_option_group_pipe:
 
@@ -461,7 +461,7 @@ POSIX_PIPE
    :header: API, Supported
    :widths: 50,10
 
-    pipe(),
+    :c:func:`pipe`,
 
 .. doxygengroup:: posix_option_group_pipe
    :project: posix
@@ -477,9 +477,9 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_REALTIME_SIGNALS`.
    :header: API, Supported
    :widths: 50,10
 
-    sigqueue(),
-    sigtimedwait(),
-    sigwaitinfo(),
+    :c:func:`sigqueue`,
+    :c:func:`sigtimedwait`,
+    :c:func:`sigwaitinfo`,
 
 ..
    this link is "deprecated" - mainly left here so that older links still work
@@ -500,17 +500,17 @@ Enable this option with :kconfig:option:`CONFIG_POSIX_RW_LOCKS`.
    :header: API, Supported
    :widths: 50,10
 
-    pthread_rwlock_destroy(),yes
-    pthread_rwlock_init(),yes
-    pthread_rwlock_rdlock(),yes
-    pthread_rwlock_tryrdlock(),yes
-    pthread_rwlock_trywrlock(),yes
-    pthread_rwlock_unlock(),yes
-    pthread_rwlock_wrlock(),yes
-    pthread_rwlockattr_destroy(),yes
-    pthread_rwlockattr_getpshared(),yes
-    pthread_rwlockattr_init(),yes
-    pthread_rwlockattr_setpshared(),yes
+    :c:func:`pthread_rwlock_destroy`,yes
+    :c:func:`pthread_rwlock_init`,yes
+    :c:func:`pthread_rwlock_rdlock`,yes
+    :c:func:`pthread_rwlock_tryrdlock`,yes
+    :c:func:`pthread_rwlock_trywrlock`,yes
+    :c:func:`pthread_rwlock_unlock`,yes
+    :c:func:`pthread_rwlock_wrlock`,yes
+    :c:func:`pthread_rwlockattr_destroy`,yes
+    :c:func:`pthread_rwlockattr_getpshared`,yes
+    :c:func:`pthread_rwlockattr_init`,yes
+    :c:func:`pthread_rwlockattr_setpshared`,yes
 
 .. doxygengroup:: posix_option_group_rw_locks
    :project: posix
@@ -526,15 +526,15 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_SEMAPHORES`.
    :header: API, Supported
    :widths: 50,10
 
-    sem_close(),yes
-    sem_destroy(),yes
-    sem_getvalue(),yes
-    sem_init(),yes
-    sem_open(),yes
-    sem_post(),yes
-    sem_trywait(),yes
-    sem_unlink(),yes
-    sem_wait(),yes
+    :c:func:`sem_close`,yes
+    :c:func:`sem_destroy`,yes
+    :c:func:`sem_getvalue`,yes
+    :c:func:`sem_init`,yes
+    :c:func:`sem_open`,yes
+    :c:func:`sem_post`,yes
+    :c:func:`sem_trywait`,yes
+    :c:func:`sem_unlink`,yes
+    :c:func:`sem_wait`,yes
 
 .. _posix_option_group_signal_jump:
 
@@ -545,8 +545,8 @@ POSIX_SIGNAL_JUMP
    :header: API, Supported
    :widths: 50,10
 
-    siglongjmp(),
-    sigsetjmp(),
+    :c:func:`siglongjmp`,
+    :c:func:`sigsetjmp`,
 
 .. _posix_option_group_signals:
 
@@ -567,23 +567,23 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_SIGNALS`.
    :header: API, Supported
    :widths: 50,10
 
-    abort(),yes :ref:`†<posix_undefined_behaviour>`
-    alarm(),yes :ref:`†<posix_undefined_behaviour>`
-    kill(),yes :ref:`†<posix_undefined_behaviour>`
-    pause(),yes :ref:`†<posix_undefined_behaviour>`
-    raise(),yes :ref:`†<posix_undefined_behaviour>`
-    sigaction(),yes :ref:`†<posix_undefined_behaviour>`
-    sigaddset(),yes
-    sigdelset(),yes
-    sigemptyset(),yes
-    sigfillset(),yes
-    sigismember(),yes
-    signal(),yes :ref:`†<posix_undefined_behaviour>`
-    sigpending(),yes :ref:`†<posix_undefined_behaviour>`
-    sigprocmask(),yes
-    sigsuspend(),yes :ref:`†<posix_undefined_behaviour>`
-    sigwait(),yes :ref:`†<posix_undefined_behaviour>`
-    strsignal(),yes
+    :c:func:`abort`,yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`alarm`,yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`kill`,yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`pause`,yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`raise`,yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`sigaction`,yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`sigaddset`,yes
+    :c:func:`sigdelset`,yes
+    :c:func:`sigemptyset`,yes
+    :c:func:`sigfillset`,yes
+    :c:func:`sigismember`,yes
+    :c:func:`signal`,yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`sigpending`,yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`sigprocmask`,yes
+    :c:func:`sigsuspend`,yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`sigwait`,yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`strsignal`,yes
 
 .. doxygengroup:: posix_option_group_signals
    :project: posix
@@ -602,14 +602,14 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_SINGLE_PROCESS`.
    :header: API, Supported
    :widths: 50,10
 
-    confstr(),yes
+    :c:func:`confstr`,yes
     environ,yes
     errno,yes
-    getenv(),yes
-    setenv(),yes
-    sysconf(),yes
-    uname(),yes
-    unsetenv(),yes
+    :c:func:`getenv`,yes
+    :c:func:`setenv`,yes
+    :c:func:`sysconf`,yes
+    :c:func:`uname`,yes
+    :c:func:`unsetenv`,yes
 
 .. doxygengroup:: posix_option_group_single_process
    :project: posix
@@ -625,11 +625,11 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_SPIN_LOCKS`.
    :header: API, Supported
    :widths: 50,10
 
-    pthread_spin_destroy(),yes
-    pthread_spin_init(),yes
-    pthread_spin_lock(),yes
-    pthread_spin_trylock(),yes
-    pthread_spin_unlock(),yes
+    :c:func:`pthread_spin_destroy`,yes
+    :c:func:`pthread_spin_init`,yes
+    :c:func:`pthread_spin_lock`,yes
+    :c:func:`pthread_spin_trylock`,yes
+    :c:func:`pthread_spin_unlock`,yes
 
 .. doxygengroup:: posix_option_group_spin_locks
    :project: posix
@@ -650,55 +650,55 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_THREADS`.
    :header: API, Supported
    :widths: 50,10
 
-    pthread_atfork(),yes
-    pthread_attr_destroy(),yes
-    pthread_attr_getdetachstate(),yes
-    pthread_attr_getschedparam(),yes
-    pthread_attr_init(),yes
-    pthread_attr_setdetachstate(),yes
-    pthread_attr_setschedparam(),yes
-    pthread_barrier_destroy(),yes
-    pthread_barrier_init(),yes
-    pthread_barrier_wait(),yes
-    pthread_barrierattr_destroy(),yes
-    pthread_barrierattr_getpshared(),yes
-    pthread_barrierattr_init(),yes
-    pthread_barrierattr_setpshared(),yes
-    pthread_cancel(),yes
-    pthread_cleanup_pop(),yes
-    pthread_cleanup_push(),yes
-    pthread_cond_broadcast(),yes
-    pthread_cond_destroy(),yes
-    pthread_cond_init(),yes
-    pthread_cond_signal(),yes
-    pthread_cond_timedwait(),yes
-    pthread_cond_wait(),yes
-    pthread_condattr_destroy(),yes
-    pthread_condattr_init(),yes
-    pthread_create(),yes
-    pthread_detach(),yes
-    pthread_equal(),yes
-    pthread_exit(),yes
-    pthread_getspecific(),yes
-    pthread_join(),yes
-    pthread_key_create(),yes
-    pthread_key_delete(),yes
-    pthread_kill(),
-    pthread_mutex_destroy(),yes
-    pthread_mutex_init(),yes
-    pthread_mutex_lock(),yes
-    pthread_mutex_trylock(),yes
-    pthread_mutex_unlock(),yes
-    pthread_mutexattr_destroy(),yes
-    pthread_mutexattr_init(),yes
-    pthread_once(),yes
-    pthread_self(),yes
-    pthread_setcancelstate(),yes
-    pthread_setcanceltype(),yes
-    pthread_setspecific(),yes
-    pthread_sigmask(),yes
-    pthread_testcancel(),yes
-    sched_yield(),yes
+    :c:func:`pthread_atfork`,yes
+    :c:func:`pthread_attr_destroy`,yes
+    :c:func:`pthread_attr_getdetachstate`,yes
+    :c:func:`pthread_attr_getschedparam`,yes
+    :c:func:`pthread_attr_init`,yes
+    :c:func:`pthread_attr_setdetachstate`,yes
+    :c:func:`pthread_attr_setschedparam`,yes
+    :c:func:`pthread_barrier_destroy`,yes
+    :c:func:`pthread_barrier_init`,yes
+    :c:func:`pthread_barrier_wait`,yes
+    :c:func:`pthread_barrierattr_destroy`,yes
+    :c:func:`pthread_barrierattr_getpshared`,yes
+    :c:func:`pthread_barrierattr_init`,yes
+    :c:func:`pthread_barrierattr_setpshared`,yes
+    :c:func:`pthread_cancel`,yes
+    :c:func:`pthread_cleanup_pop`,yes
+    :c:func:`pthread_cleanup_push`,yes
+    :c:func:`pthread_cond_broadcast`,yes
+    :c:func:`pthread_cond_destroy`,yes
+    :c:func:`pthread_cond_init`,yes
+    :c:func:`pthread_cond_signal`,yes
+    :c:func:`pthread_cond_timedwait`,yes
+    :c:func:`pthread_cond_wait`,yes
+    :c:func:`pthread_condattr_destroy`,yes
+    :c:func:`pthread_condattr_init`,yes
+    :c:func:`pthread_create`,yes
+    :c:func:`pthread_detach`,yes
+    :c:func:`pthread_equal`,yes
+    :c:func:`pthread_exit`,yes
+    :c:func:`pthread_getspecific`,yes
+    :c:func:`pthread_join`,yes
+    :c:func:`pthread_key_create`,yes
+    :c:func:`pthread_key_delete`,yes
+    :c:func:`pthread_kill`,
+    :c:func:`pthread_mutex_destroy`,yes
+    :c:func:`pthread_mutex_init`,yes
+    :c:func:`pthread_mutex_lock`,yes
+    :c:func:`pthread_mutex_trylock`,yes
+    :c:func:`pthread_mutex_unlock`,yes
+    :c:func:`pthread_mutexattr_destroy`,yes
+    :c:func:`pthread_mutexattr_init`,yes
+    :c:func:`pthread_once`,yes
+    :c:func:`pthread_self`,yes
+    :c:func:`pthread_setcancelstate`,yes
+    :c:func:`pthread_setcanceltype`,yes
+    :c:func:`pthread_setspecific`,yes
+    :c:func:`pthread_sigmask`,yes
+    :c:func:`pthread_testcancel`,yes
+    :c:func:`sched_yield`,yes
 
 .. doxygengroup:: posix_option_group_threads_base
    :project: posix
@@ -714,10 +714,10 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_THREADS_EXT`.
    :header: API, Supported
    :widths: 50,10
 
-    pthread_attr_getguardsize(),yes
-    pthread_attr_setguardsize(),yes
-    pthread_mutexattr_gettype(),yes
-    pthread_mutexattr_settype(),yes
+    :c:func:`pthread_attr_getguardsize`,yes
+    :c:func:`pthread_attr_setguardsize`,yes
+    :c:func:`pthread_mutexattr_gettype`,yes
+    :c:func:`pthread_mutexattr_settype`,yes
 
 .. doxygengroup:: posix_option_group_posix_threads_ext
    :project: posix
@@ -733,15 +733,15 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_TIMERS`.
    :header: API, Supported
    :widths: 50,10
 
-    clock_getres(),yes
-    clock_gettime(),yes
-    clock_settime(),yes
-    nanosleep(),yes
-    timer_create(),yes
-    timer_delete(),yes
-    timer_gettime(),yes
-    timer_getoverrun(),yes
-    timer_settime(),yes
+    :c:func:`clock_getres`,yes
+    :c:func:`clock_gettime`,yes
+    :c:func:`clock_settime`,yes
+    :c:func:`nanosleep`,yes
+    :c:func:`timer_create`,yes
+    :c:func:`timer_delete`,yes
+    :c:func:`timer_gettime`,yes
+    :c:func:`timer_getoverrun`,yes
+    :c:func:`timer_settime`,yes
 
 .. doxygengroup:: posix_option_group_timers
    :project: posix
@@ -775,9 +775,9 @@ Enable this option group with :kconfig:option:`CONFIG_XSI_SINGLE_PROCESS`.
    :header: API, Supported
    :widths: 50,10
 
-    gethostid(),yes
-    gettimeofday(),yes
-    putenv(),yes
+    :c:func:`gethostid`,yes
+    :c:func:`gettimeofday`,yes
+    :c:func:`putenv`,yes
 
 .. doxygengroup:: posix_option_group_xsi_single_process
    :project: posix
@@ -793,10 +793,10 @@ Enable this option group with :kconfig:option:`CONFIG_XSI_SYSTEM_LOGGING`.
    :header: API, Supported
    :widths: 50,10
 
-    closelog(),yes
-    openlog(),yes
-    setlogmask(),yes
-    syslog(),yes
+    :c:func:`closelog`,yes
+    :c:func:`openlog`,yes
+    :c:func:`setlogmask`,yes
+    :c:func:`syslog`,yes
 
 .. doxygengroup:: posix_option_group_xsi_system_logging
    :project: posix
@@ -816,10 +816,10 @@ Enable this option group with :kconfig:option:`CONFIG_XSI_THREADS_EXT`.
    :header: API, Supported
    :widths: 50,10
 
-    pthread_attr_getstack(),yes
-    pthread_attr_setstack(),yes
-    pthread_getconcurrency(),yes
-    pthread_setconcurrency(),yes
+    :c:func:`pthread_attr_getstack`,yes
+    :c:func:`pthread_attr_setstack`,yes
+    :c:func:`pthread_getconcurrency`,yes
+    :c:func:`pthread_setconcurrency`,yes
 
 .. doxygengroup:: posix_option_group_xsi_threads_ext
    :project: posix
@@ -844,14 +844,14 @@ Enable this option with :kconfig:option:`CONFIG_POSIX_ASYNCHRONOUS_IO`.
    :header: API, Supported
    :widths: 50,10
 
-    aio_cancel(),yes :ref:`†<posix_undefined_behaviour>`
-    aio_error(),yes :ref:`†<posix_undefined_behaviour>`
-    aio_fsync(),yes :ref:`†<posix_undefined_behaviour>`
-    aio_read(),yes :ref:`†<posix_undefined_behaviour>`
-    aio_return(),yes :ref:`†<posix_undefined_behaviour>`
-    aio_suspend(),yes :ref:`†<posix_undefined_behaviour>`
-    aio_write(),yes :ref:`†<posix_undefined_behaviour>`
-    lio_listio(),yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`aio_cancel`,yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`aio_error`,yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`aio_fsync`,yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`aio_read`,yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`aio_return`,yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`aio_suspend`,yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`aio_write`,yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`lio_listio`,yes :ref:`†<posix_undefined_behaviour>`
 
 .. _posix_option_cputime:
 
@@ -880,7 +880,7 @@ Enable this option with :kconfig:option:`CONFIG_POSIX_FSYNC`.
    :header: API, Supported
    :widths: 50,10
 
-    fsync(),yes
+    :c:func:`fsync`,yes
 
 .. doxygengroup:: posix_option_fsync
    :project: posix
@@ -911,8 +911,8 @@ Enable this option with :kconfig:option:`CONFIG_POSIX_MEMLOCK`.
    :header: API, Supported
    :widths: 50,10
 
-    mlockall(), yes
-    munlockall(), yes
+    :c:func:`mlockall`, yes
+    :c:func:`munlockall`, yes
 
 .. doxygengroup:: posix_option_memlock
    :project: posix
@@ -928,8 +928,8 @@ Enable this option with :kconfig:option:`CONFIG_POSIX_MEMLOCK_RANGE`.
    :header: API, Supported
    :widths: 50,10
 
-    mlock(), yes
-    munlock(), yes
+    :c:func:`mlock`, yes
+    :c:func:`munlock`, yes
 
 .. doxygengroup:: posix_option_memlock_range
    :project: posix
@@ -945,14 +945,14 @@ Enable this option with :kconfig:option:`CONFIG_POSIX_MESSAGE_PASSING`.
    :header: API, Supported
    :widths: 50,10
 
-    mq_close(),yes
-    mq_getattr(),yes
-    mq_notify(),yes
-    mq_open(),yes
-    mq_receive(),yes
-    mq_send(),yes
-    mq_setattr(),yes
-    mq_unlink(),yes
+    :c:func:`mq_close`,yes
+    :c:func:`mq_getattr`,yes
+    :c:func:`mq_notify`,yes
+    :c:func:`mq_open`,yes
+    :c:func:`mq_receive`,yes
+    :c:func:`mq_send`,yes
+    :c:func:`mq_setattr`,yes
+    :c:func:`mq_unlink`,yes
 
 .. _posix_option_monotonic_clock:
 
@@ -985,13 +985,13 @@ Enable this option with :kconfig:option:`CONFIG_POSIX_PRIORITY_SCHEDULING`.
    :header: API, Supported
    :widths: 50,10
 
-    sched_get_priority_max(),yes
-    sched_get_priority_min(),yes
-    sched_getparam(),yes
-    sched_getscheduler(),yes
-    sched_rr_get_interval(),yes :ref:`†<posix_undefined_behaviour>`
-    sched_setparam(),yes :ref:`†<posix_undefined_behaviour>`
-    sched_setscheduler(),yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`sched_get_priority_max`,yes
+    :c:func:`sched_get_priority_min`,yes
+    :c:func:`sched_getparam`,yes
+    :c:func:`sched_getscheduler`,yes
+    :c:func:`sched_rr_get_interval`,yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`sched_setparam`,yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`sched_setscheduler`,yes :ref:`†<posix_undefined_behaviour>`
 
 .. doxygengroup:: posix_option_priority_scheduling
    :project: posix
@@ -1020,10 +1020,10 @@ Enable this option with :kconfig:option:`CONFIG_POSIX_SHARED_MEMORY_OBJECTS`.
    :header: API, Supported
    :widths: 50,10
 
-    mmap(), yes
-    munmap(), yes
-    shm_open(), yes
-    shm_unlink(), yes
+    :c:func:`mmap`, yes
+    :c:func:`munmap`, yes
+    :c:func:`shm_open`, yes
+    :c:func:`shm_unlink`, yes
 
 .. doxygengroup:: posix_option_shared_memory_objects
    :project: posix
@@ -1039,9 +1039,9 @@ Enable this option with :kconfig:option:`CONFIG_POSIX_SYNCHRONIZED_IO`.
    :header: API, Supported
    :widths: 50,10
 
-    fdatasync(),yes
-    fsync(),yes
-    msync(),yes
+    :c:func:`fdatasync`,yes
+    :c:func:`fsync`,yes
+    :c:func:`msync`,yes
 
 .. doxygengroup:: posix_option_synchronized_io
    :project: posix
@@ -1057,8 +1057,8 @@ Enable this option with :kconfig:option:`CONFIG_POSIX_THREAD_ATTR_STACKADDR`.
    :header: API, Supported
    :widths: 50,10
 
-    pthread_attr_getstackaddr(),yes
-    pthread_attr_setstackaddr(),yes
+    :c:func:`pthread_attr_getstackaddr`,yes
+    :c:func:`pthread_attr_setstackaddr`,yes
 
 .. doxygengroup:: posix_option_thread_attr_stackaddr
    :project: posix
@@ -1074,8 +1074,8 @@ Enable this option with :kconfig:option:`CONFIG_POSIX_THREAD_ATTR_STACKSIZE`.
    :header: API, Supported
    :widths: 50,10
 
-    pthread_attr_getstacksize(),yes
-    pthread_attr_setstacksize(),yes
+    :c:func:`pthread_attr_getstacksize`,yes
+    :c:func:`pthread_attr_setstacksize`,yes
 
 .. doxygengroup:: posix_option_thread_attr_stacksize
    :project: posix
@@ -1092,7 +1092,7 @@ Enable this option with :kconfig:option:`CONFIG_POSIX_THREAD_CPUTIME`.
    :widths: 50,10
 
     CLOCK_THREAD_CPUTIME_ID,yes
-    pthread_getcpuclockid(),yes
+    :c:func:`pthread_getcpuclockid`,yes
 
 .. doxygengroup:: posix_option_thread_cputime
    :project: posix
@@ -1108,8 +1108,8 @@ Enable this option with :kconfig:option:`CONFIG_POSIX_THREAD_PRIO_INHERIT`.
    :header: API, Supported
    :widths: 50,10
 
-    pthread_mutexattr_getprotocol(),yes
-    pthread_mutexattr_setprotocol(),yes
+    :c:func:`pthread_mutexattr_getprotocol`,yes
+    :c:func:`pthread_mutexattr_setprotocol`,yes
 
 .. doxygengroup:: posix_option_thread_prio_inherit
    :project: posix
@@ -1125,12 +1125,12 @@ Enable this option with :kconfig:option:`CONFIG_POSIX_THREAD_PRIO_PROTECT`.
    :header: API, Supported
    :widths: 50,10
 
-    pthread_mutex_getprioceiling(),yes
-    pthread_mutex_setprioceiling(),yes
-    pthread_mutexattr_getprioceiling(),yes
-    pthread_mutexattr_getprotocol(),yes
-    pthread_mutexattr_setprioceiling(),yes
-    pthread_mutexattr_setprotocol(),yes
+    :c:func:`pthread_mutex_getprioceiling`,yes
+    :c:func:`pthread_mutex_setprioceiling`,yes
+    :c:func:`pthread_mutexattr_getprioceiling`,yes
+    :c:func:`pthread_mutexattr_getprotocol`,yes
+    :c:func:`pthread_mutexattr_setprioceiling`,yes
+    :c:func:`pthread_mutexattr_setprotocol`,yes
 
 .. doxygengroup:: posix_option_thread_prio_protect
    :project: posix
@@ -1146,15 +1146,15 @@ Enable this option with :kconfig:option:`CONFIG_POSIX_THREAD_PRIORITY_SCHEDULING
    :header: API, Supported
    :widths: 50,10
 
-    pthread_attr_getinheritsched(),yes
-    pthread_attr_getschedpolicy(),yes
-    pthread_attr_getscope(),yes
-    pthread_attr_setinheritsched(),yes
-    pthread_attr_setschedpolicy(),yes
-    pthread_attr_setscope(),yes
-    pthread_getschedparam(),yes
-    pthread_setschedparam(),yes
-    pthread_setschedprio(),yes
+    :c:func:`pthread_attr_getinheritsched`,yes
+    :c:func:`pthread_attr_getschedpolicy`,yes
+    :c:func:`pthread_attr_getscope`,yes
+    :c:func:`pthread_attr_setinheritsched`,yes
+    :c:func:`pthread_attr_setschedpolicy`,yes
+    :c:func:`pthread_attr_setscope`,yes
+    :c:func:`pthread_getschedparam`,yes
+    :c:func:`pthread_setschedparam`,yes
+    :c:func:`pthread_setschedprio`,yes
 
 .. doxygengroup:: posix_option_thread_priority_scheduling
    :project: posix
@@ -1170,25 +1170,25 @@ Enable this option with :kconfig:option:`CONFIG_POSIX_THREAD_SAFE_FUNCTIONS`.
     :header: API, Supported
     :widths: 50,10
 
-    asctime_r(), yes
-    ctime_r(), yes (UTC timezone only)
-    flockfile(),
-    ftrylockfile(),
-    funlockfile(),
-    getc_unlocked(),
-    getchar_unlocked(),
-    getgrgid_r(),yes :ref:`†<posix_undefined_behaviour>`
-    getgrnam_r(),yes :ref:`†<posix_undefined_behaviour>`
-    getpwnam_r(),yes :ref:`†<posix_undefined_behaviour>`
-    getpwuid_r(),yes :ref:`†<posix_undefined_behaviour>`
-    gmtime_r(), yes
-    localtime_r(), yes (UTC timezone only)
-    putc_unlocked(),
-    putchar_unlocked(),
-    rand_r(), yes
-    readdir_r(), yes
-    strerror_r(), yes
-    strtok_r(), yes
+    :c:func:`asctime_r`, yes
+    :c:func:`ctime_r`, yes (UTC timezone only)
+    :c:func:`flockfile`,
+    :c:func:`ftrylockfile`,
+    :c:func:`funlockfile`,
+    :c:func:`getc_unlocked`,
+    :c:func:`getchar_unlocked`,
+    :c:func:`getgrgid_r`,yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`getgrnam_r`,yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`getpwnam_r`,yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`getpwuid_r`,yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`gmtime_r`, yes
+    :c:func:`localtime_r`, yes (UTC timezone only)
+    :c:func:`putc_unlocked`,
+    :c:func:`putchar_unlocked`,
+    :c:func:`rand_r`, yes
+    :c:func:`readdir_r`, yes
+    :c:func:`strerror_r`, yes
+    :c:func:`strtok_r`, yes
 
 .. doxygengroup:: posix_option_thread_safe_functions
    :project: posix
@@ -1204,13 +1204,13 @@ Enable this option with :kconfig:option:`CONFIG_POSIX_TIMEOUTS`.
    :header: API, Supported
    :widths: 50,10
 
-    mq_timedreceive(),yes
-    mq_timedsend(),yes
-    pthread_mutex_timedlock(),yes
-    pthread_rwlock_timedrdlock(),yes
-    pthread_rwlock_timedwrlock(),yes
-    sem_timedwait(),yes
-    posix_trace_timedgetnext_event(),
+    :c:func:`mq_timedreceive`,yes
+    :c:func:`mq_timedsend`,yes
+    :c:func:`pthread_mutex_timedlock`,yes
+    :c:func:`pthread_rwlock_timedrdlock`,yes
+    :c:func:`pthread_rwlock_timedwrlock`,yes
+    :c:func:`sem_timedwait`,yes
+    :c:func:`posix_trace_timedgetnext_event`,
 
 .. _posix_option_group_xsi_streams:
 .. _posix_option_xopen_streams:
@@ -1229,14 +1229,14 @@ Enable this option with :kconfig:option:`CONFIG_XSI_STREAMS`.
    :header: API, Supported
    :widths: 50,10
 
-    fattach(), yes :ref:`†<posix_undefined_behaviour>`
-    fdetach(), yes :ref:`†<posix_undefined_behaviour>`
-    getmsg(), yes :ref:`†<posix_undefined_behaviour>`
-    getpmsg(), yes :ref:`†<posix_undefined_behaviour>`
-    ioctl(), yes
-    isastream(), yes :ref:`†<posix_undefined_behaviour>`
-    putmsg(), yes :ref:`†<posix_undefined_behaviour>`
-    putpmsg(), yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`fattach`, yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`fdetach`, yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`getmsg`, yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`getpmsg`, yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`ioctl`, yes
+    :c:func:`isastream`, yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`putmsg`, yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`putpmsg`, yes :ref:`†<posix_undefined_behaviour>`
 
 .. _Subprofiling Considerations:
     https://pubs.opengroup.org/onlinepubs/9699919799/xrat/V4_subprofiles.html
