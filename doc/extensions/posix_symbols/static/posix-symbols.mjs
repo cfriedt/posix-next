@@ -55,6 +55,27 @@ function doxyUrl(refid) {
     return `${doxyHtmlUrl}/${file}#${refid}`;
 }
 
+/**
+ * Build a Doxygen file page URL from a header path.
+ * e.g. "pthread.h" → ".../pthread_8h.html"
+ *      "sys/types.h" → ".../sys_2types_8h.html"
+ */
+function headerDoxyUrl(header) {
+    if (!doxyHtmlUrl || !header) return null;
+    const encoded = header.replace(/_/g, '__').replace(/\//g, '_2').replace(/\./g, '_8');
+    return `${doxyHtmlUrl}/${encoded}.html`;
+}
+
+/**
+ * Build a Doxygen group page URL from a group name.
+ * e.g. "posix_option_group_barriers" → ".../group__posix__option__group__barriers.html"
+ */
+function groupDoxyUrl(group) {
+    if (!doxyHtmlUrl || !group) return null;
+    const encoded = 'group__' + group.replace(/_/g, '__');
+    return `${doxyHtmlUrl}/${encoded}.html`;
+}
+
 function showError(message) {
     const admonition = document.createElement('div');
     admonition.className = 'admonition error';
@@ -153,14 +174,38 @@ function renderSymbolEntry(entry) {
         addProp(label, code);
     }
 
-    /* Header file */
+    /* Header file — linked to Doxygen file page */
     if (entry.header) {
-        textProp('Header', entry.header);
+        const hdrUrl = headerDoxyUrl(entry.header);
+        let hdrEl;
+        if (hdrUrl) {
+            hdrEl = document.createElement('a');
+            hdrEl.href = hdrUrl;
+            hdrEl.className = 'symbol-header-link';
+        } else {
+            hdrEl = document.createElement('span');
+        }
+        const code = document.createElement('code');
+        code.className = 'docutils literal';
+        const span = document.createElement('span');
+        span.className = 'pre';
+        span.textContent = entry.header;
+        code.appendChild(span);
+        hdrEl.appendChild(code);
+        addProp('Header', hdrEl);
     }
 
-    /* POSIX Option Group */
+    /* POSIX Option Group — linked to Doxygen group page */
     if (entry.group_label) {
-        const groupEl = document.createElement('span');
+        const grpUrl = groupDoxyUrl(entry.group);
+        let groupEl;
+        if (grpUrl) {
+            groupEl = document.createElement('a');
+            groupEl.href = grpUrl;
+            groupEl.className = 'symbol-group-link';
+        } else {
+            groupEl = document.createElement('span');
+        }
         groupEl.textContent = entry.group_label;
         addProp('Option group', groupEl);
     }
