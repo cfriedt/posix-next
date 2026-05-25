@@ -1101,6 +1101,7 @@ Enable this option with :kconfig:option:`CONFIG_POSIX_TIMEOUTS`.
     sem_timedwait(),yes
     posix_trace_timedgetnext_event(),
 
+.. _posix_option_group_xsi_streams:
 .. _posix_option_xopen_streams:
 
 _XOPEN_STREAMS
