@@ -42,6 +42,9 @@ extensions = [
     # Zephyr extensions needed by the POSIX RST content
     "zephyr.kconfig",       # :kconfig:option: role
     "zephyr.link-roles",    # :zephyr:file:, etc.
+    # Lightweight stubs for zephyr.domain / zephyr.application directives
+    # (the full extensions require a complete west workspace).
+    "zephyr_stubs",
     # Doxygen integration — doxyrunner MUST come before posix_symbols so that
     # Doxygen XML exists when posix_symbols parses it (env-before-read-docs).
     "zephyr.doxyrunner",    # runs Doxygen before Sphinx
@@ -134,9 +137,7 @@ doxybridge_projects = {"posix": doxyrunner_projects["posix"]["outdir"]}
 posix_symbols_doxy_xml_dir = str(doxyrunner_projects["posix"]["outdir"] / "xml")
 posix_symbols_doxy_html_url = "../doxygen/html"
 
-# -- Suppress known warnings from stripped-down build -------------------------
-# :zephyr:code-sample-category: is provided by zephyr.domain which we don't
-# load (it crashes without the full west workspace). Suppress the warning.
+# -- Suppress known warnings ---------------------------------------------------
 suppress_warnings = [
     "ref.ref",        # unresolved :ref: that Intersphinx also can't find
 ]
