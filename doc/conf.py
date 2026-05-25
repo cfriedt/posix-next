@@ -92,7 +92,7 @@ html_static_path = [
     str(Path(__file__).parent / "_static"),
 ]
 html_css_files = ["posix-next.css"]
-html_logo = str(ZEPHYR_BASE / "doc" / "_static" / "images" / "kite.png")
+html_logo = str(Path(__file__).parent / "_static" / "posix-next-logo.png")
 html_favicon = str(ZEPHYR_BASE / "doc" / "_static" / "images" / "favicon.png")
 
 html_baseurl = os.environ.get("DOCS_HTML_BASEURL", "https://cfriedt.github.io/posix-next/")
