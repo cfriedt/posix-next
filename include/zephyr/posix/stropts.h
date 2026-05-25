@@ -46,6 +46,7 @@ struct strbuf {
  * @param dataptr Data part of the message, or NULL.
  * @param flags   0 or RS_HIPRI.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/putmsg.html
  */
 int putmsg(int fildes, const struct strbuf *ctlptr, const struct strbuf *dataptr, int flags);
 
@@ -54,6 +55,7 @@ int putmsg(int fildes, const struct strbuf *ctlptr, const struct strbuf *dataptr
  * @ingroup posix_option_xopen_streams
  * @param path Pathname previously used with fattach().
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/fdetach.html
  */
 int fdetach(const char *path);
 
@@ -63,6 +65,7 @@ int fdetach(const char *path);
  * @param fildes STREAMS file descriptor to attach.
  * @param path   Existing pathname to attach the STREAMS fd to.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/fattach.html
  */
 int fattach(int fildes, const char *path);
 
@@ -74,6 +77,7 @@ int fattach(int fildes, const char *path);
  * @param dataptr Output: data part buffer, or NULL.
  * @param flagsp  Input/output: 0 or RS_HIPRI to request high-priority messages only.
  * @return 0 if complete message received, 1 if more to follow, -1 on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/getmsg.html
  */
 int getmsg(int fildes, struct strbuf *ctlptr, struct strbuf *dataptr, int *flagsp);
 
@@ -86,6 +90,7 @@ int getmsg(int fildes, struct strbuf *ctlptr, struct strbuf *dataptr, int *flags
  * @param bandp   Input/output: priority band.
  * @param flagsp  Input/output: message flags.
  * @return 0 if complete message received, 1 if more to follow, -1 on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/getpmsg.html
  */
 int getpmsg(int fildes, struct strbuf *ctlptr, struct strbuf *dataptr, int *bandp, int *flagsp);
 
@@ -94,6 +99,7 @@ int getpmsg(int fildes, struct strbuf *ctlptr, struct strbuf *dataptr, int *band
  * @ingroup posix_option_xopen_streams
  * @param fildes File descriptor to test.
  * @return 1 if @p fildes is a STREAMS file, 0 if not, -1 with errno set on error.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/isastream.html
  */
 int isastream(int fildes);
 
