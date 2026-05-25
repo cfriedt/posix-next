@@ -1,15 +1,19 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Maps each public POSIX header to the primary (and optional secondary)
-# POSIX Option Group Sphinx anchors defined in:
+# POSIX Option Group / Option Sphinx anchors defined in:
 #   doc/posix/option_groups/index.rst
 #
 # Used by:
 #   - Doxygen @ingroup / @defgroup in each header (primary group)
 #   - Phase 3 posix_symbols Sphinx extension (secondary linkage)
 #
-# Anchor format: posix_option_group_<name>  (matches .. _anchor: in RST)
-#   or posix_option_<name> for individual options (not groups)
+# Anchor format:
+#   posix_option_group_<name>  POSIX Option Groups  (e.g. POSIX_THREADS_BASE)
+#   posix_option_<name>        POSIX Options        (e.g. _POSIX_MESSAGE_PASSING)
+#
+# Source of truth: doc/posix/option_groups/index.rst
+# Cross-check:     https://pubs.opengroup.org/onlinepubs/9699919799/xrat/V4_subprofiles.html
 
 # ---------------------------------------------------------------------------
 # Threads and synchronization
@@ -26,8 +30,11 @@ pthread.h:
 sys/types.h:
   primary: posix_option_group_threads_base
 
+# sched_yield is POSIX_THREADS_BASE; everything else is _POSIX_PRIORITY_SCHEDULING
 sched.h:
-  primary: posix_option_group_threads_base
+  primary: posix_option_priority_scheduling
+  secondary:
+    - posix_option_group_threads_base
 
 semaphore.h:
   primary: posix_option_group_semaphores
@@ -41,6 +48,10 @@ posix_signal.h:
   secondary:
     - posix_option_group_realtime_signals
 
+# strsignal() is listed under POSIX_SIGNALS in the Zephyr RST
+posix_string.h:
+  primary: posix_option_group_signals
+
 # ---------------------------------------------------------------------------
 # Timers and clocks
 # ---------------------------------------------------------------------------
@@ -50,24 +61,34 @@ posix_time.h:
   secondary:
     - posix_option_group_clock_selection
 
+# gettimeofday() is XSI_SINGLE_PROCESS
 sys/time.h:
-  primary: posix_option_group_timers
+  primary: posix_option_group_xsi_single_process
 
+# mq_* are _POSIX_MESSAGE_PASSING; mq_timed* are also _POSIX_TIMEOUTS
 mqueue.h:
-  primary: posix_option_group_timers
+  primary: posix_option_message_passing
+  secondary:
+    - posix_option_timeouts
 
 # ---------------------------------------------------------------------------
 # File I/O and descriptors
 # ---------------------------------------------------------------------------
 
+# fcntl() is POSIX_FD_MGMT; creat()/open() are POSIX_DEVICE_IO / POSIX_FILE_SYSTEM
 fcntl.h:
   primary: posix_option_group_fd_mgmt
+  secondary:
+    - posix_option_group_device_io
+    - posix_option_group_file_system
 
+# poll() is POSIX_DEVICE_IO
 poll.h:
-  primary: posix_option_group_fd_mgmt
+  primary: posix_option_group_device_io
 
+# select()/pselect() are POSIX_DEVICE_IO; FD_* macros are also POSIX_DEVICE_IO
 sys/select.h:
-  primary: posix_option_group_fd_mgmt
+  primary: posix_option_group_device_io
 
 unistd.h:
   primary: posix_option_group_single_process
@@ -84,18 +105,21 @@ sys/pathconf.h:
 sys/mman.h:
   primary: posix_option_group_mapped_files
 
+# ioctl() is _XOPEN_STREAMS (XSI_STREAMS Option Group)
 sys/ioctl.h:
-  primary: posix_option_group_device_io
+  primary: posix_option_group_xsi_streams
 
 # ---------------------------------------------------------------------------
 # Single process / system info
 # ---------------------------------------------------------------------------
 
+# uname() is POSIX_SINGLE_PROCESS
 sys/utsname.h:
   primary: posix_option_group_single_process
 
+# times() is POSIX_MULTI_PROCESS (not POSIX_SINGLE_PROCESS)
 sys/times.h:
-  primary: posix_option_group_single_process
+  primary: posix_option_group_multi_process
 
 sys/sysconf.h:
   primary: posix_option_group_single_process
@@ -132,11 +156,19 @@ netinet/tcp.h:
 fnmatch.h:
   primary: posix_option_group_c_lib_ext
 
-posix_stdlib.h:
-  primary: posix_option_group_c_lang_support
+# strfmon() is POSIX_C_LIB_EXT; strfmon_l() is POSIX_MULTI_CONCURRENT_LOCALES
+monetary.h:
+  primary: posix_option_group_c_lib_ext
 
+# setenv/unsetenv are POSIX_SINGLE_PROCESS; getsubopt is POSIX_C_LIB_EXT
+posix_stdlib.h:
+  primary: posix_option_group_single_process
+  secondary:
+    - posix_option_group_c_lib_ext
+
+# strsignal() is listed under POSIX_SIGNALS in the Zephyr RST
 posix_string.h:
-  primary: posix_option_group_c_lang_support_r
+  primary: posix_option_group_signals
 
 # ---------------------------------------------------------------------------
 # System logging
@@ -146,39 +178,43 @@ syslog.h:
   primary: posix_option_group_xsi_system_logging
 
 # ---------------------------------------------------------------------------
-# Multi-process / users
+# Thread-safe database access
 # ---------------------------------------------------------------------------
 
+# getpwnam_r/getpwuid_r are _POSIX_THREAD_SAFE_FUNCTIONS
 pwd.h:
-  primary: posix_option_group_multi_process
+  primary: posix_option_thread_safe_functions
 
+# getgrnam_r/getgrgid_r are _POSIX_THREAD_SAFE_FUNCTIONS
 grp.h:
-  primary: posix_option_group_multi_process
+  primary: posix_option_thread_safe_functions
 
 # ---------------------------------------------------------------------------
-# Linux extensions (not in a POSIX option group)
+# XSI STREAMS
 # ---------------------------------------------------------------------------
 
-sys/eventfd.h:
-  primary: null   # Linux extension; no upstream POSIX option group
+# ioctl/fattach/fdetach/getmsg/getpmsg/isastream/putmsg are _XOPEN_STREAMS (XSI_STREAMS)
+stropts.h:
+  primary: posix_option_group_xsi_streams
 
 # ---------------------------------------------------------------------------
-# Async I/O (individual option, not a group)
+# Async I/O
 # ---------------------------------------------------------------------------
 
+# aio_* and lio_listio are _POSIX_ASYNCHRONOUS_IO
 aio.h:
   primary: posix_option_asynchronous_io
 
 # ---------------------------------------------------------------------------
-# Streams (rarely implemented)
+# Linux extensions (no upstream POSIX option)
 # ---------------------------------------------------------------------------
 
-stropts.h:
-  primary: null   # XSI STREAMS; rarely present in Zephyr
+sys/eventfd.h:
+  primary: null
 
 # ---------------------------------------------------------------------------
-# Limits (cross-cutting, referenced by many groups)
+# Limits (cross-cutting; referenced in option group pages directly)
 # ---------------------------------------------------------------------------
 
 posix_limits.h:
-  primary: null   # cross-cutting; referenced in option group pages directly
+  primary: null

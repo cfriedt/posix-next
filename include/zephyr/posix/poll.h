@@ -15,7 +15,7 @@
  *      POSIX.1-2017 &lt;poll.h&gt;</a>
  *
  * @defgroup posix_poll POSIX poll
- * @ingroup posix_option_group_file_system
+ * @ingroup posix_option_group_device_io
  * @{
  */
 
