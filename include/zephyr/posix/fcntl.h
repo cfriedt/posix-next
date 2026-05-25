@@ -203,6 +203,7 @@ typedef int pid_t;
  * @param path File path.
  * @param mode Permission bits applied if the file is created.
  * @return New file descriptor on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/creat.html
  */
 int creat(const char *path, mode_t mode);
 
@@ -213,6 +214,7 @@ int creat(const char *path, mode_t mode);
  * @param cmd    Control command (F_GETFD, F_SETFD, F_GETFL, F_SETFL, F_GETLK, …).
  * @param ...    Optional argument (type depends on @p cmd).
  * @return Command-specific value on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/fcntl.html
  */
 int fcntl(int fildes, int cmd, ...);
 
@@ -223,6 +225,7 @@ int fcntl(int fildes, int cmd, ...);
  * @param flags Access and creation flags (O_RDONLY, O_WRONLY, O_RDWR, O_CREAT, …).
  * @param ...   If O_CREAT: mode_t mode.
  * @return New file descriptor on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/open.html
  */
 int open(const char *name, int flags, ...);
 
@@ -234,6 +237,7 @@ int open(const char *name, int flags, ...);
  * @param oflag Access and creation flags.
  * @param ...   If O_CREAT: mode_t mode.
  * @return New file descriptor on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/openat.html
  */
 int openat(int fd, const char *path, int oflag, ...);
 
@@ -246,6 +250,7 @@ int openat(int fd, const char *path, int oflag, ...);
  * @param len    Length of the region in bytes (0 = to EOF).
  * @param advice Access pattern hint (POSIX_FADV_*).
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/posix_fadvise.html
  */
 int posix_fadvise(int fd, off_t offset, off_t len, int advice);
 
@@ -256,6 +261,7 @@ int posix_fadvise(int fd, off_t offset, off_t len, int advice);
  * @param offset Start of the region.
  * @param len    Length of the region in bytes.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/posix_fallocate.html
  */
 int posix_fallocate(int fd, off_t offset, off_t len);
 #endif
