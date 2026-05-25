@@ -15,7 +15,7 @@
  *      POSIX.1-2017 &lt;stdlib.h&gt;</a>
  *
  * @defgroup posix_stdlib POSIX stdlib Extensions
- * @ingroup posix_option_group_c_lang_support
+ * @ingroup posix_option_group_single_process
  * @{
  */
 
