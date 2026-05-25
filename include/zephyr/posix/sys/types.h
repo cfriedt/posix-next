@@ -4,6 +4,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+/**
+ * @file
+ * @brief POSIX fundamental types (<sys/types.h>)
+ *
+ * @see <a href="https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/sys_types.h.html">
+ *      POSIX.1-2017 &lt;sys/types.h&gt;</a>
+ *
+ * @defgroup posix_types POSIX Types
+ * @ingroup posix_option_group_threads_base
+ * @{
+ */
+
 #ifndef ZEPHYR_INCLUDE_POSIX_SYS_TYPES_H_
 #define ZEPHYR_INCLUDE_POSIX_SYS_TYPES_H_
 
@@ -14,54 +26,63 @@ extern "C" {
 #endif
 
 #if !defined(_BLKCNT_T_DECLARED) && !defined(__blkcnt_t_defined)
+/** @brief Used for file block counts. */
 typedef long blkcnt_t;
 #define _BLKCNT_T_DECLARED
 #define __blkcnt_t_defined
 #endif
 
 #if !defined(_BLKSIZE_T_DECLARED) && !defined(__blksize_t_defined)
+/** @brief Used for block sizes. */
 typedef unsigned long blksize_t;
 #define _BLKSIZE_T_DECLARED
 #define __blksize_t_defined
 #endif
 
 #if !defined(_CLOCK_T_DECLARED) && !defined(__clock_t_defined)
+/** @brief Used for system times in clock ticks or CLOCKS_PER_SEC. */
 typedef unsigned long clock_t;
 #define _CLOCK_T_DECLARED
 #define __clock_t_defined
 #endif
 
 #if !defined(_CLOCKID_T_DECLARED) && !defined(__clockid_t_defined)
+/** @brief Used for clock ID type in the clock and timer functions. */
 typedef unsigned long clockid_t;
 #define _CLOCKID_T_DECLARED
 #define __clockid_t_defined
 #endif
 
 #if !defined(_DEV_T_DECLARED) && !defined(__dev_t_defined)
+/** @brief Used for device IDs. */
 typedef int dev_t;
 #define _DEV_T_DECLARED
 #define __dev_t_defined
 #endif
 
 #if !defined(_FSBLKCNT_T_DECLARED) && !defined(__fsblkcnt_t_defined)
+/** @brief Used for file system block counts. */
 typedef unsigned long fsblkcnt_t;
 #define _FSBLKCNT_T_DECLARED
 #define __fsblkcnt_t_defined
 #endif
 
 #if !defined(_FSFILCNT_T_DECLARED) && !defined(__fsfilcnt_t_defined)
+/** @brief Used for file system file counts. */
 typedef unsigned long fsfilcnt_t;
 #define _FSFILCNT_T_DECLARED
 #define __fsfilcnt_t_defined
 #endif
 
 #if !defined(_GID_T_DECLARED) && !defined(__gid_t_defined)
+/** @brief Used for group IDs. */
 typedef unsigned short gid_t;
 #define _GID_T_DECLARED
 #define __gid_t_defined
 #endif
 
 #if !defined(_INO_T_DECLARED) && !defined(__ino_t_defined)
+/** @brief Used for file serial numbers. */
 typedef long ino_t;
 #define _INO_T_DECLARED
 #define __ino_t_defined
@@ -69,31 +90,35 @@ typedef long ino_t;
 
 /* Maybe limit to when _XOPEN_SOURCE is defined? */
 #if !defined(_KEY_T_DECLARED) && !defined(__key_t_defined)
+/** @brief Used for XSI interprocess communication. */
 typedef unsigned long key_t;
 #define _KEY_T_DECLARED
 #define __key_t_defined
 #endif
 
 #if !defined(_MODE_T_DECLARED) && !defined(__mode_t_defined)
+/** @brief Used for file attributes. */
 typedef int mode_t;
 #define _MODE_T_DECLARED
 #define __mode_t_defined
 #endif
 
 #if !defined(_NLINK_T_DECLARED) && !defined(__nlink_t_defined)
+/** @brief Used for link counts. */
 typedef unsigned short nlink_t;
 #define _NLINK_T_DECLARED
 #define __nlink_t_defined
 #endif
 
 #if !defined(_OFF_T_DECLARED) && !defined(__off_t_defined)
+/** @brief Used for file sizes and offsets. */
 typedef long off_t;
 #define _OFF_T_DECLARED
 #define __off_t_defined
 #endif
 
 #if !defined(_PID_T_DECLARED) && !defined(__pid_t_defined)
-/* TODO: it would be nice to convert this to a long */
+/** @brief Used for process IDs and process group IDs. */
 typedef int pid_t;
 #define _PID_T_DECLARED
 #define __pid_t_defined
@@ -107,6 +132,7 @@ typedef int pid_t;
 #endif
 
 #if !defined(_SSIZE_T_DECLARED) && !defined(__ssize_t_defined)
+/** @brief Used for a count of bytes or an error indication. */
 #define unsigned signed /* parasoft-suppress MISRAC2012-RULE_20_4-a MISRAC2012-RULE_20_4-b */
 typedef __SIZE_TYPE__ ssize_t;
 #undef unsigned
@@ -115,6 +141,7 @@ typedef __SIZE_TYPE__ ssize_t;
 #endif
 
 #if !defined(_SUSECONDS_T_DECLARED) && !defined(__suseconds_t_defined)
+/** @brief Used for time in microseconds. */
 typedef long suseconds_t;
 #define _SUSECONDS_T_DECLARED
 #define __suseconds_t_defined
@@ -131,9 +158,14 @@ typedef long suseconds_t;
  * of struct timespec
  */
 #if !defined(_TIMESPEC_DECLARED) && !defined(__timespec_defined) && !defined(CONFIG_PICOLIBC)
+/**
+ * @brief Time value with nanosecond resolution.
+ *
+ * @see clock_gettime(), nanosleep()
+ */
 struct timespec {
-	time_t tv_sec;
-	long tv_nsec;
+	time_t tv_sec;  /**< Seconds. */
+	long tv_nsec;   /**< Nanoseconds [0, 999999999]. */
 };
 #define _TIMESPEC_DECLARED
 #define __timespec_defined
@@ -143,6 +175,7 @@ struct timespec {
 /* TODO: trace_attr_t, trace_event_id_t, trace_event_set_t, trace_id_t */
 
 #if !defined(_UID_T_DECLARED) && !defined(__uid_t_defined)
+/** @brief Used for user IDs. */
 typedef unsigned short uid_t;
 #define _UID_T_DECLARED
 #define __uid_t_defined
@@ -150,6 +183,7 @@ typedef unsigned short uid_t;
 
 #if (_POSIX_C_SOURCE < 200809L) || defined(__DOXYGEN__)
 #if !defined(_USECONDS_T_DECLARED) && !defined(__useconds_t_defined)
+/** @brief Used for time in microseconds (obsolescent). */
 typedef unsigned long useconds_t;
 #define _USECONDS_T_DECLARED
 #define __useconds_t_defined
@@ -161,5 +195,7 @@ typedef unsigned long useconds_t;
 #endif
 
 #include <sys/_pthreadtypes.h>
+
+/** @} */
 
 #endif /* ZEPHYR_INCLUDE_POSIX_SYS_TYPES_H_ */
