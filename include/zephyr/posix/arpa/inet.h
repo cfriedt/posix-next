@@ -39,6 +39,7 @@ typedef uint32_t in_addr_t;
  *
  * @param cp Dotted-decimal IPv4 address string (e.g. "192.0.2.1").
  * @return IPv4 address in network byte order, or INADDR_NONE on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/inet_addr.html
  */
 in_addr_t inet_addr(const char *cp);
 
@@ -51,6 +52,7 @@ in_addr_t inet_addr(const char *cp);
  *
  * @param in IPv4 address in network byte order.
  * @return Pointer to a dotted-decimal string, or NULL on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/inet_ntoa.html
  */
 char *inet_ntoa(struct in_addr in);
 
@@ -62,6 +64,7 @@ char *inet_ntoa(struct in_addr in);
  * @param dst    Output buffer for the text form.
  * @param size   Size of @p dst in bytes (INET_ADDRSTRLEN / INET6_ADDRSTRLEN).
  * @return @p dst on success, or NULL with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/inet_ntop.html
  */
 char *inet_ntop(sa_family_t family, const void *src, char *dst, size_t size);
 
@@ -72,6 +75,7 @@ char *inet_ntop(sa_family_t family, const void *src, char *dst, size_t size);
  * @param src    Text form of the address.
  * @param dst    Output buffer for the binary address.
  * @return 1 on success, 0 if @p src is not a valid address, -1 on error.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/inet_pton.html
  */
 int inet_pton(sa_family_t family, const char *src, void *dst);
 

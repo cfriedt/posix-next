@@ -113,6 +113,7 @@ extern "C" {
  * @param parent  Handler called in the parent after fork().
  * @param child   Handler called in the child after fork().
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_atfork.html
  */
 int pthread_atfork(void (*prepare)(void), void (*parent)(void), void (*child)(void));
 
@@ -121,6 +122,7 @@ int pthread_atfork(void (*prepare)(void), void (*parent)(void), void (*child)(vo
  * @ingroup posix_option_group_threads_base
  * @param attr Thread attributes object to destroy.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_attr_destroy.html
  */
 int pthread_attr_destroy(pthread_attr_t *attr);
 
@@ -130,6 +132,7 @@ int pthread_attr_destroy(pthread_attr_t *attr);
  * @param attr        Thread attributes object.
  * @param detachstate Output: @c PTHREAD_CREATE_DETACHED or @c PTHREAD_CREATE_JOINABLE.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_attr_getdetachstate.html
  */
 int pthread_attr_getdetachstate(const pthread_attr_t *attr, int *detachstate);
 
@@ -139,6 +142,7 @@ int pthread_attr_getdetachstate(const pthread_attr_t *attr, int *detachstate);
  * @param attr      Thread attributes object.
  * @param guardsize Output: guard size in bytes.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_attr_getguardsize.html
  */
 int pthread_attr_getguardsize(const pthread_attr_t *ZRESTRICT attr, size_t *ZRESTRICT guardsize);
 
@@ -149,6 +153,7 @@ int pthread_attr_getguardsize(const pthread_attr_t *ZRESTRICT attr, size_t *ZRES
  * @param attr         Thread attributes object.
  * @param inheritsched Output: @c PTHREAD_INHERIT_SCHED or @c PTHREAD_EXPLICIT_SCHED.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_attr_getinheritsched.html
  */
 int pthread_attr_getinheritsched(const pthread_attr_t *ZRESTRICT attr,
 				 int *ZRESTRICT inheritsched);
@@ -160,6 +165,7 @@ int pthread_attr_getinheritsched(const pthread_attr_t *ZRESTRICT attr,
  * @param attr  Thread attributes object.
  * @param param Output: scheduling parameters.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_attr_getschedparam.html
  */
 int pthread_attr_getschedparam(const pthread_attr_t *ZRESTRICT attr,
 			       struct sched_param *ZRESTRICT param);
@@ -171,6 +177,7 @@ int pthread_attr_getschedparam(const pthread_attr_t *ZRESTRICT attr,
  * @param attr   Thread attributes object.
  * @param policy Output: @c SCHED_FIFO, @c SCHED_RR, or @c SCHED_OTHER.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_attr_getschedpolicy.html
  */
 int pthread_attr_getschedpolicy(const pthread_attr_t *ZRESTRICT attr, int *ZRESTRICT policy);
 
@@ -180,6 +187,7 @@ int pthread_attr_getschedpolicy(const pthread_attr_t *ZRESTRICT attr, int *ZREST
  * @param attr            Thread attributes object.
  * @param contentionscope Output: @c PTHREAD_SCOPE_SYSTEM or @c PTHREAD_SCOPE_PROCESS.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_attr_getscope.html
  */
 int pthread_attr_getscope(const pthread_attr_t *ZRESTRICT attr, int *ZRESTRICT contentionscope);
 #endif
@@ -193,6 +201,7 @@ int pthread_attr_getscope(const pthread_attr_t *ZRESTRICT attr, int *ZRESTRICT c
  * @param stackaddr Output: stack base address.
  * @param stacksize Output: stack size in bytes.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_attr_getstack.html
  */
 int pthread_attr_getstack(const pthread_attr_t *ZRESTRICT attr, void **ZRESTRICT stackaddr,
 			  size_t *ZRESTRICT stacksize);
@@ -205,6 +214,7 @@ int pthread_attr_getstack(const pthread_attr_t *ZRESTRICT attr, void **ZRESTRICT
  * @param attr      Thread attributes object.
  * @param stacksize Output: stack size in bytes.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_attr_getstacksize.html
  */
 int pthread_attr_getstacksize(const pthread_attr_t *ZRESTRICT attr, size_t *ZRESTRICT stacksize);
 #endif
@@ -214,6 +224,7 @@ int pthread_attr_getstacksize(const pthread_attr_t *ZRESTRICT attr, size_t *ZRES
  * @ingroup posix_option_group_threads_base
  * @param attr Thread attributes object to initialise.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_attr_init.html
  */
 int pthread_attr_init(pthread_attr_t *attr);
 
@@ -223,6 +234,7 @@ int pthread_attr_init(pthread_attr_t *attr);
  * @param attr        Thread attributes object.
  * @param detachstate @c PTHREAD_CREATE_DETACHED or @c PTHREAD_CREATE_JOINABLE.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_attr_setdetachstate.html
  */
 int pthread_attr_setdetachstate(pthread_attr_t *attr, int detachstate);
 
@@ -232,6 +244,7 @@ int pthread_attr_setdetachstate(pthread_attr_t *attr, int detachstate);
  * @param attr      Thread attributes object.
  * @param guardsize Guard size in bytes.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_attr_setguardsize.html
  */
 int pthread_attr_setguardsize(pthread_attr_t *attr, size_t guardsize);
 
@@ -242,6 +255,7 @@ int pthread_attr_setguardsize(pthread_attr_t *attr, size_t guardsize);
  * @param attr         Thread attributes object.
  * @param inheritsched @c PTHREAD_INHERIT_SCHED or @c PTHREAD_EXPLICIT_SCHED.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_attr_setinheritsched.html
  */
 int pthread_attr_setinheritsched(pthread_attr_t *attr, int inheritsched);
 #endif
@@ -252,6 +266,7 @@ int pthread_attr_setinheritsched(pthread_attr_t *attr, int inheritsched);
  * @param attr  Thread attributes object.
  * @param param Scheduling parameters to apply.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_attr_setschedparam.html
  */
 int pthread_attr_setschedparam(pthread_attr_t *ZRESTRICT attr,
 			       const struct sched_param *ZRESTRICT param);
@@ -263,6 +278,7 @@ int pthread_attr_setschedparam(pthread_attr_t *ZRESTRICT attr,
  * @param attr   Thread attributes object.
  * @param policy @c SCHED_FIFO, @c SCHED_RR, or @c SCHED_OTHER.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_attr_setschedpolicy.html
  */
 int pthread_attr_setschedpolicy(pthread_attr_t *attr, int policy);
 
@@ -272,6 +288,7 @@ int pthread_attr_setschedpolicy(pthread_attr_t *attr, int policy);
  * @param attr            Thread attributes object.
  * @param contentionscope @c PTHREAD_SCOPE_SYSTEM or @c PTHREAD_SCOPE_PROCESS.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_attr_setscope.html
  */
 int pthread_attr_setscope(pthread_attr_t *attr, int contentionscope);
 #endif
@@ -285,6 +302,7 @@ int pthread_attr_setscope(pthread_attr_t *attr, int contentionscope);
  * @param stackaddr Stack base address.
  * @param stacksize Stack size in bytes (>= PTHREAD_STACK_MIN).
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_attr_setstack.html
  */
 int pthread_attr_setstack(pthread_attr_t *attr, void *stackaddr, size_t stacksize);
 #endif
@@ -296,6 +314,7 @@ int pthread_attr_setstack(pthread_attr_t *attr, void *stackaddr, size_t stacksiz
  * @param attr      Thread attributes object.
  * @param stacksize Stack size in bytes (>= PTHREAD_STACK_MIN).
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_attr_setstacksize.html
  */
 int pthread_attr_setstacksize(pthread_attr_t *attr, size_t stacksize);
 #endif
@@ -307,6 +326,7 @@ int pthread_attr_setstacksize(pthread_attr_t *attr, size_t stacksize);
  * @ingroup posix_option_group_barriers
  * @param barrier Barrier to destroy.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_barrier_destroy.html
  */
 int pthread_barrier_destroy(pthread_barrier_t *barrier);
 
@@ -317,6 +337,7 @@ int pthread_barrier_destroy(pthread_barrier_t *barrier);
  * @param attr    Barrier attributes, or NULL for defaults.
  * @param count   Number of threads that must call pthread_barrier_wait() before any proceeds.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_barrier_init.html
  */
 int pthread_barrier_init(pthread_barrier_t *ZRESTRICT barrier,
 			 const pthread_barrierattr_t *ZRESTRICT attr, unsigned int count);
@@ -331,6 +352,7 @@ int pthread_barrier_init(pthread_barrier_t *ZRESTRICT barrier,
  * @param barrier Barrier to wait on.
  * @return @c PTHREAD_BARRIER_SERIAL_THREAD for one thread, 0 for all others,
  *         or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_barrier_wait.html
  */
 int pthread_barrier_wait(pthread_barrier_t *barrier);
 
@@ -339,6 +361,7 @@ int pthread_barrier_wait(pthread_barrier_t *barrier);
  * @ingroup posix_option_group_barriers
  * @param attr Barrier attributes object to destroy.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_barrierattr_destroy.html
  */
 int pthread_barrierattr_destroy(pthread_barrierattr_t *attr);
 
@@ -349,6 +372,7 @@ int pthread_barrierattr_destroy(pthread_barrierattr_t *attr);
  * @param attr    Barrier attributes object.
  * @param pshared Output: @c PTHREAD_PROCESS_SHARED or @c PTHREAD_PROCESS_PRIVATE.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_barrierattr_getpshared.html
  */
 int pthread_barrierattr_getpshared(const pthread_barrierattr_t *ZRESTRICT attr,
 				   int *ZRESTRICT pshared);
@@ -359,6 +383,7 @@ int pthread_barrierattr_getpshared(const pthread_barrierattr_t *ZRESTRICT attr,
  * @ingroup posix_option_group_barriers
  * @param attr Barrier attributes object to initialise.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_barrierattr_init.html
  */
 int pthread_barrierattr_init(pthread_barrierattr_t *attr);
 
@@ -369,6 +394,7 @@ int pthread_barrierattr_init(pthread_barrierattr_t *attr);
  * @param attr    Barrier attributes object.
  * @param pshared @c PTHREAD_PROCESS_SHARED or @c PTHREAD_PROCESS_PRIVATE.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_barrierattr_setpshared.html
  */
 int pthread_barrierattr_setpshared(pthread_barrierattr_t *attr, int pshared);
 #endif
@@ -380,6 +406,7 @@ int pthread_barrierattr_setpshared(pthread_barrierattr_t *attr, int pshared);
  * @ingroup posix_option_group_threads_base
  * @param thread Thread to cancel.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_cancel.html
  */
 int pthread_cancel(pthread_t thread);
 
@@ -390,6 +417,7 @@ int pthread_cancel(pthread_t thread);
  * @ingroup posix_option_group_threads_base
  * @param cond Condition variable to broadcast.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_cond_broadcast.html
  */
 int pthread_cond_broadcast(pthread_cond_t *cond);
 
@@ -402,6 +430,7 @@ int pthread_cond_broadcast(pthread_cond_t *cond);
  * @param clock_id Clock used to interpret @p abstime.
  * @param abstime  Absolute timeout.
  * @return 0 on success, @c ETIMEDOUT on timeout, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_cond_clockwait.html
  */
 int pthread_cond_clockwait(pthread_cond_t *ZRESTRICT cond, pthread_mutex_t *ZRESTRICT mutex,
 	clockid_t clock_id, const struct timespec *ZRESTRICT abstime);
@@ -412,6 +441,7 @@ int pthread_cond_clockwait(pthread_cond_t *ZRESTRICT cond, pthread_mutex_t *ZRES
  * @ingroup posix_option_group_threads_base
  * @param cond Condition variable to destroy.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_cond_destroy.html
  */
 int pthread_cond_destroy(pthread_cond_t *cond);
 
@@ -421,6 +451,7 @@ int pthread_cond_destroy(pthread_cond_t *cond);
  * @param cond Condition variable to initialise.
  * @param attr Condition variable attributes, or NULL for defaults.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_cond_init.html
  */
 int pthread_cond_init(pthread_cond_t *ZRESTRICT cond, const pthread_condattr_t *ZRESTRICT attr);
 
@@ -429,6 +460,7 @@ int pthread_cond_init(pthread_cond_t *ZRESTRICT cond, const pthread_condattr_t *
  * @ingroup posix_option_group_threads_base
  * @param cond Condition variable to signal.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_cond_signal.html
  */
 int pthread_cond_signal(pthread_cond_t *cond);
 
@@ -439,6 +471,7 @@ int pthread_cond_signal(pthread_cond_t *cond);
  * @param mutex   Associated mutex (must be locked by the caller).
  * @param abstime Absolute timeout (CLOCK_REALTIME).
  * @return 0 on success, @c ETIMEDOUT on timeout, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_cond_timedwait.html
  */
 int pthread_cond_timedwait(pthread_cond_t *ZRESTRICT cond, pthread_mutex_t *ZRESTRICT mutex,
 			   const struct timespec *ZRESTRICT abstime);
@@ -449,6 +482,7 @@ int pthread_cond_timedwait(pthread_cond_t *ZRESTRICT cond, pthread_mutex_t *ZRES
  * @param cond  Condition variable.
  * @param mutex Associated mutex (must be locked by the caller).
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_cond_wait.html
  */
 int pthread_cond_wait(pthread_cond_t *ZRESTRICT cond, pthread_mutex_t *ZRESTRICT mutex);
 
@@ -457,6 +491,7 @@ int pthread_cond_wait(pthread_cond_t *ZRESTRICT cond, pthread_mutex_t *ZRESTRICT
  * @ingroup posix_option_group_threads_base
  * @param attr Condition variable attributes object to destroy.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_condattr_destroy.html
  */
 int pthread_condattr_destroy(pthread_condattr_t *attr);
 
@@ -466,6 +501,7 @@ int pthread_condattr_destroy(pthread_condattr_t *attr);
  * @param attr     Condition variable attributes object.
  * @param clock_id Output: clock ID.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_condattr_getclock.html
  */
 int pthread_condattr_getclock(const pthread_condattr_t *ZRESTRICT attr,
 			      clockid_t *ZRESTRICT clock_id);
@@ -477,6 +513,7 @@ int pthread_condattr_getclock(const pthread_condattr_t *ZRESTRICT attr,
  * @param attr    Condition variable attributes object.
  * @param pshared Output: @c PTHREAD_PROCESS_SHARED or @c PTHREAD_PROCESS_PRIVATE.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_condattr_getpshared.html
  */
 int pthread_condattr_getpshared(const pthread_condattr_t *ZRESTRICT attr, int *ZRESTRICT pshared);
 #endif
@@ -486,6 +523,7 @@ int pthread_condattr_getpshared(const pthread_condattr_t *ZRESTRICT attr, int *Z
  * @ingroup posix_option_group_threads_base
  * @param attr Condition variable attributes object to initialise.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_condattr_init.html
  */
 int pthread_condattr_init(pthread_condattr_t *attr);
 
@@ -495,6 +533,7 @@ int pthread_condattr_init(pthread_condattr_t *attr);
  * @param attr     Condition variable attributes object.
  * @param clock_id Clock ID (e.g. @c CLOCK_MONOTONIC or @c CLOCK_REALTIME).
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_condattr_setclock.html
  */
 int pthread_condattr_setclock(pthread_condattr_t *attr, clockid_t clock_id);
 
@@ -505,6 +544,7 @@ int pthread_condattr_setclock(pthread_condattr_t *attr, clockid_t clock_id);
  * @param attr    Condition variable attributes object.
  * @param pshared @c PTHREAD_PROCESS_SHARED or @c PTHREAD_PROCESS_PRIVATE.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_condattr_setpshared.html
  */
 int pthread_condattr_setpshared(pthread_condattr_t *attr, int pshared);
 #endif
@@ -519,6 +559,7 @@ int pthread_condattr_setpshared(pthread_condattr_t *attr, int pshared);
  * @param start_routine Thread entry point function.
  * @param arg           Argument passed to @p start_routine.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_create.html
  */
 int pthread_create(pthread_t *ZRESTRICT thread, const pthread_attr_t *ZRESTRICT attr,
 		   void *(*start_routine)(void *), void *ZRESTRICT arg);
@@ -528,6 +569,7 @@ int pthread_create(pthread_t *ZRESTRICT thread, const pthread_attr_t *ZRESTRICT 
  * @ingroup posix_option_group_threads_base
  * @param thread Thread to detach.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_detach.html
  */
 int pthread_detach(pthread_t thread);
 
@@ -537,6 +579,7 @@ int pthread_detach(pthread_t thread);
  * @param t1 First thread ID.
  * @param t2 Second thread ID.
  * @return Non-zero if @p t1 and @p t2 refer to the same thread, 0 otherwise.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_equal.html
  */
 int pthread_equal(pthread_t t1, pthread_t t2);
 
@@ -544,6 +587,7 @@ int pthread_equal(pthread_t t1, pthread_t t2);
  * @brief Terminate the calling thread.
  * @ingroup posix_option_group_threads_base
  * @param value_ptr Value made available to pthread_join().
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_exit.html
  */
 void pthread_exit(void *value_ptr);
 
@@ -552,6 +596,7 @@ void pthread_exit(void *value_ptr);
  * @brief Get the concurrency level (advisory, has no effect on scheduling).
  * @ingroup posix_option_group_xsi_threads_ext
  * @return Current concurrency level.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_getconcurrency.html
  */
 int pthread_getconcurrency(void);
 #endif
@@ -563,6 +608,7 @@ int pthread_getconcurrency(void);
  * @param thread_id Thread whose CPU-time clock to retrieve.
  * @param clock_id  Output: clock ID for the thread.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_getcpuclockid.html
  */
 int pthread_getcpuclockid(pthread_t thread_id, clockid_t *clock_id);
 #endif
@@ -575,6 +621,7 @@ int pthread_getcpuclockid(pthread_t thread_id, clockid_t *clock_id);
  * @param policy Output: scheduling policy.
  * @param param  Output: scheduling parameters.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_getschedparam.html
  */
 int pthread_getschedparam(pthread_t thread, int *ZRESTRICT policy,
 			  struct sched_param *ZRESTRICT param);
@@ -585,6 +632,7 @@ int pthread_getschedparam(pthread_t thread, int *ZRESTRICT policy,
  * @ingroup posix_option_group_threads_base
  * @param key Thread-specific data key.
  * @return Value associated with @p key for the calling thread, or NULL if none.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_getspecific.html
  */
 void *pthread_getspecific(pthread_key_t key);
 
@@ -594,6 +642,7 @@ void *pthread_getspecific(pthread_key_t key);
  * @param thread    Thread to wait for.
  * @param value_ptr Output: exit value or @c PTHREAD_CANCELED.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_join.html
  */
 int pthread_join(pthread_t thread, void **value_ptr);
 
@@ -603,6 +652,7 @@ int pthread_join(pthread_t thread, void **value_ptr);
  * @param key        Output: new key.
  * @param destructor Destructor called with the thread's value when the thread exits, or NULL.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_key_create.html
  */
 int pthread_key_create(pthread_key_t *key, void (*destructor)(void *));
 
@@ -611,6 +661,7 @@ int pthread_key_create(pthread_key_t *key, void (*destructor)(void *));
  * @ingroup posix_option_group_threads_base
  * @param key Key to delete.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_key_delete.html
  */
 int pthread_key_delete(pthread_key_t key);
 
@@ -621,6 +672,7 @@ int pthread_key_delete(pthread_key_t key);
  * @ingroup posix_option_group_threads_base
  * @param mutex Robust mutex to mark consistent.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_mutex_consistent.html
  */
 int pthread_mutex_consistent(pthread_mutex_t *mutex);
 
@@ -629,6 +681,7 @@ int pthread_mutex_consistent(pthread_mutex_t *mutex);
  * @ingroup posix_option_group_threads_base
  * @param mutex Mutex to destroy.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_mutex_destroy.html
  */
 int pthread_mutex_destroy(pthread_mutex_t *mutex);
 
@@ -639,6 +692,7 @@ int pthread_mutex_destroy(pthread_mutex_t *mutex);
  * @param mutex       Mutex to query.
  * @param prioceiling Output: priority ceiling value.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_mutex_getprioceiling.html
  */
 int pthread_mutex_getprioceiling(const pthread_mutex_t *ZRESTRICT mutex,
 				 int *ZRESTRICT prioceiling);
@@ -650,6 +704,7 @@ int pthread_mutex_getprioceiling(const pthread_mutex_t *ZRESTRICT mutex,
  * @param mutex Mutex to initialise.
  * @param attr  Mutex attributes, or NULL for defaults.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_mutex_init.html
  */
 int pthread_mutex_init(pthread_mutex_t *ZRESTRICT mutex, const pthread_mutexattr_t *ZRESTRICT attr);
 
@@ -658,6 +713,7 @@ int pthread_mutex_init(pthread_mutex_t *ZRESTRICT mutex, const pthread_mutexattr
  * @ingroup posix_option_group_threads_base
  * @param mutex Mutex to lock.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_mutex_lock.html
  */
 int pthread_mutex_lock(pthread_mutex_t *mutex);
 
@@ -669,6 +725,7 @@ int pthread_mutex_lock(pthread_mutex_t *mutex);
  * @param prioceiling New priority ceiling value.
  * @param old_ceiling Output: previous priority ceiling, or NULL.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_mutex_setprioceiling.html
  */
 int pthread_mutex_setprioceiling(pthread_mutex_t *ZRESTRICT mutex, int prioceiling,
 				 int *ZRESTRICT old_ceiling);
@@ -680,6 +737,7 @@ int pthread_mutex_setprioceiling(pthread_mutex_t *ZRESTRICT mutex, int prioceili
  * @param mutex   Mutex to lock.
  * @param abstime Absolute timeout (CLOCK_REALTIME).
  * @return 0 on success, @c ETIMEDOUT on timeout, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_mutex_timedlock.html
  */
 int pthread_mutex_timedlock(pthread_mutex_t *ZRESTRICT mutex,
 			    const struct timespec *ZRESTRICT abstime);
@@ -689,6 +747,7 @@ int pthread_mutex_timedlock(pthread_mutex_t *ZRESTRICT mutex,
  * @ingroup posix_option_group_threads_base
  * @param mutex Mutex to try to lock.
  * @return 0 if the lock was acquired, @c EBUSY if already locked, or a positive error number.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_mutex_trylock.html
  */
 int pthread_mutex_trylock(pthread_mutex_t *mutex);
 
@@ -697,6 +756,7 @@ int pthread_mutex_trylock(pthread_mutex_t *mutex);
  * @ingroup posix_option_group_threads_base
  * @param mutex Mutex to unlock.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_mutex_unlock.html
  */
 int pthread_mutex_unlock(pthread_mutex_t *mutex);
 
@@ -705,6 +765,7 @@ int pthread_mutex_unlock(pthread_mutex_t *mutex);
  * @ingroup posix_option_group_threads_base
  * @param attr Mutex attributes object to destroy.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_mutexattr_destroy.html
  */
 int pthread_mutexattr_destroy(pthread_mutexattr_t *attr);
 
@@ -715,6 +776,7 @@ int pthread_mutexattr_destroy(pthread_mutexattr_t *attr);
  * @param attr        Mutex attributes object.
  * @param prioceiling Output: priority ceiling.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_mutexattr_getprioceiling.html
  */
 int pthread_mutexattr_getprioceiling(const pthread_mutexattr_t *ZRESTRICT attr,
 				     int *ZRESTRICT prioceiling);
@@ -729,6 +791,7 @@ int pthread_mutexattr_getprioceiling(const pthread_mutexattr_t *ZRESTRICT attr,
  * @param protocol Output: @c PTHREAD_PRIO_NONE, @c PTHREAD_PRIO_INHERIT,
  *                 or @c PTHREAD_PRIO_PROTECT.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_mutexattr_getprotocol.html
  */
 int pthread_mutexattr_getprotocol(const pthread_mutexattr_t *ZRESTRICT attr,
 				  int *ZRESTRICT protocol);
@@ -741,6 +804,7 @@ int pthread_mutexattr_getprotocol(const pthread_mutexattr_t *ZRESTRICT attr,
  * @param attr    Mutex attributes object.
  * @param pshared Output: @c PTHREAD_PROCESS_SHARED or @c PTHREAD_PROCESS_PRIVATE.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_mutexattr_getpshared.html
  */
 int pthread_mutexattr_getpshared(const pthread_mutexattr_t *ZRESTRICT attr, int *ZRESTRICT pshared);
 #endif
@@ -751,6 +815,7 @@ int pthread_mutexattr_getpshared(const pthread_mutexattr_t *ZRESTRICT attr, int 
  * @param attr   Mutex attributes object.
  * @param robust Output: @c PTHREAD_MUTEX_STALLED or @c PTHREAD_MUTEX_ROBUST.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_mutexattr_getrobust.html
  */
 int pthread_mutexattr_getrobust(const pthread_mutexattr_t *ZRESTRICT attr, int *ZRESTRICT robust);
 
@@ -761,6 +826,7 @@ int pthread_mutexattr_getrobust(const pthread_mutexattr_t *ZRESTRICT attr, int *
  * @param type Output: @c PTHREAD_MUTEX_NORMAL, @c PTHREAD_MUTEX_ERRORCHECK,
  *             @c PTHREAD_MUTEX_RECURSIVE, or @c PTHREAD_MUTEX_DEFAULT.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_mutexattr_gettype.html
  */
 int pthread_mutexattr_gettype(const pthread_mutexattr_t *ZRESTRICT attr, int *ZRESTRICT type);
 
@@ -769,6 +835,7 @@ int pthread_mutexattr_gettype(const pthread_mutexattr_t *ZRESTRICT attr, int *ZR
  * @ingroup posix_option_group_threads_base
  * @param attr Mutex attributes object to initialise.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_mutexattr_init.html
  */
 int pthread_mutexattr_init(pthread_mutexattr_t *attr);
 
@@ -779,6 +846,7 @@ int pthread_mutexattr_init(pthread_mutexattr_t *attr);
  * @param attr        Mutex attributes object.
  * @param prioceiling Priority ceiling value.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_mutexattr_setprioceiling.html
  */
 int pthread_mutexattr_setprioceiling(pthread_mutexattr_t *attr, int prioceiling);
 #endif
@@ -791,6 +859,7 @@ int pthread_mutexattr_setprioceiling(pthread_mutexattr_t *attr, int prioceiling)
  * @param attr     Mutex attributes object.
  * @param protocol @c PTHREAD_PRIO_NONE, @c PTHREAD_PRIO_INHERIT, or @c PTHREAD_PRIO_PROTECT.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_mutexattr_setprotocol.html
  */
 int pthread_mutexattr_setprotocol(pthread_mutexattr_t *attr, int protocol);
 #endif
@@ -802,6 +871,7 @@ int pthread_mutexattr_setprotocol(pthread_mutexattr_t *attr, int protocol);
  * @param attr    Mutex attributes object.
  * @param pshared @c PTHREAD_PROCESS_SHARED or @c PTHREAD_PROCESS_PRIVATE.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_mutexattr_setpshared.html
  */
 int pthread_mutexattr_setpshared(pthread_mutexattr_t *attr, int pshared);
 #endif
@@ -812,6 +882,7 @@ int pthread_mutexattr_setpshared(pthread_mutexattr_t *attr, int pshared);
  * @param attr   Mutex attributes object.
  * @param robust @c PTHREAD_MUTEX_STALLED or @c PTHREAD_MUTEX_ROBUST.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_mutexattr_setrobust.html
  */
 int pthread_mutexattr_setrobust(pthread_mutexattr_t *attr, int robust);
 
@@ -822,6 +893,7 @@ int pthread_mutexattr_setrobust(pthread_mutexattr_t *attr, int robust);
  * @param type @c PTHREAD_MUTEX_NORMAL, @c PTHREAD_MUTEX_ERRORCHECK,
  *             @c PTHREAD_MUTEX_RECURSIVE, or @c PTHREAD_MUTEX_DEFAULT.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_mutexattr_settype.html
  */
 int pthread_mutexattr_settype(pthread_mutexattr_t *attr, int type);
 
@@ -833,6 +905,7 @@ int pthread_mutexattr_settype(pthread_mutexattr_t *attr, int type);
  * @param once_control Pointer to a @c pthread_once_t initialised with @c PTHREAD_ONCE_INIT.
  * @param init_routine Initialisation function to call at most once.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_once.html
  */
 int pthread_once(pthread_once_t *once_control, void (*init_routine)(void));
 
@@ -843,6 +916,7 @@ int pthread_once(pthread_once_t *once_control, void (*init_routine)(void));
  * @ingroup posix_option_group_rw_locks
  * @param rwlock Reader-writer lock to destroy.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_rwlock_destroy.html
  */
 int pthread_rwlock_destroy(pthread_rwlock_t *rwlock);
 
@@ -852,6 +926,7 @@ int pthread_rwlock_destroy(pthread_rwlock_t *rwlock);
  * @param rwlock Reader-writer lock to initialise.
  * @param attr   Attributes, or NULL for defaults.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_rwlock_init.html
  */
 int pthread_rwlock_init(pthread_rwlock_t *ZRESTRICT rwlock,
 			const pthread_rwlockattr_t *ZRESTRICT attr);
@@ -861,6 +936,7 @@ int pthread_rwlock_init(pthread_rwlock_t *ZRESTRICT rwlock,
  * @ingroup posix_option_group_rw_locks
  * @param rwlock Reader-writer lock.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_rwlock_rdlock.html
  */
 int pthread_rwlock_rdlock(pthread_rwlock_t *rwlock);
 
@@ -870,6 +946,7 @@ int pthread_rwlock_rdlock(pthread_rwlock_t *rwlock);
  * @param rwlock  Reader-writer lock.
  * @param abstime Absolute timeout (CLOCK_REALTIME).
  * @return 0 on success, @c ETIMEDOUT on timeout, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_rwlock_timedrdlock.html
  */
 int pthread_rwlock_timedrdlock(pthread_rwlock_t *ZRESTRICT rwlock,
 			       const struct timespec *ZRESTRICT abstime);
@@ -880,6 +957,7 @@ int pthread_rwlock_timedrdlock(pthread_rwlock_t *ZRESTRICT rwlock,
  * @param rwlock  Reader-writer lock.
  * @param abstime Absolute timeout (CLOCK_REALTIME).
  * @return 0 on success, @c ETIMEDOUT on timeout, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_rwlock_timedwrlock.html
  */
 int pthread_rwlock_timedwrlock(pthread_rwlock_t *ZRESTRICT rwlock,
 			       const struct timespec *ZRESTRICT abstime);
@@ -889,6 +967,7 @@ int pthread_rwlock_timedwrlock(pthread_rwlock_t *ZRESTRICT rwlock,
  * @ingroup posix_option_group_rw_locks
  * @param rwlock Reader-writer lock.
  * @return 0 on success, @c EBUSY if locked, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_rwlock_tryrdlock.html
  */
 int pthread_rwlock_tryrdlock(pthread_rwlock_t *rwlock);
 
@@ -897,6 +976,7 @@ int pthread_rwlock_tryrdlock(pthread_rwlock_t *rwlock);
  * @ingroup posix_option_group_rw_locks
  * @param rwlock Reader-writer lock.
  * @return 0 on success, @c EBUSY if locked, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_rwlock_trywrlock.html
  */
 int pthread_rwlock_trywrlock(pthread_rwlock_t *rwlock);
 
@@ -905,6 +985,7 @@ int pthread_rwlock_trywrlock(pthread_rwlock_t *rwlock);
  * @ingroup posix_option_group_rw_locks
  * @param rwlock Reader-writer lock to release.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_rwlock_unlock.html
  */
 int pthread_rwlock_unlock(pthread_rwlock_t *rwlock);
 
@@ -913,6 +994,7 @@ int pthread_rwlock_unlock(pthread_rwlock_t *rwlock);
  * @ingroup posix_option_group_rw_locks
  * @param rwlock Reader-writer lock.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_rwlock_wrlock.html
  */
 int pthread_rwlock_wrlock(pthread_rwlock_t *rwlock);
 
@@ -921,6 +1003,7 @@ int pthread_rwlock_wrlock(pthread_rwlock_t *rwlock);
  * @ingroup posix_option_group_rw_locks
  * @param attr Attributes object to destroy.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_rwlockattr_destroy.html
  */
 int pthread_rwlockattr_destroy(pthread_rwlockattr_t *attr);
 
@@ -931,6 +1014,7 @@ int pthread_rwlockattr_destroy(pthread_rwlockattr_t *attr);
  * @param attr    Attributes object.
  * @param pshared Output: @c PTHREAD_PROCESS_SHARED or @c PTHREAD_PROCESS_PRIVATE.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_rwlockattr_getpshared.html
  */
 int pthread_rwlockattr_getpshared(const pthread_rwlockattr_t *ZRESTRICT attr,
 				  int *ZRESTRICT pshared);
@@ -941,6 +1025,7 @@ int pthread_rwlockattr_getpshared(const pthread_rwlockattr_t *ZRESTRICT attr,
  * @ingroup posix_option_group_rw_locks
  * @param attr Attributes object to initialise.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_rwlockattr_init.html
  */
 int pthread_rwlockattr_init(pthread_rwlockattr_t *attr);
 
@@ -951,6 +1036,7 @@ int pthread_rwlockattr_init(pthread_rwlockattr_t *attr);
  * @param attr    Attributes object.
  * @param pshared @c PTHREAD_PROCESS_SHARED or @c PTHREAD_PROCESS_PRIVATE.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_rwlockattr_setpshared.html
  */
 int pthread_rwlockattr_setpshared(pthread_rwlockattr_t *attr, int pshared);
 #endif
@@ -961,6 +1047,7 @@ int pthread_rwlockattr_setpshared(pthread_rwlockattr_t *attr, int pshared);
  * @brief Return the thread ID of the calling thread.
  * @ingroup posix_option_group_threads_base
  * @return Thread ID of the calling thread.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_self.html
  */
 pthread_t pthread_self(void);
 
@@ -970,6 +1057,7 @@ pthread_t pthread_self(void);
  * @param state    @c PTHREAD_CANCEL_ENABLE or @c PTHREAD_CANCEL_DISABLE.
  * @param oldstate Output: previous state, or NULL.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_setcancelstate.html
  */
 int pthread_setcancelstate(int state, int *oldstate);
 
@@ -979,6 +1067,7 @@ int pthread_setcancelstate(int state, int *oldstate);
  * @param type    @c PTHREAD_CANCEL_DEFERRED or @c PTHREAD_CANCEL_ASYNCHRONOUS.
  * @param oldtype Output: previous type, or NULL.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_setcanceltype.html
  */
 int pthread_setcanceltype(int type, int *oldtype);
 
@@ -988,6 +1077,7 @@ int pthread_setcanceltype(int type, int *oldtype);
  * @ingroup posix_option_group_xsi_threads_ext
  * @param new_level Desired concurrency level (0 = implementation default).
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_setconcurrency.html
  */
 int pthread_setconcurrency(int new_level);
 #endif
@@ -1000,6 +1090,7 @@ int pthread_setconcurrency(int new_level);
  * @param policy New scheduling policy.
  * @param param  New scheduling parameters.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_setschedparam.html
  */
 int pthread_setschedparam(pthread_t thread, int policy, const struct sched_param *param);
 
@@ -1009,6 +1100,7 @@ int pthread_setschedparam(pthread_t thread, int policy, const struct sched_param
  * @param thread Thread to modify.
  * @param prio   New priority value.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_setschedprio.html
  */
 int pthread_setschedprio(pthread_t thread, int prio);
 #endif
@@ -1019,6 +1111,7 @@ int pthread_setschedprio(pthread_t thread, int prio);
  * @param key   Thread-specific data key.
  * @param value Value to associate with @p key for the calling thread.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_setspecific.html
  */
 int pthread_setspecific(pthread_key_t key, const void *value);
 
@@ -1029,6 +1122,7 @@ int pthread_setspecific(pthread_key_t key, const void *value);
  * @ingroup posix_option_group_spin_locks
  * @param lock Spin lock to destroy.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_spin_destroy.html
  */
 int pthread_spin_destroy(pthread_spinlock_t *lock);
 
@@ -1038,6 +1132,7 @@ int pthread_spin_destroy(pthread_spinlock_t *lock);
  * @param lock    Spin lock to initialise.
  * @param pshared @c PTHREAD_PROCESS_SHARED or @c PTHREAD_PROCESS_PRIVATE.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_spin_init.html
  */
 int pthread_spin_init(pthread_spinlock_t *lock, int pshared);
 
@@ -1046,6 +1141,7 @@ int pthread_spin_init(pthread_spinlock_t *lock, int pshared);
  * @ingroup posix_option_group_spin_locks
  * @param lock Spin lock to acquire.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_spin_lock.html
  */
 int pthread_spin_lock(pthread_spinlock_t *lock);
 
@@ -1054,6 +1150,7 @@ int pthread_spin_lock(pthread_spinlock_t *lock);
  * @ingroup posix_option_group_spin_locks
  * @param lock Spin lock to try.
  * @return 0 on success, @c EBUSY if already locked, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_spin_trylock.html
  */
 int pthread_spin_trylock(pthread_spinlock_t *lock);
 
@@ -1062,6 +1159,7 @@ int pthread_spin_trylock(pthread_spinlock_t *lock);
  * @ingroup posix_option_group_spin_locks
  * @param lock Spin lock to release.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_spin_unlock.html
  */
 int pthread_spin_unlock(pthread_spinlock_t *lock);
 
@@ -1072,6 +1170,7 @@ int pthread_spin_unlock(pthread_spinlock_t *lock);
  * @ingroup posix_option_group_threads_base
  *
  * If cancellation is pending and enabled, this function does not return.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_testcancel.html
  */
 void pthread_testcancel(void);
 
@@ -1115,6 +1214,7 @@ void pthread_testcancel(void);
  * @param name   Output buffer for the name.
  * @param len    Size of @p name buffer.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_getname_np.html
  */
 int pthread_getname_np(pthread_t thread, char *name, size_t len);
 
@@ -1124,6 +1224,7 @@ int pthread_getname_np(pthread_t thread, char *name, size_t len);
  * @param thread Thread to name.
  * @param name   Null-terminated name string (max 15 characters + NUL).
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_setname_np.html
  */
 int pthread_setname_np(pthread_t thread, const char *name);
 
@@ -1134,6 +1235,7 @@ int pthread_setname_np(pthread_t thread, const char *name);
  * @param status  Output: exit value or @c PTHREAD_CANCELED.
  * @param abstime Absolute timeout (CLOCK_REALTIME).
  * @return 0 on success, @c ETIMEDOUT on timeout, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_timedjoin_np.html
  */
 int pthread_timedjoin_np(pthread_t thread, void **status, const struct timespec *abstime);
 
@@ -1144,6 +1246,7 @@ int pthread_timedjoin_np(pthread_t thread, void **status, const struct timespec 
  * @param status Output: exit value if joined, or unchanged if not yet terminated.
  * @return 0 if joined, @c EBUSY if the thread has not yet terminated,
  *         or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_tryjoin_np.html
  */
 int pthread_tryjoin_np(pthread_t thread, void **status);
 
