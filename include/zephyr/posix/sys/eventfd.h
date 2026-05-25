@@ -4,6 +4,21 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+/**
+ * @file
+ * @brief Linux-compatible event notification file descriptor (<sys/eventfd.h>)
+ *
+ * eventfd provides a lightweight, kernel-managed counter that can be used for
+ * event notification between threads or between a kernel component and
+ * user space.  It integrates with poll/select/epoll.
+ *
+ * @note eventfd is a Linux extension, not part of POSIX.1-2017, but is
+ *       widely available on Linux and implemented here for compatibility.
+ *
+ * @defgroup posix_eventfd Event Notification File Descriptor
+ * @{
+ */
+
 #ifndef ZEPHYR_INCLUDE_POSIX_SYS_EVENTFD_H_
 #define ZEPHYR_INCLUDE_POSIX_SYS_EVENTFD_H_
 
@@ -13,49 +28,54 @@
 extern "C" {
 #endif
 
+/** @brief Semaphore-mode flag: each read decrements the counter by 1 instead of resetting to 0. */
 #define EFD_SEMAPHORE ZVFS_EFD_SEMAPHORE
+/** @brief Non-blocking flag: reads and writes return EAGAIN instead of blocking. */
 #define EFD_NONBLOCK  ZVFS_EFD_NONBLOCK
 
+/** @brief Counter value type for eventfd operations. */
 typedef zvfs_eventfd_t eventfd_t;
 
 /**
- * @brief Create a file descriptor for event notification
+ * @brief Create a file descriptor for event notification.
  *
- * The returned file descriptor can be used with POSIX read/write calls or
- * with the eventfd_read/eventfd_write functions.
+ * The returned file descriptor can be used with POSIX read()/write() or with
+ * eventfd_read()/eventfd_write().  It also integrates with poll(), allowing a
+ * writing thread to wake a polling thread simply by writing to the eventfd.
  *
- * It also supports polling and by including an eventfd in a call to poll,
- * it is possible to signal and wake the polling thread by simply writing to
- * the eventfd.
+ * When using read()/write(), the buffer size must be exactly 8 bytes or the
+ * call will fail with @c EINVAL.
  *
- * When using read() and write() on an eventfd, the size must always be at
- * least 8 bytes or the operation will fail with EINVAL.
- *
- * @return New eventfd file descriptor on success, -1 on error
+ * @param initval Initial counter value.
+ * @param flags   0, EFD_SEMAPHORE, EFD_NONBLOCK, or their combination.
+ * @return New eventfd file descriptor on success, -1 with errno set on failure.
  */
 int eventfd(unsigned int initval, int flags);
 
 /**
- * @brief Read from an eventfd
+ * @brief Read the current counter value from an eventfd.
  *
- * If call is successful, the value parameter will have the value 1
+ * In normal mode the counter is reset to 0; in EFD_SEMAPHORE mode it is
+ * decremented by 1.  Blocks if the counter is 0 (unless EFD_NONBLOCK).
  *
- * @param fd File descriptor
- * @param value Pointer for storing the read value
- *
- * @return 0 on success, -1 on error
+ * @param fd    Eventfd file descriptor.
+ * @param value Output: counter value read.
+ * @return 0 on success, -1 with errno set on failure.
  */
 int eventfd_read(int fd, eventfd_t *value);
 
 /**
- * @brief Write to an eventfd
+ * @brief Add a value to an eventfd counter.
  *
- * @param fd File descriptor
- * @param value Value to write
+ * Wakes any thread blocked in eventfd_read(), read(), or poll() on @p fd.
  *
- * @return 0 on success, -1 on error
+ * @param fd    Eventfd file descriptor.
+ * @param value Value to add to the counter.
+ * @return 0 on success, -1 with errno set on failure.
  */
 int eventfd_write(int fd, eventfd_t value);
+
+/** @} */
 
 #ifdef __cplusplus
 }

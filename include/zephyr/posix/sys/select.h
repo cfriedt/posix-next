@@ -15,7 +15,7 @@
  *      POSIX.1-2017 &lt;sys/select.h&gt;</a>
  *
  * @defgroup posix_select POSIX select
- * @ingroup posix_option_group_file_system
+ * @ingroup posix_option_group_device_io
  * @{
  */
 
