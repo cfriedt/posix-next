@@ -15,9 +15,7 @@
  * @see <a href="https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/limits.h.html">
  *      POSIX.1-2017 &lt;limits.h&gt;</a>
  *
- * @defgroup posix_limits POSIX Limits
  * @ingroup posix_option_group_threads_base
- * @{
  */
 
 #ifndef ZEPHYR_INCLUDE_ZEPHYR_POSIX_POSIX_LIMITS_H_
@@ -32,14 +30,8 @@
 
 /* clang-format off */
 
-/** @name Maximum values */
-/** @{ */
 /** @brief Maximum nanoseconds between clock ticks (20 ms). */
 #define _POSIX_CLOCKRES_MIN (20000000L)
-/** @} */
-
-/** @name Minimum values (portable lower bounds guaranteed by POSIX) */
-/** @{ */
 /** @brief Minimum number of I/O operations in a single list I/O call. */
 #define _POSIX_AIO_LISTIO_MAX               (2)
 #define _POSIX_AIO_MAX                      (1)
@@ -90,10 +82,7 @@
 #define _XOPEN_NAME_MAX                     (255)
 #define _XOPEN_PATH_MAX                     (1024)
 
-/** @} */ /* minimum values */
 
-/** @name Other invariant values */
-/** @{ */
 /** @brief Maximum number of bytes in a LANG name. */
 #define NL_LANGMAX (14)
 /** @brief Maximum message number. */
@@ -104,10 +93,6 @@
 #define NL_TEXTMAX (_POSIX2_LINE_MAX)
 /** @brief Default process priority (nice value). */
 #define NZERO      (20)
-/** @} */
-
-/** @name Runtime invariant values (actual limits for this implementation) */
-/** @{ */
 #define AIO_LISTIO_MAX                _POSIX_AIO_LISTIO_MAX
 #define AIO_MAX                       _POSIX_AIO_MAX
 #define AIO_PRIO_DELTA_MAX            (0)
@@ -145,10 +130,7 @@
 #define TTY_NAME_MAX                  _POSIX_TTY_NAME_MAX
 #define TZNAME_MAX                    _POSIX_TZNAME_MAX
 
-/** @} */ /* runtime invariant values */
 
-/** @name Pathname variable values */
-/** @{ */
 /** @brief Minimum number of bits needed to represent file size. */
 #define FILESIZEBITS             (32)
 #define POSIX_ALLOC_SIZE_MIN     (256)
@@ -158,11 +140,9 @@
 #define POSIX_REC_XFER_ALIGN     (4)
 #define SYMLINK_MAX              _POSIX_SYMLINK_MAX
 
-/** @} */ /* pathname variable values */
 
 /* clang-format on */
 
-/** @} */ /* posix_limits */
 
 #endif
 

@@ -11,9 +11,7 @@
  * @see <a href="https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/grp.h.html">
  *      POSIX.1-2017 &lt;grp.h&gt;</a>
  *
- * @defgroup posix_grp POSIX Group Database
  * @ingroup posix_option_thread_safe_functions
- * @{
  */
 
 #ifndef ZEPHYR_INCLUDE_POSIX_GRP_H_
@@ -34,6 +32,7 @@ struct group {
 
 /**
  * @brief Look up a group entry by name (thread-safe).
+ * @ingroup posix_option_thread_safe_functions
  * @param name    Group name to search for.
  * @param grp     Caller-supplied structure to fill in.
  * @param buffer  Caller-supplied buffer for string fields.
@@ -46,6 +45,7 @@ int getgrnam_r(const char *name, struct group *grp, char *buffer, size_t bufsize
 
 /**
  * @brief Look up a group entry by group ID (thread-safe).
+ * @ingroup posix_option_thread_safe_functions
  * @param gid     Numerical group ID to search for.
  * @param grp     Caller-supplied structure to fill in.
  * @param buffer  Caller-supplied buffer for string fields.
@@ -55,7 +55,6 @@ int getgrnam_r(const char *name, struct group *grp, char *buffer, size_t bufsize
  */
 int getgrgid_r(gid_t gid, struct group *grp, char *buffer, size_t bufsize, struct group **result);
 
-/** @} */
 
 #ifdef __cplusplus
 }
