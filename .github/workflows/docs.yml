@@ -1,0 +1,135 @@
+# SPDX-License-Identifier: Apache-2.0
+# Build posix-next Sphinx documentation and deploy to GitHub Pages.
+
+name: Documentation
+
+on:
+  push:
+    branches:
+      - main
+      - v*-branch
+    tags:
+      - v*
+  pull_request:
+    branches:
+      - main
+      - v*-branch
+
+# Allow only one Pages deployment at a time; cancel in-progress runs.
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Build
+  # ---------------------------------------------------------------------------
+  doc-build:
+    name: Build HTML documentation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout posix-next
+        uses: actions/checkout@v4
+        with:
+          path: modules/lib/posix
+
+      - name: Checkout Zephyr v4.3.0
+        uses: actions/checkout@v4
+        with:
+          repository: zephyrproject-rtos/zephyr
+          ref: v4.3.0
+          path: zephyr
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: zephyr/doc/requirements.txt
+
+      - name: Install Python dependencies
+        run: |
+          pip install -r zephyr/scripts/requirements-base.txt
+          python3 -c "
+          import re, pathlib
+          txt = pathlib.Path('zephyr/doc/requirements.txt').read_text()
+          txt = txt.replace('\x5c\n', ' ')
+          txt = re.sub(r'\s*--hash[= ]\S+', '', txt)
+          pathlib.Path('/tmp/doc-reqs.txt').write_text(txt)
+          "
+          pip install -r /tmp/doc-reqs.txt
+
+      - name: Install Doxygen
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y --no-install-recommends doxygen graphviz
+
+      - name: Build HTML
+        env:
+          ZEPHYR_BASE: ${{ github.workspace }}/zephyr
+          SPHINXOPTS_EXTRA: "-q -t publish"
+          DOCS_HTML_BASEURL: "https://cfriedt.github.io/posix-next/"
+        run: |
+          make -C modules/lib/posix/doc html \
+            SPHINXOPTS="-j auto -T -W --keep-going"
+
+      - name: Upload Pages artifact
+        # Only upload on push to main/tags (not PRs); use artifact for deploy job
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: modules/lib/posix/doc/_build/html
+
+      - name: Upload PR preview artifact
+        # On PRs, upload as a plain artifact for manual inspection
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: html-preview-pr${{ github.event.pull_request.number }}
+          path: modules/lib/posix/doc/_build/html
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # Deploy (push to main / tags only)
+  # ---------------------------------------------------------------------------
+  doc-deploy:
+    name: Deploy to GitHub Pages
+    needs: doc-build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    permissions:
+      pages: write
+      id-token: write
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+
+    steps:
+      - name: Deploy Pages
+        id: deploy
+        uses: actions/deploy-pages@v4
+
+  # ---------------------------------------------------------------------------
+  # Status check (always reported — required for branch protection)
+  # ---------------------------------------------------------------------------
+  doc-status:
+    name: Documentation Status
+    if: always()
+    needs: [doc-build]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check build result
+        run: |
+          if [ "${{ needs.doc-build.result }}" != "success" ]; then
+            echo "Documentation build failed"
+            exit 1
+          fi
+          echo "Documentation build succeeded"
