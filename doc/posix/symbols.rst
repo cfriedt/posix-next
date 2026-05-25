@@ -12,4 +12,4 @@ Clicking a symbol name opens its full Doxygen documentation page.  The
 **Standard** link takes you to the Open Group POSIX.1-2017 specification
 for that symbol.
 
-.. posix:search::
+.. posix-search::

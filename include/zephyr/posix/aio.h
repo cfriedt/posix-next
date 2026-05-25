@@ -14,9 +14,7 @@
  * @see <a href="https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/aio.h.html">
  *      POSIX.1-2017 &lt;aio.h&gt;</a>
  *
- * @defgroup posix_aio POSIX Asynchronous I/O
  * @ingroup posix_option_asynchronous_io
- * @{
  */
 
 #ifndef ZEPHYR_INCLUDE_ZEPHYR_POSIX_AIO_H_
@@ -34,7 +32,7 @@ extern "C" {
 #endif
 
 #if !defined(_OFF_T_DECLARED) && !defined(__off_t_defined)
-/** @brief File offset type. */
+/** @brief File offset type.  @ingroup posix_option_asynchronous_io*/
 typedef long off_t;
 #define _OFF_T_DECLARED
 #define __off_t_defined
@@ -45,7 +43,7 @@ typedef long off_t;
 #endif
 
 #if !defined(_SSIZE_T_DECLARED) && !defined(__ssize_t_defined)
-/** @brief Signed size type. */
+/** @brief Signed size type.  @ingroup posix_option_asynchronous_io*/
 #define unsigned signed /* parasoft-suppress MISRAC2012-RULE_20_4-a MISRAC2012-RULE_20_4-b */
 typedef __SIZE_TYPE__ ssize_t;
 #undef unsigned
@@ -87,6 +85,7 @@ struct aiocb {
 
 /**
  * @brief Cancel an outstanding asynchronous I/O request.
+ * @ingroup posix_option_asynchronous_io
  * @param fildes File descriptor.
  * @param aiocbp Control block to cancel, or NULL to cancel all for @p fildes.
  * @return AIO_CANCELED, AIO_NOTCANCELED, AIO_ALLDONE, or -1 on error.
@@ -95,6 +94,7 @@ int aio_cancel(int fildes, struct aiocb *aiocbp);
 
 /**
  * @brief Retrieve the error status of an asynchronous I/O request.
+ * @ingroup posix_option_asynchronous_io
  * @param aiocbp Asynchronous I/O control block.
  * @return EINPROGRESS if still running, 0 on success, or a positive error number.
  */
@@ -102,6 +102,7 @@ int aio_error(const struct aiocb *aiocbp);
 
 /**
  * @brief Asynchronously synchronise a file's data and metadata to storage.
+ * @ingroup posix_option_asynchronous_io
  * @param filedes File descriptor (ignored; use aiocbp->aio_fildes).
  * @param aiocbp  Control block specifying the file descriptor.
  * @return 0 if the request was successfully queued, or -1 on failure.
@@ -110,6 +111,7 @@ int aio_fsync(int filedes, struct aiocb *aiocbp);
 
 /**
  * @brief Enqueue an asynchronous read operation.
+ * @ingroup posix_option_asynchronous_io
  * @param aiocbp Control block specifying the file, offset, buffer, and size.
  * @return 0 if the request was successfully queued, or -1 on failure.
  */
@@ -117,6 +119,7 @@ int aio_read(struct aiocb *aiocbp);
 
 /**
  * @brief Retrieve the return status of a completed asynchronous I/O request.
+ * @ingroup posix_option_asynchronous_io
  *
  * Must be called exactly once after aio_error() returns a value other than
  * EINPROGRESS.  Calling it a second time yields undefined behaviour.
@@ -128,6 +131,7 @@ ssize_t aio_return(struct aiocb *aiocbp);
 
 /**
  * @brief Wait for one or more asynchronous I/O requests to complete.
+ * @ingroup posix_option_asynchronous_io
  * @param list    Array of pointers to control blocks to wait on.
  * @param nent    Number of entries in @p list.
  * @param timeout Maximum wait time, or NULL to block indefinitely.
@@ -137,6 +141,7 @@ int aio_suspend(const struct aiocb *const list[], int nent, const struct timespe
 
 /**
  * @brief Enqueue an asynchronous write operation.
+ * @ingroup posix_option_asynchronous_io
  * @param aiocbp Control block specifying the file, offset, buffer, and size.
  * @return 0 if the request was successfully queued, or -1 on failure.
  */
@@ -144,6 +149,7 @@ int aio_write(struct aiocb *aiocbp);
 
 /**
  * @brief Initiate a list of asynchronous I/O requests.
+ * @ingroup posix_option_asynchronous_io
  * @param mode LIO_WAIT (block until all complete) or LIO_NOWAIT (return immediately).
  * @param list Array of control block pointers (LIO_NOP entries are skipped).
  * @param nent Number of entries in @p list.
@@ -155,7 +161,6 @@ int lio_listio(int mode, struct aiocb *const ZRESTRICT list[], int nent,
 
 #endif /* _POSIX_C_SOURCE >= 200112L */
 
-/** @} */
 
 #ifdef __cplusplus
 }

@@ -14,9 +14,7 @@
  * @see <a href="https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/poll.h.html">
  *      POSIX.1-2017 &lt;poll.h&gt;</a>
  *
- * @defgroup posix_poll POSIX poll
  * @ingroup posix_option_group_device_io
- * @{
  */
 
 #ifndef ZEPHYR_INCLUDE_POSIX_POLL_H_
@@ -32,40 +30,41 @@ extern "C" {
 #if defined(_POSIX_C_SOURCE) || defined(__DOXYGEN__)
 
 #if !defined(_NFDS_T_DECLARED) && !defined(__nfds_t_defined)
-/** @brief Type for the number of file descriptors passed to poll(). */
+/** @brief Type for the number of file descriptors passed to poll().  @ingroup posix_option_group_device_io*/
 typedef int nfds_t;
 #define _NFDS_T_DECLARED
 #define __nfds_t_defined
 #endif
 
-/** @brief Poll file descriptor structure (alias for zvfs_pollfd). */
+/** @brief Poll file descriptor structure (alias for zvfs_pollfd).  @ingroup posix_option_group_device_io*/
 #define pollfd zvfs_pollfd
 
-/** @brief Data other than high-priority data may be read without blocking. */
+/** @brief Data other than high-priority data may be read without blocking.  @ingroup posix_option_group_device_io*/
 #define POLLIN     ZVFS_POLLIN
-/** @brief Normal data may be read without blocking. */
+/** @brief Normal data may be read without blocking.  @ingroup posix_option_group_device_io*/
 #define POLLRDNORM ZVFS_POLLRDNORM
-/** @brief Priority data may be read without blocking. */
+/** @brief Priority data may be read without blocking.  @ingroup posix_option_group_device_io*/
 #define POLLRDBAND ZVFS_POLLRDBAND
-/** @brief High-priority data may be read without blocking. */
+/** @brief High-priority data may be read without blocking.  @ingroup posix_option_group_device_io*/
 #define POLLPRI    ZVFS_POLLPRI
-/** @brief Normal data may be written without blocking. */
+/** @brief Normal data may be written without blocking.  @ingroup posix_option_group_device_io*/
 #define POLLOUT    ZVFS_POLLOUT
-/** @brief Equivalent to POLLOUT. */
+/** @brief Equivalent to POLLOUT.  @ingroup posix_option_group_device_io*/
 #define POLLWRNORM ZVFS_POLLWRNORM
-/** @brief Priority data may be written. */
+/** @brief Priority data may be written.  @ingroup posix_option_group_device_io*/
 #define POLLWRBAND ZVFS_POLLWRBAND
-/** @brief An error has occurred on the file descriptor (output only). */
+/** @brief An error has occurred on the file descriptor (output only).  @ingroup posix_option_group_device_io*/
 #define POLLERR    ZVFS_POLLERR
-/** @brief The file descriptor has been hung up (output only). */
+/** @brief The file descriptor has been hung up (output only).  @ingroup posix_option_group_device_io*/
 #define POLLHUP    ZVFS_POLLHUP
-/** @brief The file descriptor is not open (output only). */
+/** @brief The file descriptor is not open (output only).  @ingroup posix_option_group_device_io*/
 #define POLLNVAL   ZVFS_POLLNVAL
 
 BUILD_ASSERT(POLLWRNORM == POLLOUT, "POLLWRNORM must be equal to POLLOUT");
 
 /**
  * @brief Wait for events on a set of file descriptors.
+ * @ingroup posix_option_group_device_io
  *
  * Examines each file descriptor in @p fds for the events specified in its
  * @c events field.  Blocks until at least one descriptor is ready, the
@@ -79,7 +78,6 @@ BUILD_ASSERT(POLLWRNORM == POLLOUT, "POLLWRNORM must be equal to POLLOUT");
  */
 int poll(struct pollfd *fds, nfds_t nfds, int timeout);
 
-/** @} */
 
 #endif /* _POSIX_C_SOURCE || __DOXYGEN__ */
 
