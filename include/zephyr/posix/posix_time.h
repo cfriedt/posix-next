@@ -6,7 +6,7 @@
 
 /**
  * @file
- * @brief POSIX time types, clocks, and timers (<time.h> supplement)
+ * @brief \<time.h\>: POSIX time types, clocks, and timers
  *
  * Provides the clock identifiers, POSIX timer API, thread-safe time
  * conversion helpers, and locale-aware time formatting that extend the

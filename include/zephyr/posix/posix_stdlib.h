@@ -6,7 +6,7 @@
 
 /**
  * @file
- * @brief POSIX extensions to the C standard library (<stdlib.h> supplement)
+ * @brief \<stdlib.h\>: POSIX extensions to the C standard library
  *
  * Provides POSIX and XSI extensions to the standard @c <stdlib.h> interface,
  * including environment variable manipulation and sub-option parsing.
