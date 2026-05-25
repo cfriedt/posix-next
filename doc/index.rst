@@ -48,3 +48,4 @@ posix-next
 
    getting_started/index.rst
    posix/index.rst
+   samples/posix/posix
