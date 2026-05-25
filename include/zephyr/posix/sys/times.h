@@ -43,6 +43,7 @@ struct tms {
  * @param buf Output: filled with CPU times for the calling process.
  * @return Elapsed real time in clock ticks since an arbitrary epoch, or
  *         (clock_t)-1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/times.html
  */
 clock_t times(struct tms *buf);
 

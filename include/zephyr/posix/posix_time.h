@@ -151,6 +151,7 @@ struct itimerspec {
  * @param tm  Broken-down time.
  * @param buf Caller-supplied buffer of at least 26 bytes.
  * @return @p buf on success, or NULL on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/asctime_r.html
  */
 char *asctime_r(const struct tm *ZRESTRICT tm, char *ZRESTRICT buf);
 #endif
@@ -164,6 +165,7 @@ char *asctime_r(const struct tm *ZRESTRICT tm, char *ZRESTRICT buf);
  * @param pid      Process ID (0 = calling process).
  * @param clock_id Output: clock ID.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/clock_getcpuclockid.html
  */
 int clock_getcpuclockid(pid_t pid, clockid_t *clock_id);
 #endif
@@ -175,6 +177,7 @@ int clock_getcpuclockid(pid_t pid, clockid_t *clock_id);
  * @param clock_id Clock to query.
  * @param ts       Output: resolution (smallest representable interval).
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/clock_getres.html
  */
 int clock_getres(clockid_t clock_id, struct timespec *ts);
 
@@ -184,6 +187,7 @@ int clock_getres(clockid_t clock_id, struct timespec *ts);
  * @param clock_id Clock to read.
  * @param ts       Output: current time.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/clock_gettime.html
  */
 int clock_gettime(clockid_t clock_id, struct timespec *ts);
 #endif
@@ -197,6 +201,7 @@ int clock_gettime(clockid_t clock_id, struct timespec *ts);
  * @param rqtp     Requested sleep duration or absolute wakeup time.
  * @param rmtp     Output: remaining time if interrupted (only for relative sleeps), or NULL.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/clock_nanosleep.html
  */
 int clock_nanosleep(clockid_t clock_id, int flags, const struct timespec *rqtp,
 		    struct timespec *rmtp);
@@ -209,6 +214,7 @@ int clock_nanosleep(clockid_t clock_id, int flags, const struct timespec *rqtp,
  * @param clock_id Clock to set.
  * @param ts       New time value.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/clock_settime.html
  */
 int clock_settime(clockid_t clock_id, const struct timespec *ts);
 #endif
@@ -222,6 +228,7 @@ int clock_settime(clockid_t clock_id, const struct timespec *ts);
  * @param clock Pointer to a time_t value.
  * @param buf   Caller-supplied buffer of at least 26 bytes.
  * @return @p buf on success, or NULL on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/ctime_r.html
  */
 char *ctime_r(const time_t *clock, char *buf);
 #endif
@@ -279,6 +286,7 @@ struct tm *localtime_r(const time_t *ZRESTRICT timer, struct tm *ZRESTRICT resul
  * @param rqtp Requested sleep duration.
  * @param rmtp Output: remaining time if the call was interrupted, or NULL.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/nanosleep.html
  */
 int nanosleep(const struct timespec *rqtp, struct timespec *rmtp);
 #endif
@@ -294,6 +302,7 @@ int nanosleep(const struct timespec *rqtp, struct timespec *rmtp);
  * @param timeptr Broken-down time to format.
  * @param locale  Locale to use for formatting.
  * @return Number of bytes written (excluding NUL) on success, or 0 if @p maxsize was exceeded.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/strftime_l.html
  */
 size_t strftime_l(char *ZRESTRICT s, size_t maxsize, const char *ZRESTRICT format,
 		  const struct tm *ZRESTRICT timeptr, locale_t locale);
@@ -307,6 +316,7 @@ size_t strftime_l(char *ZRESTRICT s, size_t maxsize, const char *ZRESTRICT forma
  * @param tm     Output: filled-in broken-down time structure.
  * @return Pointer to the first character in @p s not consumed by parsing,
  *         or NULL on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/strptime.html
  */
 char *strptime(const char *ZRESTRICT s, const char *ZRESTRICT format, struct tm *ZRESTRICT tm);
 #endif
@@ -321,6 +331,7 @@ char *strptime(const char *ZRESTRICT s, const char *ZRESTRICT format, struct tm 
  * @param evp     Notification specification, or NULL for SIGALRM delivery.
  * @param timerid Output: new timer ID.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/timer_create.html
  */
 int timer_create(clockid_t clockId, struct sigevent *ZRESTRICT evp, timer_t *ZRESTRICT timerid);
 
@@ -329,6 +340,7 @@ int timer_create(clockid_t clockId, struct sigevent *ZRESTRICT evp, timer_t *ZRE
  * @ingroup posix_option_group_timers
  * @param timerid Timer to delete.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/timer_delete.html
  */
 int timer_delete(timer_t timerid);
 
@@ -337,6 +349,7 @@ int timer_delete(timer_t timerid);
  * @ingroup posix_option_group_timers
  * @param timerid Timer to query.
  * @return Overrun count on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/timer_getoverrun.html
  */
 int timer_getoverrun(timer_t timerid);
 
@@ -346,6 +359,7 @@ int timer_getoverrun(timer_t timerid);
  * @param timerid Timer to query.
  * @param its     Output: current timer value and interval.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/timer_gettime.html
  */
 int timer_gettime(timer_t timerid, struct itimerspec *its);
 
@@ -357,6 +371,7 @@ int timer_gettime(timer_t timerid, struct itimerspec *its);
  * @param value   New expiration time and interval; set it_value to zero to disarm.
  * @param ovalue  Output: previous timer value, or NULL.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/timer_settime.html
  */
 int timer_settime(timer_t timerid, int flags, const struct itimerspec *value,
 		  struct itimerspec *ovalue);
