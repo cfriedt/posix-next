@@ -39,6 +39,7 @@ struct group {
  * @param bufsize Size of @p buffer.
  * @param result  Output: pointer to @p grp on success, or NULL if not found.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/getgrnam_r.html
  */
 int getgrnam_r(const char *name, struct group *grp, char *buffer, size_t bufsize,
 	       struct group **result);
@@ -52,6 +53,7 @@ int getgrnam_r(const char *name, struct group *grp, char *buffer, size_t bufsize
  * @param bufsize Size of @p buffer.
  * @param result  Output: pointer to @p grp on success, or NULL if not found.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/getgrgid_r.html
  */
 int getgrgid_r(gid_t gid, struct group *grp, char *buffer, size_t bufsize, struct group **result);
 

@@ -75,6 +75,7 @@ BUILD_ASSERT(POLLWRNORM == POLLOUT, "POLLWRNORM must be equal to POLLOUT");
  * @param timeout Timeout in milliseconds; -1 to block indefinitely, 0 to return immediately.
  * @return Number of file descriptors with non-zero @c revents on success,
  *         0 on timeout, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/poll.html
  */
 int poll(struct pollfd *fds, nfds_t nfds, int timeout);
 

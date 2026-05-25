@@ -72,6 +72,7 @@ extern "C" {
 /**
  * @brief Close the connection to the system logger.
  * @ingroup posix_option_group_xsi_system_logging
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/closelog.html
  */
 void closelog(void);
 
@@ -81,6 +82,7 @@ void closelog(void);
  * @param ident    String prepended to each log message; typically the program name.
  * @param logopt   OR of LOG_* option flags (LOG_PID, LOG_CONS, etc.).
  * @param facility Facility code (LOG_USER, LOG_DAEMON, etc.).
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/openlog.html
  */
 void openlog(const char *ident, int logopt, int facility);
 
@@ -89,6 +91,7 @@ void openlog(const char *ident, int logopt, int facility);
  * @ingroup posix_option_group_xsi_system_logging
  * @param maskpri New priority mask (generated with LOG_MASK()).
  * @return The previous log priority mask.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/setlogmask.html
  */
 int setlogmask(int maskpri);
 
@@ -98,6 +101,7 @@ int setlogmask(int maskpri);
  * @param priority Priority code (LOG_EMERG .. LOG_DEBUG).
  * @param message  printf()-style format string.
  * @param ...      Format arguments.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/syslog.html
  */
 void syslog(int priority, const char *message, ...);
 
@@ -107,6 +111,7 @@ void syslog(int priority, const char *message, ...);
  * @param priority Priority code (LOG_EMERG .. LOG_DEBUG).
  * @param format   printf()-style format string.
  * @param ap       Argument list.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/vsyslog.html
  */
 void vsyslog(int priority, const char *format, va_list ap);
 

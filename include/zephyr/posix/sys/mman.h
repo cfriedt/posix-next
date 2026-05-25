@@ -65,6 +65,7 @@ extern "C" {
  * @param addr Base address of the region to lock.
  * @param len  Length of the region in bytes.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/mlock.html
  */
 int mlock(const void *addr, size_t len);
 
@@ -73,6 +74,7 @@ int mlock(const void *addr, size_t len);
  * @ingroup posix_option_memlock
  * @param flags MCL_CURRENT, MCL_FUTURE, or both.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/mlockall.html
  */
 int mlockall(int flags);
 
@@ -86,6 +88,7 @@ int mlockall(int flags);
  * @param fildes File descriptor (-1 for anonymous mappings).
  * @param off    Offset within the file (must be page-aligned).
  * @return Base address of the mapping, or MAP_FAILED on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/mmap.html
  */
 void *mmap(void *addr, size_t len, int prot, int flags, int fildes, off_t off);
 
@@ -96,6 +99,7 @@ void *mmap(void *addr, size_t len, int prot, int flags, int fildes, off_t off);
  * @param length Length of the region in bytes.
  * @param flags  MS_SYNC, MS_ASYNC, or MS_INVALIDATE.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/msync.html
  */
 int msync(void *addr, size_t length, int flags);
 
@@ -105,6 +109,7 @@ int msync(void *addr, size_t length, int flags);
  * @param addr Base address of the region to unlock.
  * @param len  Length of the region in bytes.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/munlock.html
  */
 int munlock(const void *addr, size_t len);
 
@@ -112,6 +117,7 @@ int munlock(const void *addr, size_t len);
  * @brief Unlock all memory locked by the calling process.
  * @ingroup posix_option_memlock
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/munlockall.html
  */
 int munlockall(void);
 
@@ -121,6 +127,7 @@ int munlockall(void);
  * @param addr Base address of the mapping.
  * @param len  Length of the region in bytes.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/munmap.html
  */
 int munmap(void *addr, size_t len);
 
@@ -131,6 +138,7 @@ int munmap(void *addr, size_t len);
  * @param oflag Open flags (O_RDONLY, O_RDWR, O_CREAT, O_EXCL, O_TRUNC).
  * @param mode  Permission bits applied if the object is created.
  * @return File descriptor for the shared memory object, or -1 on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/shm_open.html
  */
 int shm_open(const char *name, int oflag, mode_t mode);
 
@@ -139,6 +147,7 @@ int shm_open(const char *name, int oflag, mode_t mode);
  * @ingroup posix_option_shared_memory_objects
  * @param name Shared memory name.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/shm_unlink.html
  */
 int shm_unlink(const char *name);
 
