@@ -102,6 +102,7 @@ void endservent(void);
  * @brief Free addrinfo list returned by getaddrinfo().
  * @ingroup posix_option_group_networking
  * @param ai Linked list to free.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/freeaddrinfo.html
  */
 void freeaddrinfo(struct zsock_addrinfo *ai);
 
@@ -110,6 +111,7 @@ void freeaddrinfo(struct zsock_addrinfo *ai);
  * @ingroup posix_option_group_networking
  * @param errcode Error code returned by getaddrinfo().
  * @return Pointer to a description string.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/gai_strerror.html
  */
 const char *gai_strerror(int errcode);
 
@@ -121,6 +123,7 @@ const char *gai_strerror(int errcode);
  * @param hints   Criteria for address selection, or NULL for defaults.
  * @param res     Output: linked list of matching addresses.
  * @return 0 on success, or a non-zero EAI_* error code.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/getaddrinfo.html
  */
 int getaddrinfo(const char *host, const char *service, const struct zsock_addrinfo *hints,
 		struct zsock_addrinfo **res);
@@ -143,6 +146,7 @@ struct hostent *gethostent(void);
  * @param servlen  Size of @p serv.
  * @param flags    NI_* flags controlling the conversion.
  * @return 0 on success, or a non-zero EAI_* error code.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/getnameinfo.html
  */
 int getnameinfo(const struct sockaddr *addr, socklen_t addrlen, char *host, socklen_t hostlen,
 		char *serv, socklen_t servlen, int flags);
@@ -223,6 +227,7 @@ struct servent *getservent(void);
  * @brief Open the hosts database (legacy).
  * @ingroup posix_option_group_networking
  * @param stayopen Non-zero to keep the database connection open.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/sethostent.html
  */
 void sethostent(int stayopen);
 
@@ -230,6 +235,7 @@ void sethostent(int stayopen);
  * @brief Open the networks database (legacy).
  * @ingroup posix_option_group_networking
  * @param stayopen Non-zero to keep the database connection open.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/setnetent.html
  */
 void setnetent(int stayopen);
 
@@ -237,6 +243,7 @@ void setnetent(int stayopen);
  * @brief Open the protocols database (legacy).
  * @ingroup posix_option_group_networking
  * @param stayopen Non-zero to keep the database connection open.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/setprotoent.html
  */
 void setprotoent(int stayopen);
 
@@ -244,6 +251,7 @@ void setprotoent(int stayopen);
  * @brief Open the services database (legacy).
  * @ingroup posix_option_group_networking
  * @param stayopen Non-zero to keep the database connection open.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/setservent.html
  */
 void setservent(int stayopen);
 
