@@ -45,6 +45,7 @@ struct mq_attr {
  * @param oflags Open flags (O_RDONLY, O_WRONLY, O_RDWR, O_CREAT, O_EXCL, O_NONBLOCK).
  * @param ...    If O_CREAT: mode_t mode, struct mq_attr *attr.
  * @return Message queue descriptor on success, or @c (mqd_t)-1 on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/mq_open.html
  */
 mqd_t mq_open(const char *name, int oflags, ...);
 
@@ -53,6 +54,7 @@ mqd_t mq_open(const char *name, int oflags, ...);
  * @ingroup posix_option_message_passing
  * @param mqdes Message queue descriptor.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/mq_close.html
  */
 int mq_close(mqd_t mqdes);
 
@@ -61,6 +63,7 @@ int mq_close(mqd_t mqdes);
  * @ingroup posix_option_message_passing
  * @param name Queue name.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/mq_unlink.html
  */
 int mq_unlink(const char *name);
 
@@ -70,6 +73,7 @@ int mq_unlink(const char *name);
  * @param mqdes  Message queue descriptor.
  * @param mqstat Output: current attributes.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/mq_getattr.html
  */
 int mq_getattr(mqd_t mqdes, struct mq_attr *mqstat);
 
@@ -81,6 +85,7 @@ int mq_getattr(mqd_t mqdes, struct mq_attr *mqstat);
  * @param msg_len  Size of @p msg_ptr (must be >= mq_msgsize).
  * @param msg_prio Output: priority of the received message, or NULL.
  * @return Number of bytes in the received message on success, or -1 on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/mq_receive.html
  */
 int mq_receive(mqd_t mqdes, char *msg_ptr, size_t msg_len, unsigned int *msg_prio);
 
@@ -92,6 +97,7 @@ int mq_receive(mqd_t mqdes, char *msg_ptr, size_t msg_len, unsigned int *msg_pri
  * @param msg_len  Size of the message in bytes.
  * @param msg_prio Priority of the message (higher value = higher priority).
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/mq_send.html
  */
 int mq_send(mqd_t mqdes, const char *msg_ptr, size_t msg_len, unsigned int msg_prio);
 
@@ -102,6 +108,7 @@ int mq_send(mqd_t mqdes, const char *msg_ptr, size_t msg_len, unsigned int msg_p
  * @param mqstat  New attributes (only mq_flags is used).
  * @param omqstat Output: previous attributes, or NULL.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/mq_setattr.html
  */
 int mq_setattr(mqd_t mqdes, const struct mq_attr *mqstat, struct mq_attr *omqstat);
 
@@ -114,6 +121,7 @@ int mq_setattr(mqd_t mqdes, const struct mq_attr *mqstat, struct mq_attr *omqsta
  * @param msg_prio Output: message priority, or NULL.
  * @param abstime  Absolute timeout (CLOCK_REALTIME).
  * @return Number of bytes in the message on success, or -1 on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/mq_timedreceive.html
  */
 int mq_timedreceive(mqd_t mqdes, char *msg_ptr, size_t msg_len, unsigned int *msg_prio,
 		    const struct timespec *abstime);
@@ -127,6 +135,7 @@ int mq_timedreceive(mqd_t mqdes, char *msg_ptr, size_t msg_len, unsigned int *ms
  * @param msg_prio Priority of the message.
  * @param abstime  Absolute timeout (CLOCK_REALTIME).
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/mq_timedsend.html
  */
 int mq_timedsend(mqd_t mqdes, const char *msg_ptr, size_t msg_len, unsigned int msg_prio,
 		 const struct timespec *abstime);
@@ -137,6 +146,7 @@ int mq_timedsend(mqd_t mqdes, const char *msg_ptr, size_t msg_len, unsigned int 
  * @param mqdes        Message queue descriptor.
  * @param notification Notification specification, or NULL to cancel.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/mq_notify.html
  */
 int mq_notify(mqd_t mqdes, const struct sigevent *notification);
 

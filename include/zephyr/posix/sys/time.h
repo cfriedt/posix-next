@@ -40,6 +40,7 @@ struct timeval {
  *           since the Epoch.
  * @param tz Deprecated, must be NULL.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/gettimeofday.html
  */
 int gettimeofday(struct timeval *tv, void *tz);
 

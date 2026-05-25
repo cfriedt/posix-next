@@ -54,6 +54,7 @@ struct sched_param {
  * @return 0 on success, or -1 with errno set on failure.
  *
  * @see IEEE 1003.1, sched_yield
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/sched_yield.html
  */
 int sched_yield(void);
 
@@ -62,6 +63,7 @@ int sched_yield(void);
  * @ingroup posix_option_priority_scheduling
  * @param policy @c SCHED_FIFO, @c SCHED_RR, or @c SCHED_OTHER.
  * @return Minimum priority on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/sched_get_priority_min.html
  */
 int sched_get_priority_min(int policy);
 
@@ -70,6 +72,7 @@ int sched_get_priority_min(int policy);
  * @ingroup posix_option_priority_scheduling
  * @param policy @c SCHED_FIFO, @c SCHED_RR, or @c SCHED_OTHER.
  * @return Maximum priority on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/sched_get_priority_max.html
  */
 int sched_get_priority_max(int policy);
 
@@ -79,6 +82,7 @@ int sched_get_priority_max(int policy);
  * @param pid   Process ID (0 = calling process).
  * @param param Output: current scheduling parameters.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/sched_getparam.html
  */
 int sched_getparam(pid_t pid, struct sched_param *param);
 
@@ -88,6 +92,7 @@ int sched_getparam(pid_t pid, struct sched_param *param);
  * @param pid Process ID (0 = calling process).
  * @return Scheduling policy (@c SCHED_FIFO, @c SCHED_RR, @c SCHED_OTHER),
  *         or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/sched_getscheduler.html
  */
 int sched_getscheduler(pid_t pid);
 
@@ -97,6 +102,7 @@ int sched_getscheduler(pid_t pid);
  * @param pid   Process ID (0 = calling process).
  * @param param New scheduling parameters.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/sched_setparam.html
  */
 int sched_setparam(pid_t pid, const struct sched_param *param);
 
@@ -107,6 +113,7 @@ int sched_setparam(pid_t pid, const struct sched_param *param);
  * @param policy @c SCHED_FIFO, @c SCHED_RR, or @c SCHED_OTHER.
  * @param param  New scheduling parameters.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/sched_setscheduler.html
  */
 int sched_setscheduler(pid_t pid, int policy, const struct sched_param *param);
 
@@ -116,6 +123,7 @@ int sched_setscheduler(pid_t pid, int policy, const struct sched_param *param);
  * @param pid      Process ID (0 = calling process).
  * @param interval Output: round-robin interval.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/sched_rr_get_interval.html
  */
 int sched_rr_get_interval(pid_t pid, struct timespec *interval);
 
