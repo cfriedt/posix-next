@@ -12,3 +12,4 @@ POSIX
    implementation/index.rst
    option_groups/index.rst
    kconfig/index.rst
+   symbols.rst
