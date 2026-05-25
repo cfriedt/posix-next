@@ -89,6 +89,7 @@ struct aiocb {
  * @param fildes File descriptor.
  * @param aiocbp Control block to cancel, or NULL to cancel all for @p fildes.
  * @return AIO_CANCELED, AIO_NOTCANCELED, AIO_ALLDONE, or -1 on error.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/aio_cancel.html
  */
 int aio_cancel(int fildes, struct aiocb *aiocbp);
 
@@ -97,6 +98,7 @@ int aio_cancel(int fildes, struct aiocb *aiocbp);
  * @ingroup posix_option_asynchronous_io
  * @param aiocbp Asynchronous I/O control block.
  * @return EINPROGRESS if still running, 0 on success, or a positive error number.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/aio_error.html
  */
 int aio_error(const struct aiocb *aiocbp);
 
@@ -106,6 +108,7 @@ int aio_error(const struct aiocb *aiocbp);
  * @param filedes File descriptor (ignored; use aiocbp->aio_fildes).
  * @param aiocbp  Control block specifying the file descriptor.
  * @return 0 if the request was successfully queued, or -1 on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/aio_fsync.html
  */
 int aio_fsync(int filedes, struct aiocb *aiocbp);
 
@@ -114,6 +117,7 @@ int aio_fsync(int filedes, struct aiocb *aiocbp);
  * @ingroup posix_option_asynchronous_io
  * @param aiocbp Control block specifying the file, offset, buffer, and size.
  * @return 0 if the request was successfully queued, or -1 on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/aio_read.html
  */
 int aio_read(struct aiocb *aiocbp);
 
@@ -126,6 +130,7 @@ int aio_read(struct aiocb *aiocbp);
  *
  * @param aiocbp Asynchronous I/O control block.
  * @return Number of bytes transferred on success, or -1 on error (sets errno).
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/aio_return.html
  */
 ssize_t aio_return(struct aiocb *aiocbp);
 
@@ -136,6 +141,7 @@ ssize_t aio_return(struct aiocb *aiocbp);
  * @param nent    Number of entries in @p list.
  * @param timeout Maximum wait time, or NULL to block indefinitely.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/aio_suspend.html
  */
 int aio_suspend(const struct aiocb *const list[], int nent, const struct timespec *timeout);
 
@@ -144,6 +150,7 @@ int aio_suspend(const struct aiocb *const list[], int nent, const struct timespe
  * @ingroup posix_option_asynchronous_io
  * @param aiocbp Control block specifying the file, offset, buffer, and size.
  * @return 0 if the request was successfully queued, or -1 on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/aio_write.html
  */
 int aio_write(struct aiocb *aiocbp);
 
@@ -155,6 +162,7 @@ int aio_write(struct aiocb *aiocbp);
  * @param nent Number of entries in @p list.
  * @param sig  Notification on completion (only for LIO_NOWAIT), or NULL.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/lio_listio.html
  */
 int lio_listio(int mode, struct aiocb *const ZRESTRICT list[], int nent,
 	       struct sigevent *ZRESTRICT sig);
