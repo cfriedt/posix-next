@@ -97,6 +97,20 @@ set_target_properties(html html-nodeps PROPERTIES
   ADDITIONAL_CLEAN_FILES "${DOCS_HTML_DIR};${DOCS_DOCTREE_DIR}"
 )
 
+# Interactive SVGs that use <object> embedding need to be copied verbatim
+# (Sphinx only copies figure/image SVGs to _images/).
+set(INTERACTIVE_SVGS
+  posix/overview/aep.svg
+)
+foreach(svg ${INTERACTIVE_SVGS})
+  add_custom_command(TARGET html POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      ${DOCS_SRC_DIR}/${svg}
+      ${DOCS_HTML_DIR}/${svg}
+    COMMENT "Copying interactive SVG: ${svg}"
+  )
+endforeach()
+
 # ---------------------------------------------------------------------------
 # html-live target (auto-rebuild on change)
 # ---------------------------------------------------------------------------
