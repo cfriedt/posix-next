@@ -3,6 +3,22 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
+
+/**
+ * @file
+ * @brief POSIX extensions to the C string library (<string.h> supplement)
+ *
+ * Provides POSIX extensions to the standard @c <string.h> interface, including
+ * thread-safe and signal-related string utilities.
+ *
+ * @see <a href="https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/string.h.html">
+ *      POSIX.1-2017 &lt;string.h&gt;</a>
+ *
+ * @defgroup posix_string POSIX String Extensions
+ * @ingroup posix_option_group_c_lang_support_r
+ * @{
+ */
+
 #ifndef ZEPHYR_INCLUDE_POSIX_POSIX_STRING_H_
 #define ZEPHYR_INCLUDE_POSIX_POSIX_STRING_H_
 
@@ -16,7 +32,21 @@ extern "C" {
 
 /* TODO: additional POSIX signatures here */
 
+/**
+ * @brief Return a string describing a signal number.
+ *
+ * Returns a pointer to a locale-specific message string describing the signal
+ * whose number is @p signo.  The contents of the string pointed to by the
+ * return value must not be modified by the application.  The returned pointer
+ * may be invalidated by a subsequent call to strsignal().
+ *
+ * @param signo Signal number.
+ * @return Pointer to a string describing the signal, or an unspecified string
+ *         if @p signo is an unknown signal number.
+ */
 char *strsignal(int signo);
+
+/** @} */
 
 #ifdef __cplusplus
 }
