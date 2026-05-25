@@ -11,9 +11,7 @@
  * @see <a href="https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/pwd.h.html">
  *      POSIX.1-2017 &lt;pwd.h&gt;</a>
  *
- * @defgroup posix_pwd POSIX Password Database
  * @ingroup posix_option_thread_safe_functions
- * @{
  */
 
 #ifndef ZEPHYR_INCLUDE_POSIX_PWD_H_
@@ -36,6 +34,7 @@ struct passwd {
 
 /**
  * @brief Look up a password entry by name (thread-safe).
+ * @ingroup posix_option_thread_safe_functions
  * @param nam     User login name to search for.
  * @param pwd     Caller-supplied structure to fill in.
  * @param buffer  Caller-supplied buffer for string fields.
@@ -48,6 +47,7 @@ int getpwnam_r(const char *nam, struct passwd *pwd, char *buffer, size_t bufsize
 
 /**
  * @brief Look up a password entry by user ID (thread-safe).
+ * @ingroup posix_option_thread_safe_functions
  * @param uid     Numerical user ID to search for.
  * @param pwd     Caller-supplied structure to fill in.
  * @param buffer  Caller-supplied buffer for string fields.
@@ -57,7 +57,6 @@ int getpwnam_r(const char *nam, struct passwd *pwd, char *buffer, size_t bufsize
  */
 int getpwuid_r(uid_t uid, struct passwd *pwd, char *buffer, size_t bufsize, struct passwd **result);
 
-/** @} */
 
 #ifdef __cplusplus
 }

@@ -14,9 +14,7 @@
  * @see <a href="https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/sys_socket.h.html">
  *      POSIX.1-2017 &lt;sys/socket.h&gt;</a>
  *
- * @defgroup posix_socket POSIX Sockets
  * @ingroup posix_option_group_networking
- * @{
  */
 
 #ifndef ZEPHYR_INCLUDE_POSIX_SYS_SOCKET_H_
@@ -25,20 +23,20 @@
 #include <sys/types.h>
 #include <zephyr/net/socket.h>
 
-/** @brief Shut down the read half of the connection. */
+/** @brief Shut down the read half of the connection.  @ingroup posix_option_group_networking*/
 #define SHUT_RD   ZSOCK_SHUT_RD
-/** @brief Shut down the write half of the connection. */
+/** @brief Shut down the write half of the connection.  @ingroup posix_option_group_networking*/
 #define SHUT_WR   ZSOCK_SHUT_WR
-/** @brief Shut down both halves of the connection. */
+/** @brief Shut down both halves of the connection.  @ingroup posix_option_group_networking*/
 #define SHUT_RDWR ZSOCK_SHUT_RDWR
 
-/** @brief Peek at incoming data without removing it from the queue. */
+/** @brief Peek at incoming data without removing it from the queue.  @ingroup posix_option_group_networking*/
 #define MSG_PEEK     ZSOCK_MSG_PEEK
-/** @brief Return the real length of the datagram even if it was truncated. */
+/** @brief Return the real length of the datagram even if it was truncated.  @ingroup posix_option_group_networking*/
 #define MSG_TRUNC    ZSOCK_MSG_TRUNC
-/** @brief Enable non-blocking operation for this call only. */
+/** @brief Enable non-blocking operation for this call only.  @ingroup posix_option_group_networking*/
 #define MSG_DONTWAIT ZSOCK_MSG_DONTWAIT
-/** @brief Block until all requested data has been received. */
+/** @brief Block until all requested data has been received.  @ingroup posix_option_group_networking*/
 #define MSG_WAITALL  ZSOCK_MSG_WAITALL
 
 #ifdef __cplusplus
@@ -46,7 +44,7 @@ extern "C" {
 #endif
 
 #if !defined(_SOCKLEN_T_DECLARED) && !defined(__socklen_t_defined)
-/** @brief Type for socket address length values. */
+/** @brief Type for socket address length values.  @ingroup posix_option_group_networking*/
 typedef uint32_t socklen_t;
 #define _SOCKLEN_T_DECLARED
 #define __socklen_t_defined
@@ -60,6 +58,7 @@ struct linger {
 
 /**
  * @brief Accept a new connection on a listening socket.
+ * @ingroup posix_option_group_networking
  * @param sock    Listening socket file descriptor.
  * @param addr    Output: address of the connecting peer, or NULL.
  * @param addrlen Input: size of @p addr; output: actual address size.
@@ -69,6 +68,7 @@ int accept(int sock, struct sockaddr *addr, socklen_t *addrlen);
 
 /**
  * @brief Assign a local address to a socket.
+ * @ingroup posix_option_group_networking
  * @param sock    Socket file descriptor.
  * @param addr    Local address to bind.
  * @param addrlen Size of @p addr in bytes.
@@ -78,6 +78,7 @@ int bind(int sock, const struct sockaddr *addr, socklen_t addrlen);
 
 /**
  * @brief Initiate a connection on a socket.
+ * @ingroup posix_option_group_networking
  * @param sock    Socket file descriptor.
  * @param addr    Remote address to connect to.
  * @param addrlen Size of @p addr in bytes.
@@ -87,6 +88,7 @@ int connect(int sock, const struct sockaddr *addr, socklen_t addrlen);
 
 /**
  * @brief Get the address of the peer connected to a socket.
+ * @ingroup posix_option_group_networking
  * @param sock    Socket file descriptor.
  * @param addr    Output: peer address.
  * @param addrlen Input: size of @p addr; output: actual size.
@@ -96,6 +98,7 @@ int getpeername(int sock, struct sockaddr *addr, socklen_t *addrlen);
 
 /**
  * @brief Get the local address bound to a socket.
+ * @ingroup posix_option_group_networking
  * @param sock    Socket file descriptor.
  * @param addr    Output: local address.
  * @param addrlen Input: size of @p addr; output: actual size.
@@ -105,6 +108,7 @@ int getsockname(int sock, struct sockaddr *addr, socklen_t *addrlen);
 
 /**
  * @brief Get socket options.
+ * @ingroup posix_option_group_networking
  * @param sock    Socket file descriptor.
  * @param level   Protocol level (SOL_SOCKET, IPPROTO_TCP, etc.).
  * @param optname Option name (SO_REUSEADDR, SO_KEEPALIVE, etc.).
@@ -116,6 +120,7 @@ int getsockopt(int sock, int level, int optname, void *optval, socklen_t *optlen
 
 /**
  * @brief Mark a socket as passive (ready to accept connections).
+ * @ingroup posix_option_group_networking
  * @param sock    Socket file descriptor.
  * @param backlog Maximum number of pending connections to queue.
  * @return 0 on success, or -1 with errno set on failure.
@@ -124,6 +129,7 @@ int listen(int sock, int backlog);
 
 /**
  * @brief Receive data from a connected socket.
+ * @ingroup posix_option_group_networking
  * @param sock    Socket file descriptor.
  * @param buf     Buffer to receive data into.
  * @param max_len Maximum number of bytes to receive.
@@ -134,6 +140,7 @@ ssize_t recv(int sock, void *buf, size_t max_len, int flags);
 
 /**
  * @brief Receive data and the sender's address from a socket.
+ * @ingroup posix_option_group_networking
  * @param sock     Socket file descriptor.
  * @param buf      Buffer to receive data into.
  * @param max_len  Maximum number of bytes to receive.
@@ -147,6 +154,7 @@ ssize_t recvfrom(int sock, void *buf, size_t max_len, int flags, struct sockaddr
 
 /**
  * @brief Receive a message (with scatter-gather I/O and ancillary data).
+ * @ingroup posix_option_group_networking
  * @param sock Socket file descriptor.
  * @param msg  Message header specifying I/O vectors and address buffer.
  * @param flags MSG_* flags.
@@ -156,6 +164,7 @@ ssize_t recvmsg(int sock, struct msghdr *msg, int flags);
 
 /**
  * @brief Send data on a connected socket.
+ * @ingroup posix_option_group_networking
  * @param sock Socket file descriptor.
  * @param buf  Data to send.
  * @param len  Number of bytes to send.
@@ -166,6 +175,7 @@ ssize_t send(int sock, const void *buf, size_t len, int flags);
 
 /**
  * @brief Send a message (with scatter-gather I/O and ancillary data).
+ * @ingroup posix_option_group_networking
  * @param sock    Socket file descriptor.
  * @param message Message header specifying I/O vectors and destination.
  * @param flags   MSG_* flags.
@@ -175,6 +185,7 @@ ssize_t sendmsg(int sock, const struct msghdr *message, int flags);
 
 /**
  * @brief Send data to a specific destination address.
+ * @ingroup posix_option_group_networking
  * @param sock      Socket file descriptor.
  * @param buf       Data to send.
  * @param len       Number of bytes to send.
@@ -188,6 +199,7 @@ ssize_t sendto(int sock, const void *buf, size_t len, int flags, const struct so
 
 /**
  * @brief Set socket options.
+ * @ingroup posix_option_group_networking
  * @param sock    Socket file descriptor.
  * @param level   Protocol level (SOL_SOCKET, IPPROTO_TCP, etc.).
  * @param optname Option name.
@@ -199,6 +211,7 @@ int setsockopt(int sock, int level, int optname, const void *optval, socklen_t o
 
 /**
  * @brief Shut down part or all of a full-duplex connection.
+ * @ingroup posix_option_group_networking
  * @param sock Socket file descriptor.
  * @param how  SHUT_RD, SHUT_WR, or SHUT_RDWR.
  * @return 0 on success, or -1 with errno set on failure.
@@ -207,6 +220,7 @@ int shutdown(int sock, int how);
 
 /**
  * @brief Determine whether a socket is at the out-of-band mark.
+ * @ingroup posix_option_group_networking
  * @param s Socket file descriptor.
  * @return 1 if at the mark, 0 if not, or -1 on failure.
  */
@@ -214,6 +228,7 @@ int sockatmark(int s);
 
 /**
  * @brief Create a new socket.
+ * @ingroup posix_option_group_networking
  * @param family Protocol family (AF_INET, AF_INET6, AF_UNIX, etc.).
  * @param type   Socket type (SOCK_STREAM, SOCK_DGRAM, SOCK_RAW, etc.).
  * @param proto  Protocol number (IPPROTO_TCP, IPPROTO_UDP, 0 for default).
@@ -223,6 +238,7 @@ int socket(int family, int type, int proto);
 
 /**
  * @brief Create a pair of connected sockets.
+ * @ingroup posix_option_group_networking
  * @param family Protocol family (typically AF_UNIX).
  * @param type   Socket type.
  * @param proto  Protocol.
@@ -231,7 +247,6 @@ int socket(int family, int type, int proto);
  */
 int socketpair(int family, int type, int proto, int sv[2]);
 
-/** @} */
 
 #ifdef __cplusplus
 }
