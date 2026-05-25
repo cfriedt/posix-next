@@ -11,9 +11,6 @@
  * @see <a href="https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/syslog.h.html">
  *      POSIX.1-2017 &lt;syslog.h&gt;</a>
  *
- * @defgroup posix_syslog POSIX System Logging
- * @ingroup posix_option_group_threads_base
- * @{
  */
 
 #ifndef ZEPHYR_INCLUDE_POSIX_SYSLOG_H_
@@ -22,23 +19,19 @@
 #include <stdarg.h>
 
 /** @name openlog() option flags */
-/** @{ */
-/** @brief Include the process ID in each log message. */
+/** @brief Include the process ID in each log message.  @ingroup posix_option_group_xsi_system_logging*/
 #define LOG_PID    1
-/** @brief Log to the system console if the logger is unavailable. */
+/** @brief Log to the system console if the logger is unavailable.  @ingroup posix_option_group_xsi_system_logging*/
 #define LOG_CONS   2
-/** @brief Open the connection to the logger immediately. */
+/** @brief Open the connection to the logger immediately.  @ingroup posix_option_group_xsi_system_logging*/
 #define LOG_NDELAY 4
-/** @brief Delay the connection until the first message is sent. */
+/** @brief Delay the connection until the first message is sent.  @ingroup posix_option_group_xsi_system_logging*/
 #define LOG_ODELAY 8
-/** @brief Do not wait for child processes created by logging. */
+/** @brief Do not wait for child processes created by logging.  @ingroup posix_option_group_xsi_system_logging*/
 #define LOG_NOWAIT 16
-/** @brief Also write messages to stderr. */
+/** @brief Also write messages to stderr.  @ingroup posix_option_group_xsi_system_logging*/
 #define LOG_PERROR 32
-/** @} */
-
 /** @name openlog() facility codes */
-/** @{ */
 #define LOG_KERN   0  /**< Kernel messages. */
 #define LOG_USER   1  /**< Generic user-level messages. */
 #define LOG_MAIL   2  /**< Mail system messages. */
@@ -56,10 +49,7 @@
 #define LOG_LOCAL5 14 /**< Reserved for local use (facility 5). */
 #define LOG_LOCAL6 15 /**< Reserved for local use (facility 6). */
 #define LOG_LOCAL7 16 /**< Reserved for local use (facility 7). */
-/** @} */
-
 /** @name syslog() priority codes */
-/** @{ */
 #define LOG_EMERG   0 /**< System is unusable. */
 #define LOG_ALERT   1 /**< Action must be taken immediately. */
 #define LOG_CRIT    2 /**< Critical conditions. */
@@ -68,8 +58,6 @@
 #define LOG_NOTICE  5 /**< Normal but significant condition. */
 #define LOG_INFO    6 /**< Informational message. */
 #define LOG_DEBUG   7 /**< Debug-level message. */
-/** @} */
-
 /**
  * @brief Generate a log mask for the given priority.
  * @param mask Priority value (LOG_EMERG .. LOG_DEBUG).
@@ -83,11 +71,13 @@ extern "C" {
 
 /**
  * @brief Close the connection to the system logger.
+ * @ingroup posix_option_group_xsi_system_logging
  */
 void closelog(void);
 
 /**
  * @brief Open a connection to the system logger.
+ * @ingroup posix_option_group_xsi_system_logging
  * @param ident    String prepended to each log message; typically the program name.
  * @param logopt   OR of LOG_* option flags (LOG_PID, LOG_CONS, etc.).
  * @param facility Facility code (LOG_USER, LOG_DAEMON, etc.).
@@ -96,6 +86,7 @@ void openlog(const char *ident, int logopt, int facility);
 
 /**
  * @brief Set the log priority mask.
+ * @ingroup posix_option_group_xsi_system_logging
  * @param maskpri New priority mask (generated with LOG_MASK()).
  * @return The previous log priority mask.
  */
@@ -103,6 +94,7 @@ int setlogmask(int maskpri);
 
 /**
  * @brief Write a message to the system logger.
+ * @ingroup posix_option_group_xsi_system_logging
  * @param priority Priority code (LOG_EMERG .. LOG_DEBUG).
  * @param message  printf()-style format string.
  * @param ...      Format arguments.
@@ -111,13 +103,12 @@ void syslog(int priority, const char *message, ...);
 
 /**
  * @brief Write a message to the system logger (va_list form).
+ * @ingroup posix_option_group_xsi_system_logging
  * @param priority Priority code (LOG_EMERG .. LOG_DEBUG).
  * @param format   printf()-style format string.
  * @param ap       Argument list.
  */
 void vsyslog(int priority, const char *format, va_list ap);
-
-/** @} */
 
 #ifdef __cplusplus
 }

@@ -11,9 +11,7 @@
  * @see <a href="https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/sys_times.h.html">
  *      POSIX.1-2017 &lt;sys/times.h&gt;</a>
  *
- * @defgroup posix_times POSIX Process Times
  * @ingroup posix_option_group_multi_process
- * @{
  */
 
 #ifndef ZEPHYR_INCLUDE_POSIX_SYS_TIMES_H_
@@ -41,6 +39,7 @@ struct tms {
 
 /**
  * @brief Get the process and child process times.
+ * @ingroup posix_option_group_multi_process
  * @param buf Output: filled with CPU times for the calling process.
  * @return Elapsed real time in clock ticks since an arbitrary epoch, or
  *         (clock_t)-1 with errno set on failure.
@@ -49,7 +48,6 @@ clock_t times(struct tms *buf);
 
 #endif /* defined(_POSIX_C_SOURCE) || defined(__DOXYGEN__) */
 
-/** @} */
 
 #ifdef __cplusplus
 }
