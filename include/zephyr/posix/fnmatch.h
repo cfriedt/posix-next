@@ -47,6 +47,7 @@ extern "C" {
  * @param flags   Combination of FNM_* flags, or 0 for default matching.
  * @return 0 if @p string matches @p pattern, @c FNM_NOMATCH if it does not,
  *         or a non-zero value on error.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/fnmatch.html
  */
 int fnmatch(const char *pattern, const char *string, int flags);
 

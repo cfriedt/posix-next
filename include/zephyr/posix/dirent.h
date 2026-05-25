@@ -52,6 +52,7 @@ struct dirent {
  * @param d1 First directory entry.
  * @param d2 Second directory entry.
  * @return Negative, zero, or positive per strcmp() semantics.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/alphasort.html
  */
 int alphasort(const struct dirent **d1, const struct dirent **d2);
 #endif
@@ -61,6 +62,7 @@ int alphasort(const struct dirent **d1, const struct dirent **d2);
  * @ingroup posix_option_group_file_system
  * @param dirp Directory stream to close.
  * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/closedir.html
  */
 int closedir(DIR *dirp);
 
@@ -70,6 +72,7 @@ int closedir(DIR *dirp);
  * @ingroup posix_option_group_file_system
  * @param dirp Directory stream.
  * @return File descriptor on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/dirfd.html
  */
 int dirfd(DIR *dirp);
 #endif
@@ -79,6 +82,7 @@ int dirfd(DIR *dirp);
  * @ingroup posix_option_group_file_system
  * @param fd File descriptor for the directory.
  * @return Directory stream on success, or NULL on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/fdopendir.html
  */
 DIR *fdopendir(int fd);
 
@@ -87,6 +91,7 @@ DIR *fdopendir(int fd);
  * @ingroup posix_option_group_file_system
  * @param dirname Path to the directory.
  * @return Directory stream on success, or NULL on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/opendir.html
  */
 DIR *opendir(const char *dirname);
 
@@ -106,6 +111,7 @@ struct dirent *readdir(DIR *dirp);
  * @param entry  Caller-supplied buffer for the entry.
  * @param result Output: pointer to @p entry, or NULL at end-of-directory.
  * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/readdir_r.html
  */
 int readdir_r(DIR *ZRESTRICT dirp, struct dirent *ZRESTRICT entry,
 	      struct dirent **ZRESTRICT result);
@@ -115,6 +121,7 @@ int readdir_r(DIR *ZRESTRICT dirp, struct dirent *ZRESTRICT entry,
  * @brief Reset a directory stream to the beginning.
  * @ingroup posix_option_group_file_system
  * @param dirp Directory stream to rewind.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/rewinddir.html
  */
 void rewinddir(DIR *dirp);
 
@@ -127,6 +134,7 @@ void rewinddir(DIR *dirp);
  * @param sel      Filter function, or NULL to include all entries.
  * @param compar   Comparison function for sorting, or NULL for no sorting.
  * @return Number of entries in @p namelist on success, or -1 on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/scandir.html
  */
 int scandir(const char *dir, struct dirent ***namelist, int (*sel)(const struct dirent *),
 	    int (*compar)(const struct dirent **, const struct dirent **));
@@ -138,6 +146,7 @@ int scandir(const char *dir, struct dirent ***namelist, int (*sel)(const struct 
  * @ingroup posix_option_group_file_system
  * @param dirp Directory stream.
  * @param loc  Position value from telldir().
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/seekdir.html
  */
 void seekdir(DIR *dirp, long loc);
 
@@ -146,6 +155,7 @@ void seekdir(DIR *dirp, long loc);
  * @ingroup posix_option_group_file_system
  * @param dirp Directory stream.
  * @return Current position value, or -1 on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/telldir.html
  */
 long telldir(DIR *dirp);
 #endif
