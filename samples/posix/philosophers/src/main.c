@@ -271,7 +271,7 @@ int main(void)
 		/* Wait a few seconds before main() exit, giving the sample the
 		 * opportunity to dump some output before coverage data gets emitted
 		 */
-		sleep(5);
+		usleep(5 * USEC_PER_SEC);
 	}
 
 	return 0;
