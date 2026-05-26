@@ -59,4 +59,17 @@ ZTEST(xsi_realtime, test_sched_rr_get_interval)
 	zassert_true((rc == -1 && err == ENOSYS));
 }
 
-ZTEST_SUITE(xsi_realtime, NULL, NULL, NULL, NULL, NULL);
+static void teardown(void *arg)
+{
+	ARG_UNUSED(arg);
+
+	if (IS_ENABLED(CONFIG_COVERAGE)) {
+		extern int usleep(useconds_t usec);
+		/* Wait a few seconds before main() exit, giving the sample the
+		 * opportunity to dump some output before coverage data gets emitted
+		 */
+		usleep(5 * USEC_PER_SEC);
+	}
+}
+
+ZTEST_SUITE(xsi_realtime, NULL, NULL, NULL, NULL, teardown);
