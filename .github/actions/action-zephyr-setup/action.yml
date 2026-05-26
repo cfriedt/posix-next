@@ -1,0 +1,315 @@
+# Copyright 2024 Google LLC
+# SPDX-License-Identifier: Apache-2.0
+#
+# Fork of zephyrproject-rtos/action-zephyr-setup v1.0.9 with manifest-scoped
+# west project caching (manifest repo excluded; use actions/checkout for that).
+
+name: Setup Zephyr project
+description: Setup a Zephyr west workspace with optional caching of west manifest projects
+
+inputs:
+  app-path:
+    description: |
+      Application code path containing west.yml. Must already be checked out.
+      Cannot contain multiple directories (use base-path instead).
+    required: true
+
+  base-path:
+    description: Workspace root containing app-path
+    required: false
+    default: .
+
+  cache-west-projects:
+    description: Cache and restore west projects from the manifest (excluding app-path)
+    required: false
+    default: "true"
+
+  ccache-max-size:
+    description: Maximum ccache size
+    required: false
+    default: 512MB
+
+  enable-ccache:
+    description: Enable ccache caching via this action
+    required: false
+    default: "false"
+
+  ccache-cache-key:
+    description: Additional ccache cache key segment
+    required: false
+    default: default
+
+  manifest-file-name:
+    description: West manifest file name in app-path
+    required: false
+    default: west.yml
+
+  sdk-version:
+    description: Zephyr SDK version or auto
+    required: false
+    default: auto
+
+  sdk-base:
+    description: Base URL of the Zephyr SDK
+    required: false
+    default: https://github.com/zephyrproject-rtos/sdk-ng/releases/download
+
+  toolchains:
+    description: Toolchains to install, colon separated
+    required: false
+    default: arm-zephyr-eabi
+
+  west-project-filter:
+    description: West project filter
+    required: false
+    default: ""
+
+  west-group-filter:
+    description: West group filter
+    required: false
+    default: ""
+
+  west-version:
+    description: West version to install
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Install dependencies
+      shell: bash
+      run: |
+        if [ "${{ runner.os }}" = "Windows" ]; then
+          python.exe -m pip install -U pip
+        fi
+
+        pip3 install -U pip wheel
+
+        if [ -n "${{ inputs.west-version }}" ]; then
+          pip3 install west==${{ inputs.west-version }}
+        else
+          pip3 install west
+        fi
+
+        if [ "${{ runner.os }}" = "Linux" ]; then
+          sudo rm -f /var/lib/man-db/auto-update
+          sudo apt-get update -y
+          apt_packages="ninja-build ccache gperf"
+          if [ "${{ inputs.cache-west-projects }}" = "true" ]; then
+            apt_packages="$apt_packages zstd"
+          fi
+          sudo apt-get install -y $apt_packages
+          if [ "${{ runner.arch }}" = "X64" ]; then
+            sudo apt-get install -y libc6-dev-i386 g++-multilib
+          fi
+        elif [ "${{ runner.os }}" = "macOS" ]; then
+          brew install ninja ccache qemu dtc gperf
+        elif [ "${{ runner.os }}" = "Windows" ]; then
+          choco feature enable -n allowGlobalConfirmation
+          choco install ninja wget gperf
+        fi
+
+    - name: Restore west workspace tarball
+      if: inputs.cache-west-projects == 'true'
+      id: west-projects-cache
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ inputs.base-path }}/.west-workspace-cache.tar.zst
+        # Hash both layouts: checkout is at repo root (west.yml), re-home runs before this step.
+        key: west-projects-${{ hashFiles(format('{0}/west.yml', inputs.app-path), 'west.yml') }}
+        restore-keys: |
+          west-projects-${{ hashFiles(format('{0}/west.yml', inputs.app-path), 'west.yml') }}
+          west-projects-
+
+    - name: Extract west workspace
+      if: >-
+        inputs.cache-west-projects == 'true' &&
+        steps.west-projects-cache.outputs.cache-hit == 'true'
+      working-directory: ${{ inputs.base-path }}
+      shell: bash
+      run: zstd -d -q -c .west-workspace-cache.tar.zst | tar -xf -
+
+    - name: Bootstrap west workspace
+      if: >-
+        inputs.cache-west-projects != 'true' ||
+        steps.west-projects-cache.outputs.cache-hit != 'true'
+      working-directory: ${{ inputs.base-path }}
+      shell: bash
+      run: |
+        mkdir -p .west
+        cat > .west/config <<EOF
+        [manifest]
+        path = ${{ inputs.app-path }}
+        file = ${{ inputs.manifest-file-name }}
+        EOF
+        if [ -n "${{ inputs.west-group-filter }}" ]; then
+          west config manifest.group-filter -- ${{ inputs.west-group-filter }}
+        fi
+        if [ -n "${{ inputs.west-project-filter }}" ]; then
+          west config manifest.project-filter -- ${{ inputs.west-project-filter }}
+        fi
+        west update -o=--depth=1 -n
+
+    - name: Create west workspace tarball
+      if: >-
+        inputs.cache-west-projects == 'true' &&
+        steps.west-projects-cache.outputs.cache-hit != 'true'
+      working-directory: ${{ inputs.base-path }}
+      shell: bash
+      run: tar -cf - .west $(west list | grep -v "^manifest" | awk '{print $2}') | zstd -T0 -q -o .west-workspace-cache.tar.zst
+
+    - name: Log west cache status
+      if: inputs.cache-west-projects == 'true'
+      shell: bash
+      run: |
+        {
+          echo "### West project cache"
+          echo "- cache-hit: \`${{ steps.west-projects-cache.outputs.cache-hit }}\`"
+          echo "- cache-matched-key: \`${{ steps.west-projects-cache.outputs.cache-matched-key }}\`"
+          echo "- primary key: \`west-projects-\` + \`west.yml\` hash (manifest tarball; restore-keys fall back across branches on default)"
+        } >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Save west workspace tarball
+      if: >-
+        inputs.cache-west-projects == 'true' &&
+        steps.west-projects-cache.outputs.cache-hit != 'true' &&
+        !cancelled()
+      continue-on-error: true
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ inputs.base-path }}/.west-workspace-cache.tar.zst
+        key: ${{ steps.west-projects-cache.outputs.cache-primary-key }}
+
+    - name: Environment setup
+      working-directory: ${{ inputs.base-path }}
+      id: env-setup
+      shell: bash
+      run: |
+        runner="${{ runner.os }}-${{ runner.arch }}"
+        if [ "$runner" = "Linux-X64" ]; then
+          sdk_variant="linux-x86_64"
+        elif [ "$runner" = "Linux-ARM64" ]; then
+          sdk_variant="linux-aarch64"
+        elif [ "$runner" = "macOS-X64" ]; then
+          sdk_variant="macos-x86_64"
+        elif [ "$runner" = "macOS-ARM64" ]; then
+          sdk_variant="macos-aarch64"
+        elif [ "$runner" = "Windows-X64" ]; then
+          sdk_variant="windows-x86_64"
+        else
+          echo "Unsupported runner platform: $runner"
+          exit 1
+        fi
+
+        if [ "${{ runner.os }}" = "Linux" ]; then
+          pip_cache_path="~/.cache/pip"
+          ccache_path="$HOME/.cache/ccache"
+          sdk_ext="tar.xz"
+          setup_file="./setup.sh"
+          setup_opt="-"
+        elif [ "${{ runner.os }}" = "macOS" ]; then
+          pip_cache_path="~/Library/Caches/pip"
+          ccache_path="$HOME/Library/Caches/ccache"
+          sdk_ext="tar.xz"
+          setup_file="./setup.sh"
+          setup_opt="-"
+        elif [ "${{ runner.os }}" = "Windows" ]; then
+          pip_cache_path="~/AppData/Local/pip/Cache"
+          ccache_path="$HOME/AppData/Local/ccache/Cache"
+          sdk_ext="7z"
+          setup_file="./setup.cmd"
+          setup_opt="//"
+        fi
+
+        if [ "${{ inputs.sdk-version }}" = "auto" ]; then
+          zephyr_path="zephyr"
+          if west list -f '{abspath}' zephyr; then
+            zephyr_path="$( west list -f '{abspath}' zephyr )"
+          fi
+
+          if [ -f "${zephyr_path}/SDK_VERSION" ]; then
+            echo "Reading SDK version from ${zephyr_path}/SDK_VERSION"
+            sdk_version=$( cat "${zephyr_path}/SDK_VERSION" )
+          else
+            echo "Cannot find ${zephyr_path}/SDK_VERSION"
+            exit 1
+          fi
+        else
+          sdk_version="${{ inputs.sdk-version }}"
+        fi
+
+        echo "SDK_VERSION=${sdk_version}" >> "$GITHUB_ENV"
+        echo "SDK_FILE=zephyr-sdk-${sdk_version}_${sdk_variant}_minimal.${sdk_ext}" >> "$GITHUB_ENV"
+        echo "PIP_CACHE_PATH=${pip_cache_path}" >> "$GITHUB_ENV"
+        echo "CCACHE_TIMESTAMP=$(date +%s)" >> "$GITHUB_ENV"
+        echo "CCACHE_DIR=${ccache_path}" >> "$GITHUB_ENV"
+        echo "CCACHE_IGNOREOPTIONS=-specs=* --specs=*" >> "$GITHUB_ENV"
+        echo "SETUP_FILE=${setup_file}" >> "$GITHUB_ENV"
+        echo "SETUP_OPT=${setup_opt}" >> "$GITHUB_ENV"
+        echo "ZEPHYR_SDK_INSTALL_DIR=${{ github.workspace }}/${{ inputs.base-path }}/zephyr-sdk" >> "$GITHUB_ENV"
+        echo "ZEPHYR_BASE=${{ github.workspace }}/${{ inputs.base-path }}/zephyr" >> "$GITHUB_ENV"
+
+    - name: Cache Python packages
+      uses: actions/cache@v4
+      with:
+        path: ${{ env.PIP_CACHE_PATH }}
+        key: pip-${{ runner.os }}-${{ hashFiles(format('{0}/zephyr/scripts/requirements*.txt', inputs.base-path)) }}
+
+    - name: Install Python packages
+      working-directory: ${{ inputs.base-path }}
+      shell: bash
+      run: |
+        west packages pip --install --ignore-venv-check || pip3 install -r zephyr/scripts/requirements.txt
+
+    - name: Cache Zephyr SDK
+      id: cache-toolchain
+      uses: actions/cache@v4
+      with:
+        path: ${{ inputs.base-path }}/zephyr-sdk
+        key: ${{ env.SDK_FILE }}-${{ github.event.repository.name }}-${{ inputs.toolchains }}
+
+    - if: steps.cache-toolchain.outputs.cache-hit != 'true'
+      working-directory: ${{ inputs.base-path }}
+      name: Download Zephyr SDK
+      shell: bash
+      run: |
+        wget --progress=dot:giga ${{ inputs.sdk-base }}/v${SDK_VERSION}/${SDK_FILE}
+        if [ "${{ runner.os }}" = "Windows" ]; then
+          7z x $SDK_FILE
+          mv zephyr-sdk-${SDK_VERSION} zephyr-sdk
+        else
+          mkdir zephyr-sdk
+          tar xvf $SDK_FILE -C zephyr-sdk --strip-components=1
+        fi
+
+    - name: Setup Zephyr SDK
+      working-directory: ${{ inputs.base-path }}/zephyr-sdk
+      shell: bash
+      run: |
+        IFS=":"
+        TOOLCHAINS="${{ inputs.toolchains }}"
+        for toolchain in $TOOLCHAINS; do
+          ${SETUP_FILE} ${SETUP_OPT}t $toolchain
+        done
+        if [ ! -d sysroots ]; then
+          ${SETUP_FILE} ${SETUP_OPT}h
+        fi
+        ${SETUP_FILE} ${SETUP_OPT}c
+
+    - name: Cache ccache data
+      if: inputs.enable-ccache == 'true' && runner.os != 'Windows'
+      uses: actions/cache@v4
+      with:
+        path: ${{ env.CCACHE_DIR }}
+        key: ccache-${{ inputs.ccache-cache-key }}-${{ env.CCACHE_TIMESTAMP }}
+        restore-keys: ccache-${{ inputs.ccache-cache-key }}-
+
+    - name: Set up ccache
+      if: inputs.enable-ccache == 'true' && runner.os != 'Windows'
+      shell: bash
+      run: |
+        mkdir -p ${{ env.CCACHE_DIR }}
+        ccache -M ${{ inputs.ccache-max-size }}
+        ccache -p
+        ccache -z -s -vv
