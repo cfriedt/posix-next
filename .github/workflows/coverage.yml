@@ -1,0 +1,121 @@
+name: Coverage
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+env:
+  MANIFEST_PATH: modules/lib/posix
+  ZEPHYR_BASE: ${{ github.workspace }}/zephyr
+  PLATFORMS: >-
+    -p mps2/an385
+    -p native_sim
+    -p qemu_riscv64
+    -p qemu_x86
+  ROOTS: >-
+    -T ${{ github.workspace }}/modules/lib/posix/samples/posix
+    -T ${{ github.workspace }}/modules/lib/posix/tests/benchmarks/posix
+    -T ${{ github.workspace }}/modules/lib/posix/tests/posix
+    -T ${{ github.workspace }}/zephyr/samples/net
+    -T ${{ github.workspace }}/zephyr/samples/subsys/shell/shell_module
+    -T ${{ github.workspace }}/zephyr/tests/net
+    -T ${{ github.workspace }}/zephyr/tests/lib/c_lib
+    -T ${{ github.workspace }}/zephyr/tests/kernel/threads/thread_apis
+    -T ${{ github.workspace }}/zephyr/tests/kernel/signal
+
+jobs:
+  codecov:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Set up environment
+        shell: bash
+        run: |
+          WEST_INIT_PATH="$(mktemp -d)"
+          rmdir $WEST_INIT_PATH
+          WEST_INIT_PATH="$(basename "$WEST_INIT_PATH")"
+          echo "WEST_INIT_PATH=${WEST_INIT_PATH}" >> $GITHUB_ENV
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          path: ${{ env.WEST_INIT_PATH }}
+
+      - name: Set up Zephyr project
+        uses: zephyrproject-rtos/action-zephyr-setup@v1.0.9
+        with:
+          app-path: ${{ env.WEST_INIT_PATH }}
+          toolchains: arm-zephyr-eabi:riscv64-zephyr-elf:x86_64-zephyr-elf
+
+      - name: Re-home module
+        shell: bash
+        run: |
+          MANIFEST_PATH_BASE="$(basename "${{ env.MANIFEST_PATH }}")"
+          MANIFEST_PATH_DIR="$(dirname "${{ github.workspace }}/${{ env.MANIFEST_PATH }}")"
+          mkdir -p "$MANIFEST_PATH_DIR"
+          mv "${{ env.WEST_INIT_PATH }}" "$MANIFEST_PATH_DIR/$MANIFEST_PATH_BASE"
+          west config -d manifest.path
+          west config manifest.path "${{ env.MANIFEST_PATH }}"
+
+      - name: Apply patches
+        shell: bash
+        run: |
+          west -v patch apply
+
+      - name: Run Tests with Coverage
+        shell: bash
+        working-directory: ${{ env.ZEPHYR_BASE }}
+        run: |
+          ./scripts/twister \
+            -i --force-color -N -v \
+            --filter runnable \
+            --coverage \
+            --coverage-tool gcovr \
+            --coverage-basedir ${{ github.workspace }} \
+            ${{ env.PLATFORMS }} \
+            ${{ env.ROOTS }} \
+            --timeout-multiplier 2 \
+            -e nano
+
+      - name: Check for coverage data
+        id: coverage-check
+        if: always()
+        shell: bash
+        run: |
+          if [ -f "${{ env.ZEPHYR_BASE }}/twister-out/coverage.json" ]; then
+            echo "has_coverage=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_coverage=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Generate coverage report
+        if: steps.coverage-check.outputs.has_coverage == 'true'
+        shell: bash
+        run: |
+          mkdir -p ${{ github.workspace }}/coverage-report
+          gcovr \
+            --add-tracefile ${{ env.ZEPHYR_BASE }}/twister-out/coverage.json \
+            --html-details ${{ github.workspace }}/coverage-report/index.html \
+            --filter 'modules/lib/posix/include' \
+            --filter 'modules/lib/posix/lib' \
+            --filter 'zephyr/kernel' \
+            --filter 'zephyr/lib/elastipool' \
+            --filter 'zephyr/lib/libc/common/source/thrd' \
+            --filter 'zephyr/lib/os/zvfs' \
+            --filter 'zephyr/lib/os/thread.c'
+
+      - name: Upload coverage report
+        if: steps.coverage-check.outputs.has_coverage == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage-report/
