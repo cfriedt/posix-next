@@ -40,6 +40,11 @@ posix-next
        <span class="pn-tile-title">Samples</span>
        <span class="pn-tile-desc">Example POSIX applications for Zephyr</span>
      </a>
+     <a class="pn-tile" href="metrics/index.html">
+       <span class="pn-tile-icon">&#128200;</span>
+       <span class="pn-tile-title">Metrics</span>
+       <span class="pn-tile-desc">Coverage and trends over time</span>
+     </a>
    </div>
 
 .. toctree::
@@ -50,3 +55,4 @@ posix-next
    posix/index.rst
    posix/symbols
    samples/posix/posix
+   metrics/index.rst
