@@ -1,0 +1,188 @@
+# SPDX-License-Identifier: Apache-2.0
+# Checkout the posix manifest and set up the Zephyr west workspace.
+
+name: Setup posix west workspace
+description: Move project to manifest.self.path, run action-zephyr-setup, apply patches (requires prior checkout)
+
+inputs:
+  base-path:
+    description: West workspace topdir
+    required: false
+    default: .
+
+  toolchains:
+    description: Zephyr SDK toolchains, colon-separated
+    required: true
+
+  apply-patches:
+    description: Run west patch apply after west update
+    required: false
+    default: "true"
+
+  cache-west-projects:
+    description: Enable west project caching in action-zephyr-setup
+    required: false
+    default: "true"
+
+  west-group-filter:
+    description: West group filter forwarded to action-zephyr-setup
+    required: false
+    default: ""
+
+  west-project-filter:
+    description: West project filter forwarded to action-zephyr-setup
+    required: false
+    default: ""
+
+  ccache-key-prefix:
+    description: Segment in the Actions cache key (e.g. twister, coverage)
+    required: false
+    default: twister
+
+  cache-ccache:
+    description: Restore workspace .ccache from Actions cache (save via save-workspace-ccache)
+    required: false
+    default: "true"
+
+outputs:
+  manifest-path:
+    description: Resolved manifest path (manifest.self.path from west.yml)
+    value: ${{ steps.manifest.outputs.path }}
+
+  zephyr-base:
+    description: ZEPHYR_BASE path
+    value: ${{ inputs.base-path == '.' && format('{0}/zephyr', github.workspace) || format('{0}/{1}/zephyr', github.workspace, inputs.base-path) }}
+
+  ccache-primary-key:
+    description: Primary cache key from the restore step (empty when cache-ccache is false)
+    value: ${{ steps.ccache-restore.outputs.cache-primary-key }}
+
+  ccache-save-key:
+    description: Actions cache key for save-workspace-ccache (stable prefix + run_id)
+    value: ${{ steps.ccache-key.outputs.save-key }}
+
+  ccache-cache-hit:
+    description: Whether workspace ccache restore matched the primary key exactly
+    value: ${{ steps.ccache-restore.outputs.cache-hit }}
+
+runs:
+  using: composite
+  steps:
+    # west init sadly does not properly re-home the west project using self.path from west.yml
+    # we need this for the setup action anyway, becuase we use the checkout action to get code
+    - name: Move project to manifest.self.path
+      id: manifest
+      working-directory: ${{ inputs.base-path }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        ws=$(realpath .)
+        cd "$ws"
+
+        manifest_path="."
+        if [ -f west.yml ]; then
+          manifest_path=$(yq -o=json west.yml | jq -r '.manifest.self.path // empty')
+          manifest_path="${manifest_path#./}"
+          manifest_path="${manifest_path%/}"
+        fi
+
+        if [ -n "$manifest_path" ] && [ "$manifest_path" != "." ]; then
+          parent=$(dirname "$ws")
+          tmp=$(mktemp -d "${parent}/.rehome.XXXXXX")
+          mv "$ws" "${tmp}/checkout"
+          mkdir -p "${ws}/$(dirname "$manifest_path")"
+          mv "${tmp}/checkout" "${ws}/${manifest_path}"
+          rmdir "$tmp" 2>/dev/null || true
+          cp -a "${ws}/${manifest_path}/.github" "${ws}/.github"
+          if [ -f "${ws}/${manifest_path}/.codecov.yml" ]; then
+            cp -a "${ws}/${manifest_path}/.codecov.yml" "${ws}/.codecov.yml"
+          fi
+        else
+          manifest_path="."
+        fi
+
+        echo "path=${manifest_path}" >> "$GITHUB_OUTPUT"
+        echo "MANIFEST_PATH=${manifest_path}" >> "$GITHUB_ENV"
+
+    - name: Set up Zephyr west workspace
+      uses: ./.github/actions/action-zephyr-setup
+      with:
+        base-path: ${{ inputs.base-path }}
+        app-path: ${{ steps.manifest.outputs.path }}
+        toolchains: ${{ inputs.toolchains }}
+        cache-west-projects: ${{ inputs.cache-west-projects }}
+        west-group-filter: ${{ inputs.west-group-filter }}
+        west-project-filter: ${{ inputs.west-project-filter }}
+        enable-ccache: "false"
+
+    - name: Export workspace paths
+      shell: bash
+      run: |
+        if [ "${{ inputs.base-path }}" = "." ]; then
+          echo "ZEPHYR_BASE=${GITHUB_WORKSPACE}/zephyr" >> "$GITHUB_ENV"
+          echo "ZEPHYR_SDK_INSTALL_DIR=${GITHUB_WORKSPACE}/zephyr-sdk" >> "$GITHUB_ENV"
+        else
+          echo "ZEPHYR_BASE=${GITHUB_WORKSPACE}/${{ inputs.base-path }}/zephyr" >> "$GITHUB_ENV"
+          echo "ZEPHYR_SDK_INSTALL_DIR=${GITHUB_WORKSPACE}/${{ inputs.base-path }}/zephyr-sdk" >> "$GITHUB_ENV"
+        fi
+        manifest_path="${{ steps.manifest.outputs.path }}"
+        if [ -n "$manifest_path" ] && [ "$manifest_path" != "." ]; then
+          git config --global --add safe.directory "${GITHUB_WORKSPACE}/${manifest_path}"
+        fi
+
+    - name: Apply patches
+      if: inputs.apply-patches == 'true'
+      working-directory: ${{ inputs.base-path }}
+      shell: bash
+      run: |
+        patch_yml="${{ steps.manifest.outputs.path }}/zephyr/patches.yml"
+        if [ ! -f "$patch_yml" ]; then
+          echo "missing $patch_yml (manifest zephyr/ must be under manifest.self.path/)" >&2
+          exit 1
+        fi
+        west -v patch apply
+
+    - name: Compute ccache cache keys
+      id: ccache-key
+      working-directory: ${{ inputs.base-path }}
+      shell: bash
+      run: |
+        sdk_version_file="zephyr/SDK_VERSION"
+        if [ ! -f "${sdk_version_file}" ]; then
+          echo "missing ${sdk_version_file}" >&2
+          exit 1
+        fi
+        # Match actions/hashFiles: sha256(sha256(file) as raw bytes), not sha256(hex).
+        sdk_hash=$(openssl dgst -sha256 -binary "${sdk_version_file}" | openssl dgst -sha256 | awk '{print $2}')
+        prefix="${{ inputs.ccache-key-prefix }}"
+        os="${{ runner.os }}"
+        run_id="${{ github.run_id }}"
+        save_key="ccache-${prefix}-${os}-${sdk_hash}-${run_id}"
+        restore_prefix="ccache-${prefix}-${os}-${sdk_hash}"
+        echo "save-key=${save_key}" >> "$GITHUB_OUTPUT"
+        echo "restore-prefix=${restore_prefix}" >> "$GITHUB_OUTPUT"
+        echo "sdk-hash=${sdk_hash}" >> "$GITHUB_OUTPUT"
+
+    - name: Restore workspace ccache
+      if: inputs.cache-ccache == 'true'
+      id: ccache-restore
+      uses: actions/cache/restore@v4
+      with:
+        # actions/cache rejects paths containing './' or '../'
+        path: ${{ inputs.base-path == '.' && '.ccache' || format('{0}/.ccache', inputs.base-path) }}
+        key: ${{ steps.ccache-key.outputs.save-key }}
+        restore-keys: |
+          ${{ steps.ccache-key.outputs.restore-prefix }}-
+          ccache-${{ inputs.ccache-key-prefix }}-${{ runner.os }}-
+          ccache-${{ runner.os }}-${{ steps.ccache-key.outputs.sdk-hash }}
+
+    - name: Export ccache environment
+      shell: bash
+      run: |
+        ccache_dir="${{ inputs.base-path == '.' && format('{0}/.ccache', github.workspace) || format('{0}/{1}/.ccache', github.workspace, inputs.base-path) }}"
+        mkdir -p "${ccache_dir}"
+        echo "CCACHE_DIR=${ccache_dir}" >> "$GITHUB_ENV"
+        echo "CCACHE_BASEDIR=${GITHUB_WORKSPACE}" >> "$GITHUB_ENV"
+        echo "CCACHE_MAXSIZE=1G" >> "$GITHUB_ENV"
+        echo "CCACHE_COMPILERCHECK=content" >> "$GITHUB_ENV"
+        echo "CCACHE_IGNOREOPTIONS=-specs=* --specs=*" >> "$GITHUB_ENV"
