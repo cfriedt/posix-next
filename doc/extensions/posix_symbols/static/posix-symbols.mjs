@@ -58,12 +58,14 @@ function doxyUrl(refid) {
 
 /**
  * Build a Doxygen file page URL from a header path.
- * e.g. "pthread.h" → ".../pthread_8h.html"
- *      "sys/types.h" → ".../sys_2types_8h.html"
+ * Doxygen uses only the file basename for HTML filenames, e.g.
+ *   "unistd.h"     → ".../unistd_8h.html"
+ *   "sys/types.h"  → ".../types_8h.html"
  */
 function headerDoxyUrl(header) {
     if (!doxyHtmlUrl || !header) return null;
-    const encoded = header.replace(/_/g, '__').replace(/\//g, '_2').replace(/\./g, '_8');
+    const basename = header.split('/').pop();
+    const encoded = basename.replace(/_/g, '__').replace(/\./g, '_8');
     return `${doxyHtmlUrl}/${encoded}.html`;
 }
 
@@ -190,7 +192,7 @@ function renderSymbolEntry(entry) {
         code.className = 'docutils literal';
         const span = document.createElement('span');
         span.className = 'pre';
-        span.textContent = entry.header;
+        span.textContent = `<${entry.header}>`;
         code.appendChild(span);
         hdrEl.appendChild(code);
         addProp('Header', hdrEl);
