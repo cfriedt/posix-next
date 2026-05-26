@@ -1,0 +1,668 @@
+name: Coverage
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  push:
+    branches:
+      - main
+    paths:
+      - 'modules/lib/posix/**'
+      - 'zephyr/tests/**'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'modules/lib/posix/**'
+      - 'zephyr/tests/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+env:
+  ZEPHYR_BASE: ${{ github.workspace }}/zephyr
+  ZEPHYR_SDK_INSTALL_DIR: ${{ github.workspace }}/zephyr-sdk
+  CI_CONFIG: ${{ github.workspace }}/.github/ci-config.json
+  COVERAGE_PROFILE: ${{ inputs.debug && 'coverage_debug' || 'coverage_nightly' }}
+
+jobs:
+  coverage-nightly-prep:
+    runs-on: ubuntu-24.04
+    outputs:
+      skip_nightly: ${{ steps.skip.outputs.skip_nightly }}
+      main_sha: ${{ steps.skip.outputs.main_sha }}
+      shard_total: ${{ steps.plan.outputs.shard_total }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Check if scheduled nightly should run
+        id: skip
+        shell: bash
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          git fetch origin main automation/coverage-json 2>/dev/null || git fetch origin main
+          main_sha=$(git rev-parse origin/main)
+          echo "main_sha=${main_sha}" >> "$GITHUB_OUTPUT"
+          echo "skip_nightly=false" >> "$GITHUB_OUTPUT"
+
+          if [ "${GITHUB_EVENT_NAME:-}" != "schedule" ]; then
+            echo "Not a scheduled run; nightly coverage enabled (main=${main_sha})"
+            exit 0
+          fi
+
+          prov="doc/metrics/coverage-provenance.json"
+          last=""
+
+          if [ -f "$prov" ]; then
+            last=$(jq -r '.commit // empty' "$prov")
+            echo "Provenance on main checkout: commit=${last:-<empty>}"
+          elif git cat-file -e "origin/automation/coverage-json:${prov}" 2>/dev/null; then
+            last=$(git show "origin/automation/coverage-json:${prov}" | jq -r '.commit // empty')
+            echo "Provenance from automation/coverage-json: commit=${last:-<empty>}"
+          else
+            echo "No coverage provenance found; scheduled nightly will run"
+            exit 0
+          fi
+
+          if [ -n "$last" ] && [ "$last" = "$main_sha" ]; then
+            echo "skip_nightly=true" >> "$GITHUB_OUTPUT"
+            echo "Scheduled nightly skipped: main unchanged since last coverage snapshot (${main_sha})"
+            exit 0
+          fi
+
+          echo "Scheduled nightly will run (main=${main_sha}, last coverage=${last:-<none>})"
+
+      - name: Plan nightly shards
+        id: plan
+        if: github.event_name != 'pull_request' && steps.skip.outputs.skip_nightly != 'true'
+        shell: bash
+        run: |
+          total=$(jq -r '.coverage_nightly.shards // 10' "$CI_CONFIG")
+          echo "shard_total=$total" >> "$GITHUB_OUTPUT"
+          echo "matrix=$(jq -nc --argjson n "$total" '{shard: [range(1; $n+1)]}')" >> "$GITHUB_OUTPUT"
+
+  coverage-nightly:
+    needs: coverage-nightly-prep
+    if: >-
+      github.event_name != 'pull_request' &&
+      needs.coverage-nightly-prep.outputs.skip_nightly != 'true'
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.coverage-nightly-prep.outputs.matrix) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up workspace
+        id: workspace
+        uses: ./.github/actions/setup-workspace
+        with:
+          toolchains: arm-zephyr-eabi:riscv64-zephyr-elf:x86_64-zephyr-elf
+          ccache-key-prefix: coverage
+          cache-ccache: false
+
+      - name: Generate nightly coverage plan
+        if: matrix.shard == 1
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          CI_CONFIG_PROFILE=coverage_nightly \
+            "${{ github.workspace }}/${{ env.MANIFEST_PATH }}/scripts/ci/gen-testplan.sh"
+          test -s testplan.json
+
+      - name: Upload nightly coverage plan
+        if: matrix.shard == 1
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-nightly-testplan
+          path: testplan.json
+          if-no-files-found: error
+
+      - name: Wait for nightly coverage plan
+        if: matrix.shard != 1
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          setup_max_sec=120
+          plan_gen_sec=10
+          buffer_sec=30
+          poll_sec=10
+          max_wait_sec=$((setup_max_sec + plan_gen_sec + buffer_sec))
+          max_attempts=$(( (max_wait_sec + poll_sec - 1) / poll_sec ))
+
+          name=coverage-nightly-testplan
+          for attempt in $(seq 1 "${max_attempts}"); do
+            count=$(gh api -H "Accept: application/vnd.github+json" \
+              "/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts" \
+              --paginate -q "[.artifacts[] | select(.name == \"${name}\")] | length")
+            if [ "${count}" -gt 0 ]; then
+              echo "Found ${name} after ${attempt} attempt(s)"
+              exit 0
+            fi
+            echo "Waiting for ${name} (${attempt}/${max_attempts}, poll ${poll_sec}s, budget ${max_wait_sec}s)..."
+            sleep "${poll_sec}"
+          done
+          echo "Timed out waiting for ${name} after ${max_wait_sec}s"
+          exit 1
+
+      - name: Download nightly coverage plan
+        if: matrix.shard != 1
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-nightly-testplan
+          path: ${{ github.workspace }}
+
+      - name: Run Tests with Coverage
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        env:
+          CCACHE_DISABLE: "1"
+        run: |
+          set -uo pipefail
+          test -s testplan.json
+
+          twister_rc=0
+          "${{ github.workspace }}/${{ env.MANIFEST_PATH }}/scripts/ci/coverage.sh" \
+            -i \
+            --disable-coverage-aggregation \
+            --load-tests testplan.json \
+            --subset ${{ matrix.shard }}/${{ needs.coverage-nightly-prep.outputs.shard_total }} \
+            || twister_rc=$?
+          echo "twister exit code: ${twister_rc}"
+
+          "${{ github.workspace }}/${{ env.MANIFEST_PATH }}/scripts/ci/refresh-coverage-traces.sh" \
+            twister-out "${{ github.workspace }}"
+
+          diagnose="${{ github.workspace }}/${{ env.MANIFEST_PATH }}/scripts/ci/diagnose-coverage-trace.sh"
+          non_empty_traces="${RUNNER_TEMP}/non-empty-coverage-traces.txt"
+          "$diagnose" --non-empty-out "$non_empty_traces" twister-out
+
+          if [ -s "$non_empty_traces" ]; then
+            # shellcheck source=gcovr-config-args.sh
+            source "${{ github.workspace }}/${{ env.MANIFEST_PATH }}/scripts/ci/gcovr-config-args.sh"
+            gcovr_args=()
+            while IFS= read -r a; do gcovr_args+=("$a"); done \
+              < <(jq -r '.coverage_report.gcovr_args[]? // empty' "$CI_CONFIG")
+            workspace_filter_args=()
+            gcovr_load_filter_args workspace_filter_args workspace "$CI_CONFIG"
+            posix_filter_args=()
+            gcovr_load_filter_args posix_filter_args posix "$CI_CONFIG"
+            trace_args=()
+            while IFS= read -r f; do trace_args+=(--add-tracefile "$f"); done \
+              < "$non_empty_traces"
+            gcovr -r "${{ github.workspace }}" \
+              "${gcovr_args[@]}" \
+              "${trace_args[@]}" \
+              "${workspace_filter_args[@]}" \
+              --json twister-out/coverage-full.json
+            gcovr -r "${{ github.workspace }}" \
+              "${gcovr_args[@]}" \
+              --add-tracefile twister-out/coverage-full.json \
+              "${posix_filter_args[@]}" \
+              --json twister-out/coverage-posix.json
+            gcovr -r "${{ github.workspace }}" \
+              "${gcovr_args[@]}" \
+              --add-tracefile twister-out/coverage-full.json \
+              "${posix_filter_args[@]}" \
+              --xml-pretty -o twister-out/coverage-posix.xml
+            line_hits=$(jq '[.files[]?.lines[]?.count // empty | select(. > 0)] | length' twister-out/coverage-full.json)
+            posix_hits=$(jq '[.files[]?.lines[]?.count // empty | select(. > 0)] | length' twister-out/coverage-posix.json)
+            xml_classes=$(grep -c '<class ' twister-out/coverage-posix.xml || true)
+            echo "Shard ${{ matrix.shard }} merged coverage: ${line_hits} workspace line hits, ${posix_hits} posix line hits, ${xml_classes} xml classes (Codecov)"
+          else
+            echo "Skipping shard gcovr merge: no non-empty per-test coverage traces"
+            shopt -s nullglob
+            cov_builds=0
+            gcda_total=0
+            while IFS= read -r kconfig; do
+              cov_builds=$((cov_builds + 1))
+              bdir=$(dirname "$(dirname "$kconfig")")
+              gcda_total=$((gcda_total + $(find "$bdir" -name '*.gcda' 2>/dev/null | wc -l)))
+            done < <(find twister-out -path '*/zephyr/.config' -exec grep -l '^CONFIG_COVERAGE=y' {} + 2>/dev/null || true)
+            echo "Coverage builds: ${cov_builds}, .gcda files: ${gcda_total}"
+          fi
+
+          "${{ github.workspace }}/${{ env.MANIFEST_PATH }}/scripts/ci/eval-coverage-shard.sh" \
+            --shard ${{ matrix.shard }} \
+            --output shard-status.json \
+            twister-out || exit 1
+
+      - name: Upload shard to Codecov
+        if: always() && hashFiles('twister-out/coverage-posix.xml') != ''
+        shell: bash
+        working-directory: ${{ github.workspace }}/${{ env.MANIFEST_PATH }}
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        run: |
+          set -euo pipefail
+          curl -sSL --fail -o /tmp/codecov https://cli.codecov.io/latest/linux/codecov
+          chmod +x /tmp/codecov
+          /tmp/codecov --verbose upload-coverage \
+            -t "$CODECOV_TOKEN" \
+            --git-service github \
+            --disable-search \
+            --file "${{ github.workspace }}/twister-out/coverage-posix.xml" \
+            --flag nightly \
+            --name nightly-shard-${{ matrix.shard }} \
+            --plugin noop \
+            || true
+
+      - name: Upload shard status
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-shard-status-${{ matrix.shard }}
+          path: shard-status.json
+          if-no-files-found: ignore
+
+      - name: Upload shard coverage trace
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-shard-${{ matrix.shard }}
+          path: |
+            twister-out/coverage-full.json
+            twister-out/coverage-posix.json
+          if-no-files-found: ignore
+
+      - name: Upload ccache shard
+        if: always() && !cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-ccache-${{ matrix.shard }}
+          path: .ccache
+          include-hidden-files: true
+          if-no-files-found: ignore
+
+  coverage-merge:
+    needs: [coverage-nightly-prep, coverage-nightly]
+    if: >-
+      github.event_name != 'pull_request' &&
+      always() && !cancelled() &&
+      needs.coverage-nightly-prep.outputs.skip_nightly != 'true' &&
+      needs.coverage-nightly.result != 'cancelled'
+    runs-on: ubuntu-24.04
+    outputs:
+      has_report: ${{ steps.coverage-check.outputs.has_coverage }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set coverage artifact directories
+        shell: bash
+        run: |
+          echo "COVERAGE_SHARDS_DIR=${RUNNER_TEMP}/coverage-shards" >> "$GITHUB_ENV"
+          mkdir -p "${RUNNER_TEMP}/coverage-shards"
+
+      - name: Download shard coverage traces
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-shard-*
+          path: ${{ env.COVERAGE_SHARDS_DIR }}
+
+      - name: Check for coverage data
+        id: coverage-check
+        shell: bash
+        run: |
+          shopt -s nullglob
+          files=("${COVERAGE_SHARDS_DIR}"/coverage-shard-*/coverage-full.json)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "has_coverage=false" >> "$GITHUB_OUTPUT"
+            echo "No shard coverage-full.json artifacts found"
+            exit 0
+          fi
+          echo "has_coverage=true" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "${files[@]}"
+
+      - name: Install coverage report tools
+        if: steps.coverage-check.outputs.has_coverage == 'true'
+        run: pip install gcovr
+
+      - name: Merge coverage JSON snapshots
+        if: steps.coverage-check.outputs.has_coverage == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          merge="${{ github.workspace }}/scripts/ci/merge-coverage-json.sh"
+          out="${{ github.workspace }}/coverage-json-snapshot"
+
+          git fetch origin main
+          main_sha=$(git rev-parse origin/main)
+
+          shopt -s nullglob
+          full_traces=("${COVERAGE_SHARDS_DIR}"/coverage-shard-*/coverage-full.json)
+          posix_traces=("${COVERAGE_SHARDS_DIR}"/coverage-shard-*/coverage-posix.json)
+          if [ ${#full_traces[@]} -eq 0 ]; then
+            echo "No shard coverage-full.json under ${COVERAGE_SHARDS_DIR}" >&2
+            exit 1
+          fi
+          if [ ${#posix_traces[@]} -eq 0 ]; then
+            echo "No shard coverage-posix.json under ${COVERAGE_SHARDS_DIR}" >&2
+            exit 1
+          fi
+          echo "Merging ${#full_traces[@]} full shard(s), ${#posix_traces[@]} posix shard(s)"
+
+          mkdir -p "$out"
+          "$merge" --workspace "${{ github.workspace }}" \
+            --output "$out/coverage-full.json" \
+            --ci-config "$CI_CONFIG" \
+            -- "${full_traces[@]}"
+          "$merge" --workspace "${{ github.workspace }}" \
+            --output "$out/coverage-posix.json" \
+            --ci-config "$CI_CONFIG" \
+            -- "${posix_traces[@]}"
+
+          line_stats() {
+            jq -r '
+              def hits:
+                [(.files[]?.lines[]?.count // empty) | select(. > 0)] | length;
+              def total:
+                [(.files[]?.lines[]?) | select(. != null)] | length;
+              [hits, total] | @tsv
+            ' "$1"
+          }
+
+          read -r full_hits full_total < <(line_stats "$out/coverage-full.json")
+          read -r posix_hits posix_total < <(line_stats "$out/coverage-posix.json")
+          full_pct=$(awk -v h="$full_hits" -v t="$full_total" \
+            'BEGIN { if (t > 0) printf "%.1f", h * 100 / t; else print "0.0" }')
+          posix_pct=$(awk -v h="$posix_hits" -v t="$posix_total" \
+            'BEGIN { if (t > 0) printf "%.1f", h * 100 / t; else print "0.0" }')
+          commit_short="${main_sha:0:7}"
+
+          jq -n \
+            --arg url "$RUN_URL" \
+            --arg sha "$main_sha" \
+            --arg short "$commit_short" \
+            --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg full_pct "$full_pct" \
+            --arg posix_pct "$posix_pct" \
+            --argjson full_hits "$full_hits" \
+            --argjson full_total "$full_total" \
+            --argjson posix_hits "$posix_hits" \
+            --argjson posix_total "$posix_total" \
+            --argjson full_files "$(jq '.files | length' "$out/coverage-full.json")" \
+            --argjson posix_files "$(jq '.files | length' "$out/coverage-posix.json")" \
+            '{
+              workflow_run_url: $url,
+              commit: $sha,
+              commit_short: $short,
+              created_at: $created,
+              full: {
+                line_coverage: $full_pct,
+                line_hits: $full_hits,
+                line_total: $full_total,
+                file_count: $full_files
+              },
+              posix: {
+                line_coverage: $posix_pct,
+                line_hits: $posix_hits,
+                line_total: $posix_total,
+                file_count: $posix_files
+              }
+            }' > "$out/coverage-provenance.json"
+
+          echo "Merged coverage: full ${full_pct}% (${full_hits}/${full_total}), posix ${posix_pct}% (${posix_hits}/${posix_total})"
+
+      - name: Upload coverage JSON snapshot
+        if: steps.coverage-check.outputs.has_coverage == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-json-snapshot
+          path: coverage-json-snapshot/
+
+  coverage-publish:
+    needs: [coverage-nightly-prep, coverage-merge]
+    if: >-
+      needs.coverage-nightly-prep.outputs.skip_nightly != 'true' &&
+      (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch') &&
+      needs.coverage-merge.result == 'success' &&
+      needs.coverage-merge.outputs.has_report == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Download merged JSON snapshot
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-json-snapshot
+          path: coverage-json-snapshot
+
+      - name: Check for coverage data changes
+        id: changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          dest="${{ github.workspace }}/doc/metrics"
+          changed=0
+          for f in coverage-full.json coverage-posix.json coverage-provenance.json; do
+            if [ ! -f "coverage-json-snapshot/$f" ]; then
+              echo "Missing coverage-json-snapshot/$f" >&2
+              exit 1
+            fi
+            if [ ! -f "$dest/$f" ] || ! cmp -s "coverage-json-snapshot/$f" "$dest/$f"; then
+              echo "Changed: $f"
+              changed=1
+            fi
+          done
+          if [ "$changed" -eq 0 ]; then
+            echo "coverage_changed=false" >> "$GITHUB_OUTPUT"
+            echo "Coverage JSON unchanged; skipping publish PR"
+            exit 0
+          fi
+          echo "coverage_changed=true" >> "$GITHUB_OUTPUT"
+          mkdir -p "$dest"
+          cp -a coverage-json-snapshot/. "$dest/"
+
+      - name: Create or update coverage JSON PR
+        if: steps.changes.outputs.coverage_changed == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: automation/coverage-json
+          sign-commits: true
+          add-paths: |
+            doc/metrics/coverage-full.json
+            doc/metrics/coverage-posix.json
+            doc/metrics/coverage-provenance.json
+          title: "doc: refresh nightly coverage JSON snapshots"
+          commit-message: "doc: refresh nightly coverage JSON snapshots"
+          body: |
+            Update committed gcovr JSON coverage snapshots from the Coverage
+            workflow (GitHub Actions run ${{ github.run_id }}).
+
+            Interactive reports and PR comments are on Codecov.
+          labels: |
+            automation
+            coverage
+
+  coverage-pr-codecov:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up workspace
+        uses: ./.github/actions/setup-workspace
+        with:
+          toolchains: x86_64-zephyr-elf
+          ccache-key-prefix: coverage-pr
+
+      - name: Wait for PR test plan from Twister workflow
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sha="${{ github.event.pull_request.head.sha }}"
+          download="${{ github.workspace }}/${{ env.MANIFEST_PATH }}/scripts/ci/download-pr-testplan.sh"
+          poll_sec=10
+          max_attempts=90
+          for attempt in $(seq 1 "${max_attempts}"); do
+            if "$download" "$sha" "${{ github.workspace }}"; then
+              exit 0
+            fi
+            echo "Waiting for Twister pr-testplan artifact (${attempt}/${max_attempts})..."
+            sleep "${poll_sec}"
+          done
+          echo "Timed out waiting for pr-testplan from Twister workflow" >&2
+          exit 1
+
+      - name: Run PR coverage on Twister test plan
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          "${{ github.workspace }}/${{ env.MANIFEST_PATH }}/scripts/ci/coverage-pr-codecov.sh" \
+            testplan.json
+
+      - name: Upload PR coverage to Codecov
+        if: always() && hashFiles('twister-out/coverage.xml') != ''
+        shell: bash
+        working-directory: ${{ github.workspace }}/${{ env.MANIFEST_PATH }}
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        run: |
+          set -euo pipefail
+          curl -sSL --fail -o /tmp/codecov https://cli.codecov.io/latest/linux/codecov
+          chmod +x /tmp/codecov
+          /tmp/codecov --verbose upload-coverage \
+            -t "$CODECOV_TOKEN" \
+            --git-service github \
+            --disable-search \
+            --file "${{ github.workspace }}/twister-out/coverage.xml" \
+            --flag pr-diff \
+            --name pr-diff \
+            --plugin noop \
+            || true
+
+  coverage-status:
+    if: always()
+    needs: [coverage-nightly-prep, coverage-nightly, coverage-merge, coverage-publish, coverage-pr-codecov]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Download shard status artifacts
+        if: >-
+          github.event_name != 'pull_request' &&
+          needs.coverage-nightly-prep.outputs.skip_nightly != 'true'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-shard-status-*
+          path: ${{ runner.temp }}/coverage-shard-status
+
+      - name: Nightly skipped
+        if: >-
+          github.event_name != 'pull_request' &&
+          needs.coverage-nightly-prep.outputs.skip_nightly == 'true'
+        run: |
+          echo "Scheduled nightly skipped — main unchanged since last coverage snapshot"
+          echo "main: ${{ needs.coverage-nightly-prep.outputs.main_sha }}"
+
+      - name: Check coverage pipeline
+        if: >-
+          github.event_name == 'pull_request' ||
+          needs.coverage-nightly-prep.outputs.skip_nightly != 'true'
+        shell: bash
+        env:
+          SHARD_STATUS_DIR: ${{ runner.temp }}/coverage-shard-status
+          SHARD_TOTAL: ${{ needs.coverage-nightly-prep.outputs.shard_total }}
+        run: |
+          set -euo pipefail
+
+          shard_ratio=$(jq -r '.coverage_nightly.shard_failure_ratio // 0.5' "$CI_CONFIG")
+          failed_shards=0
+
+          echo "Shard outcomes (config failure threshold from per-shard status):"
+          for shard in $(seq 1 "${SHARD_TOTAL}"); do
+            status_file="${SHARD_STATUS_DIR}/coverage-shard-status-${shard}/shard-status.json"
+            if [ ! -f "$status_file" ]; then
+              status_file=""
+            fi
+            if [ ! -f "$status_file" ]; then
+              matches=$(find "${SHARD_STATUS_DIR}" -name 'shard-status.json' 2>/dev/null | \
+                while IFS= read -r f; do
+                  jq -e --argjson s "$shard" '.shard == $s' "$f" >/dev/null 2>&1 && echo "$f"
+                done | head -1)
+              status_file="${matches:-}"
+            fi
+
+            if [ -z "$status_file" ] || [ ! -f "$status_file" ]; then
+              failed_shards=$((failed_shards + 1))
+              echo "  shard ${shard}: MISSING status artifact (counts as failed)"
+              continue
+            fi
+
+            if jq -e '.shard_ok' "$status_file" >/dev/null; then
+              jq -r '"  shard \(.shard): OK (\(.configs_failed)/\(.configs_total) configs failed, line_hits=\(.line_hits // 0), non_empty_traces=\(.non_empty_traces // 0), \(.reason))"' \
+                "$status_file"
+            else
+              failed_shards=$((failed_shards + 1))
+              jq -r '"  shard \(.shard): FAIL (\(.configs_failed)/\(.configs_total) configs failed, line_hits=\(.line_hits // 0), non_empty_traces=\(.non_empty_traces // 0), \(.reason))"' \
+                "$status_file"
+            fi
+          done
+
+          echo "Failed shards: ${failed_shards}/${SHARD_TOTAL} (nightly threshold ${shard_ratio})"
+          # shard_failure_ratio 0 means zero failed shards tolerated (not ratio >= 0, which is always true).
+          if awk -v failed="$failed_shards" -v total="$SHARD_TOTAL" -v ratio="$shard_ratio" \
+              'BEGIN {
+                 if (total <= 0) { exit 0 }
+                 if (ratio == 0) { exit !(failed > 0) }
+                 exit !(failed / total >= ratio)
+               }'; then
+            if awk -v ratio="$shard_ratio" 'BEGIN { exit (ratio == 0) }'; then
+              echo "Coverage nightly failed: ${failed_shards} failed shard(s) (threshold: none allowed)"
+            else
+              echo "Coverage nightly failed: shard failure ratio >= ${shard_ratio}"
+            fi
+            exit 1
+          fi
+
+          if [ "${{ github.event_name }}" != "pull_request" ] && \
+             [ "${{ needs.coverage-merge.result }}" != "success" ]; then
+            echo "Coverage merge failed"
+            exit 1
+          fi
+          if { [ "${{ github.ref }}" = "refs/heads/main" ] || \
+               [ "${{ github.event_name }}" = "workflow_dispatch" ]; } && \
+             [ "${{ needs.coverage-publish.result }}" != "success" ] && \
+             [ "${{ needs.coverage-publish.result }}" != "skipped" ]; then
+            echo "Coverage publish failed"
+            exit 1
+          fi
+          echo "Coverage pipeline succeeded"
