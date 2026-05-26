@@ -135,6 +135,8 @@ add_custom_command(TARGET html POST_BUILD
   COMMENT "Renaming posix_ header display names in Doxygen output"
 )
 
+# Coverage UI: Codecov (see doc/metrics/index.rst). JSON snapshots may live in doc/metrics/.
+
 # ---------------------------------------------------------------------------
 # html-live target (auto-rebuild on change)
 # ---------------------------------------------------------------------------
