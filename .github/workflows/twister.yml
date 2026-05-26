@@ -13,111 +13,208 @@ on:
     branches:
       - main
       - v*-branch
-      # Disabled for now until a self-hosted runner is available
-      # schedule:
-      #   # Run at 02:00 UTC on every Sunday
-      #   - cron: '0 2 * * 0'
+  schedule:
+    - cron: '0 2 * * 0'
+  workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.head_ref || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
-  MANIFEST_PATH: modules/lib/posix
   ZEPHYR_BASE: ${{ github.workspace }}/zephyr
-  PLATFORMS: >-
-    -p mps2/an385
-    -p native_sim
-    -p qemu_cortex_a53
-    -p qemu_riscv64
-    -p qemu_x86
-    -p qemu_x86_64
-  ROOTS: >-
-    -T ${{ github.workspace }}/modules/lib/posix/samples/posix
-    -T ${{ github.workspace }}/modules/lib/posix/tests/benchmarks/posix
-    -T ${{ github.workspace }}/modules/lib/posix/tests/posix
-    -T ${{ github.workspace }}/zephyr/samples/net
-    -T ${{ github.workspace }}/zephyr/samples/subsys/shell/shell_module
-    -T ${{ github.workspace }}/zephyr/tests/net
-    -T ${{ github.workspace }}/zephyr/tests/lib/c_lib
-    -T ${{ github.workspace }}/zephyr/kernel/threads/thread_apis
-    -T ${{ github.workspace }}/zephyr/kernel/signal
+  CI_CONFIG: ${{ github.workspace }}/.github/ci-config.json
 
 jobs:
   twister-build:
-    strategy:
-      fail-fast: false
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     steps:
-      - name: Set up environment
-        shell: bash
-        run: |
-          WEST_INIT_PATH="$(mktemp -d)"
-          rmdir $WEST_INIT_PATH
-          WEST_INIT_PATH="$(basename "$WEST_INIT_PATH")"
-          echo "WEST_INIT_PATH=${WEST_INIT_PATH}" >> $GITHUB_ENV
-
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          # need history in order to be able to run 'scripts/ci/test_plan.py -c origin/main..'
           fetch-depth: 0
-          # note: checkout to posix-next and then rename to modules/lib/posix as a workaround for the
-          # assumed west workspace location via 'west init -l modules/lib/posix'. See output of
-          # 'west init --help' for details.
-          path: ${{ env.WEST_INIT_PATH }}
 
-      - name: Set up Zephyr project
-        uses: zephyrproject-rtos/action-zephyr-setup@v1.0.9
+      - name: Set up workspace
+        id: workspace
+        uses: ./.github/actions/setup-workspace
         with:
-          app-path: ${{ env.WEST_INIT_PATH }}
           toolchains: aarch64-zephyr-elf:arm-zephyr-eabi:riscv64-zephyr-elf:x86_64-zephyr-elf
 
-      # note: correct location of lib/.west/ to .west/
-      - name: Re-home module
+      - name: Generate PR test plan
+        id: plan
         shell: bash
+        working-directory: ${{ github.workspace }}
+        env:
+          MANIFEST: ${{ github.workspace }}/${{ env.MANIFEST_PATH }}
+          BASE_REF: origin/${{ github.base_ref }}
         run: |
-          MANIFEST_PATH_BASE="$(basename "${{ env.MANIFEST_PATH }}")"
-          MANIFEST_PATH_DIR="$(dirname "${{ github.workspace }}/${{ env.MANIFEST_PATH }}")"
-          mkdir -p "$MANIFEST_PATH_DIR"
-          mv "${{ env.WEST_INIT_PATH }}" "$MANIFEST_PATH_DIR/$MANIFEST_PATH_BASE"
-          west config -d manifest.path
-          west config manifest.path "${{ env.MANIFEST_PATH }}"
+          set -euo pipefail
+          git -C "${MANIFEST}" diff --name-only "${BASE_REF}.." \
+            | python3 -c 'import json,sys; json.dump([l for l in sys.stdin.read().splitlines() if l], sys.stdout)' \
+            > changed_files.json
+          "${{ github.workspace }}/${{ env.MANIFEST_PATH }}/scripts/ci/gen-pr-testplan.sh" \
+            changed_files.json
+          count=$(jq '.testsuites | length' testplan.json)
+          if [ "$count" -gt 0 ]; then
+            echo "has_tests=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_tests=false" >> "$GITHUB_OUTPUT"
+          fi
 
-      # Verify binary blobs (skipped, no blobs needed)
-      - name: Apply patches
-        shell: bash
-        run: |
-          west -v patch apply
+      - name: Upload PR test plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-testplan
+          path: testplan.json
+          if-no-files-found: error
+
+      - name: Skip twister (no tests in plan)
+        if: steps.plan.outputs.has_tests != 'true'
+        run: echo "Pull request changes do not require twister; skipping test run."
 
       - name: Run Tests with Twister (Pull Request)
-        if: github.event_name == 'pull_request'
+        if: steps.plan.outputs.has_tests == 'true'
         shell: bash
-        working-directory: ${{ env.ZEPHYR_BASE }}
+        working-directory: ${{ github.workspace }}
         run: |
-          # copy west.yml to west_old.yml to allow test_plan.py to detect changes
-          cp ${{ github.workspace }}/${{ env.MANIFEST_PATH }}/west.yml \
-            ${{ github.workspace }}/${{ env.MANIFEST_PATH }}/west_old.yml
+          set -euo pipefail
+          ccache --zero-stats
+          "${{ github.workspace }}/${{ env.MANIFEST_PATH }}/scripts/ci/twister-pr-run.sh"
+          ccache --show-stats
 
-          # must be run from ZEPHYR_BASE. generates testplan.json
-          ./scripts/ci/test_plan.py -r ${{ github.workspace }}/${{ env.MANIFEST_PATH }} \
-            -c origin/${{ github.base_ref }}.. --pull-request \
-            ${{ env.PLATFORMS }} \
-            ${{ env.ROOTS }}
+      - name: Save workspace ccache
+        if: always() && !cancelled()
+        uses: ./.github/actions/save-workspace-ccache
+        with:
+          cache-primary-key: ${{ steps.workspace.outputs.ccache-primary-key }}
+          save: ${{ github.event_name == 'push' }}
 
-          # run twister with the generated testplan
-          # there are about 625 tests that get pulled into this run with the specified platforms
-          # and roots. for now, hard-coded limit of first 25th of shuffled tests to reduce
-          # on-diff CI time
-          ./scripts/twister -i -c \
-            --subset 1/25  --shuffle-tests \
-            --load-tests testplan.json \
-            ${{ env.PLATFORMS }} \
-            ${{ env.ROOTS }}
+  twister-nightly-prep:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    outputs:
+      shard_total: ${{ steps.plan.outputs.shard_total }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Plan nightly shards
+        id: plan
+        shell: bash
+        run: |
+          total=$(jq -r '.twister_nightly.shards // 10' "$CI_CONFIG")
+          echo "shard_total=$total" >> "$GITHUB_OUTPUT"
+          echo "matrix=$(jq -nc --argjson n "$total" '{shard: [range(1; $n+1)]}')" >> "$GITHUB_OUTPUT"
+
+  twister-nightly:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: twister-nightly-prep
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.twister-nightly-prep.outputs.matrix) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up workspace
+        id: workspace
+        uses: ./.github/actions/setup-workspace
+        with:
+          toolchains: aarch64-zephyr-elf:arm-zephyr-eabi:riscv64-zephyr-elf:x86_64-zephyr-elf
+          ccache-key-prefix: twister
+
+      - name: Generate nightly test plan
+        if: matrix.shard == 1
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          CI_CONFIG_PROFILE=twister_nightly \
+            "${{ github.workspace }}/${{ env.MANIFEST_PATH }}/scripts/ci/gen-testplan.sh"
+          test -s testplan.json
+
+      - name: Upload nightly test plan
+        if: matrix.shard == 1
+        uses: actions/upload-artifact@v4
+        with:
+          name: twister-nightly-testplan
+          path: testplan.json
+          if-no-files-found: error
+
+      - name: Wait for nightly test plan
+        if: matrix.shard != 1
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Shard 1: setup (<=2m) + twister -c plan generation + upload; other shards poll after their own setup.
+          setup_max_sec=120
+          plan_gen_sec=10
+          buffer_sec=30
+          poll_sec=10
+          max_wait_sec=$((setup_max_sec + plan_gen_sec + buffer_sec))
+          max_attempts=$(( (max_wait_sec + poll_sec - 1) / poll_sec ))
+
+          name=twister-nightly-testplan
+          for attempt in $(seq 1 "${max_attempts}"); do
+            count=$(gh api -H "Accept: application/vnd.github+json" \
+              "/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts" \
+              --paginate -q "[.artifacts[] | select(.name == \"${name}\")] | length")
+            if [ "${count}" -gt 0 ]; then
+              echo "Found ${name} after ${attempt} attempt(s)"
+              exit 0
+            fi
+            echo "Waiting for ${name} (${attempt}/${max_attempts}, poll ${poll_sec}s, budget ${max_wait_sec}s)..."
+            sleep "${poll_sec}"
+          done
+          echo "Timed out waiting for ${name} after ${max_wait_sec}s"
+          exit 1
+
+      - name: Download nightly test plan
+        if: matrix.shard != 1
+        uses: actions/download-artifact@v4
+        with:
+          name: twister-nightly-testplan
+          path: ${{ github.workspace }}
 
       - name: Run Tests with Twister (Nightly)
-        if: github.event_name == 'schedule'
         shell: bash
-        working-directory: ${{ env.ZEPHYR_BASE }}
+        working-directory: ${{ github.workspace }}
         run: |
-          west twister -c -i ${{ env.PLATFORMS }} ${{ env.ROOTS }}
+          set -euo pipefail
+          test -s testplan.json
+          ccache --zero-stats
+          CI_CONFIG_PROFILE=twister_nightly \
+            "${{ github.workspace }}/${{ env.MANIFEST_PATH }}/scripts/ci/runci.sh" \
+            -i \
+            --load-tests testplan.json \
+            --subset ${{ matrix.shard }}/${{ needs.twister-nightly-prep.outputs.shard_total }}
+          ccache --show-stats
+
+      - name: Save workspace ccache
+        if: always() && !cancelled() && matrix.shard == 1
+        uses: ./.github/actions/save-workspace-ccache
+        with:
+          cache-primary-key: ${{ steps.workspace.outputs.ccache-primary-key }}
+          save: true
+
+  twister-nightly-status:
+    if: >-
+      always() &&
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    needs: [twister-nightly-prep, twister-nightly]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check nightly shards
+        run: |
+          if [ "${{ needs.twister-nightly.result }}" != "success" ]; then
+            echo "One or more twister nightly shards failed"
+            exit 1
+          fi
+          echo "All ${{ needs.twister-nightly-prep.outputs.shard_total }} twister nightly shards passed"

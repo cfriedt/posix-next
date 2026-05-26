@@ -1,0 +1,66 @@
+codecov:
+  notify:
+    require_ci_to_pass: yes
+
+# Coverage is collected from the west workspace (paths like
+# modules/lib/posix/lib/posix/...) but this repo's git root is posix-next
+# (paths like lib/posix/...). Strip the workspace prefix so Codecov can map
+# reports to source files.
+fixes:
+  - "modules/lib/posix/::"
+
+# Drop everything outside posix-next lib/posix and include. Fixes run first, so
+# modules/lib/posix/... becomes lib/posix/... or include/... before matching.
+ignore:
+  - "zephyr/**/*"
+  - "modules/**/*"
+  - "tests/**/*"
+  - "samples/**/*"
+  - "scripts/**/*"
+  - "doc/**/*"
+  - ".github/**/*"
+
+coverage:
+  precision: 2
+  round: down
+  range: "70...100"
+  status:
+    project:
+      default: false
+      nightly:
+        flags:
+          - nightly
+        target: auto
+    patch:
+      default:
+        target: auto
+        threshold: 0%
+
+flag_management:
+  default_rules:
+    carryforward: true
+  individual_flags:
+    # carryforward: nightly shards feed the baseline that PR reports reuse.
+    - name: nightly
+      carryforward: true
+      paths:
+        - include/
+        - lib/posix/
+    - name: pr-diff
+      carryforward: false
+      paths:
+        - include/
+        - lib/posix/
+
+comment:
+  layout: "reach, diff, flags, files, footer"
+  behavior: default
+  require_changes: no
+
+parsers:
+  gcov:
+    branch_detection:
+      conditional: yes
+      loop: yes
+      method: no
+      macro: no
