@@ -189,8 +189,8 @@ def _parse_xml_dir(xml_dir: Path) -> list[dict]:
                     header_file = ""
                     if location is not None:
                         header_file = location.get("file", "")
-                        # strip leading path up to include/zephyr/posix/
-                        m = re.search(r"include/zephyr/posix/(.+)", header_file)
+                        # strip leading path up to zephyr/posix/
+                        m = re.search(r"(?:include/)?zephyr/posix/(.+)", header_file)
                         if m:
                             header_file = m.group(1)
 
