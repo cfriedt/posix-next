@@ -48,4 +48,5 @@ posix-next
 
    getting_started/index.rst
    posix/index.rst
+   posix/symbols
    samples/posix/posix
