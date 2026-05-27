@@ -71,6 +71,16 @@ jobs:
         run: |
           west -v patch apply
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: zephyr/scripts/requirements-actions.txt
+
+      - name: Install coverage tools
+        run: pip install -r zephyr/scripts/requirements-actions.txt --require-hashes
+
       - name: Run Tests with Coverage
         shell: bash
         working-directory: ${{ env.ZEPHYR_BASE }}
@@ -103,6 +113,7 @@ jobs:
         run: |
           mkdir -p ${{ github.workspace }}/coverage-report
           gcovr \
+            -r ${{ github.workspace }} \
             --add-tracefile ${{ env.ZEPHYR_BASE }}/twister-out/coverage.json \
             --html-details ${{ github.workspace }}/coverage-report/index.html \
             --filter 'modules/lib/posix/include' \
