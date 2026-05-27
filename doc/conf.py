@@ -193,4 +193,5 @@ def _install_kconfig_db(app, exception):
 
 
 def setup(app):
+    app.add_js_file("doxytooltip-patch.js")
     app.connect("build-finished", _install_kconfig_db)
