@@ -25,6 +25,9 @@ concurrency:
 env:
   MANIFEST_PATH: modules/lib/posix
   ZEPHYR_BASE: ${{ github.workspace }}/zephyr
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 1G
+  CCACHE_COMPILERCHECK: content
   PLATFORMS: >-
     -p mps2/an385
     -p native_sim
@@ -90,11 +93,20 @@ jobs:
         run: |
           west -v patch apply
 
+      - name: Restore ccache
+        id: ccache-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-${{ runner.os }}-twister-sdk-${{ hashFiles('zephyr/SDK_VERSION') }}
+
       - name: Run Tests with Twister (Pull Request)
         if: github.event_name == 'pull_request'
         shell: bash
         working-directory: ${{ env.ZEPHYR_BASE }}
         run: |
+          ccache --zero-stats
+
           # copy west.yml to west_old.yml to allow test_plan.py to detect changes
           cp ${{ github.workspace }}/${{ env.MANIFEST_PATH }}/west.yml \
             ${{ github.workspace }}/${{ env.MANIFEST_PATH }}/west_old.yml
@@ -115,9 +127,20 @@ jobs:
             ${{ env.PLATFORMS }} \
             ${{ env.ROOTS }}
 
+          ccache --show-stats
+
       - name: Run Tests with Twister (Nightly)
         if: github.event_name == 'schedule'
         shell: bash
         working-directory: ${{ env.ZEPHYR_BASE }}
         run: |
+          ccache --zero-stats
           west twister -c -i ${{ env.PLATFORMS }} ${{ env.ROOTS }}
+          ccache --show-stats
+
+      - name: Save ccache
+        if: success()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ${{ steps.ccache-restore.outputs.cache-primary-key }}
