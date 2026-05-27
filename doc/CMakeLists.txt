@@ -22,6 +22,11 @@ set(DOCS_BUILD_DIR  ${CMAKE_CURRENT_BINARY_DIR})
 set(DOCS_HTML_DIR   ${CMAKE_CURRENT_BINARY_DIR}/html)
 set(DOCS_DOCTREE_DIR ${CMAKE_CURRENT_BINARY_DIR}/doctrees)
 
+# West workspace root (posix-next checkout); used to locate a local coverage-report/.
+get_filename_component(WORKSPACE_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../../.." ABSOLUTE)
+set(COVERAGE_REPORT_SRC "" CACHE PATH
+  "Directory with gcovr HTML output (index.html); empty = auto-detect")
+
 # ---------------------------------------------------------------------------
 # Options
 # ---------------------------------------------------------------------------
@@ -134,6 +139,53 @@ add_custom_command(TARGET html POST_BUILD
     ${DOCS_HTML_DIR}/doxygen/html
   COMMENT "Renaming posix_ header display names in Doxygen output"
 )
+
+# Optional gcovr report for Metrics page (local preview or pre-staged tree).
+function(_posix_doc_has_gcovr_report dir out_var)
+  if(EXISTS "${dir}/index.html" OR EXISTS "${dir}/index.functions.html")
+    set("${out_var}" TRUE PARENT_SCOPE)
+  else()
+    set("${out_var}" FALSE PARENT_SCOPE)
+  endif()
+endfunction()
+
+if(NOT COVERAGE_REPORT_SRC)
+  _posix_doc_has_gcovr_report("${WORKSPACE_ROOT}/coverage-report" _has_report)
+  if(_has_report)
+    set(COVERAGE_REPORT_SRC "${WORKSPACE_ROOT}/coverage-report")
+  else()
+    _posix_doc_has_gcovr_report("${CMAKE_CURRENT_LIST_DIR}/../coverage-report" _has_report)
+    if(_has_report)
+      set(COVERAGE_REPORT_SRC "${CMAKE_CURRENT_LIST_DIR}/../coverage-report")
+    endif()
+  endif()
+endif()
+
+if(COVERAGE_REPORT_SRC)
+  _posix_doc_has_gcovr_report("${COVERAGE_REPORT_SRC}" _has_report)
+endif()
+
+if(COVERAGE_REPORT_SRC AND _has_report)
+  message(STATUS "Bundling coverage report from ${COVERAGE_REPORT_SRC}")
+  add_custom_command(TARGET html POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+      "${COVERAGE_REPORT_SRC}"
+      "${DOCS_HTML_DIR}/coverage-report"
+    COMMAND ${CMAKE_COMMAND} -E echo "Bundled gcovr report for Metrics page"
+    COMMENT "Copying gcovr coverage report for Metrics page"
+  )
+  # Metrics iframe expects index.html; use the functions summary if the main index is absent.
+  if(NOT EXISTS "${COVERAGE_REPORT_SRC}/index.html")
+    add_custom_command(TARGET html POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${DOCS_HTML_DIR}/coverage-report/index.functions.html"
+        "${DOCS_HTML_DIR}/coverage-report/index.html"
+      COMMENT "Using index.functions.html as coverage report landing page"
+    )
+  endif()
+else()
+  message(STATUS "No coverage-report/ found; Metrics iframe will be empty until Coverage CI runs")
+endif()
 
 # ---------------------------------------------------------------------------
 # html-live target (auto-rebuild on change)

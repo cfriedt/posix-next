@@ -22,6 +22,7 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -77,6 +78,23 @@ jobs:
         run: |
           make -C modules/lib/posix/doc html \
             SPHINXOPTS="-j auto -T -W --keep-going"
+
+      - name: Download latest coverage report
+        id: coverage-report
+        continue-on-error: true
+        uses: dawidd6/action-download-artifact@v11
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          workflow: coverage.yml
+          name: coverage-report
+          branch: main
+          workflow_conclusion: success
+          if_no_artifact_found: ignore
+
+      - name: Bundle coverage report into site
+        if: steps.coverage-report.outputs.found_artifact == 'true'
+        run: |
+          cp -a coverage-report modules/lib/posix/doc/_build/html/coverage-report
 
       - name: Upload Pages artifact
         # Only upload on push to main/tags (not PRs); use artifact for deploy job
