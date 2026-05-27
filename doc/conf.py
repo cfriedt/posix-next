@@ -94,7 +94,7 @@ html_static_path = [
     str(ZEPHYR_BASE / "doc" / "_static"),
     str(Path(__file__).parent / "_static"),
 ]
-html_css_files = ["posix-next.css"]
+html_css_files = []
 html_logo = str(Path(__file__).parent / "_static" / "posix-next-logo.png")
 html_favicon = str(ZEPHYR_BASE / "doc" / "_static" / "images" / "favicon.png")
 
@@ -145,3 +145,6 @@ suppress_warnings = [
 
 def setup(app):
     app.add_js_file("doxytooltip-patch.js")
+    # Ensure theme overrides load after the RTD base styles.
+    app.add_css_file("css/custom.css")
+    app.add_css_file("posix-next.css")
