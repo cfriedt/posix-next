@@ -15,6 +15,9 @@ concurrency:
 env:
   MANIFEST_PATH: modules/lib/posix
   ZEPHYR_BASE: ${{ github.workspace }}/zephyr
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_MAXSIZE: 1G
+  CCACHE_COMPILERCHECK: content
   PLATFORMS: >-
     -p mps2/an385
     -p native_sim
@@ -81,10 +84,18 @@ jobs:
       - name: Install coverage tools
         run: pip install -r zephyr/scripts/requirements-actions.txt --require-hashes
 
+      - name: Restore ccache
+        id: ccache-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-${{ runner.os }}-coverage-sdk-${{ hashFiles('zephyr/SDK_VERSION') }}
+
       - name: Run Tests with Coverage
         shell: bash
         working-directory: ${{ env.ZEPHYR_BASE }}
         run: |
+          ccache --zero-stats
           ./scripts/twister \
             -i --force-color -N -v \
             --filter runnable \
@@ -95,6 +106,7 @@ jobs:
             ${{ env.ROOTS }} \
             --timeout-multiplier 2 \
             -e nano
+          ccache --show-stats
 
       - name: Check for coverage data
         id: coverage-check
@@ -130,3 +142,10 @@ jobs:
         with:
           name: coverage-report
           path: coverage-report/
+
+      - name: Save ccache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ${{ steps.ccache-restore.outputs.cache-primary-key }}
