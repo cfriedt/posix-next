@@ -141,3 +141,7 @@ posix_symbols_doxy_html_url = "../doxygen/html"
 suppress_warnings = [
     "ref.ref",        # unresolved :ref: that Intersphinx also can't find
 ]
+
+
+def setup(app):
+    app.add_js_file("doxytooltip-patch.js")
