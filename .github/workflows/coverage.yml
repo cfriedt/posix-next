@@ -15,6 +15,7 @@ concurrency:
 env:
   MANIFEST_PATH: modules/lib/posix
   ZEPHYR_BASE: ${{ github.workspace }}/zephyr
+  ZEPHYR_SDK_INSTALL_DIR: ${{ github.workspace }}/zephyr-sdk
   CCACHE_DIR: ${{ github.workspace }}/.ccache
   CCACHE_MAXSIZE: 1G
   CCACHE_COMPILERCHECK: content
@@ -35,7 +36,7 @@ env:
     -T ${{ github.workspace }}/zephyr/tests/kernel/signal
 
 jobs:
-  codecov:
+  coverage:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -74,16 +75,6 @@ jobs:
         run: |
           west -v patch apply
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: zephyr/scripts/requirements-actions.txt
-
-      - name: Install coverage tools
-        run: pip install -r zephyr/scripts/requirements-actions.txt --require-hashes
-
       - name: Restore ccache
         id: ccache-restore
         uses: actions/cache/restore@v4
@@ -95,6 +86,18 @@ jobs:
         shell: bash
         working-directory: ${{ env.ZEPHYR_BASE }}
         run: |
+          for d in \
+            "${ZEPHYR_SDK_INSTALL_DIR}/aarch64-zephyr-elf/bin" \
+            "${ZEPHYR_SDK_INSTALL_DIR}/arm-zephyr-eabi/bin" \
+            "${ZEPHYR_SDK_INSTALL_DIR}/riscv64-zephyr-elf/bin" \
+            "${ZEPHYR_SDK_INSTALL_DIR}/x86_64-zephyr-elf/bin"
+          do
+            if [ -d "$d" ]; then
+              echo "$d" >> "$GITHUB_PATH"
+              export PATH="$d:$PATH"
+            fi
+          done
+
           ccache --zero-stats
           ./scripts/twister \
             -i --force-color -N -v \
