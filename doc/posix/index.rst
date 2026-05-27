@@ -1,7 +1,7 @@
 .. _posix_support:
 
-POSIX
-#####
+POSIX-next
+##########
 
 .. toctree::
    :maxdepth: 2
