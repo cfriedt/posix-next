@@ -1,0 +1,120 @@
+# SPDX-License-Identifier: Apache-2.0
+# Checkout the posix manifest and set up the Zephyr west workspace.
+
+name: Setup posix west workspace
+description: Re-home manifest to modules/lib/posix, run action-zephyr-setup, apply patches (requires prior checkout)
+
+inputs:
+  manifest-path:
+    description: West manifest path under the workspace (manifest.self.path)
+    required: false
+    default: modules/lib/posix
+
+  base-path:
+    description: West workspace topdir
+    required: false
+    default: .
+
+  toolchains:
+    description: Zephyr SDK toolchains, colon-separated
+    required: true
+
+  apply-patches:
+    description: Run west patch apply after west update
+    required: false
+    default: "true"
+
+  cache-west-projects:
+    description: Enable west project caching in action-zephyr-setup
+    required: false
+    default: "true"
+
+  west-group-filter:
+    description: West group filter forwarded to action-zephyr-setup
+    required: false
+    default: ""
+
+  west-project-filter:
+    description: West project filter forwarded to action-zephyr-setup
+    required: false
+    default: ""
+
+  ccache-key-prefix:
+    description: Segment in the Actions cache key (e.g. twister, coverage)
+    required: false
+    default: twister
+
+  cache-ccache:
+    description: Restore workspace .ccache from Actions cache (save via save-workspace-ccache)
+    required: false
+    default: "true"
+
+outputs:
+  manifest-path:
+    description: Resolved manifest path
+    value: ${{ inputs.manifest-path }}
+
+  zephyr-base:
+    description: ZEPHYR_BASE path
+    value: ${{ github.workspace }}/${{ inputs.base-path }}/zephyr
+
+  ccache-primary-key:
+    description: Primary cache key for save-workspace-ccache
+    value: ${{ steps.ccache-restore.outputs.cache-primary-key }}
+
+runs:
+  using: composite
+  steps:
+    - name: Re-home manifest to ${{ inputs.manifest-path }}
+      working-directory: ${{ inputs.base-path }}
+      shell: bash
+      run: |
+        script="${{ github.action_path }}/../action-zephyr-setup/scripts/rehome-manifest.sh"
+        chmod +x "$script"
+        "$script" . "${{ inputs.manifest-path }}"
+
+    - name: Set up Zephyr west workspace
+      uses: ./.github/actions/action-zephyr-setup
+      with:
+        base-path: ${{ inputs.base-path }}
+        app-path: ${{ inputs.manifest-path }}
+        toolchains: ${{ inputs.toolchains }}
+        cache-west-projects: ${{ inputs.cache-west-projects }}
+        west-group-filter: ${{ inputs.west-group-filter }}
+        west-project-filter: ${{ inputs.west-project-filter }}
+        enable-ccache: "true"
+
+    - name: Export workspace paths
+      shell: bash
+      run: |
+        echo "MANIFEST_PATH=${{ inputs.manifest-path }}" >> "$GITHUB_ENV"
+        echo "ZEPHYR_BASE=${{ github.workspace }}/${{ inputs.base-path }}/zephyr" >> "$GITHUB_ENV"
+        echo "ZEPHYR_SDK_INSTALL_DIR=${{ github.workspace }}/${{ inputs.base-path }}/zephyr-sdk" >> "$GITHUB_ENV"
+
+    - name: Apply patches
+      if: inputs.apply-patches == 'true'
+      working-directory: ${{ inputs.base-path }}
+      shell: bash
+      run: |
+        patch_yml="${{ inputs.manifest-path }}/zephyr/patches.yml"
+        if [ ! -f "$patch_yml" ]; then
+          echo "missing $patch_yml (manifest zephyr/ must be under ${{ inputs.manifest-path }}/)" >&2
+          exit 1
+        fi
+        west -v patch apply
+
+    - name: Restore workspace ccache
+      if: inputs.cache-ccache == 'true'
+      id: ccache-restore
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ inputs.base-path }}/.ccache
+        key: ccache-${{ runner.os }}-${{ hashFiles(format('{0}/zephyr/SDK_VERSION', inputs.base-path)) }}
+
+    - name: Export ccache environment
+      if: inputs.cache-ccache == 'true'
+      shell: bash
+      run: |
+        echo "CCACHE_DIR=${{ github.workspace }}/${{ inputs.base-path }}/.ccache" >> "$GITHUB_ENV"
+        echo "CCACHE_MAXSIZE=1G" >> "$GITHUB_ENV"
+        echo "CCACHE_COMPILERCHECK=content" >> "$GITHUB_ENV"
