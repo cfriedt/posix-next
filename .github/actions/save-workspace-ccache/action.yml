@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: Apache-2.0
+# Save workspace ccache after build/test steps (run at job end).
+
+name: Save workspace ccache
+description: Save workspace .ccache to Actions cache
+
+inputs:
+  cache-primary-key:
+    description: Primary key from setup-workspace ccache-restore output
+    required: true
+
+  save:
+    description: Run cache save (set false on pull_request to avoid save races)
+    required: false
+    default: "true"
+
+  base-path:
+    description: Workspace root containing .ccache
+    required: false
+    default: .
+
+runs:
+  using: composite
+  steps:
+    - name: Save ccache
+      if: inputs.save == 'true'
+      continue-on-error: true
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ inputs.base-path }}/.ccache
+        key: ${{ inputs.cache-primary-key }}

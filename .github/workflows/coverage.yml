@@ -9,16 +9,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.head_ref || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: true
 
 env:
   MANIFEST_PATH: modules/lib/posix
   ZEPHYR_BASE: ${{ github.workspace }}/zephyr
   ZEPHYR_SDK_INSTALL_DIR: ${{ github.workspace }}/zephyr-sdk
-  CCACHE_DIR: ${{ github.workspace }}/.ccache
-  CCACHE_MAXSIZE: 1G
-  CCACHE_COMPILERCHECK: content
   PLATFORMS: >-
     -p mps2/an385
     -p native_sim
@@ -40,47 +37,16 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - name: Set up environment
-        shell: bash
-        run: |
-          WEST_INIT_PATH="$(mktemp -d)"
-          rmdir $WEST_INIT_PATH
-          WEST_INIT_PATH="$(basename "$WEST_INIT_PATH")"
-          echo "WEST_INIT_PATH=${WEST_INIT_PATH}" >> $GITHUB_ENV
-
       - name: Checkout
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
-          path: ${{ env.WEST_INIT_PATH }}
 
-      - name: Set up Zephyr project
-        uses: zephyrproject-rtos/action-zephyr-setup@v1.0.9
+      - name: Set up workspace
+        id: workspace
+        uses: ./.github/actions/setup-workspace
         with:
-          app-path: ${{ env.WEST_INIT_PATH }}
           toolchains: arm-zephyr-eabi:riscv64-zephyr-elf:x86_64-zephyr-elf
-
-      - name: Re-home module
-        shell: bash
-        run: |
-          MANIFEST_PATH_BASE="$(basename "${{ env.MANIFEST_PATH }}")"
-          MANIFEST_PATH_DIR="$(dirname "${{ github.workspace }}/${{ env.MANIFEST_PATH }}")"
-          mkdir -p "$MANIFEST_PATH_DIR"
-          mv "${{ env.WEST_INIT_PATH }}" "$MANIFEST_PATH_DIR/$MANIFEST_PATH_BASE"
-          west config -d manifest.path
-          west config manifest.path "${{ env.MANIFEST_PATH }}"
-
-      - name: Apply patches
-        shell: bash
-        run: |
-          west -v patch apply
-
-      - name: Restore ccache
-        id: ccache-restore
-        uses: actions/cache/restore@v4
-        with:
-          path: ${{ env.CCACHE_DIR }}
-          key: ccache-${{ runner.os }}-coverage-sdk-${{ hashFiles('zephyr/SDK_VERSION') }}
 
       - name: Run Tests with Coverage
         shell: bash
@@ -146,9 +112,8 @@ jobs:
           name: coverage-report
           path: coverage-report/
 
-      - name: Save ccache
-        if: always()
-        uses: actions/cache/save@v4
+      - name: Save workspace ccache
+        if: always() && !cancelled()
+        uses: ./.github/actions/save-workspace-ccache
         with:
-          path: ${{ env.CCACHE_DIR }}
-          key: ${{ steps.ccache-restore.outputs.cache-primary-key }}
+          cache-primary-key: ${{ steps.workspace.outputs.ccache-primary-key }}
