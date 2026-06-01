@@ -15,6 +15,9 @@
   <a href="https://github.com/cfriedt/posix-next/actions/workflows/docs.yml">
     <img src="https://github.com/cfriedt/posix-next/actions/workflows/docs.yml/badge.svg" alt="Documentation">
   </a>
+  <a href="https://cfriedt.github.io/posix-next/metrics/index.html">
+    <img src="https://img.shields.io/endpoint?url=https://cfriedt.github.io/posix-next/coverage-report/badge.json" alt="Coverage">
+  </a>
   <a href="https://github.com/cfriedt/posix-next/blob/main/LICENSE">
     <img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License">
   </a>

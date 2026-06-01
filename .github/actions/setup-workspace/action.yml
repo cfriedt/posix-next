@@ -56,7 +56,7 @@ outputs:
 
   zephyr-base:
     description: ZEPHYR_BASE path
-    value: ${{ github.workspace }}/${{ inputs.base-path }}/zephyr
+    value: ${{ inputs.base-path == '.' && format('{0}/zephyr', github.workspace) || format('{0}/{1}/zephyr', github.workspace, inputs.base-path) }}
 
   ccache-primary-key:
     description: Primary cache key for save-workspace-ccache
@@ -88,8 +88,13 @@ runs:
       shell: bash
       run: |
         echo "MANIFEST_PATH=${{ inputs.manifest-path }}" >> "$GITHUB_ENV"
-        echo "ZEPHYR_BASE=${{ github.workspace }}/${{ inputs.base-path }}/zephyr" >> "$GITHUB_ENV"
-        echo "ZEPHYR_SDK_INSTALL_DIR=${{ github.workspace }}/${{ inputs.base-path }}/zephyr-sdk" >> "$GITHUB_ENV"
+        if [ "${{ inputs.base-path }}" = "." ]; then
+          echo "ZEPHYR_BASE=${GITHUB_WORKSPACE}/zephyr" >> "$GITHUB_ENV"
+          echo "ZEPHYR_SDK_INSTALL_DIR=${GITHUB_WORKSPACE}/zephyr-sdk" >> "$GITHUB_ENV"
+        else
+          echo "ZEPHYR_BASE=${GITHUB_WORKSPACE}/${{ inputs.base-path }}/zephyr" >> "$GITHUB_ENV"
+          echo "ZEPHYR_SDK_INSTALL_DIR=${GITHUB_WORKSPACE}/${{ inputs.base-path }}/zephyr-sdk" >> "$GITHUB_ENV"
+        fi
 
     - name: Apply patches
       if: inputs.apply-patches == 'true'
@@ -108,13 +113,15 @@ runs:
       id: ccache-restore
       uses: actions/cache/restore@v4
       with:
-        path: ${{ inputs.base-path }}/.ccache
-        key: ccache-${{ runner.os }}-${{ hashFiles(format('{0}/zephyr/SDK_VERSION', inputs.base-path)) }}
+        # actions/cache rejects paths containing './' or '../'
+        path: ${{ inputs.base-path == '.' && '.ccache' || format('{0}/.ccache', inputs.base-path) }}
+        key: ccache-${{ runner.os }}-${{ hashFiles(inputs.base-path == '.' && 'zephyr/SDK_VERSION' || format('{0}/zephyr/SDK_VERSION', inputs.base-path)) }}
 
     - name: Export ccache environment
       if: inputs.cache-ccache == 'true'
       shell: bash
       run: |
-        echo "CCACHE_DIR=${{ github.workspace }}/${{ inputs.base-path }}/.ccache" >> "$GITHUB_ENV"
+        ccache_dir="${{ inputs.base-path == '.' && format('{0}/.ccache', github.workspace) || format('{0}/{1}/.ccache', github.workspace, inputs.base-path) }}"
+        echo "CCACHE_DIR=${ccache_dir}" >> "$GITHUB_ENV"
         echo "CCACHE_MAXSIZE=1G" >> "$GITHUB_ENV"
         echo "CCACHE_COMPILERCHECK=content" >> "$GITHUB_ENV"
