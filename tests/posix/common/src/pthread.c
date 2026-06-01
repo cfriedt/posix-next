@@ -300,6 +300,10 @@ ZTEST(pthread, test_pthread_priority_conversion)
 
 ZTEST(pthread, test_pthread_execution)
 {
+	if (IS_ENABLED(CONFIG_COVERAGE)) {
+		/* Coverage data increases binary size, reducing heap for dynamic stacks */
+		ztest_test_skip();
+	}
 	int i, ret;
 	pthread_t newthread[N_THR_E];
 	void *retval;
@@ -417,6 +421,10 @@ ZTEST(pthread, test_pthread_execution)
 
 ZTEST(pthread, test_pthread_termination)
 {
+	if (IS_ENABLED(CONFIG_COVERAGE)) {
+		/* Coverage data increases binary size, reducing heap for dynamic stacks */
+		ztest_test_skip();
+	}
 	int32_t i, ret;
 	pthread_t newthread[N_THR_T] = {0};
 	void *retval;
