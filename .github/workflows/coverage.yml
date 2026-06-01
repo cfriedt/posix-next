@@ -9,33 +9,39 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.head.ref || github.ref_name }}
+  group: ${{ github.workflow }}-${{ github.ref_name }}
   cancel-in-progress: true
 
 env:
   MANIFEST_PATH: modules/lib/posix
   ZEPHYR_BASE: ${{ github.workspace }}/zephyr
   ZEPHYR_SDK_INSTALL_DIR: ${{ github.workspace }}/zephyr-sdk
-  PLATFORMS: >-
-    -p mps2/an385
-    -p native_sim
-    -p qemu_riscv64
-    -p qemu_x86
-  ROOTS: >-
-    -T ${{ github.workspace }}/modules/lib/posix/samples/posix
-    -T ${{ github.workspace }}/modules/lib/posix/tests/benchmarks/posix
-    -T ${{ github.workspace }}/modules/lib/posix/tests/posix
-    -T ${{ github.workspace }}/zephyr/samples/net
-    -T ${{ github.workspace }}/zephyr/samples/subsys/shell/shell_module
-    -T ${{ github.workspace }}/zephyr/tests/net
-    -T ${{ github.workspace }}/zephyr/tests/lib/c_lib
-    -T ${{ github.workspace }}/zephyr/tests/kernel/threads/thread_apis
-    -T ${{ github.workspace }}/zephyr/tests/kernel/signal
+  CI_CONFIG: ${{ github.workspace }}/.github/ci-config.json
 
 jobs:
-  coverage:
+  coverage-nightly-prep:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    outputs:
+      shard_total: ${{ steps.plan.outputs.shard_total }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Plan nightly shards
+        id: plan
+        shell: bash
+        run: |
+          total=$(jq -r '.coverage_nightly.shards // 10' "$CI_CONFIG")
+          echo "shard_total=$total" >> "$GITHUB_OUTPUT"
+          echo "matrix=$(jq -nc --argjson n "$total" '{shard: [range(1; $n+1)]}')" >> "$GITHUB_OUTPUT"
+
+  coverage-nightly:
+    needs: coverage-nightly-prep
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.coverage-nightly-prep.outputs.matrix) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -47,63 +53,220 @@ jobs:
         uses: ./.github/actions/setup-workspace
         with:
           toolchains: arm-zephyr-eabi:riscv64-zephyr-elf:x86_64-zephyr-elf
+          ccache-key-prefix: coverage
+
+      - name: Generate nightly test plan
+        if: matrix.shard == 1
+        shell: bash
+        working-directory: ${{ env.ZEPHYR_BASE }}
+        env:
+          MANIFEST: ${{ github.workspace }}/${{ env.MANIFEST_PATH }}
+        run: |
+          set -euo pipefail
+          PLATFORMS=""
+          ROOTS=""
+          while IFS= read -r p; do PLATFORMS+=" -p ${p}"; done \
+            < <(jq -r '.coverage_nightly.platforms[]' "$CI_CONFIG")
+          while IFS= read -r r; do ROOTS+=" -T ${{ github.workspace }}/${r}"; done \
+            < <(jq -r '.coverage_nightly.roots[]' "$CI_CONFIG")
+
+          printf '%s\n' '["__ci_nightly_full_run__"]' > nightly-scope.json
+          ./scripts/ci/test_plan.py -r "${MANIFEST}" \
+            -m nightly-scope.json \
+            -o testplan.json \
+            --ignore-path "${{ github.workspace }}/.github/twister_ignore.txt" \
+            ${PLATFORMS} \
+            ${ROOTS}
+          test -s testplan.json
+
+      - name: Upload nightly test plan
+        if: matrix.shard == 1
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-nightly-testplan
+          path: zephyr/testplan.json
+          if-no-files-found: error
+
+      - name: Wait for nightly test plan
+        if: matrix.shard != 1
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Shard 1: setup (<=2m) + test_plan (~10s) + upload; other shards poll after their own setup.
+          setup_max_sec=120
+          plan_gen_sec=10
+          buffer_sec=30
+          poll_sec=10
+          max_wait_sec=$((setup_max_sec + plan_gen_sec + buffer_sec))
+          max_attempts=$(( (max_wait_sec + poll_sec - 1) / poll_sec ))
+
+          name=coverage-nightly-testplan
+          for attempt in $(seq 1 "${max_attempts}"); do
+            count=$(gh api -H "Accept: application/vnd.github+json" \
+              "/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts" \
+              --paginate -q "[.artifacts[] | select(.name == \"${name}\")] | length")
+            if [ "${count}" -gt 0 ]; then
+              echo "Found ${name} after ${attempt} attempt(s)"
+              exit 0
+            fi
+            echo "Waiting for ${name} (${attempt}/${max_attempts}, poll ${poll_sec}s, budget ${max_wait_sec}s)..."
+            sleep "${poll_sec}"
+          done
+          echo "Timed out waiting for ${name} after ${max_wait_sec}s"
+          exit 1
+
+      - name: Download nightly test plan
+        if: matrix.shard != 1
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-nightly-testplan
+          path: zephyr
 
       - name: Run Tests with Coverage
         shell: bash
         working-directory: ${{ env.ZEPHYR_BASE }}
         run: |
-          for d in \
-            "${ZEPHYR_SDK_INSTALL_DIR}/aarch64-zephyr-elf/bin" \
-            "${ZEPHYR_SDK_INSTALL_DIR}/arm-zephyr-eabi/bin" \
-            "${ZEPHYR_SDK_INSTALL_DIR}/riscv64-zephyr-elf/bin" \
-            "${ZEPHYR_SDK_INSTALL_DIR}/x86_64-zephyr-elf/bin"
-          do
-            if [ -d "$d" ]; then
-              echo "$d" >> "$GITHUB_PATH"
-              export PATH="$d:$PATH"
-            fi
-          done
-
+          set -euo pipefail
+          test -s testplan.json
           ccache --zero-stats
-          ./scripts/twister \
-            -i --force-color -N -v \
-            --filter runnable \
-            --coverage \
-            --coverage-tool gcovr \
-            --coverage-basedir ${{ github.workspace }} \
-            ${{ env.PLATFORMS }} \
-            ${{ env.ROOTS }} \
-            --timeout-multiplier 2 \
-            -e nano
+          "${{ github.workspace }}/${{ env.MANIFEST_PATH }}/scripts/ci/coverage.sh" \
+            --load-tests testplan.json \
+            --subset ${{ matrix.shard }}/${{ needs.coverage-nightly-prep.outputs.shard_total }} \
+            --shuffle-tests
           ccache --show-stats
+
+          shopt -s nullglob
+          mapfile -t coverage_files < <(
+            find twister-out -name coverage.json -type f ! -path 'twister-out/coverage.json'
+          )
+          if [ ${#coverage_files[@]} -gt 0 ]; then
+            trace_args=()
+            for f in "${coverage_files[@]}"; do
+              trace_args+=(--add-tracefile "$f")
+            done
+            gcovr -r "${{ github.workspace }}" \
+              --merge-mode-functions=separate \
+              "${trace_args[@]}" \
+              --json twister-out/coverage.json
+          fi
+
+      - name: Upload shard coverage trace
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-shard-${{ matrix.shard }}
+          path: zephyr/twister-out/coverage.json
+          if-no-files-found: ignore
+
+      - name: Save workspace ccache
+        if: always() && !cancelled() && matrix.shard == 1
+        uses: ./.github/actions/save-workspace-ccache
+        with:
+          cache-primary-key: ${{ steps.workspace.outputs.ccache-primary-key }}
+          save: true
+
+  coverage-merge:
+    needs: [coverage-nightly-prep, coverage-nightly]
+    if: always() && !cancelled() && needs.coverage-nightly.result != 'cancelled'
+    runs-on: ubuntu-24.04
+    outputs:
+      has_report: ${{ steps.coverage-check.outputs.has_coverage }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set coverage shards directory
+        shell: bash
+        run: |
+          echo "COVERAGE_SHARDS_DIR=${RUNNER_TEMP}/coverage-shards" >> "$GITHUB_ENV"
+          mkdir -p "${RUNNER_TEMP}/coverage-shards"
+
+      - name: Download shard coverage traces
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-shard-*
+          path: ${{ env.COVERAGE_SHARDS_DIR }}
 
       - name: Check for coverage data
         id: coverage-check
-        if: always()
         shell: bash
         run: |
-          if [ -f "${{ env.ZEPHYR_BASE }}/twister-out/coverage.json" ]; then
-            echo "has_coverage=true" >> "$GITHUB_OUTPUT"
-          else
+          shopt -s nullglob
+          files=("${COVERAGE_SHARDS_DIR}"/coverage-shard-*/coverage.json)
+          if [ ${#files[@]} -eq 0 ]; then
             echo "has_coverage=false" >> "$GITHUB_OUTPUT"
+            echo "No shard coverage.json artifacts found"
+            exit 0
           fi
+          echo "has_coverage=true" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "${files[@]}"
+
+      - name: Set up workspace
+        if: steps.coverage-check.outputs.has_coverage == 'true'
+        uses: ./.github/actions/setup-workspace
+        with:
+          toolchains: x86_64-zephyr-elf
+          ccache-key-prefix: coverage-merge
+          cache-ccache: "false"
+
 
       - name: Generate coverage report
         if: steps.coverage-check.outputs.has_coverage == 'true'
         shell: bash
         run: |
-          mkdir -p ${{ github.workspace }}/coverage-report
-          gcovr \
-            -r ${{ github.workspace }} \
-            --add-tracefile ${{ env.ZEPHYR_BASE }}/twister-out/coverage.json \
-            --html-details ${{ github.workspace }}/coverage-report/index.html \
-            --filter 'modules/lib/posix/include' \
-            --filter 'modules/lib/posix/lib' \
-            --filter 'zephyr/kernel' \
-            --filter 'zephyr/lib/elastipool' \
-            --filter 'zephyr/lib/libc/common/source/thrd' \
-            --filter 'zephyr/lib/os/zvfs' \
-            --filter 'zephyr/lib/os/thread.c'
+          set -euo pipefail
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          mkdir -p "${{ github.workspace }}/coverage-report"
+
+          shopt -s nullglob
+          tracefiles=("${COVERAGE_SHARDS_DIR}"/coverage-shard-*/coverage.json)
+          if [ ${#tracefiles[@]} -eq 0 ]; then
+            echo "No shard coverage.json under ${COVERAGE_SHARDS_DIR}" >&2
+            exit 1
+          fi
+          trace_args=()
+          for f in "${tracefiles[@]}"; do
+            trace_args+=(--add-tracefile "$f")
+          done
+
+          filter_args=()
+          ci_config="${{ github.workspace }}/${{ env.MANIFEST_PATH }}/.github/ci-config.json"
+          while IFS= read -r p; do filter_args+=(--filter "$p"); done \
+            < <(jq -r '.coverage_report.gcovr_filters[]' "$ci_config")
+
+          gcovr -r "${{ github.workspace }}" \
+            --merge-mode-functions=separate \
+            "${trace_args[@]}" \
+            --json "${{ github.workspace }}/coverage-report/merged.json"
+          if [ "$(jq '.files | length' "${{ github.workspace }}/coverage-report/merged.json")" -eq 0 ]; then
+            echo "Merged coverage is empty after combining ${#tracefiles[@]} shard tracefiles" >&2
+            exit 1
+          fi
+          gcovr -r "${{ github.workspace }}" \
+            --merge-mode-functions=separate \
+            "${trace_args[@]}" \
+            --html-details "${{ github.workspace }}/coverage-report/index.html" \
+            "${filter_args[@]}"
+
+          line_pct=$(gcovr -r "${{ github.workspace }}" \
+            --merge-mode-functions=separate \
+            --add-tracefile "${{ github.workspace }}/coverage-report/merged.json" \
+            --json-summary - | jq -e -r '.line_percent')
+          line_msg="${line_pct}%"
+          green=$(jq -r '.badge_thresholds.green' "$ci_config")
+          yellow=$(jq -r '.badge_thresholds.yellow' "$ci_config")
+          if awk "BEGIN {exit !($line_pct >= $green)}"; then color=brightgreen
+          elif awk "BEGIN {exit !($line_pct >= $yellow)}"; then color=yellow
+          else color=red; fi
+          jq -n --arg msg "$line_msg" --arg color "$color" \
+            '{schemaVersion: 1, label: "coverage", message: $msg, color: $color}' \
+            > "${{ github.workspace }}/coverage-report/badge.json"
+          jq -n --arg url "$RUN_URL" --arg sha "${{ github.sha }}" \
+            --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg line "$line_msg" \
+            '{workflow_run_url: $url, commit: $sha, created_at: $created, line_coverage: $line}' \
+            > "${{ github.workspace }}/coverage-report/provenance.json"
 
       - name: Upload coverage report
         if: steps.coverage-check.outputs.has_coverage == 'true'
@@ -112,8 +275,71 @@ jobs:
           name: coverage-report
           path: coverage-report/
 
-      - name: Save workspace ccache
-        if: always() && !cancelled()
-        uses: ./.github/actions/save-workspace-ccache
+  coverage-publish:
+    needs: coverage-merge
+    if: >-
+      (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch') &&
+      needs.coverage-merge.result == 'success' &&
+      needs.coverage-merge.outputs.has_report == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v5
         with:
-          cache-primary-key: ${{ steps.workspace.outputs.ccache-primary-key }}
+          ref: main
+          fetch-depth: 0
+
+      - name: Download merged report
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage-report
+
+      - name: Publish coverage report
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEST="${{ github.workspace }}/${{ env.MANIFEST_PATH }}/doc/coverage-report"
+          rm -rf "$DEST"
+          mkdir -p "$DEST"
+          cp -a coverage-report/. "$DEST/"
+
+      - name: Commit coverage report
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "${{ github.workspace }}/${{ env.MANIFEST_PATH }}/doc/coverage-report"
+          if git diff --staged --quiet; then
+            echo "Nothing to commit"
+          else
+            git commit -m "docs: refresh coverage report from run ${{ github.run_id }}"
+            git push
+          fi
+
+  coverage-status:
+    if: always()
+    needs: [coverage-nightly-prep, coverage-nightly, coverage-merge, coverage-publish]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check coverage pipeline
+        run: |
+          if [ "${{ needs.coverage-nightly.result }}" != "success" ]; then
+            echo "One or more coverage nightly shards failed"
+            exit 1
+          fi
+          if [ "${{ needs.coverage-merge.result }}" != "success" ]; then
+            echo "Coverage merge failed"
+            exit 1
+          fi
+          if { [ "${{ github.ref }}" = "refs/heads/main" ] || \
+               [ "${{ github.event_name }}" = "workflow_dispatch" ]; } && \
+             [ "${{ needs.coverage-publish.result }}" != "success" ] && \
+             [ "${{ needs.coverage-publish.result }}" != "skipped" ]; then
+            echo "Coverage publish failed"
+            exit 1
+          fi
+          echo "Coverage pipeline succeeded"

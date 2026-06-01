@@ -17,7 +17,3 @@ Test coverage
      class="pn-coverage-frame"
      title="Code coverage report"
      src="../coverage-report/index.html"></iframe>
-
-If the frame is empty, the documentation build did not bundle a
-``coverage-report`` artifact (for example on a pull-request preview before the
-first successful Coverage run on ``main``).

@@ -79,6 +79,18 @@ jobs:
           make -C modules/lib/posix/doc html \
             SPHINXOPTS="-j auto -T -W --keep-going"
 
+      - name: Bundle committed coverage report
+        id: coverage-committed
+        run: |
+          SRC="modules/lib/posix/doc/coverage-report"
+          if [ -f "$SRC/index.html" ] || [ -f "$SRC/index.functions.html" ]; then
+            mkdir -p modules/lib/posix/doc/_build/html/coverage-report
+            cp -a "$SRC/." modules/lib/posix/doc/_build/html/coverage-report/
+            echo "bundled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "bundled=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Download latest coverage report
         id: coverage-report
         continue-on-error: true
@@ -92,7 +104,7 @@ jobs:
           if_no_artifact_found: ignore
 
       - name: Bundle coverage report into site
-        if: steps.coverage-report.outputs.found_artifact == 'true'
+        if: steps.coverage-committed.outputs.bundled != 'true' && steps.coverage-report.outputs.found_artifact == 'true'
         run: |
           cp -a coverage-report modules/lib/posix/doc/_build/html/coverage-report
 

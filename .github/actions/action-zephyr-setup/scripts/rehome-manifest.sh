@@ -26,7 +26,11 @@ for entry in *; do
   case "$entry" in
     # Do not skip manifest zephyr/ (module.yml, patches). Re-home runs before west
     # update, so root zephyr/ is never the Zephyr RTOS tree here.
-    modules|zephyr-sdk|.west|.ccache|.github)
+    modules|zephyr-sdk|.west|.ccache)
+      continue
+      ;;
+    .github)
+      cp -aR .github "$manifest_path"/.github
       continue
       ;;
   esac
