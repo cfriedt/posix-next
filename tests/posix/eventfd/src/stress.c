@@ -86,6 +86,10 @@ static void th_fun(void *arg1, void *arg2, void *arg3)
 
 ZTEST_F(eventfd, test_stress)
 {
+	if (IS_ENABLED(CONFIG_COVERAGE)) {
+		/* Coverage overhead overflows thread stacks on constrained targets */
+		ztest_test_skip();
+	}
 	enum th_id i;
 	enum th_id begin = MIN(READER, WRITER);
 	enum th_id end = MAX(READER, WRITER) + 1;
