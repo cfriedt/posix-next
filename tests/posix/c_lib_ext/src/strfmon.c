@@ -95,7 +95,8 @@ static const char *const strfmon_tc_fmt[] = {
 		},                                                                                 \
 	}
 
-static char buffer[15];
+/* oversized to accomodate coverage tests using native libc's strfmon() */
+static char buffer[64];
 static const double input[] = {
 	123.45,
 	-123.45,
