@@ -410,6 +410,11 @@ ZTEST(pthread_attr, test_pthread_attr_setinheritsched)
 
 ZTEST(pthread_attr, test_pthread_attr_large_stacksize)
 {
+	if (IS_ENABLED(CONFIG_COVERAGE)) {
+		/* Coverage data increases binary size, reducing heap for dynamic stacks */
+		ztest_test_skip();
+	}
+
 	size_t actual_size;
 	const size_t expect_size = 2 * CONFIG_SYS_THREAD_STACK_SIZE;
 
