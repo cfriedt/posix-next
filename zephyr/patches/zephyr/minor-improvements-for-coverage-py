@@ -1,0 +1,108 @@
+diff --git a/scripts/pylib/twister/twisterlib/coverage.py b/scripts/pylib/twister/twisterlib/coverage.py
+index ed3413fa9b8..b66a66860ae 100644
+--- a/scripts/pylib/twister/twisterlib/coverage.py
++++ b/scripts/pylib/twister/twisterlib/coverage.py
+@@ -56,8 +56,10 @@ class CoverageTool:
+         extracted_coverage_info = collections.defaultdict(list)
+         capture_data = False
+         capture_complete = False
++        lineno = 0
+         with open(input_file) as fp:
+             for line in fp.readlines():
++                lineno += 1
+                 if re.search("GCOV_COVERAGE_DUMP_START", line):
+                     capture_data = True
+                     capture_complete = False
+@@ -79,7 +81,11 @@ class CoverageTool:
+                         continue
+                 else:
+                     continue
+-                hex_bytes = bytes.fromhex(hex_dump)
++                try:
++                    hex_bytes = bytes.fromhex(hex_dump)
++                except ValueError:
++                    logger.error(f"{file_name}:{lineno}: Unable to convert hex data: {line}")
++                    continue
+                 extracted_coverage_info[file_name].append(hex_bytes)
+         if not capture_data:
+             capture_complete = True
+@@ -159,6 +165,8 @@ class CoverageTool:
+         build_dirs = None
+         if not self.coverage_capture and self.coverage_report and self.coverage_per_instance:
+             build_dirs = [instance.build_dir for instance in self.instances.values()]
++        if not self.coverage_capture:
++            logger.info("Starting aggregate coverage merge into %s", outdir)
+         reports = {}
+         with open(os.path.join(outdir, "coverage.log"), "a") as coveragelog:
+             ret, reports = self._generate(outdir, coveragelog, build_dirs)
+@@ -187,9 +195,15 @@ class CoverageTool:
+                     )
+                 }
+                 for r in self.output_formats.split(','):
++                    if r not in report_log:
++                        continue
+                     logger.info(report_log[r])
++                if not self.coverage_capture:
++                    logger.info("Aggregate coverage merge completed successfully")
+             else:
+                 coverage_completed = False
++                if not self.coverage_capture:
++                    logger.error("Aggregate coverage merge failed")
+         logger.debug(f"All coverage data processed: {coverage_completed}")
+         return coverage_completed, reports
+ 
+@@ -465,12 +479,21 @@ class Gcovr(CoverageTool):
+                     logger.debug(f"Coverage merge no files in: {dir_}")
+                     continue
+                 files += files_
+-            logger.debug(f"Coverage merge {len(files)} reports in {outdir}")
++            if not self.coverage_capture:
++                logger.info(
++                    "Merging %d coverage tracefile(s) from %d test build director%s",
++                    len(files), len(build_dirs), "y" if len(build_dirs) == 1 else "ies",
++                )
++            else:
++                logger.debug(f"Coverage merge {len(files)} reports in {outdir}")
+             ztest_file = None
+             cmd_ = ["--json-pretty", "--json", coverage_file]
+         else:
+             ret, files = self.collect_coverage(outdir, coverage_file, ztest_file, coveragelog)
+-            logger.debug(f"Coverage collected {len(files)} reports from: {outdir}")
++            if not self.coverage_capture:
++                logger.info("Collected %d coverage report(s) from %s", len(files), outdir)
++            else:
++                logger.debug(f"Coverage collected {len(files)} reports from: {outdir}")
+ 
+         if not files:
+             logger.warning(f"No coverage files to compose report for {outdir}")
+@@ -480,6 +503,8 @@ class Gcovr(CoverageTool):
+         os.makedirs(subdir, exist_ok=True)
+ 
+         tracefiles = self._interleave_list("--add-tracefile", files)
++        if not self.coverage_capture:
++            logger.info("Running gcovr merge (%d tracefile(s)) ...", len(files))
+ 
+         # Convert command line argument (comma-separated list) to gcovr flags
+         report_options = {
+@@ -492,7 +517,7 @@ class Gcovr(CoverageTool):
+             "sonarqube": ["--sonarqube", os.path.join(subdir, "coverage.sonarqube.xml")]
+         }
+         gcovr_options = self._flatten_list(
+-            [report_options[r] for r in self.output_formats.split(',')]
++            [report_options[r] for r in self.output_formats.split(',') if r in report_options]
+         )
+ 
+         cmd = ["gcovr", "-r", self.base_dir] + self.options + gcovr_options + tracefiles
+@@ -604,6 +629,12 @@ def run_coverage_tool(options, outdir, is_system_gcov, instances,
+     # Apply output format default
+     if options.coverage_formats is not None:
+         coverage_tool.output_formats = options.coverage_formats
++    elif coverage_capture and options.coverage_per_instance:
++        # Per-test pass: coverage.json only (no HTML under each build dir).
++        coverage_tool.output_formats = ""
++    elif not coverage_capture and options.coverage_per_instance:
++        # Final aggregate merge under twister-out/: JSON + HTML.
++        coverage_tool.output_formats = "html"
+     coverage_tool.add_ignore_file('generated')
+     coverage_tool.add_ignore_directory('tests')
+     coverage_tool.add_ignore_directory('samples')
