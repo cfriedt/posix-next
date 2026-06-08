@@ -1,0 +1,225 @@
+diff --git a/arch/Kconfig b/arch/Kconfig
+index b6ddc22b1e8..9262a8cef07 100644
+--- a/arch/Kconfig
++++ b/arch/Kconfig
+@@ -341,6 +341,7 @@ config NOINIT_SNIPPET_FIRST
+ config PRIVILEGED_STACK_SIZE
+ 	int "Size of privileged stack"
+ 	default 2048 if EMUL
++	default 2048 if COVERAGE_GCOV
+ 	default 1024
+ 	depends on USERSPACE
+ 	help
+diff --git a/arch/riscv/core/pmp.c b/arch/riscv/core/pmp.c
+index 49828513d71..ede5bae92ed 100644
+--- a/arch/riscv/core/pmp.c
++++ b/arch/riscv/core/pmp.c
+@@ -405,6 +405,23 @@ void z_riscv_pmp_init(void)
+ 		      (size_t)__rom_region_size,
+ 		      pmp_addr, pmp_cfg, ARRAY_SIZE(pmp_addr));
+ 
++#if defined(CONFIG_COVERAGE_GCOV) && defined(CONFIG_USERSPACE)
++	/*
++	 * GCOV counters live in __gcov_bss and must be writable from user mode
++	 * when instrumented code (e.g. z_thread_entry) runs after mret.
++	 */
++	uintptr_t gcov_start = (uintptr_t)__gcov_bss_start;
++	size_t gcov_size = (uintptr_t)__gcov_bss_end - gcov_start;
++
++	if (gcov_size > 0U) {
++		__ASSERT(set_pmp_entry(&index, PMP_R | PMP_W,
++						gcov_start, gcov_size,
++						pmp_addr, pmp_cfg,
++						ARRAY_SIZE(pmp_addr)),
++				"failed to map __gcov_bss for coverage");
++	}
++#endif
++
+ #ifdef CONFIG_PMP_STACK_GUARD
+ #ifdef CONFIG_MULTITHREADING
+ 	/*
+diff --git a/include/zephyr/arch/x86/ia32/linker.ld b/include/zephyr/arch/x86/ia32/linker.ld
+index b6350f27de5..44845ad87de 100644
+--- a/include/zephyr/arch/x86/ia32/linker.ld
++++ b/include/zephyr/arch/x86/ia32/linker.ld
+@@ -229,6 +229,7 @@ SECTIONS
+ 		*(.pinned_rodata.*)
+ 
+ #include <snippets-rodata.ld>
++#include <snippets-pinned-rodata.ld>
+ 
+ #include <zephyr/linker/kobject-rom.ld>
+ 
+@@ -259,6 +260,11 @@ SECTIONS
+ 
+ 	lnkr_pinned_data_end = .;
+ 
++/* Located in generated directory. This file is populated by the
++ * zephyr_linker_sources() Cmake function.
++ */
++#include <snippets-pinned-ram-sections.ld>
++
+ 	SECTION_PROLOGUE(pinned.bss, (NOLOAD),)
+ 	{
+ 		. = ALIGN(4);
+diff --git a/subsys/testsuite/Kconfig.coverage b/subsys/testsuite/Kconfig.coverage
+index 9209052b790..7ac1760516f 100644
+--- a/subsys/testsuite/Kconfig.coverage
++++ b/subsys/testsuite/Kconfig.coverage
+@@ -13,6 +13,7 @@ config HAS_COVERAGE_SUPPORT
+ config COVERAGE
+ 	bool "Create coverage data"
+ 	depends on HAS_COVERAGE_SUPPORT
++	select POSIX_C_LIB_EXT # fnmatch
+ 	help
+ 	  This option will build your application with the -coverage option
+ 	  which will generate data that can be used to create coverage reports.
+diff --git a/subsys/testsuite/coverage/CMakeLists.txt b/subsys/testsuite/coverage/CMakeLists.txt
+index 60910d9f00e..1efe5d64121 100644
+--- a/subsys/testsuite/coverage/CMakeLists.txt
++++ b/subsys/testsuite/coverage/CMakeLists.txt
+@@ -2,7 +2,7 @@
+ 
+ zephyr_sources_ifdef(CONFIG_COVERAGE_GCOV coverage.c)
+ 
+-if(CONFIG_DEMAND_PAGING AND CONFIG_COVERAGE)
++if(CONFIG_LINKER_USE_PINNED_SECTION AND CONFIG_COVERAGE)
+ zephyr_linker_sources_ifdef(CONFIG_COVERAGE_GCOV PINNED_RAM_SECTIONS coverage_ram.ld)
+ zephyr_linker_sources_ifdef(CONFIG_COVERAGE_GCOV PINNED_RODATA coverage_rodata.ld)
+ else()
+diff --git a/tests/kernel/signal/src/main.c b/tests/kernel/signal/src/main.c
+index 17d3641f1cd..5fdae292fcf 100644
+--- a/tests/kernel/signal/src/main.c
++++ b/tests/kernel/signal/src/main.c
+@@ -231,6 +231,11 @@ ZTEST(signal, test_noop_signal_handler_kernel)
+ #ifdef CONFIG_USERSPACE
+ ZTEST_USER(signal, test_noop_signal_handler_user)
+ {
++	if (IS_ENABLED(CONFIG_COVERAGE)) {
++		/* Coverage results in stack overflow on multiple targets */
++		ztest_test_skip();
++	}
++
+ 	noop_handler_called = false;
+ 	noop_handler_returned = false;
+ 
+diff --git a/tests/kernel/threads/thread_apis/src/test_threads_spawn.c b/tests/kernel/threads/thread_apis/src/test_threads_spawn.c
+index 893ccaa1f6d..38922e91717 100644
+--- a/tests/kernel/threads/thread_apis/src/test_threads_spawn.c
++++ b/tests/kernel/threads/thread_apis/src/test_threads_spawn.c
+@@ -109,6 +109,11 @@ ZTEST_USER(threads_lifecycle, test_threads_spawn_delay)
+  */
+ ZTEST(threads_lifecycle, test_threads_spawn_forever)
+ {
++	if (IS_ENABLED(CONFIG_COVERAGE)) {
++		/* Tight test timings are broken with coverage enabled */
++		ztest_test_skip();
++	}
++
+ 	/* spawn thread with highest priority. It will run immediately once
+ 	 * started.
+ 	 */
+@@ -137,6 +142,11 @@ ZTEST(threads_lifecycle, test_threads_spawn_forever)
+  */
+ ZTEST(threads_lifecycle, test_thread_start)
+ {
++	if (IS_ENABLED(CONFIG_COVERAGE)) {
++		/* Tight test timings are broken with coverage enabled */
++		ztest_test_skip();
++	}
++
+ 	tp2 = 5;
+ 
+ 	k_tid_t tid = k_thread_create(&tdata, tstack, STACK_SIZE,
+diff --git a/tests/kernel/threads/thread_apis/src/test_threads_suspend_resume.c b/tests/kernel/threads/thread_apis/src/test_threads_suspend_resume.c
+index a5810bad4fd..292f4ea6ead 100644
+--- a/tests/kernel/threads/thread_apis/src/test_threads_suspend_resume.c
++++ b/tests/kernel/threads/thread_apis/src/test_threads_suspend_resume.c
+@@ -53,6 +53,10 @@ static void threads_suspend_resume(int prio)
+  */
+ ZTEST(threads_lifecycle_1cpu, test_threads_suspend_resume_cooperative)
+ {
++	if (IS_ENABLED(CONFIG_COVERAGE)) {
++		/* Coverage overhead disrupts cooperative scheduling timing */
++		ztest_test_skip();
++	}
+ 	threads_suspend_resume(-2);
+ }
+ 
+diff --git a/tests/net/lib/lwm2m/lwm2m_engine/src/main.c b/tests/net/lib/lwm2m/lwm2m_engine/src/main.c
+index e72d12896be..27d0b5606ea 100644
+--- a/tests/net/lib/lwm2m/lwm2m_engine/src/main.c
++++ b/tests/net/lib/lwm2m/lwm2m_engine/src/main.c
+@@ -71,6 +71,11 @@ static void test_service(struct k_work *work)
+ 
+ static void setup(void *data)
+ {
++	if (IS_ENABLED(CONFIG_COVERAGE)) {
++		/* Coverage impractical with build errors from Kconfig hacks in CMakeLists.txt */
++		ztest_test_skip();
++	}
++
+ #if defined(CONFIG_NATIVE_SIM_SLOWDOWN_TO_REAL_TIME)
+ 	/* It is enough that some slow-down is happening on sleeps, it does not have to be
+ 	 * real time
+diff --git a/tests/net/socket/tcp/Kconfig b/tests/net/socket/tcp/Kconfig
+new file mode 100644
+index 00000000000..884c5d3c05a
+--- /dev/null
++++ b/tests/net/socket/tcp/Kconfig
+@@ -0,0 +1,9 @@
++# Copyright (c) The Zephyr Project Contributors
++# SPDX-License-Identifier: Apache-2.0
++
++config TEST_TCP_SERVER_STACK_SIZE
++    int "TLS TCP server stack size"
++    default 8192 if COVERAGE
++    default 2048
++
++source "Kconfig.zephyr"
+diff --git a/tests/net/socket/tcp/src/main.c b/tests/net/socket/tcp/src/main.c
+index 52f55d3c40d..eb8a862f2a2 100644
+--- a/tests/net/socket/tcp/src/main.c
++++ b/tests/net/socket/tcp/src/main.c
+@@ -305,9 +305,7 @@ ZTEST_USER(net_socket_tcp, test_v6_send_recv)
+ #define TEST_LARGE_TRANSFER_SIZE 60000
+ #define TEST_PRIME 811
+ 
+-#define TCP_SERVER_STACK_SIZE 2048
+-
+-K_THREAD_STACK_DEFINE(tcp_server_stack_area, TCP_SERVER_STACK_SIZE);
++K_THREAD_STACK_DEFINE(tcp_server_stack_area, CONFIG_TEST_TCP_SERVER_STACK_SIZE);
+ struct k_thread tcp_server_thread_data;
+ 
+ /* A thread that receives, while the other part transmits */
+diff --git a/tests/net/socket/tls/Kconfig b/tests/net/socket/tls/Kconfig
+new file mode 100644
+index 00000000000..a7eec87fb82
+--- /dev/null
++++ b/tests/net/socket/tls/Kconfig
+@@ -0,0 +1,9 @@
++# Copyright (c) The Zephyr Project Contributors
++# SPDX-License-Identifier: Apache-2.0
++
++config TLS_TEST_WORK_QUEUE_STACK_SIZE
++    int "TLS Test workqueue stack size"
++    default 8192 if COVERAGE
++    default 3072
++
++source "Kconfig.zephyr"
+diff --git a/tests/net/tcp/src/main.c b/tests/net/tcp/src/main.c
+index 768d6b8e546..461f9591d7d 100644
+--- a/tests/net/tcp/src/main.c
++++ b/tests/net/tcp/src/main.c
+@@ -906,6 +906,11 @@ ZTEST(net_tcp, test_server_with_options_ipv4)
+ 	struct net_context *ctx;
+ 	int ret;
+ 
++	if (IS_ENABLED(CONFIG_COVERAGE)) {
++		/* Tight test timings are broken with coverage enabled */
++		ztest_test_skip();
++	}
++
+ 	t_state = T_SYN;
+ 	test_case_no = TEST_SERVER_WITH_OPTIONS_IPV4;
+ 	seq = ack = 0;
