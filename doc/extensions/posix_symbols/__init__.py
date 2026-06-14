@@ -31,7 +31,6 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
@@ -245,7 +244,6 @@ def _build_db(app: Sphinx) -> list[dict]:
         return []
 
     raw = _parse_xml_dir(xml_dir)
-    opengroup_base = getattr(app.config, "posix_symbols_opengroup_base", OPENGROUP_BASE)
 
     for sym in raw:
         sym["opengroup_url"] = _opengroup_url(sym["kind"], sym["name"], sym["header"])
