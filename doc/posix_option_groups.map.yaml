@@ -22,7 +22,9 @@
 pthread.h:
   primary: posix_option_group_threads_base
   secondary:
+    - posix_option_group_non_portable
     - posix_option_group_posix_threads_ext
+    - posix_option_group_xsi_threads_ext
     - posix_option_group_barriers
     - posix_option_group_rw_locks
     - posix_option_group_spin_locks
@@ -30,10 +32,11 @@ pthread.h:
 sys/types.h:
   primary: posix_option_group_threads_base
 
-# sched_yield is POSIX_THREADS_BASE; everything else is _POSIX_PRIORITY_SCHEDULING
+# sched_yield is POSIX_THREADS_BASE; sched_get_priority_* and process sched_* are XSI_REALTIME
 sched.h:
-  primary: posix_option_priority_scheduling
+  primary: posix_option_group_xsi_realtime
   secondary:
+    - posix_option_priority_scheduling
     - posix_option_group_threads_base
 
 semaphore.h:
@@ -65,7 +68,7 @@ posix_time.h:
 sys/time.h:
   primary: posix_option_group_xsi_single_process
 
-# mq_* are _POSIX_MESSAGE_PASSING; mq_timed* are also _POSIX_TIMEOUTS
+# mq_* are _POSIX_MESSAGE_PASSING; mq_timed* require _POSIX_TIMEOUTS (via CONFIG_POSIX_TIMERS)
 mqueue.h:
   primary: posix_option_message_passing
   secondary:
@@ -181,13 +184,13 @@ syslog.h:
 # Thread-safe database access
 # ---------------------------------------------------------------------------
 
-# getpwnam_r/getpwuid_r are _POSIX_THREAD_SAFE_FUNCTIONS
+# getpwnam_r/getpwuid_r are POSIX_SYSTEM_DATABASE_R
 pwd.h:
-  primary: posix_option_thread_safe_functions
+  primary: posix_option_group_system_database_r
 
-# getgrnam_r/getgrgid_r are _POSIX_THREAD_SAFE_FUNCTIONS
+# getgrnam_r/getgrgid_r are POSIX_SYSTEM_DATABASE_R
 grp.h:
-  primary: posix_option_thread_safe_functions
+  primary: posix_option_group_system_database_r
 
 # ---------------------------------------------------------------------------
 # XSI STREAMS

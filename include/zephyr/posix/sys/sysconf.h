@@ -233,9 +233,9 @@ enum {
 #define __z_posix_sysconf_SC_THREADS                                                               \
 	COND_CODE_1(CONFIG_POSIX_THREADS, (_POSIX_THREADS), (-1L))
 #define __z_posix_sysconf_SC_TIMEOUTS                                                              \
-	COND_CODE_1(CONFIG_POSIX_TIMEOUTS, (_POSIX_TIMEOUTS), (-1L))
+	COND_CODE_1(IS_ENABLED(CONFIG_POSIX_TIMERS), (_POSIX_TIMEOUTS), (-1L))
 #define __z_posix_sysconf_SC_TIMERS                                                                \
-	COND_CODE_1(CONFIG_POSIX_TIMEOUTS, (_POSIX_TIMERS), (-1))
+	COND_CODE_1(CONFIG_POSIX_TIMERS, (_POSIX_TIMERS), (-1))
 #define __z_posix_sysconf_SC_TRACE                        (-1L)
 #define __z_posix_sysconf_SC_TRACE_EVENT_FILTER           (-1L)
 #define __z_posix_sysconf_SC_TRACE_EVENT_NAME_MAX         _POSIX_TRACE_NAME_MAX
