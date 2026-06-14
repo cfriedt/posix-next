@@ -6,11 +6,14 @@
  */
 
 #include <pthread.h>
+#include <sched.h>
 
 #include <zephyr/sys/util.h>
 #include <zephyr/ztest.h>
 
-#define BIOS_FOOD 0xB105F00D
+#define BIOS_FOOD     0xB105F00D
+#define SCHED_INVALID 4242
+#define PRIO_INVALID  -1
 
 static bool attr_valid;
 static pthread_attr_t attr;
@@ -75,7 +78,7 @@ static void create_thread_common(const pthread_attr_t *attrp, bool expect_succes
 				   UINT_TO_POINTER(joinable));
 }
 
-static inline void can_create_thread(const pthread_attr_t *attrp)
+static void can_create_thread(const pthread_attr_t *attrp)
 {
 	create_thread_common(attrp, true, true);
 }
@@ -258,6 +261,276 @@ ZTEST(xsi_threads_ext, test_pthread_attr_setstacksize)
 		/* ensure we read back the same values as we specified */
 		zassert_ok(pthread_attr_getstacksize(&attr, &new_stacksize));
 		zassert_equal(new_stacksize, 2 * stacksize);
+		can_create_thread(&attr);
+	}
+}
+
+#if defined(_POSIX_THREAD_PRIORITY_SCHEDULING)
+
+ZTEST(xsi_threads_ext, test_pthread_attr_getschedpolicy)
+{
+	int policy = BIOS_FOOD;
+
+	/* degenerate cases */
+	{
+		if (false) {
+			/* undefined behaviour */
+			zassert_equal(pthread_attr_getschedpolicy(NULL, NULL), EINVAL);
+			zassert_equal(pthread_attr_getschedpolicy(NULL, &policy), EINVAL);
+			zassert_equal(pthread_attr_getschedpolicy(&uninit_attr, &policy), EINVAL);
+		}
+		zassert_equal(pthread_attr_getschedpolicy(&attr, NULL), EINVAL);
+	}
+
+	zassert_ok(pthread_attr_getschedpolicy(&attr, &policy));
+	zassert_not_equal(BIOS_FOOD, policy);
+}
+
+ZTEST(xsi_threads_ext, test_pthread_attr_setschedpolicy)
+{
+	int policy = SCHED_OTHER;
+
+	/* degenerate cases */
+	{
+		if (false) {
+			/* undefined behaviour */
+			zassert_equal(pthread_attr_setschedpolicy(NULL, SCHED_INVALID), EINVAL);
+			zassert_equal(pthread_attr_setschedpolicy(NULL, policy), EINVAL);
+			zassert_equal(
+				pthread_attr_setschedpolicy((pthread_attr_t *)&uninit_attr, policy),
+				EINVAL);
+		}
+		zassert_equal(pthread_attr_setschedpolicy(&attr, SCHED_INVALID), EINVAL);
+	}
+
+	zassert_ok(pthread_attr_setschedpolicy(&attr, SCHED_OTHER));
+	policy = SCHED_INVALID;
+	zassert_ok(pthread_attr_getschedpolicy(&attr, &policy));
+	zassert_equal(policy, SCHED_OTHER);
+
+	can_create_thread(&attr);
+}
+
+ZTEST(xsi_threads_ext, test_pthread_attr_getscope)
+{
+	int contentionscope = BIOS_FOOD;
+
+	/* degenerate cases */
+	{
+		if (false) {
+			/* undefined behaviour */
+			zassert_equal(pthread_attr_getscope(NULL, NULL), EINVAL);
+			zassert_equal(pthread_attr_getscope(NULL, &contentionscope), EINVAL);
+			zassert_equal(pthread_attr_getscope(&uninit_attr, &contentionscope),
+				      EINVAL);
+		}
+		zassert_equal(pthread_attr_getscope(&attr, NULL), EINVAL);
+	}
+
+	zassert_ok(pthread_attr_getscope(&attr, &contentionscope));
+	zassert_equal(contentionscope, PTHREAD_SCOPE_SYSTEM);
+}
+
+ZTEST(xsi_threads_ext, test_pthread_attr_setscope)
+{
+	int contentionscope = BIOS_FOOD;
+
+	/* degenerate cases */
+	{
+		if (false) {
+			/* undefined behaviour */
+			zassert_equal(pthread_attr_setscope(NULL, PTHREAD_SCOPE_SYSTEM), EINVAL);
+			zassert_equal(pthread_attr_setscope(NULL, contentionscope), EINVAL);
+			zassert_equal(pthread_attr_setscope((pthread_attr_t *)&uninit_attr,
+							    contentionscope),
+				      EINVAL);
+		}
+		zassert_equal(pthread_attr_setscope(&attr, 3), EINVAL);
+	}
+
+	zassert_equal(pthread_attr_setscope(&attr, PTHREAD_SCOPE_PROCESS), ENOTSUP);
+	zassert_ok(pthread_attr_setscope(&attr, PTHREAD_SCOPE_SYSTEM));
+	zassert_ok(pthread_attr_getscope(&attr, &contentionscope));
+	zassert_equal(contentionscope, PTHREAD_SCOPE_SYSTEM);
+}
+
+ZTEST(xsi_threads_ext, test_pthread_attr_getinheritsched)
+{
+	int inheritsched = BIOS_FOOD;
+
+	/* degenerate cases */
+	{
+		if (false) {
+			/* undefined behaviour */
+			zassert_equal(pthread_attr_getinheritsched(NULL, NULL), EINVAL);
+			zassert_equal(pthread_attr_getinheritsched(NULL, &inheritsched), EINVAL);
+			zassert_equal(pthread_attr_getinheritsched(&uninit_attr, &inheritsched),
+				      EINVAL);
+		}
+		zassert_equal(pthread_attr_getinheritsched(&attr, NULL), EINVAL);
+	}
+
+	zassert_ok(pthread_attr_getinheritsched(&attr, &inheritsched));
+	zassert_equal(inheritsched, PTHREAD_INHERIT_SCHED);
+}
+
+static void *inheritsched_entry(void *arg)
+{
+	int prio;
+	int inheritsched;
+	int pprio = POINTER_TO_INT(arg);
+
+	zassert_ok(pthread_attr_getinheritsched(&attr, &inheritsched));
+
+	prio = k_thread_priority_get(k_current_get());
+
+	if (inheritsched == PTHREAD_INHERIT_SCHED) {
+		zassert_equal(prio, pprio, "actual priority: %d, expected priority: %d", prio,
+			      pprio);
+		return NULL;
+	}
+
+	int act_prio;
+	int exp_prio;
+	int act_policy;
+	int exp_policy;
+	struct sched_param param;
+
+	zassert_ok(pthread_getschedparam(pthread_self(), &act_policy, &param));
+	act_prio = param.sched_priority;
+
+	zassert_ok(pthread_attr_getschedpolicy(&attr, &exp_policy));
+	zassert_ok(pthread_attr_getschedparam(&attr, &param));
+	exp_prio = param.sched_priority;
+
+	zassert_equal(act_policy, exp_policy, "actual policy: %d, expected policy: %d", act_policy,
+		      exp_policy);
+	zassert_equal(act_prio, exp_prio, "actual priority: %d, expected priority: %d", act_prio,
+		      exp_prio);
+
+	return NULL;
+}
+
+static void test_pthread_attr_setinheritsched_common(bool inheritsched)
+{
+	int prio;
+	int policy;
+	struct sched_param param;
+
+	extern int zephyr_to_posix_priority(int priority, int *policy);
+
+	prio = k_thread_priority_get(k_current_get());
+	zassert_not_equal(prio, K_LOWEST_APPLICATION_THREAD_PRIO);
+
+	prio = K_LOWEST_APPLICATION_THREAD_PRIO;
+	param.sched_priority = zephyr_to_posix_priority(prio, &policy);
+
+	zassert_ok(pthread_attr_setschedpolicy(&attr, policy));
+	zassert_ok(pthread_attr_setschedparam(&attr, &param));
+	zassert_ok(pthread_attr_setinheritsched(&attr, inheritsched));
+	create_thread_common_entry(&attr, true, true, inheritsched_entry,
+				   UINT_TO_POINTER(k_thread_priority_get(k_current_get())));
+}
+
+ZTEST(xsi_threads_ext, test_pthread_attr_setinheritsched)
+{
+	/* degenerate cases */
+	{
+		if (false) {
+			/* undefined behaviour */
+			zassert_equal(pthread_attr_setinheritsched(NULL, PTHREAD_EXPLICIT_SCHED),
+				      EINVAL);
+			zassert_equal(pthread_attr_setinheritsched(NULL, PTHREAD_INHERIT_SCHED),
+				      EINVAL);
+			zassert_equal(pthread_attr_setinheritsched((pthread_attr_t *)&uninit_attr,
+								   PTHREAD_INHERIT_SCHED),
+				      EINVAL);
+		}
+		zassert_equal(pthread_attr_setinheritsched(&attr, 3), EINVAL);
+	}
+
+	test_pthread_attr_setinheritsched_common(PTHREAD_INHERIT_SCHED);
+	test_pthread_attr_setinheritsched_common(PTHREAD_EXPLICIT_SCHED);
+}
+
+ZTEST(xsi_threads_ext, test_pthread_setschedprio)
+{
+	int policy;
+	int prio = 0;
+	struct sched_param param;
+	pthread_t self = pthread_self();
+
+	zassert_equal(pthread_setschedprio(self, PRIO_INVALID), EINVAL, "EINVAL was expected");
+
+	zassert_ok(pthread_setschedprio(self, prio));
+	param.sched_priority = ~prio;
+	zassert_ok(pthread_getschedparam(self, &policy, &param));
+	zassert_equal(param.sched_priority, prio, "Priority unchanged");
+}
+
+#endif /* _POSIX_THREAD_PRIORITY_SCHEDULING */
+
+int zephyr_to_posix_priority(int z_prio, int *policy);
+int posix_to_zephyr_priority(int priority, int policy);
+
+ZTEST(xsi_threads_ext, test_pthread_priority_conversion)
+{
+	for (int z_prio = -CONFIG_NUM_COOP_PRIORITIES, prio = CONFIG_NUM_COOP_PRIORITIES - 1,
+		 p_prio, policy;
+	     z_prio <= -1; z_prio++, prio--) {
+		p_prio = zephyr_to_posix_priority(z_prio, &policy);
+		zassert_equal(policy, SCHED_FIFO);
+		zassert_equal(p_prio, prio, "%d %d\n", p_prio, prio);
+		zassert_equal(z_prio, posix_to_zephyr_priority(p_prio, SCHED_FIFO));
+	}
+
+	for (int z_prio = 0, prio = CONFIG_NUM_PREEMPT_PRIORITIES - 1, p_prio, policy;
+	     z_prio < CONFIG_NUM_PREEMPT_PRIORITIES; z_prio++, prio--) {
+		p_prio = zephyr_to_posix_priority(z_prio, &policy);
+		zassert_equal(policy, SCHED_RR);
+		zassert_equal(p_prio, prio, "%d %d\n", p_prio, prio);
+		zassert_equal(z_prio, posix_to_zephyr_priority(p_prio, SCHED_RR));
+	}
+}
+
+static inline void cannot_create_thread(const pthread_attr_t *attrp)
+{
+	create_thread_common(attrp, false, true);
+}
+
+ZTEST(xsi_threads_ext, test_pthread_attr_static_corner_cases)
+{
+	pthread_attr_t attr1;
+
+	if (CONFIG_SYS_THREAD_STACK_MAX > 0) {
+		ztest_test_skip();
+	}
+
+	cannot_create_thread(NULL);
+
+	zassert_ok(pthread_attr_init(&attr1));
+	cannot_create_thread(&attr1);
+}
+
+ZTEST(xsi_threads_ext, test_pthread_attr_large_stacksize)
+{
+	if (IS_ENABLED(CONFIG_COVERAGE)) {
+		ztest_test_skip();
+	}
+
+	size_t actual_size;
+	const size_t expect_size = 2 * CONFIG_SYS_THREAD_STACK_SIZE;
+
+	zassert_ok(pthread_attr_setstacksize(&attr, expect_size));
+	zassert_ok(pthread_attr_getstacksize(&attr, &actual_size));
+	zassert_equal(actual_size, expect_size);
+
+	if (CONFIG_SYS_THREAD_STACK_MAX > SYS_THREAD_STACK_MIN) {
+		if (IS_ENABLED(CONFIG_SYS_THREAD_STACK_ALLOC_HEAP) &&
+		    (K_HEAP_MEM_POOL_SIZE < 2 * K_THREAD_STACK_LEN(CONFIG_SYS_THREAD_STACK_SIZE))) {
+			ztest_test_skip();
+		}
+
 		can_create_thread(&attr);
 	}
 }
