@@ -22,22 +22,23 @@ from typing import Any
 from docutils import nodes
 from docutils.parsers.rst import Directive, directives
 from docutils.statemachine import StringList
-from sphinx import addnodes
 from sphinx.application import Sphinx
 from sphinx.domains import Domain, ObjType
 from sphinx.roles import XRefRole
 from sphinx.transforms import SphinxTransform
 from sphinx.transforms.post_transforms import SphinxPostTransform
 from sphinx.util.docutils import SphinxDirective
-from sphinx.util.nodes import make_refnode, NodeMatcher
+from sphinx.util.nodes import make_refnode
 
 
 # ---------------------------------------------------------------------------
 # Placeholder nodes
 # ---------------------------------------------------------------------------
 
+
 class _CodeSampleNode(nodes.Element):
     """Replaced by _ConvertCodeSampleNode transform."""
+
     pass
 
 
@@ -48,6 +49,7 @@ class _CodeSampleListingPlaceholder(nodes.Element):
 # ---------------------------------------------------------------------------
 # code-sample
 # ---------------------------------------------------------------------------
+
 
 class CodeSampleDirective(SphinxDirective):
     """``.. zephyr:code-sample:: <id>`` – marks a document as a code sample."""
@@ -88,6 +90,7 @@ class CodeSampleDirective(SphinxDirective):
 # Transform: convert _CodeSampleNode → section, absorbing all siblings
 # ---------------------------------------------------------------------------
 
+
 class _ConvertCodeSampleNode(SphinxTransform):
     default_priority = 100
 
@@ -98,12 +101,12 @@ class _ConvertCodeSampleNode(SphinxTransform):
                 continue
 
             idx = parent.index(node)
-            siblings = parent.children[idx + 1:]
+            siblings = parent.children[idx + 1 :]
 
             section = nodes.section(ids=[node["id"]])
             section += nodes.title(text=node["name"])
-            section += node.children      # description
-            section.extend(siblings)       # Overview, Building, etc.
+            section += node.children  # description
+            section.extend(siblings)  # Overview, Building, etc.
 
             node.replace_self(section)
             for sib in siblings:
@@ -113,6 +116,7 @@ class _ConvertCodeSampleNode(SphinxTransform):
 # ---------------------------------------------------------------------------
 # code-sample-category
 # ---------------------------------------------------------------------------
+
 
 class CodeSampleCategoryDirective(SphinxDirective):
     """``.. zephyr:code-sample-category:: <id>`` – groups code samples."""
@@ -166,6 +170,7 @@ class CodeSampleCategoryDirective(SphinxDirective):
 # Post-transform: replace listing placeholder with real sample list
 # ---------------------------------------------------------------------------
 
+
 class _ResolveSampleListing(SphinxPostTransform):
     default_priority = 5
 
@@ -184,9 +189,14 @@ class _ResolveSampleListing(SphinxPostTransform):
                 dli = nodes.definition_list_item()
 
                 term = nodes.term()
-                ref = nodes.reference("", sample["name"], internal=True,
-                                      refuri=self.app.builder.get_relative_uri(
-                                          self.env.docname, sample["docname"]))
+                ref = nodes.reference(
+                    "",
+                    sample["name"],
+                    internal=True,
+                    refuri=self.app.builder.get_relative_uri(
+                        self.env.docname, sample["docname"]
+                    ),
+                )
                 term += ref
                 dli += term
 
@@ -203,6 +213,7 @@ class _ResolveSampleListing(SphinxPostTransform):
 # ---------------------------------------------------------------------------
 # zephyr-app-commands
 # ---------------------------------------------------------------------------
+
 
 class ZephyrAppCommandsDirective(Directive):
     """``.. zephyr-app-commands::`` – renders west build / flash commands."""
@@ -256,13 +267,16 @@ class ZephyrAppCommandsDirective(Directive):
 # Minimal zephyr domain
 # ---------------------------------------------------------------------------
 
+
 class ZephyrDomain(Domain):
     name = "zephyr"
     label = "Zephyr"
 
     roles = {
         "code-sample": XRefRole(innernodeclass=nodes.inline, warn_dangling=False),
-        "code-sample-category": XRefRole(innernodeclass=nodes.inline, warn_dangling=False),
+        "code-sample-category": XRefRole(
+            innernodeclass=nodes.inline, warn_dangling=False
+        ),
     }
 
     directives = {
@@ -281,7 +295,8 @@ class ZephyrDomain(Domain):
 
     def clear_doc(self, docname: str) -> None:
         self.data["code-samples"] = {
-            k: v for k, v in self.data["code-samples"].items()
+            k: v
+            for k, v in self.data["code-samples"].items()
             if v["docname"] != docname
         }
 
@@ -293,22 +308,31 @@ class ZephyrDomain(Domain):
             sample = self.data["code-samples"].get(target)
             if sample:
                 return make_refnode(
-                    builder, fromdocname, sample["docname"],
-                    sample["id"], contnode, sample.get("description", ""),
+                    builder,
+                    fromdocname,
+                    sample["docname"],
+                    sample["id"],
+                    contnode,
+                    sample.get("description", ""),
                 )
         return None
 
     def get_objects(self):
         for sample in self.data["code-samples"].values():
             yield (
-                sample["id"], sample["name"], "code-sample",
-                sample["docname"], sample["id"], 1,
+                sample["id"],
+                sample["name"],
+                "code-sample",
+                sample["docname"],
+                sample["id"],
+                1,
             )
 
 
 # ---------------------------------------------------------------------------
 # setup
 # ---------------------------------------------------------------------------
+
 
 def setup(app: Sphinx):
     app.add_domain(ZephyrDomain)
