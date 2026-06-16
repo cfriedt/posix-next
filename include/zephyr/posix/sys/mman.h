@@ -94,7 +94,7 @@ void *mmap(void *addr, size_t len, int prot, int flags, int fildes, off_t off);
 
 /**
  * @brief Synchronise a memory mapping with the underlying storage.
- * @ingroup posix_option_group_mapped_files
+ * @ingroup posix_option_synchronized_io
  * @param addr   Base address of the region (must be page-aligned).
  * @param length Length of the region in bytes.
  * @param flags  MS_SYNC, MS_ASYNC, or MS_INVALIDATE.
