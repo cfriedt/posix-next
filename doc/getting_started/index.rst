@@ -142,6 +142,13 @@ are met.
 
 .. code-block:: bash
 
+   ./modules/lib/posix/scripts/ci/docs.sh
+   ./modules/lib/posix/scripts/ci/docs.sh --serve
+
+Or, from ``modules/lib/posix/doc``:
+
+.. code-block:: bash
+
    cmake -GNinja -Bdoc/_build doc
    ninja -C doc/_build html
    python3 -m http.server -d doc/_build/html --bind 127.0.0.1
