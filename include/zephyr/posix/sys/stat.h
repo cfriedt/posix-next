@@ -242,9 +242,9 @@ int mkfifo(const char *path, mode_t mode);
 /** @brief Create a FIFO special file relative to a directory descriptor.  @ingroup posix_option_group_file_system*/
 int mkfifoat(int fd, const char *path, mode_t mode);
 #if defined(_XOPEN_SOURCE) || defined(__DOXYGEN__)
-/** @brief Create a special or regular file (XSI extension).  @ingroup posix_option_group_xsi_single_process*/
+/** @brief Create a special or regular file (XSI extension). @ingroup posix_option_group_xsi_file_system */
 int mknod(const char *path, mode_t mode, dev_t dev);
-/** @brief Create a special or regular file relative to a directory descriptor (XSI).  @ingroup posix_option_group_xsi_single_process*/
+/** @brief Create a special or regular file relative to a directory descriptor (XSI). @ingroup posix_option_group_xsi_file_system */
 int mknodat(int fd, const char *path, mode_t mode, dev_t dev);
 #endif
 TOOLCHAIN_DISABLE_WARNING(TOOLCHAIN_WARNING_SHADOW);
