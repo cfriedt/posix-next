@@ -75,6 +75,7 @@ int sem_init(sem_t *semaphore, int pshared, unsigned int value);
  */
 int sem_post(sem_t *semaphore);
 
+#if defined(_POSIX_TIMEOUTS) || defined(__DOXYGEN__)
 /**
  * @brief Lock a semaphore with an absolute timeout.
  * @ingroup posix_option_group_semaphores
@@ -85,6 +86,7 @@ int sem_post(sem_t *semaphore);
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/sem_timedwait.html
  */
 int sem_timedwait(sem_t *ZRESTRICT semaphore, struct timespec *ZRESTRICT abstime);
+#endif
 
 /**
  * @brief Try to lock a semaphore without blocking.
