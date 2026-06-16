@@ -21,7 +21,9 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_BARRIERS`.
     :c:func:`pthread_barrier_init`,yes
     :c:func:`pthread_barrier_wait`,yes
     :c:func:`pthread_barrierattr_destroy`,yes
+    :c:func:`pthread_barrierattr_getpshared`,yes
     :c:func:`pthread_barrierattr_init`,yes
+    :c:func:`pthread_barrierattr_setpshared`,yes
 
 .. doxygengroup:: posix_option_group_barriers
    :project: posix
@@ -583,9 +585,26 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_SIGNALS`.
     :c:func:`sigprocmask`,yes
     :c:func:`sigsuspend`,yes :ref:`†<posix_undefined_behaviour>`
     :c:func:`sigwait`,yes :ref:`†<posix_undefined_behaviour>`
-    :c:func:`strsignal`,yes
 
 .. doxygengroup:: posix_option_group_signals
+   :project: posix
+
+.. _posix_option_group_signals_ext:
+
+POSIX_SIGNALS_EXT
++++++++++++++++++
+
+Extended signal helpers from V4 subprofiles (``POSIX_SIGNALS_EXT``).
+
+.. csv-table:: POSIX_SIGNALS_EXT
+   :header: API, Supported
+   :widths: 50,10
+
+    :c:func:`psignal`,
+    :c:func:`psiginfo`,
+    :c:func:`strsignal`,yes
+
+.. doxygengroup:: posix_option_group_signals_ext
    :project: posix
 
 .. _posix_option_group_single_process:
@@ -612,6 +631,25 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_SINGLE_PROCESS`.
     :c:func:`unsetenv`,yes
 
 .. doxygengroup:: posix_option_group_single_process
+   :project: posix
+
+.. _posix_option_group_system_database_r:
+
+POSIX_SYSTEM_DATABASE_R
++++++++++++++++++++++++
+
+Enable this option group with :kconfig:option:`CONFIG_POSIX_SYSTEM_DATABASE_R`.
+
+.. csv-table:: POSIX_SYSTEM_DATABASE_R
+   :header: API, Supported
+   :widths: 50,10
+
+    :c:func:`getgrgid_r`,yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`getgrnam_r`,yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`getpwnam_r`,yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`getpwuid_r`,yes :ref:`†<posix_undefined_behaviour>`
+
+.. doxygengroup:: posix_option_group_system_database_r
    :project: posix
 
 .. _posix_option_group_spin_locks:
@@ -657,13 +695,6 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_THREADS`.
     :c:func:`pthread_attr_init`,yes
     :c:func:`pthread_attr_setdetachstate`,yes
     :c:func:`pthread_attr_setschedparam`,yes
-    :c:func:`pthread_barrier_destroy`,yes
-    :c:func:`pthread_barrier_init`,yes
-    :c:func:`pthread_barrier_wait`,yes
-    :c:func:`pthread_barrierattr_destroy`,yes
-    :c:func:`pthread_barrierattr_getpshared`,yes
-    :c:func:`pthread_barrierattr_init`,yes
-    :c:func:`pthread_barrierattr_setpshared`,yes
     :c:func:`pthread_cancel`,yes
     :c:func:`pthread_cleanup_pop`,yes
     :c:func:`pthread_cleanup_push`,yes
@@ -687,6 +718,7 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_THREADS`.
     :c:func:`pthread_mutex_destroy`,yes
     :c:func:`pthread_mutex_init`,yes
     :c:func:`pthread_mutex_lock`,yes
+    :c:func:`pthread_mutex_timedlock`,yes
     :c:func:`pthread_mutex_trylock`,yes
     :c:func:`pthread_mutex_unlock`,yes
     :c:func:`pthread_mutexattr_destroy`,yes
@@ -698,7 +730,6 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_THREADS`.
     :c:func:`pthread_setspecific`,yes
     :c:func:`pthread_sigmask`,yes
     :c:func:`pthread_testcancel`,yes
-    :c:func:`sched_yield`,yes
 
 .. doxygengroup:: posix_option_group_threads_base
    :project: posix
@@ -720,6 +751,25 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_THREADS_EXT`.
     :c:func:`pthread_mutexattr_settype`,yes
 
 .. doxygengroup:: posix_option_group_posix_threads_ext
+   :project: posix
+
+.. _posix_option_group_non_portable:
+
+POSIX_NON_PORTABLE
+++++++++++++++++++
+
+Enable this option group with :kconfig:option:`CONFIG_POSIX_NON_PORTABLE`.
+
+.. csv-table:: POSIX_NON_PORTABLE
+   :header: API, Supported
+   :widths: 50,10
+
+    :c:func:`pthread_getname_np`,yes
+    :c:func:`pthread_setname_np`,yes
+    :c:func:`pthread_timedjoin_np`,yes
+    :c:func:`pthread_tryjoin_np`,yes
+
+.. doxygengroup:: posix_option_group_non_portable
    :project: posix
 
 .. _posix_option_group_timers:
@@ -745,6 +795,22 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_TIMERS`.
 
 .. doxygengroup:: posix_option_group_timers
    :project: posix
+
+.. _posix_option_group_xsi_advanced_realtime:
+
+XSI_ADVANCED_REALTIME
++++++++++++++++++++++
+
+The ``XSI_ADVANCED_REALTIME`` option group indicates that the
+:ref:`_POSIX_CLOCK_SELECTION<posix_option_group_clock_selection>`,
+:ref:`_POSIX_CPUTIME<posix_option_cputime>`, and
+:ref:`_POSIX_MONOTONIC_CLOCK<posix_option_monotonic_clock>` options are enabled.
+
+Enable this option group with :kconfig:option:`CONFIG_XSI_ADVANCED_REALTIME`.
+
+An implementation that claims conformance to this option group shall also support the
+:ref:`POSIX_TIMERS <posix_option_group_timers>` option group.
+
 
 .. _posix_option_group_xsi_realtime:
 
@@ -806,23 +872,51 @@ Enable this option group with :kconfig:option:`CONFIG_XSI_SYSTEM_LOGGING`.
 XSI_THREADS_EXT
 +++++++++++++++
 
-The XSI_THREADS_EXT option group is required because it provides
-functions to control a thread's stack. This is considered useful for any
-real-time application.
+The ``XSI_THREADS_EXT`` option group provides thread concurrency hints.
 
 Enable this option group with :kconfig:option:`CONFIG_XSI_THREADS_EXT`.
+
+Combined stack address and size control is provided by
+:ref:`pthread_attr_getstack() <posix_option_thread_attr_stackaddr>` and
+:ref:`pthread_attr_setstack() <posix_option_thread_attr_stackaddr>` when both
+:ref:`_POSIX_THREAD_ATTR_STACKADDR <posix_option_thread_attr_stackaddr>` and
+:ref:`_POSIX_THREAD_ATTR_STACKSIZE <posix_option_thread_attr_stacksize>` are
+enabled.
 
 .. csv-table:: XSI_THREADS_EXT
    :header: API, Supported
    :widths: 50,10
 
-    :c:func:`pthread_attr_getstack`,yes
-    :c:func:`pthread_attr_setstack`,yes
     :c:func:`pthread_getconcurrency`,yes
     :c:func:`pthread_setconcurrency`,yes
 
 .. doxygengroup:: posix_option_group_xsi_threads_ext
    :project: posix
+
+.. _posix_option_group_xsi_realtime_threads:
+
+XSI_REALTIME_THREADS
+++++++++++++++++++++
+
+The ``XSI_REALTIME_THREADS`` option group (``_XOPEN_REALTIME_THREADS``) enables
+:ref:`_POSIX_THREAD_PRIORITY_SCHEDULING <posix_option_thread_priority_scheduling>`,
+:ref:`_POSIX_THREAD_PRIO_INHERIT <posix_option_thread_prio_inherit>`, and
+:ref:`_POSIX_THREAD_PRIO_PROTECT <posix_option_thread_prio_protect>`.
+
+Enable this option group with :kconfig:option:`CONFIG_XSI_REALTIME_THREADS`.
+
+
+.. _posix_option_group_xsi_advanced_realtime_threads:
+
+XSI_ADVANCED_REALTIME_THREADS
++++++++++++++++++++++++++++++
+
+The ``XSI_ADVANCED_REALTIME_THREADS`` option group enables
+:ref:`_POSIX_THREAD_CPUTIME <posix_option_thread_cputime>` and requires
+:ref:`XSI_REALTIME_THREADS <posix_option_group_xsi_realtime_threads>`.
+
+Enable this option group with :kconfig:option:`CONFIG_XSI_ADVANCED_REALTIME_THREADS`.
+
 
 .. _posix_options:
 
@@ -858,13 +952,16 @@ Enable this option with :kconfig:option:`CONFIG_POSIX_ASYNCHRONOUS_IO`.
 _POSIX_CPUTIME
 ++++++++++++++
 
-Enable this option with :kconfig:option:`CONFIG_POSIX_CPUTIME`.
+Enable this option with :kconfig:option:`CONFIG_POSIX_CPUTIME`, or enable the
+:ref:`XSI_ADVANCED_REALTIME <posix_option_group_xsi_advanced_realtime>` option group with
+:kconfig:option:`CONFIG_XSI_ADVANCED_REALTIME`.
 
 .. csv-table:: _POSIX_CPUTIME
    :header: API, Supported
    :widths: 50,10
 
     CLOCK_PROCESS_CPUTIME_ID,yes
+    :c:func:`clock_getcpuclockid`,yes
 
 .. doxygengroup:: posix_option_cputime
    :project: posix
@@ -959,7 +1056,9 @@ Enable this option with :kconfig:option:`CONFIG_POSIX_MESSAGE_PASSING`.
 _POSIX_MONOTONIC_CLOCK
 ++++++++++++++++++++++
 
-Enable this option with :kconfig:option:`CONFIG_POSIX_MONOTONIC_CLOCK`.
+Enable this option with :kconfig:option:`CONFIG_POSIX_MONOTONIC_CLOCK`, or enable the
+:ref:`XSI_ADVANCED_REALTIME <posix_option_group_xsi_advanced_realtime>` option group with
+:kconfig:option:`CONFIG_XSI_ADVANCED_REALTIME`.
 
 .. csv-table:: _POSIX_MONOTONIC_CLOCK
    :header: API, Supported
@@ -992,6 +1091,7 @@ Enable this option with :kconfig:option:`CONFIG_POSIX_PRIORITY_SCHEDULING`.
     :c:func:`sched_rr_get_interval`,yes :ref:`†<posix_undefined_behaviour>`
     :c:func:`sched_setparam`,yes :ref:`†<posix_undefined_behaviour>`
     :c:func:`sched_setscheduler`,yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`sched_yield`,yes
 
 .. doxygengroup:: posix_option_priority_scheduling
    :project: posix
@@ -1033,6 +1133,10 @@ Enable this option with :kconfig:option:`CONFIG_POSIX_SHARED_MEMORY_OBJECTS`.
 _POSIX_SYNCHRONIZED_IO
 ++++++++++++++++++++++
 
+Since Zephyr does not yet support Asynchronous I/O, all I/O is, in fact, synchronous.
+The functions below are provided for linking only and report success without performing
+any actions :ref:`†<posix_undefined_behaviour>`.
+
 Enable this option with :kconfig:option:`CONFIG_POSIX_SYNCHRONIZED_IO`.
 
 .. csv-table:: _POSIX_SYNCHRONIZED_IO
@@ -1053,12 +1157,19 @@ _POSIX_THREAD_ATTR_STACKADDR
 
 Enable this option with :kconfig:option:`CONFIG_POSIX_THREAD_ATTR_STACKADDR`.
 
+``pthread_attr_getstack()`` and ``pthread_attr_setstack()`` also require
+:ref:`_POSIX_THREAD_ATTR_STACKSIZE <posix_option_thread_attr_stacksize>` /
+:kconfig:option:`CONFIG_POSIX_THREAD_ATTR_STACKSIZE`.
+
+IEEE 1003.1-2017 removed ``pthread_attr_getstackaddr()`` and
+``pthread_attr_setstackaddr()`` in favour of the combined stack APIs.
+
 .. csv-table:: _POSIX_THREAD_ATTR_STACKADDR
    :header: API, Supported
    :widths: 50,10
 
-    :c:func:`pthread_attr_getstackaddr`,yes
-    :c:func:`pthread_attr_setstackaddr`,yes
+    :c:func:`pthread_attr_getstack`,yes
+    :c:func:`pthread_attr_setstack`,yes
 
 .. doxygengroup:: posix_option_thread_attr_stackaddr
    :project: posix
@@ -1092,7 +1203,7 @@ Enable this option with :kconfig:option:`CONFIG_POSIX_THREAD_CPUTIME`.
    :widths: 50,10
 
     CLOCK_THREAD_CPUTIME_ID,yes
-    :c:func:`pthread_getcpuclockid`,yes
+    :c:func:`pthread_getcpuclockid`,yes :ref:`†<posix_undefined_behaviour>`
 
 .. doxygengroup:: posix_option_thread_cputime
    :project: posix
@@ -1108,8 +1219,8 @@ Enable this option with :kconfig:option:`CONFIG_POSIX_THREAD_PRIO_INHERIT`.
    :header: API, Supported
    :widths: 50,10
 
-    :c:func:`pthread_mutexattr_getprotocol`,yes
-    :c:func:`pthread_mutexattr_setprotocol`,yes
+    :c:func:`pthread_mutexattr_getprotocol`,yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`pthread_mutexattr_setprotocol`,yes :ref:`†<posix_undefined_behaviour>`
 
 .. doxygengroup:: posix_option_thread_prio_inherit
    :project: posix
@@ -1125,12 +1236,12 @@ Enable this option with :kconfig:option:`CONFIG_POSIX_THREAD_PRIO_PROTECT`.
    :header: API, Supported
    :widths: 50,10
 
-    :c:func:`pthread_mutex_getprioceiling`,yes
-    :c:func:`pthread_mutex_setprioceiling`,yes
-    :c:func:`pthread_mutexattr_getprioceiling`,yes
-    :c:func:`pthread_mutexattr_getprotocol`,yes
-    :c:func:`pthread_mutexattr_setprioceiling`,yes
-    :c:func:`pthread_mutexattr_setprotocol`,yes
+    :c:func:`pthread_mutex_getprioceiling`,yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`pthread_mutex_setprioceiling`,yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`pthread_mutexattr_getprioceiling`,yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`pthread_mutexattr_getprotocol`,yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`pthread_mutexattr_setprioceiling`,yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`pthread_mutexattr_setprotocol`,yes :ref:`†<posix_undefined_behaviour>`
 
 .. doxygengroup:: posix_option_thread_prio_protect
    :project: posix
@@ -1164,7 +1275,10 @@ Enable this option with :kconfig:option:`CONFIG_POSIX_THREAD_PRIORITY_SCHEDULING
 _POSIX_THREAD_SAFE_FUNCTIONS
 ++++++++++++++++++++++++++++
 
-Enable this option with :kconfig:option:`CONFIG_POSIX_THREAD_SAFE_FUNCTIONS`.
+In Zephyr, ``_POSIX_THREAD_SAFE_FUNCTIONS`` is defined when both
+:kconfig:option:`CONFIG_POSIX_C_LANG_SUPPORT_R` and
+:kconfig:option:`CONFIG_POSIX_FILE_SYSTEM_R` are enabled. The
+``POSIX_FILE_LOCKING`` option group is not yet implemented.
 
 .. csv-table:: _POSIX_THREAD_SAFE_FUNCTIONS
     :header: API, Supported
@@ -1177,10 +1291,6 @@ Enable this option with :kconfig:option:`CONFIG_POSIX_THREAD_SAFE_FUNCTIONS`.
     :c:func:`funlockfile`,
     :c:func:`getc_unlocked`,
     :c:func:`getchar_unlocked`,
-    :c:func:`getgrgid_r`,yes :ref:`†<posix_undefined_behaviour>`
-    :c:func:`getgrnam_r`,yes :ref:`†<posix_undefined_behaviour>`
-    :c:func:`getpwnam_r`,yes :ref:`†<posix_undefined_behaviour>`
-    :c:func:`getpwuid_r`,yes :ref:`†<posix_undefined_behaviour>`
     :c:func:`gmtime_r`, yes
     :c:func:`localtime_r`, yes (UTC timezone only)
     :c:func:`putc_unlocked`,
@@ -1198,19 +1308,19 @@ Enable this option with :kconfig:option:`CONFIG_POSIX_THREAD_SAFE_FUNCTIONS`.
 _POSIX_TIMEOUTS
 +++++++++++++++
 
-Enable this option with :kconfig:option:`CONFIG_POSIX_TIMEOUTS`.
+``_POSIX_TIMEOUTS`` is a POSIX **feature-test macro**, not a Zephyr Option Group. A value
+other than -1 means the implementation provides *timed variants* of some otherwise-blocking
+APIs (an absolute ``timespec`` deadline instead of waiting indefinitely).
 
-.. csv-table:: _POSIX_TIMEOUTS
-   :header: API, Supported
-   :widths: 50,10
+In Zephyr, ``_POSIX_TIMEOUTS`` is defined when :kconfig:option:`CONFIG_POSIX_TIMERS` is
+enabled. Each timed API is implemented and tested from the Option Group that owns the
+corresponding base function:
 
-    :c:func:`mq_timedreceive`,yes
-    :c:func:`mq_timedsend`,yes
-    :c:func:`pthread_mutex_timedlock`,yes
-    :c:func:`pthread_rwlock_timedrdlock`,yes
-    :c:func:`pthread_rwlock_timedwrlock`,yes
-    :c:func:`sem_timedwait`,yes
-    :c:func:`posix_trace_timedgetnext_event`,
+- ``pthread_mutex_timedlock()`` — :ref:`POSIX_THREADS_BASE<posix_option_group_threads_base>`
+- ``sem_timedwait()`` — :ref:`POSIX_SEMAPHORES<posix_option_group_semaphores>`
+- ``mq_timedsend()`` / ``mq_timedreceive()`` — :ref:`_POSIX_MESSAGE_PASSING<posix_option_message_passing>`
+- ``pthread_rwlock_timedrdlock()`` / ``pthread_rwlock_timedwrlock()`` —
+  :ref:`POSIX_RW_LOCKS<posix_option_group_rw_locks>`
 
 .. _posix_option_group_xsi_streams:
 .. _posix_option_xopen_streams:
