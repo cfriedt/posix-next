@@ -44,9 +44,9 @@ POSIX System Interfaces
     :ref:`_POSIX_REALTIME_SIGNALS<posix_option_group_realtime_signals>`, -1, :kconfig:option:`CONFIG_POSIX_REALTIME_SIGNALS`
     :ref:`_POSIX_SEMAPHORES<posix_option_group_semaphores>`, 200809L, :kconfig:option:`CONFIG_POSIX_SEMAPHORES`
     :ref:`_POSIX_SPIN_LOCKS<posix_option_group_spin_locks>`, 200809L, :kconfig:option:`CONFIG_POSIX_SPIN_LOCKS`
-    :ref:`_POSIX_THREAD_SAFE_FUNCTIONS<posix_option_thread_safe_functions>`, -1, :kconfig:option:`CONFIG_POSIX_THREAD_SAFE_FUNCTIONS`
+    :ref:`_POSIX_THREAD_SAFE_FUNCTIONS<posix_option_thread_safe_functions>`, -1, :kconfig:option:`CONFIG_POSIX_C_LANG_SUPPORT_R` and :kconfig:option:`CONFIG_POSIX_FILE_SYSTEM_R`
     :ref:`_POSIX_THREADS<posix_option_group_threads_base>`, -1, :kconfig:option:`CONFIG_POSIX_THREADS`
-    :ref:`_POSIX_TIMEOUTS<posix_option_timeouts>`, 200809L, :kconfig:option:`CONFIG_POSIX_TIMEOUTS`
+    :ref:`_POSIX_TIMEOUTS<posix_option_timeouts>`, 200809L, :kconfig:option:`CONFIG_POSIX_TIMERS`
     :ref:`_POSIX_TIMERS<posix_option_group_timers>`, 200809L, :kconfig:option:`CONFIG_POSIX_TIMERS`
     _POSIX2_C_BIND, 200809L,
 
@@ -96,7 +96,7 @@ POSIX System Interfaces
     _POSIX_TYPED_MEMORY_OBJECTS, -1,
     _XOPEN_CRYPT, -1,
     :ref:`_XOPEN_REALTIME <posix_option_group_xsi_realtime>`, 700, :kconfig:option:`CONFIG_XSI_REALTIME`
-    _XOPEN_REALTIME_THREADS, -1,
+    :ref:`_XOPEN_REALTIME_THREADS <posix_option_group_xsi_realtime_threads>`, 700, :kconfig:option:`CONFIG_XSI_REALTIME_THREADS`
     :ref:`_XOPEN_STREAMS<posix_option_xopen_streams>`, 200809L, :kconfig:option:`CONFIG_XSI_STREAMS`
     _XOPEN_UNIX, -1,
 

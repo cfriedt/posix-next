@@ -11,25 +11,104 @@
 #include <string.h>
 
 #include <zephyr/kernel.h>
+#include <zephyr/kernel/signal.h>
 #include <zephyr/sys/util.h>
 #include <zephyr/ztest.h>
+
+#define BYTES_PER_LONG (sizeof(unsigned long))
 
 #define SIGNO_WORD_IDX(_signo) ((_signo - 1) / BITS_PER_LONG)
 #define SIGNO_WORD_BIT(_signo) ((_signo - 1) & BIT_MASK(LOG2(BITS_PER_LONG)))
 
+#if defined(CONFIG_NATIVE_LIBC)
+#ifdef __GLIBC__
+/* glibc internally aliases sigset_t to something significantly smaller than the external
+ * definition. This is apparent by simply calling sigemptyset() and checking the values of the
+ * sigset_t in terms of unsigned longs. Even though it's publicly defined as capable of holding
+ * 1024 bits (i.e. is 8 64-bit words, or 16 32-bit words). The actual result of sigemptyset() is
+ * that only the first 64-bits are cleared, corresponding to the definition of SIGSET_NLONGS below.
+ */
+#define SIGSET_NLONGS (_NSIG / (BITS_PER_LONG))
+#else
+#error "Unknown native libc"
+#endif
+#else
 #define SIGSET_NLONGS (sizeof(sigset_t) / sizeof(unsigned long))
+#endif
+#define SIGSET_SIZE (SIGSET_NLONGS * BYTES_PER_LONG)
+
 BUILD_ASSERT(SIGSET_NLONGS > 0, "sigset_t has no storage");
+
+typedef int (*sigmask_fn)(int how, const sigset_t *set, sigset_t *oset);
+
+/* Adjust sigfillset() mask to match what pthread_sigmask round-trips through the kernel. */
+static ZTEST_BMEM sigset_t sigfillset_mask_bits;
+static inline void adjust_mask_expectation(sigset_t *set)
+{
+	int i;
+	unsigned long *s;
+	const unsigned long *m;
+
+	for (i = 0, s = (unsigned long *)set, m = (const unsigned long *)&sigfillset_mask_bits;
+	     i < SIGSET_NLONGS; i++, s++, m++) {
+		*s &= *m;
+	}
+}
+
+static void pr_sigset(const char *const label, const sigset_t *set)
+{
+	const unsigned long *const ulset = (unsigned long *)set;
+
+	printf("%s: ", label);
+	for (size_t i = SIGSET_NLONGS; i > 0; --i) {
+		printf("%lx", ulset[i - 1]);
+	}
+	printf("\n");
+}
+
+static inline void prfmt_sigset(char *buf, size_t len, const sigset_t *set)
+{
+	const unsigned long *const ulset = (const unsigned long *)set;
+	const size_t delta = IS_ENABLED(CONFIG_64BIT) ? 16 : 8;
+	const char *fmt = IS_ENABLED(CONFIG_64BIT) ? "%016lx" : "%08lx";
+
+	for (size_t i = SIGSET_NLONGS; i > 0; --i, buf += delta, len -= delta) {
+		snprintf(buf, delta + 1, fmt, ulset[i - 1]);
+	}
+}
+
+#define zassert_sigset_equal(a, b, ...)                                                            \
+	do {                                                                                       \
+		char buf_a[2 * SIGSET_SIZE + 1];                                                   \
+		char buf_b[2 * SIGSET_SIZE + 1];                                                   \
+		adjust_mask_expectation((a));                                                      \
+		adjust_mask_expectation((b));                                                      \
+		prfmt_sigset(buf_a, sizeof(buf_a), (a));                                           \
+		prfmt_sigset(buf_b, sizeof(buf_b), (b));                                           \
+		zassert_mem_equal((a), (b), SIGSET_SIZE, #a "(%s) != " #b " (%s)", buf_a, buf_b);  \
+	} while (0)
+
+#define zexpect_sigset_equal(a, b, ...)                                                            \
+	do {                                                                                       \
+		char buf_a[2 * SIGSET_SIZE + 1];                                                   \
+		char buf_b[2 * SIGSET_SIZE + 1];                                                   \
+		adjust_mask_expectation((a));                                                      \
+		adjust_mask_expectation((b));                                                      \
+		prfmt_sigset(buf_a, sizeof(buf_a), (a));                                           \
+		prfmt_sigset(buf_b, sizeof(buf_b), (b));                                           \
+		zexpect_mem_equal((a), (b), SIGSET_SIZE, #a "(%s) != " #b " (%s)", buf_a, buf_b);  \
+	} while (0)
 
 ZTEST(posix_signals, test_sigemptyset)
 {
-	sigset_t set;
-	unsigned long *const _set = (unsigned long *)&set;
+	unsigned long _set[SIGSET_NLONGS];
+	sigset_t *const set = (sigset_t *)_set;
 
-	for (int i = 0; i < SIGSET_NLONGS; i++) {
+	ARRAY_FOR_EACH(_set, i) {
 		_set[i] = -1;
 	}
 
-	zassert_ok(sigemptyset(&set));
+	zassert_ok(sigemptyset(set));
 
 	for (int i = 0; i < SIGSET_NLONGS; i++) {
 		zassert_equal(_set[i], 0u, "set.sig[%d] is not empty: 0x%lx", i, _set[i]);
@@ -39,13 +118,13 @@ ZTEST(posix_signals, test_sigemptyset)
 ZTEST(posix_signals, test_sigfillset)
 {
 	sigset_t set = (sigset_t){0};
-	unsigned long *const _set = (unsigned long *)&set;
 
 	zassert_ok(sigfillset(&set));
-
-	for (int i = 0; i < SIGSET_NLONGS; i++) {
-		zassert_equal(_set[i], -1, "set.sig[%d] is not filled: 0x%lx", i, _set[i]);
-	}
+	zassert_equal(-1, sigaddset(&set, CONFIG_THREAD_CANCEL_SIGNAL_NUMBER));
+	zassert_equal(errno, EINVAL);
+	zassert_equal(-1, sigaddset(&set, CONFIG_THREAD_CANCEL_SIGNAL_NUMBER + 1));
+	zassert_equal(errno, EINVAL);
+	zassert_equal(1, sigismember(&set, SIGUSR1));
 }
 
 ZTEST(posix_signals, test_sigaddset_oor)
@@ -89,7 +168,7 @@ ZTEST(posix_signals, test_sigaddset)
 	}
 
 	/* TODO: move rt signal tests to realtime_signals testsuite */
-	static const int rtsigs[] = {SIGRTMIN, SIGRTMAX};
+	const int rtsigs[] = {SIGRTMIN, SIGRTMAX};
 
 	ARRAY_FOR_EACH(rtsigs, i) {
 		int expected_ret = 0;
@@ -160,7 +239,7 @@ ZTEST(posix_signals, test_sigdelset)
 	}
 
 	/* TODO: move rt signal tests to realtime_signals testsuite */
-	static const int rtsigs[] = {SIGRTMIN, SIGRTMAX};
+	const int rtsigs[] = {SIGRTMIN, SIGRTMAX};
 
 	ARRAY_FOR_EACH(rtsigs, i) {
 		int expected_ret = 0;
@@ -193,16 +272,16 @@ ZTEST(posix_signals, test_sigismember_oor)
 	sigset_t set = {0};
 
 	res = sigismember(&set, -1);
-	zexpect_equal(res, -1, "rc should be -1 but is %d", res);
-	zexpect_equal(errno, EINVAL, "errno should be %s", "EINVAL");
+	zassert_equal(res, -1, "rc should be -1 but is %d", res);
+	zassert_equal(errno, EINVAL, "errno should be %s", "EINVAL");
 
 	res = sigismember(&set, 0);
-	zexpect_equal(res, -1, "rc should be -1 but is %d", res);
-	zexpect_equal(errno, EINVAL, "errno should be %s", "EINVAL");
+	zassert_equal(res, -1, "rc should be -1 but is %d", res);
+	zassert_equal(errno, EINVAL, "errno should be %s", "EINVAL");
 
 	res = sigismember(&set, SIGRTMAX + 1);
-	zexpect_equal(res, -1, "rc should be -1 but is %d", res);
-	zexpect_equal(errno, EINVAL, "errno should be %s", "EINVAL");
+	zassert_equal(res, -1, "rc should be -1 but is %d", res);
+	zassert_equal(errno, EINVAL, "errno should be %s", "EINVAL");
 }
 
 ZTEST(posix_signals, test_sigismember)
@@ -219,7 +298,7 @@ ZTEST(posix_signals, test_sigismember)
 	zassert_equal(sigismember(&set, SIGTERM), 0, "%s not expected to be member", "SIGTERM");
 
 	/* TODO: move rt signal tests to realtime_signals testsuite */
-	static const int rtsigs[] = {SIGRTMIN, SIGRTMAX};
+	const int rtsigs[] = {SIGRTMIN, SIGRTMAX};
 
 	ARRAY_FOR_EACH(rtsigs, i) {
 		int expected_ret = 1;
@@ -241,58 +320,6 @@ ZTEST(posix_signals, test_sigismember)
 	}
 }
 
-ZTEST(posix_signals, test_signal_strsignal)
-{
-	/* Using -INT_MAX here because compiler resolves INT_MIN to (-2147483647 - 1) */
-	char buf[sizeof("RT signal -" STRINGIFY(INT_MAX))] = {0};
-
-	zassert_mem_equal(strsignal(-1), "Invalid signal", sizeof("Invalid signal"));
-	zassert_mem_equal(strsignal(0), "Invalid signal", sizeof("Invalid signal"));
-	zassert_mem_equal(strsignal(SIGRTMAX + 1), "Invalid signal", sizeof("Invalid signal"));
-
-	zassert_mem_equal(strsignal(30), "Signal 30", sizeof("Signal 30"));
-	snprintf(buf, sizeof(buf), "RT signal %d", SIGRTMIN - SIGRTMIN);
-	zassert_mem_equal(strsignal(SIGRTMIN), buf, strlen(buf));
-	snprintf(buf, sizeof(buf), "RT signal %d", SIGRTMAX - SIGRTMIN);
-	zassert_mem_equal(strsignal(SIGRTMAX), buf, strlen(buf));
-
-#ifdef CONFIG_POSIX_SIGNAL_STRING_DESC
-	zassert_mem_equal(strsignal(SIGHUP), "Hangup", sizeof("Hangup"));
-	zassert_mem_equal(strsignal(SIGSYS), "Bad system call", sizeof("Bad system call"));
-#else
-	snprintf(buf, sizeof(buf), "Signal %d", SIGHUP);
-	zassert_mem_equal(strsignal(SIGHUP), buf, strlen(buf));
-	snprintf(buf, sizeof(buf), "Signal %d", SIGSYS);
-	zassert_mem_equal(strsignal(SIGSYS), buf, strlen(buf));
-#endif
-}
-
-typedef int (*sigmask_fn)(int how, const sigset_t *set, sigset_t *oset);
-
-/* Adjust the full mask created via sigfillset() to remove unmaskable signals.
- * SIGKILL and SIGSTOP are always unmaskable per POSIX/Linux semantics, regardless of thread type.
- */
-static void adjust_mask_expectation_for_userspace(sigset_t *set)
-{
-	if (k_is_user_context()) {
-		zassert_ok(sigdelset(set, SIGKILL));
-		zassert_ok(sigdelset(set, SIGSTOP));
-		zassert_ok(sigdelset(set, CONFIG_THREAD_CANCEL_SIGNAL_NUMBER));
-	}
-}
-
-static void pr_sigset(const char *const label, const sigset_t *set)
-{
-	const size_t nlongs = sizeof(*set) / sizeof(unsigned long);
-	unsigned long *const ulset = (unsigned long *)set;
-
-	printf("%s: ", label);
-	for (size_t i = nlongs; i > 0; --i) {
-		printf("%lx", ulset[i - 1]);
-	}
-	printf("\n");
-}
-
 static void test_sigmask_common(void *arg)
 {
 /* for clarity */
@@ -307,26 +334,26 @@ static void test_sigmask_common(void *arg)
 	sigmask_fn sigmask = arg;
 
 	/* invalid how results in EINVAL */
-	zassert_equal(sigmask(invalid_how, NULL, NULL), EINVAL);
-	zassert_equal(sigmask(invalid_how, &set[NEW], &set[OLD]), EINVAL);
+	if (!IS_ENABLED(CONFIG_NATIVE_LIBC)) {
+		/* glibc / Linux do not return EINVAL when the "how" argument is invalid (POSIX
+		 * non-conformance)
+		 */
+		zassert_equal(sigmask(invalid_how, NULL, NULL), EINVAL);
+		zassert_equal(sigmask(invalid_how, &set[NEW], &set[OLD]), EINVAL);
+	}
 
 	/* verify setting / getting masks */
 	zassert_ok(sigemptyset(&set[NEW]));
 	zassert_ok(sigmask(SIG_SETMASK, &set[NEW], NULL));
 	zassert_ok(sigfillset(&set[OLD]));
 	zassert_ok(sigmask(SIG_GETMASK, NULL, &set[OLD]));
-	zassert_mem_equal(&set[OLD], &set[NEW], sizeof(set[OLD]));
+	zassert_sigset_equal(&set[OLD], &set[NEW]);
 
 	zassert_ok(sigfillset(&set[NEW]));
 	zassert_ok(sigmask(SIG_SETMASK, &set[NEW], NULL));
 	zassert_ok(sigemptyset(&set[OLD]));
 	zassert_ok(sigmask(SIG_GETMASK, NULL, &set[OLD]));
-	adjust_mask_expectation_for_userspace(&set[NEW]);
-	if (memcmp(&set[OLD], &set[NEW], sizeof(set[OLD])) != 0) {
-		pr_sigset("set[OLD]", &set[OLD]);
-		pr_sigset("set[NEW]", &set[NEW]);
-	}
-	zassert_mem_equal(&set[OLD], &set[NEW], sizeof(set[OLD]));
+	zassert_sigset_equal(&set[OLD], &set[NEW]);
 
 	/* start with an empty mask */
 	zassert_ok(sigemptyset(&set[NEW]));
@@ -348,11 +375,7 @@ static void test_sigmask_common(void *arg)
 	zassert_ok(sigaddset(&set[OLD], SIGHUP));
 
 	zassert_ok(sigmask(SIG_GETMASK, NULL, &set[NEW]));
-	if (memcmp(&set[OLD], &set[NEW], sizeof(set[OLD])) != 0) {
-		pr_sigset("set[OLD]", &set[OLD]);
-		pr_sigset("set[NEW]", &set[NEW]);
-	}
-	zassert_mem_equal(&set[NEW], &set[OLD], sizeof(set[NEW]));
+	zassert_sigset_equal(&set[NEW], &set[OLD]);
 
 	/* start with full mask */
 	zassert_ok(sigfillset(&set[NEW]));
@@ -373,12 +396,7 @@ static void test_sigmask_common(void *arg)
 	zassert_ok(sigdelset(&set[OLD], SIGUSR2));
 	zassert_ok(sigdelset(&set[OLD], SIGHUP));
 	zassert_ok(sigmask(SIG_GETMASK, NULL, &set[NEW]));
-	adjust_mask_expectation_for_userspace(&set[OLD]);
-	if (memcmp(&set[OLD], &set[NEW], sizeof(set[OLD])) != 0) {
-		pr_sigset("set[OLD]", &set[OLD]);
-		pr_sigset("set[NEW]", &set[NEW]);
-	}
-	zassert_mem_equal(&set[NEW], &set[OLD], sizeof(set[NEW]));
+	zassert_sigset_equal(&set[NEW], &set[OLD]);
 }
 
 ZTEST(posix_signals, test_pthread_sigmask)
@@ -398,4 +416,51 @@ ZTEST(posix_signals, test_sigprocmask)
 	}
 }
 
-ZTEST_SUITE(posix_signals, NULL, NULL, NULL, NULL, NULL);
+ZTEST(posix_signals, test_reserved_rt_signals)
+{
+	sigset_t set;
+
+	sigemptyset(&set);
+	zassert_equal(sigaddset(&set, CONFIG_THREAD_CANCEL_SIGNAL_NUMBER), -1);
+	zassert_equal(errno, EINVAL);
+	zassert_equal(sigaddset(&set, CONFIG_THREAD_CANCEL_SIGNAL_NUMBER + 1), -1);
+	zassert_equal(errno, EINVAL);
+	if ((SIGRTMIN - 1) < SIGSET_NLONGS * BITS_PER_LONG) {
+		zassert_ok(sigaddset(&set, SIGRTMIN));
+	}
+}
+
+static void *setup(void)
+{
+	if (IS_ENABLED(CONFIG_NATIVE_LIBC)) {
+		sigfillset(&sigfillset_mask_bits);
+		pthread_sigmask(SIG_SETMASK, &sigfillset_mask_bits, NULL);
+		sigemptyset(&sigfillset_mask_bits);
+		pthread_sigmask(SIG_SETMASK, NULL, &sigfillset_mask_bits);
+		/* SIGTRAP is added _after_ setup() */
+		sigdelset(&sigfillset_mask_bits, SIGTRAP);
+		pr_sigset("sigfillset_mask_bits", &sigfillset_mask_bits);
+		return NULL;
+	}
+
+	/* helper to convert k_sig_set to sigset_t */
+	extern sigset_t *z_sig_set_to_posix_slow(const struct k_sig_set *kset, sigset_t *buf);
+
+	struct k_sig_set buf;
+	struct k_sig_set *const kmask = &buf;
+	sigset_t *const pmask = &sigfillset_mask_bits;
+
+	/* set all bits in k_sig_set */
+	(void)k_sig_fillset(kmask);
+	/* set as many bits as possible in current mask */
+	(void)k_sig_mask(K_SIG_SETMASK, kmask, NULL);
+	/* get all bits that were set in current mask */
+	(void)k_sig_mask(K_SIG_SETMASK, NULL, kmask);
+	/* convert k_sig_set to sigset_t */
+	zassert_not_null(z_sig_set_to_posix_slow(kmask, pmask));
+	pr_sigset("sigfillset_mask_bits", pmask);
+
+	return NULL;
+}
+
+ZTEST_SUITE(posix_signals, NULL, setup, NULL, NULL, NULL);
