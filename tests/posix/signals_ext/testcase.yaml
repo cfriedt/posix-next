@@ -1,0 +1,41 @@
+common:
+  tags:
+    - posix
+    - posix_signals_ext
+  # 1 tier0 platform per supported architecture
+  platform_key:
+    - arch
+    - simulation
+tests:
+  portability.posix.signals_ext:
+    filter: not CONFIG_NATIVE_LIBC
+    extra_configs:
+      - CONFIG_POSIX_AEP_CHOICE_BASE=y
+  portability.posix.signals_ext.minimal:
+    filter: not CONFIG_NATIVE_LIBC
+    extra_configs:
+      - CONFIG_POSIX_AEP_CHOICE_BASE=y
+      - CONFIG_MINIMAL_LIBC=y
+  portability.posix.signals_ext.minimal.strsignal_no_desc:
+    filter: not CONFIG_NATIVE_LIBC
+    extra_configs:
+      - CONFIG_POSIX_AEP_CHOICE_BASE=y
+      - CONFIG_MINIMAL_LIBC=y
+      - CONFIG_POSIX_SIGNAL_STRING_DESC_DISABLE=y
+  portability.posix.signals_ext.newlib:
+    filter: (not CONFIG_NATIVE_LIBC) and (TOOLCHAIN_HAS_NEWLIB == 1)
+    extra_configs:
+      - CONFIG_POSIX_AEP_CHOICE_BASE=y
+      - CONFIG_NEWLIB_LIBC=y
+  portability.posix.signals_ext.picolibc:
+    tags: picolibc
+    filter: (not CONFIG_NATIVE_LIBC) and CONFIG_PICOLIBC_SUPPORTED
+    extra_configs:
+      - CONFIG_POSIX_AEP_CHOICE_BASE=y
+      - CONFIG_PICOLIBC=y
+  portability.posix.signals_ext.linux_compat:
+    tags: native
+    filter: CONFIG_NATIVE_LIBC
+    extra_configs:
+      - CONFIG_POSIX_TEST_LINUX_COMPAT=y
+      - CONFIG_ZVFS_OPEN_MAX=7
