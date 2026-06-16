@@ -27,7 +27,7 @@ implementation of the POSIX API.
 * :kconfig:option:`CONFIG_POSIX_SYSTEM_INTERFACES`
 * :kconfig:option:`CONFIG_POSIX_OPEN_MAX`
 * :kconfig:option:`CONFIG_POSIX_RTSIG_MAX`
-* :kconfig:option:`CONFIG_POSIX_SIGNAL_STRING_DESC`
+* :kconfig:option:`CONFIG_POSIX_SIGNAL_STRING_DESC_DISABLE`
 * :kconfig:option:`CONFIG_POSIX_THREAD_KEYS_MAX`
 * :kconfig:option:`CONFIG_POSIX_THREAD_THREADS_MAX`
 * :kconfig:option:`CONFIG_POSIX_UNAME_NODENAME_LEN`

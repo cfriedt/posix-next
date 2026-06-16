@@ -7,7 +7,10 @@ project(posix_philosophers)
 target_sources(app PRIVATE src/main.c)
 # For translating POSIX scheduler policies and priorities to
 # Zephyr priorities.
-target_include_directories(app PRIVATE ${ZEPHYR_POSIX_NEXT_MODULE_DIR}/lib/posix/options)
+target_include_directories(app PRIVATE
+  ${ZEPHYR_POSIX_NEXT_MODULE_DIR}/lib/posix/options/threads_base
+  ${ZEPHYR_POSIX_NEXT_MODULE_DIR}/lib/posix/options/shared
+)
 
 # FIXME: We should not rely on usleep() (which is was dropped in Issue 7, 200809L)
 target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200112L)
