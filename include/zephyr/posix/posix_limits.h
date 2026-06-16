@@ -14,8 +14,6 @@
  *
  * @see <a href="https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/limits.h.html">
  *      POSIX.1-2017 &lt;limits.h&gt;</a>
- *
- * @ingroup posix_option_group_threads_base
  */
 
 #ifndef ZEPHYR_INCLUDE_ZEPHYR_POSIX_POSIX_LIMITS_H_

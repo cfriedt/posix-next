@@ -9,6 +9,8 @@
 #include <zephyr/sys/util.h>
 #include <zephyr/ztest.h>
 
+void test_mutex_common(int type);
+
 #define BIOS_FOOD           0xB105F00D
 #define SCHED_INVALID       4242
 #define INVALID_DETACHSTATE 7373
@@ -121,6 +123,9 @@ ZTEST(posix_threads_ext, test_pthread_mutexattr_settype)
 	zassert_equal(type, PTHREAD_MUTEX_ERRORCHECK);
 
 	zassert_ok(pthread_mutexattr_destroy(&attr));
+
+	test_mutex_common(PTHREAD_MUTEX_NORMAL);
+	test_mutex_common(PTHREAD_MUTEX_RECURSIVE);
 }
 
 static void before(void *arg)

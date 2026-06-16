@@ -13,8 +13,6 @@
  *
  * @see <a href="https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/string.h.html">
  *      POSIX.1-2017 &lt;string.h&gt;</a>
- *
- * @ingroup posix_option_group_signals
  */
 
 #ifndef ZEPHYR_INCLUDE_POSIX_POSIX_STRING_H_
@@ -32,7 +30,7 @@ extern "C" {
 
 /**
  * @brief Return a string describing a signal number.
- * @ingroup posix_option_group_signals
+ * @ingroup posix_option_group_signals_ext
  *
  * Returns a pointer to a locale-specific message string describing the signal
  * whose number is @p signo.  The contents of the string pointed to by the
