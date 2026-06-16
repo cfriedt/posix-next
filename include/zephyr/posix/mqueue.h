@@ -112,6 +112,7 @@ int mq_send(mqd_t mqdes, const char *msg_ptr, size_t msg_len, unsigned int msg_p
  */
 int mq_setattr(mqd_t mqdes, const struct mq_attr *mqstat, struct mq_attr *omqstat);
 
+#if defined(_POSIX_TIMEOUTS) || defined(__DOXYGEN__)
 /**
  * @brief Receive a message from a queue with an absolute timeout.
  * @ingroup posix_option_message_passing
@@ -125,7 +126,9 @@ int mq_setattr(mqd_t mqdes, const struct mq_attr *mqstat, struct mq_attr *omqsta
  */
 int mq_timedreceive(mqd_t mqdes, char *msg_ptr, size_t msg_len, unsigned int *msg_prio,
 		    const struct timespec *abstime);
+#endif
 
+#if defined(_POSIX_TIMEOUTS) || defined(__DOXYGEN__)
 /**
  * @brief Send a message to a queue with an absolute timeout.
  * @ingroup posix_option_message_passing
@@ -139,6 +142,7 @@ int mq_timedreceive(mqd_t mqdes, char *msg_ptr, size_t msg_len, unsigned int *ms
  */
 int mq_timedsend(mqd_t mqdes, const char *msg_ptr, size_t msg_len, unsigned int msg_prio,
 		 const struct timespec *abstime);
+#endif
 
 /**
  * @brief Register for notification when a message arrives on an empty queue.

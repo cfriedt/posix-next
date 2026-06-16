@@ -10,8 +10,6 @@
  *
  * @see <a href="https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/sys_types.h.html">
  *      POSIX.1-2017 &lt;sys/types.h&gt;</a>
- *
- * @ingroup posix_option_group_threads_base
  */
 
 #ifndef ZEPHYR_INCLUDE_POSIX_SYS_TYPES_H_
