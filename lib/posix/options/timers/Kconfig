@@ -1,0 +1,71 @@
+# Copyright (c) 2018 Intel Corporation
+# Copyright (c) 2024 Tenstorrent AI ULC
+#
+# SPDX-License-Identifier: Apache-2.0
+
+menuconfig POSIX_TIMERS
+	bool "POSIX high-resolution timers"
+	help
+	  Select 'y' here and Zephyr will provide implementations of clock_getres(), clock_gettime(),
+	  clock_settime(), nanosleep(), timer_create(), timer_delete(), timer_getoverrun(),
+	  timer_settime(), and timer_gettime().
+
+if POSIX_TIMERS
+
+config POSIX_MONOTONIC_CLOCK
+	bool "POSIX Monotonic clock support"
+	default y
+	help
+	  This enables CLOCK_MONOTONIC and the _POSIX_MONOTONIC_CLOCK option.
+
+	  May be enabled directly or via :kconfig:option:`CONFIG_XSI_ADVANCED_REALTIME`.
+
+config POSIX_CPUTIME
+	bool "POSIX per-process CPU-time clocks"
+	default y
+	help
+	  This enables CLOCK_PROCESS_CPUTIME_ID and the _POSIX_CPUTIME option.
+
+	  May be enabled directly or via :kconfig:option:`CONFIG_XSI_ADVANCED_REALTIME`.
+
+config POSIX_THREAD_CPUTIME
+	bool "POSIX per-thread CPU-time clocks"
+	help
+	  This enables CLOCK_THREAD_CPUTIME_ID and the _POSIX_THREAD_CPUTIME option.
+
+	  May be enabled directly or via
+	  :kconfig:option:`CONFIG_XSI_ADVANCED_REALTIME_THREADS`.
+
+config POSIX_DELAYTIMER_MAX
+	int "Maximum count returned my timer_getoverrun() in POSIX application"
+	default 32
+	help
+	  This controls the maximum number of times a timer can overrun before
+	  timer_getoverrun() in POSIX compliant application.
+
+config POSIX_TIMER_MAX
+	int "Maximum number of POSIX timers per process"
+	default 32
+	help
+	  Maximum simultaneously active timer_t in a POSIX application.
+
+config POSIX_TIMEOUTS
+	bool "Support for some blocking POSIX services"
+	help
+	  This option enables support for absolute timeouts for some blocking POSIX services such as
+	  mq_timedsend(), mq_timedreceive(), pthread_cond_timedwait(), pthread_mutex_timedlock(),
+	  pthread_rwlock_timedrdlock(), pthread_rwlock_timedwrlock(), and sem_timedwait().
+
+config TIMER_CREATE_WAIT
+	int "Time to wait for timer availability (in msec) in POSIX application"
+	default 100
+	range 0 1000
+	help
+	  This controls how long to wait for resources to come available to create
+	  a new timer in POSIX compliant application
+
+module = TIMER
+module-str = POSIX Timers
+source "subsys/logging/Kconfig.template.log_config"
+
+endif # POSIX_TIMERS
