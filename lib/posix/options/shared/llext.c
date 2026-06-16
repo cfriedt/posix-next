@@ -81,6 +81,17 @@ EXPORT_SYMBOL(pthread_barrierattr_init);
 EXPORT_SYMBOL(longjmp);
 EXPORT_SYMBOL(setjmp);
 
+/* C_LANG_SUPPORT_R */
+#ifdef CONFIG_POSIX_C_LANG_SUPPORT_R
+EXPORT_SYMBOL(asctime_r);
+EXPORT_SYMBOL(ctime_r);
+EXPORT_SYMBOL(gmtime_r);
+EXPORT_SYMBOL(localtime_r);
+EXPORT_SYMBOL(rand_r);
+EXPORT_SYMBOL(strerror_r);
+EXPORT_SYMBOL(strtok_r);
+#endif /* CONFIG_POSIX_C_LANG_SUPPORT_R */
+
 /* C_LIB_EXT */
 #ifdef CONFIG_POSIX_C_LIB_EXT
 EXPORT_SYMBOL(fnmatch);
