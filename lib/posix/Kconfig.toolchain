@@ -1,25 +1,64 @@
-# Copyright (c) 2024 Tenstorrent AI ULC
+# Copyright (c) The Zephyr Project Contributors
 #
 # SPDX-License-Identifier: Apache-2.0
 
-# The following list of Kconfig options are for features that are "POSIX-adjacent". In other words
-# features that are available on Linux, the BSDs, or elsewhere that are not (yet?) part of POSIX
-# but depend on or are otherwise intimately tied to running on a POSIX operating system.
+# Toolchain override symbols (CONFIG_TC_PROVIDES_*) tell Zephyr not to build its own
+# implementation when the C library (or some external source) already provides the feature.
+#
+# Policy:
+#
+# TC_PROVIDES_* Kconfig options may be provided for
+#
+# - Subprofiling Option Groups (IEEE Std 1003.1 V4_subprofiles)
+# - Option-Group-like Options (that gate one or more functions and are semi-independent)
+# - POSIX-adjacent options (such as eventfd, or the non-portable APIs)
+#
+# https://pubs.opengroup.org/onlinepubs/9799919799/xrat/V4_subprofiles.html
 
+# ---------------------------------------------------------------------------
+# POSIX-adjacent (not a POSIX Option Group)
+# ---------------------------------------------------------------------------
+
+# zephyr-keep-sorted-start
 config TC_PROVIDES_EVENTFD
 	bool
 
-# The following list of Kconfig options are based on standard POSIX Subprofiling Option Groups
-# and may be used to override Zephyr's internal POSIX implementations. This facility is mainly
-# for toolchain integrators, C library maintainers, etc, and is not intended for general users.
-#
-# Use these features with caution as doing so might introduce unwanted, unexpected, or undefined
-# behavior.
-#
-# POSIX Subprofiling Option Groups are defined at the link below:
-#
-# https://pubs.opengroup.org/onlinepubs/9699919799/xrat/V4_subprofiles.html
+config TC_PROVIDES_POSIX_NON_PORTABLE
+	bool
+# zephyr-keep-sorted-stop
 
+# ---------------------------------------------------------------------------
+# Quasi–Option Group POSIX Options (TC_PROVIDES allowed)
+# ---------------------------------------------------------------------------
+
+# zephyr-keep-sorted-start
+config TC_PROVIDES_POSIX_FSYNC
+	bool
+
+config TC_PROVIDES_POSIX_MEMLOCK
+	bool
+
+config TC_PROVIDES_POSIX_MEMLOCK_RANGE
+	bool
+
+config TC_PROVIDES_POSIX_MESSAGE_PASSING
+	bool
+
+config TC_PROVIDES_POSIX_PRIORITY_SCHEDULING
+	bool
+
+config TC_PROVIDES_POSIX_SHARED_MEMORY_OBJECTS
+	bool
+
+config TC_PROVIDES_POSIX_SYNCHRONIZED_IO
+	bool
+# zephyr-keep-sorted-stop
+
+# ---------------------------------------------------------------------------
+# Subprofiling Option Groups
+# ---------------------------------------------------------------------------
+
+# zephyr-keep-sorted-start
 config TC_PROVIDES_POSIX_ASYNCHRONOUS_IO
 	bool
 
@@ -125,13 +164,13 @@ config TC_PROVIDES_POSIX_NETWORKING
 config TC_PROVIDES_POSIX_PIPE
 	bool
 
-config TC_PROVIDES_POSIX_ROBUST_MUTEXES
-	bool
-
 config TC_PROVIDES_POSIX_REALTIME_SIGNALS
 	bool
 
 config TC_PROVIDES_POSIX_REGEXP
+	bool
+
+config TC_PROVIDES_POSIX_ROBUST_MUTEXES
 	bool
 
 config TC_PROVIDES_POSIX_RW_LOCKS
@@ -172,6 +211,9 @@ config TC_PROVIDES_POSIX_SYSTEM_DATABASE_R
 
 # Note: the Option is _POSIX_THREADS, while the Option Group is POSIX_THREADS_BASE.
 # We have opted to use POSIX_THREADS here to match the Option name.
+config TC_PROVIDES_POSIX_THREAD_PRIORITY_SCHEDULING
+	bool
+
 config TC_PROVIDES_POSIX_THREADS
 	bool
 
@@ -217,7 +259,16 @@ config TC_PROVIDES_XSI_MATH
 config TC_PROVIDES_XSI_MULTI_PROCESS
 	bool
 
+config TC_PROVIDES_XSI_ADVANCED_REALTIME
+	bool
+
+config TC_PROVIDES_XSI_ADVANCED_REALTIME_THREADS
+	bool
+
 config TC_PROVIDES_XSI_REALTIME
+	bool
+
+config TC_PROVIDES_XSI_REALTIME_THREADS
 	bool
 
 config TC_PROVIDES_XSI_SIGNALS
@@ -246,3 +297,4 @@ config TC_PROVIDES_XSI_USER_GROUPS
 
 config TC_PROVIDES_XSI_WIDE_CHAR
 	bool
+# zephyr-keep-sorted-stop
