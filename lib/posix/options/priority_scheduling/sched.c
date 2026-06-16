@@ -1,0 +1,70 @@
+/*
+ * Copyright (c) 2018-2023 Intel Corporation
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#include "posix_internal.h"
+
+#include <zephyr/kernel.h>
+#include <sched.h>
+
+int sched_get_priority_min(int policy)
+{
+	return posix_sched_priority_min(policy);
+}
+
+int sched_get_priority_max(int policy)
+{
+	return posix_sched_priority_max(policy);
+}
+
+int sched_getparam(pid_t pid, struct sched_param *param)
+{
+	ARG_UNUSED(pid);
+	ARG_UNUSED(param);
+
+	errno = ENOSYS;
+
+	return -1;
+}
+
+int sched_getscheduler(pid_t pid)
+{
+	ARG_UNUSED(pid);
+
+	errno = ENOSYS;
+
+	return -1;
+}
+
+int sched_setparam(pid_t pid, const struct sched_param *param)
+{
+	ARG_UNUSED(pid);
+	ARG_UNUSED(param);
+
+	errno = ENOSYS;
+
+	return -1;
+}
+
+int sched_setscheduler(pid_t pid, int policy, const struct sched_param *param)
+{
+	ARG_UNUSED(pid);
+	ARG_UNUSED(policy);
+	ARG_UNUSED(param);
+
+	errno = ENOSYS;
+
+	return -1;
+}
+
+int sched_rr_get_interval(pid_t pid, struct timespec *interval)
+{
+	ARG_UNUSED(pid);
+	ARG_UNUSED(interval);
+
+	errno = ENOSYS;
+
+	return -1;
+}

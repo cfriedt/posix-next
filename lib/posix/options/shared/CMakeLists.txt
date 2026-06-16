@@ -1,0 +1,55 @@
+# SPDX-License-Identifier: Apache-2.0
+
+zephyr_library()
+
+zephyr_library_include_directories(
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${CMAKE_CURRENT_SOURCE_DIR}/../timers
+  ${ZEPHYR_BASE}/kernel/include
+  ${ARCH_DIR}/${ARCH}/include
+)
+
+zephyr_library_property(ALLOW_EMPTY TRUE)
+zephyr_library_compile_options(-U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+zephyr_library_compile_options_ifdef(CONFIG_XSI -U_XOPEN_SOURCE -D_XOPEN_SOURCE=700)
+
+set(NEED_POSIX_POOL FALSE)
+if(CONFIG_POSIX_BARRIERS AND NOT CONFIG_TC_PROVIDES_POSIX_BARRIERS)
+  set(NEED_POSIX_POOL TRUE)
+endif()
+if(CONFIG_POSIX_SPIN_LOCKS AND NOT CONFIG_TC_PROVIDES_POSIX_SPIN_LOCKS)
+  set(NEED_POSIX_POOL TRUE)
+endif()
+if(CONFIG_POSIX_RW_LOCKS AND NOT CONFIG_TC_PROVIDES_POSIX_RW_LOCKS)
+  set(NEED_POSIX_POOL TRUE)
+endif()
+if(CONFIG_POSIX_SEMAPHORES AND NOT CONFIG_TC_PROVIDES_POSIX_SEMAPHORES)
+  set(NEED_POSIX_POOL TRUE)
+endif()
+if(NEED_POSIX_POOL)
+  zephyr_library_sources(posix_pool.c)
+endif()
+
+set(NEED_ENV_COMMON FALSE)
+if(CONFIG_POSIX_SINGLE_PROCESS AND NOT CONFIG_TC_PROVIDES_POSIX_SINGLE_PROCESS)
+  set(NEED_ENV_COMMON TRUE)
+endif()
+if(CONFIG_XSI_SINGLE_PROCESS AND NOT CONFIG_TC_PROVIDES_XSI_SINGLE_PROCESS)
+  set(NEED_ENV_COMMON TRUE)
+endif()
+if(NEED_ENV_COMMON)
+  zephyr_library_sources(env_common.c)
+endif()
+
+if(NOT CONFIG_TC_PROVIDES_POSIX_TIMERS)
+  zephyr_library_sources_ifdef(CONFIG_POSIX_TIMERS timespec_to_timeout.c)
+endif()
+
+if(CONFIG_SIGNAL AND NOT CONFIG_NATIVE_LIBC)
+  zephyr_library_sources(z_sig_set.c)
+endif()
+
+if((CONFIG_POSIX_THREADS AND NOT CONFIG_TC_PROVIDES_POSIX_THREADS) OR
+   (CONFIG_POSIX_THREAD_PRIORITY_SCHEDULING AND NOT CONFIG_TC_PROVIDES_POSIX_THREAD_PRIORITY_SCHEDULING))
+  zephyr_library_sources(pthread_priority.c)
+endif()

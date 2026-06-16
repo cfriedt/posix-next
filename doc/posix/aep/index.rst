@@ -54,6 +54,8 @@ The *Minimal Realtime System Profile* (PSE51) includes all of the
     :ref:`POSIX_SIGNALS <posix_option_group_signals>`, yes, :kconfig:option:`CONFIG_POSIX_SIGNALS` :ref:`†<posix_undefined_behaviour>`
     :ref:`POSIX_SINGLE_PROCESS <posix_option_group_single_process>`, yes, :kconfig:option:`CONFIG_POSIX_SINGLE_PROCESS`
     :ref:`XSI_THREADS_EXT <posix_option_group_xsi_threads_ext>`, yes, :kconfig:option:`CONFIG_XSI_THREADS_EXT`
+    :ref:`XSI_REALTIME_THREADS <posix_option_group_xsi_realtime_threads>`, yes, :kconfig:option:`CONFIG_XSI_REALTIME_THREADS`
+    :ref:`XSI_ADVANCED_REALTIME_THREADS <posix_option_group_xsi_advanced_realtime_threads>`, yes, :kconfig:option:`CONFIG_XSI_ADVANCED_REALTIME_THREADS`
 
 .. csv-table:: PSE51 Option Requirements
    :header: Symbol, Support, Remarks

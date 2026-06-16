@@ -1,0 +1,37 @@
+# Copyright (c) 2024, Friedt Professional Engineering Services, Inc
+#
+# SPDX-License-Identifier: Apache-2.0
+
+menuconfig POSIX_NETWORKING
+	bool "POSIX Networking API"
+	depends on NETWORKING
+	select NET_HOSTNAME_ENABLE
+	select NET_HOSTNAME_DYNAMIC
+	select NET_INTERFACE_NAME
+	select NET_SOCKETPAIR
+	select NET_SOCKETS
+	help
+	  Enable this option to support the POSIX networking API. This includes
+	  support for BSD Sockets.
+
+if POSIX_NETWORKING
+
+config POSIX_HOST_NAME_MAX
+	int
+	default NET_HOSTNAME_MAX_LEN
+	help
+	  The maximum length of a host name as defined by POSIX.
+
+config POSIX_IPV6
+	bool "POSIX IPv6 support"
+	default y if NET_CONFIG_NEED_IPV6
+	help
+	  Enable this option to support the POSIX IPv6 API.
+
+config POSIX_RAW_SOCKETS
+	bool "POSIX RAW socket support"
+	select NET_SOCKETS_PACKET
+	help
+	  Enable this option to support the raw sockets.
+
+endif # POSIX_NETWORKING

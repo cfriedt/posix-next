@@ -1,0 +1,39 @@
+common:
+  depends_on: netif
+  min_ram: 16
+  tags:
+    - iface
+    - net
+    - posix_networking
+  # dependent on netif support
+  integration_platforms:
+    - mps2/an385
+    - qemu_x86
+  # Building with the host libC links to if_*() from the host libc which causes the test to crash
+  # immediately.
+  filter: not CONFIG_NATIVE_LIBC
+tests:
+  portability.posix.networking:
+    extra_configs:
+      - CONFIG_COMMON_LIBC_MALLOC_ARENA_SIZE=256
+  portability.posix.networking.armclang_std_libc:
+    toolchain_allow: armclang
+    extra_configs:
+      - CONFIG_ARMCLANG_STD_LIBC=y
+  portability.posix.networking.arcmwdtlib:
+    toolchain_allow: arcmwdt
+    extra_configs:
+      - CONFIG_ARCMWDT_LIBC=y
+  portability.posix.networking.minimal:
+    extra_configs:
+      - CONFIG_MINIMAL_LIBC=y
+      - CONFIG_COMMON_LIBC_MALLOC_ARENA_SIZE=256
+  portability.posix.networking.newlib:
+    filter: TOOLCHAIN_HAS_NEWLIB == 1
+    extra_configs:
+      - CONFIG_NEWLIB_LIBC=y
+  portability.posix.networking.picolibc:
+    tags: picolibc
+    filter: CONFIG_PICOLIBC_SUPPORTED
+    extra_configs:
+      - CONFIG_PICOLIBC=y
