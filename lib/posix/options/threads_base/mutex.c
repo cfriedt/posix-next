@@ -1,0 +1,148 @@
+/*
+ * Copyright (c) The Zephyr Project Contributors
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#include "posix_internal.h"
+#include "posix_clock.h"
+
+#include <pthread.h>
+
+#include <zephyr/kernel.h>
+#include <zephyr/sys/thread.h>
+#include <zephyr/sys/timeutil.h>
+
+int pthread_mutex_destroy(pthread_mutex_t *mu)
+{
+	return -sys_mutex_destroy(to_k_mutex(mu));
+}
+
+static int pthread_mutexattr_to_flags(const pthread_mutexattr_t *attr, int *flags)
+{
+	*flags = 0;
+
+	if (attr == NULL) {
+		*flags |= K_MUTEX_NORMAL;
+		return 0;
+	}
+
+	struct pthread_mutexattr *const a = (struct pthread_mutexattr *)attr;
+
+	if (!a->initialized) {
+		return -EINVAL;
+	}
+
+	switch (a->type) {
+	case PTHREAD_MUTEX_DEFAULT:
+	case PTHREAD_MUTEX_NORMAL:
+		*flags |= K_MUTEX_NORMAL;
+		break;
+#if defined(PTHREAD_MUTEX_ROBUST)
+	case PTHREAD_MUTEX_ROBUST:
+#endif
+		break;
+	case PTHREAD_MUTEX_RECURSIVE:
+		*flags |= K_MUTEX_RECURSIVE;
+		break;
+	case PTHREAD_MUTEX_ERRORCHECK:
+		*flags |= K_MUTEX_ERRORCHECK;
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+int pthread_mutex_init(pthread_mutex_t *mu, const pthread_mutexattr_t *attr)
+{
+	int ret;
+	int flags = 0;
+	struct k_mutex *mutex;
+
+	if (pthread_mutexattr_to_flags(attr, &flags) < 0) {
+		return EINVAL;
+	}
+
+	ret = sys_mutex_alloc(&mutex, flags);
+	if (ret < 0) {
+		return -ret;
+	}
+
+	*mu = (pthread_mutex_t)(uintptr_t)mutex;
+
+	return 0;
+}
+
+static int pthread_mutex_lock_common(pthread_mutex_t *m, k_timeout_t timeout)
+{
+	int ret;
+
+	if (*m == PTHREAD_MUTEX_INITIALIZER) {
+		ret = pthread_mutex_init(m, NULL);
+
+		if (ret != 0) {
+			return ret;
+		}
+	}
+
+	ret = -k_mutex_lock(to_k_mutex(m), timeout);
+
+	if ((ret == EAGAIN) || (ret == EBUSY)) {
+		/* POSIX requires ETIMEDOUT. Maybe adjust k_mutex_lock()? */
+		ret = ETIMEDOUT;
+	}
+
+	return ret;
+}
+
+int pthread_mutex_lock(pthread_mutex_t *m)
+{
+	return pthread_mutex_lock_common(m, K_FOREVER);
+}
+
+int pthread_mutex_timedlock(pthread_mutex_t *m,
+			    const struct timespec *abstime)
+{
+	return pthread_mutex_lock_common(m, sys_timepoint_timeout(timespec_abs_rt_to_timepoint(abstime)));
+}
+
+int pthread_mutex_trylock(pthread_mutex_t *m)
+{
+	return pthread_mutex_lock_common(m, K_NO_WAIT);
+}
+
+int pthread_mutex_unlock(pthread_mutex_t *mu)
+{
+	return -k_mutex_unlock(to_k_mutex(mu));
+}
+
+int pthread_mutexattr_init(pthread_mutexattr_t *attr)
+{
+	struct pthread_mutexattr *const a = (struct pthread_mutexattr *)attr;
+
+	if (a == NULL) {
+		return EINVAL;
+	}
+
+	*a = (struct pthread_mutexattr){
+		.type = PTHREAD_MUTEX_DEFAULT,
+		.initialized = true,
+	};
+
+	return 0;
+}
+
+int pthread_mutexattr_destroy(pthread_mutexattr_t *attr)
+{
+	struct pthread_mutexattr *const a = (struct pthread_mutexattr *)attr;
+
+	if (a == NULL || !a->initialized) {
+		return EINVAL;
+	}
+
+	*a = (struct pthread_mutexattr){0};
+
+	return 0;
+}
