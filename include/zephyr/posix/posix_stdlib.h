@@ -92,6 +92,38 @@ int setenv(const char *envname, const char *envval, int overwrite);
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/unsetenv.html
  */
 int unsetenv(const char *name);
+
+#if (_POSIX_C_SOURCE < 202405L) || defined(__DOXYGEN__)
+/**
+ * @brief Generate a pseudo-random number (reentrant).
+ * @ingroup posix_option_group_c_lang_support_r
+ *
+ * Updates @p seed and returns the next value in the same sequence as @c rand()
+ * after @c srand(@p seed).
+ *
+ * @param seed Pointer to the seed value; updated on return.
+ * @return A pseudo-random integer in the range [0, @c RAND_MAX].
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/rand_r.html
+ */
+int rand_r(unsigned int *seed);
+#endif /* (_POSIX_C_SOURCE < 202405L) || defined(__DOXYGEN__) */
+
+#if (_POSIX_C_SOURCE >= 202405L) || defined(__DOXYGEN__)
+/**
+ * @brief Sort an array with a comparison function that takes a context argument.
+ * @ingroup posix_option_group_c_lang_support_r
+ *
+ * @param base   Pointer to the start of the array.
+ * @param nmemb  Number of elements in the array.
+ * @param size   Size of each element in bytes.
+ * @param compar Comparison function; receives a caller-supplied @p arg.
+ * @param arg    Context pointer passed to @p compar.
+ * @see https://pubs.opengroup.org/onlinepubs/9799922210/functions/qsort_r.html
+ */
+void qsort_r(void *base, size_t nmemb, size_t size,
+	     int (*compar)(const void *a, const void *b, void *arg), void *arg);
+#endif /* (_POSIX_C_SOURCE >= 202405L) || defined(__DOXYGEN__) */
+
 #endif /* defined(_POSIX_C_SOURCE) || defined(__DOXYGEN__) */
 
 #ifdef __cplusplus
