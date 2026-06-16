@@ -92,6 +92,7 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_C_LANG_SUPPORT_R`.
     :c:func:`ctime_r`,yes
     :c:func:`gmtime_r`,yes
     :c:func:`localtime_r`,yes
+    :c:func:`qsort_r`,yes
     :c:func:`rand_r`,yes
     :c:func:`strerror_r`,yes
     :c:func:`strtok_r`,yes
