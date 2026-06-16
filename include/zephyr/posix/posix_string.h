@@ -29,6 +29,17 @@ extern "C" {
 /* TODO: additional POSIX signatures here */
 
 /**
+ * @brief Tokenize a string into tokens (reentrant).
+ * @ingroup posix_option_group_c_lang_support_r
+ * @param str First call passes the string; subsequent calls pass NULL.
+ * @param sep Delimiter characters.
+ * @param state Caller-provided state for reentrant tokenization.
+ * @return Pointer to the next token, or NULL when no more tokens remain.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/strtok_r.html
+ */
+char *strtok_r(char *str, const char *sep, char **state);
+
+/**
  * @brief Return a string describing a signal number.
  * @ingroup posix_option_group_signals_ext
  *
