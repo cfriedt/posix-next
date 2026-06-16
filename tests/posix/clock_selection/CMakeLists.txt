@@ -6,4 +6,6 @@ project(posix_clock_selection)
 
 target_sources(app PRIVATE src/main.c ../timers/src/nanosleep_common.c)
 
+target_include_directories(app PRIVATE ${ZEPHYR_POSIX_NEXT_MODULE_DIR}/lib/posix/options/timers)
+
 target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)

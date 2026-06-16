@@ -10,7 +10,6 @@
  *
  * @see <a href="https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/sched.h.html">
  *      POSIX.1-2017 &lt;sched.h&gt;</a>
- *
  */
 
 #ifndef ZEPHYR_INCLUDE_POSIX_SCHED_H_
