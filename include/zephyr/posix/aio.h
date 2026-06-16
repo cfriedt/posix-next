@@ -164,7 +164,7 @@ int aio_write(struct aiocb *aiocbp);
  * @return 0 on success, or -1 with errno set on failure.
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/lio_listio.html
  */
-int lio_listio(int mode, struct aiocb *const ZRESTRICT list[], int nent,
+int lio_listio(int mode, struct aiocb *const list[ZRESTRICT], int nent,
 	       struct sigevent *ZRESTRICT sig);
 
 #endif /* _POSIX_C_SOURCE >= 200112L */
