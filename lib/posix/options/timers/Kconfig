@@ -1,0 +1,77 @@
+# Copyright (c) 2018 Intel Corporation
+# Copyright (c) 2024 Tenstorrent AI ULC
+#
+# SPDX-License-Identifier: Apache-2.0
+
+menuconfig POSIX_TIMERS
+	bool "POSIX timers, clocks, and sleep functions"
+	help
+	  Select 'y' here and Zephyr will provide implementations of clock_getres(), clock_gettime(),
+	  clock_settime(), nanosleep(), timer_create(), timer_delete(), timer_getoverrun(),
+	  timer_settime(), and timer_gettime().
+
+if POSIX_TIMERS
+
+config POSIX_MONOTONIC_CLOCK
+	bool "POSIX Monotonic clock support"
+	default y
+	help
+	  This enables CLOCK_MONOTONIC and the _POSIX_MONOTONIC_CLOCK option.
+
+	  May be enabled directly or via :kconfig:option:`CONFIG_XSI_ADVANCED_REALTIME`.
+
+config POSIX_CPUTIME
+	bool "POSIX per-process CPU-time clocks"
+	default y
+	help
+	  This enables CLOCK_PROCESS_CPUTIME_ID and the _POSIX_CPUTIME option.
+
+	  May be enabled directly or via :kconfig:option:`CONFIG_XSI_ADVANCED_REALTIME`.
+
+config POSIX_THREAD_CPUTIME
+	bool "POSIX per-thread CPU-time clocks"
+	help
+	  This enables CLOCK_THREAD_CPUTIME_ID.
+
+config POSIX_DELAYTIMER_MAX
+	int "Maximum count returned my timer_getoverrun() in POSIX application"
+	default 32
+	help
+	  This controls the maximum number of times a timer can overrun before
+	  timer_getoverrun() in POSIX compliant application.
+
+config POSIX_TIMER_MAX
+	int "Maximum number of POSIX timers per process"
+	default 32
+	help
+	  Maximum simultaneously active timer_t in a POSIX application.
+
+config POSIX_TIMEOUTS
+	bool "Support timeouts for some blocking POSIX services [DEPRECATED]"
+	select DEPRECATED
+	help
+	  This option is deprecated.
+
+	  ``_POSIX_TIMEOUTS`` is a POSIX macro indicating that some
+	  blocking APIs have timed variants (for example ``pthread_mutex_timedlock()``,
+	  ``sem_timedwait()``, and ``mq_timedsend()``). It is not a Zephyr Option Group
+	  and does not warrant a dedicated Kconfig toggle.
+
+	  In Zephyr, ``_POSIX_TIMEOUTS`` is defined when :kconfig:option:`CONFIG_POSIX_TIMERS`
+	  is enabled. Implement and test each timed API from the Option Group that owns the
+	  base function (for example ``POSIX_THREADS_BASE``, ``POSIX_SEMAPHORES``,
+	  ``XSI_REALTIME``).
+
+config TIMER_CREATE_WAIT
+	int "Time to wait for timer availability (in msec) in POSIX application"
+	default 100
+	range 0 1000
+	help
+	  This controls how long to wait for resources to come available to create
+	  a new timer in POSIX compliant application
+
+module = TIMER
+module-str = POSIX Timers
+source "subsys/logging/Kconfig.template.log_config"
+
+endif # POSIX_TIMERS

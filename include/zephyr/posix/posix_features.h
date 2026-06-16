@@ -237,25 +237,13 @@
 #endif
 
 #undef _POSIX_TIMEOUTS
-#ifdef CONFIG_POSIX_TIMEOUTS
+#if defined(CONFIG_POSIX_TIMERS)
 #define _POSIX_TIMEOUTS _POSIX_VERSION
 #endif
 
-#undef _POSIX_CPUTIME
-#undef _POSIX_MONOTONIC_CLOCK
-#undef _POSIX_TIMEOUTS
 #undef _POSIX_TIMERS
 #ifdef CONFIG_POSIX_TIMERS
-#define _POSIX_TIMERS          _POSIX_VERSION
-#define _POSIX_TIMEOUTS        _POSIX_VERSION
-/*
- * FIXME: Until we have a Kconfig for XSI_ADVANCED_REALTIME, define _POSIX_CPUTIME and
- * _POSIX_MONOTONIC_CLOCK with _POSIX_TIMERS.
- * For more information on the Advanced Realtime Option Group, please see
- * https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap02.html
- */
-#define _POSIX_CPUTIME         _POSIX_VERSION
-#define _POSIX_MONOTONIC_CLOCK _POSIX_VERSION
+#define _POSIX_TIMERS _POSIX_VERSION
 #endif
 
 /* #define _POSIX_TRACE (-1L) */
