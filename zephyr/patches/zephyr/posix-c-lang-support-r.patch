@@ -1,0 +1,1396 @@
+diff --git a/include/zephyr/sys/heap_sort.h b/include/zephyr/sys/heap_sort.h
+new file mode 100644
+index 00000000000..effe0d4aaed
+--- /dev/null
++++ b/include/zephyr/sys/heap_sort.h
+@@ -0,0 +1,32 @@
++/*
++ * Copyright (c) 2021 Friedt Professional Engineering Services, Inc
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_SYS_HEAP_SORT_H_
++#define ZEPHYR_SYS_HEAP_SORT_H_
++
++#include <stdbool.h>
++#include <stddef.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++struct heap_sort_comp {
++    bool has3;
++    void *arg;
++    union {
++        int (*comp2)(const void *a, const void *b);
++        int (*comp3)(const void *a, const void *b, void *arg);
++    };
++};
++
++void heap_sort(void *base, size_t nmemb, size_t size, const struct heap_sort_comp *cmp);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* ZEPHYR_SYS_HEAP_SORT_H_ */
+diff --git a/lib/libc/common/CMakeLists.txt b/lib/libc/common/CMakeLists.txt
+index f04fc5e99ec..817e971cd3e 100644
+--- a/lib/libc/common/CMakeLists.txt
++++ b/lib/libc/common/CMakeLists.txt
+@@ -6,8 +6,7 @@ zephyr_library()
+ zephyr_library_property(ALLOW_EMPTY TRUE)
+ zephyr_library_sources_ifdef(CONFIG_COMMON_LIBC_ABORT source/stdlib/abort.c)
+ zephyr_library_sources_ifdef(CONFIG_COMMON_LIBC_ASCTIME source/time/asctime.c)
+-zephyr_library_sources_ifdef(CONFIG_COMMON_LIBC_GMTIME_R source/time/gmtime_r.c)
+-zephyr_library_sources_ifdef(CONFIG_COMMON_LIBC_LOCALTIME_R_UTC source/time/localtime_r_utc.c)
++zephyr_library_sources_ifdef(CONFIG_COMMON_LIBC_LOCALTIME source/time/localtime.c)
+ zephyr_library_sources_ifdef(CONFIG_COMMON_LIBC_CTIME source/time/ctime.c)
+ zephyr_library_sources_ifdef(CONFIG_COMMON_LIBC_TIME source/time/time.c)
+ zephyr_library_sources_ifdef(CONFIG_COMMON_LIBC_MALLOC source/stdlib/malloc.c)
+@@ -23,5 +22,3 @@ zephyr_library_sources_ifdef(CONFIG_COMMON_LIBC_REMOVE source/stdio/remove.c)
+ 
+ # Prevent compiler from optimizing calloc into an infinite recursive call
+ zephyr_library_compile_options($<TARGET_PROPERTY:compiler,no_builtin_malloc>)
+-
+-zephyr_library_compile_definitions_ifdef(CONFIG_COMMON_LIBC_THRD -D_POSIX_C_SOURCE=200809L)
+diff --git a/lib/libc/common/Kconfig b/lib/libc/common/Kconfig
+index 6b73119db78..5569e2b3d20 100644
+--- a/lib/libc/common/Kconfig
++++ b/lib/libc/common/Kconfig
+@@ -8,39 +8,47 @@ config COMMON_LIBC_ABORT
+ 
+ config COMMON_LIBC_ASCTIME
+ 	bool
++	select POSIX_C_LANG_SUPPORT_R
+ 	help
+ 	  common implementation of asctime().
+ 
+ config COMMON_LIBC_ASCTIME_R
+ 	bool "Thread-safe version of asctime()"
+-	select COMMON_LIBC_ASCTIME
++	select DEPRECATED
++	select POSIX_C_LANG_SUPPORT_R
+ 	help
+-	  common implementation of asctime_r().
++	  This option is deprecated. Please use CONFIG_POSIX_C_LANG_SUPPORT_R instead.
+ 
+ config COMMON_LIBC_CTIME
+ 	bool
+-	select COMMON_LIBC_LOCALTIME_R_UTC
+ 	help
+ 	  common implementation of ctime().
+ 
+ config COMMON_LIBC_CTIME_R
+ 	bool "Thread-safe version of ctime()"
+-	select COMMON_LIBC_CTIME
++	select DEPRECATED
++	select POSIX_C_LANG_SUPPORT_R
+ 	help
+-	  common implementation of ctime_r().
++	  This option is deprecated. Please use CONFIG_POSIX_C_LANG_SUPPORT_R instead.
+ 
+ config COMMON_LIBC_GMTIME_R
+ 	bool
++	select DEPRECATED
++	select POSIX_C_LANG_SUPPORT_R
+ 	help
+-	  common implementation of gmtime_r().
++	  This option is deprecated. Please use CONFIG_POSIX_C_LANG_SUPPORT_R instead.
++
++config COMMON_LIBC_LOCALTIME
++	bool
++	help
++	  common implementation of localtime().
+ 
+ config COMMON_LIBC_LOCALTIME_R_UTC
+ 	bool
+-	select COMMON_LIBC_GMTIME_R
++	select DEPRECATED
++	select POSIX_C_LANG_SUPPORT_R
+ 	help
+-	  Simple implementation of localtime() & localtime_r().
+-	  This option just wraps around the gmtime(), the result is always expressed as
+-	  Coordinated Universal Time (UTC).
++	  This option is deprecated. Please use CONFIG_POSIX_C_LANG_SUPPORT_R instead.
+ 
+ config COMMON_LIBC_TIME
+ 	bool
+diff --git a/lib/libc/common/source/time/asctime.c b/lib/libc/common/source/time/asctime.c
+index aea84cfe0e0..610d00fcca5 100644
+--- a/lib/libc/common/source/time/asctime.c
++++ b/lib/libc/common/source/time/asctime.c
+@@ -4,53 +4,16 @@
+  * SPDX-License-Identifier: Apache-2.0
+  */
+ 
+-#include <stdio.h>
+-#include <string.h>
+-#include <time.h>
++#undef _POSIX_C_SOURCE
++#define _POSIX_C_SOURCE 200809L
+ 
+-#include <zephyr/sys/util.h>
++#include <time.h>
+ 
+ #define DATE_STRING_BUF_SZ  26U
+-#define DATE_WDAY_STRING_SZ 7U
+-#define DATE_MON_STRING_SZ  12U
+-#define DATE_TM_YEAR_BASE   1900
+-
+-static char *asctime_impl(const struct tm *tp, char *buf)
+-{
+-	static const char wday_str[DATE_WDAY_STRING_SZ][3] = {
+-		"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat",
+-	};
+-	static const char mon_str[DATE_MON_STRING_SZ][3] = {
+-		"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+-	};
+-
+-	if ((buf == NULL) || (tp == NULL) || ((unsigned int)tp->tm_wday >= DATE_WDAY_STRING_SZ) ||
+-	    ((unsigned int)tp->tm_mon >= DATE_MON_STRING_SZ)) {
+-		return NULL;
+-	}
+-
+-	unsigned int n = (unsigned int)snprintf(
+-		buf, DATE_STRING_BUF_SZ, "%.3s %.3s%3d %.2d:%.2d:%.2d %d\n", wday_str[tp->tm_wday],
+-		mon_str[tp->tm_mon], tp->tm_mday, tp->tm_hour, tp->tm_min, tp->tm_sec,
+-		DATE_TM_YEAR_BASE + tp->tm_year);
+-
+-	if (n >= DATE_STRING_BUF_SZ) {
+-		return NULL;
+-	}
+-
+-	return buf;
+-}
+ 
+ char *asctime(const struct tm *tp)
+ {
+ 	static char buf[DATE_STRING_BUF_SZ];
+ 
+-	return asctime_impl(tp, buf);
+-}
+-
+-#if defined(CONFIG_COMMON_LIBC_ASCTIME_R)
+-char *asctime_r(const struct tm *tp, char *buf)
+-{
+-	return asctime_impl(tp, buf);
++	return asctime_r(tp, buf);
+ }
+-#endif /* CONFIG_COMMON_LIBC_ASCTIME_R */
+diff --git a/lib/libc/common/source/time/ctime.c b/lib/libc/common/source/time/ctime.c
+index 2b7bce985d3..4eb5f32e485 100644
+--- a/lib/libc/common/source/time/ctime.c
++++ b/lib/libc/common/source/time/ctime.c
+@@ -4,8 +4,6 @@
+  * SPDX-License-Identifier: Apache-2.0
+  */
+ 
+-#undef _POSIX_C_SOURCE
+-#define _POSIX_C_SOURCE 200809L
+ #include <time.h>
+ 
+ /**
+@@ -17,12 +15,3 @@ char *ctime(const time_t *clock)
+ {
+ 	return asctime(localtime(clock));
+ }
+-
+-#if defined(CONFIG_COMMON_LIBC_CTIME_R)
+-char *ctime_r(const time_t *clock, char *buf)
+-{
+-	struct tm tmp;
+-
+-	return asctime_r(localtime_r(clock, &tmp), buf);
+-}
+-#endif /* CONFIG_COMMON_LIBC_CTIME_R */
+diff --git a/lib/libc/common/source/time/gmtime_r.c b/lib/libc/common/source/time/gmtime_r.c
+deleted file mode 100644
+index 5f240b77dce..00000000000
+--- a/lib/libc/common/source/time/gmtime_r.c
++++ /dev/null
+@@ -1,99 +0,0 @@
+-/*
+- * Copyright (c) 2019 Peter Bigot Consulting, LLC
+- *
+- * SPDX-License-Identifier: Apache-2.0
+- */
+-
+-/*
+- * The time_civil_from_days function is derived directly from public
+- * domain content written by Howard Hinnant and available at:
+- * http://howardhinnant.github.io/date_algorithms.html#civil_from_days
+- */
+-
+-#include <time.h>
+-
+-#include <zephyr/toolchain.h>
+-
+-/* A signed type with the representation of time_t without its
+- * implications.
+- */
+-typedef time_t bigint_type;
+-
+-/** Convert a UNIX time to civil time.
+- *
+- * This converts integral seconds since (before) 1970-01-01T00:00:00
+- * to the POSIX standard civil time representation.  Any adjustments
+- * due to time zone, leap seconds, or a different epoch must be
+- * applied to @p time before invoking this function.
+- *
+- * @param time the time represented as seconds.
+- *
+- * @return the time information for corresponding to the provided
+- * instant.
+- *
+- * @see http://howardhinnant.github.io/date_algorithms.html#civil_from_days
+- */
+-static void time_civil_from_days(bigint_type z,
+-				 struct tm *ZRESTRICT tp)
+-{
+-	tp->tm_wday = (z >= -4) ? ((z + 4) % 7) : ((z + 5) % 7 + 6);
+-	z += 719468;
+-
+-	bigint_type era = ((z >= 0) ? z : (z - 146096)) / 146097;
+-	unsigned int doe = (z - era * (bigint_type)146097);
+-	unsigned int yoe = (doe - doe / 1460U + doe / 36524U - doe / 146096U)
+-		/ 365U;
+-	bigint_type y = (time_t)yoe + era * 400;
+-	unsigned int doy = doe - (365U * yoe + yoe / 4U - yoe / 100U);
+-	unsigned int mp = (5U * doy + 2U) / 153U;
+-	unsigned int d = doy - (153U * mp + 2U) / 5U + 1U;
+-	unsigned int m = mp + ((mp < 10) ? 3 : -9);
+-
+-	tp->tm_year = y + (m <= 2) - 1900;
+-	tp->tm_mon = m - 1;
+-	tp->tm_mday = d;
+-
+-	/* Everything above is explained on the referenced page, but
+-	 * doy is relative to --03-01 and we need it relative to
+-	 * --01-01.
+-	 *
+-	 * doy=306 corresponds to --01-01, doy=364 to --02-28, and
+-	 * doy=365 to --02-29.  So we can just subtract 306 to handle
+-	 * January and February.
+-	 *
+-	 * For doy<306 we have to add the number of days before
+-	 * --03-01, which is 59 in a common year and 60 in a leap
+-	 * year.  Note that the first year in the era is a leap year.
+-	 */
+-	if (doy >= 306U) {
+-		tp->tm_yday = doy - 306U;
+-	} else {
+-		tp->tm_yday = doy + 59U + (((yoe % 4U == 0U) && (yoe % 100U != 0U)) || (yoe == 0U));
+-	}
+-}
+-
+-/* Convert a UNIX time to civil time.
+- *
+- * This converts integral seconds since (before) 1970-01-01T00:00:00
+- * to the POSIX standard civil time representation.  Any adjustments
+- * due to time zone, leap seconds, or a different epoch must be
+- * applied to @p time before invoking this function.
+- */
+-struct tm *gmtime_r(const time_t *ZRESTRICT timep,
+-		    struct tm *ZRESTRICT result)
+-{
+-	time_t z = *timep;
+-	bigint_type days = (z >= 0 ? z : z - 86399) / 86400;
+-	unsigned int rem = z - days * 86400;
+-
+-	*result = (struct tm){ 0 };
+-
+-	time_civil_from_days(days, result);
+-
+-	result->tm_hour = rem / 60U / 60U;
+-	rem -= result->tm_hour * 60 * 60;
+-	result->tm_min = rem / 60;
+-	result->tm_sec = rem - result->tm_min * 60;
+-
+-	return result;
+-}
+diff --git a/lib/libc/common/source/time/localtime_r_utc.c b/lib/libc/common/source/time/localtime.c
+similarity index 52%
+rename from lib/libc/common/source/time/localtime_r_utc.c
+rename to lib/libc/common/source/time/localtime.c
+index da63a39aa37..d89df323536 100644
+--- a/lib/libc/common/source/time/localtime_r_utc.c
++++ b/lib/libc/common/source/time/localtime.c
+@@ -4,15 +4,8 @@
+  * SPDX-License-Identifier: Apache-2.0
+  */
+ 
+-#undef _POSIX_C_SOURCE
+-#define _POSIX_C_SOURCE 200809L
+ #include <time.h>
+ 
+-struct tm *localtime_r(const time_t *timer, struct tm *result)
+-{
+-	return gmtime_r(timer, result);
+-}
+-
+ struct tm *localtime(const time_t *timer)
+ {
+ 	return gmtime(timer);
+diff --git a/lib/libc/minimal/CMakeLists.txt b/lib/libc/minimal/CMakeLists.txt
+index efca233cb4b..403b8203d67 100644
+--- a/lib/libc/minimal/CMakeLists.txt
++++ b/lib/libc/minimal/CMakeLists.txt
+@@ -37,6 +37,12 @@ zephyr_library_sources(
+   ${STRERROR_TABLE_H}
+ )
+ 
++if(CONFIG_STD_C23)
++  # pull in from posix-next, since the libc must provide this for c23
++  zephyr_library_sources(${ZEPHYR_POSIX_NEXT_MODULE_DIR}/lib/posix/c_lang_support_r/gmtime_r.c)
++  zephyr_library_sources(${ZEPHYR_POSIX_NEXT_MODULE_DIR}/lib/posix/c_lang_support_r/localtime_r.c)
++endif()
++
+ if(CONFIG_MINIMAL_LIBC_TIME)
+   zephyr_library_sources(source/time/gmtime.c)
+ endif()
+@@ -54,4 +60,9 @@ add_custom_command(
+   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+ )
+ 
++add_custom_target(strerror_table_gen DEPENDS ${STRERROR_TABLE_H})
++add_dependencies(zephyr strerror_table_gen)
++
++set_source_files_properties(source/string/strerror.c PROPERTIES OBJECT_DEPENDS ${STRERROR_TABLE_H})
++
+ zephyr_include_directories(${ZEPHYR_POSIX_NEXT_MODULE_DIR}/include/zephyr/posix)
+diff --git a/lib/libc/minimal/Kconfig b/lib/libc/minimal/Kconfig
+index ecb0602aaf0..7eef9d6c46c 100644
+--- a/lib/libc/minimal/Kconfig
++++ b/lib/libc/minimal/Kconfig
+@@ -6,6 +6,7 @@ if MINIMAL_LIBC
+ config MINIMAL_LIBC_NON_REENTRANT_FUNCTIONS
+ 	bool "Non-reentrant functions"
+ 	default y if !USERSPACE
++	select POSIX_C_LANG_SUPPORT_R
+ 	select NEED_LIBC_MEM_PARTITION
+ 	help
+ 	  Enable non-reentrant functions that make use of the globals; e.g.
+@@ -39,10 +40,9 @@ config MINIMAL_LIBC_TIME
+ 	bool "Time functions"
+ 	select COMMON_LIBC_TIME
+ 	select POSIX_C_LANG_SUPPORT_R
+-	select COMMON_LIBC_GMTIME_R
+ 	select COMMON_LIBC_ASCTIME
+-	select COMMON_LIBC_LOCALTIME_R_UTC
+ 	select COMMON_LIBC_CTIME
++	select COMMON_LIBC_LOCALTIME
+ 	default y
+ 	help
+ 	  Enable time() and gmtime_r() for the minimal libc.
+@@ -50,6 +50,8 @@ config MINIMAL_LIBC_TIME
+ 	  In order to make use of the non-reentrant gmtime(), it is necessary
+ 	  to set CONFIG_MINIMAL_LIBC_NON_REENTRANT_FUNCTIONS=y.
+ 
++endif # MINIMAL_LIBC
++
+ config MINIMAL_LIBC_STRING_ERROR_TABLE
+ 	bool "String error table for strerror() and strerror_r()"
+ 	help
+@@ -60,5 +62,3 @@ config MINIMAL_LIBC_STRING_ERROR_TABLE
+ 	  disabled by default. In this case, strerror() and strerror_r()
+ 	  symbols are still present, but the functions produce an empty
+ 	  string.
+-
+-endif # MINIMAL_LIBC
+diff --git a/lib/libc/minimal/include/string.h b/lib/libc/minimal/include/string.h
+index 0cf173a560e..62bc53e7823 100644
+--- a/lib/libc/minimal/include/string.h
++++ b/lib/libc/minimal/include/string.h
+@@ -27,7 +27,7 @@ extern size_t strlen(const char *s);
+ extern size_t strnlen(const char *s, size_t maxlen);
+ extern int    strcmp(const char *s1, const char *s2);
+ extern int    strncmp(const char *s1, const char *s2, size_t n);
+-extern char  *strtok_r(char *str, const char *sep, char **state);
++extern char  *strtok(char *str, const char *sep);
+ extern char *strcat(char *ZRESTRICT dest,
+ 		    const char *ZRESTRICT src);
+ extern char  *strncat(char *ZRESTRICT dest, const char *ZRESTRICT src,
+diff --git a/lib/libc/minimal/source/stdlib/qsort.c b/lib/libc/minimal/source/stdlib/qsort.c
+index e95ddacf1ca..71f54f4dfe3 100644
+--- a/lib/libc/minimal/source/stdlib/qsort.c
++++ b/lib/libc/minimal/source/stdlib/qsort.c
+@@ -4,117 +4,20 @@
+  * SPDX-License-Identifier: Apache-2.0
+  */
+ 
++#include <stdbool.h>
+ #include <stddef.h>
+-#include <stdint.h>
+ #include <stdlib.h>
+-#include <sys/types.h>
+-#include <zephyr/sys/util.h>
+ 
+-/*
+- * Normally parent is defined parent(k) = floor((k-1) / 2) but we can avoid a
+- * divide by noticing that floor((k-1) / 2) = ((k - 1) >> 1).
+- */
+-
+-#define parent(k) (((k) - 1) >> 1)
+-/*
+- * Normally left is defined left(k) = (2 * k + 1) but we can avoid a
+- * multiply by noticing that (2 * k + 1) = ((k << 1) + 1).
+- */
+-
+-#define left(k) (((k) << 1) + 1)
+-
+-/*
+- * Normally right is defined right(k) = (2 * k + 2) but we can avoid a
+- * multiply by noticing that right(k) = left(k) + 1
+- */
+-#define right(k) (left(k) + 1)
+-
+-#define A(k) ((uint8_t *)base + size * (k))
+-
+-struct qsort_comp {
+-	bool has3;
+-	void *arg;
+-	union {
+-		int (*comp2)(const void *a, const void *b);
+-		int (*comp3)(const void *a, const void *b, void *arg);
+-	};
+-};
+-
+-static inline int compare(struct qsort_comp *cmp, void *a, void *b)
+-{
+-	if (cmp->has3) {
+-		return cmp->comp3(a, b, cmp->arg);
+-	}
+-
+-	return cmp->comp2(a, b);
+-}
+-
+-static void sift_down(void *base, int start, int end, size_t size, struct qsort_comp *cmp)
+-{
+-	int root;
+-	int child;
+-	int swap;
+-
+-	for (swap = start, root = swap; left(root) < end; root = swap) {
+-		child = left(root);
+-
+-		/* if root < left */
+-		if (compare(cmp, A(swap), A(child)) < 0) {
+-			swap = child;
+-		}
+-
+-		/* right exists and min(A(root),A(left)) < A(right) */
+-		if (right(root) < end && compare(cmp, A(swap), A(right(root))) < 0) {
+-			swap = right(root);
+-		}
+-
+-		if (swap == root) {
+-			return;
+-		}
+-
+-		byteswp(A(root), A(swap), size);
+-	}
+-}
+-
+-static void heapify(void *base, int nmemb, size_t size, struct qsort_comp *cmp)
+-{
+-	int start;
+-
+-	for (start = parent(nmemb - 1); start >= 0; --start) {
+-		sift_down(base, start, nmemb, size, cmp);
+-	}
+-}
+-
+-static void heap_sort(void *base, int nmemb, size_t size, struct qsort_comp *cmp)
+-{
+-	int end;
+-
+-	heapify(base, nmemb, size, cmp);
+-
+-	for (end = nmemb - 1; end > 0; --end) {
+-		byteswp(A(end), A(0), size);
+-		sift_down(base, 0, end, size, cmp);
+-	}
+-}
+-
+-void qsort_r(void *base, size_t nmemb, size_t size,
+-	     int (*comp3)(const void *a, const void *b, void *arg), void *arg)
+-{
+-	struct qsort_comp cmp = {
+-		.has3 = true,
+-		.arg = arg,
+-		{
+-			.comp3 = comp3
+-		}
+-	};
+-
+-	heap_sort(base, nmemb, size, &cmp);
+-}
++#include <zephyr/sys/heap_sort.h>
+ 
+ void qsort(void *base, size_t nmemb, size_t size,
+ 	   int (*comp2)(const void *a, const void *b))
+ {
+-	struct qsort_comp cmp = {
++	if (nmemb <= 1) {
++		return;
++	}
++
++	struct heap_sort_comp cmp = {
+ 		.has3 = false,
+ 		.arg = NULL,
+ 		{
+diff --git a/lib/libc/minimal/source/stdlib/rand.c b/lib/libc/minimal/source/stdlib/rand.c
+index 676a9412d6c..5d0c07cafc9 100644
+--- a/lib/libc/minimal/source/stdlib/rand.c
++++ b/lib/libc/minimal/source/stdlib/rand.c
+@@ -7,17 +7,6 @@
+ #include <stdlib.h>
+ #include <zephyr/sys/libc-hooks.h>
+ 
+-#define OUTPUT_BITS (0x7fffffffU)
+-#define MULTIPLIER (1103515245U)
+-#define INCREMENT (12345U)
+-
+-int rand_r(unsigned int *seed)
+-{
+-	*seed = (MULTIPLIER * *seed + INCREMENT) & OUTPUT_BITS;
+-
+-	return *seed;
+-}
+-
+ #ifdef CONFIG_MINIMAL_LIBC_NON_REENTRANT_FUNCTIONS
+ static Z_LIBC_DATA unsigned int srand_seed = 1;
+ 
+diff --git a/lib/libc/minimal/source/string/strerror.c b/lib/libc/minimal/source/string/strerror.c
+index 77dfd8b477a..af4dd3aa9cc 100644
+--- a/lib/libc/minimal/source/string/strerror.c
++++ b/lib/libc/minimal/source/string/strerror.c
+@@ -30,35 +30,3 @@ char *strerror(int errnum)
+ 
+ 	return (char *) "";
+ }
+-
+-/*
+- * See
+- * https://pubs.opengroup.org/onlinepubs/9699919799/functions/strerror_r.html
+- */
+-int strerror_r(int errnum, char *strerrbuf, size_t buflen)
+-{
+-	const char *msg;
+-	size_t msg_len;
+-
+-	if (errnum >= 0 && errnum < sys_nerr) {
+-		if (IS_ENABLED(CONFIG_MINIMAL_LIBC_STRING_ERROR_TABLE)) {
+-			msg = sys_errlist[errnum];
+-			msg_len = sys_errlen[errnum];
+-		} else {
+-			msg = "";
+-			msg_len = 1;
+-		}
+-
+-		if (buflen < msg_len) {
+-			return ERANGE;
+-		}
+-
+-		strncpy(strerrbuf, msg, msg_len);
+-	}
+-
+-	if (errnum < 0 || errnum >= sys_nerr) {
+-		return EINVAL;
+-	}
+-
+-	return 0;
+-}
+diff --git a/lib/libc/minimal/source/string/string.c b/lib/libc/minimal/source/string/string.c
+index c801ef31e39..8b057430642 100644
+--- a/lib/libc/minimal/source/string/string.c
++++ b/lib/libc/minimal/source/string/string.c
+@@ -172,11 +172,12 @@ int strncmp(const char *s1, const char *s2, size_t n)
+  *
+  * @return pointer to NULL terminated string or NULL on errors.
+  */
+-char *strtok_r(char *str, const char *sep, char **state)
++char *strtok(char *str, const char *sep)
+ {
++	static char *state;
+ 	char *start, *end;
+ 
+-	start = str ? str : *state;
++	start = str ? str : state;
+ 
+ 	/* skip leading delimiters */
+ 	while (*start && strchr(sep, *start)) {
+@@ -184,7 +185,7 @@ char *strtok_r(char *str, const char *sep, char **state)
+ 	}
+ 
+ 	if (*start == '\0') {
+-		*state = start;
++		state = start;
+ 		return NULL;
+ 	}
+ 
+@@ -196,9 +197,9 @@ char *strtok_r(char *str, const char *sep, char **state)
+ 
+ 	if (*end != '\0') {
+ 		*end = '\0';
+-		*state = end + 1;
++		state = end + 1;
+ 	} else {
+-		*state = end;
++		state = end;
+ 	}
+ 
+ 	return start;
+diff --git a/lib/utils/CMakeLists.txt b/lib/utils/CMakeLists.txt
+index f6ab864d464..dfc52c5e6b6 100644
+--- a/lib/utils/CMakeLists.txt
++++ b/lib/utils/CMakeLists.txt
+@@ -31,3 +31,5 @@ zephyr_library_include_directories(
+ )
+ 
+ zephyr_sources_ifdef(CONFIG_LINKER_LAST_SECTION_ID last_section_id.c)
++
++zephyr_sources_ifdef(CONFIG_HEAP_SORT heap_sort.c)
+diff --git a/lib/utils/Kconfig b/lib/utils/Kconfig
+index 4db79272bba..e06c7dd04be 100644
+--- a/lib/utils/Kconfig
++++ b/lib/utils/Kconfig
+@@ -82,3 +82,14 @@ config COBS
+ 	  Enable consistent overhead byte stuffing
+ 
+ endmenu
++
++config HEAP_SORT
++	bool "Heap-sort algorithm"
++	help
++	  Provide a common O(1) space, stable, in-place, O(n log n) heap-sort algorithm.
++
++	  This algorithm uses no dynamic memory, ancillary buffers, or recursion and is therefore
++	  suitable for most embedded, memory constrained, or safety-concerned environments.
++
++	  Heap-sort is also a stable sorting algorithm, meaning that it preserves the relative order of
++	  equal elements.
+diff --git a/lib/utils/heap_sort.c b/lib/utils/heap_sort.c
+new file mode 100644
+index 00000000000..ac58b8f5c66
+--- /dev/null
++++ b/lib/utils/heap_sort.c
+@@ -0,0 +1,89 @@
++/*
++ * Copyright (c) 2021 Friedt Professional Engineering Services, Inc
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <stddef.h>
++#include <stdint.h>
++
++#include <zephyr/sys/heap_sort.h>
++#include <zephyr/sys/util.h>
++
++/*
++* Normally parent is defined parent(k) = floor((k-1) / 2) but we can avoid a
++* divide by noticing that floor((k-1) / 2) = ((k - 1) >> 1).
++*/
++
++#define parent(k) (((k) - 1) >> 1)
++/*
++* Normally left is defined left(k) = (2 * k + 1) but we can avoid a
++* multiply by noticing that (2 * k + 1) = ((k << 1) + 1).
++*/
++
++#define left(k) (((k) << 1) + 1)
++
++/*
++* Normally right is defined right(k) = (2 * k + 2) but we can avoid a
++* multiply by noticing that right(k) = left(k) + 1
++*/
++#define right(k) (left(k) + 1)
++
++#define A(k) ((uint8_t *)base + size * (k))
++
++static inline int compare(const struct heap_sort_comp *cmp, void *a, void *b)
++{
++    if (cmp->has3) {
++        return cmp->comp3(a, b, cmp->arg);
++    }
++
++    return cmp->comp2(a, b);
++}
++
++static void sift_down(void *base, int start, int end, size_t size, const struct heap_sort_comp *cmp)
++{
++    int root;
++    int child;
++    int swap;
++
++    for (swap = start, root = swap; left(root) < end; root = swap) {
++        child = left(root);
++
++        /* if root < left */
++        if (compare(cmp, A(swap), A(child)) < 0) {
++            swap = child;
++        }
++
++        /* right exists and min(A(root),A(left)) < A(right) */
++        if (right(root) < end && compare(cmp, A(swap), A(right(root))) < 0) {
++            swap = right(root);
++        }
++
++        if (swap == root) {
++            return;
++        }
++
++        byteswp(A(root), A(swap), size);
++    }
++}
++
++static void heapify(void *base, size_t nmemb, size_t size, const struct heap_sort_comp *cmp)
++{
++    int start;
++
++    for (start = parent(nmemb - 1); start >= 0; --start) {
++        sift_down(base, start, nmemb, size, cmp);
++    }
++}
++
++void heap_sort(void *base, size_t nmemb, size_t size, const struct heap_sort_comp *cmp)
++{
++	int end;
++
++	heapify(base, nmemb, size, cmp);
++
++    for (end = nmemb - 1; end > 0; --end) {
++        byteswp(A(end), A(0), size);
++        sift_down(base, 0, end, size, cmp);
++    }
++}
+diff --git a/tests/lib/c_lib/common/src/main.c b/tests/lib/c_lib/common/src/main.c
+index e5aae4ba459..2b7ec2e6390 100644
+--- a/tests/lib/c_lib/common/src/main.c
++++ b/tests/lib/c_lib/common/src/main.c
+@@ -1005,77 +1005,97 @@ ZTEST(libc_common, test_tolower_toupper)
+ 	zassert_str_equal(lw, tolw, "tolower error");
+ }
+ 
+-void test_strtok_r_do(char *str, char *sep, int tlen,
+-		      const char * const *toks, bool expect)
++struct strtok_test_case {
++	const char *input;
++	const char *sep;
++	int tlen;
++	const char *const *toks;
++	bool expect;
++};
++
++extern const struct strtok_test_case strtok_test_cases[];
++extern const size_t strtok_test_cases_len;
++
++ZTEST(libc_common, test_strtok)
+ {
+-	int len = 0;
+-	char *state, *tok, buf[64+1] = {0};
+-
+-	strncpy(buf, str, 64);
+-
+-	tok = strtok_r(buf, sep, &state);
+-	while (tok && len < tlen) {
+-		if (strcmp(tok, toks[len]) != 0) {
+-			break;
++	for (size_t i = 0; i < strtok_test_cases_len; i++) {
++		const struct strtok_test_case *tc = &strtok_test_cases[i];
++		int len = 0;
++		char *tok;
++		char buf[64 + 1] = { 0 };
++
++		strncpy(buf, tc->input, 64);
++		tok = strtok(buf, tc->sep);
++		while (tok && len < tc->tlen) {
++			if (strcmp(tok, tc->toks[len]) != 0) {
++				break;
++			}
++			tok = strtok(NULL, tc->sep);
++			len++;
++		}
++		if (tc->expect) {
++			zassert_equal(len, tc->tlen, "strtok error '%s' / '%s'", tc->input, tc->sep);
++		} else {
++			zassert_not_equal(len, tc->tlen, "strtok error '%s' / '%s'", tc->input, tc->sep);
+ 		}
+-		tok = strtok_r(NULL, sep, &state);
+-		len++;
+-	}
+-	if (expect) {
+-		zassert_equal(len, tlen,
+-			      "strtok_r error '%s' / '%s'", str, sep);
+-	} else {
+-		zassert_not_equal(len, tlen,
+-				  "strtok_r error '%s' / '%s'", str, sep);
+ 	}
+ }
+ 
+-ZTEST(libc_common, test_strtok_r)
++struct test_qsort_case {
++	const char *name;
++	size_t len;
++	const int *input;
++	const int *expect;
++	size_t base_index;
++	size_t nmemb;
++};
++
++extern const struct test_qsort_case test_qsort_input[];
++extern const size_t test_qsort_input_len;
++
++static int compare_ints(const void *a, const void *b)
++{
++	int aa = *(const int *)a;
++	int bb = *(const int *)b;
++
++	return (aa > bb) - (aa < bb);
++}
++
++ZTEST(libc_common, test_qsort)
+ {
+-	static const char * const tc01[] = { "1", "2", "3", "4", "5" };
+-
+-	test_strtok_r_do("1,2,3,4,5",           ",",  5, tc01, true);
+-	test_strtok_r_do(",, 1 ,2  ,3   4,5  ", ", ", 5, tc01, true);
+-	test_strtok_r_do("1,,,2 3,,,4 5",       ", ", 5, tc01, true);
+-	test_strtok_r_do("1,2 3,,,4 5  ",       ", ", 5, tc01, true);
+-	test_strtok_r_do("0,1,,,2 3,,,4 5",     ", ", 5, tc01, false);
+-	test_strtok_r_do("1,,,2 3,,,4 5",       ",",  5, tc01, false);
+-	test_strtok_r_do("A,,,2,3,,,4 5",       ",",  5, tc01, false);
+-	test_strtok_r_do("1,,,2,3,,,",          ",",  5, tc01, false);
+-	test_strtok_r_do("1|2|3,4|5",           "| ", 5, tc01, false);
++	static int actual_int[93];
++
++	for (size_t i = 0; i < test_qsort_input_len; i++) {
++		const struct test_qsort_case *tc = &test_qsort_input[i];
++
++		memcpy(actual_int, tc->input, tc->len * sizeof(int));
++		qsort(&actual_int[tc->base_index], tc->nmemb, sizeof(int), compare_ints);
++		zassert_mem_equal(actual_int, tc->expect, tc->len * sizeof(int), "%s", tc->name);
++	}
+ }
+ 
+ /**
+  *
+  * @brief Test time function
+  *
+- * @see gmtime(),gmtime_r().
++ * @see gmtime().
+  */
+ ZTEST(libc_common, test_time_gmtime)
+ {
+ 	time_t tests1 = 0;
+ 	time_t tests2 = -5;
+-	time_t tests3 = (time_t) -214748364800;
+-	time_t tests4 = 951868800;
+-
+-	struct tm tp;
+ 
+ 	zassert_not_null(gmtime(&tests1), "gmtime failed");
+ 	zassert_not_null(gmtime(&tests2), "gmtime failed");
+-
+-	tp.tm_wday = -5;
+-	zassert_not_null(gmtime_r(&tests3, &tp), "gmtime_r failed");
+-	zassert_not_null(gmtime_r(&tests4, &tp), "gmtime_r failed");
+ }
+ 
+ /**
+  * @brief Test time function
+  *
+- * @see asctime(), asctime_r().
++ * @see asctime().
+  */
+ ZTEST(libc_common, test_time_asctime)
+ {
+-	char buf[26] = {0};
+ 	struct tm tp = {
+ 		.tm_sec = 10,   /* Seconds */
+ 		.tm_min = 30,   /* Minutes */
+@@ -1086,20 +1106,15 @@ ZTEST(libc_common, test_time_asctime)
+ 		.tm_year = 124, /* Year (current year - 1900) */
+ 	};
+ 
+-	zassert_not_null(asctime_r(&tp, buf));
+-	zassert_equal(strncmp("Fri Jun  1 14:30:10 2024\n", buf, sizeof(buf)), 0);
+-
+ 	zassert_not_null(asctime(&tp));
+-	zassert_equal(strncmp("Fri Jun  1 14:30:10 2024\n", asctime(&tp), sizeof(buf)), 0);
++	zassert_equal(strncmp("Fri Jun  1 14:30:10 2024\n", asctime(&tp), 26), 0);
+ 
+ 	if (IS_ENABLED(CONFIG_COMMON_LIBC_ASCTIME_R)) {
+ 		tp.tm_wday = 8;
+-		zassert_is_null(asctime_r(&tp, buf));
+ 		zassert_is_null(asctime(&tp));
+ 
+ 		tp.tm_wday = 5;
+ 		tp.tm_mon = 12;
+-		zassert_is_null(asctime_r(&tp, buf));
+ 		zassert_is_null(asctime(&tp));
+ 	}
+ }
+@@ -1107,161 +1122,31 @@ ZTEST(libc_common, test_time_asctime)
+ /**
+  * @brief Test time function
+  *
+- * @see localtime(), localtime_r().
++ * @see localtime().
+  */
+ ZTEST(libc_common, test_time_localtime)
+ {
+ 	time_t tests1 = 0;
+ 	time_t tests2 = -5;
+-	time_t tests3 = (time_t) -214748364800;
+-	time_t tests4 = 951868800;
+-
+-	struct tm tp;
+ 
+ 	zassert_not_null(localtime(&tests1), "localtime failed");
+ 	zassert_not_null(localtime(&tests2), "localtime failed");
+-
+-	tp.tm_wday = -5;
+-	zassert_not_null(localtime_r(&tests3, &tp), "localtime_r failed");
+-	zassert_not_null(localtime_r(&tests4, &tp), "localtime_r failed");
+ }
+ 
+ /**
+  * @brief Test time function
+  *
+- * @see ctime(), ctime_r().
++ * @see ctime().
+  */
+ ZTEST(libc_common, test_time_ctime)
+ {
+-	char buf[26] = {0};
+ 	time_t test1 = 1718260000;
+ 
+ #ifdef CONFIG_NATIVE_LIBC
+ 	setenv("TZ", "UTC", 1);
+ #endif
+-	zassert_not_null(ctime_r(&test1, buf));
+-	zassert_equal(strncmp("Thu Jun 13 06:26:40 2024\n", buf, sizeof(buf)), 0);
+-
+ 	zassert_not_null(ctime(&test1));
+-	zassert_equal(strncmp("Thu Jun 13 06:26:40 2024\n", ctime(&test1), sizeof(buf)), 0);
+-}
+-
+-/**
+- *
+- * @brief Test rand function
+- *
+- */
+-ZTEST(libc_common, test_rand)
+-{
+-#ifdef CONFIG_MINIMAL_LIBC
+-	int a;
+-
+-	a = rand();
+-	/* The default seed is 1 */
+-	zassert_equal(a, 1103527590, "rand failed");
+-#else
+-	ztest_test_skip();
+-#endif
+-}
+-
+-/**
+- *
+- * @brief Test srand function
+- *
+- */
+-ZTEST(libc_common, test_srand)
+-{
+-#ifdef CONFIG_MINIMAL_LIBC
+-	int a;
+-
+-	srand(0);
+-	a = rand();
+-	zassert_equal(a, 12345, "srand with seed 0 failed");
+-
+-	srand(1);
+-	a = rand();
+-	zassert_equal(a, 1103527590, "srand with seed 1 failed");
+-
+-	srand(10);
+-	a = rand();
+-	zassert_equal(a, 297746555, "srand with seed 10 failed");
+-
+-	srand(UINT_MAX - 1);
+-	a = rand();
+-	zassert_equal(a, 2087949151, "srand with seed UINT_MAX - 1 failed");
+-
+-	srand(UINT_MAX);
+-	a = rand();
+-	zassert_equal(a, 1043980748, "srand with seed UINT_MAX failed");
+-#else
+-	ztest_test_skip();
+-#endif
+-}
+-
+-/**
+- *
+- * @brief Test rand function for reproducibility
+- *
+- */
+-ZTEST(libc_common, test_rand_reproducibility)
+-{
+-#ifdef CONFIG_MINIMAL_LIBC
+-	int a;
+-	int b;
+-	int c;
+-
+-	srand(0);
+-	a = rand();
+-	zassert_equal(a, 12345, "srand with seed 0 failed");
+-	srand(0);
+-	b = rand();
+-	zassert_equal(b, 12345, "srand with seed 0 failed (2nd)");
+-	srand(0);
+-	c = rand();
+-	zassert_equal(c, 12345, "srand with seed 0 failed (3rd)");
+-
+-	srand(1);
+-	a = rand();
+-	zassert_equal(a, 1103527590, "srand with seed 1 failed");
+-	srand(1);
+-	b = rand();
+-	zassert_equal(b, 1103527590, "srand with seed 1 failed (2nd)");
+-	srand(1);
+-	c = rand();
+-	zassert_equal(c, 1103527590, "srand with seed 1 failed (3rd)");
+-
+-	srand(10);
+-	a = rand();
+-	zassert_equal(a, 297746555, "srand with seed 10 failed");
+-	srand(10);
+-	b = rand();
+-	zassert_equal(b, 297746555, "srand with seed 10 failed (2nd)");
+-	srand(10);
+-	c = rand();
+-	zassert_equal(c, 297746555, "srand with seed 10 failed (3rd)");
+-
+-	srand(UINT_MAX - 1);
+-	a = rand();
+-	zassert_equal(a, 2087949151, "srand with seed UINT_MAX - 1 failed");
+-	srand(UINT_MAX - 1);
+-	b = rand();
+-	zassert_equal(b, 2087949151, "srand with seed UINT_MAX - 1 failed (2nd)");
+-	srand(UINT_MAX - 1);
+-	c = rand();
+-	zassert_equal(c, 2087949151, "srand with seed UINT_MAX - 1 failed (3rd)");
+-
+-	srand(UINT_MAX);
+-	a = rand();
+-	zassert_equal(a, 1043980748, "srand with seed UINT_MAX failed");
+-	srand(UINT_MAX);
+-	b = rand();
+-	zassert_equal(b, 1043980748, "srand with seed UINT_MAX failed (2nd)");
+-	srand(UINT_MAX);
+-	c = rand();
+-	zassert_equal(c, 1043980748, "srand with seed UINT_MAX failed (3rd)");
+-#else
+-	ztest_test_skip();
+-#endif
++	zassert_equal(strncmp("Thu Jun 13 06:26:40 2024\n", ctime(&test1), 26), 0);
+ }
+ 
+ /**
+diff --git a/tests/lib/c_lib/common/src/qsort_test_data.c b/tests/lib/c_lib/common/src/qsort_test_data.c
+new file mode 100644
+index 00000000000..68e9ef54cc4
+--- /dev/null
++++ b/tests/lib/c_lib/common/src/qsort_test_data.c
+@@ -0,0 +1,89 @@
++/*
++ * Copyright (c) 2021 Friedt Professional Engineering Services, Inc.
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <stddef.h>
++
++#include <zephyr/sys/util.h>
++
++static const int test_qsort_input_0[] = { 1, 3, 2 };
++static const int test_qsort_expect_0[] = { 1, 3, 2 };
++
++static const int test_qsort_input_1[] = { 42 };
++static const int test_qsort_expect_1[] = { 42 };
++
++static const int test_qsort_input_2[] = { 42, -42 };
++static const int test_qsort_expect_2[] = { -42, 42 };
++
++static const int test_qsort_input_3[] = { 42, -42, 0 };
++static const int test_qsort_expect_3[] = { -42, 0, 42 };
++
++static const int test_qsort_input_4[] = { 42, -42, 0, -42 };
++static const int test_qsort_expect_4[] = { -42, -42, 0, 42 };
++
++static const int test_qsort_input_5[] = {
++	1,   18,  -78, 35,  -67, -71, -12, -69, -60, 91,  -15, -99, -33,
++	-52, 52,  -4,  -89, -7,  22,  -52, -87, 32,  -23, 30,  -35, -9,
++	15,  -61, 36,  -49, 24,  -72, -63, 77,  88,  -93, 13,  49,  41,
++	35,  -5,  -72, -46, 64,  -46, -97, -88, 90,  63,  49,  12,  -58,
++	-76, 54,  75,  49,  11,  61,  42,  0,   -42, 42,  -42,
++};
++
++static const int test_qsort_expect_5[] = {
++	-99, -97, -93, -89, -88, -87, -78, -76, -72, -72, -71, -69, -67,
++	-63, -61, -60, -58, -52, -52, -49, -46, -46, -42, -42, -35, -33,
++	-23, -15, -12, -9,  -7,  -5,  -4,  0,   1,   11,  12,  13,  15,
++	18,  22,  24,  30,  32,  35,  35,  36,  41,  42,  42,  49,  49,
++	49,  52,  54,  61,  63,  64,  75,  77,  88,  90,  91,
++};
++
++static const int test_qsort_input_6[] = {
++	1,   18,  -78, 35,  -67, -71, -12, -69, -60, 91,  -15, -99, -33, -52,
++	52,  -4,  -89, -7,  22,  -52, -87, 32,  -23, 30,  -35, -9,  15,  -61,
++	36,  -49, 24,  -72, -63, 77,  88,  -93, 13,  49,  41,  35,  -5,  -72,
++	-46, 64,  -46, -97, 90,  63,  49,  12,  -58, -76, 54,  75,  49,  11,
++	61,  -45, 92,  7,   74,  -3,  -9,  96,  83,  33,  15,  -40, -84, -57,
++	40,  -93, -27, 38,  24,  41,  -70, -51, -88, 27,  94,  51,  -11, -2,
++	-21, -70, -6,  77,  42,  0,   -42, 42,  -42,
++};
++
++static const int test_qsort_expect_6[] = {
++	-99, -97, -93, -93, -89, -88, -87, -84, -78, -76, -72, -72, -71, -70,
++	-70, -69, -67, -63, -61, -60, -58, -57, -52, -52, -51, -49, -46, -46,
++	-45, -42, -42, -40, -35, -33, -27, -23, -21, -15, -12, -11, -9,  -9,
++	-7,  -6,  -5,  -4,  -3,  -2,  0,   1,   7,   11,  12,  13,  15,  15,
++	18,  22,  24,  24,  27,  30,  32,  33,  35,  35,  36,  38,  40,  41,
++	41,  42,  42,  49,  49,  49,  51,  52,  54,  61,  63,  64,  74,  75,
++	77,  77,  83,  88,  90,  91,  92,  94,  96,
++};
++
++struct test_qsort_case {
++	const char *name;
++	size_t len;
++	const int *input;
++	const int *expect;
++	size_t base_index;
++	size_t nmemb;
++};
++
++const struct test_qsort_case test_qsort_input[] = {
++	/* qsort(base+1, 0, ...) must not touch buf */
++	{ "out-of-bounds modifications detected", ARRAY_SIZE(test_qsort_input_0),
++	  test_qsort_input_0, test_qsort_expect_0, 1, 0 },
++	{ "size 1 not sorted", ARRAY_SIZE(test_qsort_input_1), test_qsort_input_1,
++	  test_qsort_expect_1, 0, ARRAY_SIZE(test_qsort_input_1) },
++	{ "size 2 not sorted", ARRAY_SIZE(test_qsort_input_2), test_qsort_input_2,
++	  test_qsort_expect_2, 0, ARRAY_SIZE(test_qsort_input_2) },
++	{ "size 3 not sorted", ARRAY_SIZE(test_qsort_input_3), test_qsort_input_3,
++	  test_qsort_expect_3, 0, ARRAY_SIZE(test_qsort_input_3) },
++	{ "error handling duplicates", ARRAY_SIZE(test_qsort_input_4), test_qsort_input_4,
++	  test_qsort_expect_4, 0, ARRAY_SIZE(test_qsort_input_4) },
++	{ "size 64 not sorted", ARRAY_SIZE(test_qsort_input_5), test_qsort_input_5,
++	  test_qsort_expect_5, 0, ARRAY_SIZE(test_qsort_input_5) },
++	{ "size 93 not sorted", ARRAY_SIZE(test_qsort_input_6), test_qsort_input_6,
++	  test_qsort_expect_6, 0, ARRAY_SIZE(test_qsort_input_6) },
++};
++
++const size_t test_qsort_input_len = ARRAY_SIZE(test_qsort_input);
+diff --git a/tests/lib/c_lib/common/src/strtok_test_data.c b/tests/lib/c_lib/common/src/strtok_test_data.c
+new file mode 100644
+index 00000000000..5e8ae0cd844
+--- /dev/null
++++ b/tests/lib/c_lib/common/src/strtok_test_data.c
+@@ -0,0 +1,34 @@
++/*
++ * Copyright (c) 2017 Intel Corporation
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <stdbool.h>
++#include <stddef.h>
++
++#include <zephyr/sys/util.h>
++
++struct strtok_test_case {
++	const char *input;
++	const char *sep;
++	int tlen;
++	const char *const *toks;
++	bool expect;
++};
++
++static const char *const strtok_toks_01[] = { "1", "2", "3", "4", "5" };
++
++const struct strtok_test_case strtok_test_cases[] = {
++	{ "1,2,3,4,5", ",", 5, strtok_toks_01, true },
++	{ ",, 1 ,2  ,3   4,5  ", ", ", 5, strtok_toks_01, true },
++	{ "1,,,2 3,,,4 5", ", ", 5, strtok_toks_01, true },
++	{ "1,2 3,,,4 5  ", ", ", 5, strtok_toks_01, true },
++	{ "0,1,,,2 3,,,4 5", ", ", 5, strtok_toks_01, false },
++	{ "1,,,2 3,,,4 5", ",", 5, strtok_toks_01, false },
++	{ "A,,,2,3,,,4 5", ",", 5, strtok_toks_01, false },
++	{ "1,,,2,3,,,", ",", 5, strtok_toks_01, false },
++	{ "1|2|3,4|5", "| ", 5, strtok_toks_01, false },
++};
++
++const size_t strtok_test_cases_len = ARRAY_SIZE(strtok_test_cases);
+diff --git a/tests/lib/c_lib/common/src/test_qsort.c b/tests/lib/c_lib/common/src/test_qsort.c
+deleted file mode 100644
+index 37db119803f..00000000000
+--- a/tests/lib/c_lib/common/src/test_qsort.c
++++ /dev/null
+@@ -1,153 +0,0 @@
+-/*
+- * Copyright (c) 2021 Friedt Professional Engineering Services, Inc
+- *
+- * SPDX-License-Identifier: Apache-2.0
+- */
+-
+-#define _GNU_SOURCE
+-#include <stdbool.h>
+-#include <stdlib.h>
+-#include <zephyr/ztest.h>
+-
+-static int compare_ints(const void *a, const void *b)
+-{
+-	int aa = *(const int *)a;
+-	int bb = *(const int *)b;
+-
+-	return (aa > bb) - (aa < bb);
+-}
+-
+-/**
+- *
+- * @brief Test qsort function
+- *
+- */
+-ZTEST(libc_common, test_qsort)
+-{
+-	{
+-		int actual_int[] = { 1, 3, 2 };
+-		const int expect_int[] = { 1, 3, 2 };
+-
+-		qsort(actual_int + 1, 0, sizeof(int), compare_ints);
+-		zassert_mem_equal(actual_int, expect_int, sizeof(expect_int),
+-				  "out-of-bounds modifications detected");
+-	}
+-
+-	{
+-		int actual_int[] = { 42 };
+-		const int expect_int[] = { 42 };
+-
+-		qsort(actual_int, ARRAY_SIZE(actual_int), sizeof(int), compare_ints);
+-		zassert_mem_equal(actual_int, expect_int, sizeof(expect_int),
+-				  "size 1 not sorted");
+-	}
+-
+-	{
+-		int actual_int[] = { 42, -42 };
+-		const int expect_int[] = { -42, 42 };
+-
+-		qsort(actual_int, ARRAY_SIZE(actual_int), sizeof(int), compare_ints);
+-		zassert_mem_equal(actual_int, expect_int, sizeof(expect_int),
+-				  "size 2 not sorted");
+-	}
+-
+-	{
+-		int actual_int[] = { 42, -42, 0 };
+-		const int expect_int[] = { -42, 0, 42 };
+-
+-		qsort(actual_int, ARRAY_SIZE(actual_int), sizeof(int), compare_ints);
+-		zassert_mem_equal(actual_int, expect_int, sizeof(expect_int),
+-				  "size 3 not sorted");
+-	}
+-
+-	{
+-		int actual_int[] = { 42, -42, 0, -42 };
+-		const int expect_int[] = { -42, -42, 0, 42 };
+-
+-		qsort(actual_int, ARRAY_SIZE(actual_int), sizeof(int), compare_ints);
+-		zassert_mem_equal(actual_int, expect_int, sizeof(expect_int),
+-				  "error handling duplicates");
+-	}
+-
+-	{
+-		/*
+-		 * NUMS="$(for i in `seq 0 63`; do echo -n "$(((RANDOM - 16384) % 100)), "; done)"
+-		 * slightly modified to ensure that there were 0, -ve and +ve duplicates
+-		 */
+-		static int actual_int[] = {
+-			1,   18,  -78, 35,  -67, -71, -12, -69, -60, 91,  -15, -99, -33,
+-			-52, 52,  -4,  -89, -7,	 22,  -52, -87, 32,  -23, 30,  -35, -9,
+-			15,  -61, 36,  -49, 24,	 -72, -63, 77,	88,  -93, 13,  49,  41,
+-			35,  -5,  -72, -46, 64,	 -46, -97, -88, 90,  63,  49,  12,  -58,
+-			-76, 54,  75,  49,  11,	 61,  42,  0,	-42, 42,  -42,
+-		};
+-
+-		/* echo $(echo "$NUMS" | sed -e 's/,/\n/g' | sort -n | sed -e 's/\(.*\)/\1,\ /g') */
+-		static const int expect_int[] = {
+-			-99, -97, -93, -89, -88, -87, -78, -76, -72, -72, -71, -69, -67,
+-			-63, -61, -60, -58, -52, -52, -49, -46, -46, -42, -42, -35, -33,
+-			-23, -15, -12, -9,  -7,	 -5,  -4,  0,	1,   11,  12,  13,  15,
+-			18,  22,  24,  30,  32,	 35,  35,  36,	41,  42,  42,  49,  49,
+-			49,  52,  54,  61,  63,	 64,  75,  77,	88,  90,  91,
+-		};
+-
+-		qsort(actual_int, ARRAY_SIZE(actual_int), sizeof(int), compare_ints);
+-		zassert_mem_equal(actual_int, expect_int, sizeof(expect_int),
+-				  "size 64 not sorted");
+-	}
+-
+-	{
+-		/*
+-		 * NUMS="$(for i in `seq 0 92`; do echo -n "$(((RANDOM - 16384) % 100)), "; done)"
+-		 * slightly modified to ensure that there were 0, -ve and +ve duplicates
+-		 */
+-		static int actual_int[] = {
+-			1,   18,  -78, 35,  -67, -71, -12, -69, -60, 91,  -15, -99, -33, -52,
+-			52,  -4,  -89, -7,  22,	 -52, -87, 32,	-23, 30,  -35, -9,  15,	 -61,
+-			36,  -49, 24,  -72, -63, 77,  88,  -93, 13,  49,  41,  35,  -5,	 -72,
+-			-46, 64,  -46, -97, 90,	 63,  49,  12,	-58, -76, 54,  75,  49,	 11,
+-			61,  -45, 92,  7,   74,	 -3,  -9,  96,	83,  33,  15,  -40, -84, -57,
+-			40,  -93, -27, 38,  24,	 41,  -70, -51, -88, 27,  94,  51,  -11, -2,
+-			-21, -70, -6,  77,  42,	 0,   -42, 42,	-42,
+-		};
+-
+-		/* echo $(echo "$NUMS" | sed -e 's/,/\n/g' | sort -n | sed -e 's/\(.*\)/\1,\ /g') */
+-		static const int expect_int[] = {
+-			-99, -97, -93, -93, -89, -88, -87, -84, -78, -76, -72, -72, -71, -70,
+-			-70, -69, -67, -63, -61, -60, -58, -57, -52, -52, -51, -49, -46, -46,
+-			-45, -42, -42, -40, -35, -33, -27, -23, -21, -15, -12, -11, -9,	 -9,
+-			-7,  -6,  -5,  -4,  -3,	 -2,  0,   1,	7,   11,  12,  13,  15,	 15,
+-			18,  22,  24,  24,  27,	 30,  32,  33,	35,  35,  36,  38,  40,	 41,
+-			41,  42,  42,  49,  49,	 49,  51,  52,	54,  61,  63,  64,  74,	 75,
+-			77,  77,  83,  88,  90,	 91,  92,  94,	96,
+-		};
+-
+-		qsort(actual_int, ARRAY_SIZE(actual_int), sizeof(int), compare_ints);
+-		zassert_mem_equal(actual_int, expect_int, sizeof(expect_int),
+-				  "size 93 not sorted");
+-	}
+-}
+-
+-static int compare_ints_with_boolp_arg(const void *a, const void *b, void *argp)
+-{
+-	int aa = *(const int *)a;
+-	int bb = *(const int *)b;
+-
+-	*(bool *)argp = true;
+-
+-	return (aa > bb) - (aa < bb);
+-}
+-
+-ZTEST(libc_common, test_qsort_r)
+-{
+-	bool arg = false;
+-
+-	const int expect_int[] = { 1, 5, 7 };
+-	int actual_int[] = { 1, 7, 5 };
+-
+-	qsort_r(actual_int, ARRAY_SIZE(actual_int), sizeof(actual_int[0]),
+-		compare_ints_with_boolp_arg, &arg);
+-
+-	zassert_mem_equal(actual_int, expect_int, sizeof(expect_int), "array not sorted");
+-	zassert_true(arg, "arg not modified");
+-}
