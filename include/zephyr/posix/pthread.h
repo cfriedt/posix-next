@@ -54,17 +54,17 @@ extern "C" {
 /** @brief Thread inherits the scheduling policy of its creator (default).  @ingroup posix_option_thread_priority_scheduling*/
 #define PTHREAD_INHERIT_SCHED  0
 #endif
-/** @brief Default mutex type; behaviour on deadlock/unlock-by-non-owner is undefined.  @ingroup posix_option_group_threads_base*/
+/** @brief Default mutex type; behaviour on deadlock/unlock-by-non-owner is undefined.  @ingroup posix_option_group_posix_threads_ext*/
 #define PTHREAD_MUTEX_DEFAULT       3
-/** @brief Mutex that returns an error on deadlock or unlock by a non-owner.  @ingroup posix_option_group_threads_base*/
+/** @brief Mutex that returns an error on deadlock or unlock by a non-owner.  @ingroup posix_option_group_posix_threads_ext*/
 #define PTHREAD_MUTEX_ERRORCHECK    2
-/** @brief Non-recursive mutex with no error checks (fastest).  @ingroup posix_option_group_threads_base*/
+/** @brief Non-recursive mutex with no error checks (fastest).  @ingroup posix_option_group_posix_threads_ext*/
 #define PTHREAD_MUTEX_NORMAL        0
-/** @brief Recursive mutex; the owning thread may lock it multiple times.  @ingroup posix_option_group_threads_base*/
+/** @brief Recursive mutex; the owning thread may lock it multiple times.  @ingroup posix_option_group_posix_threads_ext*/
 #define PTHREAD_MUTEX_RECURSIVE     1
-/** @brief Robust mutex; the state is recoverable if the owner dies.  @ingroup posix_option_group_threads_base*/
+/** @brief Robust mutex; the state is recoverable if the owner dies. @ingroup posix_option_group_robust_mutexes */
 #define PTHREAD_MUTEX_ROBUST        4
-/** @brief Mutex is not recovered on owner death (default, for non-robust mutexes).  @ingroup posix_option_group_threads_base*/
+/** @brief Mutex is not recovered on owner death (default, for non-robust mutexes). @ingroup posix_option_group_robust_mutexes */
 #define PTHREAD_MUTEX_STALLED       1
 /** @brief Static initialiser for pthread_once_t objects.  @ingroup posix_option_group_threads_base*/
 #define PTHREAD_ONCE_INIT           _PTHREAD_ONCE_INITIALIZER
@@ -81,9 +81,9 @@ extern "C" {
 /** @brief Mutex protocol: owner runs at ceiling priority while holding the mutex.  @ingroup posix_option_thread_prio_protect*/
 #define PTHREAD_PRIO_PROTECT 2
 #endif
-/** @brief Mutex or barrier attribute: object is shared between processes.  @ingroup posix_option_group_threads_base*/
+/** @brief Mutex or barrier attribute: object is shared between processes. @ingroup posix_option_thread_process_shared */
 #define PTHREAD_PROCESS_SHARED  1
-/** @brief Mutex or barrier attribute: object is private to the process (default).  @ingroup posix_option_group_threads_base*/
+/** @brief Mutex or barrier attribute: object is private to the process (default). @ingroup posix_option_thread_process_shared */
 #define PTHREAD_PROCESS_PRIVATE 0
 #if defined(_POSIX_THREAD_PRIORITY_SCHEDULING) || defined(__DOXYGEN__)
 /** @brief Thread competes for resources only with threads in the same process.  @ingroup posix_option_thread_priority_scheduling*/
@@ -138,7 +138,7 @@ int pthread_attr_getdetachstate(const pthread_attr_t *attr, int *detachstate);
 
 /**
  * @brief Get the guard size attribute of a thread attributes object.
- * @ingroup posix_option_group_threads_base
+ * @ingroup posix_option_group_posix_threads_ext
  * @param attr      Thread attributes object.
  * @param guardsize Output: guard size in bytes.
  * @return 0 on success, or a positive error number on failure.
@@ -192,7 +192,7 @@ int pthread_attr_getschedpolicy(const pthread_attr_t *ZRESTRICT attr, int *ZREST
 int pthread_attr_getscope(const pthread_attr_t *ZRESTRICT attr, int *ZRESTRICT contentionscope);
 #endif
 
-#if defined(_POSIX_THREAD_ATTR_STACKADDR) || defined(_POSIX_THREAD_ATTR_STACKSIZE) ||              \
+#if (defined(_POSIX_THREAD_ATTR_STACKADDR) && defined(_POSIX_THREAD_ATTR_STACKSIZE)) ||          \
 	defined(__DOXYGEN__)
 /**
  * @brief Get the stack address and size attributes of a thread attributes object.
@@ -240,7 +240,7 @@ int pthread_attr_setdetachstate(pthread_attr_t *attr, int detachstate);
 
 /**
  * @brief Set the guard size attribute of a thread attributes object.
- * @ingroup posix_option_group_threads_base
+ * @ingroup posix_option_group_posix_threads_ext
  * @param attr      Thread attributes object.
  * @param guardsize Guard size in bytes.
  * @return 0 on success, or a positive error number on failure.
@@ -293,7 +293,7 @@ int pthread_attr_setschedpolicy(pthread_attr_t *attr, int policy);
 int pthread_attr_setscope(pthread_attr_t *attr, int contentionscope);
 #endif
 
-#if defined(_POSIX_THREAD_ATTR_STACKADDR) || defined(_POSIX_THREAD_ATTR_STACKSIZE) ||              \
+#if (defined(_POSIX_THREAD_ATTR_STACKADDR) && defined(_POSIX_THREAD_ATTR_STACKSIZE)) ||          \
 	defined(__DOXYGEN__)
 /**
  * @brief Set the stack address and size attributes of a thread attributes object.
@@ -421,7 +421,7 @@ int pthread_cancel(pthread_t thread);
  */
 int pthread_cond_broadcast(pthread_cond_t *cond);
 
-#if (_POSIX_C_SOURCE >= 202412L) || defined(__DOXYGEN__)
+#if (_POSIX_C_SOURCE >= 202405L) || defined(__DOXYGEN__)
 /**
  * @brief Wait on a condition variable with a specific clock.
  * @ingroup posix_option_group_clock_selection
@@ -464,6 +464,7 @@ int pthread_cond_init(pthread_cond_t *ZRESTRICT cond, const pthread_condattr_t *
  */
 int pthread_cond_signal(pthread_cond_t *cond);
 
+#if defined(_POSIX_TIMEOUTS) || defined(__DOXYGEN__)
 /**
  * @brief Wait on a condition variable with an absolute timeout (CLOCK_REALTIME).
  * @ingroup posix_option_group_threads_base
@@ -475,6 +476,7 @@ int pthread_cond_signal(pthread_cond_t *cond);
  */
 int pthread_cond_timedwait(pthread_cond_t *ZRESTRICT cond, pthread_mutex_t *ZRESTRICT mutex,
 			   const struct timespec *ZRESTRICT abstime);
+#endif
 
 /**
  * @brief Wait on a condition variable.
@@ -497,7 +499,7 @@ int pthread_condattr_destroy(pthread_condattr_t *attr);
 
 /**
  * @brief Get the clock attribute of a condition variable attributes object.
- * @ingroup posix_option_group_threads_base
+ * @ingroup posix_option_group_clock_selection
  * @param attr     Condition variable attributes object.
  * @param clock_id Output: clock ID.
  * @return 0 on success, or a positive error number on failure.
@@ -509,7 +511,7 @@ int pthread_condattr_getclock(const pthread_condattr_t *ZRESTRICT attr,
 #if defined(_POSIX_THREAD_PROCESS_SHARED) || defined(__DOXYGEN__)
 /**
  * @brief Get the process-shared attribute of a condition variable attributes object.
- * @ingroup posix_option_group_threads_base
+ * @ingroup posix_option_thread_process_shared
  * @param attr    Condition variable attributes object.
  * @param pshared Output: @c PTHREAD_PROCESS_SHARED or @c PTHREAD_PROCESS_PRIVATE.
  * @return 0 on success, or a positive error number on failure.
@@ -529,7 +531,7 @@ int pthread_condattr_init(pthread_condattr_t *attr);
 
 /**
  * @brief Set the clock attribute of a condition variable attributes object.
- * @ingroup posix_option_group_threads_base
+ * @ingroup posix_option_group_clock_selection
  * @param attr     Condition variable attributes object.
  * @param clock_id Clock ID (e.g. @c CLOCK_MONOTONIC or @c CLOCK_REALTIME).
  * @return 0 on success, or a positive error number on failure.
@@ -540,7 +542,7 @@ int pthread_condattr_setclock(pthread_condattr_t *attr, clockid_t clock_id);
 #if defined(_POSIX_THREAD_PROCESS_SHARED) || defined(__DOXYGEN__)
 /**
  * @brief Set the process-shared attribute of a condition variable attributes object.
- * @ingroup posix_option_group_threads_base
+ * @ingroup posix_option_thread_process_shared
  * @param attr    Condition variable attributes object.
  * @param pshared @c PTHREAD_PROCESS_SHARED or @c PTHREAD_PROCESS_PRIVATE.
  * @return 0 on success, or a positive error number on failure.
@@ -669,7 +671,7 @@ int pthread_key_delete(pthread_key_t key);
 
 /**
  * @brief Mark a robust mutex as consistent after recovering from owner death.
- * @ingroup posix_option_group_threads_base
+ * @ingroup posix_option_group_robust_mutexes
  * @param mutex Robust mutex to mark consistent.
  * @return 0 on success, or a positive error number on failure.
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_mutex_consistent.html
@@ -731,6 +733,7 @@ int pthread_mutex_setprioceiling(pthread_mutex_t *ZRESTRICT mutex, int prioceili
 				 int *ZRESTRICT old_ceiling);
 #endif
 
+#if defined(_POSIX_TIMEOUTS) || defined(__DOXYGEN__)
 /**
  * @brief Lock a mutex with an absolute timeout.
  * @ingroup posix_option_group_threads_base
@@ -741,6 +744,7 @@ int pthread_mutex_setprioceiling(pthread_mutex_t *ZRESTRICT mutex, int prioceili
  */
 int pthread_mutex_timedlock(pthread_mutex_t *ZRESTRICT mutex,
 			    const struct timespec *ZRESTRICT abstime);
+#endif
 
 /**
  * @brief Try to lock a mutex without blocking.
@@ -800,7 +804,7 @@ int pthread_mutexattr_getprotocol(const pthread_mutexattr_t *ZRESTRICT attr,
 #if defined(_POSIX_THREAD_PROCESS_SHARED) || defined(__DOXYGEN__)
 /**
  * @brief Get the process-shared attribute of a mutex attributes object.
- * @ingroup posix_option_group_threads_base
+ * @ingroup posix_option_thread_process_shared
  * @param attr    Mutex attributes object.
  * @param pshared Output: @c PTHREAD_PROCESS_SHARED or @c PTHREAD_PROCESS_PRIVATE.
  * @return 0 on success, or a positive error number on failure.
@@ -811,7 +815,7 @@ int pthread_mutexattr_getpshared(const pthread_mutexattr_t *ZRESTRICT attr, int 
 
 /**
  * @brief Get the robustness attribute of a mutex attributes object.
- * @ingroup posix_option_group_threads_base
+ * @ingroup posix_option_group_robust_mutexes
  * @param attr   Mutex attributes object.
  * @param robust Output: @c PTHREAD_MUTEX_STALLED or @c PTHREAD_MUTEX_ROBUST.
  * @return 0 on success, or a positive error number on failure.
@@ -821,7 +825,7 @@ int pthread_mutexattr_getrobust(const pthread_mutexattr_t *ZRESTRICT attr, int *
 
 /**
  * @brief Get the type attribute of a mutex attributes object.
- * @ingroup posix_option_group_threads_base
+ * @ingroup posix_option_group_posix_threads_ext
  * @param attr Mutex attributes object.
  * @param type Output: @c PTHREAD_MUTEX_NORMAL, @c PTHREAD_MUTEX_ERRORCHECK,
  *             @c PTHREAD_MUTEX_RECURSIVE, or @c PTHREAD_MUTEX_DEFAULT.
@@ -867,7 +871,7 @@ int pthread_mutexattr_setprotocol(pthread_mutexattr_t *attr, int protocol);
 #if defined(_POSIX_THREAD_PROCESS_SHARED) || defined(__DOXYGEN__)
 /**
  * @brief Set the process-shared attribute of a mutex attributes object.
- * @ingroup posix_option_group_threads_base
+ * @ingroup posix_option_thread_process_shared
  * @param attr    Mutex attributes object.
  * @param pshared @c PTHREAD_PROCESS_SHARED or @c PTHREAD_PROCESS_PRIVATE.
  * @return 0 on success, or a positive error number on failure.
@@ -878,7 +882,7 @@ int pthread_mutexattr_setpshared(pthread_mutexattr_t *attr, int pshared);
 
 /**
  * @brief Set the robustness attribute of a mutex attributes object.
- * @ingroup posix_option_group_threads_base
+ * @ingroup posix_option_group_robust_mutexes
  * @param attr   Mutex attributes object.
  * @param robust @c PTHREAD_MUTEX_STALLED or @c PTHREAD_MUTEX_ROBUST.
  * @return 0 on success, or a positive error number on failure.
@@ -888,7 +892,7 @@ int pthread_mutexattr_setrobust(pthread_mutexattr_t *attr, int robust);
 
 /**
  * @brief Set the type attribute of a mutex attributes object.
- * @ingroup posix_option_group_threads_base
+ * @ingroup posix_option_group_posix_threads_ext
  * @param attr Mutex attributes object.
  * @param type @c PTHREAD_MUTEX_NORMAL, @c PTHREAD_MUTEX_ERRORCHECK,
  *             @c PTHREAD_MUTEX_RECURSIVE, or @c PTHREAD_MUTEX_DEFAULT.
@@ -940,6 +944,7 @@ int pthread_rwlock_init(pthread_rwlock_t *ZRESTRICT rwlock,
  */
 int pthread_rwlock_rdlock(pthread_rwlock_t *rwlock);
 
+#if defined(_POSIX_TIMEOUTS) || defined(__DOXYGEN__)
 /**
  * @brief Acquire a read lock with an absolute timeout.
  * @ingroup posix_option_group_rw_locks
@@ -950,7 +955,9 @@ int pthread_rwlock_rdlock(pthread_rwlock_t *rwlock);
  */
 int pthread_rwlock_timedrdlock(pthread_rwlock_t *ZRESTRICT rwlock,
 			       const struct timespec *ZRESTRICT abstime);
+#endif
 
+#if defined(_POSIX_TIMEOUTS) || defined(__DOXYGEN__)
 /**
  * @brief Acquire a write lock with an absolute timeout.
  * @ingroup posix_option_group_rw_locks
@@ -961,6 +968,7 @@ int pthread_rwlock_timedrdlock(pthread_rwlock_t *ZRESTRICT rwlock,
  */
 int pthread_rwlock_timedwrlock(pthread_rwlock_t *ZRESTRICT rwlock,
 			       const struct timespec *ZRESTRICT abstime);
+#endif
 
 /**
  * @brief Try to acquire a read lock without blocking.
@@ -1209,7 +1217,7 @@ void pthread_testcancel(void);
 
 /**
  * @brief Get the name of a thread (GNU extension).
- * @ingroup posix_option_group_posix_threads_ext
+ * @ingroup posix_option_group_non_portable
  * @param thread Thread to query.
  * @param name   Output buffer for the name.
  * @param len    Size of @p name buffer.
@@ -1220,7 +1228,7 @@ int pthread_getname_np(pthread_t thread, char *name, size_t len);
 
 /**
  * @brief Set the name of a thread (GNU extension).
- * @ingroup posix_option_group_posix_threads_ext
+ * @ingroup posix_option_group_non_portable
  * @param thread Thread to name.
  * @param name   Null-terminated name string (max 15 characters + NUL).
  * @return 0 on success, or a positive error number on failure.
@@ -1230,7 +1238,7 @@ int pthread_setname_np(pthread_t thread, const char *name);
 
 /**
  * @brief Wait for a thread to terminate with an absolute timeout (GNU extension).
- * @ingroup posix_option_group_posix_threads_ext
+ * @ingroup posix_option_group_non_portable
  * @param thread  Thread to wait for.
  * @param status  Output: exit value or @c PTHREAD_CANCELED.
  * @param abstime Absolute timeout (CLOCK_REALTIME).
@@ -1241,7 +1249,7 @@ int pthread_timedjoin_np(pthread_t thread, void **status, const struct timespec 
 
 /**
  * @brief Try to join a thread without blocking (GNU extension).
- * @ingroup posix_option_group_posix_threads_ext
+ * @ingroup posix_option_group_non_portable
  * @param thread Thread to try to join.
  * @param status Output: exit value if joined, or unchanged if not yet terminated.
  * @return 0 if joined, @c EBUSY if the thread has not yet terminated,
