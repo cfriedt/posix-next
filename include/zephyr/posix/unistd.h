@@ -87,13 +87,13 @@ extern "C" {
 #endif
 
 #if defined(_XOPEN_SOURCE) || defined(__DOXYGEN__)
-/** @brief Lock a region of a file (lockf command). @ingroup posix_option_group_xsi_single_process */
+/** @brief Lock a region of a file (lockf command). @ingroup posix_option_group_xsi_file_system */
 #define F_LOCK  1
-/** @brief Test whether a file region is locked (lockf command). @ingroup posix_option_group_xsi_single_process */
+/** @brief Test whether a file region is locked (lockf command). @ingroup posix_option_group_xsi_file_system */
 #define F_TEST  3
-/** @brief Lock a region, failing immediately if blocked (lockf command). @ingroup posix_option_group_xsi_single_process */
+/** @brief Lock a region, failing immediately if blocked (lockf command). @ingroup posix_option_group_xsi_file_system */
 #define F_TLOCK 2
-/** @brief Unlock a region (lockf command). @ingroup posix_option_group_xsi_single_process */
+/** @brief Unlock a region (lockf command). @ingroup posix_option_group_xsi_file_system */
 #define F_ULOCK 0
 #endif
 
@@ -118,7 +118,7 @@ extern "C" {
 
 /**
  * @brief Value used to disable a special character in a terminal.
- * @ingroup posix_option_group_device_io
+ * @ingroup posix_option_group_device_specific
  */
 #define _POSIX_VDISABLE ('\0')
 
@@ -346,33 +346,33 @@ int ftruncate(int fildes, off_t length);
 char *getcwd(char *buf, size_t size);
 /**
  * @brief Get the effective group ID of the calling process.
- * @ingroup posix_option_group_multi_process
+ * @ingroup posix_option_group_user_groups
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/getegid.html
  */
 gid_t getegid(void);
 #if (_POSIX_C_SOURCE >= 202405L) || defined(__DOXYGEN__)
 /**
  * @brief Fill a buffer with cryptographically secure random bytes.
- * @ingroup posix_option_group_single_process
+ * @ingroup posix_option_group_c_lib_ext
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/getentropy.html
  */
 int getentropy(void *buffer, size_t length);
 #endif
 /**
  * @brief Get the effective user ID of the calling process.
- * @ingroup posix_option_group_multi_process
+ * @ingroup posix_option_group_user_groups
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/geteuid.html
  */
 uid_t geteuid(void);
 /**
  * @brief Get the real group ID of the calling process.
- * @ingroup posix_option_group_multi_process
+ * @ingroup posix_option_group_user_groups
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/getgid.html
  */
 gid_t getgid(void);
 /**
  * @brief Get the supplementary group IDs of the calling process.
- * @ingroup posix_option_group_multi_process
+ * @ingroup posix_option_group_user_groups
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/getgroups.html
  */
 int getgroups(int gidsetsize, gid_t grouplist[]);
@@ -386,19 +386,19 @@ long gethostid(void);
 #endif
 /**
  * @brief Get the name of the current host.
- * @ingroup posix_option_group_single_process
+ * @ingroup posix_option_group_networking
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/gethostname.html
  */
 int gethostname(char *name, size_t namelen);
 /**
  * @brief Get the login name of the user.
- * @ingroup posix_option_group_multi_process
+ * @ingroup posix_option_group_user_groups
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/getlogin.html
  */
 char *getlogin(void);
 /**
  * @brief Get the login name of the user into a caller-supplied buffer.
- * @ingroup posix_option_thread_safe_functions
+ * @ingroup posix_option_group_user_groups_r
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/getlogin_r.html
  */
 int getlogin_r(char *name, size_t namesize);
@@ -440,13 +440,13 @@ pid_t getppid(void);
 pid_t getsid(pid_t pid);
 /**
  * @brief Get the real user ID of the calling process.
- * @ingroup posix_option_group_multi_process
+ * @ingroup posix_option_group_user_groups
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/getuid.html
  */
 uid_t getuid(void);
 /**
  * @brief Determine whether a file descriptor refers to a terminal.
- * @ingroup posix_option_group_device_io
+ * @ingroup posix_option_group_device_specific
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/isatty.html
  */
 int isatty(int fildes);
@@ -471,7 +471,7 @@ int linkat(int fd1, const char *path1, int fd2, const char *path2, int flag);
 #if defined(_XOPEN_SOURCE) || defined(__DOXYGEN__)
 /**
  * @brief Apply, test, or remove an advisory file lock (XSI extension).
- * @ingroup posix_option_group_xsi_single_process
+ * @ingroup posix_option_group_xsi_file_system
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/lockf.html
  */
 int lockf(int fildes, int function, off_t size);
@@ -485,7 +485,7 @@ off_t lseek(int fildes, off_t offset, int whence);
 #if defined(_XOPEN_SOURCE) || defined(__DOXYGEN__)
 /**
  * @brief Change the scheduling priority of the calling process (XSI extension).
- * @ingroup posix_option_group_multi_process
+ * @ingroup posix_option_group_xsi_multi_process
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/nice.html
  */
 int nice(int incr);
@@ -546,25 +546,25 @@ ssize_t readlinkat(int fd, const char *restrict path, char *restrict buf, size_t
 int rmdir(const char *path);
 /**
  * @brief Set the effective group ID of the calling process.
- * @ingroup posix_option_group_multi_process
+ * @ingroup posix_option_group_user_groups
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/setegid.html
  */
 int setegid(gid_t gid);
 /**
  * @brief Set the effective user ID of the calling process.
- * @ingroup posix_option_group_multi_process
+ * @ingroup posix_option_group_user_groups
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/seteuid.html
  */
 int seteuid(uid_t uid);
 /**
  * @brief Set the real group ID of the calling process.
- * @ingroup posix_option_group_multi_process
+ * @ingroup posix_option_group_user_groups
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/setgid.html
  */
 int setgid(gid_t gid);
 /**
  * @brief Set the process group ID for a process.
- * @ingroup posix_option_group_multi_process
+ * @ingroup posix_option_group_job_control
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/setpgid.html
  */
 int setpgid(pid_t pid, pid_t pgid);
@@ -572,7 +572,7 @@ int setpgid(pid_t pid, pid_t pgid);
 	defined(__DOXYGEN__)
 /**
  * @brief Set the process group ID to the process ID of the calling process (obsolescent).
- * @ingroup posix_option_group_multi_process
+ * @ingroup posix_option_group_job_control
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/setpgrp.html
  */
 pid_t setpgrp(void);
@@ -580,13 +580,13 @@ pid_t setpgrp(void);
 #if defined(_XOPEN_SOURCE) || defined(__DOXYGEN__)
 /**
  * @brief Set the real and effective group IDs (XSI extension).
- * @ingroup posix_option_group_xsi_single_process
+ * @ingroup posix_option_group_xsi_user_groups
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/setregid.html
  */
 int setregid(gid_t rgid, gid_t egid);
 /**
  * @brief Set the real and effective user IDs (XSI extension).
- * @ingroup posix_option_group_xsi_single_process
+ * @ingroup posix_option_group_xsi_user_groups
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/setreuid.html
  */
 int setreuid(uid_t ruid, uid_t euid);
@@ -599,7 +599,7 @@ int setreuid(uid_t ruid, uid_t euid);
 pid_t setsid(void);
 /**
  * @brief Set the real user ID of the calling process.
- * @ingroup posix_option_group_multi_process
+ * @ingroup posix_option_group_user_groups
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/setuid.html
  */
 int setuid(uid_t uid);
@@ -611,7 +611,7 @@ unsigned int sleep(unsigned int seconds);
 #if defined(_XOPEN_SOURCE) || defined(__DOXYGEN__)
 /**
  * @brief Swap bytes in a block of memory (XSI extension).
- * @ingroup posix_option_group_xsi_single_process
+ * @ingroup posix_option_group_xsi_c_lang_support
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/swab.html
  */
 void swab(const void *ZRESTRICT src, void *ZRESTRICT dest, ssize_t nbytes);
@@ -631,7 +631,7 @@ int symlinkat(const char *path1, int fd, const char *path2);
 #if defined(_XOPEN_SOURCE) || defined(__DOXYGEN__)
 /**
  * @brief Schedule outstanding writes to all file systems (XSI extension).
- * @ingroup posix_option_group_xsi_single_process
+ * @ingroup posix_option_group_xsi_file_system
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/sync.html
  */
 void sync(void);
@@ -652,13 +652,13 @@ long sysconf(int opt);
 #endif /* CONFIG_POSIX_SYSCONF_IMPL_FULL */
 /**
  * @brief Get the process group ID of the foreground process group of the terminal.
- * @ingroup posix_option_group_multi_process
+ * @ingroup posix_option_group_job_control
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/tcgetpgrp.html
  */
 pid_t tcgetpgrp(int fildes);
 /**
  * @brief Set the foreground process group ID of a terminal.
- * @ingroup posix_option_group_multi_process
+ * @ingroup posix_option_group_job_control
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/tcsetpgrp.html
  */
 int tcsetpgrp(int fildes, pid_t pgid_id);
@@ -670,13 +670,13 @@ int tcsetpgrp(int fildes, pid_t pgid_id);
 int truncate(const char *path, off_t length);
 /**
  * @brief Get the name of the terminal associated with a file descriptor.
- * @ingroup posix_option_group_device_io
+ * @ingroup posix_option_group_device_specific
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/ttyname.html
  */
 char *ttyname(int fildes);
 /**
  * @brief Get the name of the terminal into a caller-supplied buffer.
- * @ingroup posix_option_thread_safe_functions
+ * @ingroup posix_option_group_device_specific_r
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/ttyname_r.html
  */
 int ttyname_r(int fildes, char *name, size_t namesize);

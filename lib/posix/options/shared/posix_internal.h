@@ -1,0 +1,240 @@
+/*
+ * Copyright (c) 2018 Intel Corporation
+ * Copyright (c) 2022 Meta
+ * Copyright (c) 2023 Meta
+ * Copyright (c) 2025, Friedt Professional Engineering Services, Inc.
+ * Copyright (c) The Zephyr Project Contributors
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#ifndef ZEPHYR_LIB_POSIX_POSIX_INTERNAL_H_
+#define ZEPHYR_LIB_POSIX_POSIX_INTERNAL_H_
+
+#include <errno.h>
+#include <sched.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <signal.h>
+
+#include <zephyr/kernel.h>
+#include <pthread.h>
+#include <zephyr/sys/dlist.h>
+#include <zephyr/sys/elastipool.h>
+#include <zephyr/sys/slist.h>
+#include <zephyr/sys/sem.h>
+#include <zephyr/sys/util.h>
+#include <zephyr/toolchain.h>
+
+#define POSIX_OBJ_INITIALIZER (-1)
+
+struct posix_condattr {
+	/* leaves room for CLOCK_REALTIME (1, default) and CLOCK_MONOTONIC (4) */
+	unsigned char clock: 3;
+	char initialized: 1;
+#ifdef _POSIX_THREAD_PROCESS_SHARED
+	unsigned char pshared: 1;
+#endif
+};
+
+struct posix_cond {
+	struct k_condvar condvar;
+	struct posix_condattr attr;
+};
+
+struct posix_thread_attr {
+	void *stack;
+	size_t stacksize;
+	size_t guardsize;
+	union {
+		uint16_t: 16;
+		struct {
+			int8_t priority;
+			uint8_t schedpolicy: 2;
+			bool cancelstate: 1;
+			bool canceltype: 1;
+			bool contentionscope: 1;
+			bool detachstate: 1;
+			bool inheritsched: 1;
+			bool initialized: 1;
+		};
+	};
+};
+
+BUILD_ASSERT(sizeof(pthread_attr_t) >= sizeof(struct posix_thread_attr),
+	     "struct posix_thread_attr does not fit within pthread_attr_t");
+
+struct pthread_mutexattr {
+	unsigned char type: 2;
+	bool initialized: 1;
+};
+
+BUILD_ASSERT(sizeof(pthread_mutexattr_t) >= sizeof(struct pthread_mutexattr));
+
+static inline bool valid_posix_policy(int policy)
+{
+	return policy == SCHED_FIFO || policy == SCHED_RR || policy == SCHED_OTHER;
+}
+
+static inline int posix_sched_priority_min(int policy)
+{
+	if (!valid_posix_policy(policy)) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	return 0;
+}
+
+static inline int posix_sched_priority_max(int policy)
+{
+	if (IS_ENABLED(CONFIG_COOP_ENABLED) && policy == SCHED_FIFO) {
+		return CONFIG_NUM_COOP_PRIORITIES - 1;
+	} else if (IS_ENABLED(CONFIG_PREEMPT_ENABLED) &&
+		   (policy == SCHED_RR || policy == SCHED_OTHER)) {
+		return CONFIG_NUM_PREEMPT_PRIORITIES - 1;
+	}
+
+	errno = EINVAL;
+	return -1;
+}
+
+static inline bool posix_thread_attr_is_valid(const struct posix_thread_attr *attr)
+{
+	if ((attr == NULL) || !attr->initialized) {
+		return false;
+	}
+
+	if (attr->stack != NULL) {
+		if (attr->stacksize < PTHREAD_STACK_MIN) {
+			return false;
+		}
+	}
+
+	if (!valid_posix_policy(attr->schedpolicy)) {
+		return false;
+	}
+
+	return true;
+}
+
+/* get a pointer to a pool object that has already been allocated using handle */
+void *posix_get_pool_obj_unlocked(const struct sys_elastipool *pool, uint32_t handle);
+/* get a pointer to a pool object if already initialized, otherwise, initialize a new one */
+void *posix_init_pool_obj_unlocked(const struct sys_elastipool *pool, uint32_t handle,
+				   void (*cb)(void *obj));
+
+static inline void *posix_get_pool_obj(const struct sys_elastipool *pool, struct sys_sem *lock,
+				       uint32_t handle)
+{
+	void *ret = NULL;
+
+	SYS_SEM_LOCK(lock) {
+		ret = posix_get_pool_obj_unlocked(pool, handle);
+	}
+
+	return (void *)ret;
+}
+
+static inline void *posix_init_pool_obj(const struct sys_elastipool *pool, struct sys_sem *lock,
+					uint32_t handle, void (*cb)(void *obj))
+{
+	void *ret = NULL;
+
+	SYS_SEM_LOCK(lock) {
+		ret = posix_init_pool_obj_unlocked(pool, handle, cb);
+	}
+
+	return (void *)ret;
+}
+
+struct posix_thread *to_posix_thread(pthread_t pth);
+
+/* get and possibly initialize a posix_mutex */
+struct k_mutex *to_posix_mutex(pthread_mutex_t *mu);
+
+int posix_to_zephyr_priority(int priority, int policy);
+int zephyr_to_posix_priority(int priority, int *policy);
+
+BUILD_ASSERT((sizeof(void *) == sizeof(pthread_barrier_t)) ||
+		     (sizeof(void *) == 2 * sizeof(pthread_barrier_t)),
+	     "unsupported pthread_barrier_t size");
+BUILD_ASSERT((sizeof(void *) == sizeof(pthread_cond_t)) ||
+		     (sizeof(void *) == 2 * sizeof(pthread_cond_t)),
+	     "unsupported pthread_cond_t size");
+BUILD_ASSERT((sizeof(void *) == sizeof(pthread_key_t)) ||
+		     (sizeof(void *) == 2 * sizeof(pthread_key_t)),
+	     "unsupported pthread_key_t size");
+BUILD_ASSERT((sizeof(void *) == sizeof(pthread_mutex_t)) ||
+		     (sizeof(void *) == 2 * sizeof(pthread_mutex_t)),
+	     "unsupported pthread_mutex_t size");
+
+/* FIXME: Need to adjust the toolchain so that pthread_t, pthread_mutex_t, pthread_cond_t,
+ * pthread_key_t, etc are the same size of uintptr_t (i.e. void *) */
+static inline void *posix_to_kernel_object(void *input, size_t size, void *ref)
+{
+	void *output = NULL;
+
+	if (sizeof(void *) == size) {
+		output = (void *)*((uintptr_t *)input);
+	} else if ((sizeof(void *) == 2 * size) && (sizeof(uint32_t) == size)) {
+		output = (void *)(uintptr_t)(((uintptr_t)ref & GENMASK64(63, 32)) |
+					     *(uint32_t *)input);
+	}
+
+	return output;
+}
+
+static inline uintptr_t posix_from_kernel_object(void *input, size_t size)
+{
+	uintptr_t output = 0;
+
+	if (sizeof(void *) == size) {
+		output = (uintptr_t)input;
+	} else if (sizeof(void *) == 2 * size) {
+		output = (uintptr_t)input & GENMASK64(31, 0);
+	}
+
+	return output;
+}
+
+static inline struct k_mutex *to_k_mutex(const pthread_mutex_t *mu)
+{
+	extern struct k_mutex sys_mutex_pool[];
+
+	return (struct k_mutex *)posix_to_kernel_object((void *)mu, sizeof(pthread_mutex_t),
+							sys_mutex_pool);
+}
+
+static inline pthread_mutex_t to_pthread_mutex(const struct k_mutex *kmu)
+{
+	return (pthread_mutex_t)posix_from_kernel_object((void *)kmu, sizeof(pthread_mutex_t));
+}
+
+static inline struct k_condvar *to_k_condvar(const pthread_cond_t *cv)
+{
+	extern struct k_condvar sys_condvar_pool[];
+
+	return (struct k_condvar *)posix_to_kernel_object((void *)cv, sizeof(pthread_cond_t),
+							  sys_condvar_pool);
+}
+
+static inline pthread_cond_t to_pthread_cond(const struct k_condvar *kcv)
+{
+	return (pthread_cond_t)posix_from_kernel_object((void *)kcv, sizeof(pthread_cond_t));
+}
+
+static inline struct k_thread *to_k_thread(const pthread_t *th)
+{
+	extern struct k_thread sys_thread_pool[];
+
+	return (struct k_thread *)posix_to_kernel_object((void *)th, sizeof(pthread_t),
+							 sys_thread_pool);
+}
+
+static inline pthread_t to_pthread_thread(const struct k_thread *kth)
+{
+	return (pthread_t)posix_from_kernel_object((void *)kth, sizeof(pthread_t));
+}
+
+#endif

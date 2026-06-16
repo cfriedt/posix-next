@@ -19,9 +19,6 @@ config POSIX_API
 	  CONFIG_POSIX_AEP_CHOICE_PSE53. Libraries should depend on
 	  CONFIG_POSIX_SYSTEM_INTERFACES and other POSIX Option Groups.
 
-	  For more information, please see
-
-
 choice POSIX_AEP_CHOICE
 	prompt "POSIX Subprofile"
 	default POSIX_AEP_CHOICE_ZEPHYR
@@ -29,10 +26,6 @@ choice POSIX_AEP_CHOICE
 	  This choice is intended to help users select the correct POSIX profile for their
 	  application. Choices are based on IEEE 1003.13-2003 (now inactive / reserved) and
 	  extrapolated to the more recent Subprofiling Option Groups in IEEE 1003.3-2017.
-
-	  For more information, please refer to
-	  https://standards.ieee.org/ieee/1003.13/3322/
-	  https://pubs.opengroup.org/onlinepubs/9699919799/xrat/V4_subprofiles.html
 
 config POSIX_AEP_CHOICE_NONE
 	bool "No POSIX subprofile"
@@ -57,19 +50,12 @@ config POSIX_AEP_CHOICE_ZEPHYR
 	  otherwise be required for a conformant POSIX system or subprofile. This system profile
 	  does not itself meet the requirements for POSIX implementation conformance.
 
-	  For more information, see
-	  https://docs.zephyrproject.org/latest/contribute/coding_guidelines/index.html
-	  https://pubs.opengroup.org/onlinepubs/9699919799/xrat/V4_subprofiles.html
-
 config POSIX_AEP_CHOICE_BASE
 	bool "Minimal POSIX System Profile"
 	select POSIX_SYSTEM_INTERFACES
 	select POSIX_BASE_DEFINITIONS
 	help
 	  Only enable the base definitions required for all POSIX systems.
-
-	  For more information, please see
-	  https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap02.html#tag_02_01_03_01
 
 config POSIX_AEP_CHOICE_PSE51
 	bool "Minimal Realtime System Profile (PSE51)"
@@ -81,22 +67,17 @@ config POSIX_AEP_CHOICE_PSE51
 	  Option Groups to facilitate device I/O, signals, mandatory configuration utilities, and
 	  threading.
 
-	  For more information, please see
-	  https://pubs.opengroup.org/onlinepubs/9699919799/xrat/V4_subprofiles.html
-
 config POSIX_AEP_CHOICE_PSE52
 	bool "Realtime Controller System Profile (PSE52)"
 	select POSIX_SYSTEM_INTERFACES
 	select POSIX_BASE_DEFINITIONS
 	select POSIX_AEP_REALTIME_MINIMAL
 	select POSIX_AEP_REALTIME_CONTROLLER
+	imply POSIX_NON_PORTABLE
 	help
 	  PSE52 includes the POSIX Base Definitions (System Interfaces) as well as all features of
 	  PSE51. Additionally, it includes interfaces for file descriptor management, filesystem
 	  support, support for message queues, and tracing.
-
-	  For more information, please see
-	  https://pubs.opengroup.org/onlinepubs/9699919799/xrat/V4_subprofiles.html
 
 config POSIX_AEP_CHOICE_PSE53
 	bool "Dedicated Realtime System Profile (PSE53)"
@@ -109,9 +90,6 @@ config POSIX_AEP_CHOICE_PSE53
 	  PSE53 includes the POSIX Base Definitions (System Interfaces) as well as all features of
 	  PSE52. Additionally, it includes interfaces for POSIX multi-processing, networking, pipes,
 	  and prioritized I/O.
-
-	  For more information, please see
-	  https://pubs.opengroup.org/onlinepubs/9699919799/xrat/V4_subprofiles.html
 
 # TODO: PSE54: Multi-purpose Realtime System Profile
 
@@ -131,16 +109,14 @@ config POSIX_BASE_DEFINITIONS
 	select POSIX_REALTIME_SIGNALS
 	select POSIX_SEMAPHORES
 	select POSIX_SPIN_LOCKS
-	select POSIX_THREAD_SAFE_FUNCTIONS
 	select POSIX_THREADS
-	select POSIX_TIMEOUTS
 	select POSIX_TIMERS
+	# to satisfy _POSIX_THREAD_SAFE_FUNCTIONS	
+	select POSIX_FILE_SYSTEM_R
+	select POSIX_C_LANG_SUPPORT_R
 	help
 	  This option is not user configurable. It may be configured indirectly by selecting
 	  CONFIG_POSIX_AEP_CHOICE_BASE=y.
-
-	  For more information, please see
-	  https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap02.html#tag_02_01_03_01
 
 config POSIX_AEP_REALTIME_MINIMAL
 	bool
@@ -168,9 +144,6 @@ config POSIX_AEP_REALTIME_MINIMAL
 	  This option is not user configurable. It may be configured indirectly by selecting
 	  CONFIG_POSIX_AEP_CHOICE_PSE51=y.
 
-	  For more information, please see
-	  https://pubs.opengroup.org/onlinepubs/9699919799/xrat/V4_subprofiles.html
-
 config POSIX_AEP_REALTIME_CONTROLLER
 	bool
 	# Option Groups
@@ -184,9 +157,6 @@ config POSIX_AEP_REALTIME_CONTROLLER
 	help
 	  This option is not user configurable. It may be configured indirectly by selecting
 	  CONFIG_POSIX_AEP_CHOICE_PSE52=y.
-
-	  For more information, please see
-	  https://pubs.opengroup.org/onlinepubs/9699919799/xrat/V4_subprofiles.html
 
 config POSIX_AEP_REALTIME_DEDICATED
 	bool
@@ -205,8 +175,5 @@ config POSIX_AEP_REALTIME_DEDICATED
 	help
 	  This option is not user configurable. It may be configured indirectly by selecting
 	  CONFIG_POSIX_AEP_CHOICE_PSE53=y.
-
-	  For more information, please see
-	  https://pubs.opengroup.org/onlinepubs/9699919799/xrat/V4_subprofiles.html
 
 endif # POSIX_SYSTEM_INTERFACES

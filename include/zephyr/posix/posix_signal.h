@@ -78,13 +78,14 @@ struct timespec {
 #define SIGRTMIN 32
 #if defined(_POSIX_REALTIME_SIGNALS) || defined(__DOXYGEN__)
 BUILD_ASSERT(CONFIG_POSIX_RTSIG_MAX >= 0);
+/** @brief Largest real-time signal number. @ingroup posix_option_group_realtime_signals */
 #define SIGRTMAX (SIGRTMIN + CONFIG_POSIX_RTSIG_MAX)
 #else
 #define SIGRTMAX SIGRTMIN
 #endif
 
 #if !defined(_SIGSET_T_DECLARED) && !defined(__sigset_t_defined)
-/** @brief Type representing a set of signals (bitmask). */
+/** @brief Set of signals (bitmask).  @ingroup posix_option_group_signals */
 typedef struct {
 	unsigned long sig[DIV_ROUND_UP(SIGRTMAX, BITS_PER_LONG)];
 } sigset_t;
@@ -283,7 +284,7 @@ int kill(pid_t pid, int sig);
 #if defined(_XOPEN_SOURCE) || defined(__DOXYGEN__)
 /**
  * @brief Send a signal to a process group (XSI extension).
- * @ingroup posix_option_group_signals
+ * @ingroup posix_option_group_xsi_signals
  * @param pgrp Process group ID (0 = calling process's group).
  * @param sig  Signal number.
  * @return 0 on success, or -1 with errno set on failure.
@@ -294,7 +295,7 @@ int killpg(pid_t pgrp, int sig);
 
 /**
  * @brief Print a signal description with additional siginfo_t context.
- * @ingroup posix_option_group_signals
+ * @ingroup posix_option_group_signals_ext
  * @param info    Signal information.
  * @param message Prefix string.
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/psiginfo.html
@@ -303,7 +304,7 @@ void psiginfo(const siginfo_t *info, const char *message);
 
 /**
  * @brief Print a signal description to stderr.
- * @ingroup posix_option_group_signals
+ * @ingroup posix_option_group_signals_ext
  * @param sig     Signal number.
  * @param message Prefix string.
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/psignal.html
@@ -361,7 +362,7 @@ int sigaddset(sigset_t *set, int sig);
 #if defined(_XOPEN_SOURCE) || defined(__DOXYGEN__)
 /**
  * @brief Set or get the alternate signal stack (XSI extension).
- * @ingroup posix_option_group_signals
+ * @ingroup posix_option_group_xsi_signals
  * @param ss  New alternate stack descriptor, or NULL.
  * @param oss Output: previous descriptor, or NULL.
  * @return 0 on success, or -1 with errno set on failure.

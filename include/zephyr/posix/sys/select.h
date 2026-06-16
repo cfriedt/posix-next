@@ -34,15 +34,13 @@ extern "C" {
 #ifndef SIGRTMIN
 #define SIGRTMIN 32
 #endif
-#if defined(_POSIX_REALTIME_SIGNALS) || defined(__DOXYGEN__)
+#if defined(_POSIX_REALTIME_SIGNALS)
 BUILD_ASSERT(CONFIG_POSIX_RTSIG_MAX >= 0);
-/** @brief Largest real-time signal number.  @ingroup posix_option_group_device_io*/
 #define SIGRTMAX (SIGRTMIN + CONFIG_POSIX_RTSIG_MAX)
 #else
 #define SIGRTMAX SIGRTMIN
 #endif
 
-/** @brief Set of signals (bitmask).  @ingroup posix_option_group_device_io*/
 typedef struct {
 	unsigned long sig[DIV_ROUND_UP(SIGRTMAX + 1, BITS_PER_LONG)];
 } sigset_t;

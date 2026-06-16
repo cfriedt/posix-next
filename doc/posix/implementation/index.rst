@@ -76,6 +76,50 @@ Some general design considerations:
   :ref:`System Call <syscalls>` is needed as part of the implementation, the declaration and the
   implementation of that system call should be hidden behind the POSIX API.
 
+Organization and Source Layout of POSIX Options and Option Groups
+=================================================================
+
+IEEE Std 1003.1 defines POSIX
+`Options <https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap02.html#tag_02_01_03>`_
+and
+`Subprofiling Option Groups <https://pubs.opengroup.org/onlinepubs/9699919799/xrat/V4_subprofiles.html>`_
+separately. Zephyr usually maps each standard Option Group to a directory under
+
+- ``lib/posix/``
+  - for groups such as C extensions that generally do not require OS involvement, and
+- ``lib/posix/options``
+  - for features that generally do require OS involvement.
+
+When an implementation supports an Option Group (or an Option), it is required to define a constant
+to indicate support for that Option Group (or Option) for C source files. For example, if the
+implementation supports the ``POSIX_TIMERS`` Option Group, it is required to define the macro
+``_POSIX_TIMERS`` to a specific value. In most cases, the Option Group names and the associated Option
+(and macro) names differ by only one character (the prefixing underscore).
+
+However, some Options and Option Groups are intentionally not published as Subprofiling Option
+Groups because they do not meet the criteria established by
+`IEEE Std 1003.13 <https://standards.ieee.org/ieee/1003.13/3322/>`_. Namely, that Subprofiling Option
+Groups must
+
+- have a minimal footprint
+  - to facilitate specialized, embedded, resource-constrained target devices, and
+- independence
+  - to decouple functionality from other Options and Subprofiling Option Groups.
+
+For example, the :ref:`XSI_REALTIME <posix_option_group_xsi_realtime>` Option Group and
+the :ref:`_POSIX_MESSAGE_PASSING <posix_option_message_passing>` depend on other Options or Option
+Groups (:ref:`POSIX_DEVICE_IO <posix_option_group_device_io>`,
+:ref:`POSIX_REALTIME_SIGNALS <posix_option_group_realtime_signals>`, etc) and therefore are not
+qualified to be standard Subprofiling Option Groups.
+
+For simplicity and maintainability, Zephyr organizes such Options and Option Groups the same as
+standard Subprofiling Option Groups (at the discretion of the maintainer), under
+``lib/posix/options/``.
+
+The general rule is that Option Groups will _always_ have an associated Kconfig option and _some_
+Options (but not all) have an associated Kconfig option in Zephyr. The latter is mostly for
+maintainability.
+
 Native POSIX Thread Library (NPTL)
 ==================================
 
