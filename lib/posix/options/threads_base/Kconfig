@@ -1,0 +1,143 @@
+# Copyright (c) 2017 Intel Corporation
+# Copyright (c) 2023 Meta
+# Copyright (c) 2024 Tenstorrent AI ULC
+#
+# SPDX-License-Identifier: Apache-2.0
+
+menuconfig POSIX_THREADS
+	bool "POSIX thread support"
+	select SYS_THREAD
+	select SIGNAL
+	select THREAD_CANCEL
+	select THREAD_RESULT
+	select THREAD_SPECIFIC_STORAGE
+	select THREAD_CLEANUP
+	select THREAD_DETACH
+	select MUTEX_OPTIONS
+	help
+	  Select 'y' here to enable POSIX threads, mutexes, condition variables, and
+	  thread-specific storage.
+
+	  This option makes the following functions available:
+	  pthread_atfork(), pthread_attr_destroy(), pthread_attr_getdetachstate(),
+	  pthread_attr_getschedparam(), pthread_attr_init(), pthread_attr_setdetachstate(),
+	  pthread_attr_setschedparam(), pthread_cancel(), pthread_cleanup_pop(),
+	  pthread_cleanup_push(), pthread_cond_broadcast(), pthread_cond_destroy(),
+	  pthread_cond_init(), pthread_cond_signal(), pthread_cond_timedwait(),
+	  pthread_cond_wait(), pthread_condattr_destroy(), pthread_condattr_init(),
+	  pthread_create(), pthread_detach(), pthread_equal(), pthread_exit(),
+	  pthread_getspecific(), pthread_join(), pthread_key_create(), pthread_key_delete(),
+	  pthread_kill(), pthread_mutex_destroy(), pthread_mutex_init(), pthread_mutex_lock(),
+	  pthread_mutex_timedlock(), pthread_mutex_trylock(), pthread_mutex_unlock(),
+	  pthread_mutexattr_destroy(), pthread_mutexattr_init(), pthread_once(), pthread_self(),
+	  pthread_setcancelstate(), pthread_setcanceltype(), pthread_setspecific(),
+	  pthread_sigmask(), pthread_testcancel(), and sched_yield().
+
+if POSIX_THREADS
+
+# There are a number of things in POSIX that assume the availability of heap space.
+config HEAP_MEM_POOL_ADD_SIZE_POSIX_THREADS
+	def_int 256
+
+# Required for _POSIX_THREAD_THREADS_MAX in <limits.h>
+
+config SYS_THREAD_THREAD_MAX
+	int
+	default 64
+
+config SYS_THREAD_STACK_MAX
+	int
+	default 64
+
+# Required for conventional heap allocation of mutexes, condition variables, etc
+
+uint16_max := 65535
+
+config SYS_THREAD_CONDVAR_MAX
+	int
+	default $(uint16_max)
+
+config SYS_THREAD_MUTEX_MAX
+	int
+	default $(uint16_max)
+
+config POSIX_THREAD_THREADS_MAX
+	int "Maximum number of POSIX threads"
+	default SYS_THREAD_THREAD_MAX
+	help
+	  Maximum simultaneously active threads in a POSIX application.
+
+config MAX_PTHREAD_MUTEX_COUNT
+	int "Maximum number of POSIX mutexes"
+	default SYS_THREAD_MUTEX_MAX
+	help
+	  Maximum simultaneously active mutexes in a POSIX application.
+
+config MAX_PTHREAD_COND_COUNT
+	int "Maximum number of POSIX condition variables"
+	default SYS_THREAD_CONDVAR_MAX
+	help
+	  Maximum simultaneously active condition variables in a POSIX application.
+
+config POSIX_THREAD_KEYS_MAX
+	int "Maximum number of POSIX thread-specific-storage keys"
+	default 5
+	help
+	  Maximum simultaneously active thread-specific-storage keys in a POSIX application.
+
+config PTHREAD_RECYCLER_DELAY_MS
+	int "Delay for reclaiming dynamic pthread stacks (ms) [DEPRECATED]"
+	default 0
+	help
+	  This option is deprecated.
+
+config POSIX_THREAD_ATTR_STACKADDR
+	bool "Support getting and setting POSIX thread stack addresses"
+	help
+	  Enable this option to use pthread_attr_getstackaddr() and
+	  pthread_attr_setstackaddr().
+
+	  This option was removed in IEEE 1003.1-2017 in favour of
+	  pthread_attr_getstack() and pthread_attr_setstack().
+
+config POSIX_THREAD_ATTR_STACKSIZE
+	bool "Support getting and setting POSIX thread stack sizes"
+	help
+	  Enable this option to use pthread_attr_getstacksize() or
+	  pthread_attr_setstacksize().
+
+config POSIX_THREAD_PRIORITY_SCHEDULING
+	bool "Run POSIX threads with different priorities and schedulers"
+	help
+	  Enabling this option allows the application to configure different priorities and
+	  scheduling algorithms for different threads via functions such as pthread_setschedparam()
+	  and pthread_setschedprio(). This is required for Realtime Threads and Advanced Realtime
+	  Threads.
+
+config POSIX_THREAD_PRIO_INHERIT
+	bool "POSIX mutex priority inheritance"
+	help
+	  Select 'y' here to enable POSIX mutex priority inheritance.
+
+config POSIX_THREAD_PRIO_PROTECT
+	bool "POSIX mutex priority protection"
+	help
+	  Select 'y' here to enable POSIX mutex priority protection.
+
+module = PTHREAD
+module-str = POSIX thread
+source "subsys/logging/Kconfig.template.log_config"
+
+module = PTHREAD_MUTEX
+module-str = POSIX mutex
+source "subsys/logging/Kconfig.template.log_config"
+
+module = PTHREAD_COND
+module-str = POSIX condition variable
+source "subsys/logging/Kconfig.template.log_config"
+
+module = PTHREAD_KEY
+module-str = POSIX thread-specific data
+source "subsys/logging/Kconfig.template.log_config"
+
+endif # POSIX_THREADS

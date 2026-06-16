@@ -22,15 +22,20 @@
 pthread.h:
   primary: posix_option_group_threads_base
   secondary:
+    - posix_option_group_non_portable
     - posix_option_group_posix_threads_ext
+    - posix_option_group_xsi_threads_ext
     - posix_option_group_barriers
     - posix_option_group_rw_locks
     - posix_option_group_spin_locks
+    - posix_option_group_robust_mutexes
+    - posix_option_group_clock_selection
+    - posix_option_thread_process_shared
 
 sys/types.h:
   primary: posix_option_group_threads_base
 
-# sched_yield is POSIX_THREADS_BASE; everything else is _POSIX_PRIORITY_SCHEDULING
+# sched_yield is POSIX_THREADS_BASE; process sched_* are _POSIX_PRIORITY_SCHEDULING
 sched.h:
   primary: posix_option_priority_scheduling
   secondary:
@@ -47,10 +52,14 @@ posix_signal.h:
   primary: posix_option_group_signals
   secondary:
     - posix_option_group_realtime_signals
+    - posix_option_group_signals_ext
+    - posix_option_group_xsi_signals
 
-# strsignal() is listed under POSIX_SIGNALS in the Zephyr RST
+# strsignal() is POSIX_SIGNALS_EXT (see posix/option_groups/index.rst)
 posix_string.h:
-  primary: posix_option_group_signals
+  primary: posix_option_group_signals_ext
+  secondary:
+    - posix_option_group_signals
 
 # ---------------------------------------------------------------------------
 # Timers and clocks
@@ -60,12 +69,18 @@ posix_time.h:
   primary: posix_option_group_timers
   secondary:
     - posix_option_group_clock_selection
+    - posix_option_group_c_lang_support_r
+    - posix_option_group_xsi_c_lang_support
+    - posix_option_group_c_lib_ext
+    - posix_option_cputime
+    - posix_option_monotonic_clock
+    - posix_option_thread_cputime
 
 # gettimeofday() is XSI_SINGLE_PROCESS
 sys/time.h:
   primary: posix_option_group_xsi_single_process
 
-# mq_* are _POSIX_MESSAGE_PASSING; mq_timed* are also _POSIX_TIMEOUTS
+# mq_* are _POSIX_MESSAGE_PASSING; mq_timed* require _POSIX_TIMEOUTS (via CONFIG_POSIX_TIMERS)
 mqueue.h:
   primary: posix_option_message_passing
   secondary:
@@ -92,9 +107,32 @@ sys/select.h:
 
 unistd.h:
   primary: posix_option_group_single_process
+  secondary:
+    - posix_option_group_device_io
+    - posix_option_group_device_specific
+    - posix_option_group_device_specific_r
+    - posix_option_group_fd_mgmt
+    - posix_option_group_file_system
+    - posix_option_group_multi_process
+    - posix_option_group_networking
+    - posix_option_group_pipe
+    - posix_option_group_signals
+    - posix_option_group_user_groups
+    - posix_option_group_user_groups_r
+    - posix_option_group_job_control
+    - posix_option_group_c_lib_ext
+    - posix_option_group_xsi_single_process
+    - posix_option_group_xsi_file_system
+    - posix_option_group_xsi_multi_process
+    - posix_option_group_xsi_user_groups
+    - posix_option_group_xsi_c_lang_support
+    - posix_option_fsync
+    - posix_option_synchronized_io
 
 sys/stat.h:
   primary: posix_option_group_file_system
+  secondary:
+    - posix_option_group_xsi_file_system
 
 dirent.h:
   primary: posix_option_group_file_system
@@ -165,10 +203,7 @@ posix_stdlib.h:
   primary: posix_option_group_single_process
   secondary:
     - posix_option_group_c_lib_ext
-
-# strsignal() is listed under POSIX_SIGNALS in the Zephyr RST
-posix_string.h:
-  primary: posix_option_group_signals
+    - posix_option_group_c_lang_support_r
 
 # ---------------------------------------------------------------------------
 # System logging
@@ -181,13 +216,15 @@ syslog.h:
 # Thread-safe database access
 # ---------------------------------------------------------------------------
 
-# getpwnam_r/getpwuid_r are _POSIX_THREAD_SAFE_FUNCTIONS
+# getpwnam/getpwuid are POSIX_SYSTEM_DATABASE; getpwnam_r/getpwuid_r are POSIX_SYSTEM_DATABASE_R;
+# getpwent/setpwent/endpwent are XSI_SYSTEM_DATABASE (V4_subprofiles E.1).
 pwd.h:
-  primary: posix_option_thread_safe_functions
+  primary: posix_option_group_system_database_r
 
-# getgrnam_r/getgrgid_r are _POSIX_THREAD_SAFE_FUNCTIONS
+# getgrnam/getgrgid are POSIX_SYSTEM_DATABASE; getgrnam_r/getgrgid_r are POSIX_SYSTEM_DATABASE_R;
+# getgrent/setgrent/endgrent are XSI_SYSTEM_DATABASE (V4_subprofiles E.1).
 grp.h:
-  primary: posix_option_thread_safe_functions
+  primary: posix_option_group_system_database_r
 
 # ---------------------------------------------------------------------------
 # XSI STREAMS

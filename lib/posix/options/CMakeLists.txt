@@ -9,155 +9,42 @@ if(CONFIG_POSIX_SYSTEM_INTERFACES)
   zephyr_compile_options("SHELL: $<$<COMPILE_LANGUAGE:CXX>:$<TARGET_PROPERTY:compiler,imacros> ${ZEPHYR_POSIX_NEXT_MODULE_DIR}/include/zephyr/posix/posix_features.h>")
 endif()
 
-if(NOT CONFIG_TC_PROVIDES_POSIX_SIGNALS)
-  if(CONFIG_POSIX_SIGNALS)
-    set(STRSIGNAL_TABLE_H ${GEN_DIR}/posix/strsignal_table.h)
 
-    add_custom_command(
-      OUTPUT ${STRSIGNAL_TABLE_H}
-      COMMAND
-      ${PYTHON_EXECUTABLE}
-      ${ZEPHYR_BASE}/scripts/build/gen_strsignal_table.py
-      -i ${ZEPHYR_POSIX_NEXT_MODULE_DIR}/include/zephyr/posix/posix_signal.h
-      -o ${STRSIGNAL_TABLE_H}
-      DEPENDS ${ZEPHYR_POSIX_NEXT_MODULE_DIR}/include/zephyr/posix/posix_signal.h
-    )
-  endif()
-endif()
+add_subdirectory(shared)
 
-zephyr_library()
-
-if(NOT CONFIG_TC_PROVIDES_POSIX_ASYNCHRONOUS_IO)
-  zephyr_library_sources_ifdef(CONFIG_POSIX_ASYNCHRONOUS_IO aio.c)
-endif()
-
-if(NOT CONFIG_TC_PROVIDES_POSIX_BARRIERS)
-  zephyr_library_sources_ifdef(CONFIG_POSIX_BARRIERS barrier.c posix_pool.c)
-endif()
-
-if(NOT CONFIG_TC_PROVIDES_POSIX_CLOCK_SELECTION)
-  zephyr_library_sources_ifdef(CONFIG_POSIX_CLOCK_SELECTION clock_selection.c)
-endif()
-
-if(NOT CONFIG_TC_PROVIDES_POSIX_DEVICE_IO)
-  zephyr_library_sources_ifdef(CONFIG_POSIX_DEVICE_IO
-    # perror should be moved to the common libc
-    perror.c
-    device_io.c
-  )
-endif()
-
-if(NOT CONFIG_TC_PROVIDES_POSIX_FD_MGMT)
-  zephyr_library_sources_ifdef(CONFIG_POSIX_FD_MGMT
-    fd_mgmt.c
-  )
-endif()
-
-if(NOT CONFIG_TC_PROVIDES_POSIX_FILE_SYSTEM)
-  zephyr_library_sources_ifdef(CONFIG_POSIX_FILE_SYSTEM fs.c)
-endif()
-
-if(NOT CONFIG_TC_PROVIDES_POSIX_FILE_SYSTEM_R)
-  zephyr_library_sources_ifdef(CONFIG_POSIX_FILE_SYSTEM_R file_system_r.c)
-endif()
-
-if(NOT CONFIG_TC_PROVIDES_POSIX_MEMORY_PROTECTION)
-zephyr_library_sources_ifdef(CONFIG_POSIX_MEMORY_PROTECTION mprotect.c)
-endif()
-
-if(NOT CONFIG_TC_PROVIDES_POSIX_MAPPED_FILES)
-  zephyr_library_sources_ifdef(CONFIG_POSIX_MAPPED_FILES mmap.c)
-endif()
-
-if(NOT CONFIG_TC_PROVIDES_POSIX_MULTI_PROCESS)
-  zephyr_library_sources_ifdef(CONFIG_POSIX_MULTI_PROCESS
-    sleep.c
-    multi_process.c
-  )
-endif()
-
-if(NOT CONFIG_TC_PROVIDES_POSIX_NETWORKING)
-  zephyr_library_sources_ifdef(CONFIG_POSIX_NETWORKING net.c)
-endif()
-
-if(NOT CONFIG_TC_PROVIDES_POSIX_SIGNALS)
-  zephyr_library_sources_ifdef(CONFIG_POSIX_SIGNALS signal.c ${STRSIGNAL_TABLE_H})
-  zephyr_library_sources_ifdef(CONFIG_SIGNAL z_sig_set.c)
-endif()
-
-if(NOT CONFIG_TC_PROVIDES_POSIX_SINGLE_PROCESS)
-  zephyr_library_sources_ifdef(CONFIG_POSIX_SINGLE_PROCESS
-    confstr.c
-    env.c
-    env_common.c
-    sysconf.c
-    uname.c
-  )
-endif()
-
-if(NOT CONFIG_TC_PROVIDES_POSIX_SPIN_LOCKS)
-  zephyr_library_sources_ifdef(CONFIG_POSIX_SPIN_LOCKS spinlock.c posix_pool.c)
-endif()
-
-if(NOT CONFIG_TC_PROVIDES_POSIX_TIMERS)
-  zephyr_library_sources_ifdef(CONFIG_POSIX_TIMERS
-    clock.c
-    timer.c
-    timespec_to_timeout.c
-  )
-endif()
-
-if(NOT CONFIG_TC_PROVIDES_POSIX_RW_LOCKS)
-  zephyr_library_sources_ifdef(CONFIG_POSIX_RW_LOCKS rwlock.c posix_pool.c)
-endif()
-
-if(NOT CONFIG_TC_PROVIDES_POSIX_SEMAPHORES)
-  zephyr_library_sources_ifdef(CONFIG_POSIX_SEMAPHORES semaphore.c posix_pool.c)
-endif()
-
-if(NOT CONFIG_TC_PROVIDES_POSIX_THREADS)
-  # Note: the Option is _POSIX_THREADS, while the Option Group is POSIX_THREADS_BASE.
-  # We have opted to use POSIX_THREADS here to match the Option name.
-  zephyr_library_sources_ifdef(CONFIG_POSIX_THREADS
-    cond.c
-    grp.c
-    key.c
-    mutex.c
-    pthread.c
-    pwd.c
-  )
-endif()
-
-if(NOT CONFIG_TC_PROVIDES_XSI_REALTIME)
-  zephyr_library_sources_ifdef(CONFIG_POSIX_FSYNC fsync.c)
-  zephyr_library_sources_ifdef(CONFIG_POSIX_MEMLOCK mlockall.c)
-  zephyr_library_sources_ifdef(CONFIG_POSIX_MEMLOCK_RANGE mlock.c)
-  zephyr_library_sources_ifdef(CONFIG_POSIX_MESSAGE_PASSING mqueue.c)
-  zephyr_library_sources_ifdef(CONFIG_POSIX_PRIORITY_SCHEDULING sched.c)
-  zephyr_library_sources_ifdef(CONFIG_POSIX_SHARED_MEMORY_OBJECTS shm.c)
-endif()
-
-if(NOT CONFIG_TC_PROVIDES_XSI_SINGLE_PROCESS)
-  zephyr_library_sources_ifdef(CONFIG_XSI_SINGLE_PROCESS
-    env_common.c
-    xsi_single_process.c
-  )
-endif()
-
-if(NOT CONFIG_TC_PROVIDES_XSI_STREAMS)
-  zephyr_library_sources_ifdef(CONFIG_XSI_STREAMS stropts.c)
-endif()
-
-if(NOT CONFIG_TC_PROVIDES_XSI_SYSTEM_LOGGING)
-  zephyr_library_sources_ifdef(CONFIG_XSI_SYSTEM_LOGGING syslog.c)
-endif()
-
-zephyr_library_include_directories(
-  ${ZEPHYR_BASE}/kernel/include
-  ${ARCH_DIR}/${ARCH}/include
-)
-
-zephyr_library_property(ALLOW_EMPTY TRUE)
-
-zephyr_library_compile_options(-U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
-zephyr_library_compile_options_ifdef(CONFIG_XSI -U_XOPEN_SOURCE -D_XOPEN_SOURCE=700)
+# zephyr-keep-sorted-start
+add_subdirectory_ifdef(CONFIG_POSIX_ASYNCHRONOUS_IO asynchronous_io)
+add_subdirectory_ifdef(CONFIG_POSIX_BARRIERS barriers)
+add_subdirectory_ifdef(CONFIG_POSIX_CLOCK_SELECTION clock_selection)
+add_subdirectory_ifdef(CONFIG_POSIX_DEVICE_IO device_io)
+add_subdirectory_ifdef(CONFIG_POSIX_FD_MGMT fd_mgmt)
+add_subdirectory_ifdef(CONFIG_POSIX_FILE_SYSTEM file_system)
+add_subdirectory_ifdef(CONFIG_POSIX_FILE_SYSTEM_R file_system_r)
+add_subdirectory_ifdef(CONFIG_POSIX_FSYNC fsync)
+add_subdirectory_ifdef(CONFIG_POSIX_MAPPED_FILES mapped_files)
+add_subdirectory_ifdef(CONFIG_POSIX_MEMLOCK memlock)
+add_subdirectory_ifdef(CONFIG_POSIX_MEMLOCK_RANGE memlock_range)
+add_subdirectory_ifdef(CONFIG_POSIX_MEMORY_PROTECTION memory_protection)
+add_subdirectory_ifdef(CONFIG_POSIX_MESSAGE_PASSING message_passing)
+add_subdirectory_ifdef(CONFIG_POSIX_MULTI_PROCESS multi_process)
+add_subdirectory_ifdef(CONFIG_POSIX_NETWORKING networking)
+add_subdirectory_ifdef(CONFIG_POSIX_NON_PORTABLE non_portable)
+add_subdirectory_ifdef(CONFIG_POSIX_SIGNALS_EXT signals_ext)
+add_subdirectory_ifdef(CONFIG_POSIX_PRIORITY_SCHEDULING priority_scheduling)
+add_subdirectory_ifdef(CONFIG_POSIX_RW_LOCKS rw_locks)
+add_subdirectory_ifdef(CONFIG_POSIX_SEMAPHORES semaphores)
+add_subdirectory_ifdef(CONFIG_POSIX_SHARED_MEMORY_OBJECTS shared_memory_objects)
+add_subdirectory_ifdef(CONFIG_POSIX_SIGNALS signals)
+add_subdirectory_ifdef(CONFIG_POSIX_SINGLE_PROCESS single_process)
+add_subdirectory_ifdef(CONFIG_POSIX_SPIN_LOCKS spin_locks)
+add_subdirectory_ifdef(CONFIG_POSIX_SYNCHRONIZED_IO synchronized_io)
+add_subdirectory_ifdef(CONFIG_POSIX_THREADS threads_base)
+add_subdirectory_ifdef(CONFIG_POSIX_THREADS_EXT threads_ext)
+add_subdirectory_ifdef(CONFIG_POSIX_TIMERS timers)
+add_subdirectory_ifdef(CONFIG_XSI_ADVANCED_REALTIME xsi_advanced_realtime)
+add_subdirectory_ifdef(CONFIG_XSI_REALTIME xsi_realtime)
+add_subdirectory_ifdef(CONFIG_XSI_SINGLE_PROCESS xsi_single_process)
+add_subdirectory_ifdef(CONFIG_XSI_STREAMS xsi_streams)
+add_subdirectory_ifdef(CONFIG_XSI_SYSTEM_LOGGING xsi_system_logging)
+add_subdirectory_ifdef(CONFIG_XSI_THREADS_EXT xsi_threads_ext)
+# zephyr-keep-sorted-stop
