@@ -87,6 +87,7 @@ struct timespec {
 BUILD_ASSERT(CONFIG_POSIX_RTSIG_MAX >= 0);
 BUILD_ASSERT((CONFIG_THREAD_CANCEL_SIGNAL_NUMBER + 2 +
 	      CONFIG_POSIX_RTSIG_MAX) <= SIGNAL_SET_SIZE);
+/** @brief Largest real-time signal number. @ingroup posix_option_group_realtime_signals */
 #ifndef SIGRTMAX
 #define SIGRTMAX (SIGRTMIN + CONFIG_POSIX_RTSIG_MAX)
 #endif
@@ -97,7 +98,7 @@ BUILD_ASSERT((CONFIG_THREAD_CANCEL_SIGNAL_NUMBER + 2 +
 #endif
 
 #if !defined(_SIGSET_T_DECLARED) && !defined(__sigset_t_defined)
-/** @brief Type representing a set of signals (bitmask). */
+/** @brief Set of signals (bitmask).  @ingroup posix_option_group_signals */
 typedef struct {
 	unsigned long sig[DIV_ROUND_UP(SIGRTMAX, BITS_PER_LONG)];
 } sigset_t;
@@ -124,8 +125,6 @@ typedef struct {
 
 #endif
 
-#if defined(_POSIX_REALTIME_SIGNALS) || defined(__DOXYGEN__)
-
 /* slightly out of order w.r.t. the specification */
 #if !defined(_SIGVAL_DECLARED) && !defined(__sigval_defined)
 /** @brief Value passed to a signal handler or retrieved via siginfo_t. */
@@ -136,6 +135,8 @@ union sigval {
 #define _SIGVAL_DECLARED
 #define __sigval_defined
 #endif
+
+#if defined(_POSIX_REALTIME_SIGNALS) || defined(__DOXYGEN__)
 
 #if !defined(_SIGEVENT_DECLARED) && !defined(__sigevent_defined)
 /** @brief Structure describing how to notify about an asynchronous event. */
@@ -187,8 +188,6 @@ typedef struct {
 #define __siginfo_t_defined
 #endif
 
-#if defined(_POSIX_REALTIME_SIGNALS) || defined(__DOXYGEN__)
-
 #if !defined(_SIGACTION_DECLARED) && !defined(__sigaction_defined)
 /** @brief Signal action structure used with sigaction(). */
 struct sigaction {
@@ -228,6 +227,9 @@ struct sigaction {
 #endif
 /** @brief Do not add the signal to the process signal mask during handler execution. */
 #define SA_NODEFER  0x00000040
+
+#if defined(_XOPEN_SOURCE) || defined(__DOXYGEN__)
+
 /** @brief Alternate signal stack is active (ss_flags value). */
 #define SS_ONSTACK  0x00000001
 /** @brief Alternate signal stack is disabled (ss_flags value). */
@@ -272,7 +274,7 @@ typedef struct {
 #define __ucontext_defined
 #endif
 
-#endif /* defined(_POSIX_REALTIME_SIGNALS) || defined(__DOXYGEN__) */
+#endif /* defined(_XOPEN_SOURCE) || defined(__DOXYGEN__) */
 
 /* Siginfo codes are defined below */
 
@@ -296,7 +298,7 @@ int kill(pid_t pid, int sig);
 #if defined(_XOPEN_SOURCE) || defined(__DOXYGEN__)
 /**
  * @brief Send a signal to a process group (XSI extension).
- * @ingroup posix_option_group_signals
+ * @ingroup posix_option_group_xsi_signals
  * @param pgrp Process group ID (0 = calling process's group).
  * @param sig  Signal number.
  * @return 0 on success, or -1 with errno set on failure.
@@ -307,7 +309,7 @@ int killpg(pid_t pgrp, int sig);
 
 /**
  * @brief Print a signal description with additional siginfo_t context.
- * @ingroup posix_option_group_signals
+ * @ingroup posix_option_group_signals_ext
  * @param info    Signal information.
  * @param message Prefix string.
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/psiginfo.html
@@ -316,7 +318,7 @@ void psiginfo(const siginfo_t *info, const char *message);
 
 /**
  * @brief Print a signal description to stderr.
- * @ingroup posix_option_group_signals
+ * @ingroup posix_option_group_signals_ext
  * @param sig     Signal number.
  * @param message Prefix string.
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/psignal.html
@@ -346,7 +348,6 @@ int pthread_kill(pthread_t thread, int sig);
 int pthread_sigmask(int how, const sigset_t *ZRESTRICT set, sigset_t *ZRESTRICT oset);
 #endif
 
-#if defined(_POSIX_REALTIME_SIGNALS) || defined(__DOXYGEN__)
 TOOLCHAIN_DISABLE_WARNING(TOOLCHAIN_WARNING_SHADOW);
 /**
  * @brief Examine and change a signal action.
@@ -359,7 +360,6 @@ TOOLCHAIN_DISABLE_WARNING(TOOLCHAIN_WARNING_SHADOW);
  */
 int sigaction(int sig, const struct sigaction *ZRESTRICT act, struct sigaction *ZRESTRICT oact);
 TOOLCHAIN_ENABLE_WARNING(TOOLCHAIN_WARNING_SHADOW);
-#endif
 
 /**
  * @brief Add a signal to a signal set.
@@ -374,7 +374,7 @@ int sigaddset(sigset_t *set, int sig);
 #if defined(_XOPEN_SOURCE) || defined(__DOXYGEN__)
 /**
  * @brief Set or get the alternate signal stack (XSI extension).
- * @ingroup posix_option_group_signals
+ * @ingroup posix_option_group_xsi_signals
  * @param ss  New alternate stack descriptor, or NULL.
  * @param oss Output: previous descriptor, or NULL.
  * @return 0 on success, or -1 with errno set on failure.
