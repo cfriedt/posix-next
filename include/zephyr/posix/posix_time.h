@@ -238,7 +238,7 @@ char *ctime_r(const time_t *clock, char *buf);
 #if defined(_XOPEN_SOURCE) || defined(__DOXYGEN__)
 /**
  * @brief Convert a date-time string to broken-down time (XSI extension).
- * @ingroup posix_option_group_xsi_single_process
+ * @ingroup posix_option_group_xsi_c_lang_support
  * @param string Date-time string; the format is determined by the DATEMSK environment variable.
  * @return Pointer to a broken-down time, or NULL on failure.
  */
@@ -310,7 +310,7 @@ size_t strftime_l(char *ZRESTRICT s, size_t maxsize, const char *ZRESTRICT forma
 #if defined(_XOPEN_SOURCE) || defined(__DOXYGEN__)
 /**
  * @brief Parse a date/time string according to a format (XSI extension).
- * @ingroup posix_option_group_xsi_single_process
+ * @ingroup posix_option_group_xsi_c_lang_support
  * @param s      Input string to parse.
  * @param format Format string describing the date/time fields to parse.
  * @param tm     Output: filled-in broken-down time structure.
@@ -378,11 +378,9 @@ int timer_settime(timer_t timerid, int flags, const struct itimerspec *value,
 #endif
 
 #if defined(_XOPEN_SOURCE) || defined(__DOXYGEN__)
-/** @brief Non-zero if Daylight Saving Time is in effect. */
-/** @ingroup posix_option_group_xsi_single_process */
+/** @brief Non-zero if Daylight Saving Time is in effect. @ingroup posix_option_group_xsi_c_lang_support */
 extern int daylight;
-/** @brief Offset in seconds from UTC for the current timezone. */
-/** @ingroup posix_option_group_xsi_single_process */
+/** @brief Offset in seconds from UTC for the current timezone. @ingroup posix_option_group_xsi_c_lang_support */
 extern long timezone;
 #endif
 
