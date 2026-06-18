@@ -13,6 +13,7 @@ zephyr_library_sources(
   getsubopt.c
   stpcpy.c
   strcasecmp.c
+  strncasecmp.c
   strdup.c
   strfmon.c
   strnlen.c
