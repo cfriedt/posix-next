@@ -47,8 +47,9 @@ except Exception as exc:  # pragma: no cover - import guard
 
 try:
     from pygments import highlight
-    from pygments.formatters import HtmlFormatter
-    from pygments.lexers import get_lexer_for_filename, guess_lexer, TextLexer
+    from pygments.formatters.html import HtmlFormatter
+    from pygments.lexers import get_lexer_for_filename, guess_lexer
+    from pygments.lexers.special import TextLexer
 except Exception as exc:  # pragma: no cover - import guard
     raise SystemExit(
         "Missing dependency: pygments. Install with: pip install pygments"
@@ -2443,7 +2444,10 @@ def _resolve_listen_port(bind: str, port: Optional[int], explicit: bool) -> int:
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Interactive gcovr coverage viewer")
+    parser = argparse.ArgumentParser(
+        description="Interactive gcovr coverage viewer",
+        allow_abbrev=False,
+    )
     parser.add_argument("coverage_json", help="Path to gcovr JSON coverage file")
     parser.add_argument(
         "-d",
