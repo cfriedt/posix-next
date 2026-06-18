@@ -28,6 +28,16 @@ ZTEST(posix_c_lib_ext, test_getentropy)
 	}
 
 	if ((dev == NULL) || !device_is_ready(dev)) {
+		/* verify that getentropy fails when no entropy device is available */
+		{
+			uint8_t buf[16] = {0};
+			int ret;
+
+			ret = getentropy(buf, sizeof(buf));
+			zexpect_equal(ret, -1);
+			zexpect_equal(errno, EIO);
+		}
+
 		/* some platforms do not have an entropy device, so skip the tests below */
 		ztest_test_skip();
 	}
