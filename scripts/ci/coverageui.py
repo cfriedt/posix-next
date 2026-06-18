@@ -283,6 +283,29 @@ html[data-theme="light"] .table .row-red { --bs-table-accent-bg: rgba(220, 53, 6
 }
 .cov-sort-th.sort-asc::after { content: "▲"; opacity: 0.95; }
 .cov-sort-th.sort-desc::after { content: "▼"; opacity: 0.95; }
+.total-line-coverage { display: flex; flex-direction: column; align-items: center; gap: 0.25rem; }
+.total-line-coverage .total-line-pct {
+  font-size: clamp(2.4rem, 5vw, 3.6rem);
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+.total-line-coverage .total-line-fraction {
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
+}
+.total-line-coverage--card {
+  padding: 0.35rem 0 0.85rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0.85rem;
+}
+.total-line-coverage--hero {
+  align-items: flex-end;
+  text-align: right;
+  flex-shrink: 0;
+  padding: 0.15rem 0.25rem;
+}
 """
 
 EMBED_JS = r"""
@@ -474,6 +497,18 @@ TEMPLATES: Dict[str, str] = {
 <span class="pill cov-{{ cls }}">{% if value is not none %}{{ "%.1f"|format(value) }}%{% else %}n/a{% endif %}</span>
 {%- endmacro %}
 
+{% macro total_line_coverage(stats, line_cov, line_total, variant="card") -%}
+  {% set cls = stats.coverage_class(metric='line', green=green_threshold, yellow=yellow_threshold) %}
+  <div class="total-line-coverage total-line-coverage--{{ variant }}">
+    <div class="total-line-pct cov-{{ cls }}">
+      {% if stats.line_pct is not none %}{{ "%.1f"|format(stats.line_pct) }}%{% else %}n/a{% endif %}
+    </div>
+    <div class="total-line-fraction muted">
+      {% if line_total > 0 %}{{ "{:,}".format(line_cov) }} / {{ "{:,}".format(line_total) }} lines covered{% else %}no instrumented lines{% endif %}
+    </div>
+  </div>
+{%- endmacro %}
+
 {% macro coverage_wheels(stats, color_for) -%}
 <div class="coverage-rings">
   {% set metrics = [("Lines", stats.line_pct), ("Funcs", stats.func_pct), ("Branch", stats.branch_pct)] %}
@@ -617,6 +652,7 @@ TEMPLATES: Dict[str, str] = {
     <div class="card h-100">
       <div class="card-header">Overall Coverage</div>
       <div class="card-body">
+        {{ m.total_line_coverage(overall, overall_line_cov, overall_line_total, "card")|safe }}
         {{ m.coverage_wheels(overall, color_for)|safe }}
       </div>
     </div>
@@ -750,9 +786,14 @@ TEMPLATES: Dict[str, str] = {
 {% import "macros.html" as m %}
 {% block body %}
 <section class="hero mb-3">
-  <div class="smallcaps">POSIX Framework</div>
-  <h2 class="h4">Coverage by option group</h2>
-  <p class="mb-0 muted">Treemap tile colour is line coverage; use the size control to switch between coverage % and instrumented line count. External ISO C groups appear only in the table.</p>
+  <div class="d-flex flex-wrap align-items-start justify-content-between gap-3">
+    <div>
+      <div class="smallcaps">POSIX Framework</div>
+      <h2 class="h4 mb-2">Coverage by option group</h2>
+      <p class="mb-0 muted">Treemap tile colour is line coverage; use the size control to switch between coverage % and instrumented line count. External ISO C groups appear only in the table.</p>
+    </div>
+    {{ m.total_line_coverage(overall, overall_line_cov, overall_line_total, "hero")|safe }}
+  </div>
 </section>
 <div class="row g-3">
   <div class="col-xl-7">
@@ -1009,6 +1050,14 @@ class CoverageContainer:
         self.group_state: Dict[str, Dict[str, Any]] = {}
         self.macro_index: Dict[str, List[Dict[str, Any]]] = {}
         self.overall = CoverageStats(None, None, None)
+        self.overall_totals: Dict[str, int] = {
+            "line_cov": 0,
+            "line_total": 0,
+            "func_cov": 0,
+            "func_total": 0,
+            "branch_cov": 0,
+            "branch_total": 0,
+        }
 
         self._build_indices()
         self._build_macro_index()
@@ -1321,6 +1370,14 @@ class CoverageContainer:
             _to_pct(total_func_cov, total_func_total),
             _to_pct(total_branch_cov, total_branch_total),
         )
+        self.overall_totals = {
+            "line_cov": total_line_cov,
+            "line_total": total_line_total,
+            "func_cov": total_func_cov,
+            "func_total": total_func_total,
+            "branch_cov": total_branch_cov,
+            "branch_total": total_branch_total,
+        }
 
     def directory_stats(self, path: str) -> CoverageStats:
         key = path or "."
@@ -2057,7 +2114,6 @@ class CoverageRequestHandler(BaseHTTPRequestHandler):
                     "index.html",
                     title="Overview",
                     nav="home",
-                    overall=self.app.coverage.overall,
                     worst_files=self.app.coverage.worst_files(),
                 )
                 return
@@ -2262,6 +2318,7 @@ class CoverageApp:
         self._inject_globals()
 
     def _inject_globals(self) -> None:
+        totals = self.coverage.overall_totals
         self.env.globals.update(
             cdn=CDN_URLS,
             embed_css=EMBED_CSS,
@@ -2273,6 +2330,9 @@ class CoverageApp:
             green_threshold=self.coverage.green_threshold,
             yellow_threshold=self.coverage.yellow_threshold,
             color_for=_color_for_class,
+            overall=self.coverage.overall,
+            overall_line_cov=totals["line_cov"],
+            overall_line_total=totals["line_total"],
         )
         self.env.filters["urlencode"] = lambda s: quote(str(s), safe="")
         self.env.filters["header_display"] = format_posix_header_display
