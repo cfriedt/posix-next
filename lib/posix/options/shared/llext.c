@@ -97,7 +97,14 @@ EXPORT_SYMBOL(strtok_r);
 EXPORT_SYMBOL(fnmatch);
 EXPORT_SYMBOL(getopt);
 EXPORT_SYMBOL(getsubopt);
+EXPORT_SYMBOL(stpcpy);
+EXPORT_SYMBOL(stpncpy);
+EXPORT_SYMBOL(strcasecmp);
+EXPORT_SYMBOL(strdup);
 EXPORT_SYMBOL(strfmon);
+EXPORT_SYMBOL(strncasecmp);
+EXPORT_SYMBOL(strndup);
+EXPORT_SYMBOL(strnlen);
 #endif /* CONFIG_POSIX_C_LIB_EXT */
 
 /* CLOCK_SELECTION */
