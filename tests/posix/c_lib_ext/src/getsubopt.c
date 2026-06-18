@@ -93,4 +93,18 @@ ZTEST(posix_c_lib_ext, test_getsubopt)
 	if (value != NULL) {
 		zexpect_str_equal(value, "");
 	}
+
+	/* option without '=' leaves value NULL */
+	strcpy(buf, "ro");
+	option = buf;
+	value = (char *)0x4242;
+	zexpect_equal(RO_OPTION, getsubopt(&option, (char **)key_list, &value));
+	zexpect_is_null(value);
+	zexpect_equal(option, &buf[strlen("ro")]);
+
+	/* prefix of a valid key must not match */
+	strcpy(buf, "rost");
+	option = buf;
+	value = (char *)0x4242;
+	zexpect_equal(-1, getsubopt(&option, (char **)key_list, &value));
 }
