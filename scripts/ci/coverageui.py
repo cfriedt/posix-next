@@ -311,14 +311,45 @@ window.COVUI.toast = function(msg) {
   setTimeout(() => el.remove(), 2500);
 };
 
-window.COVUI.initTreemap = async function(targetId, endpoint) {
+window.COVUI.initTreemap = async function(targetId, endpoint, controlsId) {
   const mount = document.getElementById(targetId);
   if (!mount) return;
   try {
     const response = await fetch(endpoint, { headers: { "Accept": "application/json" } });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const payload = await response.json();
+    const meta = payload.meta || {};
+    const sizeModes = meta.size_modes || {};
+    const storageKey = "coverageui-treemap-size";
+    let mode = localStorage.getItem(storageKey) || meta.default_size_mode || "percent";
+    if (!sizeModes[mode]) {
+      mode = meta.default_size_mode || "percent";
+    }
+
+    const trace = payload.data && payload.data[0];
+    if (!trace) throw new Error("treemap payload missing trace data");
+
+    function valuesFor(selectedMode) {
+      return sizeModes[selectedMode] || trace.values;
+    }
+
+    trace.values = valuesFor(mode);
     Plotly.newPlot(mount, payload.data, payload.layout, { responsive: true, displaylogo: false });
+
+    const controls = controlsId ? document.getElementById(controlsId) : null;
+    if (controls) {
+      const radios = controls.querySelectorAll('input[type="radio"][name]');
+      radios.forEach(function(radio) {
+        radio.checked = radio.value === mode;
+        radio.addEventListener("change", function() {
+          if (!radio.checked) return;
+          mode = radio.value;
+          localStorage.setItem(storageKey, mode);
+          Plotly.restyle(mount, { values: [valuesFor(mode)] }, [0]);
+        });
+      });
+    }
+
     mount.on("plotly_click", function(e) {
       const point = e.points && e.points[0];
       if (!point || !point.customdata) return;
@@ -721,11 +752,19 @@ TEMPLATES: Dict[str, str] = {
 <section class="hero mb-3">
   <div class="smallcaps">POSIX Framework</div>
   <h2 class="h4">Coverage by option group</h2>
-  <p class="mb-0 muted">Treemap shows groups with line coverage above {{ treemap_min_score }}%; the table lists all groups.</p>
+  <p class="mb-0 muted">Treemap tile colour is line coverage; use the size control to switch between coverage % and instrumented line count. External ISO C groups appear only in the table.</p>
 </section>
 <div class="row g-3">
   <div class="col-xl-7">
     <div class="plot-wrap p-2">
+      <div class="d-flex justify-content-end align-items-center mb-2 px-1">
+        <div class="btn-group btn-group-sm" role="group" id="posix-treemap-controls" aria-label="Treemap tile size">
+          <input type="radio" class="btn-check" name="posix-treemap-size" id="posix-treemap-size-pct" value="percent" autocomplete="off" checked>
+          <label class="btn btn-outline-theme" for="posix-treemap-size-pct">Size: coverage %</label>
+          <input type="radio" class="btn-check" name="posix-treemap-size" id="posix-treemap-size-lines" value="lines" autocomplete="off">
+          <label class="btn btn-outline-theme" for="posix-treemap-size-lines">Size: line count</label>
+        </div>
+      </div>
       <div id="posix-treemap" style="height: 500px;"></div>
     </div>
   </div>
@@ -765,7 +804,7 @@ TEMPLATES: Dict[str, str] = {
 {% endblock %}
 {% block scripts %}
 <script>
-window.COVUI.initTreemap("posix-treemap", "/api/posix/treemap");
+window.COVUI.initTreemap("posix-treemap", "/api/posix/treemap", "posix-treemap-controls");
 window.COVUI.initSortableTable("posix-option-groups");
 </script>
 {% endblock %}
@@ -1064,6 +1103,39 @@ class CoverageContainer:
             if key in seen:
                 continue
             seen.add(key)
+            if line.get("gcovr/excluded"):
+                continue
+            line_total += 1
+            if int(line.get("count") or 0) > 0:
+                line_hit += 1
+            for branch in line.get("branches") or []:
+                if branch.get("gcovr/excluded"):
+                    continue
+                branch_total += 1
+                if int(branch.get("count") or 0) > 0:
+                    branch_hit += 1
+        return line_hit, line_total, branch_hit, branch_total
+
+    def _group_line_branch_totals(
+        self, symbols: Iterable[str]
+    ) -> Tuple[int, int, int, int]:
+        symbol_list = list(symbols)
+        if not symbol_list:
+            return 0, 0, 0, 0
+
+        line_hit = line_total = branch_hit = branch_total = 0
+        seen_lines: set[Tuple[str, int]] = set()
+        for (path, lnum), line in self.line_map.items():
+            fn = str(line.get("function_name") or "")
+            if not any(
+                self._line_belongs_to_symbol(path, lnum, symbol, fn)
+                for symbol in symbol_list
+            ):
+                continue
+            key = (path, lnum)
+            if key in seen_lines:
+                continue
+            seen_lines.add(key)
             if line.get("gcovr/excluded"):
                 continue
             line_total += 1
@@ -1654,24 +1726,14 @@ class CoverageContainer:
                         href += f"#L{lineno}"
                     return href
 
-        path = state.get("path") or ""
-        if path in ("-", "external (ISO C)"):
-            path = ""
+        impl_href = self.implementation_source_href(symbol)
+        if impl_href:
+            return impl_href
 
-        candidates = self.function_index.get(symbol, [])
-        local = [c for c in candidates if self._is_local_posix(c["path"])]
-        libc = [c for c in candidates if self._is_zephyr_libc_common(c["path"])]
-        pick = (local or libc or candidates or [None])[0]
-        if pick:
-            rel = pick["path"]
-            href = f"/source?path={quote(rel, safe='')}"
-            lineno = int(pick.get("lineno") or 0)
-            if lineno > 0:
-                href += f"#L{lineno}"
-            return href
-        if path:
-            return f"/source?path={quote(path, safe='')}"
-        return None
+        path = state.get("path") or ""
+        if path in ("-", "external (ISO C)") or path.endswith(".h"):
+            return None
+        return f"/source?path={quote(path, safe='')}"
 
     def _enrich_symbol_state(self, sym: str) -> Dict[str, Any]:
         base = self.symbol_state.get(sym)
@@ -1734,6 +1796,9 @@ class CoverageContainer:
                     for s in symbol_states
                 ),
             )
+            _line_hit, line_total, _branch_hit, _branch_total = (
+                self._group_line_branch_totals(symbols)
+            )
             self.group_state[gid] = {
                 "gid": gid,
                 "label": info.get("label", gid),
@@ -1742,6 +1807,7 @@ class CoverageContainer:
                 "symbols": symbols,
                 "symbol_states": symbol_states,
                 "stats": stats,
+                "line_total": line_total,
             }
 
     def worst_files(self, limit: int = 16) -> List[Dict[str, Any]]:
@@ -1855,21 +1921,26 @@ class CoverageContainer:
     def build_treemap_payload(self) -> Dict[str, Any]:
         labels: List[str] = []
         parents: List[str] = []
-        values: List[float] = []
+        percent_values: List[float] = []
+        line_values: List[float] = []
         colors: List[str] = []
-        customdata: List[List[str]] = []
+        customdata: List[List[Any]] = []
         text: List[str] = []
         for gid, group in sorted(self.group_state.items()):
             stats: CoverageStats = group["stats"]
+            if stats.external:
+                continue
             pct = stats.line_pct if stats.line_pct is not None else 0.0
             if pct <= TREEMAP_MIN_SCORE:
                 continue
             cov_class = stats.coverage_class(
                 metric="line", green=self.green_threshold, yellow=self.yellow_threshold
             )
+            line_total = int(group.get("line_total") or 0)
             labels.append(gid)
             parents.append("")
-            values.append(max(pct, 1.0))
+            percent_values.append(max(pct, 1.0))
+            line_values.append(max(float(line_total), 1.0))
             colors.append(
                 {
                     "green": "#39d98a",
@@ -1879,18 +1950,22 @@ class CoverageContainer:
                     "unknown": "#5e6989",
                 }[cov_class]
             )
-            customdata.append([gid])
+            customdata.append([gid, pct, line_total])
             text.append(group.get("label", gid))
 
         fig = go.Figure(
             go.Treemap(
                 labels=labels,
                 parents=parents,
-                values=values,
+                values=percent_values,
                 marker={"colors": colors, "line": {"color": "#0f1117", "width": 1}},
                 customdata=customdata,
                 text=text,
-                hovertemplate="<b>%{label}</b><br>%{text}<br>score=%{value:.1f}<extra></extra>",
+                hovertemplate=(
+                    "<b>%{label}</b><br>%{text}<br>"
+                    "Coverage: %{customdata[1]:.1f}%<br>"
+                    "Lines: %{customdata[2]}<extra></extra>"
+                ),
             )
         )
         fig.update_layout(
@@ -1899,7 +1974,15 @@ class CoverageContainer:
             margin={"l": 10, "r": 10, "t": 16, "b": 10},
             font={"color": "#dbe5ff"},
         )
-        return fig.to_plotly_json()
+        payload = fig.to_plotly_json()
+        payload["meta"] = {
+            "default_size_mode": "percent",
+            "size_modes": {
+                "percent": percent_values,
+                "lines": line_values,
+            },
+        }
+        return payload
 
 
 class CoverageRequestHandler(BaseHTTPRequestHandler):
