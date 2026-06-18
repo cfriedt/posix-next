@@ -81,6 +81,7 @@ _HEADER_BASEDEFS: dict[str, str] = {
     "posix_stdlib.h": "stdlib.h",
     "posix_string.h": "string.h",
     "fnmatch.h": "fnmatch.h",
+    "strings.h": "strings.h",
     "syslog.h": "syslog.h",
     "pwd.h": "pwd.h",
     "grp.h": "grp.h",
