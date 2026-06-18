@@ -10,11 +10,12 @@
 
 char *strndup(const char *s, size_t n)
 {
-	char *ret = malloc(n);
+	size_t len = strnlen(s, n);
+	char *ret = malloc(len + 1);
 
 	if (ret != NULL) {
-		strncpy(ret, s, n);
-		ret[n - 1] = '\0';
+		memcpy(ret, s, len);
+		ret[len] = '\0';
 	}
 
 	return ret;
