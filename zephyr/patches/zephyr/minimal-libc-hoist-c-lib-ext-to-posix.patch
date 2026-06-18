@@ -1,0 +1,99 @@
+diff --git a/lib/libc/common/CMakeLists.txt b/lib/libc/common/CMakeLists.txt
+index 817e971cd3e..42b681367ee 100644
+--- a/lib/libc/common/CMakeLists.txt
++++ b/lib/libc/common/CMakeLists.txt
+@@ -10,7 +10,6 @@ zephyr_library_sources_ifdef(CONFIG_COMMON_LIBC_LOCALTIME source/time/localtime.
+ zephyr_library_sources_ifdef(CONFIG_COMMON_LIBC_CTIME source/time/ctime.c)
+ zephyr_library_sources_ifdef(CONFIG_COMMON_LIBC_TIME source/time/time.c)
+ zephyr_library_sources_ifdef(CONFIG_COMMON_LIBC_MALLOC source/stdlib/malloc.c)
+-zephyr_library_sources_ifdef(CONFIG_COMMON_LIBC_STRNLEN source/string/strnlen.c)
+ zephyr_library_sources_ifdef(CONFIG_COMMON_LIBC_THRD
+     source/thrd/cnd.c
+     source/thrd/mtx.c
+diff --git a/lib/libc/common/Kconfig b/lib/libc/common/Kconfig
+index 5569e2b3d20..b5a55d9b688 100644
+--- a/lib/libc/common/Kconfig
++++ b/lib/libc/common/Kconfig
+@@ -109,8 +109,10 @@ config COMMON_LIBC_REALLOCARRAY
+ 
+ config COMMON_LIBC_STRNLEN
+ 	bool
++	select DEPRECATED
++	select POSIX_C_LIB_EXT
+ 	help
+-	  common implementation of strnlen().
++	  This option is deprecated. Please use POSIX_C_LIB_EXT instead.
+ 
+ config COMMON_LIBC_THRD
+ 	bool "C11 <threads.h> API support"
+diff --git a/lib/libc/minimal/CMakeLists.txt b/lib/libc/minimal/CMakeLists.txt
+index 403b8203d67..084a9e324fe 100644
+--- a/lib/libc/minimal/CMakeLists.txt
++++ b/lib/libc/minimal/CMakeLists.txt
+@@ -25,7 +25,6 @@ zephyr_library_sources(
+   source/stdlib/exit.c
+   source/stdlib/qsort.c
+   source/string/strerror.c
+-  source/string/strncasecmp.c
+   source/string/strstr.c
+   source/string/string.c
+   source/string/strspn.c
+diff --git a/lib/libc/minimal/include/string.h b/lib/libc/minimal/include/string.h
+index 62bc53e7823..eec1fe4b05a 100644
+--- a/lib/libc/minimal/include/string.h
++++ b/lib/libc/minimal/include/string.h
+@@ -24,7 +24,6 @@ extern char  *strncpy(char *ZRESTRICT d, const char *ZRESTRICT s,
+ extern char  *strchr(const char *s, int c);
+ extern char  *strrchr(const char *s, int c);
+ extern size_t strlen(const char *s);
+-extern size_t strnlen(const char *s, size_t maxlen);
+ extern int    strcmp(const char *s1, const char *s2);
+ extern int    strncmp(const char *s1, const char *s2, size_t n);
+ extern char  *strtok(char *str, const char *sep);
+diff --git a/lib/libc/minimal/include/strings.h b/lib/libc/minimal/include/strings.h
+index 5c930194003..312aa710ddd 100644
+--- a/lib/libc/minimal/include/strings.h
++++ b/lib/libc/minimal/include/strings.h
+@@ -15,8 +15,6 @@
+ extern "C" {
+ #endif
+ 
+-extern int strncasecmp(const char *s1, const char *s2, size_t n);
+-
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/lib/libc/minimal/source/string/strncasecmp.c b/lib/libc/minimal/source/string/strncasecmp.c
+deleted file mode 100644
+index 17a44bb724e..00000000000
+--- a/lib/libc/minimal/source/string/strncasecmp.c
++++ /dev/null
+@@ -1,28 +0,0 @@
+-/*
+- * Copyright (c) 2018 Intel Corporation
+- *
+- * SPDX-License-Identifier: Apache-2.0
+- */
+-
+-#include <stdlib.h>
+-#include <ctype.h>
+-
+-int
+-strncasecmp(const char *s1, const char *s2, size_t n)
+-{
+-	unsigned char c = 1U;
+-
+-	for (; c && n != 0; n--) {
+-		unsigned char lower1, lower2;
+-
+-		c = *s1++;
+-		lower1 = tolower(c);
+-		lower2 = tolower((unsigned char)*s2++);
+-
+-		if (lower1 != lower2) {
+-			return (lower1 > lower2) - (lower1 < lower2);
+-		}
+-	}
+-
+-	return 0;
+-}
