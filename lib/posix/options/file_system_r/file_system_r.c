@@ -10,12 +10,16 @@
 #include <zephyr/fs/fs.h>
 #include <dirent.h>
 #include <zephyr/sys/util.h>
+#include <zephyr/sys/zvfs_fs.h>
 
 int readdir_r(DIR *dirp, struct dirent *entry, struct dirent **result)
 {
 	int rc;
 	struct fs_dirent de;
-	struct fs_dir_t *const ptr = dirp;
+	struct zvfs_fs_desc *const ptr = (struct zvfs_fs_desc *)dirp;
+
+#ifndef CONFIG_NATIVE_LIBC
+	/* Silence __nonnull warnings for args the spec leaves undefined. */
 
 	if (result == NULL) {
 		return EINVAL;
@@ -30,8 +34,9 @@ int readdir_r(DIR *dirp, struct dirent *entry, struct dirent **result)
 		*result = NULL;
 		return EBADF;
 	}
+#endif
 
-	rc = fs_readdir(ptr, &de);
+	rc = fs_readdir(&ptr->dir, &de);
 	if (rc < 0) {
 		*result = NULL;
 		return -rc;

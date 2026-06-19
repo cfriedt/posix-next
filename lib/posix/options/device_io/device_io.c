@@ -12,20 +12,15 @@
 #include <poll.h>
 #include <unistd.h>
 #include <sys/select.h>
-#include <zephyr/fs/fs.h>
+
 #include <zephyr/sys/fdtable.h>
+#include <zephyr/sys/zvfs_libc.h>
+#include <zephyr/sys/zvfs_fs.h>
 
 /* prototypes for external, not-yet-public, functions in fdtable.c */
 int zvfs_close(int fd);
-FILE *zvfs_fdopen(int fd, const char *mode);
-int zvfs_fileno(FILE *file);
-
-static struct fd_op_vtable posix_op_vtable = {
-	.read = zvfs_read_vmeth,
-	.write = zvfs_write_vmeth,
-	.close = zvfs_close_vmeth,
-	.ioctl = zvfs_ioctl_vmeth,
-};
+ssize_t zvfs_read(int fd, void *buf, size_t sz, size_t *from_offset);
+ssize_t zvfs_write(int fd, const void *buf, size_t sz, size_t *from_offset);
 
 #undef FD_CLR
 void FD_CLR(int fd, struct zvfs_fd_set *fdset)
@@ -61,37 +56,19 @@ FUNC_ALIAS(close, _close, int);
 
 FILE *fdopen(int fd, const char *mode)
 {
-	return zvfs_fdopen(fd, mode);
+	return zvfs_libc_fdopen(fd, mode);
 }
+#ifdef CONFIG_POSIX_DEVICE_IO_ALIAS_FDOPEN
+FUNC_ALIAS(fdopen, _fdopen, FILE *);
+#endif
 
 int fileno(FILE *file)
 {
-	return zvfs_fileno(file);
+	return zvfs_libc_fileno(file);
 }
-
-static int posix_mode_to_zephyr(int mf)
-{
-	int mode = (mf & O_CREAT) ? FS_O_CREATE : 0;
-
-	mode |= (mf & O_APPEND) ? FS_O_APPEND : 0;
-	mode |= (mf & O_TRUNC) ? FS_O_TRUNC : 0;
-
-	switch (mf & O_ACCMODE) {
-	case O_RDONLY:
-		mode |= FS_O_READ;
-		break;
-	case O_WRONLY:
-		mode |= FS_O_WRITE;
-		break;
-	case O_RDWR:
-		mode |= FS_O_RDWR;
-		break;
-	default:
-		break;
-	}
-
-	return mode;
-}
+#ifdef CONFIG_POSIX_DEVICE_IO_ALIAS_FILENO
+FUNC_ALIAS(fileno, _fileno, int);
+#endif
 
 int open(const char *name, int flags, ...)
 {
@@ -104,9 +81,7 @@ int open(const char *name, int flags, ...)
 		va_end(args);
 	}
 
-	ARG_UNUSED(mode);
-
-	return zvfs_open(name, posix_mode_to_zephyr(flags), &posix_op_vtable);
+	return zvfs_open(name, flags, mode);
 }
 #ifdef CONFIG_POSIX_DEVICE_IO_ALIAS_OPEN
 FUNC_ALIAS(open, _open, int);
