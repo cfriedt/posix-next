@@ -114,6 +114,7 @@ config POSIX_BASE_DEFINITIONS
 	# to satisfy _POSIX_THREAD_SAFE_FUNCTIONS	
 	select POSIX_FILE_SYSTEM_R
 	select POSIX_C_LANG_SUPPORT_R
+	imply ZVFS_RESERVE_STDIO_FDS
 	help
 	  This option is not user configurable. It may be configured indirectly by selecting
 	  CONFIG_POSIX_AEP_CHOICE_BASE=y.
