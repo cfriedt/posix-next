@@ -11,16 +11,17 @@
 #include <dirent.h>
 #include <string.h>
 #include <zephyr/sys/fdtable.h>
+#include <zephyr/sys/zvfs_fs.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <zephyr/fs/fs.h>
+
+int zvfs_fstat(int fd, struct stat *buf);
 
 BUILD_ASSERT(PATH_MAX >= MAX_FILE_NAME, "PATH_MAX is less than MAX_FILE_NAME");
 
 static struct fs_dirent fdirent;
 static struct dirent pdirent;
-
-K_MEM_SLAB_DEFINE_STATIC(dir_desc_slab, sizeof(struct fs_dir_t), CONFIG_POSIX_OPEN_MAX, 4);
 
 /**
  * @brief Open a directory stream.
@@ -30,24 +31,24 @@ K_MEM_SLAB_DEFINE_STATIC(dir_desc_slab, sizeof(struct fs_dir_t), CONFIG_POSIX_OP
 DIR *opendir(const char *dirname)
 {
 	int rc;
-	struct fs_dir_t *ptr;
+	struct zvfs_fs_desc *ptr;
 
-	rc = k_mem_slab_alloc(&dir_desc_slab, (void **)&ptr, K_NO_WAIT);
-	if (rc < 0) {
+	ptr = zvfs_fs_desc_alloc(true);
+	if (ptr == NULL) {
 		errno = EMFILE;
 		return NULL;
 	}
 
-	fs_dir_t_init(ptr);
+	fs_dir_t_init(&ptr->dir);
 
-	rc = fs_opendir(ptr, dirname);
+	rc = fs_opendir(&ptr->dir, dirname);
 	if (rc < 0) {
-		k_mem_slab_free(&dir_desc_slab, ptr);
+		zvfs_fs_desc_free(ptr);
 		errno = -rc;
 		return NULL;
 	}
 
-	return ptr;
+	return (DIR *)ptr;
 }
 
 /**
@@ -58,16 +59,16 @@ DIR *opendir(const char *dirname)
 int closedir(DIR *dirp)
 {
 	int rc;
-	struct fs_dir_t *ptr = dirp;
+	struct zvfs_fs_desc *ptr = (struct zvfs_fs_desc *)dirp;
 
 	if (dirp == NULL) {
 		errno = EBADF;
 		return -1;
 	}
 
-	rc = fs_closedir(ptr);
+	rc = fs_closedir(&ptr->dir);
 
-	k_mem_slab_free(&dir_desc_slab, ptr);
+	zvfs_fs_desc_free(ptr);
 
 	if (rc < 0) {
 		errno = -rc;
@@ -85,14 +86,14 @@ int closedir(DIR *dirp)
 struct dirent *readdir(DIR *dirp)
 {
 	int rc;
-	struct fs_dir_t *ptr = dirp;
+	struct zvfs_fs_desc *ptr = (struct zvfs_fs_desc *)dirp;
 
 	if (dirp == NULL) {
 		errno = EBADF;
 		return NULL;
 	}
 
-	rc = fs_readdir(ptr, &fdirent);
+	rc = fs_readdir(&ptr->dir, &fdirent);
 	if (rc < 0) {
 		errno = -rc;
 		return NULL;
@@ -227,16 +228,22 @@ int mkdir(const char *path, mode_t mode)
 
 int fstat(int fildes, struct stat *buf)
 {
-	struct zvfs_stat zbuf = {0};
-	int rc = zvfs_fstat(fildes, &zbuf);
+	struct zvfs_stat zs;
+	int rc;
 
-	if (rc < 0) {
-		errno = -rc;
+	if (buf == NULL) {
+		errno = EFAULT;
 		return -1;
 	}
-	*buf = (struct stat){0};
-	buf->st_size = zbuf.size;
-	buf->st_mode = zbuf.mode;
+
+	rc = zvfs_fstat(fildes, &zs);
+	if (rc < 0) {
+		return -1;
+	}
+
+	memset(buf, 0, sizeof(*buf));
+	buf->st_size = zs.size;
+	buf->st_mode = zs.mode;
 	return 0;
 }
 #ifdef CONFIG_POSIX_FILE_SYSTEM_ALIAS_FSTAT
