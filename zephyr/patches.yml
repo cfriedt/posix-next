@@ -388,3 +388,18 @@ patches:
       function the base image defines over the variable and exports, so an
       extension shares the errno of the thread running it. ERRNO_IN_TLS
       defaults off with LLEXT for the same reason.
+  - path: zephyr/zvfs-libc-file-fd-fix.patch
+    sha256sum: 83f092887f555bb86e5b406bc9dafee2a134cd1b0325a360786e6c93fcd42b54
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-06-19
+    upstreamable: true
+    comments: |
+      Bind C library FILE objects to ZVFS file descriptors via per-libc
+      zvfs_libc_fdopen()/zvfs_libc_fileno() hooks and a generic, statically-
+      allocated FILE-object store (k_mem_slab), fixing the #108818 fd_entry-to-
+      FILE cast crash. Add common libc fopen()/freopen()/fclose() on zvfs_open()
+      without POSIX_FILE_SYSTEM by moving zvfs_open() and the FS fd vtable into
+      lib/os/zvfs/zvfs_fs.c (CONFIG_ZVFS_FS). Reserve fd table slots via
+      CONFIG_ZVFS_RESERVE_STDIO_FDS and CONFIG_ZVFS_OPEN_ADD_SIZE_STDIO.
