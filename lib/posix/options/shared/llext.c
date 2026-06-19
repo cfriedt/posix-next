@@ -364,6 +364,14 @@ EXPORT_SYMBOL(pthread_spin_trylock);
 EXPORT_SYMBOL(pthread_spin_unlock);
 #endif /* CONFIG_POSIX_SPIN_LOCKS */
 
+/* SYSTEM_DATABASE_R */
+#ifdef CONFIG_POSIX_SYSTEM_DATABASE_R
+EXPORT_SYMBOL(getgrgid_r);
+EXPORT_SYMBOL(getgrnam_r);
+EXPORT_SYMBOL(getpwnam_r);
+EXPORT_SYMBOL(getpwuid_r);
+#endif /* CONFIG_POSIX_SYSTEM_DATABASE_R */
+
 /* THREADS_BASE */
 #ifdef CONFIG_POSIX_THREADS
 EXPORT_SYMBOL(pthread_atfork);
