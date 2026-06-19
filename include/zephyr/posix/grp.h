@@ -23,12 +23,21 @@ extern "C" {
 
 #include <sys/stat.h>
 
-/** @brief Group database entry. */
+#if !defined(_GROUP_DECLARED) && !defined(__group_defined)
+/**
+ * @brief POSIX group database entry.
+ * @ingroup posix_option_group_system_database
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/group.h.html
+ */
 struct group {
-	char *gr_name;  /**< Group name. */
-	gid_t gr_gid;   /**< Numerical group ID. */
-	char **gr_mem;  /**< NULL-terminated array of member login names. */
+	char *gr_name;    /**< Group name. */
+	char *gr_passwd;  /**< Group password. */
+	gid_t gr_gid;     /**< Numerical group ID. */
+	char **gr_mem;    /**< NULL-terminated array of member login names. */
 };
+#define _GROUP_DECLARED
+#define __group_defined
+#endif
 
 /**
  * @brief Look up a group entry by name (thread-safe).
