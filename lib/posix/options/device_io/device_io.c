@@ -13,11 +13,12 @@
 #include <unistd.h>
 #include <sys/select.h>
 
-/* prototypes for external, not-yet-public, functions in fdtable.c or fs.c */
+#include <zephyr/sys/fdtable.h>
+#include <zephyr/sys/zvfs_libc.h>
+#include <zephyr/sys/zvfs_fs.h>
+
+/* prototypes for external, not-yet-public, functions in fdtable.c */
 int zvfs_close(int fd);
-FILE *zvfs_fdopen(int fd, const char *mode);
-int zvfs_fileno(FILE *file);
-int zvfs_open(const char *name, int flags, int mode);
 ssize_t zvfs_read(int fd, void *buf, size_t sz, size_t *from_offset);
 ssize_t zvfs_write(int fd, const void *buf, size_t sz, size_t *from_offset);
 
@@ -55,13 +56,19 @@ FUNC_ALIAS(close, _close, int);
 
 FILE *fdopen(int fd, const char *mode)
 {
-	return zvfs_fdopen(fd, mode);
+	return zvfs_libc_fdopen(fd, mode);
 }
+#ifdef CONFIG_POSIX_DEVICE_IO_ALIAS_FDOPEN
+FUNC_ALIAS(fdopen, _fdopen, FILE *);
+#endif
 
 int fileno(FILE *file)
 {
-	return zvfs_fileno(file);
+	return zvfs_libc_fileno(file);
 }
+#ifdef CONFIG_POSIX_DEVICE_IO_ALIAS_FILENO
+FUNC_ALIAS(fileno, _fileno, int);
+#endif
 
 int open(const char *name, int flags, ...)
 {

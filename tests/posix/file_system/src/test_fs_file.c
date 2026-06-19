@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include <stdio.h>
 #include <string.h>
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -273,6 +274,96 @@ ZTEST(posix_fs_file_test, test_fs_fd_leak)
 			zassert_true(test_file_close() == TC_PASS);
 		}
 	}
+}
+
+/**
+ * @brief fdopen()/fileno() round-trip (regression for zephyrproject-rtos/zephyr#108818)
+ *
+ * Previously zvfs_fdopen()/zvfs_fileno() cast a struct fd_entry * to FILE *,
+ * which faulted as soon as the C library touched the FILE. The FILE object is
+ * now backed by a statically-allocated pool (or an encoded fd for minimal libc),
+ * so this must neither crash nor allocate, and fileno(fdopen(fd)) must equal fd.
+ */
+ZTEST(posix_fs_file_test, test_fs_fdopen_fileno)
+{
+	FILE *fp;
+	int fd;
+
+	zassert_true(test_file_open() == TC_PASS);
+	fd = file;
+
+	fp = fdopen(fd, "r+");
+	zassert_not_null(fp, "fdopen() failed, errno=%d", errno);
+
+	zassert_equal(fileno(fp), fd, "fileno(fdopen(%d)) != %d", fd, fd);
+
+	zassert_ok(fclose(fp), "fclose() failed, errno=%d", errno);
+	/* fclose() closed the underlying fd; prevent a double close in after_fn. */
+	file = -1;
+}
+
+#ifndef CONFIG_MINIMAL_LIBC
+/**
+ * @brief FILE I/O through a pooled fdopen()'d stream
+ *
+ * Exercises the path that crashed in #108818: writing and reading back through
+ * the C library FILE API on top of a ZVFS file descriptor. Minimal libc provides
+ * fopen()/fclose() via common libc and fdopen()/fileno() via POSIX device I/O,
+ * but it does not implement fread() or fseek().
+ */
+ZTEST(posix_fs_file_test, test_fs_fdopen_io)
+{
+	FILE *fp;
+	size_t n;
+	char buf[sizeof(test_str)] = {0};
+
+	zassert_true(test_file_open() == TC_PASS);
+
+	fp = fdopen(file, "r+");
+	zassert_not_null(fp, "fdopen() failed, errno=%d", errno);
+
+	n = fwrite(test_str, 1, strlen(test_str), fp);
+	zassert_equal(n, strlen(test_str), "fwrite() wrote %zu (errno=%d)", n, errno);
+	zassert_ok(fflush(fp), "fflush() failed, errno=%d", errno);
+
+	zassert_equal(fseek(fp, 0, SEEK_SET), 0, "fseek() failed, errno=%d", errno);
+
+	n = fread(buf, 1, strlen(test_str), fp);
+	zassert_equal(n, strlen(test_str), "fread() read %zu (errno=%d)", n, errno);
+	zassert_mem_equal(buf, test_str, strlen(test_str), "read back data mismatch");
+
+	zassert_ok(fclose(fp), "fclose() failed, errno=%d", errno);
+	file = -1;
+
+	zassert_ok(test_file_delete());
+}
+#endif /* CONFIG_MINIMAL_LIBC */
+
+/**
+ * @brief fdopen()/fclose() cycles do not leak slots (no alloc)
+ *
+ * Loop more times than the pool can hold simultaneously. If fclose() did not
+ * release the binding, fdopen() would eventually fail. With minimal libc the
+ * FILE is an encoded fd rather than a pooled object, but the same invariant holds.
+ */
+ZTEST(posix_fs_file_test, test_fs_fdopen_no_leak)
+{
+	const int reps = MAX(CONFIG_POSIX_OPEN_MAX, ZVFS_OPEN_SIZE) + 5;
+
+	for (int i = 0; i < reps; i++) {
+		FILE *fp;
+
+		zassert_true(test_file_open() == TC_PASS);
+
+		fp = fdopen(file, "r+");
+		zassert_not_null(fp, "fdopen() failed at iteration %d, errno=%d", i, errno);
+		zassert_equal(fileno(fp), file, "fileno mismatch at iteration %d", i);
+
+		zassert_ok(fclose(fp), "fclose() failed at iteration %d, errno=%d", i, errno);
+		file = -1;
+	}
+
+	zassert_ok(test_file_delete());
 }
 
 ZTEST(posix_fs_file_test, test_file_open_truncate)
