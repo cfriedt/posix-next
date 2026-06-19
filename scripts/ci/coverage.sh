@@ -10,20 +10,11 @@ SCRIPT_PATH="$(realpath "$(dirname "$0")")"
 
 export CI_CONFIG_PROFILE=coverage_nightly
 
-exec "$SCRIPT_PATH"/runci.sh "$@"
-
-# Note: none of the following commands are executed because they follow an exec call, but it is
-# convenient to copy-paste after a coverage run (same merge steps as CI coverage.yml).
-#
+"$SCRIPT_PATH"/runci.sh "$@"
 # Prerequisites (once):
 #   source ~/posix-next/zephyr/zephyr-env.sh
 #   pip install gcovr jq
 #   pip install -r modules/lib/posix/scripts/ci/requirements-coverage.txt
-#
-# (a) Generate coverage data from tests (runs twister with CI_CONFIG_PROFILE=coverage_nightly):
-#   ./modules/lib/posix/scripts/ci/coverage.sh
-#
-# (b–d) From the west workspace root, refresh traces, merge JSON, and start the UI:
 
 WORKSPACE="$(west topdir)"
 CI_CONFIG="$WORKSPACE/modules/lib/posix/.github/ci-config.json"
@@ -59,12 +50,16 @@ done
 
 mkdir -p twister-out
 
+echo "Generating coverage-full.json"
+
 # (b) coverage-full.json — zephyr + modules/lib/posix (CI workspace filters)
 gcovr -r "$WORKSPACE" \
   "${gcovr_args[@]}" \
   "${trace_args[@]}" \
   "${workspace_filter_args[@]}" \
   --json "$WORKSPACE/twister-out/coverage-full.json"
+
+echo "Generating coverage-posix.json"
 
 # (c) coverage-posix.json — POSIX headers + lib/posix only (re-filter full merge)
 gcovr -r "$WORKSPACE" \
