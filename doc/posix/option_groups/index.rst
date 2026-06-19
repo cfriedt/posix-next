@@ -647,10 +647,10 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_SYSTEM_DATABASE_R`.
    :header: API, Supported
    :widths: 50,10
 
-    :c:func:`getgrgid_r`,yes :ref:`†<posix_undefined_behaviour>`
-    :c:func:`getgrnam_r`,yes :ref:`†<posix_undefined_behaviour>`
-    :c:func:`getpwnam_r`,yes :ref:`†<posix_undefined_behaviour>`
-    :c:func:`getpwuid_r`,yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`getgrgid_r`,yes
+    :c:func:`getgrnam_r`,yes
+    :c:func:`getpwnam_r`,yes
+    :c:func:`getpwuid_r`,yes
 
 .. doxygengroup:: posix_option_group_system_database_r
    :project: posix
@@ -1294,6 +1294,10 @@ In Zephyr, ``_POSIX_THREAD_SAFE_FUNCTIONS`` is defined when
     :c:func:`funlockfile`,
     :c:func:`getc_unlocked`,
     :c:func:`getchar_unlocked`,
+    :c:func:`getgrgid_r`, yes
+    :c:func:`getgrnam_r`, yes
+    :c:func:`getpwnam_r`, yes
+    :c:func:`getpwuid_r`, yes
     :c:func:`gmtime_r`, yes
     :c:func:`localtime_r`, yes (UTC timezone only)
     :c:func:`putc_unlocked`,
