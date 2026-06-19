@@ -25,11 +25,14 @@ extern "C" {
 
 /** @brief Password database entry. */
 struct passwd {
-	char *pw_name;  /**< User's login name. */
-	uid_t pw_uid;   /**< Numerical user ID. */
-	gid_t pw_gid;   /**< Numerical group ID. */
-	char *pw_dir;   /**< Initial working directory. */
-	char *pw_shell; /**< Program to use as shell. */
+	char *pw_name;    /**< User's login name. */
+	char *pw_passwd;  /**< Encrypted password. */
+	uid_t pw_uid;     /**< Numerical user ID. */
+	gid_t pw_gid;     /**< Numerical group ID. */
+	char *pw_comment; /**< User comment (unused). */
+	char *pw_gecos;   /**< Real name / GECOS field. */
+	char *pw_dir;     /**< Initial working directory. */
+	char *pw_shell;   /**< Program to use as shell. */
 };
 
 /**
