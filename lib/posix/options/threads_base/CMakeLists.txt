@@ -15,7 +15,7 @@ zephyr_library_compile_options(-U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
 zephyr_library_compile_options_ifdef(CONFIG_XSI -U_XOPEN_SOURCE -D_XOPEN_SOURCE=700)
 
 if(NOT CONFIG_TC_PROVIDES_POSIX_THREADS)
-  zephyr_library_sources(cond.c grp.c key.c mutex.c pthread.c pwd.c)
+  zephyr_library_sources(cond.c key.c mutex.c pthread.c)
   if(CONFIG_POSIX_THREAD_ATTR_STACKADDR AND CONFIG_POSIX_THREAD_ATTR_STACKSIZE)
     zephyr_library_sources(pthread_attr_stackaddr.c)
   endif()
