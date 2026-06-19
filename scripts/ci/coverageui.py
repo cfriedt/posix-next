@@ -126,15 +126,43 @@ MACRO_DEFINE_RE = re.compile(r"^\s*#\s*define\s+(\w+)")
 HEADER_PROTO_START_RE = re.compile(
     r"^\s*(?:static\s+|inline\s+|extern\s+)*"
     r"(?:const\s+|volatile\s+|unsigned\s+|signed\s+|struct\s+|enum\s+)*"
-    r"[\w\s\*]+?\s+(\w+)\s*\("
+    r"[\w\s]+?"
+    r"(?:\s*\*+\s*)*"
+    r"(\w+)\s*\("
 )
 HEADER_PROTO_SKIP_NAMES = frozenset(
     {"if", "while", "for", "switch", "return", "sizeof", "defined", "do"}
+)
+C_SOURCE_FUNC_RE = re.compile(
+    r"^\s*(?:static\s+|inline\s+)*"
+    r"(?:const\s+|volatile\s+|unsigned\s+|signed\s+|struct\s+|enum\s+)*"
+    r"[\w\s]+?"
+    r"(?:\s*\*+\s*)*"
+    r"(\w+)\s*\("
 )
 
 # ISO C library symbols listed in POSIX option groups but implemented by libc.
 ISO_C_EXTERNAL_SYMBOLS = frozenset(
     {"remove", "rename", "tmpfile", "tmpnam"},
+)
+
+# Symbols listed without () in V4_subprofiles.html (9699919799 / 9799919799).
+V4_VARIABLE_SYMBOLS = frozenset(
+    {
+        "daylight",
+        "environ",
+        "errno",
+        "optarg",
+        "opterr",
+        "optind",
+        "optopt",
+        "signgam",
+        "stderr",
+        "stdin",
+        "stdout",
+        "timezone",
+        "tzname",
+    }
 )
 
 # V4_subprofiles uses family shorthands; expand to concrete APIs for coverage lookup.
@@ -767,11 +795,17 @@ TEMPLATES: Dict[str, str] = {
 """,
     "source.html": """
 {% extends "base.html" %}
+{% import "macros.html" as m %}
 {% block body %}
 <section class="hero mb-3">
-  <div class="smallcaps">Annotated Source</div>
-  <h2 class="h4 mb-1"><code>{{ display_path or path }}</code></h2>
-  <p class="mb-0 muted">Line rows are tinted by execution: green hit, red miss, gray neutral/excluded.{% if show_prototype_wheels %} Prototype rows include line and branch coverage wheels.{% endif %}</p>
+  <div class="d-flex flex-wrap align-items-start justify-content-between gap-3">
+    <div>
+      <div class="smallcaps">Annotated Source</div>
+      <h2 class="h4 mb-1"><code>{{ display_path or path }}</code></h2>
+      <p class="mb-0 muted">Line rows are tinted by execution: green hit, red miss, gray neutral/excluded.{% if show_prototype_wheels %} Prototype rows include line and branch coverage wheels.{% endif %}</p>
+    </div>
+    {{ m.total_line_coverage(stats, line_cov, line_total, "hero")|safe }}
+  </div>
 </section>
 <div class="source-pane">
   {{ source_table|safe }}
@@ -856,9 +890,14 @@ window.COVUI.initSortableTable("posix-option-groups");
 {% import "macros.html" as m %}
 {% block body %}
 <section class="hero mb-3">
-  <div class="smallcaps">POSIX Group</div>
-  <h2 class="h4 mb-1">{{ group.gid }}</h2>
-  <div class="muted">{{ group.label }} · {{ group.kind }}</div>
+  <div class="d-flex flex-wrap align-items-start justify-content-between gap-3">
+    <div>
+      <div class="smallcaps">POSIX Group</div>
+      <h2 class="h4 mb-1">{{ group.gid }}</h2>
+      <div class="muted">{{ group.label }} · {{ group.kind }}</div>
+    </div>
+    {{ m.total_line_coverage(group.stats, group.line_cov, group.line_total, "hero")|safe }}
+  </div>
 </section>
 <div class="row g-3 mb-3">
   <div class="col-lg-5">
@@ -951,12 +990,22 @@ window.COVUI.initSortableTable("posix-option-groups");
 }
 
 
+def _is_coverable_symbol(symbol: str) -> bool:
+    return symbol not in V4_VARIABLE_SYMBOLS
+
+
 def _to_pct(hit: Optional[int], total: Optional[int]) -> Optional[float]:
     if hit is None or total is None:
         return None
     if total <= 0:
         return None
     return (100.0 * hit) / float(total)
+
+
+def _effective_branch_pct(branch_hit: int, branch_total: int) -> float:
+    if branch_total <= 0:
+        return 100.0
+    return float(_to_pct(branch_hit, branch_total) or 100.0)
 
 
 @dataclass
@@ -1061,6 +1110,7 @@ class CoverageContainer:
         }
 
         self._build_indices()
+        self._build_implementation_index()
         self._build_macro_index()
         self._build_symbol_resolution()
         self._build_group_state()
@@ -1346,23 +1396,28 @@ class CoverageContainer:
                 )
                 if not name:
                     continue
-                self.function_index.setdefault(name, []).append(
-                    {
-                        "path": rel_path,
-                        "count": int(func.get("execution_count", 0)),
-                        "name": name,
-                        "lineno": int(
-                            func.get("lineno") or func.get("line_number") or 0
-                        ),
-                    }
-                )
+                entry = {
+                    "path": rel_path,
+                    "count": int(func.get("execution_count", 0)),
+                    "name": name,
+                    "lineno": int(
+                        func.get("lineno") or func.get("line_number") or 0
+                    ),
+                }
+                self.function_index.setdefault(name, []).append(entry)
+                if (
+                    name.startswith("<unknown")
+                    and rel_path.endswith(".c")
+                    and self._is_local_posix(rel_path)
+                ):
+                    stem = Path(rel_path).stem
+                    if stem in self.symbol_option_groups and stem != name:
+                        self.function_index.setdefault(stem, []).append(entry)
                 self.file_functions.setdefault(rel_path, []).append(
                     {
                         "name": name,
-                        "lineno": int(
-                            func.get("lineno") or func.get("line_number") or 0
-                        ),
-                        "count": int(func.get("execution_count", 0)),
+                        "lineno": entry["lineno"],
+                        "count": entry["count"],
                     }
                 )
 
@@ -1560,7 +1615,7 @@ class CoverageContainer:
                 branch_total += 1
                 if int(branch.get("count") or 0) > 0:
                     branch_hit += 1
-            branch_pct = _to_pct(branch_hit, branch_total) if branch_total else None
+            branch_pct = _effective_branch_pct(branch_hit, branch_total)
             return CoverageStats(line_pct, None, branch_pct)
 
         state = self.symbol_state.get(name, {"status": "unresolved"})
@@ -1569,22 +1624,124 @@ class CoverageContainer:
             return impl
         return CoverageStats(0.0, None, None)
 
-    def implementation_source_href(self, name: str) -> Optional[str]:
-        state = self.symbol_state.get(name, {})
-        if state.get("status") == "macro":
-            return None
-        candidates = self.function_index.get(name, [])
+    def _parse_c_source_functions(self, path: str) -> List[Dict[str, Any]]:
+        source_path = self.resolve_file_source(path)
+        if source_path is None:
+            return []
+        try:
+            lines = source_path.read_text(
+                encoding="utf-8", errors="replace"
+            ).splitlines()
+        except OSError:
+            return []
+        funcs: List[Dict[str, Any]] = []
+        idx = 0
+        while idx < len(lines):
+            line = lines[idx]
+            stripped = line.strip()
+            if (
+                not stripped
+                or stripped.startswith(("/*", "*", "#", "//", "return "))
+                or stripped.startswith(("typedef", "struct ", "enum ", "union "))
+                or stripped.startswith(("if ", "for ", "while ", "switch ", "else "))
+                or "Copyright" in line
+                or "SPDX" in line
+            ):
+                idx += 1
+                continue
+            match = C_SOURCE_FUNC_RE.match(line)
+            if not match:
+                idx += 1
+                continue
+            if ";" in line:
+                idx += 1
+                continue
+            name = match.group(1)
+            if name in HEADER_PROTO_SKIP_NAMES or len(name) < 2:
+                idx += 1
+                continue
+            lineno = idx + 1
+            block = line
+            while not block.rstrip().endswith("{") and idx + 1 < len(lines):
+                idx += 1
+                next_line = lines[idx]
+                if ";" in next_line:
+                    break
+                block += " " + next_line.strip()
+            if "(" not in block or not block.rstrip().endswith("{"):
+                idx += 1
+                continue
+            funcs.append({"name": name, "lineno": lineno})
+            idx += 1
+        return funcs
+
+    def _build_implementation_index(self) -> None:
+        manifest_symbols = set(self.symbol_option_groups.keys())
+        lib_root = self.workspace / "modules/lib/posix/lib"
+        if not lib_root.is_dir():
+            return
+        for c_file in sorted(lib_root.rglob("*.c")):
+            try:
+                rel = c_file.relative_to(self.workspace).as_posix()
+            except ValueError:
+                continue
+            for func in self._parse_c_source_functions(rel):
+                name = func["name"]
+                if name not in manifest_symbols:
+                    continue
+                lineno = int(func["lineno"])
+                existing = self.function_index.get(name, [])
+                if any(
+                    e["path"] == rel and int(e.get("lineno") or 0) == lineno
+                    for e in existing
+                ):
+                    continue
+                self.function_index.setdefault(name, []).append(
+                    {
+                        "path": rel,
+                        "count": 0,
+                        "name": name,
+                        "lineno": lineno,
+                    }
+                )
+
+    @staticmethod
+    def _pick_implementation_candidate(
+        candidates: List[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
         impl = [
             c
             for c in candidates
-            if not c["path"].endswith(".h") and self._is_local_posix(c["path"])
+            if not c["path"].endswith(".h")
+            and CoverageContainer._is_local_posix(c["path"])
         ]
         libc = [
             c
             for c in candidates
-            if not c["path"].endswith(".h") and self._is_zephyr_libc_common(c["path"])
+            if not c["path"].endswith(".h")
+            and CoverageContainer._is_zephyr_libc_common(c["path"])
         ]
-        pick = (impl or libc or [None])[0]
+        pool = impl or libc
+        if not pool:
+            return None
+
+        def rank(entry: Dict[str, Any]) -> Tuple[int, int, int, str]:
+            path = entry["path"].replace("\\", "/")
+            sym_name = str(entry.get("name") or "")
+            return (
+                1 if "/lib/posix/" in path and path.endswith(".c") else 0,
+                1 if not sym_name.startswith("<unknown") else 0,
+                int(entry.get("count") or 0),
+                path,
+            )
+
+        return max(pool, key=rank)
+
+    def implementation_source_href(self, name: str) -> Optional[str]:
+        state = self.symbol_state.get(name, {})
+        if state.get("status") == "macro":
+            return None
+        pick = self._pick_implementation_candidate(self.function_index.get(name, []))
         if not pick:
             return None
         href = f"/source?path={quote(pick['path'], safe='')}"
@@ -1695,6 +1852,8 @@ class CoverageContainer:
 
         all_symbols: Iterable[str] = self.symbol_option_groups.keys()
         for symbol in all_symbols:
+            if not _is_coverable_symbol(symbol):
+                continue
             candidates = self.function_index.get(symbol, [])
             local = [c for c in candidates if self._is_local_posix(c["path"])]
             libc = [c for c in candidates if self._is_zephyr_libc_common(c["path"])]
@@ -1768,7 +1927,7 @@ class CoverageContainer:
         return CoverageStats(
             _to_pct(line_hit, line_total),
             None,
-            _to_pct(branch_hit, branch_total),
+            _effective_branch_pct(branch_hit, branch_total),
         )
 
     def symbol_source_href(self, symbol: str, state: Dict[str, Any]) -> Optional[str]:
@@ -1789,7 +1948,18 @@ class CoverageContainer:
             return impl_href
 
         path = state.get("path") or ""
-        if path in ("-", "external (ISO C)") or path.endswith(".h"):
+        if path in ("-", "external (ISO C)"):
+            return None
+        if path.endswith(".h"):
+            if self.is_posix_header(path):
+                href = f"/source?path={quote(path, safe='')}"
+                candidates = self.function_index.get(symbol, [])
+                header_hits = [c for c in candidates if c["path"] == path]
+                if header_hits:
+                    lineno = int(header_hits[0].get("lineno") or 0)
+                    if lineno > 0:
+                        href += f"#L{lineno}"
+                return href
             return None
         return f"/source?path={quote(path, safe='')}"
 
@@ -1814,57 +1984,55 @@ class CoverageContainer:
 
     def _build_group_state(self) -> None:
         for gid, info in self.option_group_symbols.items():
-            symbols = list(info.get("symbols", []))
-            symbol_states = [self._enrich_symbol_state(sym) for sym in symbols]
+            manifest_symbols = list(info.get("symbols", []))
+            coverable_symbols = [
+                sym for sym in manifest_symbols if _is_coverable_symbol(sym)
+            ]
+            symbol_states = [
+                self._enrich_symbol_state(sym) for sym in coverable_symbols
+            ]
 
             line_pcts: List[float] = []
-            branch_pcts: List[float] = []
             for s in symbol_states:
                 stats = s.get("coverage_stats")
                 if s.get("status") == "external":
                     line_pcts.append(100.0)
-                    branch_pcts.append(100.0)
                     continue
                 line_pcts.append(
                     float(stats.line_pct)
                     if stats and stats.line_pct is not None
                     else 0.0
                 )
-                branch_pcts.append(
-                    float(stats.branch_pct)
-                    if stats and stats.branch_pct is not None
-                    else 0.0
-                )
 
-            total = len(symbols)
+            total = len(coverable_symbols)
             if total == 0:
-                pct = None
-                branch_pct = None
+                func_pct = None
             else:
-                pct = sum(line_pcts) / float(total)
-                branch_pct = sum(branch_pcts) / float(total)
+                func_pct = sum(line_pcts) / float(total)
+
+            line_hit, line_total, branch_hit, branch_total = (
+                self._group_line_branch_totals(coverable_symbols)
+            )
 
             stats = CoverageStats(
-                line_pct=pct,
-                func_pct=pct,
-                branch_pct=branch_pct,
+                line_pct=_to_pct(line_hit, line_total),
+                func_pct=func_pct,
+                branch_pct=_effective_branch_pct(branch_hit, branch_total),
                 external=bool(info.get("iso_c"))
                 and all(
                     (s.get("status") in {"external", "unresolved"})
                     for s in symbol_states
                 ),
             )
-            _line_hit, line_total, _branch_hit, _branch_total = (
-                self._group_line_branch_totals(symbols)
-            )
             self.group_state[gid] = {
                 "gid": gid,
                 "label": info.get("label", gid),
                 "kind": info.get("kind", "unknown"),
                 "iso_c": bool(info.get("iso_c")),
-                "symbols": symbols,
+                "symbols": coverable_symbols,
                 "symbol_states": symbol_states,
                 "stats": stats,
+                "line_cov": line_hit,
                 "line_total": line_total,
             }
 
@@ -2178,9 +2346,11 @@ class CoverageRequestHandler(BaseHTTPRequestHandler):
                     self._bad_request("missing query parameter: path")
                     return
                 path = unquote(path)
-                if self.app.coverage.stats_for_path(path) is None:
+                stats = self.app.coverage.stats_for_path(path)
+                if stats is None:
                     self._not_found(f"unknown file: {path}")
                     return
+                file_totals = self.app.coverage.file_totals.get(path, {})
                 wheels_html = self.app.prototype_wheels_html(path)
                 html = self.app.coverage.render_source_table(
                     path, wheels_html=wheels_html
@@ -2191,6 +2361,9 @@ class CoverageRequestHandler(BaseHTTPRequestHandler):
                     nav="tree",
                     path=path,
                     display_path=format_posix_header_display(path),
+                    stats=stats,
+                    line_cov=int(file_totals.get("line_cov", 0)),
+                    line_total=int(file_totals.get("line_total", 0)),
                     source_table=html,
                     show_prototype_wheels=bool(wheels_html),
                 )
