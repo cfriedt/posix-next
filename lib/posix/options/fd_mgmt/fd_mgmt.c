@@ -12,11 +12,7 @@
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <zephyr/sys/fdtable.h>
-
-/* prototypes for external, not-yet-public, functions in fdtable.c or fs.c */
-int zvfs_fcntl(int fd, int cmd, va_list arg);
-int zvfs_ftruncate(int fd, off_t length);
-off_t zvfs_lseek(int fd, off_t offset, int whence);
+#include <zephyr/sys/zvfs.h>
 
 int fcntl(int fd, int cmd, ...)
 {
