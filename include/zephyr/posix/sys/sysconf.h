@@ -297,8 +297,10 @@ enum {
 #define __z_posix_sysconf_SC_XOPEN_VERSION                                                         \
 	COND_CODE_1(CONFIG_XSI, (_XOPEN_VERSION), (0))
 #define __z_posix_sysconf_SC_CLK_TCK                      (100L)
-#define __z_posix_sysconf_SC_GETGR_R_SIZE_MAX             (0L)
-#define __z_posix_sysconf_SC_GETPW_R_SIZE_MAX             (0L)
+#define __z_posix_sysconf_SC_GETGR_R_SIZE_MAX                                                          \
+	COND_CODE_1(CONFIG_POSIX_SYSTEM_DATABASE_R, (CONFIG_POSIX_GETGR_R_SIZE_MAX), (0L))
+#define __z_posix_sysconf_SC_GETPW_R_SIZE_MAX                                                          \
+	COND_CODE_1(CONFIG_POSIX_SYSTEM_DATABASE_R, (CONFIG_POSIX_GETPW_R_SIZE_MAX), (0L))
 #define __z_posix_sysconf_SC_AIO_LISTIO_MAX               _POSIX_AIO_LISTIO_MAX
 #define __z_posix_sysconf_SC_AIO_MAX                      _POSIX_AIO_MAX
 #define __z_posix_sysconf_SC_AIO_PRIO_DELTA_MAX           0
