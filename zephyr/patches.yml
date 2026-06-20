@@ -601,3 +601,18 @@ patches:
       existence-and-permission check with no type or init-state enforcement,
       permitting type confusion between kernel object families at the
       syscall boundary. Forward both arguments to k_object_validate().
+  - path: zephyr/zvfs-introduce-k-obj-file.patch
+    sha256sum: f88ec409daedfe0868f62085c5b18a264a4d564069f8728c5917eba8ab826bce
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-06-19
+    upstreamable: true
+    comments: |
+      Register each static fdtable slot as a K_OBJ_FILE kernel object for
+      userspace permission checks. Initialize slots at boot, recycle permissions
+      on reserve, and clear initialization when the last reference is dropped.
+      Forbid dynamic allocation of K_OBJ_FILE. Extend
+      kernel.memory_protection.obj_validation with fdtable slot checks (no POSIX).
+      Revoke all grants and clear the PUBLIC flag when the last reference to a
+      slot is dropped, so a closed descriptor leaves no residual access.
