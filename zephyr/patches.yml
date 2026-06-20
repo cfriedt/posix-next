@@ -616,3 +616,18 @@ patches:
       kernel.memory_protection.obj_validation with fdtable slot checks (no POSIX).
       Revoke all grants and clear the PUBLIC flag when the last reference to a
       slot is dropped, so a closed descriptor leaves no residual access.
+  - path: zephyr/zvfs-fdtable-use-k-obj-file.patch
+    sha256sum: 866fbff04feeb44384eb4e78c2e3251ddb7dfff5e468b344d07e03a10bfe9cd8
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-06-19
+    upstreamable: true
+    comments: |
+      Relocate fdtable core to lib/os/zvfs/, split I/O accessors into sibling
+      files with K_OBJ_FILE syscall verifiers, and add documented zvfs.h.
+      Replace scattered zvfs_* prototypes with zvfs.h includes. Verify the
+      K_OBJ_FILE grant in zvfs_get_fd_obj() and zvfs_get_fd_obj_and_vtable()
+      so consumers that bypass the zvfs syscall verifiers (e.g. the BSD
+      socket layer) are still permission-checked during user syscalls, and
+      grant all threads access to the stdio slots at boot.
