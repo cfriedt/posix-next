@@ -1,0 +1,252 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Chris Friedt <chris@fr4.co>
+Date: Fri, 19 Jun 2026 20:30:00 -0400
+Subject: [PATCH] zvfs: register fd_entry as K_OBJ_FILE kernel object
+
+Register each static fdtable slot as a K_OBJ_FILE kernel object so
+userspace permission checks can be applied per file descriptor. Initialize
+slots at boot, recycle permissions on reserve, and clear initialization on
+the last close. Forbid dynamic allocation of K_OBJ_FILE. Extend the existing
+obj_validation userspace test with fdtable slot checks (no POSIX).
+
+Signed-off-by: Chris Friedt <chris@fr4.co>
+---
+ include/zephyr/sys/fdtable.h                        |  14 +++++
+ kernel/userspace.c                                  |   3 +
+ lib/os/fdtable.c                                    |  43 +++++++++++++++++
+ scripts/build/gen_kobject_list.py                   |   4 +
+ tests/kernel/mem_protect/obj_validation/prj.conf    |   2 +
+ tests/kernel/mem_protect/obj_validation/src/main.c  |  62 ++++++++++++++++++++++++
+ 6 files changed, 128 insertions(+)
+diff --git a/scripts/build/gen_kobject_list.py b/scripts/build/gen_kobject_list.py
+index 6a68468901f..b39560e737d 100755
+--- a/scripts/build/gen_kobject_list.py
++++ b/scripts/build/gen_kobject_list.py
+@@ -107,6 +107,7 @@ kobjects = OrderedDict([
+     ("sys_mutex", (None, True, False)),
+     ("k_futex", (None, True, False)),
+     ("k_condvar", (None, False, True)),
++    ("fd_entry", ("CONFIG_FDTABLE", False, False)),
+     ("k_event", ("CONFIG_EVENTS", False, True)),
+     ("ztest_suite_node", ("CONFIG_ZTEST", True, False)),
+     ("ztest_suite_stats", ("CONFIG_ZTEST", True, False)),
+@@ -120,6 +121,9 @@ kobjects = OrderedDict([
+ ])
+ 
+ def kobject_to_enum(kobj):
++    if kobj == "fd_entry":
++        return "K_OBJ_FILE"
++
+     if kobj.startswith("k_") or kobj.startswith("z_"):
+         name = kobj[2:]
+     else:
+diff --git a/kernel/userspace.c b/kernel/userspace.c
+index 20fa048636b..17354e15ed5 100644
+--- a/kernel/userspace.c
++++ b/kernel/userspace.c
+@@ -413,6 +413,9 @@ static void *z_object_alloc(enum k_objects otype, size_t size)
+ 	case K_OBJ_FUTEX:			/* Lives in user memory */
+ 	case K_OBJ_SYS_MUTEX:			/* Lives in user memory */
+ 	case K_OBJ_NET_SOCKET:			/* Indeterminate size */
++#if defined(CONFIG_FDTABLE)
++	case K_OBJ_FILE:			/* Static fdtable slots only */
++#endif
+ 		LOG_ERR("forbidden object type '%s' requested",
+ 			otype_to_str(otype));
+ 		return NULL;
+diff --git a/lib/os/fdtable.c b/lib/os/fdtable.c
+index bbde5fb1d89..f7942eb3a9c 100644
+--- a/lib/os/fdtable.c
++++ b/lib/os/fdtable.c
+@@ -19,12 +19,17 @@
+ #include <stdio.h>
+ 
+ #include <zephyr/kernel.h>
++#include <zephyr/init.h>
+ #include <zephyr/sys/fdtable.h>
+ #include <zephyr/sys/speculation.h>
+ #include <zephyr/internal/syscall_handler.h>
+ #include <zephyr/sys/atomic.h>
+ #include <zephyr/sys/zvfs_libc.h>
+ 
++#if defined(CONFIG_USERSPACE)
++#include <zephyr/sys/kobject.h>
++#endif
++
+ struct stat;
+ 
+ struct fd_entry {
+@@ -104,6 +109,10 @@ static int z_fd_unref(int fd)
+ 	fdtable[fd].obj = NULL;
+ 	fdtable[fd].vtable = NULL;
+ 
++#if defined(CONFIG_USERSPACE)
++	k_object_uninit(&fdtable[fd]);
++#endif
++
+ 	return 0;
+ }
+ 
+@@ -181,6 +190,37 @@ bool fdtable_fd_is_initialized(int fd)
+ }
+ #endif /* CONFIG_ZTEST */
+ 
++#if defined(CONFIG_USERSPACE)
++static int zvfs_fdtable_kobj_init(void)
++{
++	for (int i = 0; i < ARRAY_SIZE(fdtable); i++) {
++		k_object_init(&fdtable[i]);
++	}
++
++#if defined(CONFIG_POSIX_DEVICE_IO)
++	for (int i = 0; i < 3; i++) {
++		k_object_access_all_grant(&fdtable[i]);
++	}
++#endif /* CONFIG_POSIX_DEVICE_IO */
++
++	return 0;
++}
++
++SYS_INIT(zvfs_fdtable_kobj_init, PRE_KERNEL_1,
++	 CONFIG_KERNEL_INIT_PRIORITY_OBJECTS);
++
++#if defined(CONFIG_ZTEST)
++void *zvfs_test_fd_entry_kobj(int fd)
++{
++	if (fd < 0 || fd >= ARRAY_SIZE(fdtable)) {
++		return NULL;
++	}
++
++	return &fdtable[fd];
++}
++#endif /* CONFIG_ZTEST */
++#endif /* CONFIG_USERSPACE */
++
+ void *zvfs_get_fd_obj(int fd, const struct fd_op_vtable *vtable, int err)
+ {
+ 	struct fd_entry *entry;
+@@ -264,6 +304,9 @@ int zvfs_reserve_fd(void)
+ 
+ 	fd = _find_fd_entry();
+ 	if (fd >= 0) {
++#if defined(CONFIG_USERSPACE)
++		k_object_recycle(&fdtable[fd]);
++#endif
+ 		/* Mark entry as used, zvfs_finalize_fd() will fill it in. */
+ 		(void)z_fd_ref(fd);
+ 		fdtable[fd].obj = NULL;
+diff --git a/include/zephyr/sys/fdtable.h b/include/zephyr/sys/fdtable.h
+index bd0cb6e0e07..ccb8577f604 100644
+--- a/include/zephyr/sys/fdtable.h
++++ b/include/zephyr/sys/fdtable.h
+@@ -306,6 +306,20 @@ enum {
+ 	ZFD_IOCTL_FIONBIO = 0x5421,
+ };
+ 
++#if defined(CONFIG_ZTEST) && defined(CONFIG_USERSPACE)
++/**
++ * @brief Return the kernel object backing a file descriptor slot (tests only).
++ *
++ * Each static @c fd_entry in the fd table is registered as @c K_OBJ_FILE for
++ * userspace permission checks. Tests use this to validate object metadata
++ * without reaching into @c fdtable.c.
++ *
++ * @param fd File descriptor index.
++ * @return Pointer to the slot's @c fd_entry, or NULL if @p fd is out of range.
++ */
++void *zvfs_test_fd_entry_kobj(int fd);
++#endif
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/tests/kernel/mem_protect/obj_validation/src/main.c b/tests/kernel/mem_protect/obj_validation/src/main.c
+index fb671661..8f69909b 100644
+--- a/tests/kernel/mem_protect/obj_validation/src/main.c
++++ b/tests/kernel/mem_protect/obj_validation/src/main.c
+@@ -9,6 +9,11 @@
+ #include <zephyr/ztest.h>
+ #include <kernel_internal.h>
+ 
++#if defined(CONFIG_FDTABLE)
++#include <errno.h>
++#include <zephyr/sys/fdtable.h>
++#endif
++
+ #define SEM_ARRAY_SIZE	16
+ 
+ /* Show that extern declarations don't interfere with detecting kernel
+@@ -183,6 +188,63 @@ ZTEST(object_validation, test_no_ref_dyn_kobj_release_mem)
+ 	zassert_true(ret == -EBADF, "Dynamic kernel object not released");
+ }
+ 
++#if defined(CONFIG_FDTABLE)
++static int validate_file_kobj(void *obj)
++{
++	struct k_object *ko = k_object_find(obj);
++
++	zassert_not_null(ko, "fd_entry not in kernel object table");
++	zassert_equal(ko->type, K_OBJ_FILE, "wrong kernel object type");
++
++	return k_object_validation_check(ko, obj, K_OBJ_FILE, 0);
++}
++
++ZTEST(object_validation, test_k_obj_file_fdtable_slot)
++{
++	int fd;
++	void *kobj;
++
++	fd = zvfs_reserve_fd();
++	zassert_true(fd >= 0, "fd reserve failed");
++
++	kobj = zvfs_test_fd_entry_kobj(fd);
++	zassert_not_null(kobj, "reserved fd_entry missing");
++	zassert_equal(validate_file_kobj(kobj), 0,
++		      "reserved slot should validate as K_OBJ_FILE");
++
++	zvfs_free_fd(fd);
++}
++
++ZTEST(object_validation, test_k_obj_file_grant_revoke)
++{
++	int fd;
++	void *kobj;
++	struct k_thread *self = k_current_get();
++
++	fd = zvfs_reserve_fd();
++	zassert_true(fd >= 0, "fd reserve failed");
++
++	kobj = zvfs_test_fd_entry_kobj(fd);
++	zassert_not_null(kobj, "fd_entry missing");
++
++	k_object_access_revoke(kobj, self);
++	zassert_equal(validate_file_kobj(kobj), -EPERM,
++		      "revoked slot should deny access");
++
++	k_object_access_grant(kobj, self);
++	zassert_equal(validate_file_kobj(kobj), 0,
++		      "granted slot should allow access");
++
++	zvfs_free_fd(fd);
++}
++
++ZTEST(object_validation, test_k_obj_file_not_dynamically_allocatable)
++{
++	zassert_is_null(k_object_alloc(K_OBJ_FILE),
++			"K_OBJ_FILE must not be dynamically allocated");
++}
++#endif /* CONFIG_FDTABLE */
++
+ void *object_validation_setup(void)
+ {
+ 	k_thread_system_pool_assign(k_current_get());
+diff --git a/tests/kernel/mem_protect/obj_validation/prj.conf b/tests/kernel/mem_protect/obj_validation/prj.conf
+index cb297c82..d9f5c59e 100644
+--- a/tests/kernel/mem_protect/obj_validation/prj.conf
++++ b/tests/kernel/mem_protect/obj_validation/prj.conf
+@@ -2,3 +2,5 @@ CONFIG_ZTEST=y
+ CONFIG_TEST_USERSPACE=y
+ CONFIG_DYNAMIC_OBJECTS=y
+ CONFIG_HEAP_MEM_POOL_SIZE=8192
++CONFIG_FDTABLE=y
++CONFIG_ZVFS_OPEN_MAX=4
