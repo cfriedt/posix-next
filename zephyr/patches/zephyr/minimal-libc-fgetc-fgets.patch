@@ -1,0 +1,131 @@
+diff --git a/lib/libc/minimal/CMakeLists.txt b/lib/libc/minimal/CMakeLists.txt
+index 688340478cd..8af0e6a309a 100644
+--- a/lib/libc/minimal/CMakeLists.txt
++++ b/lib/libc/minimal/CMakeLists.txt
+@@ -28,15 +28,17 @@ zephyr_library_sources(
+   source/string/strstr.c
+   source/string/string.c
+   source/string/strspn.c
+-  source/stdout/stdout_console.c
+-  source/stdout/sprintf.c
+-  source/stdout/fprintf.c
++  source/stdio/stdout_console.c
++  source/stdio/fgetc.c
++  source/stdio/fgets.c
++  source/stdio/sprintf.c
++  source/stdio/fprintf.c
+   source/math/sqrtf.c
+   source/math/sqrt.c
+   ${STRERROR_TABLE_H}
+ )
+ 
+-zephyr_library_sources_ifdef(CONFIG_ZVFS source/stdout/zvfs_libc.c)
++zephyr_library_sources_ifdef(CONFIG_ZVFS source/stdio/zvfs_libc.c)
+ 
+ if(CONFIG_STD_C23)
+   # pull in from posix-next, since the libc must provide this for c23
+diff --git a/lib/libc/minimal/source/stdio/fgetc.c b/lib/libc/minimal/source/stdio/fgetc.c
+new file mode 100644
+index 00000000000..7f3da7d2bb5
+--- /dev/null
++++ b/lib/libc/minimal/source/stdio/fgetc.c
+@@ -0,0 +1,40 @@
++/*
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <stdio.h>
++
++#if defined(CONFIG_ZVFS)
++#include <zephyr/sys/zvfs.h>
++#include <zephyr/sys/zvfs_libc.h>
++#endif
++
++int fgetc(FILE *stream)
++{
++#if defined(CONFIG_ZVFS)
++	unsigned char ch;
++	int fd;
++	long ret;
++
++	if (stream == NULL) {
++		return EOF;
++	}
++
++	fd = zvfs_libc_fileno(stream);
++	if (fd < 3) {
++		return EOF;
++	}
++
++	ret = zvfs_read(fd, &ch, 1);
++	if (ret != 1) {
++		return EOF;
++	}
++
++	return (int)ch;
++#else
++	ARG_UNUSED(stream);
++
++	return EOF;
++#endif
++}
+diff --git a/lib/libc/minimal/source/stdio/fgets.c b/lib/libc/minimal/source/stdio/fgets.c
+new file mode 100644
+index 00000000000..9096cbd4e23
+--- /dev/null
++++ b/lib/libc/minimal/source/stdio/fgets.c
+@@ -0,0 +1,37 @@
++/*
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <stdio.h>
++
++char *fgets(char *ZRESTRICT s, int n, FILE *ZRESTRICT stream)
++{
++	int i;
++	int c;
++
++	if ((s == NULL) || (n <= 0) || (stream == NULL)) {
++		return NULL;
++	}
++
++	for (i = 0; i < (n - 1); i++) {
++		c = fgetc(stream);
++		if (c == EOF) {
++			break;
++		}
++
++		s[i] = (char)c;
++		if (c == '\n') {
++			i++;
++			break;
++		}
++	}
++
++	if (i == 0) {
++		return NULL;
++	}
++
++	s[i] = '\0';
++
++	return s;
++}
+diff --git a/lib/libc/minimal/source/stdout/fprintf.c b/lib/libc/minimal/source/stdio/fprintf.c
+similarity index 100%
+rename from lib/libc/minimal/source/stdout/fprintf.c
+rename to lib/libc/minimal/source/stdio/fprintf.c
+diff --git a/lib/libc/minimal/source/stdout/sprintf.c b/lib/libc/minimal/source/stdio/sprintf.c
+similarity index 100%
+rename from lib/libc/minimal/source/stdout/sprintf.c
+rename to lib/libc/minimal/source/stdio/sprintf.c
+diff --git a/lib/libc/minimal/source/stdout/stdout_console.c b/lib/libc/minimal/source/stdio/stdout_console.c
+similarity index 100%
+rename from lib/libc/minimal/source/stdout/stdout_console.c
+rename to lib/libc/minimal/source/stdio/stdout_console.c
+diff --git a/lib/libc/minimal/source/stdout/zvfs_libc.c b/lib/libc/minimal/source/stdio/zvfs_libc.c
+similarity index 100%
+rename from lib/libc/minimal/source/stdout/zvfs_libc.c
+rename to lib/libc/minimal/source/stdio/zvfs_libc.c
