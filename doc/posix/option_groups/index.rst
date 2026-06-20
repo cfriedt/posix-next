@@ -1305,19 +1305,21 @@ In Zephyr, ``_POSIX_THREAD_SAFE_FUNCTIONS`` is defined when
 _POSIX_TIMEOUTS
 +++++++++++++++
 
-``_POSIX_TIMEOUTS`` is a POSIX **feature-test macro**, not a Zephyr Option Group. A value
-other than -1 means the implementation provides *timed variants* of some otherwise-blocking
-APIs (an absolute ``timespec`` deadline instead of waiting indefinitely).
+Enable this option with :kconfig:option:`CONFIG_POSIX_TIMERS`.
 
-In Zephyr, ``_POSIX_TIMEOUTS`` is defined when :kconfig:option:`CONFIG_POSIX_TIMERS` is
-enabled. Each timed API is implemented and tested from the Option Group that owns the
-corresponding base function:
+.. csv-table:: _POSIX_TIMEOUTS
+   :header: API, Supported
+   :widths: 50,10
 
-- ``pthread_mutex_timedlock()`` — :ref:`POSIX_THREADS_BASE<posix_option_group_threads_base>`
-- ``sem_timedwait()`` — :ref:`POSIX_SEMAPHORES<posix_option_group_semaphores>`
-- ``mq_timedsend()`` / ``mq_timedreceive()`` — :ref:`_POSIX_MESSAGE_PASSING<posix_option_message_passing>`
-- ``pthread_rwlock_timedrdlock()`` / ``pthread_rwlock_timedwrlock()`` —
-  :ref:`POSIX_RW_LOCKS<posix_option_group_rw_locks>`
+    :c:func:`mq_timedreceive`, yes
+    :c:func:`mq_timedsend`, yes
+    :c:func:`pthread_mutex_timedlock`, yes
+    :c:func:`pthread_rwlock_timedrdlock`, yes
+    :c:func:`pthread_rwlock_timedwrlock`, yes
+    :c:func:`sem_timedwait`, yes
+
+.. doxygengroup:: posix_option_timeouts
+   :project: posix
 
 .. _posix_option_group_xsi_streams:
 .. _posix_option_xopen_streams:
