@@ -23,7 +23,12 @@ extern "C" {
 
 #include <sys/stat.h>
 
-/** @brief Password database entry. */
+#if (!defined(_PASSWD_DECLARED) && !defined(__passwd_defined)) || defined(__DOXYGEN__)
+/**
+ * @brief POSIX password database entry.
+ * @ingroup posix_option_group_system_database
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/pwd.h.html
+ */
 struct passwd {
 	char *pw_name;    /**< User's login name. */
 	char *pw_passwd;  /**< Encrypted password. */
@@ -34,6 +39,9 @@ struct passwd {
 	char *pw_dir;     /**< Initial working directory. */
 	char *pw_shell;   /**< Program to use as shell. */
 };
+#define _PASSWD_DECLARED
+#define __passwd_defined
+#endif
 
 /**
  * @brief Look up a password entry by name (thread-safe).
@@ -62,6 +70,45 @@ int getpwnam_r(const char *nam, struct passwd *pwd, char *buffer, size_t bufsize
  */
 int getpwuid_r(uid_t uid, struct passwd *pwd, char *buffer, size_t bufsize, struct passwd **result);
 
+#if defined(_XOPEN_SOURCE)
+/**
+ * @brief Close the password database.
+ * @ingroup posix_option_group_system_database
+ */
+void endpwent(void);
+
+/**
+ * @brief Read the next password entry from the password database.
+ * @ingroup posix_option_group_system_database
+ */
+struct passwd *getpwent(void);
+#endif
+
+/**
+ * @brief Look up a password entry by name.
+ * @ingroup posix_option_group_system_database
+ * @param name User login name to search for.
+ * @return Pointer to a static passwd structure, or NULL on failure or if not found.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/getpwnam.html
+ */
+struct passwd *getpwnam(const char *name);
+
+/**
+ * @brief Look up a password entry by user ID.
+ * @ingroup posix_option_group_system_database
+ * @param uid Numerical user ID to search for.
+ * @return Pointer to a static passwd structure, or NULL on failure or if not found.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/getpwuid.html
+ */
+struct passwd *getpwuid(uid_t uid);
+
+#if defined(_XOPEN_SOURCE)
+/**
+ * @brief Rewind to the beginning of the password database.
+ * @ingroup posix_option_group_system_database
+ */
+void setpwent(void);
+#endif
 
 #ifdef __cplusplus
 }

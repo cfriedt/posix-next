@@ -23,7 +23,7 @@ extern "C" {
 
 #include <sys/stat.h>
 
-#if !defined(_GROUP_DECLARED) && !defined(__group_defined)
+#if (!defined(_GROUP_DECLARED) && !defined(__group_defined)) || defined(__DOXYGEN__)
 /**
  * @brief POSIX group database entry.
  * @ingroup posix_option_group_system_database
@@ -66,6 +66,45 @@ int getgrnam_r(const char *name, struct group *grp, char *buffer, size_t bufsize
  */
 int getgrgid_r(gid_t gid, struct group *grp, char *buffer, size_t bufsize, struct group **result);
 
+#if defined(_XOPEN_SOURCE) || defined(__DOXYGEN__)
+/**
+ * @brief Close the group database.
+ * @ingroup posix_option_group_system_database
+ */
+void endgrent(void);
+
+/**
+ * @brief Read the next group entry from the group database.
+ * @ingroup posix_option_group_system_database
+ */
+struct group *getgrent(void);
+#endif
+
+/**
+ * @brief Look up a group entry by group ID.
+ * @ingroup posix_option_group_system_database
+ * @param gid Group ID to search for.
+ * @return Pointer to a static group structure, or NULL on failure or if not found.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/getgrgid.html
+ */
+struct group *getgrgid(gid_t gid);
+
+/**
+ * @brief Look up a group entry by name.
+ * @ingroup posix_option_group_system_database
+ * @param name Group name to search for.
+ * @return Pointer to a static group structure, or NULL on failure or if not found.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/getgrnam.html
+ */
+struct group *getgrnam(const char *name);
+
+#if defined(_XOPEN_SOURCE) || defined(__DOXYGEN__)
+/**
+ * @brief Rewind to the beginning of the group database.
+ * @ingroup posix_option_group_system_database
+ */
+void setgrent(void);
+#endif
 
 #ifdef __cplusplus
 }
