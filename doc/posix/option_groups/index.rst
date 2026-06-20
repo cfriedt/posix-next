@@ -248,17 +248,19 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_FD_MGMT`.
 POSIX_FILE_LOCKING
 ++++++++++++++++++
 
+Enable this option group with :kconfig:option:`CONFIG_POSIX_FILE_LOCKING`.
+
 .. csv-table:: POSIX_FILE_LOCKING
    :header: API, Supported
    :widths: 50,10
 
-    :c:func:`flockfile`,
-    :c:func:`ftrylockfile`,
-    :c:func:`funlockfile`,
-    :c:func:`getc_unlocked`,
-    :c:func:`getchar_unlocked`,
-    :c:func:`putc_unlocked`,
-    :c:func:`putchar_unlocked`,
+    :c:func:`flockfile`,yes
+    :c:func:`ftrylockfile`,yes
+    :c:func:`funlockfile`,yes
+    :c:func:`getc_unlocked`,yes
+    :c:func:`getchar_unlocked`,yes
+    :c:func:`putc_unlocked`,yes
+    :c:func:`putchar_unlocked`,yes
 
 .. doxygengroup:: posix_option_group_file_locking
    :project: posix
@@ -1276,10 +1278,10 @@ Enable this option with :kconfig:option:`CONFIG_POSIX_THREAD_PRIORITY_SCHEDULING
 _POSIX_THREAD_SAFE_FUNCTIONS
 ++++++++++++++++++++++++++++
 
-In Zephyr, ``_POSIX_THREAD_SAFE_FUNCTIONS`` is defined when both
-:kconfig:option:`CONFIG_POSIX_C_LANG_SUPPORT_R` and
-:kconfig:option:`CONFIG_POSIX_FILE_SYSTEM_R` are enabled. The
-``POSIX_FILE_LOCKING`` option group is not yet implemented.
+In Zephyr, ``_POSIX_THREAD_SAFE_FUNCTIONS`` is defined when
+:kconfig:option:`CONFIG_POSIX_C_LANG_SUPPORT_R`,
+:kconfig:option:`CONFIG_POSIX_FILE_SYSTEM_R`, and
+:kconfig:option:`CONFIG_POSIX_FILE_LOCKING` are enabled.
 
 .. csv-table:: _POSIX_THREAD_SAFE_FUNCTIONS
     :header: API, Supported
