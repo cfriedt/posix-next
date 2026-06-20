@@ -82,7 +82,7 @@ int isastream(int fildes)
 	return -1;
 }
 
-extern int zvfs_ioctl(int fd, unsigned long request, va_list args);
+#include <zephyr/sys/zvfs.h>
 
 int ioctl(int fd, unsigned long request, ...)
 {
