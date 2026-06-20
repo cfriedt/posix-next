@@ -98,7 +98,7 @@ POSIX System Interfaces
     :ref:`_XOPEN_REALTIME <posix_option_group_xsi_realtime>`, 700, :kconfig:option:`CONFIG_XSI_REALTIME`
     _XOPEN_REALTIME_THREADS, -1,
     :ref:`_XOPEN_STREAMS<posix_option_xopen_streams>`, 200809L, :kconfig:option:`CONFIG_XSI_STREAMS`
-    _XOPEN_UNIX, -1,
+    _XOPEN_UNIX, 700, :kconfig:option:`CONFIG_XSI`
 
 
 POSIX Shell and Utilities
