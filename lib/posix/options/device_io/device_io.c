@@ -14,6 +14,7 @@
 #include <sys/select.h>
 
 #include <zephyr/sys/fdtable.h>
+#include <zephyr/sys/zvfs.h>
 #include <zephyr/sys/zvfs_libc.h>
 #include <zephyr/sys/zvfs_fs.h>
 
@@ -96,7 +97,7 @@ ssize_t pread(int fd, void *buf, size_t count, off_t offset)
 		return -1;
 	}
 
-	return zvfs_read(fd, buf, count, (size_t *)&off);
+	return zvfs_read_offset(fd, buf, count, &off);
 }
 
 int pselect(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
@@ -115,12 +116,12 @@ ssize_t pwrite(int fd, const void *buf, size_t count, off_t offset)
 		return -1;
 	}
 
-	return zvfs_write(fd, buf, count, (size_t *)&off);
+	return zvfs_write_offset(fd, buf, count, &off);
 }
 
 ssize_t read(int fd, void *buf, size_t sz)
 {
-	return zvfs_read(fd, buf, sz, NULL);
+	return zvfs_read(fd, buf, sz);
 }
 #ifdef CONFIG_POSIX_DEVICE_IO_ALIAS_READ
 FUNC_ALIAS(read, _read, ssize_t);
@@ -138,7 +139,7 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struc
 
 ssize_t write(int fd, const void *buf, size_t sz)
 {
-	return zvfs_write(fd, buf, sz, NULL);
+	return zvfs_write(fd, buf, sz);
 }
 #ifdef CONFIG_POSIX_DEVICE_IO_ALIAS_WRITE
 FUNC_ALIAS(write, _write, ssize_t);
