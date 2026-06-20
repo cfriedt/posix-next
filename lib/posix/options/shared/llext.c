@@ -171,6 +171,17 @@ EXPORT_SYMBOL(lseek);
 EXPORT_SYMBOL(rewind);
 #endif /* CONFIG_POSIX_FD_MGMT */
 
+/* FILE_LOCKING */
+#ifdef CONFIG_POSIX_FILE_LOCKING
+EXPORT_SYMBOL(flockfile);
+EXPORT_SYMBOL(ftrylockfile);
+EXPORT_SYMBOL(funlockfile);
+EXPORT_SYMBOL(getc_unlocked);
+EXPORT_SYMBOL(getchar_unlocked);
+EXPORT_SYMBOL(putc_unlocked);
+EXPORT_SYMBOL(putchar_unlocked);
+#endif /* CONFIG_POSIX_FILE_LOCKING */
+
 /* FILE_SYSTEM */
 #ifdef CONFIG_POSIX_FILE_SYSTEM
 EXPORT_SYMBOL(closedir);
