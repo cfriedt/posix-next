@@ -579,3 +579,16 @@ patches:
       without POSIX_FILE_SYSTEM by moving zvfs_open() and the FS fd vtable into
       lib/os/zvfs/zvfs_fs.c (CONFIG_ZVFS_FS). Reserve fd table slots via
       CONFIG_ZVFS_RESERVE_STDIO_FDS and CONFIG_ZVFS_OPEN_ADD_SIZE_STDIO.
+  - path: zephyr/zvfs-introduce-k-obj-file.patch
+    sha256sum: bd965df101c2b5add312e31a69bedb16c1b0cac9d3902b9bbd0875b244bbaa47
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-06-19
+    upstreamable: true
+    comments: |
+      Register each static fdtable slot as a K_OBJ_FILE kernel object for
+      userspace permission checks. Initialize slots at boot, recycle permissions
+      on reserve, and clear initialization when the last reference is dropped.
+      Forbid dynamic allocation of K_OBJ_FILE. Extend
+      kernel.memory_protection.obj_validation with fdtable slot checks (no POSIX).
