@@ -10,6 +10,7 @@ if(CONFIG_POSIX_SYSTEM_INTERFACES)
 endif()
 
 
+
 add_subdirectory(shared)
 
 # zephyr-keep-sorted-start
@@ -18,6 +19,7 @@ add_subdirectory_ifdef(CONFIG_POSIX_BARRIERS barriers)
 add_subdirectory_ifdef(CONFIG_POSIX_CLOCK_SELECTION clock_selection)
 add_subdirectory_ifdef(CONFIG_POSIX_DEVICE_IO device_io)
 add_subdirectory_ifdef(CONFIG_POSIX_FD_MGMT fd_mgmt)
+add_subdirectory_ifdef(CONFIG_POSIX_FILE_LOCKING file_locking)
 add_subdirectory_ifdef(CONFIG_POSIX_FILE_SYSTEM file_system)
 add_subdirectory_ifdef(CONFIG_POSIX_FILE_SYSTEM_R file_system_r)
 add_subdirectory_ifdef(CONFIG_POSIX_FSYNC fsync)
