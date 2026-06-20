@@ -11,6 +11,7 @@
 #include <dirent.h>
 #include <string.h>
 #include <zephyr/sys/fdtable.h>
+#include <zephyr/sys/zvfs.h>
 #include <zephyr/sys/zvfs_fs.h>
 #include <sys/stat.h>
 #include <fcntl.h>
