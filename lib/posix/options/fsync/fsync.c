@@ -5,9 +5,7 @@
  */
 
 #include <unistd.h>
-
-/* prototypes for external, not-yet-public, functions in fdtable.c */
-int zvfs_fsync(int fd);
+#include <zephyr/sys/zvfs.h>
 
 int fsync(int fd)
 {
