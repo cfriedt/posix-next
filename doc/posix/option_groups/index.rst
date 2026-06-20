@@ -113,18 +113,18 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_C_LIB_EXT`.
 
     :c:func:`fnmatch`, yes
     :c:func:`getopt`, yes
-    :c:func:`getsubopt`,
+    :c:func:`getsubopt`, yes
     optarg, yes
     opterr, yes
     optind, yes
     optopt, yes
-    :c:func:`stpcpy`,
-    :c:func:`stpncpy`,
-    :c:func:`strcasecmp`,
-    :c:func:`strdup`,
-    :c:func:`strfmon`,
+    :c:func:`stpcpy`, yes
+    :c:func:`stpncpy`, yes
+    :c:func:`strcasecmp`, yes
+    :c:func:`strdup`, yes
+    :c:func:`strfmon`, yes
     :c:func:`strncasecmp`, yes
-    :c:func:`strndup`,
+    :c:func:`strndup`, yes
     :c:func:`strnlen`, yes
 
 .. doxygengroup:: posix_option_group_c_lib_ext
