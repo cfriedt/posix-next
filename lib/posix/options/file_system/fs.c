@@ -11,12 +11,11 @@
 #include <dirent.h>
 #include <string.h>
 #include <zephyr/sys/fdtable.h>
+#include <zephyr/sys/zvfs.h>
 #include <zephyr/sys/zvfs_fs.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <zephyr/fs/fs.h>
-
-int zvfs_fstat(int fd, struct stat *buf);
 
 BUILD_ASSERT(PATH_MAX >= MAX_FILE_NAME, "PATH_MAX is less than MAX_FILE_NAME");
 
