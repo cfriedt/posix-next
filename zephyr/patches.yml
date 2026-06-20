@@ -1550,6 +1550,21 @@ patches:
       declarations from string.h and strings.h, remove strncasecmp.c, and provide them via
       posix-next instead. C_LANG_SUPPORT_R symbols (strerror_r, strtok_r) remain handled by
       posix-c-lang-support-r.patch.
+  - path: zephyr/zvfs-introduce-k-obj-file.patch
+    sha256sum: 89cbf08413703bf6fb771a606b36d4793b84a49bc8d7d8e9f771d96c621b8ee3
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-06-19
+    upstreamable: true
+    comments: |
+      Register each static fdtable slot as a K_OBJ_FILE kernel object for
+      userspace permission checks. Initialize slots at boot, recycle permissions
+      on reserve, and clear initialization when the last reference is dropped.
+      Forbid dynamic allocation of K_OBJ_FILE. Extend
+      kernel.memory_protection.obj_validation with fdtable slot checks (no POSIX).
+      Revoke all grants and clear the PUBLIC flag when the last reference to a
+      slot is dropped, so a closed descriptor leaves no residual access.
   - path: zephyr/libc-signal-h-pthread-kill.patch
     sha256sum: 9db8dc468a348bb0603646373dbe308174a5711ddbcfd454197b47f18992eb48
     module: zephyr
