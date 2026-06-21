@@ -37,19 +37,17 @@ tests:
     extra_configs:
       - CONFIG_PICOLIBC=y
   portability.posix.signals.big_nsig:
+    # Large SIGNAL_SET_SIZE grows k_sig_ctx and pushes callee_saved past the
+    # ARM64 stp/ldp immediate offset limit in arch/arm64/core/switch.S.
+    platform_allow:
+      - qemu_riscv64
     integration_platforms:
       - qemu_riscv64
     extra_configs:
       - CONFIG_POSIX_RTSIG_MAX=1024
-  portability.posix.signals.native:
-    platform_allow:
-      - native_sim
-      - native_sim/native/64
-    integration_platforms:
-      - native_sim
-      - native_sim/native/64
-    integration_toolchains:
-      - host
-      - llvm
+      - CONFIG_SIGNAL_SET_SIZE=1058
+  portability.posix.signals.linux_compat:
+    tags: native
+    filter: CONFIG_NATIVE_LIBC
     extra_configs:
-      - CONFIG_PICOLIBC=y
+      - CONFIG_POSIX_TEST_LINUX_COMPAT=y
