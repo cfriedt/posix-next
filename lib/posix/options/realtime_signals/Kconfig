@@ -1,0 +1,33 @@
+# Copyright (c) 2023 Meta
+#
+# SPDX-License-Identifier: Apache-2.0
+
+config POSIX_REALTIME_SIGNALS
+	bool "POSIX realtime signals"
+	help
+	  Enable support for POSIX realtime signals.
+
+if POSIX_REALTIME_SIGNALS
+
+config SIGNAL_QUEUE_SIZE_ADD_POSIX_REALTIME
+	def_int 32
+	help
+	  This value represents the maximum number of signals that a process may send or have pending
+	  at any given time (see SIGQUEUE_MAX and
+	  _POSIX_SIGQUEUE_MAX limits.h).
+
+config POSIX_RTSIG_MAX
+	int "Maximum number of realtime signals"
+	default 8
+	help
+	  Define the maximum number of realtime signals (RTSIG_MAX).
+	  The range of realtime signals is [SIGRTMIN .. (SIGRTMIN+RTSIG_MAX)]
+
+# it would be much better to use arithmetic + variables here but it does not work
+config SIGNAL_SET_SIZE_MIN_POSIX_REALTIME
+	def_int 42
+	help
+	  Linux-aligned POSIX realtime sigset_t size (SIGRTMIN is this value
+	  minus CONFIG_POSIX_RTSIG_MAX: reserve 32 for cancel, 33 reserved).
+
+endif # POSIX_REALTIME_SIGNALS
