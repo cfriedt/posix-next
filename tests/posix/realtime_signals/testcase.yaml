@@ -1,0 +1,34 @@
+common:
+  tags:
+    - posix
+    - posix_realtime_signals
+  platform_key:
+    - arch
+    - simulation
+  platform_exclude:
+    # undefined reference to `bootutil_key_cnt'
+    - mps2/an521/cpu0/ns
+  min_flash: 64
+  min_ram: 32
+tests:
+  portability.posix.posix_realtime_signals:
+    filter: not CONFIG_NATIVE_LIBC
+  portability.posix.posix_realtime_signals.userspace:
+    filter: (not CONFIG_NATIVE_LIBC) and CONFIG_ARCH_SUPPORTS_USERSPACE_SIGNALS
+    tags: userspace
+    extra_configs:
+      - CONFIG_TEST_USERSPACE=y
+      - CONFIG_USERSPACE=y
+  portability.posix.posix_realtime_signals.minimal:
+    filter: not CONFIG_NATIVE_LIBC
+    extra_configs:
+      - CONFIG_MINIMAL_LIBC=y
+  portability.posix.posix_realtime_signals.newlib:
+    filter: (not CONFIG_NATIVE_LIBC) and (TOOLCHAIN_HAS_NEWLIB == 1)
+    extra_configs:
+      - CONFIG_NEWLIB_LIBC=y
+  portability.posix.posix_realtime_signals.picolibc:
+    tags: picolibc
+    filter: (not CONFIG_NATIVE_LIBC) and CONFIG_PICOLIBC_SUPPORTED
+    extra_configs:
+      - CONFIG_PICOLIBC=y
