@@ -19,18 +19,23 @@
 #include <zephyr/sys/clock.h>
 #include <pthread.h>
 
+#include "posix_internal.h"
+
 #define ACTIVE 1
 #define NOT_ACTIVE 0
 
 LOG_MODULE_REGISTER(posix_timer);
-
-static void zephyr_timer_wrapper(struct k_timer *ztimer);
 
 struct timer_obj {
 	struct k_timer ztimer;
 	struct sigevent evp;
 	struct k_sem sem_cond;
 	pthread_t thread;
+#ifdef CONFIG_SIGNAL
+	k_tid_t target;			/* SIGEV_SIGNAL target (creating thread) */
+	int ksigno;			/* pre-mapped kernel signal number */
+	union k_sig_val kval;
+#endif
 	struct timespec interval;	/* Reload value */
 	uint32_t reload;			/* Reload value in ms */
 	uint32_t status;
@@ -39,30 +44,25 @@ struct timer_obj {
 K_MEM_SLAB_DEFINE(posix_timer_slab, sizeof(struct timer_obj), CONFIG_POSIX_TIMER_MAX,
 		  __alignof__(struct timer_obj));
 
-static void zephyr_timer_wrapper(struct k_timer *ztimer)
+#ifdef CONFIG_SIGNAL
+static void zephyr_timer_signal_cb(struct k_timer *ztimer)
 {
-	struct timer_obj *timer;
-
-	timer = (struct timer_obj *)ztimer;
+	struct timer_obj *timer = (struct timer_obj *)ztimer;
 
 	if (timer->reload == 0U) {
 		timer->status = NOT_ACTIVE;
 		LOG_DBG("timer %p not active", timer);
 	}
 
-	if (timer->evp.sigev_notify == SIGEV_NONE) {
-		LOG_DBG("SIGEV_NONE");
-		return;
-	}
-
-	if (timer->evp.sigev_notify_function == NULL) {
-		LOG_DBG("NULL sigev_notify_function");
-		return;
-	}
-
-	LOG_DBG("calling sigev_notify_function %p", timer->evp.sigev_notify_function);
-	(timer->evp.sigev_notify_function)(timer->evp.sigev_value);
+	/*
+	 * Note: unlike POSIX's one-pending-signal-per-timer + overrun model,
+	 * each expiry queues its own signal; -EAGAIN (queue full) is
+	 * effectively an overrun. timer_getoverrun() accounting remains based
+	 * on k_timer_status_get().
+	 */
+	(void)k_sig_queue(timer->target, timer->ksigno, timer->kval);
 }
+#endif
 
 static void *zephyr_thread_wrapper(void *arg)
 {
@@ -149,8 +149,23 @@ int timer_create(clockid_t clockid, struct sigevent *evp, timer_t *timerid)
 		k_timer_init(&timer->ztimer, NULL, NULL);
 		break;
 	case SIGEV_SIGNAL:
-		k_timer_init(&timer->ztimer, zephyr_timer_wrapper, NULL);
+#ifdef CONFIG_SIGNAL
+		timer->ksigno = z_sig_from_posix(evp->sigev_signo);
+		if (timer->ksigno < 0) {
+			errno = EINVAL;
+			ret = -1;
+			goto free_timer;
+		}
+		/* deliver to the creating thread (the single process) */
+		timer->target = k_current_get();
+		timer->kval.sival_ptr = evp->sigev_value.sival_ptr;
+		k_timer_init(&timer->ztimer, zephyr_timer_signal_cb, NULL);
 		break;
+#else
+		errno = ENOTSUP;
+		ret = -1;
+		goto free_timer;
+#endif
 	case SIGEV_THREAD:
 		ret = k_sem_init(&timer->sem_cond, 0, 1);
 		if (ret != 0) {

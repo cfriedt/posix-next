@@ -36,9 +36,13 @@ extern "C" {
 #endif
 #if defined(_POSIX_REALTIME_SIGNALS)
 BUILD_ASSERT(CONFIG_POSIX_RTSIG_MAX >= 0);
+#ifndef SIGRTMAX
 #define SIGRTMAX (SIGRTMIN + CONFIG_POSIX_RTSIG_MAX)
+#endif
 #else
+#ifndef SIGRTMAX
 #define SIGRTMAX SIGRTMIN
+#endif
 #endif
 
 typedef struct {
