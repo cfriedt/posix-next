@@ -117,6 +117,20 @@ config POSIX_AEP_CHOICE_PSE53
 
 endchoice # POSIX_AEP_CHOICE
 
+config POSIX_TEST_LINUX_COMPAT
+	bool "Test POSIX suites are compatible with Linux"
+	depends on TEST
+	help
+	  Used by Twister linux_compat variants on native_sim. When set,
+	  NATIVE_LIBC_INCOMPATIBLE is not selected, allowing host libc
+	  (CONFIG_NATIVE_LIBC). Per-suite test Kconfig sets
+	  CONFIG_TC_PROVIDES_<OPTION_GROUP>=y for the option group under test.
+
+	  The "DUT" in this case becomes the testsuite itself. By transitive
+	  property, if Linux passes against the testsuite and Zephyr passes
+	  the testsuite, Linux and Zephyr are approximately compatible to the
+	  extent of coverage provided by the testsuite.
+
 if POSIX_SYSTEM_INTERFACES
 
 # Mandatory POSIX System Interfaces (base profile)
