@@ -311,12 +311,7 @@ int pthread_sigmask(int how, const sigset_t *ZRESTRICT set, sigset_t *ZRESTRICT 
 	sigset_t oset_buf;
 
 	if (set != NULL) {
-#if defined(CONFIG_SIGNAL) && !IS_ENABLED(CONFIG_NATIVE_LIBC)
 		kset = z_sig_set_from_posix(set, &kset_buf);
-#else
-		memcpy(&kset_buf, set, sizeof(kset_buf));
-		kset = &kset_buf;
-#endif
 	}
 
 	int ret = k_sig_mask(k_how, kset, oset == NULL ? NULL : &okset);
@@ -325,11 +320,7 @@ int pthread_sigmask(int how, const sigset_t *ZRESTRICT set, sigset_t *ZRESTRICT 
 	}
 
 	if (oset != NULL) {
-#if defined(CONFIG_SIGNAL) && !IS_ENABLED(CONFIG_NATIVE_LIBC)
 		*oset = *z_sig_set_to_posix(&okset, &oset_buf);
-#else
-		memcpy(oset, &okset, sizeof(*oset));
-#endif
 	}
 
 	return 0;

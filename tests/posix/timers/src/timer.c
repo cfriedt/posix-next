@@ -17,7 +17,7 @@
 #define PERIOD_SECS    0
 #define PERIOD_NSECS   100000000
 
-#define TEST_SIGNAL_VAL 34 /* normally SIGRTMIN */
+#define TEST_SIGNAL_VAL SIGRTMIN
 
 LOG_MODULE_REGISTER(timer_test);
 
@@ -31,6 +31,37 @@ void handler(union sigval val)
 	zassert_equal(val.sival_int, TEST_SIGNAL_VAL);
 }
 
+static void sig_handler(int signo, siginfo_t *info, void *ctx)
+{
+	ARG_UNUSED(ctx);
+
+	++exp_count;
+	LOG_DBG("Signal %d delivered %d times", signo, exp_count);
+	zassert_equal(signo, TEST_SIGNAL_VAL);
+	zassert_equal(info->si_value.sival_int, TEST_SIGNAL_VAL);
+}
+
+static void install_sig_handler(void)
+{
+	struct k_sig_set mask;
+	struct sigaction act = {
+		.sa_flags = SA_SIGINFO,
+		.sa_sigaction = sig_handler,
+	};
+
+	zassert_ok(sigemptyset(&act.sa_mask));
+	zassert_ok(sigaction(TEST_SIGNAL_VAL, &act, NULL));
+
+	/*
+	 * Zephyr kernel threads block all signals by default, and some libc
+	 * sigset_t types are too small for realtime signal numbers; unblock
+	 * through the kernel API, as the realtime_signals suite does.
+	 */
+	zassert_ok(k_sig_emptyset(&mask));
+	zassert_ok(k_sig_addset(&mask, TEST_SIGNAL_VAL));
+	zassert_ok(k_sig_mask(K_SIG_UNBLOCK, &mask, NULL));
+}
+
 void test_timer(clockid_t clock_id, int sigev_notify)
 {
 	struct sigevent sig = {0};
@@ -40,8 +71,13 @@ void test_timer(clockid_t clock_id, int sigev_notify)
 
 	exp_count = 0;
 	sig.sigev_notify = sigev_notify;
-	sig.sigev_notify_function = handler;
 	sig.sigev_value.sival_int = TEST_SIGNAL_VAL;
+	if (sigev_notify == SIGEV_SIGNAL) {
+		sig.sigev_signo = TEST_SIGNAL_VAL;
+		install_sig_handler();
+	} else {
+		sig.sigev_notify_function = handler;
+	}
 
 	/*TESTPOINT: Check if timer is created successfully*/
 	zassert_ok(timer_create(clock_id, &sig, &timerid));
@@ -137,8 +173,9 @@ ZTEST(posix_timers, test_one_shot__SIGEV_SIGNAL)
 
 	exp_count = 0;
 	sig.sigev_notify = SIGEV_SIGNAL;
-	sig.sigev_notify_function = handler;
+	sig.sigev_signo = TEST_SIGNAL_VAL;
 	sig.sigev_value.sival_int = TEST_SIGNAL_VAL;
+	install_sig_handler();
 
 	zassert_ok(timer_create(CLOCK_MONOTONIC, &sig, &timerid));
 
@@ -163,6 +200,8 @@ static void after(void *arg)
 		/* Give cancelled SIGEV_THREAD worker time to be recycled */
 		k_sleep(K_MSEC(2 * CONFIG_SYS_THREAD_RECYCLER_DELAY_MS));
 	}
+	/* queued signals have drained through the still-installed handler */
+	(void)signal(TEST_SIGNAL_VAL, SIG_DFL);
 }
 
 ZTEST_SUITE(posix_timers, NULL, NULL, NULL, after, NULL);
