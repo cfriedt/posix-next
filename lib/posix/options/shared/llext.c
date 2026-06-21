@@ -294,6 +294,13 @@ EXPORT_SYMBOL(pthread_mutexattr_gettype);
 EXPORT_SYMBOL(pthread_mutexattr_settype);
 #endif /* CONFIG_POSIX_THREADS_EXT */
 
+/* REALTIME_SIGNALS */
+#ifdef CONFIG_POSIX_REALTIME_SIGNALS
+EXPORT_SYMBOL(sigqueue);
+EXPORT_SYMBOL(sigtimedwait);
+EXPORT_SYMBOL(sigwaitinfo);
+#endif /* CONFIG_POSIX_REALTIME_SIGNALS */
+
 /* RW_LOCKS */
 #ifdef CONFIG_POSIX_RW_LOCKS
 EXPORT_SYMBOL(pthread_rwlock_destroy);
