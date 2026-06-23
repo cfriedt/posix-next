@@ -30,3 +30,17 @@ patches:
     comments: |
       Not immediately upstreamable. This facilitates unblocked development of Zephyr's POSIX
       implementation.
+  - path: zephyr/sigrtmin-linux-alignment.patch
+    sha256sum: a2729d55a853af20251f7a9b720fb5d8114a3915dba2009aeaa4ce3c27aed9b9
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-06-21
+    upstreamable: true
+    comments: |
+      Align SIGRTMIN with Linux/glibc NPTL (reserve 32 for cancel and 33;
+      application RT signals from 34). Corrects SIGRTMIN 32 in Newlib/Picolibc
+      libc shadows after move-posix; posix headers and Kconfig live out-of-tree.
+      The original value 32 was taken from Newlib and Picolibc Cygwin targets,
+      which use a compact sigset_t (uint32_t or unsigned long) rather than a
+      range sized for Zephyr's POSIX realtime signal requirements.

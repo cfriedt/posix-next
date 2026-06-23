@@ -61,12 +61,23 @@ struct timespec {
 
 /* sig_atomic_t must be defined by the libc signal.h */
 
-#define SIGRTMIN 32
+/*
+ * Linux/glibc NPTL: reserve 32 (cancel) and 33; RT signals from 34.
+ * The prior value 32 followed Newlib/Picolibc Cygwin targets (compact
+ * sigset_t); Zephyr sizes sigset_t from SIGNAL_SET_SIZE_MIN_POSIX_REALTIME.
+ */
+#ifndef SIGRTMIN
+#define SIGRTMIN 34
+#endif
 #if defined(_POSIX_REALTIME_SIGNALS) || defined(__DOXYGEN__)
 BUILD_ASSERT(CONFIG_POSIX_RTSIG_MAX >= 0);
+#ifndef SIGRTMAX
 #define SIGRTMAX (SIGRTMIN + CONFIG_POSIX_RTSIG_MAX)
+#endif
 #else
+#ifndef SIGRTMAX
 #define SIGRTMAX SIGRTMIN
+#endif
 #endif
 
 #if !defined(_SIGSET_T_DECLARED) && !defined(__sigset_t_defined)
