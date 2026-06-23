@@ -17,7 +17,7 @@ extern "C" {
 #if !defined(_SIGSET_T_DECLARED) && !defined(__sigset_t_defined)
 
 #ifndef SIGRTMIN
-#define SIGRTMIN 32
+#define SIGRTMIN 34
 #endif
 #if defined(_POSIX_REALTIME_SIGNALS) || defined(__DOXYGEN__)
 BUILD_ASSERT(CONFIG_POSIX_RTSIG_MAX >= 0);

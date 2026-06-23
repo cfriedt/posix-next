@@ -188,3 +188,17 @@ patches:
       feature-test macros they need instead of the build defining them globally: on v4.5.0-rc1
       that also covers the applications PR 120028 switched to the Network Appliance profile, and
       sys_clock_from_clockid() moves back to the POSIX implementation.
+  - path: zephyr/sigrtmin-linux-alignment.patch
+    sha256sum: 6c56de0f2055b6b1488fb31a4fb017e0450a622ed85c7c9cfdc925e0c8703d02
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-06-21
+    upstreamable: true
+    comments: |
+      Align SIGRTMIN with Linux/glibc NPTL (reserve 32 for cancel and 33;
+      application RT signals from 34). Corrects SIGRTMIN 32 in Newlib/Picolibc
+      libc shadows after move-posix; posix headers and Kconfig live out-of-tree.
+      The original value 32 was taken from Newlib and Picolibc Cygwin targets,
+      which use a compact sigset_t (uint32_t or unsigned long) rather than a
+      range sized for Zephyr's POSIX realtime signal requirements.
