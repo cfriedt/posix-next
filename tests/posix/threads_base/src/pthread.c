@@ -5,6 +5,7 @@
  */
 
 #include <pthread.h>
+#include <sched.h>
 #include <signal.h>
 #include <unistd.h>
 
@@ -12,6 +13,9 @@
 #include <zephyr/kernel/signal.h>
 #include <zephyr/sys/util.h>
 #include <zephyr/ztest.h>
+
+#include "../../common/linux_compat_test.h"
+#include "_main.h"
 
 #define DETACH_THR_ID 2
 
@@ -26,19 +30,19 @@
 static void *thread_top_exec(void *p1);
 static void *thread_top_term(void *p1);
 
-static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t cvar0 = PTHREAD_COND_INITIALIZER;
-static pthread_cond_t cvar1 = PTHREAD_COND_INITIALIZER;
-static pthread_cond_t cvar_done = PTHREAD_COND_INITIALIZER;
-static pthread_cond_t cvar_first_iter = PTHREAD_COND_INITIALIZER;
+static ZTEST_BMEM pthread_mutex_t lock;
+static ZTEST_BMEM pthread_cond_t cvar0;
+static ZTEST_BMEM pthread_cond_t cvar1;
+static ZTEST_BMEM pthread_cond_t cvar_done;
+static ZTEST_BMEM pthread_cond_t cvar_first_iter;
 
 #define N_FIRST_ITER_PEERS (N_THR_E - 1)
-static int first_iter_peer_count;
+static ZTEST_BMEM int first_iter_peer_count;
 
-static int bounce_failed;
-static int bounce_done[N_THR_E];
+static ZTEST_BMEM int bounce_failed;
+static ZTEST_BMEM int bounce_done[N_THR_E];
 
-static int curr_bounce_thread;
+static ZTEST_BMEM int curr_bounce_thread;
 
 /* Bounces execution between threads using a condition variable, continuously
  * testing that no other thread is mucking with the protected state.
@@ -78,7 +82,8 @@ static void *thread_top_exec(void *p1)
 		if (i == 0) {
 			if (id == 0) {
 				while (first_iter_peer_count < N_FIRST_ITER_PEERS) {
-					zassert_equal(0, pthread_cond_wait(&cvar_first_iter, &lock), "");
+					zassert_equal(0, pthread_cond_wait(&cvar_first_iter, &lock),
+						      "");
 				}
 			} else {
 				first_iter_peer_count++;
@@ -146,11 +151,9 @@ static int bounce_test_done(void)
 
 static void *thread_top_term(void *p1)
 {
-	pthread_t self;
 	int ret;
 	int id = POINTER_TO_INT(p1);
-
-	self = pthread_self();
+	pthread_t self = pthread_self();
 
 #if defined(_POSIX_THREAD_PRIORITY_SCHEDULING)
 	int policy;
@@ -159,14 +162,17 @@ static void *thread_top_term(void *p1)
 	};
 	struct sched_param getschedparam;
 
-	/* Change priority of thread */
-	zassert_false(pthread_setschedparam(self, SCHED_RR, &param),
-		      "Unable to set thread priority!");
+	if (!IS_ENABLED(CONFIG_NATIVE_LIBC)) {
+		/* Change priority of thread */
+		ret = pthread_setschedparam(self, SCHED_RR, &param);
+		zassert_ok(ret, "Unable to set thread priority! %d", ret);
 
-	zassert_false(pthread_getschedparam(self, &policy, &getschedparam),
-		      "Unable to get thread priority!");
+		ret = pthread_getschedparam(self, &policy, &getschedparam);
+		zassert_ok(ret, "Unable to get thread priority! %d", ret);
 
-	printk("Thread %d starting with a priority of %d\n", id, getschedparam.sched_priority);
+		printk("Thread %d starting with a priority of %d\n", id,
+		       getschedparam.sched_priority);
+	}
 #endif
 
 	if (!k_is_user_context()) {
@@ -189,7 +195,25 @@ static void *thread_top_term(void *p1)
 	return NULL;
 }
 
-ZTEST(pthread, test_pthread_execution)
+static void pthread_sync_init(void)
+{
+	zassert_ok(pthread_mutex_init(&lock, NULL));
+	zassert_ok(pthread_cond_init(&cvar0, NULL));
+	zassert_ok(pthread_cond_init(&cvar1, NULL));
+	zassert_ok(pthread_cond_init(&cvar_first_iter, NULL));
+	zassert_ok(pthread_cond_init(&cvar_done, NULL));
+}
+
+static void pthread_sync_fini(void)
+{
+	pthread_mutex_destroy(&lock);
+	pthread_cond_destroy(&cvar0);
+	pthread_cond_destroy(&cvar1);
+	pthread_cond_destroy(&cvar_done);
+	pthread_cond_destroy(&cvar_first_iter);
+}
+
+static void test_pthread_execution(void)
 {
 	if (IS_ENABLED(CONFIG_COVERAGE)) {
 		/* Coverage data increases binary size, reducing heap for dynamic stacks */
@@ -199,28 +223,7 @@ ZTEST(pthread, test_pthread_execution)
 	pthread_t newthread[N_THR_E];
 	void *retval;
 
-	if (CONFIG_SYS_THREAD_STACK_MAX == 0) {
-		/* Most of this testsuite uses automatic stack allocation, but
-		 * threads_base.static_stack uses statically allocated stacks.
-		 */
-		ztest_test_skip();
-	}
-
-	if (lock == PTHREAD_MUTEX_INITIALIZER) {
-		zassert_ok(pthread_mutex_init(&lock, NULL));
-	}
-	if (cvar0 == PTHREAD_COND_INITIALIZER) {
-		zassert_ok(pthread_cond_init(&cvar0, NULL));
-	}
-	if (cvar1 == PTHREAD_COND_INITIALIZER) {
-		zassert_ok(pthread_cond_init(&cvar1, NULL));
-	}
-	if (cvar_first_iter == PTHREAD_COND_INITIALIZER) {
-		zassert_ok(pthread_cond_init(&cvar_first_iter, NULL));
-	}
-	if (cvar_done == PTHREAD_COND_INITIALIZER) {
-		zassert_ok(pthread_cond_init(&cvar_done, NULL));
-	}
+	pthread_sync_init();
 
 	first_iter_peer_count = 0;
 	bounce_failed = 0;
@@ -256,14 +259,12 @@ ZTEST(pthread, test_pthread_execution)
 		zassert_ok(pthread_join(newthread[i], &retval));
 	}
 
-	pthread_mutex_destroy(&lock);
-	pthread_cond_destroy(&cvar0);
-	pthread_cond_destroy(&cvar1);
-	pthread_cond_destroy(&cvar_done);
-	pthread_cond_destroy(&cvar_first_iter);
+	pthread_sync_fini();
 }
 
-ZTEST(pthread, test_pthread_termination)
+ZTEST_THREADS_BASE(test_pthread_execution);
+
+static void test_pthread_termination(void)
 {
 	if (IS_ENABLED(CONFIG_COVERAGE)) {
 		/* Coverage data increases binary size, reducing heap for dynamic stacks */
@@ -272,13 +273,6 @@ ZTEST(pthread, test_pthread_termination)
 	int32_t i, ret;
 	pthread_t newthread[N_THR_T] = {0};
 	void *retval;
-
-	if (CONFIG_SYS_THREAD_STACK_MAX == 0) {
-		/* Most of this testsuite uses automatic stack allocation, but
-		 * threads_base.static_stack uses statically allocated stacks.
-		 */
-		ztest_test_skip();
-	}
 
 	/* Creating 4 threads */
 	for (i = 0; i < N_THR_T; i++) {
@@ -297,10 +291,16 @@ ZTEST(pthread, test_pthread_termination)
 	ret = pthread_join(pthread_self(), &retval);
 	zassert_equal(ret, EDEADLK, "thread joined with self inexplicably!");
 
-	/* TESTPOINT: Try canceling a terminated thread */
-	ret = pthread_cancel(newthread[0]);
-	zassert_equal(ret, ESRCH, "cancelled a terminated thread!");
+	/*
+	 * Cannot guarantee that an implementation will return ESRCH for attempting to
+	 * cancel a terminated thread.
+	 *
+	 * Please see Rationale here:
+	 * https://pubs.opengroup.org/onlinepubs/9799919799/functions/pthread_cancel.html
+	 */
 }
+
+ZTEST_THREADS_BASE(test_pthread_termination);
 
 static void *create_thread1(void *p1)
 {
@@ -308,16 +308,9 @@ static void *create_thread1(void *p1)
 	return NULL;
 }
 
-ZTEST(pthread, test_pthread_descriptor_leak)
+ZTEST(posix_threads_base, test_pthread_descriptor_leak)
 {
 	pthread_t pthread1;
-
-	if (CONFIG_SYS_THREAD_STACK_MAX == 0) {
-		/* Most of this testsuite uses automatic stack allocation, but
-		 * threads_base.static_stack uses statically allocated stacks.
-		 */
-		ztest_test_skip();
-	}
 
 	/* If we are leaking descriptors, then this loop will never complete */
 	for (size_t i = 0; i < CONFIG_POSIX_THREAD_THREADS_MAX * 2; ++i) {
@@ -327,12 +320,17 @@ ZTEST(pthread, test_pthread_descriptor_leak)
 	}
 }
 
-ZTEST(pthread, test_pthread_equal)
+static void test_pthread_equal(void)
 {
 	zassert_true(pthread_equal(pthread_self(), pthread_self()));
 	zassert_false(pthread_equal(pthread_self(), (pthread_t)4242));
-	zassert_true(pthread_equal(pthread_self(), (pthread_t)(uintptr_t)k_current_get()));
+	IF_NOT_NATIVE_LIBC({
+		/* not true when running the testsuite against Linux's pthread implementation */
+		zassert_true(pthread_equal(pthread_self(), (pthread_t)(uintptr_t)k_current_get()));
+	})
 }
+
+ZTEST_THREADS_BASE(test_pthread_equal);
 
 static void cleanup_handler(void *arg)
 {
@@ -356,23 +354,18 @@ static void *test_pthread_cleanup_entry(void *arg)
 	return NULL;
 }
 
-ZTEST(pthread, test_pthread_cleanup)
+static void test_pthread_cleanup(void)
 {
 	pthread_t th;
-
-	if (CONFIG_SYS_THREAD_STACK_MAX == 0) {
-		/* Most of this testsuite uses automatic stack allocation, but
-		 * threads_base.static_stack uses statically allocated stacks.
-		 */
-		ztest_test_skip();
-	}
 
 	zassert_ok(pthread_create(&th, NULL, test_pthread_cleanup_entry, NULL));
 	zassert_ok(pthread_join(th, NULL));
 }
 
-static bool testcancel_ignored;
-static bool testcancel_failed;
+ZTEST_THREADS_BASE(test_pthread_cleanup);
+
+static ZTEST_BMEM bool testcancel_ignored;
+static ZTEST_BMEM bool testcancel_failed;
 
 static void *test_pthread_cancel_fn(void *arg)
 {
@@ -398,21 +391,17 @@ static void *test_pthread_cancel_fn(void *arg)
 	/* enable the thread to be cancelled, the thread should not return */
 	zassert_ok(pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL));
 
+	/* intentionally sleep to encounter cancellation point */
+	msleep(20);
+
 	testcancel_failed = true;
 
 	return NULL;
 }
 
-ZTEST(pthread, test_pthread_testcancel)
+static void test_pthread_testcancel(void)
 {
 	pthread_t th;
-
-	if (CONFIG_SYS_THREAD_STACK_MAX == 0) {
-		/* Most of this testsuite uses automatic stack allocation, but
-		 * threads_base.static_stack uses statically allocated stacks.
-		 */
-		ztest_test_skip();
-	}
 
 	zassert_ok(pthread_create(&th, NULL, test_pthread_cancel_fn, NULL));
 	zassert_ok(pthread_join(th, NULL));
@@ -420,4 +409,205 @@ ZTEST(pthread, test_pthread_testcancel)
 	zassert_false(testcancel_failed);
 }
 
-ZTEST_SUITE(pthread, NULL, NULL, NULL, NULL, NULL);
+ZTEST_THREADS_BASE(test_pthread_testcancel);
+
+static void test_pthread_atfork(void)
+{
+	/*
+	 * fork() does not exist, so registered handlers can never run;
+	 * registration itself succeeds (and NULL handlers are permitted)
+	 */
+	zassert_ok(pthread_atfork(NULL, NULL, NULL));
+}
+
+ZTEST_THREADS_BASE(test_pthread_atfork);
+
+static void test_sched_yield(void)
+{
+	zassert_ok(sched_yield());
+}
+
+ZTEST_THREADS_BASE(test_sched_yield);
+
+static void *setcancelstate_fn(void *arg)
+{
+	int oldstate = -1;
+
+	ARG_UNUSED(arg);
+
+	zassert_equal(pthread_setcancelstate(PTHREAD_CANCEL_INVALID, NULL), EINVAL);
+
+	/*
+	 * No initial-state expectation: kernel-mode threads start with cancel masked
+	 * (see thread_top_term()). Read the state back while toggling instead.
+	 */
+	zassert_ok(pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL));
+	zassert_ok(pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, &oldstate));
+	zassert_equal(oldstate, PTHREAD_CANCEL_DISABLE);
+	zassert_ok(pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &oldstate));
+	zassert_equal(oldstate, PTHREAD_CANCEL_ENABLE);
+	zassert_ok(pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL));
+
+	return NULL;
+}
+
+static void test_pthread_setcancelstate(void)
+{
+	pthread_t th;
+
+	zassert_ok(pthread_create(&th, NULL, setcancelstate_fn, NULL));
+	zassert_ok(pthread_join(th, NULL));
+}
+
+ZTEST_THREADS_BASE(test_pthread_setcancelstate);
+
+static void *setcanceltype_fn(void *arg)
+{
+	int oldtype = -1;
+
+	ARG_UNUSED(arg);
+
+	zassert_equal(pthread_setcanceltype(PTHREAD_CANCEL_INVALID, NULL), EINVAL);
+
+	/* a new thread's cancelability type is deferred; read it back while toggling */
+	zassert_ok(pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, &oldtype));
+	zassert_equal(oldtype, PTHREAD_CANCEL_DEFERRED);
+	zassert_ok(pthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, &oldtype));
+	zassert_equal(oldtype, PTHREAD_CANCEL_ASYNCHRONOUS);
+
+	return NULL;
+}
+
+static void test_pthread_setcanceltype(void)
+{
+	pthread_t th;
+
+	zassert_ok(pthread_create(&th, NULL, setcanceltype_fn, NULL));
+	zassert_ok(pthread_join(th, NULL));
+}
+
+ZTEST_THREADS_BASE(test_pthread_setcanceltype);
+
+static ZTEST_BMEM pthread_once_t once_control;
+static ZTEST_BMEM int once_count;
+
+static void once_func(void)
+{
+	++once_count;
+}
+
+static void *once_fn(void *arg)
+{
+	ARG_UNUSED(arg);
+
+	zassert_ok(pthread_once(&once_control, once_func));
+
+	return NULL;
+}
+
+static void test_pthread_once(void)
+{
+	pthread_t th;
+
+	once_control = (pthread_once_t)PTHREAD_ONCE_INIT;
+	once_count = 0;
+
+	zassert_ok(pthread_once(&once_control, once_func));
+	zassert_ok(pthread_once(&once_control, once_func));
+
+	zassert_ok(pthread_create(&th, NULL, once_fn, NULL));
+	zassert_ok(pthread_join(th, NULL));
+
+	zassert_equal(once_count, 1, "init routine ran %d times", once_count);
+}
+
+ZTEST_THREADS_BASE(test_pthread_once);
+
+static void *pthread_exit_fn(void *arg)
+{
+	pthread_exit(arg);
+
+	zassert_unreachable();
+	return NULL;
+}
+
+static void test_pthread_exit(void)
+{
+	pthread_t th;
+	void *retval = NULL;
+
+	zassert_ok(pthread_create(&th, NULL, pthread_exit_fn, INT_TO_POINTER(42)));
+	zassert_ok(pthread_join(th, &retval));
+	zassert_equal(POINTER_TO_INT(retval), 42);
+}
+
+ZTEST_THREADS_BASE(test_pthread_exit);
+
+static ZTEST_BMEM bool detached_fn_done;
+
+static void *detached_fn(void *arg)
+{
+	ARG_UNUSED(arg);
+
+	msleep(20);
+	detached_fn_done = true;
+
+	return NULL;
+}
+
+static void test_pthread_detach(void)
+{
+	pthread_t th;
+
+	detached_fn_done = false;
+	zassert_ok(pthread_create(&th, NULL, detached_fn, NULL));
+	zassert_ok(pthread_detach(th));
+
+	for (size_t i = 0; i < 100 && !detached_fn_done; ++i) {
+		msleep(20);
+	}
+	zassert_true(detached_fn_done, "detached thread did not finish");
+}
+
+ZTEST_THREADS_BASE(test_pthread_detach);
+
+static void test_pthread_join(void)
+{
+	void *retval;
+
+	/* joining with self is a deadlock */
+	zassert_equal(pthread_join(pthread_self(), &retval), EDEADLK);
+}
+
+ZTEST_THREADS_BASE(test_pthread_join);
+
+static void *pthread_create_fn(void *arg)
+{
+	ARG_UNUSED(arg);
+
+	return NULL;
+}
+
+static void test_pthread_create(void)
+{
+#if defined(_POSIX_THREAD_PRIORITY_SCHEDULING)
+	pthread_t th;
+	pthread_attr_t eattr;
+	struct sched_param param;
+
+	posix_test_skip_if_native_libc();
+
+	/* create with explicitly-scheduled attributes rather than inherited */
+	zassert_ok(pthread_attr_init(&eattr));
+	zassert_ok(pthread_attr_getschedparam(&eattr, &param));
+	zassert_ok(pthread_attr_setinheritsched(&eattr, PTHREAD_EXPLICIT_SCHED));
+	zassert_ok(pthread_attr_setschedparam(&eattr, &param));
+	zassert_ok(pthread_create(&th, &eattr, pthread_create_fn, NULL));
+	zassert_ok(pthread_join(th, NULL));
+	zassert_ok(pthread_attr_destroy(&eattr));
+#else
+	ztest_test_skip();
+#endif
+}
+
+ZTEST_THREADS_BASE(test_pthread_create);
