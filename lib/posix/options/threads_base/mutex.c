@@ -48,6 +48,22 @@ static int pthread_mutexattr_to_options(const pthread_mutexattr_t *attr, uint32_
 		return -EINVAL;
 	}
 
+#if defined(_POSIX_THREAD_PRIO_INHERIT) || defined(_POSIX_THREAD_PRIO_PROTECT)
+	switch (a->protocol) {
+	case PTHREAD_PRIO_NONE:
+		break;
+	case PTHREAD_PRIO_INHERIT:
+		*options |= K_MUTEX_PRIO_INHERIT;
+		break;
+	default:
+		return -EINVAL;
+	}
+#else
+	if (a->protocol != 0) {
+		return -EINVAL;
+	}
+#endif
+
 	return 0;
 }
 
@@ -65,12 +81,24 @@ int pthread_mutex_init(pthread_mutex_t *mu, const pthread_mutexattr_t *attr)
 		return -ret;
 	}
 
+	if ((options & K_MUTEX_PRIO_INHERIT) != 0) {
+		/* claim the backing kernel mutex now, so that exhaustion is reported here */
+		ret = sys_mutex_lock(mu, K_NO_WAIT);
+		if (ret < 0) {
+			(void)sys_mutex_destroy(mu);
+			return (ret == -ENOMEM) ? ENOMEM : EAGAIN;
+		}
+		(void)sys_mutex_unlock(mu);
+	}
+
 	return 0;
 }
 
 static int pthread_mutex_lock_common(pthread_mutex_t *m, k_timeout_t timeout)
 {
-	return -sys_mutex_lock(m, timeout);
+	int ret = sys_mutex_lock(m, timeout);
+
+	return (ret == -ENOMEM) ? EAGAIN : -ret;
 }
 
 int pthread_mutex_lock(pthread_mutex_t *m)
