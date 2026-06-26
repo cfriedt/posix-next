@@ -30,13 +30,20 @@ ZTEST(xsi_realtime_threads, test_pthread_mutexattr_getprotocol)
 ZTEST(xsi_realtime_threads, test_pthread_mutexattr_setprotocol)
 {
 #if defined(_POSIX_THREAD_PRIO_INHERIT) || defined(_POSIX_THREAD_PRIO_PROTECT)
+	int protocol = -1;
 	pthread_mutexattr_t attr;
 
 	zassert_equal(pthread_mutexattr_setprotocol(NULL, PTHREAD_PRIO_NONE), EINVAL);
 
 	zassert_ok(pthread_mutexattr_init(&attr));
 	zassert_ok(pthread_mutexattr_setprotocol(&attr, PTHREAD_PRIO_NONE));
-	zassert_equal(pthread_mutexattr_setprotocol(&attr, PTHREAD_PRIO_INHERIT), ENOTSUP);
+
+	/* k_mutex implements priority inheritance, so PTHREAD_PRIO_INHERIT is accepted */
+	zassert_ok(pthread_mutexattr_setprotocol(&attr, PTHREAD_PRIO_INHERIT));
+	zassert_ok(pthread_mutexattr_getprotocol(&attr, &protocol));
+	zassert_equal(protocol, PTHREAD_PRIO_INHERIT);
+
+	/* priority ceilings are not implemented */
 	zassert_equal(pthread_mutexattr_setprotocol(&attr, PTHREAD_PRIO_PROTECT), ENOTSUP);
 	zassert_equal(pthread_mutexattr_setprotocol(&attr, 42), EINVAL);
 	zassert_ok(pthread_mutexattr_destroy(&attr));

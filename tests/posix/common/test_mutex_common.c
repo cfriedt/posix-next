@@ -76,8 +76,14 @@ void test_mutex_common(int type)
 	zassert_not_ok(pthread_mutexattr_getprotocol(&mut_attr, NULL));
 	zassert_not_ok(pthread_mutexattr_getprotocol(NULL, NULL));
 
-	zassert_not_ok(pthread_mutexattr_setprotocol(&mut_attr, PTHREAD_PRIO_INHERIT));
-	zassert_not_ok(pthread_mutexattr_setprotocol(&mut_attr, PTHREAD_PRIO_PROTECT));
+	if (IS_ENABLED(CONFIG_POSIX_THREAD_PRIO_INHERIT) || IS_ENABLED(CONFIG_NATIVE_LIBC)) {
+		zassert_ok(pthread_mutexattr_setprotocol(&mut_attr, PTHREAD_PRIO_INHERIT));
+	} else {
+		zassert_not_ok(pthread_mutexattr_setprotocol(&mut_attr, PTHREAD_PRIO_INHERIT));
+	}
+	if (!IS_ENABLED(CONFIG_NATIVE_LIBC)) {
+		zassert_not_ok(pthread_mutexattr_setprotocol(&mut_attr, PTHREAD_PRIO_PROTECT));
+	}
 	zassert_ok(pthread_mutexattr_setprotocol(&mut_attr, PTHREAD_PRIO_NONE));
 	zassert_ok(pthread_mutexattr_getprotocol(&mut_attr, &protocol),
 		   "reading mutex protocol is failed");
