@@ -11,13 +11,21 @@
 #include <zephyr/sys/util.h>
 #include <zephyr/ztest.h>
 
+#include "../../common/linux_compat_test.h"
+
 #define BIOS_FOOD 0xB105F00D
 
 static bool attr_valid;
 static pthread_attr_t attr;
+#ifndef CONFIG_NATIVE_LIBC
 static const pthread_attr_t uninit_attr;
+#endif
 static bool detached_thread_has_finished;
 
+/*
+ * Used by the static_stack twister variant (CONFIG_SYS_THREAD_STACK_MAX=0) where
+ * pthread_create() requires an explicit stack from pthread_attr_setstack().
+ */
 #define STATIC_THREAD_STACK_SIZE (MAX(1024, PTHREAD_STACK_MIN + CONFIG_TEST_EXTRA_STACK_SIZE))
 static K_THREAD_STACK_DEFINE(static_thread_stack, STATIC_THREAD_STACK_SIZE);
 #define LARGE_THREAD_STACK_SIZE  (2 * STATIC_THREAD_STACK_SIZE)
@@ -89,7 +97,8 @@ ZTEST(xsi_threads_ext, test_pthread_attr_getstack)
 	void *stackaddr = (void *)BIOS_FOOD;
 	size_t stacksize = BIOS_FOOD;
 
-	{
+	IF_NOT_NATIVE_LIBC({
+		/* glibc emits a warning (promoted to error) for NULL parameters */
 		if (false) {
 			zassert_equal(pthread_attr_getstack(NULL, NULL, NULL), EINVAL);
 			zassert_equal(pthread_attr_getstack(NULL, NULL, &stacksize), EINVAL);
@@ -101,7 +110,7 @@ ZTEST(xsi_threads_ext, test_pthread_attr_getstack)
 		zassert_equal(pthread_attr_getstack(&attr, NULL, NULL), EINVAL);
 		zassert_equal(pthread_attr_getstack(&attr, NULL, &stacksize), EINVAL);
 		zassert_equal(pthread_attr_getstack(&attr, &stackaddr, NULL), EINVAL);
-	}
+	})
 
 	zassert_ok(pthread_attr_getstack(&attr, &stackaddr, &stacksize));
 	zassert_not_equal(stackaddr, (void *)BIOS_FOOD);
@@ -110,7 +119,8 @@ ZTEST(xsi_threads_ext, test_pthread_attr_getstack)
 
 ZTEST(xsi_threads_ext, test_pthread_attr_setstack)
 {
-	{
+	IF_NOT_NATIVE_LIBC({
+		/* glibc emits a warning (promoted to error) for NULL parameters */
 		if (false) {
 			zassert_equal(pthread_attr_setstack(NULL, NULL, 0), EINVAL);
 			zassert_equal(pthread_attr_setstack(NULL, NULL, PTHREAD_STACK_MIN), EINVAL);
@@ -124,7 +134,7 @@ ZTEST(xsi_threads_ext, test_pthread_attr_setstack)
 		zassert_equal(pthread_attr_setstack(&attr, NULL, 0), EINVAL);
 		zassert_equal(pthread_attr_setstack(&attr, NULL, STATIC_THREAD_STACK_SIZE), EINVAL);
 		zassert_equal(pthread_attr_setstack(&attr, static_thread_stack, 0), EINVAL);
-	}
+	})
 
 	/* can create a thread with the stack set up in before() */
 	can_create_thread(&attr);
@@ -138,14 +148,16 @@ ZTEST(xsi_threads_ext, test_pthread_attr_getstacksize)
 {
 	size_t stacksize = BIOS_FOOD;
 
-	{
+	IF_NOT_NATIVE_LIBC({
+		/* glibc emits a warning (promoted to error) for NULL parameters */
 		if (false) {
+			/* undefined behaviour */
 			zassert_equal(pthread_attr_getstacksize(NULL, NULL), EINVAL);
 			zassert_equal(pthread_attr_getstacksize(NULL, &stacksize), EINVAL);
 			zassert_equal(pthread_attr_getstacksize(&uninit_attr, &stacksize), EINVAL);
 		}
 		zassert_equal(pthread_attr_getstacksize(&attr, NULL), EINVAL);
-	}
+	})
 
 	zassert_ok(pthread_attr_getstacksize(&attr, &stacksize));
 	zassert_not_equal(stacksize, BIOS_FOOD);
@@ -155,7 +167,8 @@ ZTEST(xsi_threads_ext, test_pthread_attr_setstacksize)
 {
 	size_t stacksize;
 
-	{
+	IF_NOT_NATIVE_LIBC({
+		/* glibc emits a warning (promoted to error) for NULL parameters */
 		if (false) {
 			zassert_equal(pthread_attr_setstacksize(NULL, 0), EINVAL);
 			zassert_equal(pthread_attr_setstacksize(NULL, PTHREAD_STACK_MIN), EINVAL);
@@ -164,7 +177,7 @@ ZTEST(xsi_threads_ext, test_pthread_attr_setstacksize)
 				      EINVAL);
 		}
 		zassert_equal(pthread_attr_setstacksize(&attr, 0), EINVAL);
-	}
+	})
 
 	can_create_thread(&attr);
 
@@ -178,6 +191,8 @@ ZTEST(xsi_threads_ext, test_pthread_attr_setstacksize)
 
 ZTEST(xsi_threads_ext, test_pthread_set_get_concurrency)
 {
+	posix_test_skip_if_native_libc();
+
 	zassert_equal(EINVAL, pthread_setconcurrency(-42));
 	zassert_equal(0, pthread_getconcurrency());
 
