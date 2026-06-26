@@ -14,30 +14,43 @@
 #if defined(_POSIX_THREAD_PRIO_INHERIT) || defined(_POSIX_THREAD_PRIO_PROTECT)
 int pthread_mutexattr_getprotocol(const pthread_mutexattr_t *attr, int *protocol)
 {
-	if ((attr == NULL) || (protocol == NULL)) {
+	const struct pthread_mutexattr *const a = (const struct pthread_mutexattr *)attr;
+
+	if ((a == NULL) || (protocol == NULL) || !a->initialized) {
 		return EINVAL;
 	}
 
-	*protocol = PTHREAD_PRIO_NONE;
+	*protocol = a->protocol;
 	return 0;
 }
 
 int pthread_mutexattr_setprotocol(pthread_mutexattr_t *attr, int protocol)
 {
-	if (attr == NULL) {
+	struct pthread_mutexattr *const a = (struct pthread_mutexattr *)attr;
+
+	if ((a == NULL) || !a->initialized) {
 		return EINVAL;
 	}
 
 	switch (protocol) {
 	case PTHREAD_PRIO_NONE:
-		return 0;
+		break;
 	case PTHREAD_PRIO_INHERIT:
-		return ENOTSUP;
+		/* k_mutex implements priority inheritance unconditionally */
+		if (!IS_ENABLED(CONFIG_POSIX_THREAD_PRIO_INHERIT)) {
+			return ENOTSUP;
+		}
+		break;
 	case PTHREAD_PRIO_PROTECT:
+		/* priority ceilings are not implemented */
 		return ENOTSUP;
 	default:
 		return EINVAL;
 	}
+
+	a->protocol = protocol;
+
+	return 0;
 }
 #endif
 
