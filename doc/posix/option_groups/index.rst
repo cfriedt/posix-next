@@ -736,7 +736,7 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_THREADS`.
     :c:func:`pthread_join`,yes
     :c:func:`pthread_key_create`,yes
     :c:func:`pthread_key_delete`,yes
-    :c:func:`pthread_kill`,
+    :c:func:`pthread_kill`,yes
     :c:func:`pthread_mutex_destroy`,yes
     :c:func:`pthread_mutex_init`,yes
     :c:func:`pthread_mutex_lock`,yes
