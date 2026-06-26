@@ -7,15 +7,24 @@
 #include <pthread.h>
 
 #include <zephyr/kernel.h>
+#include <zephyr/sys/util.h>
+
+BUILD_ASSERT(CONFIG_POSIX_THREAD_KEYS_MAX <= CONFIG_THREAD_SPECIFIC_STORAGE_KEYS_MAX,
+	     "CONFIG_THREAD_SPECIFIC_STORAGE_KEYS_MAX must be >= CONFIG_POSIX_THREAD_KEYS_MAX");
 
 int pthread_key_create(pthread_key_t *key, void (*destructor)(void *))
 {
+	void *kkey;
 	int ret;
 
-	ret = k_thread_key_create((void **)key, destructor);
+	ret = k_thread_key_create(&kkey, destructor);
+	if (ret != 0) {
+		/* out of pool slots means PTHREAD_KEYS_MAX is exceeded */
+		return (ret == -ENOMEM) ? EAGAIN : -ret;
+	}
 
-	/* out of pool slots means PTHREAD_KEYS_MAX is exceeded */
-	return (ret == -ENOMEM) ? EAGAIN : -ret;
+	*key = (pthread_key_t)(uintptr_t)kkey;
+	return 0;
 }
 
 int pthread_key_delete(pthread_key_t key)
