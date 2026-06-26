@@ -67,7 +67,7 @@ typedef struct {
 #endif
 
 #if !(defined(_PTHREAD_KEY_T_DECLARED) && defined(__pthread_key_t_defined)) || defined(__DOXYGEN__)
-typedef uint32_t pthread_key_t;
+typedef uintptr_t pthread_key_t;
 #define _PTHREAD_KEY_T_DECLARED
 #define __pthread_key_t_defined
 #endif

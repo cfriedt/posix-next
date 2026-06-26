@@ -4,53 +4,52 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include <errno.h>
 #include <pthread.h>
 
 #include <zephyr/sys/util.h>
 #include <zephyr/ztest.h>
 
-#define N_THR 2
-#define N_KEY  2
-#define BUFFSZ 48
+#include "_main.h"
 
-static pthread_key_t key;
-static pthread_key_t keys[N_KEY];
-static pthread_once_t key_once = PTHREAD_ONCE_INIT;
-static pthread_once_t keys_once = PTHREAD_ONCE_INIT;
+#define N_THR 2
+#define N_KEY 2
+
+static ZTEST_BMEM pthread_key_t keys[N_KEY];
+static ZTEST_BMEM int alloc_count_t0;
+static ZTEST_BMEM int alloc_count_t1;
 
 static void *thread_top(void *p1)
 {
-	void *value;
-	char *buffer[BUFFSZ];
+	void *value = (void *)0x42;
 
-	value = k_malloc(sizeof(buffer));
-	zassert_not_null(value, "thread could not allocate storage");
-	zassert_ok(pthread_setspecific(key, value), "pthread_setspecific failed");
-	zassert_equal(pthread_getspecific(key), value, "set and retrieved values are different");
-	k_free(value);
+	ARG_UNUSED(p1);
+
+	zassert_ok(pthread_setspecific(keys[0], value), "pthread_setspecific failed");
+	zassert_equal(pthread_getspecific(keys[0]), value,
+		      "set and retrieved values are different");
 
 	return NULL;
 }
 
 static void *thread_func(void *p1)
 {
-	void *value;
-	char *buffer[BUFFSZ];
+	void *value = (void *)0x73;
 
-	value = k_malloc(sizeof(buffer));
-	zassert_not_null(value, "thread could not allocate storage");
+	ARG_UNUSED(p1);
+
 	for (int i = 0; i < N_KEY; i++) {
 		zassert_ok(pthread_setspecific(keys[i], value), "pthread_setspecific failed");
 		zassert_equal(pthread_getspecific(keys[i]), value,
 			      "set and retrieved values are different");
 	}
-	k_free(value);
+
 	return NULL;
 }
 
 static void make_key(void)
 {
-	zassert_ok(pthread_key_create(&key, NULL), "insufficient memory to create key");
+	zassert_ok(pthread_key_create(&keys[0], NULL), "insufficient memory to create key");
 }
 
 static void make_keys(void)
@@ -61,27 +60,12 @@ static void make_keys(void)
 	}
 }
 
-/**
- * @brief Test to demonstrate pthread_key APIs usage
- *
- * @details The tests spawn a thread which uses pthread_once() to
- * create a key via pthread_key_create() API. It then sets the
- * thread-specific value to the key using pthread_setspecific() and
- * gets it back using pthread_getspecific and asserts that they
- * are equal. It then deletes the key using pthread_key_delete().
- * Both the sub-tests do the above, but one with multiple threads
- * using the same key and the other with a single thread using
- * multiple keys.
- */
-
-ZTEST(key, test_key_1toN_thread)
+static void test_key_1toN_thread(void)
 {
 	void *retval;
 	pthread_t newthread[N_THR];
 
-	zassert_ok(pthread_once(&key_once, make_key), "attempt to create key failed");
-
-	/* Different threads set different values to same key */
+	make_key();
 
 	for (int i = 0; i < N_THR; i++) {
 		zassert_ok(pthread_create(&newthread[i], NULL, thread_top, NULL),
@@ -92,16 +76,14 @@ ZTEST(key, test_key_1toN_thread)
 		zassert_ok(pthread_join(newthread[i], &retval), "failed to join thread %d", i);
 	}
 
-	zassert_ok(pthread_key_delete(key), "attempt to delete key failed");
+	zassert_ok(pthread_key_delete(keys[0]), "attempt to delete key failed");
 }
 
-ZTEST(key, test_key_Nto1_thread)
+static void test_key_Nto1_thread(void)
 {
 	pthread_t newthread;
 
-	zassert_ok(pthread_once(&keys_once, make_keys), "attempt to create keys failed");
-
-	/* Single thread associates its value with different keys */
+	make_keys();
 
 	zassert_ok(pthread_create(&newthread, NULL, thread_func, NULL),
 		   "attempt to create thread failed");
@@ -113,36 +95,42 @@ ZTEST(key, test_key_Nto1_thread)
 	}
 }
 
-ZTEST(key, test_key_resource_leak)
-{
-	pthread_key_t key;
+ZTEST_THREADS_BASE(test_key_1toN_thread);
+ZTEST_THREADS_BASE(test_key_Nto1_thread);
 
-	for (size_t i = 0; i < 2 * CONFIG_POSIX_THREAD_KEYS_MAX; ++i) {
-		zassert_ok(pthread_key_create(&key, NULL), "failed to create key %zu", i);
-		zassert_ok(pthread_key_delete(key), "failed to delete key %zu", i);
+ZTEST(posix_threads_base, test_key_resource_leak)
+{
+	pthread_key_t leak_key;
+
+	for (size_t i = 0; i < CONFIG_POSIX_THREAD_KEYS_MAX; ++i) {
+		zassert_ok(pthread_key_create(&leak_key, NULL), "failed to create key %zu", i);
+		zassert_ok(pthread_key_delete(leak_key), "failed to delete key %zu", i);
 	}
 }
 
-ZTEST(key, test_correct_key_is_deleted)
+static void test_correct_key_is_deleted(void)
 {
-	pthread_key_t key;
+	pthread_key_t deleted_key;
 	size_t j = CONFIG_POSIX_THREAD_KEYS_MAX - 1;
-	pthread_key_t keys[CONFIG_POSIX_THREAD_KEYS_MAX];
+	pthread_key_t all_keys[CONFIG_POSIX_THREAD_KEYS_MAX];
 
-	for (size_t i = 0; i < ARRAY_SIZE(keys); ++i) {
-		zassert_ok(pthread_key_create(&keys[i], NULL), "failed to create key %zu", i);
+	for (size_t i = 0; i < ARRAY_SIZE(all_keys); ++i) {
+		zassert_ok(pthread_key_create(&all_keys[i], NULL), "failed to create key %zu", i);
 	}
 
-	key = keys[j];
-	zassert_ok(pthread_key_delete(keys[j]));
-	zassert_ok(pthread_key_create(&keys[j], NULL), "failed to create key %zu", j);
+	deleted_key = all_keys[j];
+	zassert_ok(pthread_key_delete(all_keys[j]));
+	zassert_ok(pthread_key_create(&all_keys[j], NULL), "failed to create key %zu", j);
 
-	zassert_equal(key, keys[j], "deleted key %x instead of key %x", keys[j], key);
+	zassert_equal(deleted_key, all_keys[j], "deleted key %lx instead of key %lx", (long)all_keys[j],
+		      (long)deleted_key);
 
-	for (size_t i = 0; i < ARRAY_SIZE(keys); ++i) {
-		zassert_ok(pthread_key_delete(keys[i]), "failed to delete key %zu", i);
+	for (size_t i = 0; i < ARRAY_SIZE(all_keys); ++i) {
+		zassert_ok(pthread_key_delete(all_keys[i]), "failed to delete key %zu", i);
 	}
 }
+
+ZTEST_THREADS_BASE(test_correct_key_is_deleted);
 
 static void *setspecific_thread(void *count)
 {
@@ -150,51 +138,43 @@ static void *setspecific_thread(void *count)
 	int *alloc_count = count;
 
 	while (1) {
-		pthread_key_t key;
+		pthread_key_t tkey;
+
 		if (*alloc_count == CONFIG_POSIX_THREAD_KEYS_MAX / N_THR) {
 			break;
 		}
 
-		if (pthread_key_create(&key, NULL) < 0) {
+		if (pthread_key_create(&tkey, NULL) < 0) {
 			break;
 		}
-		if (pthread_setspecific(key, &value) == ENOMEM) {
+		if (pthread_setspecific(tkey, &value) == ENOMEM) {
 			break;
-		};
+		}
 		*alloc_count += 1;
 	}
 
 	return NULL;
 }
 
-ZTEST(key, test_thread_specific_data_deallocation)
+static void test_thread_specific_data_deallocation(void)
 {
 	pthread_t thread;
-	static int alloc_count_t0;
-	static int alloc_count_t1;
+
+	alloc_count_t0 = 0;
+	alloc_count_t1 = 0;
 
 	zassert_ok(pthread_create(&thread, NULL, setspecific_thread, &alloc_count_t0),
-		"attempt to create thread failed");
+		   "attempt to create thread failed");
 	zassert_ok(pthread_join(thread, NULL), "failed to join thread");
 	printk("first thread allocated %d keys\n", alloc_count_t0);
 
 	zassert_ok(pthread_create(&thread, NULL, setspecific_thread, &alloc_count_t1),
-		"attempt to create thread failed");
+		   "attempt to create thread failed");
 	zassert_ok(pthread_join(thread, NULL), "failed to join thread");
 	printk("second thread allocated %d keys\n", alloc_count_t1);
 
 	zassert_equal(alloc_count_t0, alloc_count_t1,
-		"failed to deallocate thread specific data");
+		      "failed to deallocate thread specific data");
 }
 
-static void before(void *arg)
-{
-	ARG_UNUSED(arg);
-
-	if (!IS_ENABLED(CONFIG_DYNAMIC_THREAD)) {
-		/* skip redundant testing if there is no thread pool / heap allocation */
-		ztest_test_skip();
-	}
-}
-
-ZTEST_SUITE(key, NULL, NULL, before, NULL, NULL);
+ZTEST_THREADS_BASE(test_thread_specific_data_deallocation);
