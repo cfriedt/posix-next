@@ -4,36 +4,39 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include "../../common/linux_compat_test.h"
+#include "_main.h"
+
 #include <errno.h>
 #include <pthread.h>
 
 #include <zephyr/ztest.h>
 
-ZTEST(mutex_attr, test_pthread_mutexattr_init)
+static void test_pthread_mutexattr_init(void)
 {
 	pthread_mutexattr_t attr;
 
 	/* degenerate cases */
-	{
-		zassert_equal(EINVAL, pthread_mutexattr_init(NULL));
-	}
+	IF_NOT_NATIVE_LIBC({ zassert_equal(EINVAL, pthread_mutexattr_init(NULL)); })
 
 	zassert_ok(pthread_mutexattr_init(&attr));
 	zassert_ok(pthread_mutexattr_destroy(&attr));
 }
 
-ZTEST(mutex_attr, test_pthread_mutexattr_destroy)
+ZTEST_THREADS_BASE(test_pthread_mutexattr_init);
+
+static void test_pthread_mutexattr_destroy(void)
 {
 	pthread_mutexattr_t attr;
 
 	/* degenerate cases */
-	{
+	IF_NOT_NATIVE_LIBC({
 		if (false) {
 			/* undefined behaviour */
 			zassert_equal(EINVAL, pthread_mutexattr_destroy(&attr));
 		}
 		zassert_equal(EINVAL, pthread_mutexattr_destroy(NULL));
-	}
+	})
 
 	zassert_ok(pthread_mutexattr_init(&attr));
 	zassert_ok(pthread_mutexattr_destroy(&attr));
@@ -43,4 +46,4 @@ ZTEST(mutex_attr, test_pthread_mutexattr_destroy)
 	}
 }
 
-ZTEST_SUITE(mutex_attr, NULL, NULL, NULL, NULL, NULL);
+ZTEST_THREADS_BASE(test_pthread_mutexattr_destroy);
