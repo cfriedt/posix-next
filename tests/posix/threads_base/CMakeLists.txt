@@ -7,13 +7,16 @@ project(posix_threads_base)
 file(GLOB app_sources src/*.c)
 zephyr_include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../../../lib/posix)
 
-target_sources(app PRIVATE ${app_sources})
+target_sources(app PRIVATE
+  ${app_sources}
+  ../common/msleep.c
+  ../common/test_sigmask_common.c
+)
 
 target_include_directories(app PRIVATE
   ${ZEPHYR_POSIX_NEXT_MODULE_DIR}/lib/posix/options/timers
   ${ZEPHYR_POSIX_NEXT_MODULE_DIR}/lib/posix/options/shared
 )
 
-# FIXME: We should not rely on usleep() (which was dropped in Issue 7, 200809L)
-target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200112L)
-target_compile_options(app PRIVATE -U_XOPEN_SOURCE -D_XOPEN_SOURCE=600)
+target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+target_compile_options(app PRIVATE -U_XOPEN_SOURCE -D_XOPEN_SOURCE=700)
