@@ -79,4 +79,20 @@ ZTEST(cond, test_cond_init_existing_initialized_condattr)
 	zassert_ok(pthread_condattr_destroy(&att));
 }
 
+ZTEST(posix_threads_base, test_cond_broadcast_static_init_pthread_cond_t)
+{
+	pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+
+	zassert_ok(pthread_cond_broadcast(&cond));
+	zassert_ok(pthread_cond_destroy(&cond));
+}
+
+ZTEST(posix_threads_base, test_cond_signal_static_init_pthread_cond_t)
+{
+	pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+
+	zassert_ok(pthread_cond_signal(&cond));
+	zassert_ok(pthread_cond_destroy(&cond));
+}
+
 ZTEST_SUITE(cond, NULL, NULL, NULL, NULL, NULL);
