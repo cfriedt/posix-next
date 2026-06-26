@@ -285,7 +285,11 @@ int pthread_atfork(void (*prepare)(void), void (*parent)(void), void (*child)(vo
 	ARG_UNUSED(parent);
 	ARG_UNUSED(child);
 
-	return ENOSYS;
+	/*
+	 * Zephyr has no fork(), so registered handlers could never run;
+	 * accepting and discarding them is conformant.
+	 */
+	return 0;
 }
 
 int pthread_sigmask(int how, const sigset_t *ZRESTRICT set, sigset_t *ZRESTRICT oset)
@@ -328,7 +332,21 @@ int pthread_sigmask(int how, const sigset_t *ZRESTRICT set, sigset_t *ZRESTRICT 
 
 int pthread_kill(pthread_t thread, int sig)
 {
-	return -k_sig_queue(to_k_thread(&thread), sig, (union k_sig_val){0});
+	int ksigno;
+	int ret;
+
+	if (sig == 0) {
+		ksigno = 0;
+	} else {
+		ksigno = z_sig_from_posix(sig);
+		if (ksigno <= 0) {
+			return EINVAL;
+		}
+	}
+
+	ret = k_sig_queue(to_k_thread(&thread), ksigno, (union k_sig_val){0});
+
+	return -ret;
 }
 
 int sched_yield(void)
