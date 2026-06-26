@@ -68,6 +68,7 @@ BUILD_ASSERT(sizeof(pthread_attr_t) >= sizeof(struct posix_thread_attr),
 
 struct pthread_mutexattr {
 	unsigned char type: 2;
+	unsigned char protocol: 2;
 	bool initialized: 1;
 };
 

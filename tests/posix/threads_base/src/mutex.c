@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include "../../common/linux_compat_test.h"
+
 #include <errno.h>
 #include <pthread.h>
 #include <time.h>
@@ -12,9 +14,11 @@
 #include <zephyr/sys/timeutil.h>
 #include <zephyr/ztest.h>
 
+#include "_main.h"
+
 #define SLEEP_MS 100
 
-static pthread_mutex_t mutex;
+static ZTEST_BMEM pthread_mutex_t mutex;
 
 static void *normal_mutex_entry(void *p1)
 {
@@ -43,27 +47,27 @@ static void *normal_mutex_entry(void *p1)
  *	    and pthread_mutex_lock are exercised without
  *	    pthread_mutexattr_settype().
  */
-ZTEST(mutex, test_mutex_normal)
+static void test_mutex_normal(void)
 {
-	__maybe_unused pthread_t th;
+	pthread_t th;
+
+	posix_test_skip_if_native_libc();
 
 	zassert_ok(pthread_mutex_init(&mutex, NULL));
 
 	zassert_ok(pthread_mutex_lock(&mutex));
 
-	if (CONFIG_SYS_THREAD_STACK_MAX > 0) {
-		zassert_ok(pthread_create(&th, NULL, normal_mutex_entry, NULL));
-	}
+	zassert_ok(pthread_create(&th, NULL, normal_mutex_entry, NULL));
 
 	k_msleep(SLEEP_MS);
 	zassert_ok(pthread_mutex_unlock(&mutex));
 
-	if (CONFIG_SYS_THREAD_STACK_MAX > 0) {
-		zassert_ok(pthread_join(th, NULL));
-	}
+	zassert_ok(pthread_join(th, NULL));
 
 	zassert_ok(pthread_mutex_destroy(&mutex));
 }
+
+ZTEST_THREADS_BASE(test_mutex_normal);
 
 /**
  * @brief Test to demonstrate limited mutex resources
@@ -71,8 +75,9 @@ ZTEST(mutex, test_mutex_normal)
  * @details Exactly SYS_THREAD_MUTEX_MIN can be in use at once (when heap allocation is
  * unavailable).
  */
-ZTEST(mutex, test_mutex_resource_exhausted)
+ZTEST(posix_threads_base, test_mutex_resource_exhausted)
 {
+	posix_test_skip_if_native_libc();
 	size_t i;
 	pthread_mutex_t m[SYS_THREAD_MUTEX_MIN + 1];
 
@@ -101,8 +106,9 @@ ZTEST(mutex, test_mutex_resource_exhausted)
  *
  * @details Demonstrate that mutexes may be used over and over again.
  */
-ZTEST(mutex, test_mutex_resource_leak)
+ZTEST(posix_threads_base, test_mutex_resource_leak)
 {
+	posix_test_skip_if_native_libc();
 	pthread_mutex_t m;
 
 	for (size_t i = 0; i < 2 * SYS_THREAD_MUTEX_MIN; ++i) {
@@ -145,18 +151,12 @@ static void *test_mutex_timedlock_fn(void *arg)
 	return NULL;
 }
 
-/** @brief Test to verify @ref pthread_mutex_timedlock returns ETIMEDOUT */
-ZTEST(mutex, test_mutex_timedlock)
+static void test_mutex_timedlock(void)
 {
 	void *ret;
 	pthread_t th;
 
-	if (CONFIG_SYS_THREAD_STACK_MAX == 0) {
-		/* Most of this testsuite uses automatic stack allocation, but
-		 * threads_base.static_stack uses statically allocated stacks.
-		 */
-		ztest_test_skip();
-	}
+	posix_test_skip_if_native_libc();
 
 	zassert_ok(pthread_mutex_init(&mutex, NULL));
 
@@ -180,11 +180,83 @@ ZTEST(mutex, test_mutex_timedlock)
 	zassert_ok(pthread_mutex_destroy(&mutex));
 }
 
-static void before(void *data)
-{
-	ARG_UNUSED(data);
+ZTEST_THREADS_BASE(test_mutex_timedlock);
 
-	mutex = PTHREAD_MUTEX_INITIALIZER;
+static void test_pthread_mutex_init(void)
+{
+	pthread_mutex_t m;
+	pthread_mutexattr_t attr;
+
+	/* explicitly-initialized default attributes */
+	zassert_ok(pthread_mutexattr_init(&attr));
+	zassert_ok(pthread_mutex_init(&m, &attr));
+	zassert_ok(pthread_mutex_lock(&m));
+	zassert_ok(pthread_mutex_unlock(&m));
+	zassert_ok(pthread_mutex_destroy(&m));
+	zassert_ok(pthread_mutexattr_destroy(&attr));
+
+	IF_NOT_NATIVE_LIBC({
+		/* an uninitialized mutexattr is rejected */
+		pthread_mutexattr_t zeroed = {0};
+
+		zassert_equal(pthread_mutex_init(&m, &zeroed), EINVAL);
+	})
 }
 
-ZTEST_SUITE(mutex, NULL, NULL, before, NULL, NULL);
+ZTEST_THREADS_BASE(test_pthread_mutex_init);
+
+static void test_pthread_mutex_lock(void)
+{
+	pthread_mutex_t m = PTHREAD_MUTEX_INITIALIZER;
+
+	/* the first lock of a statically-initialized mutex allocates it */
+	zassert_ok(pthread_mutex_lock(&m));
+	zassert_ok(pthread_mutex_unlock(&m));
+	zassert_ok(pthread_mutex_destroy(&m));
+}
+
+ZTEST_THREADS_BASE(test_pthread_mutex_lock);
+
+static ZTEST_BMEM pthread_mutex_t trylock_mutex;
+static ZTEST_BMEM int trylock_status;
+
+static void *trylock_fn(void *arg)
+{
+	ARG_UNUSED(arg);
+
+	trylock_status = pthread_mutex_trylock(&trylock_mutex);
+
+	return NULL;
+}
+
+static void test_pthread_mutex_trylock(void)
+{
+	pthread_t th;
+
+	zassert_ok(pthread_mutex_init(&trylock_mutex, NULL));
+
+	/* trylock on a held mutex fails with EBUSY, without blocking */
+	trylock_status = -1;
+	zassert_ok(pthread_mutex_lock(&trylock_mutex));
+	zassert_ok(pthread_create(&th, NULL, trylock_fn, NULL));
+	zassert_ok(pthread_join(th, NULL));
+	zassert_equal(trylock_status, EBUSY, "expected EBUSY, got %d", trylock_status);
+	zassert_ok(pthread_mutex_unlock(&trylock_mutex));
+
+	/* trylock on an uncontended mutex succeeds */
+	zassert_ok(pthread_mutex_trylock(&trylock_mutex));
+	zassert_ok(pthread_mutex_unlock(&trylock_mutex));
+
+	zassert_ok(pthread_mutex_destroy(&trylock_mutex));
+}
+
+ZTEST_THREADS_BASE(test_pthread_mutex_trylock);
+
+void mutex_before(void *fixture)
+{
+	ARG_UNUSED(fixture);
+
+	IF_NOT_NATIVE_LIBC({
+		mutex = PTHREAD_MUTEX_INITIALIZER;
+	})
+}
