@@ -11,18 +11,22 @@
 #include <zephyr/sys/util.h>
 #include <zephyr/ztest.h>
 
+#include "../../common/linux_compat_test.h"
+
 #define BIOS_FOOD     0xB105F00D
 #define SCHED_INVALID 4242
 #define PRIO_INVALID  -1
 
 static bool attr_valid;
 static pthread_attr_t attr;
+#ifndef CONFIG_NATIVE_LIBC
 static const pthread_attr_t uninit_attr;
+#endif
 static bool detached_thread_has_finished;
 
 /*
- * This should be discarded by the linker, in this specific testsuite, if
- * CONFIG_DYNAMIC_THREAD_ALLOC is not set
+ * Used by the static_stack twister variant (CONFIG_SYS_THREAD_STACK_MAX=0) where
+ * pthread_create() requires an explicit stack from pthread_attr_setstack().
  */
 #define STATIC_THREAD_STACK_SIZE (MAX(1024, PTHREAD_STACK_MIN + CONFIG_TEST_EXTRA_STACK_SIZE))
 static K_THREAD_STACK_DEFINE(static_thread_stack, STATIC_THREAD_STACK_SIZE);
@@ -89,7 +93,7 @@ ZTEST(xsi_threads_ext, test_pthread_attr_getstack)
 	size_t stacksize = BIOS_FOOD;
 
 	/* degenerate cases */
-	{
+	IF_NOT_NATIVE_LIBC({
 		if (false) {
 			/* undefined behaviour */
 			zassert_equal(pthread_attr_getstack(NULL, NULL, NULL), EINVAL);
@@ -102,7 +106,7 @@ ZTEST(xsi_threads_ext, test_pthread_attr_getstack)
 		zassert_equal(pthread_attr_getstack(&attr, NULL, NULL), EINVAL);
 		zassert_equal(pthread_attr_getstack(&attr, NULL, &stacksize), EINVAL);
 		zassert_equal(pthread_attr_getstack(&attr, &stackaddr, NULL), EINVAL);
-	}
+	})
 
 	zassert_ok(pthread_attr_getstack(&attr, &stackaddr, &stacksize));
 	zassert_not_equal(stackaddr, (void *)BIOS_FOOD);
@@ -120,7 +124,7 @@ ZTEST(xsi_threads_ext, test_pthread_attr_setstack)
 	zassert_ok(pthread_attr_getstack(&attr, &stackaddr, &stacksize));
 
 	/* degenerate cases */
-	{
+	IF_NOT_NATIVE_LIBC({
 		if (false) {
 			/* undefined behaviour */
 			zassert_equal(pthread_attr_setstack(NULL, NULL, 0), EINVAL);
@@ -134,7 +138,7 @@ ZTEST(xsi_threads_ext, test_pthread_attr_setstack)
 		zassert_equal(pthread_attr_setstack(&attr, NULL, 0), EINVAL);
 		zassert_equal(pthread_attr_setstack(&attr, NULL, stacksize), EINVAL);
 		zassert_equal(pthread_attr_setstack(&attr, stackaddr, 0), EINVAL);
-	}
+	})
 
 	/* ensure we can create and join a thread with the default attrs */
 	can_create_thread(&attr);
@@ -143,8 +147,8 @@ ZTEST(xsi_threads_ext, test_pthread_attr_setstack)
 	zassert_ok(pthread_attr_setstack(&attr, stackaddr, stacksize));
 	can_create_thread(&attr);
 
-	/* qemu_x86 seems to be unable to set thread stacks to be anything less than 4096 */
-	if (!IS_ENABLED(CONFIG_X86)) {
+	/* qemu_x86 and host libc enforce larger minimum stack sizes */
+	if (!IS_ENABLED(CONFIG_X86) && !IS_ENABLED(CONFIG_NATIVE_LIBC)) {
 		/*
 		 * check we can set a smaller stacksize
 		 * should not require dynamic reallocation
@@ -176,6 +180,7 @@ ZTEST(xsi_threads_ext, test_pthread_attr_setstack)
 
 ZTEST(xsi_threads_ext, test_pthread_set_get_concurrency)
 {
+	posix_test_skip_if_native_libc();
 	/* EINVAL if the value specified by new_level is negative */
 	zassert_equal(EINVAL, pthread_setconcurrency(-42));
 
@@ -202,7 +207,7 @@ ZTEST(xsi_threads_ext, test_pthread_attr_getstacksize)
 	size_t stacksize = BIOS_FOOD;
 
 	/* degenerate cases */
-	{
+	IF_NOT_NATIVE_LIBC({
 		if (false) {
 			/* undefined behaviour */
 			zassert_equal(pthread_attr_getstacksize(NULL, NULL), EINVAL);
@@ -210,7 +215,7 @@ ZTEST(xsi_threads_ext, test_pthread_attr_getstacksize)
 			zassert_equal(pthread_attr_getstacksize(&uninit_attr, &stacksize), EINVAL);
 		}
 		zassert_equal(pthread_attr_getstacksize(&attr, NULL), EINVAL);
-	}
+	})
 
 	zassert_ok(pthread_attr_getstacksize(&attr, &stacksize));
 	zassert_not_equal(stacksize, BIOS_FOOD);
@@ -225,7 +230,7 @@ ZTEST(xsi_threads_ext, test_pthread_attr_setstacksize)
 	zassert_ok(pthread_attr_getstacksize(&attr, &stacksize));
 
 	/* degenerate cases */
-	{
+	IF_NOT_NATIVE_LIBC({
 		if (false) {
 			/* undefined behaviour */
 			zassert_equal(pthread_attr_setstacksize(NULL, 0), EINVAL);
@@ -235,7 +240,7 @@ ZTEST(xsi_threads_ext, test_pthread_attr_setstacksize)
 				      EINVAL);
 		}
 		zassert_equal(pthread_attr_setstacksize(&attr, 0), EINVAL);
-	}
+	})
 
 	/* ensure we can spin up a thread with the default stack size */
 	can_create_thread(&attr);
@@ -247,8 +252,8 @@ ZTEST(xsi_threads_ext, test_pthread_attr_setstacksize)
 	zassert_equal(new_stacksize, stacksize);
 	can_create_thread(&attr);
 
-	/* qemu_x86 seems to be unable to set thread stacks to be anything less than 4096 */
-	if (!IS_ENABLED(CONFIG_X86)) {
+	/* qemu_x86 and host libc enforce larger minimum stack sizes */
+	if (!IS_ENABLED(CONFIG_X86) && !IS_ENABLED(CONFIG_NATIVE_LIBC)) {
 		zassert_ok(pthread_attr_setstacksize(&attr, stacksize - 1));
 		/* ensure we can read back the values we just set */
 		zassert_ok(pthread_attr_getstacksize(&attr, &new_stacksize));
@@ -272,7 +277,7 @@ ZTEST(xsi_threads_ext, test_pthread_attr_getschedpolicy)
 	int policy = BIOS_FOOD;
 
 	/* degenerate cases */
-	{
+	IF_NOT_NATIVE_LIBC({
 		if (false) {
 			/* undefined behaviour */
 			zassert_equal(pthread_attr_getschedpolicy(NULL, NULL), EINVAL);
@@ -280,7 +285,7 @@ ZTEST(xsi_threads_ext, test_pthread_attr_getschedpolicy)
 			zassert_equal(pthread_attr_getschedpolicy(&uninit_attr, &policy), EINVAL);
 		}
 		zassert_equal(pthread_attr_getschedpolicy(&attr, NULL), EINVAL);
-	}
+	})
 
 	zassert_ok(pthread_attr_getschedpolicy(&attr, &policy));
 	zassert_not_equal(BIOS_FOOD, policy);
@@ -291,7 +296,7 @@ ZTEST(xsi_threads_ext, test_pthread_attr_setschedpolicy)
 	int policy = SCHED_OTHER;
 
 	/* degenerate cases */
-	{
+	IF_NOT_NATIVE_LIBC({
 		if (false) {
 			/* undefined behaviour */
 			zassert_equal(pthread_attr_setschedpolicy(NULL, SCHED_INVALID), EINVAL);
@@ -301,7 +306,7 @@ ZTEST(xsi_threads_ext, test_pthread_attr_setschedpolicy)
 				EINVAL);
 		}
 		zassert_equal(pthread_attr_setschedpolicy(&attr, SCHED_INVALID), EINVAL);
-	}
+	})
 
 	zassert_ok(pthread_attr_setschedpolicy(&attr, SCHED_OTHER));
 	policy = SCHED_INVALID;
@@ -316,7 +321,7 @@ ZTEST(xsi_threads_ext, test_pthread_attr_getscope)
 	int contentionscope = BIOS_FOOD;
 
 	/* degenerate cases */
-	{
+	IF_NOT_NATIVE_LIBC({
 		if (false) {
 			/* undefined behaviour */
 			zassert_equal(pthread_attr_getscope(NULL, NULL), EINVAL);
@@ -325,7 +330,7 @@ ZTEST(xsi_threads_ext, test_pthread_attr_getscope)
 				      EINVAL);
 		}
 		zassert_equal(pthread_attr_getscope(&attr, NULL), EINVAL);
-	}
+	})
 
 	zassert_ok(pthread_attr_getscope(&attr, &contentionscope));
 	zassert_equal(contentionscope, PTHREAD_SCOPE_SYSTEM);
@@ -336,7 +341,7 @@ ZTEST(xsi_threads_ext, test_pthread_attr_setscope)
 	int contentionscope = BIOS_FOOD;
 
 	/* degenerate cases */
-	{
+	IF_NOT_NATIVE_LIBC({
 		if (false) {
 			/* undefined behaviour */
 			zassert_equal(pthread_attr_setscope(NULL, PTHREAD_SCOPE_SYSTEM), EINVAL);
@@ -346,7 +351,7 @@ ZTEST(xsi_threads_ext, test_pthread_attr_setscope)
 				      EINVAL);
 		}
 		zassert_equal(pthread_attr_setscope(&attr, 3), EINVAL);
-	}
+	})
 
 	zassert_equal(pthread_attr_setscope(&attr, PTHREAD_SCOPE_PROCESS), ENOTSUP);
 	zassert_ok(pthread_attr_setscope(&attr, PTHREAD_SCOPE_SYSTEM));
@@ -359,7 +364,7 @@ ZTEST(xsi_threads_ext, test_pthread_attr_getinheritsched)
 	int inheritsched = BIOS_FOOD;
 
 	/* degenerate cases */
-	{
+	IF_NOT_NATIVE_LIBC({
 		if (false) {
 			/* undefined behaviour */
 			zassert_equal(pthread_attr_getinheritsched(NULL, NULL), EINVAL);
@@ -368,11 +373,13 @@ ZTEST(xsi_threads_ext, test_pthread_attr_getinheritsched)
 				      EINVAL);
 		}
 		zassert_equal(pthread_attr_getinheritsched(&attr, NULL), EINVAL);
-	}
+	})
 
 	zassert_ok(pthread_attr_getinheritsched(&attr, &inheritsched));
 	zassert_equal(inheritsched, PTHREAD_INHERIT_SCHED);
 }
+
+#ifndef CONFIG_NATIVE_LIBC
 
 static void *inheritsched_entry(void *arg)
 {
@@ -435,7 +442,7 @@ static void test_pthread_attr_setinheritsched_common(bool inheritsched)
 ZTEST(xsi_threads_ext, test_pthread_attr_setinheritsched)
 {
 	/* degenerate cases */
-	{
+	IF_NOT_NATIVE_LIBC({
 		if (false) {
 			/* undefined behaviour */
 			zassert_equal(pthread_attr_setinheritsched(NULL, PTHREAD_EXPLICIT_SCHED),
@@ -447,11 +454,20 @@ ZTEST(xsi_threads_ext, test_pthread_attr_setinheritsched)
 				      EINVAL);
 		}
 		zassert_equal(pthread_attr_setinheritsched(&attr, 3), EINVAL);
-	}
+	})
 
 	test_pthread_attr_setinheritsched_common(PTHREAD_INHERIT_SCHED);
 	test_pthread_attr_setinheritsched_common(PTHREAD_EXPLICIT_SCHED);
 }
+
+#else /* CONFIG_NATIVE_LIBC */
+
+ZTEST(xsi_threads_ext, test_pthread_attr_setinheritsched)
+{
+	ztest_test_skip();
+}
+
+#endif /* CONFIG_NATIVE_LIBC */
 
 ZTEST(xsi_threads_ext, test_pthread_setschedprio)
 {
@@ -470,9 +486,12 @@ ZTEST(xsi_threads_ext, test_pthread_setschedprio)
 
 #endif /* _POSIX_THREAD_PRIORITY_SCHEDULING */
 
+#ifndef CONFIG_NATIVE_LIBC
 int zephyr_to_posix_priority(int z_prio, int *policy);
 int posix_to_zephyr_priority(int priority, int policy);
+#endif
 
+#ifndef CONFIG_NATIVE_LIBC
 ZTEST(xsi_threads_ext, test_pthread_priority_conversion)
 {
 	for (int z_prio = -CONFIG_NUM_COOP_PRIORITIES, prio = CONFIG_NUM_COOP_PRIORITIES - 1,
@@ -492,6 +511,15 @@ ZTEST(xsi_threads_ext, test_pthread_priority_conversion)
 		zassert_equal(z_prio, posix_to_zephyr_priority(p_prio, SCHED_RR));
 	}
 }
+
+#else /* CONFIG_NATIVE_LIBC */
+
+ZTEST(xsi_threads_ext, test_pthread_priority_conversion)
+{
+	ztest_test_skip();
+}
+
+#endif /* CONFIG_NATIVE_LIBC */
 
 static inline void cannot_create_thread(const pthread_attr_t *attrp)
 {
@@ -514,6 +542,7 @@ ZTEST(xsi_threads_ext, test_pthread_attr_static_corner_cases)
 
 ZTEST(xsi_threads_ext, test_pthread_attr_large_stacksize)
 {
+	posix_test_skip_if_native_libc();
 	if (IS_ENABLED(CONFIG_COVERAGE)) {
 		ztest_test_skip();
 	}
@@ -540,7 +569,7 @@ static void before(void *arg)
 	ARG_UNUSED(arg);
 
 	zassert_ok(pthread_attr_init(&attr));
-	if (!IS_ENABLED(CONFIG_DYNAMIC_THREAD_ALLOC)) {
+	if (CONFIG_SYS_THREAD_STACK_MAX == 0 || !IS_ENABLED(CONFIG_DYNAMIC_THREAD_ALLOC)) {
 		zassert_ok(pthread_attr_setstack(&attr, &static_thread_stack,
 						 STATIC_THREAD_STACK_SIZE));
 	}

@@ -8,14 +8,18 @@
 
 #include <zephyr/ztest.h>
 
+#include "../../common/linux_compat_test.h"
+#include "_main.h"
+
 /**
  * @brief Test to demonstrate limited condition variable resources
  *
  * @details Exactly SYS_THREAD_CONDVAR_MIN can be in use at once (when heap allocation is
  * unavailable).
  */
-ZTEST(cond, test_cond_resource_exhausted)
+ZTEST(posix_threads_base, test_cond_resource_exhausted)
 {
+	posix_test_skip_if_native_libc();
 	size_t i;
 	pthread_cond_t m[SYS_THREAD_CONDVAR_MIN + 1];
 
@@ -44,8 +48,9 @@ ZTEST(cond, test_cond_resource_exhausted)
  *
  * @details Demonstrate that condition variables may be used over and over again.
  */
-ZTEST(cond, test_cond_resource_leak)
+ZTEST(posix_threads_base, test_cond_resource_leak)
 {
+	posix_test_skip_if_native_libc();
 	pthread_cond_t cond;
 
 	for (size_t i = 0; i < 2 * SYS_THREAD_CONDVAR_MIN; ++i) {
@@ -54,7 +59,7 @@ ZTEST(cond, test_cond_resource_leak)
 	}
 }
 
-ZTEST(cond, test_pthread_condattr)
+static void test_pthread_condattr(void)
 {
 	pthread_condattr_t att = {0};
 
@@ -63,10 +68,9 @@ ZTEST(cond, test_pthread_condattr)
 	zassert_ok(pthread_condattr_destroy(&att));
 }
 
-/**
- * @brief Test pthread_cond_init() with a pre-existing initialized attribute.
- */
-ZTEST(cond, test_cond_init_existing_initialized_condattr)
+ZTEST_THREADS_BASE(test_pthread_condattr);
+
+static void test_cond_init_existing_initialized_condattr(void)
 {
 	pthread_cond_t cond;
 	pthread_condattr_t att = {0};
@@ -79,7 +83,9 @@ ZTEST(cond, test_cond_init_existing_initialized_condattr)
 	zassert_ok(pthread_condattr_destroy(&att));
 }
 
-ZTEST(posix_threads_base, test_cond_broadcast_static_init_pthread_cond_t)
+ZTEST_THREADS_BASE(test_cond_init_existing_initialized_condattr);
+
+static void test_cond_broadcast_static_init_pthread_cond_t(void)
 {
 	pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
 
@@ -87,7 +93,9 @@ ZTEST(posix_threads_base, test_cond_broadcast_static_init_pthread_cond_t)
 	zassert_ok(pthread_cond_destroy(&cond));
 }
 
-ZTEST(posix_threads_base, test_cond_signal_static_init_pthread_cond_t)
+ZTEST_THREADS_BASE(test_cond_broadcast_static_init_pthread_cond_t);
+
+static void test_cond_signal_static_init_pthread_cond_t(void)
 {
 	pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
 
@@ -95,4 +103,4 @@ ZTEST(posix_threads_base, test_cond_signal_static_init_pthread_cond_t)
 	zassert_ok(pthread_cond_destroy(&cond));
 }
 
-ZTEST_SUITE(cond, NULL, NULL, NULL, NULL, NULL);
+ZTEST_THREADS_BASE(test_cond_signal_static_init_pthread_cond_t);

@@ -706,6 +706,18 @@ multiple processes.
 
 Enable this option group with :kconfig:option:`CONFIG_POSIX_THREADS`.
 
+.. note::
+   The ``POSIX_THREADS_BASE`` Option Group is **complete**: every required API is implemented
+   and covered by the :ref:`threads_base test suite <posix_threads_base_tests>`.
+   ``pthread_atfork()`` is provided as a stub that returns ``ENOSYS`` because Zephyr does not
+   support ``fork()`` in the single-process execution model.
+
+.. _posix_threads_base_tests:
+
+The test suite ``portability.posix.threads_base`` exercises thread lifecycle, attributes,
+mutexes, condition variables, thread-specific storage, ``pthread_sigmask()``, and
+``pthread_kill()``.
+
 .. csv-table:: POSIX_THREADS_BASE
    :header: API, Supported
    :widths: 50,10
@@ -736,7 +748,7 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_THREADS`.
     :c:func:`pthread_join`,yes
     :c:func:`pthread_key_create`,yes
     :c:func:`pthread_key_delete`,yes
-    :c:func:`pthread_kill`,
+    :c:func:`pthread_kill`,yes
     :c:func:`pthread_mutex_destroy`,yes
     :c:func:`pthread_mutex_init`,yes
     :c:func:`pthread_mutex_lock`,yes

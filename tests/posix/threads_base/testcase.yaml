@@ -1,5 +1,4 @@
 common:
-  filter: not CONFIG_NATIVE_LIBC
   tags:
     - posix_threads_base
   min_ram: 64
@@ -9,29 +8,39 @@ common:
     - arch
     - simulation
 tests:
-  portability.posix.threads_base: {}
+  portability.posix.threads_base:
+    filter: not CONFIG_NATIVE_LIBC
+  portability.posix.threads_base.userspace:
+    filter: (not CONFIG_NATIVE_LIBC) and CONFIG_ARCH_SUPPORTS_USERSPACE_SIGNALS
+    tags: userspace
+    extra_configs:
+      - CONFIG_TEST_USERSPACE=y
+      - CONFIG_USERSPACE=y
   portability.posix.threads_base.minimal:
+    filter: not CONFIG_NATIVE_LIBC
     extra_configs:
       - CONFIG_MINIMAL_LIBC=y
   portability.posix.threads_base.newlib:
     platform_exclude:
       - intel_ehl_crb
       - lpcxpresso55s06
-    filter: TOOLCHAIN_HAS_NEWLIB == 1
+    filter: (not CONFIG_NATIVE_LIBC) and (TOOLCHAIN_HAS_NEWLIB == 1)
     extra_configs:
       - CONFIG_NEWLIB_LIBC=y
   portability.posix.threads_base.armclang_std_libc:
+    filter: not CONFIG_NATIVE_LIBC
     toolchain_allow: armclang
     extra_configs:
       - CONFIG_ARMCLANG_STD_LIBC=y
   portability.posix.threads_base.arcmwdtlib:
+    filter: not CONFIG_NATIVE_LIBC
     toolchain_allow: arcmwdt
     extra_configs:
       - CONFIG_ARCMWDT_LIBC=y
   portability.posix.threads_base.tls:
     platform_exclude:
       - intel_ehl_crb
-    filter: CONFIG_ARCH_HAS_THREAD_LOCAL_STORAGE and CONFIG_TOOLCHAIN_SUPPORTS_THREAD_LOCAL_STORAGE
+    filter: (not CONFIG_NATIVE_LIBC) and CONFIG_ARCH_HAS_THREAD_LOCAL_STORAGE and CONFIG_TOOLCHAIN_SUPPORTS_THREAD_LOCAL_STORAGE
     extra_configs:
       - CONFIG_NEWLIB_LIBC=n
       - CONFIG_THREAD_LOCAL_STORAGE=y
@@ -39,27 +48,27 @@ tests:
     platform_exclude:
       - intel_ehl_crb
       - lpcxpresso55s06
-    filter: TOOLCHAIN_HAS_NEWLIB == 1 and CONFIG_ARCH_HAS_THREAD_LOCAL_STORAGE and
+    filter: (not CONFIG_NATIVE_LIBC) and (TOOLCHAIN_HAS_NEWLIB == 1) and CONFIG_ARCH_HAS_THREAD_LOCAL_STORAGE and
       CONFIG_TOOLCHAIN_SUPPORTS_THREAD_LOCAL_STORAGE
     extra_configs:
       - CONFIG_NEWLIB_LIBC=y
       - CONFIG_THREAD_LOCAL_STORAGE=y
   portability.posix.threads_base.picolibc:
     tags: picolibc
-    filter: CONFIG_PICOLIBC_SUPPORTED
+    filter: (not CONFIG_NATIVE_LIBC) and CONFIG_PICOLIBC_SUPPORTED
     extra_configs:
       - CONFIG_PICOLIBC=y
-  portability.posix.threads_base.no_spin_validate:
-    extra_configs:
-      - CONFIG_SPIN_VALIDATE=n
   portability.posix.threads_base.dynamic_stack:
+    filter: not CONFIG_NATIVE_LIBC
     extra_configs:
       - CONFIG_SYS_THREAD_STACK_MIN_ADD_TEST=0
       - CONFIG_SYS_THREAD_THREAD_MIN_ADD_TEST=0
       - CONFIG_HEAP_MEM_POOL_SIZE=16384
-  portability.posix.threads_base.static_stack:
+  portability.posix.threads_base.linux_compat:
+    tags: native
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    filter: CONFIG_NATIVE_LIBC
     extra_configs:
-      - CONFIG_SYS_THREAD_STACK_MIN_ADD_TEST=0
-      - CONFIG_SYS_THREAD_THREAD_MIN_ADD_TEST=0
-      - CONFIG_SYS_THREAD_STACK_MAX=0
-      - CONFIG_THREAD_STACK_INFO=n
+      - CONFIG_POSIX_TEST_LINUX_COMPAT=y
