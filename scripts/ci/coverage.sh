@@ -8,70 +8,91 @@ set -e
 REALPATH="realpath"
 SCRIPT_PATH="$(realpath "$(dirname "$0")")"
 
-export CI_CONFIG_PROFILE=coverage_nightly
-
-"$SCRIPT_PATH"/runci.sh "$@"
+# Default local run (same platforms as coverage_nightly, POSIX-only roots):
+#   ./scripts/ci/coverage.sh
+#
+# Full nightly scope:
+#   CI_CONFIG_PROFILE=coverage_nightly ./scripts/ci/coverage.sh
+#
+# Skip Twister (merge/view only, requires existing twister-out):
+#   COVERAGE_SKIP_TWISTER=1 ./scripts/ci/coverage.sh
+#
+# Skip re-running gcovr on every build dir when Twister traces look good:
+#   COVERAGE_SKIP_REFRESH=1 ./scripts/ci/coverage.sh
+#
 # Prerequisites (once):
 #   source ~/posix-next/zephyr/zephyr-env.sh
 #   pip install gcovr jq
 #   pip install -r modules/lib/posix/scripts/ci/requirements-coverage.txt
 
+export CI_CONFIG_PROFILE="${CI_CONFIG_PROFILE:-coverage_local}"
+
+twister_rc=0
+if [ "${COVERAGE_SKIP_TWISTER:-${COVERAGE_POSTPROCESS_ONLY:-0}}" = "1" ]; then
+  echo "Skipping Twister (COVERAGE_SKIP_TWISTER=1)"
+else
+  "$SCRIPT_PATH"/runci.sh "$@" || twister_rc=$?
+fi
+
 WORKSPACE="$(west topdir)"
 CI_CONFIG="$WORKSPACE/modules/lib/posix/.github/ci-config.json"
+SCRIPTS="$WORKSPACE/modules/lib/posix/scripts/ci"
 
 cd "$WORKSPACE"
 
-"$WORKSPACE/modules/lib/posix/scripts/ci/refresh-coverage-traces.sh" \
-  twister-out "$WORKSPACE"
+echo "Refreshing coverage trace(s)"
 
-mapfile -t TRACES < <(
-  find twister-out -name coverage.json -type f \
-    ! -path twister-out/coverage-full.json \
-    ! -path twister-out/coverage-posix.json
-)
+if [ "${COVERAGE_SKIP_REFRESH:-0}" != "1" ]; then
+  "$SCRIPTS/refresh-coverage-traces.sh" twister-out "$WORKSPACE"
+else
+  echo "Skipping refresh-coverage-traces (COVERAGE_SKIP_REFRESH=1)"
+fi
 
-# shellcheck source=gcovr-config-args.sh
-source "$WORKSPACE/modules/lib/posix/scripts/ci/gcovr-config-args.sh"
+echo "Slimming coverage trace(s)"
 
-gcovr_args=()
-while IFS= read -r a; do gcovr_args+=("$a"); done \
-  < <(jq -r '.coverage_report.gcovr_args[]? // empty' "$CI_CONFIG")
+"$SCRIPTS/slim-coverage-traces.sh" twister-out "$CI_CONFIG"
 
-workspace_filter_args=()
-gcovr_load_filter_args workspace_filter_args workspace "$CI_CONFIG"
+echo "Diagnosing coverage trace(s)"
 
-posix_filter_args=()
-gcovr_load_filter_args posix_filter_args posix "$CI_CONFIG"
+diagnose="$SCRIPTS/diagnose-coverage-trace.sh"
+non_empty_traces="${TMPDIR:-/tmp}/non-empty-coverage-traces.txt"
+"$diagnose" --non-empty-out "$non_empty_traces" --prefer-workspace twister-out
 
-trace_args=()
-for trace in "${TRACES[@]}"; do
-  trace_args+=(--add-tracefile "$trace")
-done
+if [ ! -s "$non_empty_traces" ]; then
+  echo "No non-empty coverage traces; skipping gcovr merge" >&2
+  exit 0
+fi
+
+mapfile -t TRACES < "$non_empty_traces"
+merge="$SCRIPTS/merge-coverage-json.sh"
+filter="$SCRIPTS/filter-coverage-json.sh"
 
 mkdir -p twister-out
 
-echo "Generating coverage-full.json"
+echo "Generating coverage-full.json from ${#TRACES[@]} trace(s)"
 
-# (b) coverage-full.json — zephyr + modules/lib/posix (CI workspace filters)
-gcovr -r "$WORKSPACE" \
-  "${gcovr_args[@]}" \
-  "${trace_args[@]}" \
-  "${workspace_filter_args[@]}" \
-  --json "$WORKSPACE/twister-out/coverage-full.json"
+"$merge" --workspace "$WORKSPACE" \
+  --output "$WORKSPACE/twister-out/coverage-full.json" \
+  --ci-config "$CI_CONFIG" \
+  --filter-scope workspace \
+  -- "${TRACES[@]}"
 
 echo "Generating coverage-posix.json"
 
-# (c) coverage-posix.json — POSIX headers + lib/posix only (re-filter full merge)
-gcovr -r "$WORKSPACE" \
-  "${gcovr_args[@]}" \
-  --add-tracefile "$WORKSPACE/twister-out/coverage-full.json" \
-  "${posix_filter_args[@]}" \
-  --json "$WORKSPACE/twister-out/coverage-posix.json"
+"$filter" --scope posix --ci-config "$CI_CONFIG" \
+  "$WORKSPACE/twister-out/coverage-full.json" \
+  "$WORKSPACE/twister-out/coverage-posix.json"
 
-# (d) Interactive coverage viewer (default http://localhost:8000; skip in CI)
 if [ "${GITHUB_ACTIONS:-}" != "true" ]; then
-  python3 "$WORKSPACE/modules/lib/posix/scripts/ci/coverageui.py" \
+  python3 "$SCRIPTS/coverageui.py" \
     -d "$WORKSPACE" \
     --framework posix \
     "$WORKSPACE/twister-out/coverage-posix.json"
 fi
+
+if [ "$twister_rc" -ne 0 ]; then
+  echo "Twister finished with failures (exit ${twister_rc});" \
+       "coverage reports were still generated." >&2
+fi
+
+exit "$twister_rc"
