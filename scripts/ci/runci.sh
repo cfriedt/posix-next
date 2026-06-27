@@ -10,7 +10,11 @@ if [ -n "${ZEPHYR_SDK_INSTALL_DIR:-}" ]; then
     "${ZEPHYR_SDK_INSTALL_DIR}/aarch64-zephyr-elf/bin" \
     "${ZEPHYR_SDK_INSTALL_DIR}/arm-zephyr-eabi/bin" \
     "${ZEPHYR_SDK_INSTALL_DIR}/riscv64-zephyr-elf/bin" \
-    "${ZEPHYR_SDK_INSTALL_DIR}/x86_64-zephyr-elf/bin"
+    "${ZEPHYR_SDK_INSTALL_DIR}/x86_64-zephyr-elf/bin" \
+    "${ZEPHYR_SDK_INSTALL_DIR}/gnu/aarch64-zephyr-elf/bin" \
+    "${ZEPHYR_SDK_INSTALL_DIR}/gnu/arm-zephyr-eabi/bin" \
+    "${ZEPHYR_SDK_INSTALL_DIR}/gnu/riscv64-zephyr-elf/bin" \
+    "${ZEPHYR_SDK_INSTALL_DIR}/gnu/x86_64-zephyr-elf/bin"
   do
     if [ -d "$d" ]; then
       export PATH="$d:$PATH"
