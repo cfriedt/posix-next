@@ -68,8 +68,10 @@ gcovr -r "$WORKSPACE" \
   "${posix_filter_args[@]}" \
   --json "$WORKSPACE/twister-out/coverage-posix.json"
 
-# (d) Interactive coverage viewer (default http://localhost:8000)
-python3 "$WORKSPACE/modules/lib/posix/scripts/ci/coverageui.py" \
-  -d "$WORKSPACE" \
-  --framework posix \
-  "$WORKSPACE/twister-out/coverage-posix.json"
+# (d) Interactive coverage viewer (default http://localhost:8000; skip in CI)
+if [ "${GITHUB_ACTIONS:-}" != "true" ]; then
+  python3 "$WORKSPACE/modules/lib/posix/scripts/ci/coverageui.py" \
+    -d "$WORKSPACE" \
+    --framework posix \
+    "$WORKSPACE/twister-out/coverage-posix.json"
+fi
