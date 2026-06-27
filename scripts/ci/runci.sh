@@ -10,10 +10,24 @@ if [ -n "${ZEPHYR_SDK_INSTALL_DIR:-}" ]; then
     "${ZEPHYR_SDK_INSTALL_DIR}/aarch64-zephyr-elf/bin" \
     "${ZEPHYR_SDK_INSTALL_DIR}/arm-zephyr-eabi/bin" \
     "${ZEPHYR_SDK_INSTALL_DIR}/riscv64-zephyr-elf/bin" \
-    "${ZEPHYR_SDK_INSTALL_DIR}/x86_64-zephyr-elf/bin"
+    "${ZEPHYR_SDK_INSTALL_DIR}/x86_64-zephyr-elf/bin" \
+    "${ZEPHYR_SDK_INSTALL_DIR}/gnu/aarch64-zephyr-elf/bin" \
+    "${ZEPHYR_SDK_INSTALL_DIR}/gnu/arm-zephyr-eabi/bin" \
+    "${ZEPHYR_SDK_INSTALL_DIR}/gnu/riscv64-zephyr-elf/bin" \
+    "${ZEPHYR_SDK_INSTALL_DIR}/gnu/x86_64-zephyr-elf/bin"
   do
     if [ -d "$d" ]; then
       export PATH="$d:$PATH"
+    fi
+  done
+
+  for gcov_tool in \
+    "${ZEPHYR_SDK_INSTALL_DIR}/gnu/x86_64-zephyr-elf/bin/x86_64-zephyr-elf-gcov" \
+    "${ZEPHYR_SDK_INSTALL_DIR}/x86_64-zephyr-elf/bin/x86_64-zephyr-elf-gcov"
+  do
+    if [ -x "$gcov_tool" ]; then
+      export ZEPHYR_SDK_GCOV_TOOL="$gcov_tool"
+      break
     fi
   done
 fi
@@ -201,6 +215,11 @@ fi
 
 twister_cmd+=("${DEFAULT_ARGS[@]}")
 twister_cmd+=("${ARGS[@]}")
+
+# Do not pass --gcov-tool here. Twister selects gcov per instance (host gcov for
+# native_sim, Zephyr SDK gcov for cross targets). A global --gcov-tool breaks
+# native coverage: host GCC emits .gcda B33* while x86_64-zephyr-elf-gcov
+# expects B22*, and gcovr exits 64 (EXIT_READ_ERROR).
 
 cd "$WORKSPACE_PATH"
 exec "${twister_cmd[@]}"
