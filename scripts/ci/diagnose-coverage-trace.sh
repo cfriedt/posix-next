@@ -6,19 +6,27 @@
 set -euo pipefail
 
 usage() {
-  echo "Usage: $0 [--non-empty-out FILE] TWISTER_OUT_DIR [coverage.json ...]" >&2
+  echo "Usage: $0 [--non-empty-out FILE] [--prefer-workspace] \\" >&2
+  echo "  TWISTER_OUT_DIR [coverage.json ...]" >&2
   echo "  With no files: scan twister-out for per-test coverage.json traces." >&2
+  echo "  --prefer-workspace: use coverage.workspace.json when present in each" >&2
+  echo "  build dir." >&2
   echo "  Prints COVERAGE_EMPTY / COVERAGE_TRACE_SUMMARY lines for CI logs." >&2
   exit 2
 }
 
 non_empty_out=""
+prefer_workspace=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --non-empty-out)
       non_empty_out="${2:?}"
       shift 2
+      ;;
+    --prefer-workspace)
+      prefer_workspace=1
+      shift
       ;;
     -h|--help)
       usage
@@ -65,8 +73,10 @@ diagnose_build_dir() {
   local reason=""
   local detail=""
 
-  if [ -f "$kconfig" ] && ! grep -q '^CONFIG_COVERAGE=y' "$kconfig" 2>/dev/null; then
-    echo "coverage_not_enabled|CONFIG_COVERAGE is not set in zephyr/.config (check -p / --coverage-platform)"
+  if [ -f "$kconfig" ] && \
+     ! grep -q '^CONFIG_COVERAGE=y' "$kconfig" 2>/dev/null; then
+    echo "coverage_not_enabled|CONFIG_COVERAGE is not set in zephyr/.config" \
+         "(check -p / --coverage-platform)"
     return
   fi
 
@@ -80,17 +90,21 @@ diagnose_build_dir() {
     local gcda_count
     gcda_count=$(find "$build_dir" -name '*.gcda' 2>/dev/null | wc -l)
     if [ "$gcda_count" -gt 0 ]; then
-      if [ -f "$covlog" ] && grep -qi 'All coverage data is filtered out' "$covlog" 2>/dev/null; then
+      if [ -f "$covlog" ] && \
+         grep -qi 'All coverage data is filtered out' "$covlog" 2>/dev/null; then
         echo "gcovr_all_filtered|native/host .gcda present but gcovr filtered all data"
       else
-        echo "gcovr_empty_with_gcda|.gcda files exist but coverage.json is empty; see coverage.log"
+        echo "gcovr_empty_with_gcda|.gcda files exist but coverage.json is empty;" \
+             "see coverage.log"
       fi
       return
     fi
     if grep -qiE 'FATAL ERROR|Stack overflow|ASSERT|ZEPHYR FATAL' "$handler" 2>/dev/null; then
-      echo "no_gcov_dump_test_failed|handler.log has no GCOV dump (test may have crashed before dump)"
+      echo "no_gcov_dump_test_failed|handler.log has no GCOV dump" \
+           "(test may have crashed before dump)"
     else
-      echo "no_gcov_dump|handler.log has no GCOV_COVERAGE_DUMP_START (serial dump missing on HW; native may lack CONFIG_COVERAGE_NATIVE_GCOV)"
+      echo "no_gcov_dump|handler.log has no GCOV_COVERAGE_DUMP_START" \
+           "(serial dump missing on HW; native may lack CONFIG_COVERAGE_NATIVE_GCOV)"
     fi
     return
   fi
@@ -104,23 +118,27 @@ diagnose_build_dir() {
   local gcda_count
   gcda_count=$(find "$build_dir" -name '*.gcda' 2>/dev/null | wc -l)
   if [ "$gcda_count" -eq 0 ]; then
-    echo "no_gcda_files|gcov dump markers found but no .gcda under build dir after capture"
+    echo "no_gcda_files|gcov dump markers found but no .gcda under build dir" \
+         "after capture"
     return
   fi
 
   if [ -f "$covlog" ]; then
     if grep -qi 'All coverage data is filtered out' "$covlog" 2>/dev/null; then
-      echo "gcovr_all_filtered|gcovr reported all coverage data filtered (check -r and -e excludes)"
+      echo "gcovr_all_filtered|gcovr reported all coverage data filtered" \
+           "(check -r and -e excludes)"
       return
     fi
-    detail=$(grep -iE '^\(ERROR\)|^\(WARNING\)|GCOVR failed' "$covlog" 2>/dev/null | tail -1 | sed 's/^[[:space:]]*//')
+    detail=$(grep -iE '^\(ERROR\)|^\(WARNING\)|GCOVR failed' "$covlog" 2>/dev/null | \
+      tail -1 | sed 's/^[[:space:]]*//')
     if [ -n "$detail" ]; then
       echo "gcovr_warning|${detail}"
       return
     fi
   fi
 
-  echo "empty_trace_unknown|coverage.json has files:[] but dump and .gcda exist; see coverage.log"
+  echo "empty_trace_unknown|coverage.json has files:[] but dump and .gcda exist;" \
+       "see coverage.log"
 }
 
 declare -A reason_counts=()
@@ -131,6 +149,13 @@ declare -a non_empty_files=()
 for trace in "${coverage_files[@]}"; do
   if [ ! -f "$trace" ]; then
     continue
+  fi
+
+  if [ "$prefer_workspace" -eq 1 ]; then
+    workspace_trace="${trace%.json}.workspace.json"
+    if [ -f "$workspace_trace" ]; then
+      trace="$workspace_trace"
+    fi
   fi
 
   file_count=$(jq -r '.files | length' "$trace" 2>/dev/null || echo 0)
