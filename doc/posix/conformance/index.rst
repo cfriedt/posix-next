@@ -89,10 +89,6 @@ POSIX System Interfaces
     :ref:`_POSIX_THREAD_PRIORITY_SCHEDULING <posix_option_thread_priority_scheduling>`, 200809L, :kconfig:option:`CONFIG_POSIX_THREAD_PRIORITY_SCHEDULING`
     _POSIX_THREAD_PROCESS_SHARED, -1,
     _POSIX_THREAD_SPORADIC_SERVER, -1,
-    _POSIX_TRACE, -1,
-    _POSIX_TRACE_EVENT_FILTER, -1,
-    _POSIX_TRACE_INHERIT, -1,
-    _POSIX_TRACE_LOG, -1,
     _POSIX_TYPED_MEMORY_OBJECTS, -1,
     _XOPEN_CRYPT, -1,
     :ref:`_XOPEN_REALTIME <posix_option_group_xsi_realtime>`, 700, :kconfig:option:`CONFIG_XSI_REALTIME`
@@ -146,8 +142,11 @@ X/Open System Interfaces
    Some features may exhibit undefined behaviour as they fall beyond the scope of Zephyr's current
    design and capabilities. For example, multi-processing, ad-hoc memory-mapping, multiple users,
    or regular expressions are features that are uncommon in low-footprint embedded systems.
-   Such undefined behaviour is denoted with the † (obelus) symbol. Additional details
-   :ref:`here <posix_option_groups>`.
+   Other symbols are marked with the † (obelus) when they appeared in an earlier POSIX edition
+   (for example IEEE 1003.13) but were later removed from the specification and are not treated as
+   current profile requirements in this documentation.
+   Such undefined behaviour is denoted with the † (obelus) symbol. Additional details in
+   :ref:`POSIX Option Groups <posix_option_groups>` and :ref:`POSIX Options <posix_options>`.
 
 .. _posix_libc_provided:
 
