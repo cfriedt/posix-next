@@ -106,6 +106,8 @@ Groups must
 - independence
   - to decouple functionality from other Options and Subprofiling Option Groups.
 
+See also :ref:`posix_aep` for how Zephyr maps PSE51/52/53 choices onto individual Kconfig options.
+
 For example, the :ref:`XSI_REALTIME <posix_option_group_xsi_realtime>` Option Group and
 the :ref:`_POSIX_MESSAGE_PASSING <posix_option_message_passing>` depend on other Options or Option
 Groups (:ref:`POSIX_DEVICE_IO <posix_option_group_device_io>`,
