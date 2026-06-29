@@ -23,7 +23,12 @@ posix-next
      <a class="pn-tile" href="posix/option_groups/index.html">
        <span class="pn-tile-icon">&#127381;</span>
        <span class="pn-tile-title">Option Groups</span>
-       <span class="pn-tile-desc">POSIX conformance by feature set</span>
+       <span class="pn-tile-desc">POSIX option groups and bundled features</span>
+     </a>
+     <a class="pn-tile" href="posix/options/index.html">
+       <span class="pn-tile-icon">&#9881;</span>
+       <span class="pn-tile-title">POSIX Options</span>
+       <span class="pn-tile-desc">Individual POSIX options and APIs</span>
      </a>
      <a class="pn-tile" href="posix/symbols.html">
        <span class="pn-tile-icon">&#128269;</span>
