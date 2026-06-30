@@ -115,6 +115,10 @@ set_target_properties(html html-nodeps PROPERTIES
 # (Sphinx only copies figure/image SVGs to _images/).
 set(INTERACTIVE_SVGS
   posix/overview/aep.svg
+  posix/aep/si.svg
+  posix/aep/aep-pse51.svg
+  posix/aep/aep-pse52.svg
+  posix/aep/aep-pse53.svg
 )
 foreach(svg ${INTERACTIVE_SVGS})
   add_custom_command(TARGET html POST_BUILD
