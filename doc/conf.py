@@ -72,9 +72,47 @@ todo_include_todos = False
 # -- Intersphinx ---------------------------------------------------------------
 # Route external :ref: targets (threads_v2, kconfig, application, …) and
 # :kconfig:option: references to the upstream Zephyr 4.3.0 docs.
+#
+# Use a vendored objects.inv so sphinx-build does not download it on every run.
+# Python's urllib can hang indefinitely when IPv6 routes to docs.zephyrproject.org
+# are broken even though curl -4 works.
+
+INTERSPHINX_DIR = Path(__file__).parent / "_intersphinx"
+ZEPHYR_DOCS_BASE = "https://docs.zephyrproject.org/4.3.0/"
+ZEPHYR_OBJECTS_INV = INTERSPHINX_DIR / "zephyr-4.3.0.objects.inv"
+
+
+def _ensure_zephyr_intersphinx_inventory() -> None:
+    if ZEPHYR_OBJECTS_INV.is_file():
+        return
+
+    import subprocess
+
+    INTERSPHINX_DIR.mkdir(parents=True, exist_ok=True)
+    try:
+        subprocess.run(
+            [
+                "curl",
+                "-4",
+                "-fsSL",
+                "-o",
+                str(ZEPHYR_OBJECTS_INV),
+                f"{ZEPHYR_DOCS_BASE}objects.inv",
+            ],
+            check=True,
+            timeout=120,
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise RuntimeError(
+            "Zephyr intersphinx inventory is missing and could not be downloaded. "
+            f"Run: curl -4 -fsSL -o {ZEPHYR_OBJECTS_INV} {ZEPHYR_DOCS_BASE}objects.inv"
+        ) from exc
+
+
+_ensure_zephyr_intersphinx_inventory()
 
 intersphinx_mapping = {
-    "zephyr": ("https://docs.zephyrproject.org/4.3.0/", None),
+    "zephyr": (ZEPHYR_DOCS_BASE, str(ZEPHYR_OBJECTS_INV)),
 }
 
 # -- HTML output ---------------------------------------------------------------
@@ -145,6 +183,7 @@ suppress_warnings = [
 
 def setup(app):
     app.add_js_file("doxytooltip-patch.js")
+    app.add_js_file("aep-tabs.js")
     # Ensure theme overrides load after the RTD base styles.
     app.add_css_file("css/custom.css")
     app.add_css_file("posix-next.css")
