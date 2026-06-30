@@ -36,18 +36,18 @@ POSIX System Interfaces
 
     _POSIX_VERSION, 200809L,
     :ref:`_POSIX_ASYNCHRONOUS_IO<posix_option_asynchronous_io>`, 200809L, :kconfig:option:`CONFIG_POSIX_ASYNCHRONOUS_IO`:ref:`†<posix_undefined_behaviour>`
-    :ref:`_POSIX_BARRIERS<posix_option_group_barriers>`, 200809L, :kconfig:option:`CONFIG_POSIX_BARRIERS`
-    :ref:`_POSIX_CLOCK_SELECTION<posix_option_group_clock_selection>`, 200809L, :kconfig:option:`CONFIG_POSIX_CLOCK_SELECTION`
-    :ref:`_POSIX_MAPPED_FILES<posix_option_group_mapped_files>`, 200809L, :kconfig:option:`CONFIG_POSIX_MAPPED_FILES`
-    :ref:`_POSIX_MEMORY_PROTECTION<posix_option_group_memory_protection>`, 200809L, :kconfig:option:`CONFIG_POSIX_MEMORY_PROTECTION` :ref:`†<posix_undefined_behaviour>`
-    :ref:`_POSIX_READER_WRITER_LOCKS<posix_option_group_rw_locks>`, 200809L, :kconfig:option:`CONFIG_POSIX_RW_LOCKS`
-    :ref:`_POSIX_REALTIME_SIGNALS<posix_option_group_realtime_signals>`, 200809L, :kconfig:option:`CONFIG_POSIX_REALTIME_SIGNALS`
-    :ref:`_POSIX_SEMAPHORES<posix_option_group_semaphores>`, 200809L, :kconfig:option:`CONFIG_POSIX_SEMAPHORES`
-    :ref:`_POSIX_SPIN_LOCKS<posix_option_group_spin_locks>`, 200809L, :kconfig:option:`CONFIG_POSIX_SPIN_LOCKS`
+    :ref:`_POSIX_BARRIERS<posix_option_barriers>`, 200809L, :kconfig:option:`CONFIG_POSIX_BARRIERS`
+    :ref:`_POSIX_CLOCK_SELECTION<posix_option_clock_selection>`, 200809L, :kconfig:option:`CONFIG_POSIX_CLOCK_SELECTION`
+    :ref:`_POSIX_MAPPED_FILES<posix_option_mapped_files>`, 200809L, :kconfig:option:`CONFIG_POSIX_MAPPED_FILES`
+    :ref:`_POSIX_MEMORY_PROTECTION<posix_option_memory_protection>`, 200809L, :kconfig:option:`CONFIG_POSIX_MEMORY_PROTECTION` :ref:`†<posix_undefined_behaviour>`
+    :ref:`_POSIX_READER_WRITER_LOCKS<posix_option_reader_writer_locks>`, 200809L, :kconfig:option:`CONFIG_POSIX_RW_LOCKS`
+    :ref:`_POSIX_REALTIME_SIGNALS<posix_option_realtime_signals>`, 200809L, :kconfig:option:`CONFIG_POSIX_REALTIME_SIGNALS`
+    :ref:`_POSIX_SEMAPHORES<posix_option_semaphores>`, 200809L, :kconfig:option:`CONFIG_POSIX_SEMAPHORES`
+    :ref:`_POSIX_SPIN_LOCKS<posix_option_spin_locks>`, 200809L, :kconfig:option:`CONFIG_POSIX_SPIN_LOCKS`
     :ref:`_POSIX_THREAD_SAFE_FUNCTIONS<posix_option_thread_safe_functions>`, 200809L, :kconfig:option:`CONFIG_POSIX_C_LANG_SUPPORT_R` and :kconfig:option:`CONFIG_POSIX_FILE_SYSTEM_R` and :kconfig:option:`CONFIG_POSIX_FILE_LOCKING`
-    :ref:`_POSIX_THREADS<posix_option_group_threads_base>`, 200809L, :kconfig:option:`CONFIG_POSIX_THREADS`
+    :ref:`_POSIX_THREADS<posix_option_threads>`, 200809L, :kconfig:option:`CONFIG_POSIX_THREADS`
     :ref:`_POSIX_TIMEOUTS<posix_option_timeouts>`, 200809L, :kconfig:option:`CONFIG_POSIX_TIMERS`
-    :ref:`_POSIX_TIMERS<posix_option_group_timers>`, 200809L, :kconfig:option:`CONFIG_POSIX_TIMERS`
+    :ref:`_POSIX_TIMERS<posix_option_timers>`, 200809L, :kconfig:option:`CONFIG_POSIX_TIMERS`
     _POSIX2_C_BIND, 200809L,
 
 .. The following should be valued greater than zero in Zephyr, in order to be strictly conformant
@@ -68,6 +68,7 @@ POSIX System Interfaces
 
     _POSIX_ADVISORY_INFO, -1,
     :ref:`_POSIX_CPUTIME<posix_option_cputime>`, 200809L, :kconfig:option:`CONFIG_POSIX_CPUTIME`
+    _POSIX_DEVICE_CONTROL, -1,
     :ref:`_POSIX_FSYNC<posix_option_fsync>`, 200809L, :kconfig:option:`CONFIG_POSIX_FSYNC`
     :ref:`_POSIX_IPV6<posix_option_ipv6>`, 200809L, :kconfig:option:`CONFIG_POSIX_IPV6`
     :ref:`_POSIX_MEMLOCK <posix_option_memlock>`, 200809L, :kconfig:option:`CONFIG_POSIX_MEMLOCK` :ref:`†<posix_undefined_behaviour>`
@@ -88,11 +89,13 @@ POSIX System Interfaces
     :ref:`_POSIX_THREAD_PRIO_PROTECT <posix_option_thread_prio_protect>`, 200809L, :kconfig:option:`CONFIG_POSIX_THREAD_PRIO_PROTECT`
     :ref:`_POSIX_THREAD_PRIORITY_SCHEDULING <posix_option_thread_priority_scheduling>`, 200809L, :kconfig:option:`CONFIG_POSIX_THREAD_PRIORITY_SCHEDULING`
     _POSIX_THREAD_PROCESS_SHARED, -1,
+    _POSIX_THREAD_ROBUST_PRIO_INHERIT, -1,
+    _POSIX_THREAD_ROBUST_PRIO_PROTECT, -1,
     _POSIX_THREAD_SPORADIC_SERVER, -1,
     _POSIX_TYPED_MEMORY_OBJECTS, -1,
     _XOPEN_CRYPT, -1,
-    :ref:`_XOPEN_REALTIME <posix_option_group_xsi_realtime>`, 700, :kconfig:option:`CONFIG_XSI_REALTIME`
-    :ref:`_XOPEN_REALTIME_THREADS <posix_option_group_xsi_realtime_threads>`, 700, :kconfig:option:`CONFIG_XSI_REALTIME_THREADS`
+    :ref:`_XOPEN_REALTIME <posix_option_xopen_realtime>`, 700, :kconfig:option:`CONFIG_XSI_REALTIME`
+    :ref:`_XOPEN_REALTIME_THREADS <posix_option_xopen_realtime_threads>`, 700, :kconfig:option:`CONFIG_XSI_REALTIME_THREADS`
     :ref:`_XOPEN_STREAMS<posix_option_xopen_streams>`, 200809L, :kconfig:option:`CONFIG_XSI_STREAMS`
     _XOPEN_UNIX, 700, :kconfig:option:`CONFIG_XSI`
 
