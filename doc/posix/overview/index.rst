@@ -57,13 +57,12 @@ features over the required :ref:`POSIX System Interfaces <posix_system_interface
 
 .. raw:: html
 
-   <div style="text-align: center; margin: 1.5em 0;">
-     <object data="aep.svg" type="image/svg+xml"
-             width="340" height="340"
-             aria-label="POSIX Application Environment Profiles (AEP)">
-       <img src="aep.svg" alt="POSIX Application Environment Profiles (AEP)" />
-     </object>
-     <p class="caption">POSIX Application Environment Profiles (AEP)</p>
+   <div class="figure align-center aep-diagram" data-aep-svg="aep.svg"
+        data-aep-href-base="../aep/index.html"
+        aria-label="POSIX Application Environment Profiles (AEP)">
+     <img class="aep-diagram-fallback" src="aep.svg"
+          alt="POSIX Application Environment Profiles (AEP)" />
+     <p class="caption"><span class="caption-text">POSIX Application Environment Profiles (AEP)</span></p>
    </div>
 
 * Minimal Realtime System Profile (:ref:`PSE51 <posix_aep_pse51>`)
