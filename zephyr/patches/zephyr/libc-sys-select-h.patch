@@ -1,0 +1,138 @@
+diff --git a/include/zephyr/sys/fdtable.h b/include/zephyr/sys/fdtable.h
+index c36b593dac0..23736db6bc2 100644
+--- a/include/zephyr/sys/fdtable.h
++++ b/include/zephyr/sys/fdtable.h
+@@ -264,9 +264,12 @@ struct zvfs_pollfd {
+ 
+ __syscall int zvfs_poll(struct zvfs_pollfd *fds, int nfds, int poll_timeout);
+ 
++#ifndef ZVFS_FD_SET_DECLARED
++#define ZVFS_FD_SET_DECLARED
+ struct zvfs_fd_set {
+ 	uint32_t bitset[DIV_ROUND_UP(ZVFS_OPEN_SIZE, 32)];
+ };
++#endif
+ 
+ /** @brief Number of file descriptors which can be added @ref zvfs_fd_set */
+ #define ZVFS_FD_SETSIZE (sizeof(((struct zvfs_fd_set *)0)->bitset) * 8)
+diff --git a/lib/libc/newlib/include/sys/select.h b/lib/libc/newlib/include/sys/select.h
+new file mode 100644
+index 00000000000..e823aeb5370
+--- /dev/null
++++ b/lib/libc/newlib/include/sys/select.h
+@@ -0,0 +1,54 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_SYS_SELECT_H_
++#define ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_SYS_SELECT_H_
++
++#include <stdint.h>
++
++#include <sys/_sigset.h>
++#include <sys/_timeval.h>
++#include <sys/timespec.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++#if !defined(_SIGSET_T_DECLARED)
++#define _SIGSET_T_DECLARED
++typedef __sigset_t sigset_t;
++#endif
++
++/*
++ * Newlib's <sys/select.h> defines FD_CLR(), FD_ISSET(), FD_SET(), and
++ * FD_ZERO() as macros over a bit-array fd_set layout that does not match
++ * Zephyr's zvfs_fd_set. Mirror the zvfs_fd_set layout here and declare
++ * the FD_* helpers as functions implemented by the POSIX device I/O layer.
++ */
++#ifndef ZVFS_FD_SET_DECLARED
++#define ZVFS_FD_SET_DECLARED
++struct zvfs_fd_set {
++	uint32_t bitset[(ZVFS_OPEN_SIZE + 31U) / 32U];
++};
++#endif
++
++#define FD_SETSIZE (sizeof(((struct zvfs_fd_set *)0)->bitset) * 8U)
++typedef struct zvfs_fd_set fd_set;
++
++int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *errorfds,
++	   struct timeval *timeout);
++int pselect(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
++	    const struct timespec *timeout, const sigset_t *sigmask);
++void FD_CLR(int fd, fd_set *fdset);
++int FD_ISSET(int fd, fd_set *fdset);
++void FD_SET(int fd, fd_set *fdset);
++void FD_ZERO(fd_set *fdset);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_SYS_SELECT_H_ */
+diff --git a/lib/libc/picolibc/include/sys/select.h b/lib/libc/picolibc/include/sys/select.h
+new file mode 100644
+index 00000000000..7b6159ae23c
+--- /dev/null
++++ b/lib/libc/picolibc/include/sys/select.h
+@@ -0,0 +1,55 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SYS_SELECT_H_
++#define ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SYS_SELECT_H_
++
++#include <stdint.h>
++
++#include <sys/_sigset.h>
++#include <sys/_timeval.h>
++#include <sys/_timespec.h>
++#include <sys/_types.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++#if !defined(_SIGSET_T_DECLARED)
++#define _SIGSET_T_DECLARED
++typedef __sigset_t sigset_t;
++#endif
++
++/*
++ * Picolibc's <sys/_select.h> defines FD_CLR(), FD_ISSET(), FD_SET(), and
++ * FD_ZERO() as macros over a bit-array fd_set layout that does not match
++ * Zephyr's zvfs_fd_set. Mirror the zvfs_fd_set layout here and declare
++ * the FD_* helpers as functions implemented by the POSIX device I/O layer.
++ */
++#ifndef ZVFS_FD_SET_DECLARED
++#define ZVFS_FD_SET_DECLARED
++struct zvfs_fd_set {
++	uint32_t bitset[(ZVFS_OPEN_SIZE + 31U) / 32U];
++};
++#endif
++
++#define FD_SETSIZE (sizeof(((struct zvfs_fd_set *)0)->bitset) * 8U)
++typedef struct zvfs_fd_set fd_set;
++
++int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *errorfds,
++	   struct timeval *timeout);
++int pselect(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds,
++	    const struct timespec *timeout, const sigset_t *sigmask);
++void FD_CLR(int fd, fd_set *fdset);
++int FD_ISSET(int fd, fd_set *fdset);
++void FD_SET(int fd, fd_set *fdset);
++void FD_ZERO(fd_set *fdset);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SYS_SELECT_H_ */
