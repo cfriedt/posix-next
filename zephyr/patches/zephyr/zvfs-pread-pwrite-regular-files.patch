@@ -1,0 +1,80 @@
+diff --git a/lib/os/zvfs/zvfs_fs.c b/lib/os/zvfs/zvfs_fs.c
+--- a/lib/os/zvfs/zvfs_fs.c
++++ b/lib/os/zvfs/zvfs_fs.c
+@@ -247,6 +247,13 @@
+ {
+ 	struct zvfs_fs_desc *ptr = obj;
+ 	ssize_t rc;
++	long saved;
++
++	saved = fs_tell(&ptr->file);
++	if (saved < 0) {
++		errno = -saved;
++		return -1;
++	}
+
+ 	rc = fs_seek(&ptr->file, (off_t)offset, FS_SEEK_SET);
+ 	if (rc < 0) {
+@@ -254,7 +261,17 @@
+ 		return -1;
+ 	}
+
+-	return fs_write_vmeth(obj, buffer, count);
++	rc = fs_write_vmeth(obj, buffer, count);
++	if (rc < 0) {
++		return rc;
++	}
++
++	if (fs_seek(&ptr->file, saved, FS_SEEK_SET) < 0) {
++		errno = EIO;
++		return -1;
++	}
++
++	return rc;
+ }
+
+ static ssize_t fs_read_vmeth(void *obj, void *buffer, size_t count)
+@@ -275,6 +292,13 @@
+ {
+ 	struct zvfs_fs_desc *ptr = obj;
+ 	ssize_t rc;
++	long saved;
++
++	saved = fs_tell(&ptr->file);
++	if (saved < 0) {
++		errno = -saved;
++		return -1;
++	}
+
+ 	rc = fs_seek(&ptr->file, (off_t)offset, FS_SEEK_SET);
+ 	if (rc < 0) {
+@@ -282,7 +306,17 @@
+ 		return -1;
+ 	}
+
+-	return fs_read_vmeth(obj, buffer, count);
++	rc = fs_read_vmeth(obj, buffer, count);
++	if (rc < 0) {
++		return rc;
++	}
++
++	if (fs_seek(&ptr->file, saved, FS_SEEK_SET) < 0) {
++		errno = EIO;
++		return -1;
++	}
++
++	return rc;
+ }
+
+ static struct fd_op_vtable fs_fd_op_vtable = {
+diff --git a/lib/os/zvfs/zvfs_rw.c b/lib/os/zvfs/zvfs_rw.c
+--- a/lib/os/zvfs/zvfs_rw.c
++++ b/lib/os/zvfs/zvfs_rw.c
+@@ -13,6 +13,7 @@
+ {
+ 	switch (mode & ZVFS_MODE_IFMT) {
+ 	case ZVFS_MODE_IFSHM:
++	case ZVFS_MODE_IFREG:
+ 		return true;
+ 	default:
+ 		return false;

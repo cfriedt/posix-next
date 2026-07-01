@@ -14,5 +14,18 @@ zephyr_library_compile_options(-U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
 zephyr_library_compile_options_ifdef(CONFIG_XSI -U_XOPEN_SOURCE -D_XOPEN_SOURCE=700)
 
 if(NOT CONFIG_TC_PROVIDES_POSIX_DEVICE_IO)
-  zephyr_library_sources(perror.c device_io.c)
+  zephyr_library_sources(
+    perror.c
+    close.c
+    fdopen.c
+    fileno.c
+    open.c
+    poll.c
+    pread.c
+    pselect.c
+    pwrite.c
+    read.c
+    select.c
+    write.c
+  )
 endif()
