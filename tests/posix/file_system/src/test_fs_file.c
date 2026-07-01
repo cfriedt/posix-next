@@ -302,14 +302,13 @@ ZTEST(posix_fs_file_test, test_fs_fdopen_fileno)
 	file = -1;
 }
 
-#ifndef CONFIG_MINIMAL_LIBC
 /**
  * @brief FILE I/O through a pooled fdopen()'d stream
  *
  * Exercises the path that crashed in #108818: writing and reading back through
  * the C library FILE API on top of a ZVFS file descriptor. Minimal libc provides
  * fopen()/fclose() via common libc and fdopen()/fileno() via POSIX device I/O,
- * but it does not implement fread() or fseek().
+ * plus fread() and fseek()/rewind() on ZVFS-backed streams.
  */
 ZTEST(posix_fs_file_test, test_fs_fdopen_io)
 {
@@ -337,7 +336,6 @@ ZTEST(posix_fs_file_test, test_fs_fdopen_io)
 
 	zassert_ok(test_file_delete());
 }
-#endif /* CONFIG_MINIMAL_LIBC */
 
 /**
  * @brief fdopen()/fclose() cycles do not leak slots (no alloc)
