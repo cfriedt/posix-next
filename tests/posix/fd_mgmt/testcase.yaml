@@ -1,7 +1,35 @@
 common:
-  filter: not CONFIG_NATIVE_LIBC
   tags:
     - posix_fd_mgmt
+  modules:
+    - fatfs
+  platform_key:
+    - arch
+    - simulation
   min_ram: 32
 tests:
-  portability.posix.fd_mgmt: {}
+  portability.posix.fd_mgmt:
+    filter: not CONFIG_NATIVE_LIBC
+  portability.posix.fd_mgmt.minimal:
+    filter: not CONFIG_NATIVE_LIBC
+    extra_configs:
+      - CONFIG_MINIMAL_LIBC=y
+  portability.posix.fd_mgmt.newlib:
+    filter: (not CONFIG_NATIVE_LIBC) and (TOOLCHAIN_HAS_NEWLIB == 1)
+    extra_configs:
+      - CONFIG_NEWLIB_LIBC=y
+  portability.posix.fd_mgmt.picolibc:
+    tags: picolibc
+    filter: (not CONFIG_NATIVE_LIBC) and CONFIG_PICOLIBC_SUPPORTED
+    extra_configs:
+      - CONFIG_PICOLIBC=y
+  portability.posix.fd_mgmt.linux_compat:
+    tags: native
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    filter: CONFIG_NATIVE_LIBC
+    extra_configs:
+      - CONFIG_POSIX_AEP_CHOICE_PSE51=y
+      - CONFIG_POSIX_TEST_LINUX_COMPAT=y
+      - CONFIG_ZVFS_OPEN_MAX=15

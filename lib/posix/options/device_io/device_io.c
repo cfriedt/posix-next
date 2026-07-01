@@ -1,12 +1,13 @@
 /*
- * Copyright (c) 2024, Tenstorrent AI ULC
- *
+ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include <errno.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <stdarg.h>
 
 #include <fcntl.h>
 #include <poll.h>
