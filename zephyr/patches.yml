@@ -615,3 +615,25 @@ patches:
       and refactor zvfs_rw() so unlocked I/O can run under flockfile().
       Route minimal-libc stdout through z_impl_zephyr_write_stdout for reserved
       stdio fds. Select TC_PROVIDES_POSIX_FILE_LOCKING for picolibc.
+  - path: zephyr/libc-sys-select-h.patch
+    sha256sum: 11a0fb06f2247f7810ca8abc28c405c3ca7754dac358411e8a6014e13577c63c
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-06-30
+    upstreamable: true
+    comments: |
+      Redirect picolibc and newlib <sys/select.h> to <zephyr/posix/sys/select.h>
+      so FD_CLR(), FD_ISSET(), FD_SET(), and FD_ZERO() are Zephyr functions over
+      zvfs_fd_set instead of libc macros over a bit-array fd_set (see poll.h for the
+      same pattern).
+  - path: zephyr/minimal-libc-fread.patch
+    sha256sum: 892e9122ad45fa33703e4884374e9e334c06b825179d9aeb159ec9a08aa2c9db
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-06-30
+    upstreamable: true
+    comments: |
+      Implement fread() for minimal libc on ZVFS-backed FILE streams, mirroring the
+      existing fwrite() path. Adds zephyr_fread() syscall hook for userspace builds.
