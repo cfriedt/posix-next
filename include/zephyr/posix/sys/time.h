@@ -17,19 +17,10 @@
 #ifndef ZEPHYR_INCLUDE_POSIX_SYS_TIME_H_
 #define ZEPHYR_INCLUDE_POSIX_SYS_TIME_H_
 
-#include <sys/types.h>
+#include <sys/select.h>
 
 #ifdef __cplusplus
 extern "C" {
-#endif
-
-#if !defined(_TIMEVAL_DECLARED) && !defined(__timeval_defined)
-struct timeval {
-	time_t tv_sec;
-	suseconds_t tv_usec;
-};
-#define _TIMEVAL_DECLARED
-#define __timeval_defined
 #endif
 
 /**
@@ -44,6 +35,29 @@ struct timeval {
  */
 int gettimeofday(struct timeval *tv, void *tz);
 
+#if defined(_XOPEN_SOURCE) || defined(__DOXYGEN__)
+/**
+ * @brief Set file access and modification times (obsolescent).
+ * @ingroup posix_option_group_xsi_file_system
+ *
+ * @param path Path to the file.
+ * @param times Access and modification times, or NULL for the current time.
+ * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/utimes.html
+ */
+int utimes(const char *path, const struct timeval times[2]);
+
+/**
+ * @brief Set the current time (legacy; removed from POSIX.1-2001).
+ * @ingroup posix_option_group_xsi_single_process
+ *
+ * @param tv New current time.
+ * @param tz Must be NULL.
+ * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/7908799/xsh/settimeofday.html
+ */
+int settimeofday(const struct timeval *tv, const void *tz);
+#endif /* _XOPEN_SOURCE || __DOXYGEN__ */
 
 #ifdef __cplusplus
 }
