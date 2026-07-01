@@ -287,4 +287,9 @@ static inline sigset_t *z_sig_set_to_posix(const struct k_sig_set *kset, sigset_
 	return z_sig_set_to_posix_slow(kset, buf);
 }
 
+/* forward declaration to avoid pulling in conflicting <sys/time.h> and <time.h> */
+struct timeval;
+struct timespec;
+bool timeval_to_timespec(const struct timeval *tv, struct timespec *ts);
+
 #endif
