@@ -1,0 +1,181 @@
+diff --git a/include/zephyr/sys/fdtable.h b/include/zephyr/sys/fdtable.h
+index 23736db6..df09a039 100644
+--- a/include/zephyr/sys/fdtable.h
++++ b/include/zephyr/sys/fdtable.h
+@@ -32,8 +32,13 @@
+ #define ZVFS_O_NONBLOCK 0x4000
+
+ #define ZVFS_F_DUPFD 0
++#define ZVFS_F_GETFD 1
++#define ZVFS_F_SETFD 2
+ #define ZVFS_F_GETFL 3
+ #define ZVFS_F_SETFL 4
++#define ZVFS_F_DUPFD_CLOEXEC 10
++
++#define ZVFS_FD_CLOEXEC 1
+
+ /* File mode bits */
+ #define ZVFS_MODE_IFMT   0170000
+diff --git a/include/zephyr/sys/internal/fdtable_priv.h b/include/zephyr/sys/internal/fdtable_priv.h
+index f0ce28ba..0c20b85c 100644
+--- a/include/zephyr/sys/internal/fdtable_priv.h
++++ b/include/zephyr/sys/internal/fdtable_priv.h
+@@ -24,6 +24,7 @@ struct fd_entry {
+ 	struct k_condvar cond;
+ 	size_t offset;
+ 	uint32_t mode;
++	uint8_t fd_flags;
+ };
+
+ struct fd_entry *zvfs_fd_entry_get(int fd);
+diff --git a/lib/os/zvfs/zvfs_fdtable.c b/lib/os/zvfs/zvfs_fdtable.c
+index 4c5d3380..188614a0 100644
+--- a/lib/os/zvfs/zvfs_fdtable.c
++++ b/lib/os/zvfs/zvfs_fdtable.c
+@@ -192,6 +192,7 @@ int zvfs_dup_entry_locked(struct fd_entry *src, int newfd)
+ 	fdtable[newfd].vtable = src->vtable;
+ 	fdtable[newfd].mode = src->mode;
+ 	fdtable[newfd].offset = src->offset;
++	fdtable[newfd].fd_flags = 0;
+ 	k_mutex_init(&fdtable[newfd].lock);
+ 	k_condvar_init(&fdtable[newfd].cond);
+
+@@ -401,6 +402,7 @@ int zvfs_reserve_fd(void)
+ 		fdtable[fd].obj = NULL;
+ 		fdtable[fd].vtable = NULL;
+ 		fdtable[fd].offset = 0;
++		fdtable[fd].fd_flags = 0;
+ 		k_mutex_init(&fdtable[fd].lock);
+ 		k_condvar_init(&fdtable[fd].cond);
+ 	}
+diff --git a/include/zephyr/sys/zvfs.h b/include/zephyr/sys/zvfs.h
+index ab4d985f..7bc973b6 100644
+--- a/include/zephyr/sys/zvfs.h
++++ b/include/zephyr/sys/zvfs.h
+@@ -102,15 +102,17 @@ __syscall int zvfs_ftruncate(int fd, off_t length);
+ /**
+  * @brief Dispatch a control request on a file descriptor.
+  *
+- * Callers marshal arguments before dispatching through the fd vtable.
++ * @p arg is command-specific: an @c int for most requests, or a pointer to
++ * @ref zvfs_flock for record-lock commands. Commands and flag values use ZVFS
++ * constants (see @ref fdtable.h), not POSIX @c fcntl.h values.
+  *
+  * @param fd File descriptor.
+- * @param cmd Control command.
+- * @param args Command arguments.
++ * @param cmd ZVFS control command.
++ * @param arg Command argument.
+  *
+  * @return Command-specific result, or -1 on error (errno is set).
+  */
+-int zvfs_fcntl(int fd, int cmd, va_list args);
++__syscall int zvfs_fcntl(int fd, int cmd, uintptr_t arg);
+
+ /**
+  * @brief Duplicate a file descriptor to the lowest available slot >= minfd.
+diff --git a/lib/os/zvfs/zvfs_fcntl.c b/lib/os/zvfs/zvfs_fcntl.c
+index fb4078f4..0d6e60b4 100644
+--- a/lib/os/zvfs/zvfs_fcntl.c
++++ b/lib/os/zvfs/zvfs_fcntl.c
+@@ -1,14 +1,17 @@
+ /*
+  * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++ * Copyright (c) 2024, Friedt Professional Engineering Services, Inc.
+  * SPDX-License-Identifier: Apache-2.0
+  */
+
++#include <errno.h>
+ #include <stdarg.h>
+
+ #include <zephyr/sys/fdtable.h>
+ #include <zephyr/sys/internal/fdtable_priv.h>
++#include <zephyr/internal/syscall_handler.h>
+
+-int zvfs_fcntl(int fd, int cmd, va_list args)
++int z_impl_zvfs_fcntl(int fd, int cmd, uintptr_t arg)
+ {
+ 	struct fd_entry *entry = zvfs_fd_entry_get(fd);
+
+@@ -16,4 +19,80 @@ int zvfs_fcntl(int fd, int cmd, va_list args)
+ 		return -1;
+ 	}
+
+-	return entry->vtable->ioctl(entry->obj, cmd, args);
++	switch (cmd) {
++	case ZVFS_F_GETFD:
++		return entry->fd_flags;
++
++	case ZVFS_F_SETFD:
++		entry->fd_flags = (int)arg & ZVFS_FD_CLOEXEC;
++		return 0;
++
++	case ZVFS_F_DUPFD:
++		return zvfs_dup(fd, (int)arg);
++
++	case ZVFS_F_DUPFD_CLOEXEC: {
++		struct fd_entry *dup_entry;
++		int dupfd;
++
++		dupfd = zvfs_dup(fd, (int)arg);
++		if (dupfd < 0) {
++			return -1;
++		}
++
++		dup_entry = zvfs_fd_entry_get(dupfd);
++		if (dup_entry == NULL) {
++			(void)zvfs_close(dupfd);
++			return -1;
++		}
++
++		dup_entry->fd_flags = ZVFS_FD_CLOEXEC;
++		return dupfd;
++	}
++
++	case ZVFS_F_GETLK:
++	case ZVFS_F_SETLK:
++	case ZVFS_F_SETLKW: {
++		struct zvfs_flock *lock = (struct zvfs_flock *)(uintptr_t)arg;
++
++		if (lock == NULL) {
++			errno = EINVAL;
++			return -1;
++		}
++
++#ifdef CONFIG_ZVFS_FS
++		return zvfs_record_lock_fcntl(entry, cmd, lock);
++#else
++		errno = EOPNOTSUPP;
++		return -1;
++#endif
++	}
++
++	default:
++		return zvfs_fdtable_call_ioctl(entry->vtable, entry->obj, cmd, (int)arg);
++	}
++}
++
++#ifdef CONFIG_USERSPACE
++static int z_vrfy_zvfs_fcntl(int fd, int cmd, uintptr_t arg)
++{
++	if (zvfs_fd_syscall_verify(fd) == NULL) {
++		return -1;
++	}
++
++	switch (cmd) {
++	case ZVFS_F_GETLK:
++		K_OOPS(K_SYSCALL_MEMORY_WRITE((void *)arg, sizeof(struct zvfs_flock)));
++		break;
++	case ZVFS_F_SETLK:
++	case ZVFS_F_SETLKW:
++		K_OOPS(K_SYSCALL_MEMORY_READ((void *)arg, sizeof(struct zvfs_flock)));
++		break;
++	default:
++		break;
++	}
++
++	return z_impl_zvfs_fcntl(fd, cmd, arg);
++}
++
++#include <zephyr/syscalls/zvfs_fcntl_mrsh.c>
++#endif /* CONFIG_USERSPACE */
