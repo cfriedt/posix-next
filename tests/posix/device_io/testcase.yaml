@@ -1,0 +1,35 @@
+common:
+  tags:
+    - posix_device_io
+  min_ram: 128
+  modules:
+    - fatfs
+  platform_key:
+    - arch
+    - simulation
+tests:
+  portability.posix.device_io:
+    filter: not CONFIG_NATIVE_LIBC
+  portability.posix.device_io.minimal:
+    filter: not CONFIG_NATIVE_LIBC
+    extra_configs:
+      - CONFIG_MINIMAL_LIBC=y
+  portability.posix.device_io.newlib:
+    filter: (not CONFIG_NATIVE_LIBC) and (TOOLCHAIN_HAS_NEWLIB == 1)
+    extra_configs:
+      - CONFIG_NEWLIB_LIBC=y
+  portability.posix.device_io.picolibc:
+    tags: picolibc
+    filter: (not CONFIG_NATIVE_LIBC) and CONFIG_PICOLIBC_SUPPORTED
+    extra_configs:
+      - CONFIG_PICOLIBC=y
+  portability.posix.device_io.linux_compat:
+    tags: native
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    filter: CONFIG_NATIVE_LIBC
+    extra_configs:
+      - CONFIG_POSIX_AEP_CHOICE_PSE51=y
+      - CONFIG_POSIX_TEST_LINUX_COMPAT=y
+      - CONFIG_ZVFS_OPEN_MAX=15
