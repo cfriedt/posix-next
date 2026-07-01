@@ -232,7 +232,7 @@ long sysconf(int name)
 	case _SC_MQ_PRIO_MAX:
 		return _POSIX_MQ_PRIO_MAX;
 	case _SC_OPEN_MAX:
-		return CONFIG_POSIX_OPEN_MAX;
+		return OPEN_MAX;
 	case _SC_PAGE_SIZE:
 		return CONFIG_POSIX_PAGE_SIZE;
 	case _SC_THREAD_DESTRUCTOR_ITERATIONS:

@@ -165,8 +165,8 @@ extern "C" {
 struct flock {
 	short l_type;   /**< Lock type: F_RDLCK, F_WRLCK, or F_UNLCK. */
 	short l_whence; /**< How to interpret l_start: SEEK_SET, SEEK_CUR, SEEK_END. */
-	long l_start;   /**< Byte offset to start of locked region. */
-	long l_len;     /**< Length of locked region in bytes (0 = to EOF). */
+	off_t l_start;  /**< Byte offset to start of locked region. */
+	off_t l_len;    /**< Length of locked region in bytes (0 = to EOF). */
 	pid_t l_pid;    /**< PID of the process holding the lock (F_GETLK output only). */
 };
 #define _FLOCK_DECLARED

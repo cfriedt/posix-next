@@ -317,7 +317,7 @@ enum {
 #define __z_posix_sysconf_SC_MQ_OPEN_MAX                                                           \
 	COND_CODE_1(CONFIG_POSIX_MESSAGE_PASSING, (CONFIG_POSIX_MQ_OPEN_MAX), (0))
 #define __z_posix_sysconf_SC_MQ_PRIO_MAX                  _POSIX_MQ_PRIO_MAX
-#define __z_posix_sysconf_SC_OPEN_MAX                     CONFIG_POSIX_OPEN_MAX
+#define __z_posix_sysconf_SC_OPEN_MAX                     OPEN_MAX
 #define __z_posix_sysconf_SC_PAGE_SIZE                    CONFIG_POSIX_PAGE_SIZE
 #define __z_posix_sysconf_SC_PAGESIZE                     CONFIG_POSIX_PAGE_SIZE
 #define __z_posix_sysconf_SC_THREAD_DESTRUCTOR_ITERATIONS PTHREAD_DESTRUCTOR_ITERATIONS
