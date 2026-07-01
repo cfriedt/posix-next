@@ -950,3 +950,35 @@ patches:
       a <sys/utime.h> that defines struct utimbuf but neither declares
       utime() nor includes <time.h> for time_t, so the shim supplies both
       around an include_next.
+  - path: zephyr/libc-sys-select-h.patch
+    sha256sum: f18399645832efee34dc944f88d7f7e96f9d859f11556342dddea569e76129c0
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-06-30
+    upstreamable: true
+    comments: |
+      Replace picolibc and newlib <sys/select.h> with Zephyr-local headers that
+      mirror zvfs_fd_set and declare FD_CLR(), FD_ISSET(), FD_SET(), and FD_ZERO()
+      as functions instead of libc macros over an incompatible bit-array fd_set.
+  - path: zephyr/minimal-libc-fread.patch
+    sha256sum: 74158863087981a2854e59eeb90390c4cf26129f90848c1da4343d2e2ee10840
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-06-30
+    upstreamable: true
+    comments: |
+      Implement fread() for minimal libc on ZVFS-backed FILE streams, mirroring the
+      existing fwrite() path. Adds zephyr_fread() syscall hook for userspace builds.
+  - path: zephyr/zvfs-pread-pwrite-regular-files.patch
+    sha256sum: 326074ba8d5ab39bba9ddb7c46b79d6d5498bee456d0d2b9ecc65b16cd799d9c
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-01
+    upstreamable: true
+    comments: |
+      Allow pread() and pwrite() on ZVFS-backed regular files via the existing
+      fs read_offs and write_offs vtable methods, restoring the underlying file
+      position after offset I/O so lseek(SEEK_CUR) is unchanged.
