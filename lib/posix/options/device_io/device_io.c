@@ -18,25 +18,21 @@
 #include <zephyr/sys/zvfs_libc.h>
 #include <zephyr/sys/zvfs_fs.h>
 
-#undef FD_CLR
 void FD_CLR(int fd, struct zvfs_fd_set *fdset)
 {
 	ZVFS_FD_CLR(fd, fdset);
 }
 
-#undef FD_ISSET
 int FD_ISSET(int fd, struct zvfs_fd_set *fdset)
 {
 	return ZVFS_FD_ISSET(fd, fdset);
 }
 
-#undef FD_SET
 void FD_SET(int fd, struct zvfs_fd_set *fdset)
 {
 	ZVFS_FD_SET(fd, fdset);
 }
 
-#undef FD_ZERO
 void FD_ZERO(struct zvfs_fd_set *fdset)
 {
 	ZVFS_FD_ZERO(fdset);
