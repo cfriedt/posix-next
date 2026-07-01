@@ -22,6 +22,7 @@
 #include <zephyr/sys/dlist.h>
 #include <zephyr/sys/fdtable.h>
 #include <zephyr/sys/hash_function.h>
+#include <zephyr/sys/internal/fdtable_priv.h>
 
 #define _page_size COND_CODE_1(CONFIG_MMU, (CONFIG_MMU_PAGE_SIZE), (CONFIG_POSIX_PAGE_SIZE))
 
@@ -32,7 +33,6 @@ static sys_dlist_t shm_list = SYS_DLIST_STATIC_INIT(&shm_list);
 struct shm_obj {
 	uint8_t *mem;
 	sys_dnode_t node;
-	size_t refs;
 	size_t size;
 	uint32_t hash;
 	bool unlinked: 1;
@@ -242,8 +242,11 @@ static int shm_close(void *obj)
 {
 	struct shm_obj *shm = obj;
 
-	shm->refs -= (shm->refs > 0) ? 1 : 0;
-	if (shm->unlinked && (shm->refs == 0)) {
+	/*
+	 * zvfs_close() invokes this only when the last fd for @obj is closed.
+	 * Drop the object if it was already unlinked.
+	 */
+	if (shm->unlinked) {
 		shm_obj_remove(shm);
 	}
 
@@ -342,6 +345,7 @@ int shm_open(const char *name, int oflag, mode_t mode)
 	shm = shm_obj_find(key);
 	if ((shm != NULL) && shm->unlinked) {
 		/* we cannot open a shm object that has already been unlinked */
+		zvfs_free_fd(fd);
 		errno = EACCES;
 		return -1;
 	}
@@ -365,11 +369,11 @@ int shm_open(const char *name, int oflag, mode_t mode)
 			shm_obj_add(shm);
 		}
 	} else if (shm == NULL) {
+		zvfs_free_fd(fd);
 		errno = ENOENT;
 		return -1;
 	}
 
-	++shm->refs;
 	zvfs_finalize_typed_fd(fd, shm, &shm_vtable, ZVFS_MODE_IFSHM);
 
 	return fd;
@@ -394,7 +398,7 @@ int shm_unlink(const char *name)
 	}
 
 	shm->unlinked = true;
-	if (shm->refs == 0) {
+	if (zvfs_fd_obj_refcount(shm) == 0) {
 		shm_obj_remove(shm);
 	}
 
