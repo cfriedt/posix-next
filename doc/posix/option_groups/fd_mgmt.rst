@@ -6,15 +6,15 @@ POSIX_FD_MGMT
 Enable this option group with :kconfig:option:`CONFIG_POSIX_FD_MGMT`.
 
 .. note::
-   When using Newlib, Picolibc, or other C libraries conforming to the ISO C Standard, the
+   When using Newlib, Picolibc, or other C libraries conforming to the C89 Standard, the
    stdio components of the ``POSIX_FD_MGMT`` Option Group are considered supported.
 
 .. csv-table:: POSIX_FD_MGMT
    :header: API, Supported
    :widths: 50,10
 
-    :c:func:`dup`,
-    :c:func:`dup2`,
+    :c:func:`dup`,yes
+    :c:func:`dup2`,yes
     :c:func:`fcntl`,yes
     :c:func:`fgetpos`,yes
     :c:func:`fseek`,yes

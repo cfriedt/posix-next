@@ -14,5 +14,13 @@ zephyr_library_compile_options(-U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
 zephyr_library_compile_options_ifdef(CONFIG_XSI -U_XOPEN_SOURCE -D_XOPEN_SOURCE=700)
 
 if(NOT CONFIG_TC_PROVIDES_POSIX_FD_MGMT)
-  zephyr_library_sources(fd_mgmt.c)
+  zephyr_library_sources(
+    dup.c
+    dup2.c
+    fcntl.c
+    fseeko.c
+    ftello.c
+    ftruncate.c
+    lseek.c
+  )
 endif()

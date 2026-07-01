@@ -774,3 +774,57 @@ patches:
       Allow pread() and pwrite() on ZVFS-backed regular files via the existing
       fs read_offs and write_offs vtable methods, restoring the underlying file
       position after offset I/O so lseek(SEEK_CUR) is unchanged.
+  - path: picolibc/tinystdio-fgetpos-fsetpos.patch
+    sha256sum: c223181e6b7c19159881cfe9c69e5bf0d880ce69e760835473f28db485ef2e87
+    module: picolibc
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-08
+    upstreamable: true
+    comments: |
+      Add fgetpos.c, fsetpos.c, and flockfile_init.c to the picolibc tinystdio CMake
+      build (already listed in meson.build). Without these, native_sim resolves
+      fgetpos()/fsetpos() from host glibc against picolibc FILE objects and hangs.
+      Also expose the tinystdio source directory for stdio_private.h includes.
+  - path: zephyr/minimal-libc-fseek.patch
+    sha256sum: 4d39aab5b2420d9453093b88b56145a453357af71525684c9d66b95d2374815f
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-04
+    upstreamable: true
+    comments: |
+      Implement C89 stdio positioning for minimal libc on ZVFS-backed FILE streams:
+      clearerr(), fgetpos(), fseek(), fsetpos(), ftell(), and rewind(). Required for
+      POSIX_FD_MGMT when CONFIG_MINIMAL_LIBC is selected (fseeko()/ftello() live in
+      posix-next fd_mgmt and delegate to fileno()/lseek()).
+  - path: zephyr/zvfs-dup.patch
+    sha256sum: d941dda49b2997d5f73d43a62451c84cc5fc8ac712805becb8b716267e400ae2
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-06-30
+    upstreamable: true
+    comments: |
+      Add zvfs_dup() and zvfs_dup2() with F_DUPFD fcntl support and refcount-aware
+      close when multiple file descriptors share the same underlying object.
+  - path: zephyr/zvfs-fcntl-getfd-setfd.patch
+    sha256sum: 555989baaaa6f33a2502d34845c1d792fae8c62394e01cacb6a4b13daada6c28
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-06-30
+    upstreamable: true
+    comments: |
+      Add per-fd descriptor flags to the ZVFS fd table and implement fcntl()
+      F_GETFD, F_SETFD, and F_DUPFD_CLOEXEC.
+  - path: zephyr/zvfs-fcntl-record-lock.patch
+    sha256sum: 0f5b31f7f0841860ecfc70c8399d11d160bb14ba09da27bd8f0ac7f081bd4077
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-06-30
+    upstreamable: true
+    comments: |
+      Implement POSIX advisory record locking via fcntl() F_GETLK, F_SETLK, and
+      F_SETLKW for ZVFS-backed regular files, with libc fcntl command normalization.
