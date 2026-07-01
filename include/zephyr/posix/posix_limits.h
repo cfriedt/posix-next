@@ -104,7 +104,14 @@
 #define MQ_OPEN_MAX \
 	COND_CODE_1(CONFIG_POSIX_MESSAGE_PASSING, (CONFIG_POSIX_MQ_OPEN_MAX), (0))
 #define MQ_PRIO_MAX                   _POSIX_MQ_PRIO_MAX
+/* the descriptor table: per process when sized, else the system-wide one CMake sizes */
+#if defined(CONFIG_ZVFS_PROC_OPEN_MAX) && (CONFIG_ZVFS_PROC_OPEN_MAX > 0)
+#define OPEN_MAX                      CONFIG_ZVFS_PROC_OPEN_MAX
+#elif defined(ZVFS_OPEN_SIZE)
+#define OPEN_MAX                      ZVFS_OPEN_SIZE
+#else
 #define OPEN_MAX                      CONFIG_POSIX_OPEN_MAX
+#endif
 #define PAGE_SIZE                     CONFIG_POSIX_PAGE_SIZE
 #define PAGESIZE                      CONFIG_POSIX_PAGE_SIZE
 #define PATH_MAX                      _POSIX_PATH_MAX

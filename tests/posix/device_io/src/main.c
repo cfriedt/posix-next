@@ -17,6 +17,7 @@
 
 #include <zephyr/ztest.h>
 
+#include "../../common/linux_compat_test.h"
 #include "test_fs.h"
 
 static void cleanup_test_file(void)
