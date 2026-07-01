@@ -1,0 +1,107 @@
+diff --git a/include/zephyr/sys/fdtable.h b/include/zephyr/sys/fdtable.h
+--- a/include/zephyr/sys/fdtable.h
++++ b/include/zephyr/sys/fdtable.h
+@@ -32,8 +32,13 @@
+ #define ZVFS_O_NONBLOCK 0x4000
+ 
+ #define ZVFS_F_DUPFD 0
++#define ZVFS_F_GETFD 1
++#define ZVFS_F_SETFD 2
+ #define ZVFS_F_GETFL 3
+ #define ZVFS_F_SETFL 4
++#define ZVFS_F_DUPFD_CLOEXEC 10
++
++#define ZVFS_FD_CLOEXEC 1
+ 
+ /* File mode bits */
+ #define ZVFS_MODE_IFMT   0170000
+diff --git a/include/zephyr/sys/internal/fdtable_priv.h b/include/zephyr/sys/internal/fdtable_priv.h
+--- a/include/zephyr/sys/internal/fdtable_priv.h
++++ b/include/zephyr/sys/internal/fdtable_priv.h
+@@ -24,6 +24,7 @@
+ 	struct k_condvar cond;
+ 	size_t offset;
+ 	uint32_t mode;
++	uint8_t fd_flags;
+ };
+ 
+ struct fd_entry *zvfs_fd_entry_get(int fd);
+diff --git a/lib/os/zvfs/zvfs_fcntl.c b/lib/os/zvfs/zvfs_fcntl.c
+--- a/lib/os/zvfs/zvfs_fcntl.c
++++ b/lib/os/zvfs/zvfs_fcntl.c
+@@ -4,6 +4,7 @@
+  * SPDX-License-Identifier: Apache-2.0
+  */
+ 
++#include <errno.h>
+ #include <stdarg.h>
+ 
+ #include <zephyr/sys/fdtable.h>
+@@ -17,13 +18,46 @@
+ 		return -1;
+ 	}
+ 
+-	if (cmd == ZVFS_F_DUPFD) {
++	switch (cmd) {
++	case ZVFS_F_GETFD:
++		return entry->fd_flags;
++
++	case ZVFS_F_SETFD: {
++		int flags = va_arg(args, int);
++
++		entry->fd_flags = flags & ZVFS_FD_CLOEXEC;
++		return 0;
++	}
++
++	case ZVFS_F_DUPFD: {
+ 		int minfd = va_arg(args, int);
+ 
+ 		return zvfs_dup(fd, minfd);
+ 	}
+ 
+-	return entry->vtable->ioctl(entry->obj, cmd, args);
++	case ZVFS_F_DUPFD_CLOEXEC: {
++		int minfd = va_arg(args, int);
++		struct fd_entry *dup_entry;
++		int dupfd;
++
++		dupfd = zvfs_dup(fd, minfd);
++		if (dupfd < 0) {
++			return -1;
++		}
++
++		dup_entry = zvfs_fd_entry_get(dupfd);
++		if (dup_entry == NULL) {
++			(void)zvfs_close(dupfd);
++			return -1;
++		}
++
++		dup_entry->fd_flags = ZVFS_FD_CLOEXEC;
++		return dupfd;
++	}
++
++	default:
++		return entry->vtable->ioctl(entry->obj, cmd, args);
++	}
+ }
+ 
+ int zvfs_ioctl(int fd, unsigned long request, va_list args)
+diff --git a/lib/os/zvfs/zvfs_fdtable.c b/lib/os/zvfs/zvfs_fdtable.c
+--- a/lib/os/zvfs/zvfs_fdtable.c
++++ b/lib/os/zvfs/zvfs_fdtable.c
+@@ -163,6 +163,7 @@
+ 	fdtable[newfd].vtable = src->vtable;
+ 	fdtable[newfd].mode = src->mode;
+ 	fdtable[newfd].offset = src->offset;
++	fdtable[newfd].fd_flags = 0;
+ 	k_mutex_init(&fdtable[newfd].lock);
+ 	k_condvar_init(&fdtable[newfd].cond);
+ 
+@@ -436,6 +437,7 @@
+ 		fdtable[fd].obj = NULL;
+ 		fdtable[fd].vtable = NULL;
+ 		fdtable[fd].offset = 0;
++		fdtable[fd].fd_flags = 0;
+ 		k_mutex_init(&fdtable[fd].lock);
+ 		k_condvar_init(&fdtable[fd].cond);
+ 	}

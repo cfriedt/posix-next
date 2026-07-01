@@ -1,0 +1,253 @@
+diff --git a/include/zephyr/sys/internal/fdtable_priv.h b/include/zephyr/sys/internal/fdtable_priv.h
+--- a/include/zephyr/sys/internal/fdtable_priv.h
++++ b/include/zephyr/sys/internal/fdtable_priv.h
+@@ -29,6 +29,10 @@
+ struct fd_entry *zvfs_fd_entry_get(int fd);
+ struct fd_entry *zvfs_fd_syscall_verify(int fd);
+ 
++int zvfs_fd_obj_refcount(void *obj);
++
++void zvfs_fd_offset_set(struct fd_entry *entry, size_t offset);
++
+ bool supports_pread_pwrite(uint32_t mode);
+ ssize_t zvfs_rw_unlocked(int fd, void *buf, size_t sz, bool is_write, const size_t *from_offset);
+ 
+diff --git a/include/zephyr/sys/zvfs.h b/include/zephyr/sys/zvfs.h
+--- a/include/zephyr/sys/zvfs.h
++++ b/include/zephyr/sys/zvfs.h
+@@ -113,6 +113,26 @@
+ int zvfs_fcntl(int fd, int cmd, va_list args);
+ 
+ /**
++ * @brief Duplicate a file descriptor to the lowest available slot >= minfd.
++ *
++ * @param fd File descriptor to duplicate.
++ * @param minfd Minimum value for the new descriptor.
++ *
++ * @return New file descriptor on success, or -1 on error (errno is set).
++ */
++int zvfs_dup(int fd, int minfd);
++
++/**
++ * @brief Duplicate a file descriptor to a specific descriptor number.
++ *
++ * @param fd File descriptor to duplicate.
++ * @param newfd Target descriptor number.
++ *
++ * @return @p newfd on success, or -1 on error (errno is set).
++ */
++int zvfs_dup2(int fd, int newfd);
++
++/**
+  * @brief Dispatch an I/O control request on a file descriptor.
+  *
+  * @param fd File descriptor.
+diff --git a/lib/os/zvfs/zvfs_close.c b/lib/os/zvfs/zvfs_close.c
+--- a/lib/os/zvfs/zvfs_close.c
++++ b/lib/os/zvfs/zvfs_close.c
+@@ -1,5 +1,6 @@
+ /*
+  * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++ * Copyright (c) 2024, Friedt Professional Engineering Services, Inc.
+  * SPDX-License-Identifier: Apache-2.0
+  */
+ 
+@@ -18,7 +19,8 @@
+ 	}
+ 
+ 	(void)k_mutex_lock(&entry->lock, K_FOREVER);
+-	if (entry->vtable->close != NULL) {
++	if (entry->vtable->close != NULL && entry->obj != NULL &&
++	    zvfs_fd_obj_refcount(entry->obj) <= 1) {
+ 		if (entry->mode & ZVFS_MODE_IFSOCK) {
+ 			res = entry->vtable->close2(entry->obj, fd);
+ 		} else {
+diff --git a/lib/os/zvfs/zvfs_fcntl.c b/lib/os/zvfs/zvfs_fcntl.c
+--- a/lib/os/zvfs/zvfs_fcntl.c
++++ b/lib/os/zvfs/zvfs_fcntl.c
+@@ -1,5 +1,6 @@
+ /*
+  * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++ * Copyright (c) 2024, Friedt Professional Engineering Services, Inc.
+  * SPDX-License-Identifier: Apache-2.0
+  */
+ 
+@@ -16,6 +17,12 @@
+ 		return -1;
+ 	}
+ 
++	if (cmd == ZVFS_F_DUPFD) {
++		int minfd = va_arg(args, int);
++
++		return zvfs_dup(fd, minfd);
++	}
++
+ 	return entry->vtable->ioctl(entry->obj, cmd, args);
+ }
+ 
+diff --git a/lib/os/zvfs/zvfs_fdtable.c b/lib/os/zvfs/zvfs_fdtable.c
+--- a/lib/os/zvfs/zvfs_fdtable.c
++++ b/lib/os/zvfs/zvfs_fdtable.c
+@@ -101,6 +101,138 @@
+ 	return -1;
+ }
+ 
++static int _find_fd_entry_at_or_above(int minfd)
++{
++	int fd;
++
++	if (minfd < 0) {
++		errno = EINVAL;
++		return -1;
++	}
++
++	for (fd = minfd; fd < ARRAY_SIZE(fdtable); fd++) {
++		if (!atomic_get(&fdtable[fd].refcount)) {
++			return fd;
++		}
++	}
++
++	errno = EMFILE;
++	return -1;
++}
++
++int zvfs_fd_obj_refcount(void *obj)
++{
++	int count = 0;
++
++	if (obj == NULL) {
++		return 0;
++	}
++
++	for (int fd = 0; fd < ARRAY_SIZE(fdtable); fd++) {
++		if (atomic_get(&fdtable[fd].refcount) && fdtable[fd].obj == obj) {
++			count++;
++		}
++	}
++
++	return count;
++}
++
++void zvfs_fd_offset_set(struct fd_entry *entry, size_t offset)
++{
++	void *obj = entry->obj;
++
++	if (obj == NULL) {
++		entry->offset = offset;
++		return;
++	}
++
++	for (int fd = 0; fd < ARRAY_SIZE(fdtable); fd++) {
++		if (atomic_get(&fdtable[fd].refcount) && fdtable[fd].obj == obj) {
++			fdtable[fd].offset = offset;
++		}
++	}
++}
++
++static int zvfs_dup_entry_locked(struct fd_entry *src, int newfd)
++{
++#if defined(CONFIG_USERSPACE)
++	k_object_recycle(&fdtable[newfd]);
++#endif
++	(void)z_fd_ref(newfd);
++	fdtable[newfd].obj = src->obj;
++	fdtable[newfd].vtable = src->vtable;
++	fdtable[newfd].mode = src->mode;
++	fdtable[newfd].offset = src->offset;
++	k_mutex_init(&fdtable[newfd].lock);
++	k_condvar_init(&fdtable[newfd].cond);
++
++	return newfd;
++}
++
++int zvfs_dup(int oldfd, int minfd)
++{
++	struct fd_entry *src = zvfs_fd_entry_get(oldfd);
++	int fd;
++
++	if (src == NULL) {
++		return -1;
++	}
++
++	(void)k_mutex_lock(&fdtable_lock, K_FOREVER);
++
++	fd = _find_fd_entry_at_or_above(minfd);
++	if (fd >= 0) {
++		fd = zvfs_dup_entry_locked(src, fd);
++	}
++
++	k_mutex_unlock(&fdtable_lock);
++
++	return fd;
++}
++
++int zvfs_dup2(int oldfd, int newfd)
++{
++	struct fd_entry *src;
++
++	if (oldfd == newfd) {
++		if (zvfs_fd_entry_get(oldfd) == NULL) {
++			return -1;
++		}
++
++		return newfd;
++	}
++
++	src = zvfs_fd_entry_get(oldfd);
++	if (src == NULL) {
++		return -1;
++	}
++
++	if (newfd < 0 || newfd >= ARRAY_SIZE(fdtable)) {
++		errno = EBADF;
++		return -1;
++	}
++
++	if (zvfs_fd_entry_get(newfd) != NULL) {
++		if (zvfs_close(newfd) < 0) {
++			return -1;
++		}
++	}
++
++	(void)k_mutex_lock(&fdtable_lock, K_FOREVER);
++
++	if (atomic_get(&fdtable[newfd].refcount)) {
++		errno = EBADF;
++		k_mutex_unlock(&fdtable_lock);
++		return -1;
++	}
++
++	newfd = zvfs_dup_entry_locked(src, newfd);
++
++	k_mutex_unlock(&fdtable_lock);
++
++	return newfd;
++}
++
+ struct fd_entry *zvfs_fd_entry_get(int fd)
+ {
+ 	if ((fd < 0) || (fd >= ARRAY_SIZE(fdtable))) {
+diff --git a/lib/os/zvfs/zvfs_rw.c b/lib/os/zvfs/zvfs_rw.c
+--- a/lib/os/zvfs/zvfs_rw.c
++++ b/lib/os/zvfs/zvfs_rw.c
+@@ -51,7 +51,7 @@
+ 	}
+ 
+ 	if (res > 0 && from_offset == NULL) {
+-		entry->offset += res;
++		zvfs_fd_offset_set(entry, entry->offset + (size_t)res);
+ 	}
+ 
+ 	return res;
+diff --git a/lib/os/zvfs/zvfs_lseek.c b/lib/os/zvfs/zvfs_lseek.c
+--- a/lib/os/zvfs/zvfs_lseek.c
++++ b/lib/os/zvfs/zvfs_lseek.c
+@@ -24,7 +24,7 @@
+ 		case ZVFS_MODE_IFBLK:
+ 		case ZVFS_MODE_IFSHM:
+ 		case ZVFS_MODE_IFREG:
+-			entry->offset = res;
++			zvfs_fd_offset_set(entry, (size_t)res);
+ 			break;
+ 		default:
+ 			break;
