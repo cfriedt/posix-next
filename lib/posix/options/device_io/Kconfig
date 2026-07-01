@@ -11,8 +11,8 @@ config POSIX_DEVICE_IO
 	select ZVFS_SELECT
 	help
 	  Select 'y' here and Zephyr will provide an implementation of the POSIX_DEVICE_IO Option
-	  Group such as FD_CLR(), FD_ISSET(), FD_SET(), FD_ZERO(), close(), fdopen(), fileno(), open(),
-	  poll(), pread(), pselect(), pwrite(), read(), select(), and write().
+	  Group such as FD_CLR(), FD_ISSET(), FD_SET(), FD_ZERO(), close(), fdopen(), fileno(),
+	  open(), poll(), pread(), pselect(), pwrite(), read(), select(), and write().
 
 if POSIX_DEVICE_IO
 
@@ -53,10 +53,11 @@ endif # POSIX_DEVICE_IO
 
 config POSIX_OPEN_MAX
 	int
-	default ZVFS_OPEN_ADD_SIZE_STDIO if ZVFS
-	default 20
+	default ZVFS_OPEN_MAX if ZVFS
 	help
-	  The maximum number of files that a process can have open at one time. This option is not
-	  directly user-configurable but can be adjusted via CONFIG_POSIX_OPEN_MAX.
+	  The maximum number of files that a process can have open at one time when no
+	  ZVFS descriptor table sizes it. With ZVFS, OPEN_MAX and sysconf(_SC_OPEN_MAX)
+	  report the table size: the system-wide table CMake sizes from ZVFS_OPEN_MAX and
+	  the ZVFS_OPEN_ADD_SIZE_* requests.
 
 endmenu
