@@ -9,6 +9,8 @@
 
 #include <zephyr/ztest.h>
 
+#include "linux_compat_test.h"
+
 #define M_HOME "/home/zephyr"
 #define M_UID  "1000"
 #define M_PWD  "/tmp"
@@ -19,9 +21,11 @@
 #define RESET_ENVIRON(_handle, _key, _val)                                                         \
 	snprintf(_handle, ARRAY_SIZE(_handle), "%s=%s", _key, _val)
 
+#if !defined(CONFIG_NATIVE_LIBC)
 #if defined(CONFIG_NEWLIB_LIBC) || defined(CONFIG_PICOLIBC)
 /* newlib headers seem to be missing this */
 int getenv_r(const char *name, char *val, size_t len);
+#endif
 #endif
 
 extern char **environ;
@@ -35,7 +39,10 @@ static char *environ_for_test[] = {home, uid, pwd, NULL};
 
 ZTEST(posix_single_process, test_getenv)
 {
-	zassert_equal(getenv(NULL), NULL);
+	IF_NOT_NATIVE_LIBC({
+		/* avoid glib c non-NULL warnings */
+		zassert_equal(getenv(NULL), NULL);
+	})
 	zassert_equal(getenv(""), NULL);
 	zassert_equal(getenv("invalid=key"), NULL);
 	zassert_equal(getenv("HOME=" M_HOME), NULL);
@@ -46,6 +53,7 @@ ZTEST(posix_single_process, test_getenv)
 	zassert_mem_equal(getenv("PWD"), M_PWD, strlen(M_PWD) + 1);
 }
 
+#ifndef CONFIG_NATIVE_LIBC
 ZTEST(posix_single_process, test_getenv_r)
 {
 	static char buf[16];
@@ -84,15 +92,33 @@ ZTEST(posix_single_process, test_getenv_r)
 			      args[i].name, args[i].buf, args[i].size, errno, exp_errno[i]);
 	}
 
+	errno = 0;
+	zassert_equal(getenv_r("NO_SUCH_VAR", buf, sizeof(buf)), -1);
+	zassert_equal(errno, ENOENT);
+
+	errno = 0;
+	zassert_equal(getenv_r("HOME", buf, 2), -1);
+	zassert_equal(errno, ERANGE);
+
+	zassert_ok(getenv_r("HOME", buf, sizeof(buf)));
+	zassert_mem_equal(buf, M_HOME, strlen(M_HOME) + 1);
+
 	zassert_mem_equal(getenv("HOME"), M_HOME, strlen(M_HOME) + 1);
 	zassert_mem_equal(getenv("UID"), M_UID, strlen(M_UID) + 1);
 	zassert_mem_equal(getenv("PWD"), M_PWD, strlen(M_PWD) + 1);
 }
+#endif /* CONFIG_NATIVE_LIBC */
 
 ZTEST(posix_single_process, test_setenv)
 {
-	zassert_equal(setenv(NULL, NULL, 0), -1);
-	zassert_equal(errno, EINVAL);
+	IF_NOT_NATIVE_LIBC({
+		/* avoid glib c non-NULL warnings */
+		zassert_equal(setenv(NULL, NULL, 0), -1);
+		zassert_equal(errno, EINVAL);
+
+		zassert_equal(setenv("HOME", NULL, 0), -1);
+		zassert_equal(errno, EINVAL);
+	})
 
 	/*
 	 * bug in picolibc / newlib
@@ -115,9 +141,11 @@ ZTEST(posix_single_process, test_setenv)
 
 ZTEST(posix_single_process, test_unsetenv)
 {
-	/* not hardened / application should fault */
-	zassert_equal(unsetenv(NULL), -1);
-	zassert_equal(errno, EINVAL);
+	IF_NOT_NATIVE_LIBC({
+		/* not hardened / application should fault */
+		zassert_equal(unsetenv(NULL), -1);
+		zassert_equal(errno, EINVAL);
+	})
 
 	errno = 0;
 	/* bug in picolibc / newlib */
@@ -126,6 +154,8 @@ ZTEST(posix_single_process, test_unsetenv)
 
 	zassert_equal(unsetenv("invalid=key"), -1);
 	zassert_equal(errno, EINVAL);
+
+	zassert_ok(unsetenv("NO_SUCH_VAR"));
 
 	/* restore original environ */
 	environ = old_environ;
@@ -136,6 +166,7 @@ ZTEST(posix_single_process, test_unsetenv)
 	zassert_is_null(getenv("HOME"));
 }
 
+#ifndef CONFIG_NATIVE_LIBC
 ZTEST(posix_single_process, test_watertight)
 {
 	extern size_t posix_env_get_allocated_space(void);
@@ -156,6 +187,7 @@ ZTEST(posix_single_process, test_watertight)
 
 	zassert_equal(posix_env_get_allocated_space(), 0);
 }
+#endif /* CONFIG_NATIVE_LIBC */
 
 void test_env_before(void)
 {
