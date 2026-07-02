@@ -177,7 +177,7 @@ enum {
 	COND_CODE_1(CONFIG_POSIX_CPUTIME, (_POSIX_CPUTIME), (-1L))
 #define __z_posix_sysconf_SC_FSYNC                                                                 \
 	COND_CODE_1(CONFIG_POSIX_FSYNC, (_POSIX_FSYNC), (-1L))
-#define __z_posix_sysconf_SC_IPV6              COND_CODE_1(CONFIG_NET_IPV6, (_POSIX_IPV6), (-1L))
+#define __z_posix_sysconf_SC_IPV6              COND_CODE_1(CONFIG_NET_IPV6, (_POSIX_VERSION), (-1L))
 #define __z_posix_sysconf_SC_JOB_CONTROL       (-1L)
 #define __z_posix_sysconf_SC_MAPPED_FILES                                                          \
 	COND_CODE_1(CONFIG_POSIX_MAPPED_FILES, (_POSIX_MAPPED_FILES), (-1L))
@@ -212,7 +212,8 @@ enum {
 	COND_CODE_1(CONFIG_POSIX_SPIN_LOCKS, (_POSIX_SPIN_LOCKS), (-1L))
 #define __z_posix_sysconf_SC_SPORADIC_SERVER (-1L)
 #define __z_posix_sysconf_SC_SS_REPL_MAX     _POSIX_SS_REPL_MAX
-#define __z_posix_sysconf_SC_SYNCHRONIZED_IO (-1L)
+#define __z_posix_sysconf_SC_SYNCHRONIZED_IO                                                       \
+	COND_CODE_1(CONFIG_POSIX_SYNCHRONIZED_IO, (_POSIX_SYNCHRONIZED_IO), (-1L))
 #define __z_posix_sysconf_SC_THREAD_ATTR_STACKADDR                                                 \
 	COND_CODE_1(CONFIG_POSIX_THREAD_ATTR_STACKADDR, (_POSIX_THREAD_ATTR_STACKADDR), (-1))
 #define __z_posix_sysconf_SC_THREAD_ATTR_STACKSIZE                                                 \
@@ -220,7 +221,8 @@ enum {
 #define __z_posix_sysconf_SC_THREAD_CPUTIME (-1L)
 #define __z_posix_sysconf_SC_THREAD_PRIO_INHERIT                                                   \
 	COND_CODE_1(CONFIG_POSIX_THREAD_PRIO_INHERIT, (_POSIX_THREAD_PRIO_INHERIT), (-1L))
-#define __z_posix_sysconf_SC_THREAD_PRIO_PROTECT        (-1L)
+#define __z_posix_sysconf_SC_THREAD_PRIO_PROTECT                                                   \
+	COND_CODE_1(CONFIG_POSIX_THREAD_PRIO_PROTECT, (_POSIX_THREAD_PRIO_PROTECT), (-1L))
 #define __z_posix_sysconf_SC_THREAD_PRIORITY_SCHEDULING                                            \
 	COND_CODE_1(CONFIG_POSIX_THREAD_PRIORITY_SCHEDULING, (_POSIX_THREAD_PRIORITY_SCHEDULING),  \
 		    (-1L))
