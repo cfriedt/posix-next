@@ -11,4 +11,10 @@ target_sources(app PRIVATE ${app_sources})
 # For setenv() and unsetenv()
 target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
 # For getenv_r() visibility and testing
-target_compile_definitions(app PRIVATE _BSD_SOURCE)
+if(CONFIG_NATIVE_LIBC)
+  target_compile_definitions(app PRIVATE _DEFAULT_SOURCE)
+else()
+  target_compile_definitions(app PRIVATE _BSD_SOURCE)
+endif()
+
+target_include_directories(app PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../common)
