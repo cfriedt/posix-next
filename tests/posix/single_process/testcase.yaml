@@ -1,19 +1,15 @@
 common:
-  filter: not CONFIG_NATIVE_LIBC
   tags:
     - posix_single_process
   # 1 tier0 platform per supported architecture
   platform_key:
     - arch
     - simulation
-  integration_platforms:
-    - qemu_riscv64
   min_flash: 64
   min_ram: 32
 tests:
   portability.posix.single_process:
-    extra_configs:
-      - CONFIG_COMMON_LIBC_MALLOC_ARENA_SIZE=256
+    filter: not CONFIG_NATIVE_LIBC
   portability.posix.single_process.armclang_std_libc:
     toolchain_allow: armclang
     extra_configs:
@@ -23,15 +19,38 @@ tests:
     extra_configs:
       - CONFIG_ARCMWDT_LIBC=y
   portability.posix.single_process.minimal:
+    filter: not CONFIG_NATIVE_LIBC
     extra_configs:
       - CONFIG_MINIMAL_LIBC=y
       - CONFIG_COMMON_LIBC_MALLOC_ARENA_SIZE=256
   portability.posix.single_process.newlib:
-    filter: TOOLCHAIN_HAS_NEWLIB == 1
+    filter: (not CONFIG_NATIVE_LIBC) and (TOOLCHAIN_HAS_NEWLIB == 1)
     extra_configs:
       - CONFIG_NEWLIB_LIBC=y
   portability.posix.single_process.picolibc:
     tags: picolibc
-    filter: CONFIG_PICOLIBC_SUPPORTED
+    filter: (not CONFIG_NATIVE_LIBC) and CONFIG_PICOLIBC_SUPPORTED
     extra_configs:
       - CONFIG_PICOLIBC=y
+  portability.posix.single_process.hostname:
+    filter: not CONFIG_NATIVE_LIBC
+    # This can work for any platform with networking support. It is only exercised on
+    # native_sim because it is known to have have networking support.
+    platform_allow:
+      - native_sim
+    integration_platforms:
+      - native_sim
+    extra_configs:
+      - CONFIG_NET_HOSTNAME_ENABLE=y
+      - CONFIG_NETWORKING=y
+      - CONFIG_COMMON_LIBC_MALLOC_ARENA_SIZE=256
+  portability.posix.single_process.linux_compat:
+    tags: native
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    filter: CONFIG_NATIVE_LIBC
+    extra_configs:
+      - CONFIG_POSIX_TEST_LINUX_COMPAT=y
+      - CONFIG_ZVFS_OPEN_MAX=7
+      - CONFIG_COMMON_LIBC_MALLOC_ARENA_SIZE=256

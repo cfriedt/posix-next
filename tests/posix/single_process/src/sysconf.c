@@ -5,27 +5,236 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <zephyr/ztest.h>
-
+#include <errno.h>
+#include <limits.h>
 #include <unistd.h>
 
-ZTEST(posix_single_process, test_posix_sysconf)
+#include <zephyr/sys/util.h>
+#include <zephyr/ztest.h>
+
+#ifdef CONFIG_POSIX_SYSCONF_IMPL_FULL
+
+enum sysconf_expect {
+	/* Must be supported with a positive value on all platforms. */
+	SYSCONF_POSITIVE,
+	/*
+	 * Optional limit: unsupported (-1), disabled (0), or a positive value.
+	 * Matches Linux/glibc and Zephyr without platform-specific tables.
+	 */
+	SYSCONF_LIMIT,
+	/*
+	 * Optional feature: unsupported (-1) or supported (> 0).
+	 */
+	SYSCONF_OPTION,
+	/* Known unsupported on Linux and Zephyr. */
+	SYSCONF_UNSUPPORTED,
+};
+
+struct sysconf_case {
+	int name;
+	enum sysconf_expect kind;
+};
+
+static void assert_sysconf(int name, long ret, enum sysconf_expect kind)
+{
+	switch (kind) {
+	case SYSCONF_POSITIVE:
+		zassert_true(ret > 0, "sysconf(%d) returned %ld", name, ret);
+		break;
+	case SYSCONF_LIMIT:
+		zassert_true(ret == -1L || ret >= 0L,
+			     "sysconf(%d) returned %ld, expected -1 or >= 0", name, ret);
+		break;
+	case SYSCONF_OPTION:
+		zassert_true(ret == -1L || ret > 0L,
+			     "sysconf(%d) returned %ld, expected -1 or > 0", name, ret);
+		break;
+	case SYSCONF_UNSUPPORTED:
+		zassert_equal(ret, -1L, "sysconf(%d) returned %ld, expected -1", name, ret);
+		break;
+	default:
+		zassert_unreachable("unexpected sysconf expectation kind");
+		break;
+	}
+}
+
+#ifndef _SC_XOPEN_UUCP
+#define _SC_XOPEN_UUCP 124
+#endif
+
+static const struct sysconf_case sysconf_cases[] = {
+	{_SC_ADVISORY_INFO, SYSCONF_OPTION},
+	{_SC_ASYNCHRONOUS_IO, SYSCONF_OPTION},
+	{_SC_BARRIERS, SYSCONF_OPTION},
+	{_SC_CLOCK_SELECTION, SYSCONF_OPTION},
+	{_SC_CPUTIME, SYSCONF_OPTION},
+	{_SC_FSYNC, SYSCONF_OPTION},
+	{_SC_IPV6, SYSCONF_OPTION},
+	{_SC_JOB_CONTROL, SYSCONF_OPTION},
+	{_SC_MAPPED_FILES, SYSCONF_OPTION},
+	{_SC_MEMLOCK, SYSCONF_OPTION},
+	{_SC_MEMLOCK_RANGE, SYSCONF_OPTION},
+	{_SC_MEMORY_PROTECTION, SYSCONF_OPTION},
+	{_SC_MESSAGE_PASSING, SYSCONF_OPTION},
+	{_SC_MONOTONIC_CLOCK, SYSCONF_OPTION},
+	{_SC_PRIORITIZED_IO, SYSCONF_OPTION},
+	{_SC_PRIORITY_SCHEDULING, SYSCONF_OPTION},
+	{_SC_RAW_SOCKETS, SYSCONF_OPTION},
+	{_SC_RE_DUP_MAX, SYSCONF_OPTION},
+	{_SC_READER_WRITER_LOCKS, SYSCONF_OPTION},
+	{_SC_REALTIME_SIGNALS, SYSCONF_OPTION},
+	{_SC_REGEXP, SYSCONF_OPTION},
+	{_SC_SAVED_IDS, SYSCONF_OPTION},
+	{_SC_SEMAPHORES, SYSCONF_OPTION},
+	{_SC_SHARED_MEMORY_OBJECTS, SYSCONF_OPTION},
+	{_SC_SHELL, SYSCONF_OPTION},
+	{_SC_SPAWN, SYSCONF_OPTION},
+	{_SC_SPIN_LOCKS, SYSCONF_OPTION},
+	{_SC_SPORADIC_SERVER, SYSCONF_UNSUPPORTED},
+	{_SC_SS_REPL_MAX, SYSCONF_OPTION},
+	{_SC_SYNCHRONIZED_IO, SYSCONF_OPTION},
+	{_SC_THREAD_ATTR_STACKADDR, SYSCONF_OPTION},
+	{_SC_THREAD_ATTR_STACKSIZE, SYSCONF_OPTION},
+	{_SC_THREAD_CPUTIME, SYSCONF_OPTION},
+	{_SC_THREAD_PRIO_INHERIT, SYSCONF_OPTION},
+	{_SC_THREAD_PRIO_PROTECT, SYSCONF_OPTION},
+	{_SC_THREAD_PRIORITY_SCHEDULING, SYSCONF_OPTION},
+	{_SC_THREAD_PROCESS_SHARED, SYSCONF_OPTION},
+	{_SC_THREAD_ROBUST_PRIO_INHERIT, SYSCONF_OPTION},
+	{_SC_THREAD_ROBUST_PRIO_PROTECT, SYSCONF_OPTION},
+	{_SC_THREAD_SAFE_FUNCTIONS, SYSCONF_OPTION},
+	{_SC_THREAD_SPORADIC_SERVER, SYSCONF_UNSUPPORTED},
+	{_SC_THREADS, SYSCONF_OPTION},
+	{_SC_TIMEOUTS, SYSCONF_OPTION},
+	{_SC_TIMERS, SYSCONF_OPTION},
+	{_SC_TRACE, SYSCONF_UNSUPPORTED},
+	{_SC_TRACE_EVENT_FILTER, SYSCONF_UNSUPPORTED},
+	{_SC_TRACE_EVENT_NAME_MAX, SYSCONF_OPTION},
+	{_SC_TRACE_INHERIT, SYSCONF_UNSUPPORTED},
+	{_SC_TRACE_LOG, SYSCONF_UNSUPPORTED},
+	{_SC_TRACE_NAME_MAX, SYSCONF_OPTION},
+	{_SC_TRACE_SYS_MAX, SYSCONF_OPTION},
+	{_SC_TRACE_USER_EVENT_MAX, SYSCONF_OPTION},
+	{_SC_TYPED_MEMORY_OBJECTS, SYSCONF_UNSUPPORTED},
+	{_SC_VERSION, SYSCONF_POSITIVE},
+	{_SC_V7_ILP32_OFF32, SYSCONF_OPTION},
+	{_SC_V7_ILP32_OFFBIG, SYSCONF_OPTION},
+	{_SC_V7_LP64_OFF64, SYSCONF_OPTION},
+	{_SC_V7_LPBIG_OFFBIG, SYSCONF_OPTION},
+	{_SC_BC_BASE_MAX, SYSCONF_OPTION},
+	{_SC_BC_DIM_MAX, SYSCONF_OPTION},
+	{_SC_BC_SCALE_MAX, SYSCONF_OPTION},
+	{_SC_BC_STRING_MAX, SYSCONF_OPTION},
+	{_SC_2_C_BIND, SYSCONF_OPTION},
+	{_SC_2_C_DEV, SYSCONF_OPTION},
+	{_SC_2_CHAR_TERM, SYSCONF_OPTION},
+	{_SC_COLL_WEIGHTS_MAX, SYSCONF_OPTION},
+	{_SC_DELAYTIMER_MAX, SYSCONF_LIMIT},
+	{_SC_EXPR_NEST_MAX, SYSCONF_OPTION},
+	{_SC_2_FORT_DEV, SYSCONF_OPTION},
+	{_SC_2_FORT_RUN, SYSCONF_OPTION},
+	{_SC_LINE_MAX, SYSCONF_OPTION},
+	{_SC_2_LOCALEDEF, SYSCONF_OPTION},
+	{_SC_2_PBS, SYSCONF_OPTION},
+	{_SC_2_PBS_ACCOUNTING, SYSCONF_OPTION},
+	{_SC_2_PBS_CHECKPOINT, SYSCONF_OPTION},
+	{_SC_2_PBS_LOCATE, SYSCONF_OPTION},
+	{_SC_2_PBS_MESSAGE, SYSCONF_OPTION},
+	{_SC_2_PBS_TRACK, SYSCONF_OPTION},
+	{_SC_2_SW_DEV, SYSCONF_OPTION},
+	{_SC_2_UPE, SYSCONF_OPTION},
+	{_SC_2_VERSION, SYSCONF_OPTION},
+	{_SC_XOPEN_CRYPT, SYSCONF_UNSUPPORTED},
+	{_SC_XOPEN_ENH_I18N, SYSCONF_OPTION},
+	{_SC_XOPEN_REALTIME, SYSCONF_OPTION},
+	{_SC_XOPEN_REALTIME_THREADS, SYSCONF_OPTION},
+	{_SC_XOPEN_SHM, SYSCONF_OPTION},
+	{_SC_XOPEN_STREAMS, SYSCONF_OPTION},
+	{_SC_XOPEN_UNIX, SYSCONF_OPTION},
+	{_SC_XOPEN_UUCP, SYSCONF_OPTION},
+	{_SC_XOPEN_VERSION, SYSCONF_LIMIT},
+	{_SC_CLK_TCK, SYSCONF_POSITIVE},
+	{_SC_GETGR_R_SIZE_MAX, SYSCONF_LIMIT},
+	{_SC_GETPW_R_SIZE_MAX, SYSCONF_LIMIT},
+	{_SC_AIO_LISTIO_MAX, SYSCONF_OPTION},
+	{_SC_AIO_MAX, SYSCONF_OPTION},
+	{_SC_AIO_PRIO_DELTA_MAX, SYSCONF_LIMIT},
+	{_SC_ARG_MAX, SYSCONF_POSITIVE},
+	{_SC_ATEXIT_MAX, SYSCONF_POSITIVE},
+	{_SC_CHILD_MAX, SYSCONF_POSITIVE},
+	{_SC_HOST_NAME_MAX, SYSCONF_LIMIT},
+	{_SC_IOV_MAX, SYSCONF_POSITIVE},
+	{_SC_LOGIN_NAME_MAX, SYSCONF_POSITIVE},
+	{_SC_NGROUPS_MAX, SYSCONF_LIMIT},
+	{_SC_MQ_OPEN_MAX, SYSCONF_LIMIT},
+	{_SC_MQ_PRIO_MAX, SYSCONF_OPTION},
+	{_SC_OPEN_MAX, SYSCONF_POSITIVE},
+	{_SC_PAGE_SIZE, SYSCONF_POSITIVE},
+	{_SC_THREAD_DESTRUCTOR_ITERATIONS, SYSCONF_POSITIVE},
+	{_SC_THREAD_KEYS_MAX, SYSCONF_LIMIT},
+	{_SC_THREAD_STACK_MIN, SYSCONF_LIMIT},
+	{_SC_THREAD_THREADS_MAX, SYSCONF_LIMIT},
+	{_SC_RTSIG_MAX, SYSCONF_LIMIT},
+	{_SC_SEM_NSEMS_MAX, SYSCONF_LIMIT},
+	{_SC_SEM_VALUE_MAX, SYSCONF_LIMIT},
+	{_SC_SIGQUEUE_MAX, SYSCONF_OPTION},
+	{_SC_STREAM_MAX, SYSCONF_POSITIVE},
+	{_SC_SYMLOOP_MAX, SYSCONF_OPTION},
+	{_SC_TIMER_MAX, SYSCONF_LIMIT},
+	{_SC_TTY_NAME_MAX, SYSCONF_POSITIVE},
+	{_SC_TZNAME_MAX, SYSCONF_OPTION},
+};
+
+ZTEST(posix_single_process, test_sysconf_known_values)
+{
+	long page_size;
+
+	ARRAY_FOR_EACH(sysconf_cases, i) {
+		long ret = sysconf(sysconf_cases[i].name);
+
+		assert_sysconf(sysconf_cases[i].name, ret, sysconf_cases[i].kind);
+	}
+
+	page_size = sysconf(_SC_PAGE_SIZE);
+	zassert_equal(sysconf(_SC_PAGESIZE), page_size);
+}
+
+ZTEST(posix_single_process, test_sysconf_invalid_name)
 {
 	long ret;
 
-	/* SC that's implemented */
-	ret = sysconf(_SC_VERSION);
-	zassert_equal(ret, _POSIX_VERSION, "sysconf returned unexpected value %ld", ret);
-
-	/* SC that's not implemented */
-	ret = sysconf(_SC_ADVISORY_INFO);
-	zassert_equal(ret, -1, "sysconf returned unexpected value %ld", ret);
-
-	/* SC that value depends on target's configuration */
-	ret = sysconf(_SC_SEMAPHORES);
-	if (IS_ENABLED(CONFIG_POSIX_THREADS)) {
-		zassert_equal(ret, _POSIX_VERSION, "sysconf returned unexpected value %ld", ret);
-	} else {
-		zassert_equal(ret, -1L, "sysconf returned unexpected value %ld", ret);
-	}
+	errno = 0;
+	ret = sysconf(99999);
+	zassert_equal(ret, -1L, "sysconf returned unexpected value %ld", ret);
+	zassert_equal(errno, EINVAL, "errno %d", errno);
 }
+
+#else /* CONFIG_POSIX_SYSCONF_IMPL_MACRO */
+
+#define CHECK_SYSCONF(_name, _exp) zassert_equal(sysconf(_name), (long)(_exp))
+
+ZTEST(posix_single_process, test_sysconf_known_values)
+{
+	CHECK_SYSCONF(_SC_ADVISORY_INFO, -1L);
+	CHECK_SYSCONF(_SC_ASYNCHRONOUS_IO,
+		      COND_CODE_1(CONFIG_POSIX_ASYNCHRONOUS_IO, (_POSIX_ASYNCHRONOUS_IO), (-1L)));
+	CHECK_SYSCONF(_SC_BARRIERS,
+		      COND_CODE_1(CONFIG_POSIX_BARRIERS, (_POSIX_BARRIERS), (-1L)));
+	CHECK_SYSCONF(_SC_CLOCK_SELECTION,
+		      COND_CODE_1(CONFIG_POSIX_CLOCK_SELECTION, (_POSIX_CLOCK_SELECTION), (-1L)));
+	CHECK_SYSCONF(_SC_CPUTIME, COND_CODE_1(CONFIG_POSIX_CPUTIME, (_POSIX_CPUTIME), (-1L)));
+	CHECK_SYSCONF(_SC_FSYNC, COND_CODE_1(CONFIG_POSIX_FSYNC, (_POSIX_FSYNC), (-1L)));
+	CHECK_SYSCONF(_SC_IPV6, COND_CODE_1(CONFIG_NET_IPV6, (_POSIX_VERSION), (-1L)));
+	CHECK_SYSCONF(_SC_VERSION,
+		      COND_CODE_1(CONFIG_POSIX_SYSTEM_INTERFACES, (_POSIX_VERSION), (0)));
+	CHECK_SYSCONF(_SC_CLK_TCK, 100L);
+	CHECK_SYSCONF(_SC_OPEN_MAX, CONFIG_POSIX_OPEN_MAX);
+	CHECK_SYSCONF(_SC_PAGE_SIZE, CONFIG_POSIX_PAGE_SIZE);
+	CHECK_SYSCONF(_SC_PAGESIZE, CONFIG_POSIX_PAGE_SIZE);
+	CHECK_SYSCONF(_SC_SEMAPHORES,
+		      COND_CODE_1(CONFIG_POSIX_SEMAPHORES, (_POSIX_SEMAPHORES), (-1L)));
+	CHECK_SYSCONF(_SC_THREADS, COND_CODE_1(CONFIG_POSIX_THREADS, (_POSIX_THREADS), (-1L)));
+	CHECK_SYSCONF(_SC_TIMERS, COND_CODE_1(CONFIG_POSIX_TIMERS, (_POSIX_TIMERS), (-1)));
+}
+
+#endif /* CONFIG_POSIX_SYSCONF_IMPL_FULL */
