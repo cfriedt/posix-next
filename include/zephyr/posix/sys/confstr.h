@@ -12,7 +12,7 @@
  * confstr() to query implementation-defined configuration strings.
  *
  * @see <a href="https://pubs.opengroup.org/onlinepubs/9699919799/functions/confstr.html">
- *      POSIX.1-2017 confstr()</a>
+ *      POSIX.1-2008 confstr()</a>
  *
  * @ingroup posix_option_group_single_process
  */
@@ -24,41 +24,58 @@
 extern "C" {
 #endif
 
-/** @brief confstr() name constants. */
-enum {
-	_CS_PATH,                            /**< Default value of PATH. */
-	_CS_POSIX_V7_ILP32_OFF32_CFLAGS,    /**< Compilation flags for ILP32/OFF32 (POSIX.1-2008). */
-	_CS_POSIX_V7_ILP32_OFF32_LDFLAGS,   /**< Linker flags for ILP32/OFF32 (POSIX.1-2008). */
-	_CS_POSIX_V7_ILP32_OFF32_LIBS,      /**< Libraries for ILP32/OFF32 (POSIX.1-2008). */
-	_CS_POSIX_V7_ILP32_OFFBIG_CFLAGS,   /**< Compilation flags for ILP32/OFFBIG (POSIX.1-2008). */
-	_CS_POSIX_V7_ILP32_OFFBIG_LDFLAGS,  /**< Linker flags for ILP32/OFFBIG (POSIX.1-2008). */
-	_CS_POSIX_V7_ILP32_OFFBIG_LIBS,     /**< Libraries for ILP32/OFFBIG (POSIX.1-2008). */
-	_CS_POSIX_V7_LP64_OFF64_CFLAGS,     /**< Compilation flags for LP64/OFF64 (POSIX.1-2008). */
-	_CS_POSIX_V7_LP64_OFF64_LDFLAGS,    /**< Linker flags for LP64/OFF64 (POSIX.1-2008). */
-	_CS_POSIX_V7_LP64_OFF64_LIBS,       /**< Libraries for LP64/OFF64 (POSIX.1-2008). */
-	_CS_POSIX_V7_LPBIG_OFFBIG_CFLAGS,   /**< Compilation flags for LPBIG/OFFBIG (POSIX.1-2008). */
-	_CS_POSIX_V7_LPBIG_OFFBIG_LDFLAGS,  /**< Linker flags for LPBIG/OFFBIG (POSIX.1-2008). */
-	_CS_POSIX_V7_LPBIG_OFFBIG_LIBS,     /**< Libraries for LPBIG/OFFBIG (POSIX.1-2008). */
-	_CS_POSIX_V7_THREADS_CFLAGS,        /**< Compilation flags for threads (POSIX.1-2008). */
-	_CS_POSIX_V7_THREADS_LDFLAGS,       /**< Linker flags for threads (POSIX.1-2008). */
-	_CS_POSIX_V7_WIDTH_RESTRICTED_ENVS, /**< Environments with width restrictions (POSIX.1-2008). */
-	_CS_V7_ENV,                          /**< Environments with width restrictions (alias). */
-	_CS_POSIX_V6_ILP32_OFF32_CFLAGS,    /**< Compilation flags for ILP32/OFF32 (POSIX.1-2001). */
-	_CS_POSIX_V6_ILP32_OFF32_LDFLAGS,   /**< Linker flags for ILP32/OFF32 (POSIX.1-2001). */
-	_CS_POSIX_V6_ILP32_OFF32_LIBS,      /**< Libraries for ILP32/OFF32 (POSIX.1-2001). */
-	_CS_POSIX_V6_ILP32_OFFBIG_CFLAGS,   /**< Compilation flags for ILP32/OFFBIG (POSIX.1-2001). */
-	_CS_POSIX_V6_ILP32_OFFBIG_LDFLAGS,  /**< Linker flags for ILP32/OFFBIG (POSIX.1-2001). */
-	_CS_POSIX_V6_ILP32_OFFBIG_LIBS,     /**< Libraries for ILP32/OFFBIG (POSIX.1-2001). */
-	_CS_POSIX_V6_LP64_OFF64_CFLAGS,     /**< Compilation flags for LP64/OFF64 (POSIX.1-2001). */
-	_CS_POSIX_V6_LP64_OFF64_LDFLAGS,    /**< Linker flags for LP64/OFF64 (POSIX.1-2001). */
-	_CS_POSIX_V6_LP64_OFF64_LIBS,       /**< Libraries for LP64/OFF64 (POSIX.1-2001). */
-	_CS_POSIX_V6_LPBIG_OFFBIG_CFLAGS,   /**< Compilation flags for LPBIG/OFFBIG (POSIX.1-2001). */
-	_CS_POSIX_V6_LPBIG_OFFBIG_LDFLAGS,  /**< Linker flags for LPBIG/OFFBIG (POSIX.1-2001). */
-	_CS_POSIX_V6_LPBIG_OFFBIG_LIBS,     /**< Libraries for LPBIG/OFFBIG (POSIX.1-2001). */
-	_CS_POSIX_V6_WIDTH_RESTRICTED_ENVS, /**< Environments with width restrictions (POSIX.1-2001). */
-	_CS_V6_ENV,                          /**< Environments with width restrictions (alias). */
-};
+#ifndef _CS_PATH
 
+/** @brief confstr() name constants (POSIX.1-2008). */
+#define _CS_PATH                               0
+#define _CS_POSIX_V7_ILP32_OFF32_CFLAGS        1
+#define _CS_POSIX_V6_ILP32_OFF32_CFLAGS       _CS_POSIX_V7_ILP32_OFF32_CFLAGS
+#define _CS_XBS5_ILP32_OFF32_CFLAGS           _CS_POSIX_V7_ILP32_OFF32_CFLAGS
+#define _CS_POSIX_V7_ILP32_OFF32_LDFLAGS       2
+#define _CS_POSIX_V6_ILP32_OFF32_LDFLAGS      _CS_POSIX_V7_ILP32_OFF32_LDFLAGS
+#define _CS_XBS5_ILP32_OFF32_LDFLAGS          _CS_POSIX_V7_ILP32_OFF32_LDFLAGS
+#define _CS_POSIX_V7_ILP32_OFF32_LIBS          3
+#define _CS_POSIX_V6_ILP32_OFF32_LIBS         _CS_POSIX_V7_ILP32_OFF32_LIBS
+#define _CS_XBS5_ILP32_OFF32_LIBS             _CS_POSIX_V7_ILP32_OFF32_LIBS
+#define _CS_POSIX_V7_ILP32_OFFBIG_CFLAGS       4
+#define _CS_POSIX_V6_ILP32_OFFBIG_CFLAGS      _CS_POSIX_V7_ILP32_OFFBIG_CFLAGS
+#define _CS_XBS5_ILP32_OFFBIG_CFLAGS          _CS_POSIX_V7_ILP32_OFFBIG_CFLAGS
+#define _CS_POSIX_V7_ILP32_OFFBIG_LDFLAGS      5
+#define _CS_POSIX_V6_ILP32_OFFBIG_LDFLAGS     _CS_POSIX_V7_ILP32_OFFBIG_LDFLAGS
+#define _CS_XBS5_ILP32_OFFBIG_LDFLAGS         _CS_POSIX_V7_ILP32_OFFBIG_LDFLAGS
+#define _CS_POSIX_V7_ILP32_OFFBIG_LIBS         6
+#define _CS_POSIX_V6_ILP32_OFFBIG_LIBS        _CS_POSIX_V7_ILP32_OFFBIG_LIBS
+#define _CS_XBS5_ILP32_OFFBIG_LIBS            _CS_POSIX_V7_ILP32_OFFBIG_LIBS
+#define _CS_POSIX_V7_LP64_OFF64_CFLAGS         7
+#define _CS_POSIX_V6_LP64_OFF64_CFLAGS        _CS_POSIX_V7_LP64_OFF64_CFLAGS
+#define _CS_XBS5_LP64_OFF64_CFLAGS            _CS_POSIX_V7_LP64_OFF64_CFLAGS
+#define _CS_POSIX_V7_LP64_OFF64_LDFLAGS        8
+#define _CS_POSIX_V6_LP64_OFF64_LDFLAGS       _CS_POSIX_V7_LP64_OFF64_LDFLAGS
+#define _CS_XBS5_LP64_OFF64_LDFLAGS           _CS_POSIX_V7_LP64_OFF64_LDFLAGS
+#define _CS_POSIX_V7_LP64_OFF64_LIBS           9
+#define _CS_POSIX_V6_LP64_OFF64_LIBS          _CS_POSIX_V7_LP64_OFF64_LIBS
+#define _CS_XBS5_LP64_OFF64_LIBS              _CS_POSIX_V7_LP64_OFF64_LIBS
+#define _CS_POSIX_V7_LPBIG_OFFBIG_CFLAGS      10
+#define _CS_POSIX_V6_LPBIG_OFFBIG_CFLAGS      _CS_POSIX_V7_LPBIG_OFFBIG_CFLAGS
+#define _CS_XBS5_LPBIG_OFFBIG_CFLAGS          _CS_POSIX_V7_LPBIG_OFFBIG_CFLAGS
+#define _CS_POSIX_V7_LPBIG_OFFBIG_LDFLAGS     11
+#define _CS_POSIX_V6_LPBIG_OFFBIG_LDFLAGS     _CS_POSIX_V7_LPBIG_OFFBIG_LDFLAGS
+#define _CS_XBS5_LPBIG_OFFBIG_LDFLAGS         _CS_POSIX_V7_LPBIG_OFFBIG_LDFLAGS
+#define _CS_POSIX_V7_LPBIG_OFFBIG_LIBS        12
+#define _CS_POSIX_V6_LPBIG_OFFBIG_LIBS        _CS_POSIX_V7_LPBIG_OFFBIG_LIBS
+#define _CS_XBS5_LPBIG_OFFBIG_LIBS            _CS_POSIX_V7_LPBIG_OFFBIG_LIBS
+#define _CS_POSIX_V7_WIDTH_RESTRICTED_ENVS    13
+#define _CS_POSIX_V6_WIDTH_RESTRICTED_ENVS    _CS_POSIX_V7_WIDTH_RESTRICTED_ENVS
+#define _CS_XBS5_WIDTH_RESTRICTED_ENVS        _CS_POSIX_V7_WIDTH_RESTRICTED_ENVS
+#define _CS_POSIX_V7_THREADS_CFLAGS           14
+#define _CS_POSIX_V7_THREADS_LDFLAGS          15
+#define _CS_V7_ENV                            16
+#define _CS_V6_ENV                            _CS_V7_ENV
+#define _CS_LFS_CFLAGS                        17
+#define _CS_LFS_LDFLAGS                       18
+#define _CS_LFS_LIBS                          19
+
+#endif /* _CS_PATH */
 
 #ifdef __cplusplus
 }
