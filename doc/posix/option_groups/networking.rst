@@ -3,9 +3,6 @@
 POSIX_NETWORKING
 ================
 
-The function ``sockatmark()`` is not yet supported and is expected to fail setting ``errno``
-to ``ENOSYS`` :ref:`†<posix_undefined_behaviour>`.
-
 Enable this option group with :kconfig:option:`CONFIG_POSIX_NETWORKING`.
 
 .. csv-table:: POSIX_NETWORKING
@@ -61,8 +58,13 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_NETWORKING`.
     :c:func:`setprotoent`,yes
     :c:func:`setservent`,yes
     :c:func:`setsockopt`,yes
-    :c:func:`shutdown`,yes
+    :c:func:`shutdown`,yes :ref:`†<posix_undefined_behaviour>`
     :c:func:`socket`,yes
     :c:func:`sockatmark`,yes :ref:`†<posix_undefined_behaviour>`
     :c:func:`socketpair`,yes
 
+.. note:: The function ``sockatmark()`` is not yet supported and is expected to fail setting ``errno``
+   to ``ENOSYS`` :ref:`†<posix_undefined_behaviour>`.
+
+.. note:: ``shutdown()`` with ``SHUT_WR`` or ``SHUT_RDWR`` is not supported by the Zephyr socket stack;
+   those calls fail with ``errno`` set to ``ENOTSUP``.

@@ -699,3 +699,70 @@ patches:
     comments: |
       Implement POSIX advisory record locking via fcntl() F_GETLK, F_SETLK, and
       F_SETLKW for ZVFS-backed regular files, with libc fcntl command normalization.
+  - path: zephyr/zsock-sockatmark.patch
+    sha256sum: 747b37e76f3e284176e859b7d50bedb1d941dc0620a67ef163e3fda0a2b2c6ac
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-03
+    upstreamable: true
+    comments: |
+      Add zsock_sockatmark() to the socket subsystem; out-of-band data is not
+      supported and the call returns ENOSYS for valid sockets.
+  - path: zephyr/libc-sys-uio-h.patch
+    sha256sum: 485e08b0108339891f90c1d12e10e3a63444add880cf6aad4f6b8c21aca393c8
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-04
+    upstreamable: true
+    comments: |
+      Add newlib and picolibc <sys/uio.h> forwarding to the out-of-tree POSIX
+      networking header so <sys/socket.h> can pull in struct iovec per IEEE Std
+      1003.1.
+  - path: zephyr/libc-sys-un-h.patch
+    sha256sum: 498437984e3fcbb36d801e9299f7368e66b2b1c030e4a510a97439dad52127eb
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-04
+    upstreamable: true
+    comments: |
+      Add newlib and picolibc <sys/un.h> forwarding to the out-of-tree POSIX
+      networking header for struct sockaddr_un per IEEE Std 1003.1.
+  - path: zephyr/socket-h-drop-posix-tail-includes.patch
+    sha256sum: a72f95a5354d981d0a3f27792961807822dc1ff19f2b4adb131f9ce4d70f7023
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-04
+    upstreamable: true
+    comments: |
+      Drop the CONFIG_POSIX_NETWORKING tail includes from socket.h. POSIX
+      headers live in the out-of-tree module; pulling them from Zephyr socket.h
+      collides with net_ip.h types and violates API layering.
+  - path: zephyr/network-headers-namespacing.patch
+    sha256sum: 07d8beeef111bc72d7e3caec0df25578265220ac31be479a4592fd026a6de6cc
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-04
+    upstreamable: true
+    comments: |
+      Namespace Zephyr socket types and constants (ZSOCK_AF_*, zsock_sockaddr,
+      etc.) across net headers, subsys, drivers, and call sites so out-of-tree
+      POSIX networking headers no longer collide with net_ip.h. Excludes
+      samples/net/ (those apps use the POSIX networking API and keep POSIX
+      sockaddr/AF_INET names via out-of-tree headers).
+  - path: zephyr/zsock-manifest-constants-net-ip.patch
+    sha256sum: aa89ec2afb4b60a7589829cd330c094c6ae3e55ba061cce4f745ab37fb89146b
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-04
+    upstreamable: true
+    comments: |
+      Move ZSOCK_MSG_*, ZSOCK_SHUT_*, ZSOCK_SOL_SOCKET, ZSOCK_SO_*, and
+      ZSOCK_SOMAXCONN manifest constants from socket.h to net_ip.h. Rename
+      Zephyr zsock call sites to ZSOCK_SO_* / ZSOCK_SOL_SOCKET so POSIX
+      sys/socket.h can alias SO_* / SOL_SOCKET via net_ip.h.

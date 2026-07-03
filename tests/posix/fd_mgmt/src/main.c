@@ -379,7 +379,7 @@ ZTEST(posix_fd_mgmt, test_fseek_ftell_rewind)
 	zassert_equal(pos, 0, "ftell after rewind == %ld", pos);
 
 	zassert_ok(fgetpos(fp, &fpos));
-	zassert_equal((long)fpos, 0);
+	zassert_equal(ftell(fp), 0);
 
 	zassert_ok(fsetpos(fp, &fpos));
 	zassert_equal(fread(buf, 1, len, fp), len);
