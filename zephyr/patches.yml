@@ -238,16 +238,6 @@ patches:
     upstreamable: true
     comments: |
       x86 arch-level support for userspace signals in syscall handling.
-  - path: hostap/fix-zephyr-select-api.patch
-    sha256sum: f90ad77cafd895b74aa22d9e57775c5bf286a8f794c725ff4563fdb466143c37
-    module: modules/lib/hostap
-    author: Chris Friedt
-    email: chris@fr4.co
-    date: 2026-05-16
-    upstreamable: true
-    comments: |
-      Map Zephyr socket select APIs to the POSIX names used by HostAP when CONFIG_POSIX_API is
-      disabled.
   - path: hostap/fix-xsi-kconfig.patch
     sha256sum: 2c0211d78e58b40ed79d6bd84ff54f193f9107681f1c7418e209d84a94d5ac7e
     module: zephyr
@@ -699,3 +689,42 @@ patches:
     comments: |
       Implement POSIX advisory record locking via fcntl() F_GETLK, F_SETLK, and
       F_SETLKW for ZVFS-backed regular files, with libc fcntl command normalization.
+  - path: zephyr/posix-net-namespacing.patch
+    sha256sum: f2af354142b68779e9941bdd6e751f62f1757e1174c60afb543a13f170f92150
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-06-30
+    upstreamable: true
+    comments: |
+      Namespace most of the posix identifiers declared by the Zephyr network subsystem to avoid
+      conflicts with the identifiers declared by the POSIX network subsystem.
+  - path: zephyr/dns-resolve-netdb-constants.patch
+    sha256sum: 97ca3000199530bd54eec5e83ccaeeab2055c20f3322068ce104cdec12cc2918
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-05
+    upstreamable: true
+    comments: |
+      Move ZSOCK_AI_* and ZSOCK_NI_* resolver constants to dns_resolve.h so POSIX
+      netdb.h can alias them without including socket.h.
+  - path: zephyr/nsos-host-use-posix-sockets.patch
+    sha256sum: cb2fde1e7b6f0a7563d3460b78a028a18e3d079ec992ded1863e09d2740bf8b9
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-05
+    upstreamable: true
+    comments: |
+      NSOS host adapter must use POSIX socket constants (AF_*, SOL_SOCKET, MSG_*,
+      etc.) when calling the Linux host, not ZSOCK_*.
+  - path: zephyr/posix-net-namespacing-extra.patch
+    sha256sum: df97cd651a0edc59300ce50bc2bb2b0fb05ad3a49dd0af053c492f0ef128b889
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-05
+    upstreamable: true
+    comments: |
+      Picolibc shims, hostap Kconfig, and test fixes for posix-net-namespacing.patch.

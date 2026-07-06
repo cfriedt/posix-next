@@ -1,0 +1,210 @@
+diff --git a/lib/libc/picolibc/include/sys/time.h b/lib/libc/picolibc/include/sys/time.h
+new file mode 100644
+index 00000000000..6c921c355a8
+--- /dev/null
++++ b/lib/libc/picolibc/include/sys/time.h
+@@ -0,0 +1,12 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SYS_TIME_H_
++#define ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SYS_TIME_H_
++
++#include <zephyr/posix/sys/time.h>
++
++#endif /* ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SYS_TIME_H_ */
+diff --git a/lib/libc/picolibc/include/sys/uio.h b/lib/libc/picolibc/include/sys/uio.h
+new file mode 100644
+index 00000000000..843e41320fc
+--- /dev/null
++++ b/lib/libc/picolibc/include/sys/uio.h
+@@ -0,0 +1,12 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SYS_UIO_H_
++#define ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SYS_UIO_H_
++
++#include <zephyr/posix/sys/uio.h>
++
++#endif /* ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SYS_UIO_H_ */
+diff --git a/lib/libc/picolibc/include/sys/un.h b/lib/libc/picolibc/include/sys/un.h
+new file mode 100644
+index 00000000000..2b69b116765
+--- /dev/null
++++ b/lib/libc/picolibc/include/sys/un.h
+@@ -0,0 +1,12 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SYS_UN_H_
++#define ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SYS_UN_H_
++
++#include <zephyr/posix/sys/un.h>
++
++#endif /* ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SYS_UN_H_ */
+diff --git a/modules/hostap/Kconfig b/modules/hostap/Kconfig
+index c3633a55396..61625c9abc6 100644
+--- a/modules/hostap/Kconfig
++++ b/modules/hostap/Kconfig
+@@ -11,6 +11,7 @@ config WIFI_NM_WPA_SUPPLICANT
+ 	select POSIX_BASE_DEFINITIONS
+ 	select POSIX_AEP_REALTIME_MINIMAL
+ 	select POSIX_AEP_REALTIME_CONTROLLER
++	select POSIX_DEVICE_IO
+ 	select POSIX_NETWORKING
+ 	imply EVENTFD
+ 	imply POSIX_FD_MGMT
+@@ -28,6 +29,9 @@ config WIFI_NM_WPA_SUPPLICANT
+ 	help
+ 	  WPA supplicant as a network management backend for WIFI_NM.
+
++	  Selects POSIX_DEVICE_IO and POSIX_NETWORKING so hostap uses the standard
++	  POSIX headers (<sys/select.h>, <sys/socket.h>, <arpa/inet.h>, etc.).
++
+ if WIFI_NM_WPA_SUPPLICANT
+
+ config ZVFS_OPEN_ADD_SIZE_WIFI_NM_WPA_SUPPLICANT
+diff --git a/tests/net/socket/service/src/main.c b/tests/net/socket/service/src/main.c
+index a85360d4dbb..7b1d6ac76f7 100644
+--- a/tests/net/socket/service/src/main.c
++++ b/tests/net/socket/service/src/main.c
+@@ -73,6 +73,7 @@ void run_test_service(const struct net_socket_service_desc *udp_service,
+ 	int new_sock;
+ 	struct zsock_sockaddr_in6 c_addr;
+ 	struct zsock_sockaddr_in6 s_addr;
++	struct sockaddr_in6 s_bind;
+ 	ssize_t len;
+ 	char buf[10];
+ 	struct zsock_pollfd sock[2] = {
+@@ -100,10 +101,11 @@ void run_test_service(const struct net_socket_service_desc *udp_service,
+ 	ret = net_socket_service_register(tcp_service, sock, ARRAY_SIZE(sock), NULL);
+ 	zassert_equal(ret, 0, "Cannot register tcp service (%d)", ret);
+
+-	ret = bind(s_sock_udp, (struct zsock_sockaddr *)&s_addr, sizeof(s_addr));
++	posix_sockaddr_in6_from_zsock(&s_addr, &s_bind);
++	ret = bind(s_sock_udp, (struct sockaddr *)&s_bind, sizeof(s_bind));
+ 	zassert_equal(ret, 0, "bind failed");
+
+-	ret = connect(c_sock_udp, (struct zsock_sockaddr *)&s_addr, sizeof(s_addr));
++	ret = connect(c_sock_udp, (struct sockaddr *)&s_bind, sizeof(s_bind));
+ 	zassert_equal(ret, 0, "connect failed");
+
+ 	/* Send pkt for s_sock_udp and poll with timeout of 10 */
+@@ -118,13 +120,14 @@ void run_test_service(const struct net_socket_service_desc *udp_service,
+ 	len = recv(s_sock_udp, BUF_AND_SIZE(buf), 0);
+ 	zassert_equal(len, STRLEN(TEST_STR_SMALL), "invalid recv len");
+
+-	ret = bind(s_sock_tcp, (struct zsock_sockaddr *)&s_addr, sizeof(s_addr));
++	posix_sockaddr_in6_from_zsock(&s_addr, &s_bind);
++	ret = bind(s_sock_tcp, (struct sockaddr *)&s_bind, sizeof(s_bind));
+ 	zassert_equal(ret, 0, "bind failed (%d)", -errno);
+ 	ret = listen(s_sock_tcp, 0);
+ 	zassert_equal(ret, 0, "");
+
+-	ret = connect(c_sock_tcp, (const struct zsock_sockaddr *)&s_addr,
+-		      sizeof(s_addr));
++	ret = connect(c_sock_tcp, (const struct sockaddr *)&s_bind,
++		      sizeof(s_bind));
+ 	zassert_equal(ret, 0, "");
+
+ 	/* Let the network stack run */
+diff --git a/tests/net/socket/socket_helpers.h b/tests/net/socket/socket_helpers.h
+index 35b9d1cb98e..8530f6dcd7f 100644
+--- a/tests/net/socket/socket_helpers.h
++++ b/tests/net/socket/socket_helpers.h
+@@ -7,6 +7,7 @@
+ #include <zephyr/ztest_assert.h>
+
+ #if defined(CONFIG_POSIX_NETWORKING)
++#include <string.h>
+ #include <sys/socket.h>
+ #include <arpa/inet.h>
+ #include <unistd.h>
+@@ -16,6 +17,27 @@
+
+ #define clear_buf(buf) memset(buf, 0, sizeof(buf))
+
++#if defined(CONFIG_POSIX_NETWORKING)
++static inline void posix_sockaddr_in_from_zsock(const struct zsock_sockaddr_in *z,
++						struct sockaddr_in *p)
++{
++	memset(p, 0, sizeof(*p));
++	p->sin_family = AF_INET;
++	p->sin_port = z->sin_port;
++	p->sin_addr.s_addr = z->sin_addr.s_addr;
++}
++
++static inline void posix_sockaddr_in6_from_zsock(const struct zsock_sockaddr_in6 *z,
++						 struct sockaddr_in6 *p)
++{
++	memset(p, 0, sizeof(*p));
++	p->sin6_family = AF_INET6;
++	p->sin6_port = z->sin6_port;
++	memcpy(&p->sin6_addr, &z->sin6_addr, sizeof(p->sin6_addr));
++	p->sin6_scope_id = z->sin6_scope_id;
++}
++#endif
++
+ static inline int prepare_listen_sock_udp_v4(struct zsock_sockaddr_in *addr)
+ {
+ 	int ret, sock;
+diff --git a/tests/net/socket/tls_configurations/CMakeLists.txt b/tests/net/socket/tls_configurations/CMakeLists.txt
+index d7cb36f6a59..794ea14241c 100644
+--- a/tests/net/socket/tls_configurations/CMakeLists.txt
++++ b/tests/net/socket/tls_configurations/CMakeLists.txt
+@@ -7,6 +7,8 @@ project(tls_configurations)
+
+ target_sources(app PRIVATE src/main.c)
+
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
++
+ set(gen_dir ${ZEPHYR_BINARY_DIR}/include/generated/)
+
+ # Helper function to convert the content of a PEM file (generated by OpenSSL)
+diff --git a/tests/net/socket/tls_configurations/src/main.c b/tests/net/socket/tls_configurations/src/main.c
+index d22861d8b4e..2ef6f6c8835 100644
+--- a/tests/net/socket/tls_configurations/src/main.c
++++ b/tests/net/socket/tls_configurations/src/main.c
+@@ -9,6 +9,7 @@ LOG_MODULE_REGISTER(tls_configuration_sample, LOG_LEVEL_INF);
+ #include <zephyr/kernel.h>
+ #include <errno.h>
+ #include <stdio.h>
++#include <string.h>
+ #include <netinet/in.h>
+ #include <sys/socket.h>
+ #include <arpa/inet.h>
+@@ -130,7 +131,14 @@ static int create_socket(void)
+ 	}
+ #endif
+
+-	ret = connect(socket_fd, (struct zsock_sockaddr *) &addr, sizeof(addr));
++	struct sockaddr_in conn_addr;
++
++	memset(&conn_addr, 0, sizeof(conn_addr));
++	conn_addr.sin_family = AF_INET;
++	conn_addr.sin_port = addr.sin_port;
++	conn_addr.sin_addr.s_addr = addr.sin_addr.s_addr;
++
++	ret = connect(socket_fd, (struct sockaddr *)&conn_addr, sizeof(conn_addr));
+ 	if (ret < 0) {
+ 		LOG_ERR("Cannot connect to TCP remote (%d)", errno);
+ 		return -errno;
+@@ -225,7 +233,7 @@ int main(void)
+
+ 		wait_for_event();
+
+-		ret = recv(socket_fd, test_buf, data_len, ZSOCK_MSG_WAITALL);
++		ret = recv(socket_fd, test_buf, data_len, MSG_WAITALL);
+ 		if (ret == 0) {
+ 			LOG_ERR("Server terminated unexpectedly");
+ 			ret = -EIO;

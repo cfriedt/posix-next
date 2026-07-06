@@ -1,0 +1,62 @@
+diff --git a/include/zephyr/net/socket.h b/include/zephyr/net/socket.h
+index 35c53cbec1a..42fcb7681a1 100644
+--- a/include/zephyr/net/socket.h
++++ b/include/zephyr/net/socket.h
+@@ -708,6 +708,19 @@ __syscall int zsock_getpeername(int sock, struct zsock_sockaddr *addr,
+  */
+ __syscall int zsock_gethostname(char *buf, size_t len);
+ 
++/**
++ * @brief Test if the next data to be read from a socket is out-of-band data
++ *
++ * @details
++ * See POSIX.1-2017 article
++ * http://pubs.opengroup.org/onlinepubs/9699919799/functions/sockatmark.html
++ * for normative description. Out-of-band TCP data is not supported in Zephyr;
++ * this call fails with @c errno set to @c ENOSYS.
++ * This function is also exposed as `sockatmark()`
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
++ */
++__syscall int zsock_sockatmark(int sock);
++
+ /**
+  * @brief Convert network address from internal to numeric ASCII form
+  *
+diff --git a/subsys/net/lib/sockets/sockets.c b/subsys/net/lib/sockets/sockets.c
+index 59241a71f8f..ce45a3f8438 100644
+--- a/subsys/net/lib/sockets/sockets.c
++++ b/subsys/net/lib/sockets/sockets.c
+@@ -229,6 +229,33 @@ static inline int z_vrfy_zsock_shutdown(int sock, int how)
+ #include <zephyr/syscalls/zsock_shutdown_mrsh.c>
+ #endif /* CONFIG_USERSPACE */
+ 
++int z_impl_zsock_sockatmark(int sock)
++{
++	const struct socket_op_vtable *vtable;
++	struct k_mutex *lock;
++	void *ctx;
++
++	ctx = get_sock_vtable(sock, &vtable, &lock);
++	if (ctx == NULL) {
++		errno = EBADF;
++		return -1;
++	}
++
++	ARG_UNUSED(vtable);
++	ARG_UNUSED(lock);
++
++	errno = ENOSYS;
++	return -1;
++}
++
++#ifdef CONFIG_USERSPACE
++static inline int z_vrfy_zsock_sockatmark(int sock)
++{
++	return z_impl_zsock_sockatmark(sock);
++}
++#include <zephyr/syscalls/zsock_sockatmark_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
+ int z_impl_zsock_bind(int sock, const struct sockaddr *addr, socklen_t addrlen)
+ {
+ 	int ret;

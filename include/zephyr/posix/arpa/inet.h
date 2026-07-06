@@ -1,6 +1,5 @@
 /*
- * Copyright (c) 2019 Linaro Limited
- *
+ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -18,22 +17,36 @@
 #define ZEPHYR_INCLUDE_POSIX_ARPA_INET_H_
 
 #include <stddef.h>
+#include <stdint.h>
 
 #include <netinet/in.h>
-#include <sys/socket.h>
-
-#include <zephyr/net/socket.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/** @brief Unsigned 32-bit IPv4 address (alias for in_addr_t).  @ingroup posix_option_group_networking*/
-typedef uint32_t in_addr_t;
+/** @brief Convert 32-bit value from host to network byte order. */
+#if defined(__GNUC__) || defined(__clang__)
+#define htonl(x) __builtin_bswap32((uint32_t)(x))
+#define htons(x) __builtin_bswap16((uint16_t)(x))
+#define ntohl(x) __builtin_bswap32((uint32_t)(x))
+#define ntohs(x) __builtin_bswap16((uint16_t)(x))
+#else
+#define htonl(x) ((uint32_t)((((uint32_t)(x) & 0x000000ffU) << 24) | \
+			     (((uint32_t)(x) & 0x0000ff00U) << 8) |  \
+			     (((uint32_t)(x) & 0x00ff0000U) >> 8) |  \
+			     (((uint32_t)(x) & 0xff000000U) >> 24)))
+#define htons(x) ((uint16_t)((((uint16_t)(x) & 0x00ffU) << 8) | \
+			     (((uint16_t)(x) & 0xff00U) >> 8)))
+#define ntohl(x) htonl(x)
+#define ntohs(x) htons(x)
+#endif
+
+/** @brief Invalid IPv4 address returned by inet_addr() on failure. */
+#define INADDR_NONE ((in_addr_t)0xffffffffU)
 
 /**
  * @brief Convert an IPv4 address from dotted-decimal text to binary.
- * @ingroup posix_option_group_networking
  *
  * @note Deprecated; use inet_pton() for new code.
  *
@@ -45,7 +58,6 @@ in_addr_t inet_addr(const char *cp);
 
 /**
  * @brief Convert an IPv4 address from binary to dotted-decimal text.
- * @ingroup posix_option_group_networking
  *
  * @note Deprecated; use inet_ntop() for new code.  The returned pointer
  *       is to a static buffer that may be overwritten by subsequent calls.
@@ -58,7 +70,6 @@ char *inet_ntoa(struct in_addr in);
 
 /**
  * @brief Convert an IPv4 or IPv6 address from binary to text form.
- * @ingroup posix_option_group_networking
  * @param family Address family: AF_INET or AF_INET6.
  * @param src    Source address in network byte order.
  * @param dst    Output buffer for the text form.
@@ -70,7 +81,6 @@ char *inet_ntop(sa_family_t family, const void *src, char *dst, size_t size);
 
 /**
  * @brief Convert an IPv4 or IPv6 address from text form to binary.
- * @ingroup posix_option_group_networking
  * @param family Address family: AF_INET or AF_INET6.
  * @param src    Text form of the address.
  * @param dst    Output buffer for the binary address.
@@ -78,7 +88,6 @@ char *inet_ntop(sa_family_t family, const void *src, char *dst, size_t size);
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/inet_pton.html
  */
 int inet_pton(sa_family_t family, const char *src, void *dst);
-
 
 #ifdef __cplusplus
 }

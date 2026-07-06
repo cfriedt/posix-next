@@ -1,0 +1,153 @@
+diff --git a/include/zephyr/net/dns_resolve.h b/include/zephyr/net/dns_resolve.h
+index 3a4d97505b5..206b29da931 100644
+--- a/include/zephyr/net/dns_resolve.h
++++ b/include/zephyr/net/dns_resolve.h
+@@ -83,6 +83,48 @@ enum dns_server_source {
+ #define DNS_MAX_TEXT_SIZE 64
+ #endif /* CONFIG_DNS_RESOLVER_MAX_TEXT_LEN */
+
++/**
++ * @name Flags for zsock_getaddrinfo() hints
++ * @{
++ */
++/** Address for bind() (vs for connect()). */
++#define ZSOCK_AI_PASSIVE 0x1
++/** Fill in ai_canonname. */
++#define ZSOCK_AI_CANONNAME 0x2
++/** Assume host address is in numeric notation, don't DNS lookup. */
++#define ZSOCK_AI_NUMERICHOST 0x4
++/** May return IPv4 mapped address for IPv6. */
++#define ZSOCK_AI_V4MAPPED 0x8
++/** May return both native IPv6 and mapped IPv4 address for IPv6. */
++#define ZSOCK_AI_ALL 0x10
++/** IPv4/IPv6 support depends on local system config. */
++#define ZSOCK_AI_ADDRCONFIG 0x20
++/** Assume service (port) is numeric. */
++#define ZSOCK_AI_NUMERICSERV 0x400
++/** Extra flags present (see RFC 5014). */
++#define ZSOCK_AI_EXTFLAGS 0x800
++/** @} */
++
++/**
++ * @name Flags for zsock_getnameinfo()
++ * @{
++ */
++/** Resolve to numeric address. */
++#define ZSOCK_NI_NUMERICHOST 1
++/** Resolve to numeric port number. */
++#define ZSOCK_NI_NUMERICSERV 2
++/** Return only hostname instead of FQDN. */
++#define ZSOCK_NI_NOFQDN 4
++/** Return an error if the host name cannot be located. */
++#define ZSOCK_NI_NAMEREQD 8
++/** Look up the service name for a datagram socket. */
++#define ZSOCK_NI_DGRAM 16
++/** Maximum supported hostname length for getnameinfo(). */
++#define ZSOCK_NI_MAXHOST 64
++/** Maximum supported service name length for getnameinfo(). */
++#define ZSOCK_NI_MAXSERV 32
++/** @} */
++
+ /** @cond INTERNAL_HIDDEN */
+
+ #define DNS_BUF_TIMEOUT K_MSEC(500) /* ms */
+diff --git a/include/zephyr/net/socket.h b/include/zephyr/net/socket.h
+index 327d5a947fd..1f93903af05 100644
+--- a/include/zephyr/net/socket.h
++++ b/include/zephyr/net/socket.h
+@@ -67,6 +67,10 @@ extern "C" {
+  */
+ /** zsock_recv: Read data without removing it from socket input queue */
+ #define ZSOCK_MSG_PEEK 0x02
++/** zsock_send: Send out-of-band data */
++#define ZSOCK_MSG_OOB 0x01
++/** zsock_send: Send without using routing tables */
++#define ZSOCK_MSG_DONTROUTE 0x04
+ /** zsock_recvmsg: Control data buffer too small.
+  */
+ #define ZSOCK_MSG_CTRUNC 0x08
+@@ -76,8 +80,12 @@ extern "C" {
+ #define ZSOCK_MSG_TRUNC 0x20
+ /** zsock_recv/zsock_send: Override operation to non-blocking */
+ #define ZSOCK_MSG_DONTWAIT 0x40
++/** zsock_send: Terminates a record (if supported by the protocol) */
++#define ZSOCK_MSG_EOR 0x80
+ /** zsock_recv: block until the full amount of data can be returned */
+ #define ZSOCK_MSG_WAITALL 0x100
++/** zsock_send: No SIGPIPE on send to a disconnected stream socket */
++#define ZSOCK_MSG_NOSIGNAL 0x4000
+ /** @} */
+
+ /**
+@@ -743,30 +751,6 @@ __syscall int z_zsock_getaddrinfo_internal(const char *host,
+ 					   struct zsock_addrinfo *res);
+ /** @endcond */
+
+-/* Flags for getaddrinfo() hints. */
+-
+-/**
+- * @name Flags for getaddrinfo() hints
+- * @{
+- */
+-/** Address for bind() (vs for connect()) */
+-#define ZSOCK_AI_PASSIVE 0x1
+-/** Fill in ai_canonname */
+-#define ZSOCK_AI_CANONNAME 0x2
+-/** Assume host address is in numeric notation, don't DNS lookup */
+-#define ZSOCK_AI_NUMERICHOST 0x4
+-/** May return IPv4 mapped address for IPv6  */
+-#define ZSOCK_AI_V4MAPPED 0x8
+-/** May return both native IPv6 and mapped IPv4 address for IPv6 */
+-#define ZSOCK_AI_ALL 0x10
+-/** IPv4/IPv6 support depends on local system config */
+-#define ZSOCK_AI_ADDRCONFIG 0x20
+-/** Assume service (port) is numeric */
+-#define ZSOCK_AI_NUMERICSERV 0x400
+-/** Extra flags present (see RFC 5014) */
+-#define ZSOCK_AI_EXTFLAGS 0x800
+-/** @} */
+-
+ /**
+  * @brief Resolve a domain name to one or more network addresses
+  *
+@@ -805,27 +789,6 @@ void zsock_freeaddrinfo(struct zsock_addrinfo *ai);
+  */
+ const char *zsock_gai_strerror(int errcode);
+
+-/**
+- * @name Flags for getnameinfo()
+- * @{
+- */
+-/** zsock_getnameinfo(): Resolve to numeric address. */
+-#define ZSOCK_NI_NUMERICHOST 1
+-/** zsock_getnameinfo(): Resolve to numeric port number. */
+-#define ZSOCK_NI_NUMERICSERV 2
+-/** zsock_getnameinfo(): Return only hostname instead of FQDN */
+-#define ZSOCK_NI_NOFQDN 4
+-/** zsock_getnameinfo(): Dummy option for compatibility */
+-#define ZSOCK_NI_NAMEREQD 8
+-/** zsock_getnameinfo(): Dummy option for compatibility */
+-#define ZSOCK_NI_DGRAM 16
+-
+-/* POSIX extensions */
+-
+-/** zsock_getnameinfo(): Max supported hostname length */
+-#define ZSOCK_NI_MAXHOST 64
+-/** @} */
+-
+ /**
+  * @brief Resolve a network address to a domain name or ASCII address
+  *
+@@ -1268,12 +1231,4 @@ struct socket_op_vtable {
+  * @}
+  */
+
+-/* Avoid circular loops with POSIX socket headers.
+- * We have these includes here so that we do not need
+- * to change the applications that were only including
+- * zephyr/net/socket.h header file.
+- *
+- * Additionally, if non-zephyr-prefixed headers are used here,
+- * native_sim pulls in those from the host rather than Zephyr's.
+- */
+ #endif /* ZEPHYR_INCLUDE_NET_SOCKET_H_ */
