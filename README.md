@@ -15,8 +15,11 @@
   <a href="https://github.com/cfriedt/posix-next/actions/workflows/docs.yml">
     <img src="https://github.com/cfriedt/posix-next/actions/workflows/docs.yml/badge.svg" alt="Documentation">
   </a>
+  <a href="https://github.com/cfriedt/posix-next/actions/workflows/coverage.yml">
+    <img src="https://github.com/cfriedt/posix-next/actions/workflows/coverage.yml/badge.svg" alt="Coverage">
+  </a>
   <a href="https://app.codecov.io/gh/cfriedt/posix-next">
-    <img src="https://codecov.io/gh/cfriedt/posix-next/branch/main/graph/badge.svg" alt="Coverage">
+    <img src="https://codecov.io/gh/cfriedt/posix-next/branch/main/graph/badge.svg" alt="Codecov.io">
   </a>
   <a href="https://github.com/cfriedt/posix-next/blob/main/LICENSE">
     <img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License">
