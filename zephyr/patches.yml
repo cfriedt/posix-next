@@ -758,3 +758,78 @@ patches:
       Set _DECLARED guards inside each compat alias block in net_ip.h and
       socket.h so that POSIX headers included after Zephyr headers skip
       redefining types that are already aliased (fixes hybrid build order).
+  - path: zephyr/drivers-net-zsock-namespace.patch
+    sha256sum: 1a39ece15a44f9657121f4d7dfd75cbe281bd95b087f0a7aea76ff4444985441
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-09
+    upstreamable: true
+    comments: |
+      Migrate drivers/net C code to zsock_/ZSOCK_ types and constants renamed in
+      net-headers-zsock-namespace.patch.
+  - path: zephyr/subsys-net-zsock-types.patch
+    sha256sum: f0a665285b1fa69ff40b6023cc6693b05daccd57c87c72b25d03dd709854cab0
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-09
+    upstreamable: true
+    comments: |
+      Migrate subsys/net C code struct types (sockaddr, msghdr, iovec, etc.) to
+      zsock_-prefixed forms from net-headers-zsock-namespace.patch, including
+      IPV6_ADDR_PREFERENCES and IPV6_PREFER_SRC_* socket option constants.
+  - path: zephyr/samples-net-namespace-rework.patch
+    sha256sum: 838700105c88c6d9711422c9d7cfe5a660c53f51e515400f8e080fbff583777e
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-08
+    upstreamable: true
+    comments: |
+      Rework zsock-native samples/net for the POSIX/zsock namespace split.
+      POSIX/hybrid sample includes are handled in phase 3d patches.
+  - path: zephyr/subsys-net-zsock-constants.patch
+    sha256sum: a4ae76d03a726832f1f5b2baa022ec55efa11f8db90352bd0028fa8863c6f3fe
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-09
+    upstreamable: true
+    comments: |
+      Migrate subsys/net and drivers/net AF_*, IPPROTO_*, and SO_* constants to
+      ZSOCK_* spellings not covered by the header-only renames.
+  - path: zephyr/net-posix-api-followups.patch
+    sha256sum: 7ad4950a0fdc994d3473b7845287966a1377266094ce98af1d407016a487b012
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-09
+    upstreamable: true
+    comments: |
+      Miscellaneous subsys, tracing (ctf_top.c), tunnel/vlan, and test follow-ups
+      for the zsock namespace split after driver and subsys migrations.
+      tracing_ctf.h prototypes are in net-headers-zsock-namespace.patch (phase 1).
+  - path: zephyr/net-tests-socket-zsock-namespace.patch
+    sha256sum: 42b5c18b815a2947ae3dd5af9834b94a037bd69dc1e08fdb5b132f1268ff1c0b
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-08
+    upstreamable: true
+    comments: |
+      Migrate tests/net/socket (except PSE53 POSIX-API tests) to zsock_/ZSOCK_
+      types and constants. socket_helpers.h gains dual #if CONFIG_POSIX_NETWORKING
+      paths; service test adds _POSIX_C_SOURCE for conformant netinet/in.h IPv6.
+  - path: zephyr/net-tests-stack-zsock-namespace.patch
+    sha256sum: de9fd64038c1071168ff0be3454333fc2254820137603208b19d39189ea4b66d
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-08
+    upstreamable: true
+    comments: |
+      Migrate remaining tests/net stack tests to zsock_/ZSOCK_ for symbols
+      renamed in net-headers-zsock-namespace.patch. PSE53 POSIX-API tests
+      (dhcpv4/server, all, http_server, prometheus, tls_configurations, etc.)
+      are left unchanged.

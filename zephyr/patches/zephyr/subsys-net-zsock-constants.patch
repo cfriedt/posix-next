@@ -1,0 +1,1408 @@
+diff --git a/drivers/net/canbus.c b/drivers/net/canbus.c
+index a3c894f238e..bd038023efc 100644
+--- a/drivers/net/canbus.c
++++ b/drivers/net/canbus.c
+@@ -37,7 +37,7 @@ static void net_canbus_recv(const struct device *dev, struct can_frame *frame, v
+ 
+ 	LOG_DBG("pkt on interface %p", ctx->iface);
+ 	pkt = net_pkt_rx_alloc_with_buffer(ctx->iface, sizeof(struct can_frame),
+-					   AF_CAN, 0, K_NO_WAIT);
++					   ZSOCK_AF_CAN, 0, K_NO_WAIT);
+ 	if (pkt == NULL) {
+ 		LOG_ERR("Failed to obtain net_pkt");
+ 		return;
+@@ -104,7 +104,7 @@ static int net_canbus_send(const struct device *dev, struct net_pkt *pkt)
+ 	const struct net_canbus_config *cfg = dev->config;
+ 	int ret;
+ 
+-	if (net_pkt_family(pkt) != AF_CAN) {
++	if (net_pkt_family(pkt) != ZSOCK_AF_CAN) {
+ 		return -EPFNOSUPPORT;
+ 	}
+ 
+diff --git a/drivers/net/nsos_sockets.c b/drivers/net/nsos_sockets.c
+index 296f2906bc7..0fc41d5321a 100644
+--- a/drivers/net/nsos_sockets.c
++++ b/drivers/net/nsos_sockets.c
+@@ -80,7 +80,7 @@ static int socket_family_to_nsos_mid(int family, int *family_mid)
+ 	case ZSOCK_AF_UNIX:
+ 		*family_mid = NSOS_MID_AF_UNIX;
+ 		break;
+-	case AF_PACKET:
++	case ZSOCK_AF_PACKET:
+ 		*family_mid = NSOS_MID_AF_PACKET;
+ 		break;
+ 	default:
+@@ -99,10 +99,10 @@ static int socket_proto_to_nsos_mid(int proto, int *proto_mid)
+ 	case ZSOCK_IPPROTO_ICMP:
+ 		*proto_mid = NSOS_MID_IPPROTO_ICMP;
+ 		break;
+-	case IPPROTO_IGMP:
++	case ZSOCK_IPPROTO_IGMP:
+ 		*proto_mid = NSOS_MID_IPPROTO_IGMP;
+ 		break;
+-	case IPPROTO_IPIP:
++	case ZSOCK_IPPROTO_IPIP:
+ 		*proto_mid = NSOS_MID_IPPROTO_IPIP;
+ 		break;
+ 	case ZSOCK_IPPROTO_TCP:
+@@ -488,7 +488,7 @@ static int sockaddr_to_nsos_mid(const struct zsock_sockaddr *addr, zsock_socklen
+ 
+ 		return 0;
+ 	}
+-	case AF_PACKET: {
++	case ZSOCK_AF_PACKET: {
+ 		const struct sockaddr_ll *addr_ll =
+ 			(const struct sockaddr_ll *)addr;
+ 		struct nsos_mid_sockaddr_ll *addr_ll_mid =
+@@ -983,10 +983,10 @@ static int socket_proto_from_nsos_mid(int proto_mid, int *proto)
+ 		*proto = ZSOCK_IPPROTO_ICMP;
+ 		break;
+ 	case NSOS_MID_IPPROTO_IGMP:
+-		*proto = IPPROTO_IGMP;
++		*proto = ZSOCK_IPPROTO_IGMP;
+ 		break;
+ 	case NSOS_MID_IPPROTO_IPIP:
+-		*proto = IPPROTO_IPIP;
++		*proto = ZSOCK_IPPROTO_IPIP;
+ 		break;
+ 	case NSOS_MID_IPPROTO_TCP:
+ 		*proto = ZSOCK_IPPROTO_TCP;
+@@ -1026,7 +1026,7 @@ static int socket_family_from_nsos_mid(int family_mid, int *family)
+ 		*family = ZSOCK_AF_UNIX;
+ 		break;
+ 	case NSOS_MID_AF_PACKET:
+-		*family = AF_PACKET;
++		*family = ZSOCK_AF_PACKET;
+ 		break;
+ 	default:
+ 		return -NSI_ERRNO_MID_EAFNOSUPPORT;
+@@ -1110,7 +1110,7 @@ static int nsos_getsockopt(void *obj, int level, int optname,
+ 
+ 			return 0;
+ 		}
+-		case SO_PROTOCOL: {
++		case ZSOCK_SO_PROTOCOL: {
+ 			int nsos_mid_proto;
+ 			int err;
+ 
+@@ -1134,7 +1134,7 @@ static int nsos_getsockopt(void *obj, int level, int optname,
+ 
+ 			return 0;
+ 		}
+-		case SO_DOMAIN: {
++		case ZSOCK_SO_DOMAIN: {
+ 			int nsos_mid_family;
+ 			int err;
+ 
+@@ -1170,7 +1170,7 @@ static int nsos_getsockopt(void *obj, int level, int optname,
+ 			return nsos_getsockopt_int(sock,
+ 						   NSOS_MID_SOL_SOCKET, NSOS_MID_SO_REUSEADDR,
+ 						   optval, optlen);
+-		case SO_REUSEPORT:
++		case ZSOCK_SO_REUSEPORT:
+ 			return nsos_getsockopt_int(sock,
+ 						   NSOS_MID_SOL_SOCKET, NSOS_MID_SO_REUSEPORT,
+ 						   optval, optlen);
+@@ -1187,15 +1187,15 @@ static int nsos_getsockopt(void *obj, int level, int optname,
+ 			return nsos_getsockopt_int(sock,
+ 						   NSOS_MID_IPPROTO_TCP, NSOS_MID_TCP_NODELAY,
+ 						   optval, optlen);
+-		case TCP_KEEPIDLE:
++		case ZSOCK_TCP_KEEPIDLE:
+ 			return nsos_getsockopt_int(sock,
+ 						   NSOS_MID_IPPROTO_TCP, NSOS_MID_TCP_KEEPIDLE,
+ 						   optval, optlen);
+-		case TCP_KEEPINTVL:
++		case ZSOCK_TCP_KEEPINTVL:
+ 			return nsos_getsockopt_int(sock,
+ 						   NSOS_MID_IPPROTO_TCP, NSOS_MID_TCP_KEEPINTVL,
+ 						   optval, optlen);
+-		case TCP_KEEPCNT:
++		case ZSOCK_TCP_KEEPCNT:
+ 			return nsos_getsockopt_int(sock,
+ 						   NSOS_MID_IPPROTO_TCP, NSOS_MID_TCP_KEEPCNT,
+ 						   optval, optlen);
+@@ -1244,7 +1244,7 @@ static int nsos_setsockopt(void *obj, int level, int optname,
+ 	switch (level) {
+ 	case ZSOCK_SOL_SOCKET:
+ 		switch (optname) {
+-		case SO_PRIORITY: {
++		case ZSOCK_SO_PRIORITY: {
+ 			int nsos_mid_priority;
+ 			int err;
+ 
+@@ -1335,7 +1335,7 @@ static int nsos_setsockopt(void *obj, int level, int optname,
+ 			return nsos_setsockopt_int(sock,
+ 						   NSOS_MID_SOL_SOCKET, NSOS_MID_SO_REUSEADDR,
+ 						   optval, optlen);
+-		case SO_REUSEPORT:
++		case ZSOCK_SO_REUSEPORT:
+ 			return nsos_setsockopt_int(sock,
+ 						   NSOS_MID_SOL_SOCKET, NSOS_MID_SO_REUSEPORT,
+ 						   optval, optlen);
+@@ -1356,15 +1356,15 @@ static int nsos_setsockopt(void *obj, int level, int optname,
+ 			return nsos_setsockopt_int(sock,
+ 						   NSOS_MID_IPPROTO_TCP, NSOS_MID_TCP_NODELAY,
+ 						   optval, optlen);
+-		case TCP_KEEPIDLE:
++		case ZSOCK_TCP_KEEPIDLE:
+ 			return nsos_setsockopt_int(sock,
+ 						   NSOS_MID_IPPROTO_TCP, NSOS_MID_TCP_KEEPIDLE,
+ 						   optval, optlen);
+-		case TCP_KEEPINTVL:
++		case ZSOCK_TCP_KEEPINTVL:
+ 			return nsos_setsockopt_int(sock,
+ 						   NSOS_MID_IPPROTO_TCP, NSOS_MID_TCP_KEEPINTVL,
+ 						   optval, optlen);
+-		case TCP_KEEPCNT:
++		case ZSOCK_TCP_KEEPCNT:
+ 			return nsos_setsockopt_int(sock,
+ 						   NSOS_MID_IPPROTO_TCP, NSOS_MID_TCP_KEEPCNT,
+ 						   optval, optlen);
+diff --git a/subsys/net/ip/canbus_socket.c b/subsys/net/ip/canbus_socket.c
+index 5a2debc2e09..658303801be 100644
+--- a/subsys/net/ip/canbus_socket.c
++++ b/subsys/net/ip/canbus_socket.c
+@@ -20,7 +20,7 @@ LOG_MODULE_REGISTER(net_sockets_can, CONFIG_NET_SOCKETS_LOG_LEVEL);
+ 
+ enum net_verdict net_canbus_socket_input(struct net_pkt *pkt)
+ {
+-	__ASSERT_NO_MSG(net_pkt_family(pkt) == AF_CAN);
++	__ASSERT_NO_MSG(net_pkt_family(pkt) == ZSOCK_AF_CAN);
+ 
+ 	if (net_if_l2(net_pkt_iface(pkt)) == &NET_L2_GET_NAME(CANBUS_RAW)) {
+ 		return net_conn_can_input(pkt, CAN_RAW);
+diff --git a/subsys/net/ip/connection.c b/subsys/net/ip/connection.c
+index 9776f6d0a8e..89a10da9511 100644
+--- a/subsys/net/ip/connection.c
++++ b/subsys/net/ip/connection.c
+@@ -348,11 +348,11 @@ static int net_conn_change_local(struct net_conn *conn,
+ 				conn->flags |= NET_CONN_LOCAL_ADDR_SPEC;
+ 			}
+ 		} else if (IS_ENABLED(CONFIG_NET_SOCKETS_CAN) &&
+-			   local_addr->sa_family == AF_CAN) {
++			   local_addr->sa_family == ZSOCK_AF_CAN) {
+ 			memcpy(&conn->local_addr, local_addr,
+ 			       sizeof(struct zsock_sockaddr_can));
+ 		} else if (IS_ENABLED(CONFIG_NET_SOCKETS_PACKET) &&
+-			   local_addr->sa_family == AF_PACKET) {
++			   local_addr->sa_family == ZSOCK_AF_PACKET) {
+ 			memcpy(&conn->local_addr, local_addr,
+ 			       sizeof(struct zsock_sockaddr_ll));
+ 		} else {
+@@ -642,8 +642,8 @@ void net_conn_packet_input(struct net_pkt *pkt, uint16_t proto, enum net_sock_ty
+ 	struct zsock_sockaddr_ll *local;
+ 	struct net_conn *conn;
+ 
+-	/* Only accept input with AF_PACKET family. */
+-	if (net_pkt_family(pkt) != AF_PACKET) {
++	/* Only accept input with ZSOCK_AF_PACKET family. */
++	if (net_pkt_family(pkt) != ZSOCK_AF_PACKET) {
+ 		return;
+ 	}
+ 
+@@ -658,12 +658,12 @@ void net_conn_packet_input(struct net_pkt *pkt, uint16_t proto, enum net_sock_ty
+ 		}
+ 
+ 		/* If there are other listening connections than
+-		 * AF_PACKET, the packet shall be also passed back to
++		 * ZSOCK_AF_PACKET, the packet shall be also passed back to
+ 		 * net_conn_input() in upper layer processing in order to
+ 		 * re-check if there is any listening socket interested
+ 		 * in this packet.
+ 		 */
+-		if (conn->family != AF_PACKET) {
++		if (conn->family != ZSOCK_AF_PACKET) {
+ 			continue; /* wrong family */
+ 		}
+ 
+@@ -780,8 +780,8 @@ enum net_verdict net_conn_can_input(struct net_pkt *pkt, uint8_t proto)
+ 	net_conn_cb_t cb = NULL;
+ 	void *user_data = NULL;
+ 
+-	/* Only accept input with AF_CAN family and CAN_RAW protocol. */
+-	if (net_pkt_family(pkt) != AF_CAN || proto != CAN_RAW) {
++	/* Only accept input with ZSOCK_AF_CAN family and CAN_RAW protocol. */
++	if (net_pkt_family(pkt) != ZSOCK_AF_CAN || proto != CAN_RAW) {
+ 		return NET_DROP;
+ 	}
+ 
+@@ -796,7 +796,7 @@ enum net_verdict net_conn_can_input(struct net_pkt *pkt, uint8_t proto)
+ 			continue; /* wrong interface */
+ 		}
+ 
+-		if (conn->family != AF_CAN) {
++		if (conn->family != ZSOCK_AF_CAN) {
+ 			continue; /* wrong family */
+ 		}
+ 
+diff --git a/subsys/net/ip/icmp.c b/subsys/net/ip/icmp.c
+index 63a3ca678d2..056c8e38b86 100644
+--- a/subsys/net/ip/icmp.c
++++ b/subsys/net/ip/icmp.c
+@@ -326,7 +326,7 @@ static int send_icmpv6_echo_request(struct net_icmp_ctx *ctx,
+ 	}
+ 
+ 	net_pkt_cursor_init(pkt);
+-	net_ipv6_finalize(pkt, IPPROTO_ICMPV6);
++	net_ipv6_finalize(pkt, ZSOCK_IPPROTO_ICMPV6);
+ 
+ 	NET_DBG("Sending ICMPv6 Echo Request type %d from %s to %s",
+ 		NET_ICMPV6_ECHO_REQUEST,
+diff --git a/subsys/net/ip/icmpv6.c b/subsys/net/ip/icmpv6.c
+index 2e40ac8c3d6..45d6d5a9ea6 100644
+--- a/subsys/net/ip/icmpv6.c
++++ b/subsys/net/ip/icmpv6.c
+@@ -167,7 +167,7 @@ static int icmpv6_handle_echo_request(struct net_icmp_ctx *ctx,
+ 	}
+ 
+ 	net_pkt_cursor_init(reply);
+-	net_ipv6_finalize(reply, IPPROTO_ICMPV6);
++	net_ipv6_finalize(reply, ZSOCK_IPPROTO_ICMPV6);
+ 
+ 	NET_DBG("Sending Echo Reply from %s to %s",
+ 		net_sprint_ipv6_addr(src),
+@@ -210,7 +210,7 @@ int net_icmpv6_send_error(struct net_pkt *orig, uint8_t type, uint8_t code,
+ 		goto drop_no_pkt;
+ 	}
+ 
+-	if (ip_hdr->nexthdr == IPPROTO_ICMPV6) {
++	if (ip_hdr->nexthdr == ZSOCK_IPPROTO_ICMPV6) {
+ 		NET_PKT_DATA_ACCESS_CONTIGUOUS_DEFINE(icmpv6_access,
+ 						      struct net_icmp_hdr);
+ 		struct net_icmp_hdr *icmp_hdr;
+@@ -322,7 +322,7 @@ int net_icmpv6_send_error(struct net_pkt *orig, uint8_t type, uint8_t code,
+ 	}
+ 
+ 	net_pkt_cursor_init(pkt);
+-	net_ipv6_finalize(pkt, IPPROTO_ICMPV6);
++	net_ipv6_finalize(pkt, ZSOCK_IPPROTO_ICMPV6);
+ 
+ 	NET_DBG("Sending ICMPv6 Error Message type %d code %d param %d"
+ 		" from %s to %s", type, code, param,
+diff --git a/subsys/net/ip/igmp.c b/subsys/net/ip/igmp.c
+index f39e2dd8cce..ca1441e9093 100644
+--- a/subsys/net/ip/igmp.c
++++ b/subsys/net/ip/igmp.c
+@@ -247,7 +247,7 @@ static int igmp_send(struct net_pkt *pkt)
+ 	int ret;
+ 
+ 	net_pkt_cursor_init(pkt);
+-	net_ipv4_finalize(pkt, IPPROTO_IGMP);
++	net_ipv4_finalize(pkt, ZSOCK_IPPROTO_IGMP);
+ 
+ 	ret = net_send_data(pkt);
+ 	if (ret < 0) {
+diff --git a/subsys/net/ip/ipv4.c b/subsys/net/ip/ipv4.c
+index b8c748e5920..2d3a39dc804 100644
+--- a/subsys/net/ip/ipv4.c
++++ b/subsys/net/ip/ipv4.c
+@@ -326,7 +326,7 @@ enum net_verdict net_ipv4_input(struct net_pkt *pkt)
+ 
+ 	if (net_ipv4_is_addr_unspecified_raw(hdr->src) &&
+ 	    !net_ipv4_is_addr_bcast_raw(net_pkt_iface(pkt), hdr->dst) &&
+-	    (hdr->proto != IPPROTO_IGMP)) {
++	    (hdr->proto != ZSOCK_IPPROTO_IGMP)) {
+ 		NET_DBG("DROP: src addr is %s", "unspecified");
+ 		goto drop;
+ 	}
+@@ -339,7 +339,7 @@ enum net_verdict net_ipv4_input(struct net_pkt *pkt)
+ 
+ 	net_pkt_set_ipv4_ttl(pkt, hdr->ttl);
+ 
+-	net_pkt_set_family(pkt, PF_INET);
++	net_pkt_set_family(pkt, ZSOCK_PF_INET);
+ 
+ 	if (!net_pkt_filter_ip_recv_ok(pkt)) {
+ 		/* drop the packet */
+@@ -400,7 +400,7 @@ enum net_verdict net_ipv4_input(struct net_pkt *pkt)
+ 		}
+ 		return verdict;
+ #if defined(CONFIG_NET_IPV4_IGMP)
+-	case IPPROTO_IGMP:
++	case ZSOCK_IPPROTO_IGMP:
+ 		verdict = net_ipv4_igmp_input(pkt, hdr);
+ 		if (verdict == NET_DROP) {
+ 			goto drop;
+@@ -422,7 +422,7 @@ enum net_verdict net_ipv4_input(struct net_pkt *pkt)
+ 
+ #if defined(CONFIG_NET_L2_IPIP)
+ 	case ZSOCK_IPPROTO_IPV6:
+-	case IPPROTO_IPIP: {
++	case ZSOCK_IPPROTO_IPIP: {
+ 		struct zsock_sockaddr_in remote_addr = { 0 };
+ 		struct net_if *tunnel_iface;
+ 
+diff --git a/subsys/net/ip/ipv6.c b/subsys/net/ip/ipv6.c
+index 7f2c20ae114..77c6d768081 100644
+--- a/subsys/net/ip/ipv6.c
++++ b/subsys/net/ip/ipv6.c
+@@ -151,7 +151,7 @@ int net_ipv6_finalize(struct net_pkt *pkt, uint8_t next_header_proto)
+ 	} else if (IS_ENABLED(CONFIG_NET_TCP) &&
+ 		   next_header_proto == ZSOCK_IPPROTO_TCP) {
+ 		return net_tcp_finalize(pkt, false);
+-	} else if (next_header_proto == IPPROTO_ICMPV6) {
++	} else if (next_header_proto == ZSOCK_IPPROTO_ICMPV6) {
+ 		return net_icmpv6_finalize(pkt, false);
+ 	}
+ 
+@@ -580,7 +580,7 @@ enum net_verdict net_ipv6_input(struct net_pkt *pkt)
+ 	net_pkt_set_ipv6_ext_len(pkt, 0);
+ 	net_pkt_set_ip_hdr_len(pkt, sizeof(struct net_ipv6_hdr));
+ 	net_pkt_set_ipv6_hop_limit(pkt, NET_IPV6_HDR(pkt)->hop_limit);
+-	net_pkt_set_family(pkt, PF_INET6);
++	net_pkt_set_family(pkt, ZSOCK_PF_INET6);
+ 
+ 	if (!net_pkt_filter_ip_recv_ok(pkt)) {
+ 		/* drop the packet */
+@@ -769,7 +769,7 @@ enum net_verdict net_ipv6_input(struct net_pkt *pkt)
+ 	}
+ 
+ 	switch (current_hdr) {
+-	case IPPROTO_ICMPV6:
++	case ZSOCK_IPPROTO_ICMPV6:
+ 		verdict = net_icmpv6_input(pkt, hdr);
+ 		break;
+ 	case ZSOCK_IPPROTO_TCP:
+@@ -791,7 +791,7 @@ enum net_verdict net_ipv6_input(struct net_pkt *pkt)
+ 
+ #if defined(CONFIG_NET_L2_IPIP)
+ 	case ZSOCK_IPPROTO_IPV6:
+-	case IPPROTO_IPIP: {
++	case ZSOCK_IPPROTO_IPIP: {
+ 		struct zsock_sockaddr_in6 remote_addr = { 0 };
+ 		struct net_if *tunnel_iface;
+ 
+@@ -817,7 +817,7 @@ enum net_verdict net_ipv6_input(struct net_pkt *pkt)
+ 	if (verdict == NET_DROP) {
+ 		NET_DBG("DROP: because verdict");
+ 		goto drop;
+-	} else if (current_hdr == IPPROTO_ICMPV6) {
++	} else if (current_hdr == ZSOCK_IPPROTO_ICMPV6) {
+ 		NET_DBG("%s verdict %s", "ICMPv6", net_verdict2str(verdict));
+ 		return verdict;
+ 	}
+diff --git a/subsys/net/ip/ipv6_fragment.c b/subsys/net/ip/ipv6_fragment.c
+index 0a7c3a5d841..471634a312d 100644
+--- a/subsys/net/ip/ipv6_fragment.c
++++ b/subsys/net/ip/ipv6_fragment.c
+@@ -736,7 +736,7 @@ int net_ipv6_send_fragmented_pkt(struct net_if *iface, struct net_pkt *pkt,
+ 		net_pkt_skip(pkt, last_hdr_off);
+ 
+ 		switch (next_hdr) {
+-		case IPPROTO_ICMPV6:
++		case ZSOCK_IPPROTO_ICMPV6:
+ 			ret = net_icmpv6_finalize(pkt, true);
+ 			break;
+ 		case ZSOCK_IPPROTO_TCP:
+diff --git a/subsys/net/ip/ipv6_mld.c b/subsys/net/ip/ipv6_mld.c
+index 7cd483e1309..cd24552b3ce 100644
+--- a/subsys/net/ip/ipv6_mld.c
++++ b/subsys/net/ip/ipv6_mld.c
+@@ -90,7 +90,7 @@ static int mld_create_packet(struct net_pkt *pkt, uint16_t count)
+ 	}
+ 
+ 	/* Add hop-by-hop option and router alert option, RFC 3810 ch 5. */
+-	if (net_pkt_write_u8(pkt, IPPROTO_ICMPV6) ||
++	if (net_pkt_write_u8(pkt, ZSOCK_IPPROTO_ICMPV6) ||
+ 	    net_pkt_write_u8(pkt, 0)) {
+ 		return -ENOBUFS;
+ 	}
+@@ -127,7 +127,7 @@ static int mld_send(struct net_pkt *pkt)
+ 	int ret;
+ 
+ 	net_pkt_cursor_init(pkt);
+-	net_ipv6_finalize(pkt, IPPROTO_ICMPV6);
++	net_ipv6_finalize(pkt, ZSOCK_IPPROTO_ICMPV6);
+ 
+ 	ret = net_send_data(pkt);
+ 	if (ret < 0) {
+diff --git a/subsys/net/ip/ipv6_nbr.c b/subsys/net/ip/ipv6_nbr.c
+index 733bda33729..912f868d24e 100644
+--- a/subsys/net/ip/ipv6_nbr.c
++++ b/subsys/net/ip/ipv6_nbr.c
+@@ -1209,7 +1209,7 @@ int net_ipv6_send_na(struct net_if *iface, const struct zsock_in6_addr *src,
+ 	}
+ 
+ 	net_pkt_cursor_init(pkt);
+-	net_ipv6_finalize(pkt, IPPROTO_ICMPV6);
++	net_ipv6_finalize(pkt, ZSOCK_IPPROTO_ICMPV6);
+ 
+ 	dbg_addr_sent_tgt("Neighbor Advertisement", src, dst, &na_hdr->tgt,
+ 			  pkt);
+@@ -2083,7 +2083,7 @@ int net_ipv6_send_ns(struct net_if *iface,
+ 	}
+ 
+ 	net_pkt_cursor_init(pkt);
+-	net_ipv6_finalize(pkt, IPPROTO_ICMPV6);
++	net_ipv6_finalize(pkt, ZSOCK_IPPROTO_ICMPV6);
+ 
+ 	net_ipv6_nbr_lock();
+ 	nbr = add_nbr(iface, tgt, false,
+@@ -2209,7 +2209,7 @@ int net_ipv6_send_rs(struct net_if *iface)
+ 	}
+ 
+ 	net_pkt_cursor_init(pkt);
+-	net_ipv6_finalize(pkt, IPPROTO_ICMPV6);
++	net_ipv6_finalize(pkt, ZSOCK_IPPROTO_ICMPV6);
+ 
+ 	dbg_addr_sent("Router Solicitation", src, &dst, pkt);
+ 
+diff --git a/subsys/net/ip/net_context.c b/subsys/net/ip/net_context.c
+index 2f2d6dae4bf..4fddab7b730 100644
+--- a/subsys/net/ip/net_context.c
++++ b/subsys/net/ip/net_context.c
+@@ -489,9 +489,9 @@ static int net_context_check(zsock_sa_family_t family, enum net_sock_type type,
+ 		}
+ 		break;
+ 
+-	case AF_PACKET:
++	case ZSOCK_AF_PACKET:
+ 		if (!IS_ENABLED(CONFIG_NET_SOCKETS_PACKET)) {
+-			NET_DBG("AF_PACKET disabled");
++			NET_DBG("ZSOCK_AF_PACKET disabled");
+ 			return -EPFNOSUPPORT;
+ 		}
+ 		if (!IS_ENABLED(CONFIG_NET_SOCKETS_PACKET_DGRAM) &&
+@@ -500,23 +500,23 @@ static int net_context_check(zsock_sa_family_t family, enum net_sock_type type,
+ 			return -EPROTOTYPE;
+ 		}
+ 		if (type != ZSOCK_SOCK_RAW && type != ZSOCK_SOCK_DGRAM) {
+-			NET_DBG("AF_PACKET only supports RAW and DGRAM socket "
++			NET_DBG("ZSOCK_AF_PACKET only supports RAW and DGRAM socket "
+ 				"types.");
+ 			return -EPROTOTYPE;
+ 		}
+ 		break;
+ 
+-	case AF_CAN:
++	case ZSOCK_AF_CAN:
+ 		if (!IS_ENABLED(CONFIG_NET_SOCKETS_CAN)) {
+-			NET_DBG("AF_CAN disabled");
++			NET_DBG("ZSOCK_AF_CAN disabled");
+ 			return -EPFNOSUPPORT;
+ 		}
+ 		if (type != ZSOCK_SOCK_RAW) {
+-			NET_DBG("AF_CAN only supports RAW socket type.");
++			NET_DBG("ZSOCK_AF_CAN only supports RAW socket type.");
+ 			return -EPROTOTYPE;
+ 		}
+ 		if (proto != CAN_RAW) {
+-			NET_DBG("AF_CAN only supports RAW_CAN protocol.");
++			NET_DBG("ZSOCK_AF_CAN only supports RAW_CAN protocol.");
+ 			return -EPROTOTYPE;
+ 		}
+ 		break;
+@@ -786,7 +786,7 @@ static int bind_default(struct net_context *context)
+ 					sizeof(addr4));
+ 	}
+ 
+-	if (IS_ENABLED(CONFIG_NET_SOCKETS_PACKET) && family == AF_PACKET) {
++	if (IS_ENABLED(CONFIG_NET_SOCKETS_PACKET) && family == ZSOCK_AF_PACKET) {
+ 		struct zsock_sockaddr_ll ll_addr;
+ 		struct net_if *iface = net_context_get_iface(context);
+ 
+@@ -794,7 +794,7 @@ static int bind_default(struct net_context *context)
+ 			return 0;
+ 		}
+ 
+-		ll_addr.sll_family = AF_PACKET;
++		ll_addr.sll_family = ZSOCK_AF_PACKET;
+ 		ll_addr.sll_protocol = zsock_htons(net_context_get_proto(context));
+ 		ll_addr.sll_ifindex = (iface == NULL) ? 0 : net_if_get_by_iface(iface);
+ 
+@@ -802,7 +802,7 @@ static int bind_default(struct net_context *context)
+ 					sizeof(ll_addr));
+ 	}
+ 
+-	if (IS_ENABLED(CONFIG_NET_SOCKETS_CAN) && family == AF_CAN) {
++	if (IS_ENABLED(CONFIG_NET_SOCKETS_CAN) && family == ZSOCK_AF_CAN) {
+ 		struct zsock_sockaddr_can can_addr;
+ 
+ 		if (context->iface >= 0) {
+@@ -824,7 +824,7 @@ static int bind_default(struct net_context *context)
+ #endif
+ 		}
+ 
+-		can_addr.can_family = AF_CAN;
++		can_addr.can_family = ZSOCK_AF_CAN;
+ 
+ 		return net_context_bind(context, (struct zsock_sockaddr *)&can_addr,
+ 					sizeof(can_addr));
+@@ -890,7 +890,7 @@ int net_context_bind(struct net_context *context, const struct zsock_sockaddr *a
+ 	 * the code below. Doesn't apply for packet sockets.
+ 	 * TODO: Support rebinding.
+ 	 */
+-	if (addr->sa_family != AF_PACKET) {
++	if (addr->sa_family != ZSOCK_AF_PACKET) {
+ 		if (context->conn_handler != NULL) {
+ 			return -EISCONN;
+ 		}
+@@ -1112,7 +1112,7 @@ int net_context_bind(struct net_context *context, const struct zsock_sockaddr *a
+ 	}
+ 
+ 	if (IS_ENABLED(CONFIG_NET_SOCKETS_PACKET) &&
+-	    addr->sa_family == AF_PACKET) {
++	    addr->sa_family == ZSOCK_AF_PACKET) {
+ 		struct zsock_sockaddr_ll *ll_addr = (struct zsock_sockaddr_ll *)addr;
+ 		struct net_if *iface = NULL;
+ 
+@@ -1138,7 +1138,7 @@ int net_context_bind(struct net_context *context, const struct zsock_sockaddr *a
+ 
+ 		k_mutex_lock(&context->lock, K_FOREVER);
+ 
+-		net_sll_ptr(&context->local)->sll_family = AF_PACKET;
++		net_sll_ptr(&context->local)->sll_family = ZSOCK_AF_PACKET;
+ 		net_sll_ptr(&context->local)->sll_ifindex =
+ 			ll_addr->sll_ifindex;
+ 		net_sll_ptr(&context->local)->sll_protocol =
+@@ -1167,7 +1167,7 @@ int net_context_bind(struct net_context *context, const struct zsock_sockaddr *a
+ 		return 0;
+ 	}
+ 
+-	if (IS_ENABLED(CONFIG_NET_SOCKETS_CAN) && addr->sa_family == AF_CAN) {
++	if (IS_ENABLED(CONFIG_NET_SOCKETS_CAN) && addr->sa_family == ZSOCK_AF_CAN) {
+ 		struct zsock_sockaddr_can *can_addr = (struct zsock_sockaddr_can *)addr;
+ 		struct net_if *iface = NULL;
+ 
+@@ -1199,9 +1199,9 @@ int net_context_bind(struct net_context *context, const struct zsock_sockaddr *a
+ 		k_mutex_lock(&context->lock, K_FOREVER);
+ 
+ 		net_context_set_iface(context, iface);
+-		net_context_set_family(context, AF_CAN);
++		net_context_set_family(context, ZSOCK_AF_CAN);
+ 
+-		net_can_ptr(&context->local)->can_family = AF_CAN;
++		net_can_ptr(&context->local)->can_family = ZSOCK_AF_CAN;
+ 		net_can_ptr(&context->local)->can_ifindex =
+ 			can_addr->can_ifindex;
+ 
+@@ -1394,7 +1394,7 @@ int net_context_connect(struct net_context *context,
+ 	}
+ 
+ 	if (IS_ENABLED(CONFIG_NET_SOCKETS_PACKET) &&
+-	    addr->sa_family == AF_PACKET) {
++	    addr->sa_family == ZSOCK_AF_PACKET) {
+ 		ret = -EOPNOTSUPP;
+ 		goto unlock;
+ 	}
+@@ -2330,7 +2330,7 @@ static void set_pkt_txtime(struct net_pkt *pkt, const struct zsock_msghdr *msghd
+ 	     cmsg = ZSOCK_CMSG_NXTHDR(msghdr, cmsg)) {
+ 		if (cmsg->cmsg_len == ZSOCK_CMSG_LEN(sizeof(uint64_t)) &&
+ 		    cmsg->cmsg_level == ZSOCK_SOL_SOCKET &&
+-		    cmsg->cmsg_type == SCM_TXTIME) {
++		    cmsg->cmsg_type == ZSOCK_SCM_TXTIME) {
+ 			net_pkt_set_timestamp_ns(pkt, *(net_time_t *)ZSOCK_CMSG_DATA(cmsg));
+ 			break;
+ 		}
+@@ -2555,7 +2555,7 @@ static int context_sendto(struct net_context *context,
+ 			}
+ 		}
+ 
+-	} else if (IS_ENABLED(CONFIG_NET_SOCKETS_PACKET) && family == AF_PACKET) {
++	} else if (IS_ENABLED(CONFIG_NET_SOCKETS_PACKET) && family == ZSOCK_AF_PACKET) {
+ 		struct zsock_sockaddr_ll *ll_addr = (struct zsock_sockaddr_ll *)dst_addr;
+ 
+ 		if (msghdr) {
+@@ -2607,7 +2607,7 @@ static int context_sendto(struct net_context *context,
+ 			}
+ 		}
+ 
+-	} else if (IS_ENABLED(CONFIG_NET_SOCKETS_CAN) && family == AF_CAN) {
++	} else if (IS_ENABLED(CONFIG_NET_SOCKETS_CAN) && family == ZSOCK_AF_CAN) {
+ 		struct zsock_sockaddr_can *can_addr = (struct zsock_sockaddr_can *)dst_addr;
+ 
+ 		if (msghdr) {
+@@ -2765,7 +2765,7 @@ skip_alloc:
+ 		len = ret;
+ 
+ 		ret = net_tcp_send_data(context, cb, user_data);
+-	} else if (IS_ENABLED(CONFIG_NET_SOCKETS_PACKET) && family == AF_PACKET) {
++	} else if (IS_ENABLED(CONFIG_NET_SOCKETS_PACKET) && family == ZSOCK_AF_PACKET) {
+ 		ret = context_write_data(pkt, buf, len, msghdr);
+ 		if (ret < 0) {
+ 			goto fail;
+@@ -2792,7 +2792,7 @@ skip_alloc:
+ 		net_pkt_set_ll_proto_type(pkt, zsock_ntohs(ll_dst_addr->sll_protocol));
+ 
+ 		net_if_try_queue_tx(net_pkt_iface(pkt), pkt, timeout);
+-	} else if (IS_ENABLED(CONFIG_NET_SOCKETS_CAN) && family == AF_CAN &&
++	} else if (IS_ENABLED(CONFIG_NET_SOCKETS_CAN) && family == ZSOCK_AF_CAN &&
+ 		   net_context_get_proto(context) == CAN_RAW) {
+ 		ret = context_write_data(pkt, buf, len, msghdr);
+ 		if (ret < 0) {
+@@ -2920,11 +2920,11 @@ int net_context_send(struct net_context *context,
+ 			dst_check = false;
+ 		}
+ 	} else if (IS_ENABLED(CONFIG_NET_SOCKETS_PACKET) &&
+-		   net_context_get_family(context) == AF_PACKET) {
++		   net_context_get_family(context) == ZSOCK_AF_PACKET) {
+ 		ret = -EOPNOTSUPP;
+ 		goto unlock;
+ 	} else if (IS_ENABLED(CONFIG_NET_SOCKETS_CAN) &&
+-		   net_context_get_family(context) == AF_CAN) {
++		   net_context_get_family(context) == ZSOCK_AF_CAN) {
+ 		addrlen = sizeof(struct zsock_sockaddr_can);
+ 	} else {
+ 		addrlen = 0;
+@@ -3231,7 +3231,7 @@ int net_context_recv(struct net_context *context,
+ 		ret = net_tcp_recv(context, cb, user_data);
+ 	} else {
+ 		if (IS_ENABLED(CONFIG_NET_SOCKETS_PACKET) &&
+-		    family == AF_PACKET) {
++		    family == ZSOCK_AF_PACKET) {
+ 			struct zsock_sockaddr_ll addr = { 0 };
+ 
+ 			ret = bind_default(context);
+@@ -3239,7 +3239,7 @@ int net_context_recv(struct net_context *context,
+ 				goto unlock;
+ 			}
+ 
+-			addr.sll_family = AF_PACKET;
++			addr.sll_family = ZSOCK_AF_PACKET;
+ 			addr.sll_ifindex =
+ 				net_sll_ptr(&context->local)->sll_ifindex;
+ 			addr.sll_protocol =
+@@ -3256,9 +3256,9 @@ int net_context_recv(struct net_context *context,
+ 			ret = recv_raw(context, cb, timeout,
+ 				       (struct zsock_sockaddr *)&addr, user_data);
+ 		} else if (IS_ENABLED(CONFIG_NET_SOCKETS_CAN) &&
+-			   family == AF_CAN) {
++			   family == ZSOCK_AF_CAN) {
+ 			struct zsock_sockaddr_can local_addr = {
+-				.can_family = AF_CAN,
++				.can_family = ZSOCK_AF_CAN,
+ 			};
+ 
+ 			ret = bind_default(context);
+diff --git a/subsys/net/ip/net_core.c b/subsys/net/ip/net_core.c
+index dd4fa9a1d1b..b049415518f 100644
+--- a/subsys/net/ip/net_core.c
++++ b/subsys/net/ip/net_core.c
+@@ -123,7 +123,7 @@ static inline enum net_verdict process_data(struct net_pkt *pkt)
+ 		net_stats_update_ip_errors_protoerr(net_pkt_iface(pkt));
+ 		net_stats_update_ip_errors_vhlerr(net_pkt_iface(pkt));
+ 		return NET_DROP;
+-	} else if (IS_ENABLED(CONFIG_NET_SOCKETS_CAN) && family == AF_CAN) {
++	} else if (IS_ENABLED(CONFIG_NET_SOCKETS_CAN) && family == ZSOCK_AF_CAN) {
+ 		return net_canbus_socket_input(pkt);
+ 	}
+ 
+diff --git a/subsys/net/ip/net_private.h b/subsys/net/ip/net_private.h
+index ec589c90298..deecae0d8be 100644
+--- a/subsys/net/ip/net_private.h
++++ b/subsys/net/ip/net_private.h
+@@ -349,7 +349,7 @@ enum net_verdict net_ipv4_igmp_input(struct net_pkt *pkt,
+ 
+ static inline uint16_t net_calc_chksum_icmpv6(struct net_pkt *pkt)
+ {
+-	return net_calc_chksum(pkt, IPPROTO_ICMPV6);
++	return net_calc_chksum(pkt, ZSOCK_IPPROTO_ICMPV6);
+ }
+ 
+ static inline uint16_t net_calc_chksum_icmpv4(struct net_pkt *pkt)
+diff --git a/subsys/net/ip/packet_socket.c b/subsys/net/ip/packet_socket.c
+index 6c29a0f0b73..11e28a8f3b5 100644
+--- a/subsys/net/ip/packet_socket.c
++++ b/subsys/net/ip/packet_socket.c
+@@ -40,7 +40,7 @@ void net_packet_socket_input(struct net_pkt *pkt,
+ 
+ 	orig_family = net_pkt_family(pkt);
+ 
+-	net_pkt_set_family(pkt, AF_PACKET);
++	net_pkt_set_family(pkt, ZSOCK_AF_PACKET);
+ 
+ 	net_conn_packet_input(pkt, proto, type);
+ 
+diff --git a/subsys/net/ip/utils.c b/subsys/net/ip/utils.c
+index d76124f9738..fdec9c1429e 100644
+--- a/subsys/net/ip/utils.c
++++ b/subsys/net/ip/utils.c
+@@ -60,12 +60,12 @@ const char *net_proto2str(int family, int proto)
+ 			return "TCP";
+ 		case ZSOCK_IPPROTO_UDP:
+ 			return "UDP";
+-		case IPPROTO_ICMPV6:
++		case ZSOCK_IPPROTO_ICMPV6:
+ 			return "ICMPv6";
+ 		default:
+ 			break;
+ 		}
+-	} else if (family == AF_CAN) {
++	} else if (family == ZSOCK_AF_CAN) {
+ 		switch (proto) {
+ 		case CAN_RAW:
+ 			return "CAN_RAW";
+@@ -751,7 +751,7 @@ uint16_t net_calc_chksum_ipv4(struct net_pkt *pkt)
+ #if defined(CONFIG_NET_IPV4_IGMP)
+ uint16_t net_calc_chksum_igmp(struct net_pkt *pkt)
+ {
+-	return net_calc_chksum(pkt, IPPROTO_IGMP);
++	return net_calc_chksum(pkt, ZSOCK_IPPROTO_IGMP);
+ }
+ #endif /* CONFIG_NET_IPV4_IGMP */
+ 
+@@ -1188,10 +1188,10 @@ const char *net_family2str(zsock_sa_family_t family)
+ 		return "ZSOCK_AF_INET";
+ 	case ZSOCK_AF_INET6:
+ 		return "ZSOCK_AF_INET6";
+-	case AF_PACKET:
+-		return "AF_PACKET";
+-	case AF_CAN:
+-		return "AF_CAN";
++	case ZSOCK_AF_PACKET:
++		return "ZSOCK_AF_PACKET";
++	case ZSOCK_AF_CAN:
++		return "ZSOCK_AF_CAN";
+ 	}
+ 
+ 	return NULL;
+diff --git a/subsys/net/l2/canbus/canbus_raw.c b/subsys/net/l2/canbus/canbus_raw.c
+index 8bdf1aa3650..7cebe3a44f9 100644
+--- a/subsys/net/l2/canbus/canbus_raw.c
++++ b/subsys/net/l2/canbus/canbus_raw.c
+@@ -23,7 +23,7 @@ static inline enum net_verdict canbus_recv(struct net_if *iface,
+ 	net_pkt_lladdr_dst(pkt)->len = 0U;
+ 	net_pkt_lladdr_dst(pkt)->type = NET_LINK_CANBUS_RAW;
+ 
+-	net_pkt_set_family(pkt, AF_CAN);
++	net_pkt_set_family(pkt, ZSOCK_AF_CAN);
+ 
+ 	return NET_CONTINUE;
+ }
+diff --git a/subsys/net/l2/ethernet/ethernet.c b/subsys/net/l2/ethernet/ethernet.c
+index e630c4ac06f..521fdc09186 100644
+--- a/subsys/net/l2/ethernet/ethernet.c
++++ b/subsys/net/l2/ethernet/ethernet.c
+@@ -744,7 +744,7 @@ static int ethernet_send(struct net_if *iface, struct net_pkt *pkt)
+ 			}
+ 		}
+ 	} else if (IS_ENABLED(CONFIG_NET_SOCKETS_PACKET) &&
+-		   net_pkt_family(pkt) == AF_PACKET) {
++		   net_pkt_family(pkt) == ZSOCK_AF_PACKET) {
+ 		struct net_context *context = net_pkt_context(pkt);
+ 
+ 		if (!(context && net_context_get_type(context) == ZSOCK_SOCK_DGRAM)) {
+diff --git a/subsys/net/l2/ieee802154/ieee802154.c b/subsys/net/l2/ieee802154/ieee802154.c
+index 26c3f9f9558..5fa675e8084 100644
+--- a/subsys/net/l2/ieee802154/ieee802154.c
++++ b/subsys/net/l2/ieee802154/ieee802154.c
+@@ -493,7 +493,7 @@ static int ieee802154_send(struct net_if *iface, struct net_pkt *pkt)
+ 		frame_buf = net_buf_alloc(&tx_frame_buf_pool, K_FOREVER);
+ 	}
+ 
+-	if (IS_ENABLED(CONFIG_NET_SOCKETS_PACKET) && net_pkt_family(pkt) == AF_PACKET) {
++	if (IS_ENABLED(CONFIG_NET_SOCKETS_PACKET) && net_pkt_family(pkt) == ZSOCK_AF_PACKET) {
+ 		enum net_sock_type socket_type;
+ 		struct net_context *context;
+ 
+diff --git a/subsys/net/l2/ppp/ppp_l2.c b/subsys/net/l2/ppp/ppp_l2.c
+index e9c87445d60..801bc020c9b 100644
+--- a/subsys/net/l2/ppp/ppp_l2.c
++++ b/subsys/net/l2/ppp/ppp_l2.c
+@@ -183,11 +183,11 @@ static int ppp_send(struct net_if *iface, struct net_pkt *pkt)
+ 	}
+ 
+ 	/* PPP drivers only support IP packet types, therefore in order to be
+-	 * able to use AF_PACKET family sockets with PPP, we need to translate
++	 * able to use ZSOCK_AF_PACKET family sockets with PPP, we need to translate
+ 	 * L2 proto type to packet family.
+ 	 */
+ 	if (IS_ENABLED(CONFIG_NET_SOCKETS_PACKET) &&
+-	    net_pkt_family(pkt) == AF_PACKET) {
++	    net_pkt_family(pkt) == ZSOCK_AF_PACKET) {
+ 		switch (net_pkt_ll_proto_type(pkt)) {
+ 		case ETH_P_IP:
+ 			net_pkt_set_family(pkt, ZSOCK_AF_INET);
+diff --git a/subsys/net/l2/virtual/ipip/ipip.c b/subsys/net/l2/virtual/ipip/ipip.c
+index 43d914191af..a940fc73b36 100644
+--- a/subsys/net/l2/virtual/ipip/ipip.c
++++ b/subsys/net/l2/virtual/ipip/ipip.c
+@@ -144,7 +144,7 @@ static int interface_send(struct net_if *iface, struct net_pkt *pkt)
+ 	}
+ 
+ 	if (net_pkt_family(pkt) == ZSOCK_AF_INET) {
+-		nexthdr = IPPROTO_IPIP;
++		nexthdr = ZSOCK_IPPROTO_IPIP;
+ 		tos = ipv4_get_tos(pkt);
+ 	} else if (net_pkt_family(pkt) == ZSOCK_AF_INET6) {
+ 		nexthdr = ZSOCK_IPPROTO_IPV6;
+diff --git a/subsys/net/lib/coap/coap_server.c b/subsys/net/lib/coap/coap_server.c
+index 26286237bff..6677f7c6a9e 100644
+--- a/subsys/net/lib/coap/coap_server.c
++++ b/subsys/net/lib/coap/coap_server.c
+@@ -466,7 +466,7 @@ int coap_service_start(const struct coap_service *service)
+ 
+ #if defined(CONFIG_NET_SOCKETS_ENABLE_DTLS)
+ 	if (service->sec_tag_list != NULL) {
+-		proto = IPPROTO_DTLS_1_2;
++		proto = ZSOCK_IPPROTO_DTLS_1_2;
+ 	}
+ #endif
+ 
+diff --git a/subsys/net/lib/dns/dispatcher.c b/subsys/net/lib/dns/dispatcher.c
+index efc23f03bba..1e8cdb3bd17 100644
+--- a/subsys/net/lib/dns/dispatcher.c
++++ b/subsys/net/lib/dns/dispatcher.c
+@@ -134,7 +134,7 @@ static int recv_data(struct net_socket_service_event *pev)
+ 	k_mutex_lock(&dispatcher->lock, K_FOREVER);
+ 
+ 	(void)zsock_getsockopt(pev->event.fd, ZSOCK_SOL_SOCKET,
+-			       SO_DOMAIN, &family, &optlen);
++			       ZSOCK_SO_DOMAIN, &family, &optlen);
+ 
+ 	if ((pev->event.revents & ZSOCK_POLLERR) ||
+ 	    (pev->event.revents & ZSOCK_POLLNVAL)) {
+diff --git a/subsys/net/lib/dns/llmnr_responder.c b/subsys/net/lib/dns/llmnr_responder.c
+index e8509c42143..2c5dfba1cbc 100644
+--- a/subsys/net/lib/dns/llmnr_responder.c
++++ b/subsys/net/lib/dns/llmnr_responder.c
+@@ -520,7 +520,7 @@ static int recv_data(struct net_socket_service_event *pev)
+ 	if ((pev->event.revents & ZSOCK_POLLERR) ||
+ 	    (pev->event.revents & ZSOCK_POLLNVAL)) {
+ 		(void)zsock_getsockopt(pev->event.fd, ZSOCK_SOL_SOCKET,
+-				       SO_DOMAIN, &family, &optlen);
++				       ZSOCK_SO_DOMAIN, &family, &optlen);
+ 		(void)zsock_getsockopt(pev->event.fd, ZSOCK_SOL_SOCKET,
+ 				       ZSOCK_SO_ERROR, &sock_error, &optlen);
+ 		NET_ERR("Receiver IPv%d socket error (%d)",
+diff --git a/subsys/net/lib/dns/resolve.c b/subsys/net/lib/dns/resolve.c
+index 0def09857b8..09bc970661b 100644
+--- a/subsys/net/lib/dns/resolve.c
++++ b/subsys/net/lib/dns/resolve.c
+@@ -1279,7 +1279,7 @@ rr_qtype_aaaa:
+ 			} else if (ctx->queries[*query_idx].query_type ==
+ 							DNS_QUERY_TYPE_PTR) {
+ 				/* Synthesize a reply and place the returned info
+-				 * in to the ai_canonname field. Use AF_LOCAL address
++				 * in to the ai_canonname field. Use ZSOCK_AF_LOCAL address
+ 				 * family as this is not a real address.
+ 				 */
+ 				struct net_buf *result;
+@@ -1308,7 +1308,7 @@ rr_qtype_aaaa:
+ 					goto quit;
+ 				}
+ 
+-				info.ai_family = AF_LOCAL;
++				info.ai_family = ZSOCK_AF_LOCAL;
+ 				info.ai_addrlen = MIN(result->len, DNS_MAX_NAME_SIZE);
+ 				memcpy(info.ai_canonname, result->data, info.ai_addrlen);
+ 				info.ai_canonname[info.ai_addrlen] = '\0';
+diff --git a/subsys/net/lib/http/http_server_core.c b/subsys/net/lib/http/http_server_core.c
+index b48329c2c04..f397017a835 100644
+--- a/subsys/net/lib/http/http_server_core.c
++++ b/subsys/net/lib/http/http_server_core.c
+@@ -153,7 +153,7 @@ int http_server_init(struct http_server_ctx *ctx)
+ 		if (COND_CODE_1(CONFIG_NET_SOCKETS_SOCKOPT_TLS,
+ 				(svc->sec_tag_list != NULL),
+ 				(0))) {
+-			proto = IPPROTO_TLS_1_2;
++			proto = ZSOCK_IPPROTO_TLS_1_2;
+ 		} else {
+ 			proto = ZSOCK_IPPROTO_TCP;
+ 		}
+diff --git a/subsys/net/lib/mqtt/mqtt_transport_socket_tcp.c b/subsys/net/lib/mqtt/mqtt_transport_socket_tcp.c
+index 334d5914fe4..0a0b3a632d6 100644
+--- a/subsys/net/lib/mqtt/mqtt_transport_socket_tcp.c
++++ b/subsys/net/lib/mqtt/mqtt_transport_socket_tcp.c
+@@ -38,7 +38,7 @@ int mqtt_client_tcp_connect(struct mqtt_client *client)
+ 			sizeof(ifname.ifr_name) - 1);
+ 
+ 		ret = zsock_setsockopt(client->transport.tcp.sock, ZSOCK_SOL_SOCKET,
+-				       SO_BINDTODEVICE, &ifname,
++				       ZSOCK_SO_BINDTODEVICE, &ifname,
+ 				       sizeof(struct ifreq));
+ 		if (ret < 0) {
+ 			NET_ERR("Failed to bind ot interface %s error (%d)",
+diff --git a/subsys/net/lib/mqtt/mqtt_transport_socket_tls.c b/subsys/net/lib/mqtt/mqtt_transport_socket_tls.c
+index 5544ebd7817..11a1923e459 100644
+--- a/subsys/net/lib/mqtt/mqtt_transport_socket_tls.c
++++ b/subsys/net/lib/mqtt/mqtt_transport_socket_tls.c
+@@ -39,7 +39,7 @@ int mqtt_client_tls_connect(struct mqtt_client *client)
+ 			sizeof(ifname.ifr_name) - 1);
+ 
+ 		ret = zsock_setsockopt(client->transport.tls.sock, ZSOCK_SOL_SOCKET,
+-				       SO_BINDTODEVICE, &ifname,
++				       ZSOCK_SO_BINDTODEVICE, &ifname,
+ 				       sizeof(struct ifreq));
+ 		if (ret < 0) {
+ 			NET_ERR("Failed to bind ot interface %s error (%d)",
+diff --git a/subsys/net/lib/ptp/transport.c b/subsys/net/lib/ptp/transport.c
+index 4e2769df356..1936155e4bd 100644
+--- a/subsys/net/lib/ptp/transport.c
++++ b/subsys/net/lib/ptp/transport.c
+@@ -62,7 +62,7 @@ static int transport_socket_open(struct net_if *iface, struct zsock_sockaddr *ad
+ 	cnt = net_if_get_name(iface, ifreq.ifr_name, INTERFACE_NAME_LEN);
+ 	if (cnt > 0 && zsock_setsockopt(socket,
+ 					ZSOCK_SOL_SOCKET,
+-					SO_BINDTODEVICE,
++					ZSOCK_SO_BINDTODEVICE,
+ 					ifreq.ifr_name,
+ 					sizeof(ifreq.ifr_name))) {
+ 		LOG_ERR("Failed to set socket binding to an interface");
+@@ -70,12 +70,12 @@ static int transport_socket_open(struct net_if *iface, struct zsock_sockaddr *ad
+ 	}
+ 
+ 	if (zsock_setsockopt(socket, ZSOCK_SOL_SOCKET, ZSOCK_SO_TIMESTAMPING, &ts_mask, sizeof(ts_mask))) {
+-		LOG_ERR("Failed to set SO_TIMESTAMPING");
++		LOG_ERR("Failed to set ZSOCK_SO_TIMESTAMPING");
+ 		goto error;
+ 	}
+ 
+ 	if (zsock_setsockopt(socket, ZSOCK_SOL_SOCKET, ZSOCK_SO_PRIORITY, &priority, sizeof(priority))) {
+-		LOG_ERR("Failed to set SO_PRIORITY");
++		LOG_ERR("Failed to set ZSOCK_SO_PRIORITY");
+ 		goto error;
+ 	}
+ 
+diff --git a/subsys/net/lib/shell/capture.c b/subsys/net/lib/shell/capture.c
+index ca2590e0dcf..04ed6d55cc2 100644
+--- a/subsys/net/lib/shell/capture.c
++++ b/subsys/net/lib/shell/capture.c
+@@ -32,11 +32,11 @@ static void get_address_str(const struct zsock_sockaddr *addr,
+ 			 zsock_ntohs(net_sin(addr)->sin_port));
+ 
+ 	} else if (IS_ENABLED(CONFIG_NET_SOCKETS_PACKET) &&
+-		   addr->sa_family == AF_PACKET) {
+-		snprintk(str, str_len, "AF_PACKET");
++		   addr->sa_family == ZSOCK_AF_PACKET) {
++		snprintk(str, str_len, "ZSOCK_AF_PACKET");
+ 	} else if (IS_ENABLED(CONFIG_NET_SOCKETS_CAN) &&
+-		   addr->sa_family == AF_CAN) {
+-		snprintk(str, str_len, "AF_CAN");
++		   addr->sa_family == ZSOCK_AF_CAN) {
++		snprintk(str, str_len, "ZSOCK_AF_CAN");
+ 	} else if (addr->sa_family == ZSOCK_AF_UNSPEC) {
+ 		snprintk(str, str_len, "ZSOCK_AF_UNSPEC");
+ 	} else {
+diff --git a/subsys/net/lib/shell/conn.c b/subsys/net/lib/shell/conn.c
+index 1d2494e777c..83f1e630adb 100644
+--- a/subsys/net/lib/shell/conn.c
++++ b/subsys/net/lib/shell/conn.c
+@@ -89,8 +89,8 @@ static void conn_handler_cb(struct net_conn *conn, void *user_data)
+ 
+ 	} else if (conn->local_addr.sa_family == ZSOCK_AF_UNSPEC) {
+ 		snprintk(addr_local, sizeof(addr_local), "ZSOCK_AF_UNSPEC");
+-	} else if (conn->local_addr.sa_family == AF_PACKET) {
+-		snprintk(addr_local, sizeof(addr_local), "AF_PACKET");
++	} else if (conn->local_addr.sa_family == ZSOCK_AF_PACKET) {
++		snprintk(addr_local, sizeof(addr_local), "ZSOCK_AF_PACKET");
+ 	} else {
+ 		snprintk(addr_local, sizeof(addr_local), "AF_UNK(%d)",
+ 			 conn->local_addr.sa_family);
+diff --git a/subsys/net/lib/shell/dns.c b/subsys/net/lib/shell/dns.c
+index 27ac53a337a..ada8400cfef 100644
+--- a/subsys/net/lib/shell/dns.c
++++ b/subsys/net/lib/shell/dns.c
+@@ -47,7 +47,7 @@ static void dns_result_cb(enum dns_resolve_status status,
+ 				      str, sizeof(str));
+ 			break;
+ 
+-		case AF_LOCAL:
++		case ZSOCK_AF_LOCAL:
+ 			/* service discovery */
+ 			memset(str, 0, MAX_STR_LEN);
+ 			memcpy(str, info->ai_canonname,
+@@ -465,8 +465,8 @@ static int cmd_net_dns_service(const struct shell *sh, size_t argc, char *argv[]
+ 			PR("ZSOCK_AF_INET6 [%s]:%u\n", cp ? cp : "<invalid>", port);
+ 			break;
+ 
+-		case AF_LOCAL:
+-			PR("AF_LOCAL %.*s\n",
++		case ZSOCK_AF_LOCAL:
++			PR("ZSOCK_AF_LOCAL %.*s\n",
+ 			   (int)info.ai_addrlen, info.ai_canonname);
+ 
+ 			snprintf(query, sizeof(query), "%.*s",
+diff --git a/subsys/net/lib/shell/net_shell.c b/subsys/net/lib/shell/net_shell.c
+index 6e96cdc6b2c..1e5c9da36ca 100644
+--- a/subsys/net/lib/shell/net_shell.c
++++ b/subsys/net/lib/shell/net_shell.c
+@@ -119,10 +119,10 @@ void get_addresses(struct net_context *context,
+ 
+ 	} else if (context->local.family == ZSOCK_AF_UNSPEC) {
+ 		snprintk(addr_local, local_len, "ZSOCK_AF_UNSPEC");
+-	} else if (context->local.family == AF_PACKET) {
+-		snprintk(addr_local, local_len, "AF_PACKET");
+-	} else if (context->local.family == AF_CAN) {
+-		snprintk(addr_local, local_len, "AF_CAN");
++	} else if (context->local.family == ZSOCK_AF_PACKET) {
++		snprintk(addr_local, local_len, "ZSOCK_AF_PACKET");
++	} else if (context->local.family == ZSOCK_AF_CAN) {
++		snprintk(addr_local, local_len, "ZSOCK_AF_CAN");
+ 	} else {
+ 		snprintk(addr_local, local_len, "AF_UNK(%d)",
+ 			 context->local.family);
+diff --git a/subsys/net/lib/shell/sockets.c b/subsys/net/lib/shell/sockets.c
+index e11cada06b8..d3ddfd5320c 100644
+--- a/subsys/net/lib/shell/sockets.c
++++ b/subsys/net/lib/shell/sockets.c
+@@ -69,7 +69,7 @@ int walk_sockets(struct k_obj_core *obj_core, void *user_data)
+ 	   thread_name, obj->reg->name,
+ 	   obj->socket_family == ZSOCK_AF_INET6 ? '6' :
+ 	   (obj->socket_family == ZSOCK_AF_INET ? '4' :
+-	    (obj->socket_family == AF_NET_MGMT ? 'M' : ' ')),
++	    (obj->socket_family == ZSOCK_AF_NET_MGMT ? 'M' : ' ')),
+ 	   obj->socket_type == ZSOCK_SOCK_DGRAM ? 'D' :
+ 	   (obj->socket_type == ZSOCK_SOCK_STREAM ? 'S' :
+ 	    (obj->socket_type == ZSOCK_SOCK_RAW ? 'R' : ' ')),
+diff --git a/subsys/net/lib/sockets/socket_dispatcher.c b/subsys/net/lib/sockets/socket_dispatcher.c
+index f78d430e111..9bcc2ad36de 100644
+--- a/subsys/net/lib/sockets/socket_dispatcher.c
++++ b/subsys/net/lib/sockets/socket_dispatcher.c
+@@ -29,8 +29,8 @@ static int sock_dispatch_create(int family, int type, int proto);
+ 
+ static bool is_tls(int proto)
+ {
+-	if ((proto >= IPPROTO_TLS_1_0 && proto <= IPPROTO_TLS_1_2) ||
+-	    (proto >= IPPROTO_DTLS_1_0 && proto <= IPPROTO_DTLS_1_2)) {
++	if ((proto >= ZSOCK_IPPROTO_TLS_1_0 && proto <= ZSOCK_IPPROTO_TLS_1_2) ||
++	    (proto >= ZSOCK_IPPROTO_DTLS_1_0 && proto <= ZSOCK_IPPROTO_DTLS_1_2)) {
+ 		return true;
+ 	}
+ 
+diff --git a/subsys/net/lib/sockets/socketpair.c b/subsys/net/lib/sockets/socketpair.c
+index 3b5407f3c38..83f70bd1e73 100644
+--- a/subsys/net/lib/sockets/socketpair.c
++++ b/subsys/net/lib/sockets/socketpair.c
+@@ -1120,7 +1120,7 @@ static ssize_t spair_recvfrom(void *obj, void *buf, size_t max_len,
+ 	(void)addrlen;
+ 
+ 	if (addrlen != NULL) {
+-		/* Protocol (PF_UNIX) does not support addressing with connected
++		/* Protocol (ZSOCK_PF_UNIX) does not support addressing with connected
+ 		 * sockets and, therefore, it is unspecified behaviour to modify
+ 		 * src_addr. However, it would be ambiguous to leave addrlen
+ 		 * untouched if the user expects it to be updated. It is not
+diff --git a/subsys/net/lib/sockets/sockets_can.c b/subsys/net/lib/sockets/sockets_can.c
+index 194c76c7a51..f1ab79fbd98 100644
+--- a/subsys/net/lib/sockets/sockets_can.c
++++ b/subsys/net/lib/sockets/sockets_can.c
+@@ -252,7 +252,7 @@ ssize_t zcan_sendto_ctx(struct net_context *ctx, const void *buf, size_t len,
+ 		memset(&can_addr, 0, sizeof(can_addr));
+ 
+ 		can_addr.can_ifindex = -1;
+-		can_addr.can_family = AF_CAN;
++		can_addr.can_family = ZSOCK_AF_CAN;
+ 
+ 		dest_addr = (struct zsock_sockaddr *)&can_addr;
+ 	}
+@@ -464,7 +464,7 @@ static int can_sock_ioctl_vmeth(void *obj, unsigned int request, va_list args)
+ }
+ 
+ /*
+- * TODO: A CAN socket can be bound to a network device using SO_BINDTODEVICE.
++ * TODO: A CAN socket can be bound to a network device using ZSOCK_SO_BINDTODEVICE.
+  */
+ static int can_sock_bind_vmeth(void *obj, const struct zsock_sockaddr *addr,
+ 			       zsock_socklen_t addrlen)
+@@ -734,5 +734,5 @@ static bool can_is_supported(int family, int type, int proto)
+ 	return true;
+ }
+ 
+-NET_SOCKET_REGISTER(af_can, NET_SOCKET_DEFAULT_PRIO, AF_CAN, can_is_supported,
++NET_SOCKET_REGISTER(af_can, NET_SOCKET_DEFAULT_PRIO, ZSOCK_AF_CAN, can_is_supported,
+ 		    zcan_socket);
+diff --git a/subsys/net/lib/sockets/sockets_inet.c b/subsys/net/lib/sockets/sockets_inet.c
+index f87fc050948..07376b1c333 100644
+--- a/subsys/net/lib/sockets/sockets_inet.c
++++ b/subsys/net/lib/sockets/sockets_inet.c
+@@ -1699,11 +1699,11 @@ static int zsock_poll_update_ctx(struct net_context *ctx,
+ static enum tcp_conn_option get_tcp_option(int optname)
+ {
+ 	switch (optname) {
+-	case TCP_KEEPIDLE:
++	case ZSOCK_TCP_KEEPIDLE:
+ 		return TCP_OPT_KEEPIDLE;
+-	case TCP_KEEPINTVL:
++	case ZSOCK_TCP_KEEPINTVL:
+ 		return TCP_OPT_KEEPINTVL;
+-	case TCP_KEEPCNT:
++	case ZSOCK_TCP_KEEPCNT:
+ 		return TCP_OPT_KEEPCNT;
+ 	}
+ 
+@@ -1835,7 +1835,7 @@ int zsock_getsockopt_ctx(struct net_context *ctx, int level, int optname,
+ 			return 0;
+ 		}
+ 
+-		case SO_TXTIME:
++		case ZSOCK_SO_TXTIME:
+ 			if (IS_ENABLED(CONFIG_NET_CONTEXT_TXTIME)) {
+ 				ret = net_context_get_option(ctx,
+ 							     NET_OPT_TXTIME,
+@@ -1849,7 +1849,7 @@ int zsock_getsockopt_ctx(struct net_context *ctx, int level, int optname,
+ 			}
+ 			break;
+ 
+-		case SO_PROTOCOL: {
++		case ZSOCK_SO_PROTOCOL: {
+ 			int proto = (int)net_context_get_proto(ctx);
+ 
+ 			if (*optlen != sizeof(proto)) {
+@@ -1862,7 +1862,7 @@ int zsock_getsockopt_ctx(struct net_context *ctx, int level, int optname,
+ 			return 0;
+ 		}
+ 
+-		case SO_DOMAIN: {
++		case ZSOCK_SO_DOMAIN: {
+ 			if (*optlen != sizeof(int)) {
+ 				errno = EINVAL;
+ 				return -1;
+@@ -1917,7 +1917,7 @@ int zsock_getsockopt_ctx(struct net_context *ctx, int level, int optname,
+ 			}
+ 			break;
+ 
+-		case SO_REUSEPORT:
++		case ZSOCK_SO_REUSEPORT:
+ 			if (IS_ENABLED(CONFIG_NET_CONTEXT_REUSEPORT)) {
+ 				ret = net_context_get_option(ctx,
+ 							     NET_OPT_REUSEPORT,
+@@ -1947,7 +1947,7 @@ int zsock_getsockopt_ctx(struct net_context *ctx, int level, int optname,
+ 
+ 			break;
+ 
+-		case SO_TIMESTAMPING:
++		case ZSOCK_SO_TIMESTAMPING:
+ 			if (IS_ENABLED(CONFIG_NET_CONTEXT_TIMESTAMPING)) {
+ 				ret = net_context_get_option(ctx,
+ 							     NET_OPT_TIMESTAMPING,
+@@ -1972,11 +1972,11 @@ int zsock_getsockopt_ctx(struct net_context *ctx, int level, int optname,
+ 			ret = net_tcp_get_option(ctx, TCP_OPT_NODELAY, optval, optlen);
+ 			return ret;
+ 
+-		case TCP_KEEPIDLE:
++		case ZSOCK_TCP_KEEPIDLE:
+ 			__fallthrough;
+-		case TCP_KEEPINTVL:
++		case ZSOCK_TCP_KEEPINTVL:
+ 			__fallthrough;
+-		case TCP_KEEPCNT:
++		case ZSOCK_TCP_KEEPCNT:
+ 			if (IS_ENABLED(CONFIG_NET_TCP_KEEPALIVE)) {
+ 				ret = net_tcp_get_option(ctx,
+ 							 get_tcp_option(optname),
+@@ -2375,7 +2375,7 @@ int zsock_setsockopt_ctx(struct net_context *ctx, int level, int optname,
+ 
+ 			break;
+ 
+-		case SO_REUSEPORT:
++		case ZSOCK_SO_REUSEPORT:
+ 			if (IS_ENABLED(CONFIG_NET_CONTEXT_REUSEPORT)) {
+ 				ret = net_context_set_option(ctx,
+ 							     NET_OPT_REUSEPORT,
+@@ -2390,7 +2390,7 @@ int zsock_setsockopt_ctx(struct net_context *ctx, int level, int optname,
+ 
+ 			break;
+ 
+-		case SO_PRIORITY:
++		case ZSOCK_SO_PRIORITY:
+ 			if (IS_ENABLED(CONFIG_NET_CONTEXT_PRIORITY)) {
+ 				ret = net_context_set_option(ctx,
+ 							     NET_OPT_PRIORITY,
+@@ -2468,7 +2468,7 @@ int zsock_setsockopt_ctx(struct net_context *ctx, int level, int optname,
+ 
+ 			break;
+ 
+-		case SO_TXTIME:
++		case ZSOCK_SO_TXTIME:
+ 			if (IS_ENABLED(CONFIG_NET_CONTEXT_TXTIME)) {
+ 				ret = net_context_set_option(ctx,
+ 							     NET_OPT_TXTIME,
+@@ -2483,7 +2483,7 @@ int zsock_setsockopt_ctx(struct net_context *ctx, int level, int optname,
+ 
+ 			break;
+ 
+-		case SO_SOCKS5:
++		case ZSOCK_SO_SOCKS5:
+ 			if (IS_ENABLED(CONFIG_SOCKS)) {
+ 				ret = net_context_set_option(ctx,
+ 							     NET_OPT_SOCKS5,
+@@ -2500,7 +2500,7 @@ int zsock_setsockopt_ctx(struct net_context *ctx, int level, int optname,
+ 
+ 			break;
+ 
+-		case SO_BINDTODEVICE: {
++		case ZSOCK_SO_BINDTODEVICE: {
+ 			struct net_if *iface;
+ 			const struct ifreq *ifreq = optval;
+ 
+@@ -2577,7 +2577,7 @@ int zsock_setsockopt_ctx(struct net_context *ctx, int level, int optname,
+ 
+ 			break;
+ 
+-		case SO_TIMESTAMPING:
++		case ZSOCK_SO_TIMESTAMPING:
+ 			if (IS_ENABLED(CONFIG_NET_CONTEXT_TIMESTAMPING)) {
+ 				ret = net_context_set_option(ctx,
+ 							     NET_OPT_TIMESTAMPING,
+@@ -2603,11 +2603,11 @@ int zsock_setsockopt_ctx(struct net_context *ctx, int level, int optname,
+ 						 TCP_OPT_NODELAY, optval, optlen);
+ 			return ret;
+ 
+-		case TCP_KEEPIDLE:
++		case ZSOCK_TCP_KEEPIDLE:
+ 			__fallthrough;
+-		case TCP_KEEPINTVL:
++		case ZSOCK_TCP_KEEPINTVL:
+ 			__fallthrough;
+-		case TCP_KEEPCNT:
++		case ZSOCK_TCP_KEEPCNT:
+ 			if (IS_ENABLED(CONFIG_NET_TCP_KEEPALIVE)) {
+ 				ret = net_tcp_set_option(ctx,
+ 							 get_tcp_option(optname),
+diff --git a/subsys/net/lib/sockets/sockets_net_mgmt.c b/subsys/net/lib/sockets/sockets_net_mgmt.c
+index 2e537646265..6e3a28cf90a 100644
+--- a/subsys/net/lib/sockets/sockets_net_mgmt.c
++++ b/subsys/net/lib/sockets/sockets_net_mgmt.c
+@@ -199,7 +199,7 @@ again:
+ 		}
+ 
+ 		nm_addr->nm_pid = mgmt->pid;
+-		nm_addr->nm_family = AF_NET_MGMT;
++		nm_addr->nm_family = ZSOCK_AF_NET_MGMT;
+ 		nm_addr->nm_mask = raised_event;
+ 	}
+ 
+@@ -395,5 +395,5 @@ static bool net_mgmt_is_supported(int family, int type, int proto)
+ 	return true;
+ }
+ 
+-NET_SOCKET_REGISTER(af_net_mgmt, NET_SOCKET_DEFAULT_PRIO, AF_NET_MGMT,
++NET_SOCKET_REGISTER(af_net_mgmt, NET_SOCKET_DEFAULT_PRIO, ZSOCK_AF_NET_MGMT,
+ 		    net_mgmt_is_supported, znet_mgmt_socket);
+diff --git a/subsys/net/lib/sockets/sockets_packet.c b/subsys/net/lib/sockets/sockets_packet.c
+index c6fa7ffb0fe..d0b6076d2ae 100644
+--- a/subsys/net/lib/sockets/sockets_packet.c
++++ b/subsys/net/lib/sockets/sockets_packet.c
+@@ -186,7 +186,7 @@ static void zpacket_set_source_addr(struct net_context *ctx,
+ 		return;
+ 	}
+ 
+-	addr.sll_family = AF_PACKET;
++	addr.sll_family = ZSOCK_AF_PACKET;
+ 	addr.sll_ifindex = net_if_get_by_iface(iface);
+ 
+ 	if (net_pkt_is_l2_processed(pkt)) {
+@@ -396,7 +396,7 @@ static int packet_sock_ioctl_vmeth(void *obj, unsigned int request,
+ }
+ 
+ /*
+- * TODO: A packet socket can be bound to a network device using SO_BINDTODEVICE.
++ * TODO: A packet socket can be bound to a network device using ZSOCK_SO_BINDTODEVICE.
+  */
+ static int packet_sock_bind_vmeth(void *obj, const struct zsock_sockaddr *addr,
+ 				  zsock_socklen_t addrlen)
+@@ -502,5 +502,5 @@ static bool packet_is_supported(int family, int type, int proto)
+ 	}
+ }
+ 
+-NET_SOCKET_REGISTER(af_packet, NET_SOCKET_DEFAULT_PRIO, AF_PACKET,
++NET_SOCKET_REGISTER(af_packet, NET_SOCKET_DEFAULT_PRIO, ZSOCK_AF_PACKET,
+ 		    packet_is_supported, zpacket_socket);
+diff --git a/subsys/net/lib/sockets/sockets_tls.c b/subsys/net/lib/sockets/sockets_tls.c
+index afb4eb88129..9fb0a7ca482 100644
+--- a/subsys/net/lib/sockets/sockets_tls.c
++++ b/subsys/net/lib/sockets/sockets_tls.c
+@@ -2255,13 +2255,13 @@ static int protocol_check(int family, int type, int *proto)
+ 		return -EAFNOSUPPORT;
+ 	}
+ 
+-	if (*proto >= IPPROTO_TLS_1_0 && *proto <= IPPROTO_TLS_1_3) {
++	if (*proto >= ZSOCK_IPPROTO_TLS_1_0 && *proto <= ZSOCK_IPPROTO_TLS_1_3) {
+ 		if (type != ZSOCK_SOCK_STREAM) {
+ 			return -EPROTOTYPE;
+ 		}
+ 
+ 		*proto = ZSOCK_IPPROTO_TCP;
+-	} else if (*proto >= IPPROTO_DTLS_1_0 && *proto <= IPPROTO_DTLS_1_2) {
++	} else if (*proto >= ZSOCK_IPPROTO_DTLS_1_0 && *proto <= ZSOCK_IPPROTO_DTLS_1_2) {
+ 		if (!IS_ENABLED(CONFIG_NET_SOCKETS_ENABLE_DTLS)) {
+ 			return -EPROTONOSUPPORT;
+ 		}
+diff --git a/subsys/net/lib/zperf/zperf_tcp_receiver.c b/subsys/net/lib/zperf/zperf_tcp_receiver.c
+index 58e527b2804..7c7f1624a8c 100644
+--- a/subsys/net/lib/zperf/zperf_tcp_receiver.c
++++ b/subsys/net/lib/zperf/zperf_tcp_receiver.c
+@@ -137,7 +137,7 @@ static int tcp_recv_data(struct net_socket_service_event *pev)
+ 	if ((pev->event.revents & ZSOCK_POLLERR) ||
+ 	    (pev->event.revents & ZSOCK_POLLNVAL)) {
+ 		(void)zsock_getsockopt(pev->event.fd, ZSOCK_SOL_SOCKET,
+-				       SO_DOMAIN, &family, &optlen);
++				       ZSOCK_SO_DOMAIN, &family, &optlen);
+ 		(void)zsock_getsockopt(pev->event.fd, ZSOCK_SOL_SOCKET,
+ 				       ZSOCK_SO_ERROR, &sock_error, &optlen);
+ 		NET_ERR("TCP receiver IPv%d socket error (%d)",
+@@ -162,7 +162,7 @@ static int tcp_recv_data(struct net_socket_service_event *pev)
+ 		if (sock < 0) {
+ 			ret = -errno;
+ 			(void)zsock_getsockopt(pev->event.fd, ZSOCK_SOL_SOCKET,
+-					       SO_DOMAIN, &family, &optlen);
++					       ZSOCK_SO_DOMAIN, &family, &optlen);
+ 			NET_ERR("TCP receiver IPv%d accept error (%d)",
+ 				family == ZSOCK_AF_INET ? 4 : 6, ret);
+ 			goto error;
+@@ -192,7 +192,7 @@ static int tcp_recv_data(struct net_socket_service_event *pev)
+ 		ret = zsock_recv(pev->event.fd, buf, sizeof(buf), 0);
+ 		if (ret < 0) {
+ 			(void)zsock_getsockopt(pev->event.fd, ZSOCK_SOL_SOCKET,
+-					       SO_DOMAIN, &family, &optlen);
++					       ZSOCK_SO_DOMAIN, &family, &optlen);
+ 			NET_ERR("recv failed on IPv%d socket (%d)",
+ 				family == ZSOCK_AF_INET ? 4 : 6,
+ 				errno);
+diff --git a/subsys/net/lib/zperf/zperf_udp_receiver.c b/subsys/net/lib/zperf/zperf_udp_receiver.c
+index 5bf2e9a389c..d15cfcdc096 100644
+--- a/subsys/net/lib/zperf/zperf_udp_receiver.c
++++ b/subsys/net/lib/zperf/zperf_udp_receiver.c
+@@ -328,7 +328,7 @@ static int udp_recv_data(struct net_socket_service_event *pev)
+ 	if ((pev->event.revents & ZSOCK_POLLERR) ||
+ 	    (pev->event.revents & ZSOCK_POLLNVAL)) {
+ 		(void)zsock_getsockopt(pev->event.fd, ZSOCK_SOL_SOCKET,
+-				       SO_DOMAIN, &family, &optlen);
++				       ZSOCK_SO_DOMAIN, &family, &optlen);
+ 		(void)zsock_getsockopt(pev->event.fd, ZSOCK_SOL_SOCKET,
+ 				       ZSOCK_SO_ERROR, &sock_error, &optlen);
+ 		NET_ERR("UDP receiver IPv%d socket error (%d)",
+@@ -352,7 +352,7 @@ static int udp_recv_data(struct net_socket_service_event *pev)
+ 		if (ret < 0) {
+ 			ret = -errno;
+ 			(void)zsock_getsockopt(pev->event.fd, ZSOCK_SOL_SOCKET,
+-					       SO_DOMAIN, &family, &optlen);
++					       ZSOCK_SO_DOMAIN, &family, &optlen);
+ 			NET_ERR("recv failed on IPv%d socket (%d)",
+ 				family == ZSOCK_AF_INET ? 4 : 6, -ret);
+ 			goto error;
+diff --git a/subsys/net/lib/zperf/zperf_udp_uploader.c b/subsys/net/lib/zperf/zperf_udp_uploader.c
+index f59dd0925d1..6eebccdd81c 100644
+--- a/subsys/net/lib/zperf/zperf_udp_uploader.c
++++ b/subsys/net/lib/zperf/zperf_udp_uploader.c
+@@ -348,7 +348,7 @@ int zperf_udp_upload(const struct zperf_upload_params *param,
+ 
+ 		if (zsock_setsockopt(sock, ZSOCK_SOL_SOCKET, ZSOCK_SO_BINDTODEVICE, &req,
+ 				     sizeof(struct ifreq)) != 0) {
+-			NET_WARN("setsockopt SO_BINDTODEVICE error (%d)", -errno);
++			NET_WARN("setsockopt ZSOCK_SO_BINDTODEVICE error (%d)", -errno);
+ 		}
+ 	}
+ 
+diff --git a/subsys/net/pkt_filter/base.c b/subsys/net/pkt_filter/base.c
+index 8cc2a049a7b..9119f414f3b 100644
+--- a/subsys/net/pkt_filter/base.c
++++ b/subsys/net/pkt_filter/base.c
+@@ -53,12 +53,12 @@ struct npf_rule_list npf_ipv6_recv_rules = {
+ static struct npf_rule_list *get_ip_rules(uint8_t pf)
+ {
+ 	switch (pf) {
+-	case PF_INET:
++	case ZSOCK_PF_INET:
+ #ifdef CONFIG_NET_PKT_FILTER_IPV4_HOOK
+ 		return &npf_ipv4_recv_rules;
+ #endif
+ 		break;
+-	case PF_INET6:
++	case ZSOCK_PF_INET6:
+ #ifdef CONFIG_NET_PKT_FILTER_IPV6_HOOK
+ 		return &npf_ipv6_recv_rules;
+ #endif

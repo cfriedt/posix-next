@@ -1,0 +1,1023 @@
+diff --git a/samples/net/capture/CMakeLists.txt b/samples/net/capture/CMakeLists.txt
+index 8b9bd7c26ba..c4de1a1c1d2 100644
+--- a/samples/net/capture/CMakeLists.txt
++++ b/samples/net/capture/CMakeLists.txt
+@@ -4,5 +4,6 @@ cmake_minimum_required(VERSION 3.20.0)
+ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+ project(net_capture)
+ 
++
+ FILE(GLOB app_sources src/*.c)
+ target_sources(app PRIVATE ${app_sources})
+diff --git a/samples/net/capture/prj.conf b/samples/net/capture/prj.conf
+index 0d22cd13a12..0d474efaf3b 100644
+--- a/samples/net/capture/prj.conf
++++ b/samples/net/capture/prj.conf
+@@ -1,3 +1,4 @@
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ CONFIG_NETWORKING=y
+ CONFIG_ENTROPY_GENERATOR=y
+ CONFIG_TEST_RANDOM_GENERATOR=y
+diff --git a/samples/net/capture/src/main.c b/samples/net/capture/src/main.c
+index 4afbe3be6bb..2786a9e6bf0 100644
+--- a/samples/net/capture/src/main.c
++++ b/samples/net/capture/src/main.c
+@@ -249,7 +249,7 @@ static int init_app(void)
+ 		link_types.count = MIN(ARRAY_SIZE(link_types.type),
+ 				       ARRAY_SIZE(link_types_to_monitor));
+ 
+-		params.family = AF_UNSPEC;
++		params.family = ZSOCK_AF_UNSPEC;
+ 		memcpy(&params.link_types, &link_types,
+ 		       sizeof(struct virtual_interface_link_types));
+ 
+diff --git a/samples/net/cellular_modem/CMakeLists.txt b/samples/net/cellular_modem/CMakeLists.txt
+index c9a32ece4c1..efd1bc81f80 100644
+--- a/samples/net/cellular_modem/CMakeLists.txt
++++ b/samples/net/cellular_modem/CMakeLists.txt
+@@ -5,4 +5,5 @@ cmake_minimum_required(VERSION 3.20.0)
+ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+ project(cellular_modem)
+ 
++
+ target_sources(app PRIVATE src/main.c)
+diff --git a/samples/net/cloud/tagoio_http_post/CMakeLists.txt b/samples/net/cloud/tagoio_http_post/CMakeLists.txt
+index 5043ed600b4..4704335e519 100644
+--- a/samples/net/cloud/tagoio_http_post/CMakeLists.txt
++++ b/samples/net/cloud/tagoio_http_post/CMakeLists.txt
+@@ -4,6 +4,7 @@ cmake_minimum_required(VERSION 3.20.0)
+ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+ project(tagoio_http_post)
+ 
++
+ target_sources(app PRIVATE src/main.c)
+ target_sources(app PRIVATE src/sockets.c)
+ target_sources_ifdef(CONFIG_WIFI app PRIVATE src/wifi.c)
+diff --git a/samples/net/common/tunnel.c b/samples/net/common/tunnel.c
+index 613527aa103..96d8c5c0f74 100644
+--- a/samples/net/common/tunnel.c
++++ b/samples/net/common/tunnel.c
+@@ -12,6 +12,7 @@ LOG_MODULE_DECLARE(net_samples_common, LOG_LEVEL_DBG);
+ #include <zephyr/net/ethernet.h>
+ #include <zephyr/net/virtual_mgmt.h>
+ #include <zephyr/net/conn_mgr_monitor.h>
++#include <zephyr/net/socket.h>
+ 
+ #if defined(CONFIG_NET_SAMPLE_COMMON_TUNNEL_PEER_ADDR)
+ #define NET_SAMPLE_COMMON_TUNNEL_PEER_ADDR CONFIG_NET_SAMPLE_COMMON_TUNNEL_PEER_ADDR
+@@ -55,19 +56,20 @@ static void iface_cb(struct net_if *iface, void *user_data)
+ static int setup_iface(struct net_if *iface, const char *ipaddr)
+ {
+ 	struct net_if_addr *ifaddr;
+-	struct sockaddr addr;
++	struct zsock_sockaddr_storage addr_storage;
++	struct zsock_sockaddr *addr = (struct zsock_sockaddr *)&addr_storage;
+ 
+ 	/* Before setting up tunnel, make sure it will be ignored by conn_mgr */
+ 	conn_mgr_ignore_iface(iface);
+ 
+-	if (!net_ipaddr_parse(ipaddr, strlen(ipaddr), &addr)) {
++	if (!net_ipaddr_parse(ipaddr, strlen(ipaddr), addr)) {
+ 		LOG_ERR("Tunnel peer address \"%s\" invalid.", ipaddr);
+ 		return -EINVAL;
+ 	}
+ 
+-	if (IS_ENABLED(CONFIG_NET_IPV6) && addr.sa_family == AF_INET6) {
++	if (IS_ENABLED(CONFIG_NET_IPV6) && addr->sa_family == ZSOCK_AF_INET6) {
+ 		ifaddr = net_if_ipv6_addr_add(iface,
+-					      &net_sin6(&addr)->sin6_addr,
++					      &net_sin6(addr)->sin6_addr,
+ 					      NET_ADDR_MANUAL, 0);
+ 		if (!ifaddr) {
+ 			LOG_ERR("Cannot add %s to interface %d",
+@@ -76,9 +78,9 @@ static int setup_iface(struct net_if *iface, const char *ipaddr)
+ 		}
+ 	}
+ 
+-	if (IS_ENABLED(CONFIG_NET_IPV4) && addr.sa_family == AF_INET) {
++	if (IS_ENABLED(CONFIG_NET_IPV4) && addr->sa_family == ZSOCK_AF_INET) {
+ 		ifaddr = net_if_ipv4_addr_add(iface,
+-					      &net_sin(&addr)->sin_addr,
++					      &net_sin(addr)->sin_addr,
+ 					      NET_ADDR_MANUAL, 0);
+ 		if (!ifaddr) {
+ 			LOG_ERR("Cannot add %s to interface %d",
+@@ -93,7 +95,8 @@ static int setup_iface(struct net_if *iface, const char *ipaddr)
+ int init_tunnel(void)
+ {
+ 	struct virtual_interface_req_params params = { 0 };
+-	struct sockaddr peer = { 0 };
++	struct zsock_sockaddr_storage peer_storage;
++	struct zsock_sockaddr *peer = (struct zsock_sockaddr *)&peer_storage;
+ 	struct ud ud;
+ 	int ret;
+ 	int mtu;
+@@ -107,36 +110,36 @@ int init_tunnel(void)
+ 
+ 	if (!net_ipaddr_parse(NET_SAMPLE_COMMON_TUNNEL_PEER_ADDR,
+ 			      strlen(NET_SAMPLE_COMMON_TUNNEL_PEER_ADDR),
+-			      &peer)) {
++			      peer)) {
+ 		LOG_ERR("Tunnel peer address \"%s\" invalid.",
+ 			NET_SAMPLE_COMMON_TUNNEL_PEER_ADDR);
+ 		return -EINVAL;
+ 	}
+ 
+-	if (IS_ENABLED(CONFIG_NET_IPV6) && peer.sa_family == AF_INET6) {
++	if (IS_ENABLED(CONFIG_NET_IPV6) && peer->sa_family == ZSOCK_AF_INET6) {
+ 		struct net_if *iface;
+ 
+ 		iface = net_if_ipv6_select_src_iface(
+-					&net_sin6(&peer)->sin6_addr);
++					&net_sin6(peer)->sin6_addr);
+ 		ud.peer = iface;
+-		params.family = AF_INET6;
++		params.family = ZSOCK_AF_INET6;
+ 		net_ipaddr_copy(&params.peer6addr,
+-				&net_sin6(&peer)->sin6_addr);
++				&net_sin6(peer)->sin6_addr);
+ 		mtu = NET_ETH_MTU - sizeof(struct net_ipv6_hdr);
+ 
+-	} else if (IS_ENABLED(CONFIG_NET_IPV4) && peer.sa_family == AF_INET) {
++	} else if (IS_ENABLED(CONFIG_NET_IPV4) && peer->sa_family == ZSOCK_AF_INET) {
+ 		struct net_if *iface;
+ 
+ 		iface = net_if_ipv4_select_src_iface(
+-					&net_sin(&peer)->sin_addr);
++					&net_sin(peer)->sin_addr);
+ 		ud.peer = iface;
+-		params.family = AF_INET;
++		params.family = ZSOCK_AF_INET;
+ 		net_ipaddr_copy(&params.peer4addr,
+-				&net_sin(&peer)->sin_addr);
++				&net_sin(peer)->sin_addr);
+ 		mtu = NET_ETH_MTU - sizeof(struct net_ipv4_hdr);
+ 
+ 	} else {
+-		LOG_ERR("Invalid address family %d", peer.sa_family);
++		LOG_ERR("Invalid address family %d", peer->sa_family);
+ 		return -EINVAL;
+ 	}
+ 
+diff --git a/samples/net/common/vlan.c b/samples/net/common/vlan.c
+index da025c2bef7..7898e890d77 100644
+--- a/samples/net/common/vlan.c
++++ b/samples/net/common/vlan.c
+@@ -11,13 +11,7 @@ LOG_MODULE_DECLARE(net_samples_common, LOG_LEVEL_DBG);
+ #include <stdlib.h>
+ #include <zephyr/kernel.h>
+ #include <zephyr/net/ethernet.h>
+-#if defined(CONFIG_NATIVE_LIBC) || defined(CONFIG_PICOLIBC)
+-/* Under native_sim, <arpa/inet.h> and <zephyr/net/ethernet.h> have conflicting redefinitions */
+-typedef uint32_t socklen_t;
+-const char *inet_ntop(int af, const void *src, char *dst, socklen_t size);
+-#else
+-#include <arpa/inet.h>
+-#endif
++#include <zephyr/net/socket.h>
+ 
+ /* User data for the interface callback */
+ struct ud {
+@@ -55,7 +49,7 @@ static int setup_iface(struct net_if *eth_iface,
+ 		       const char *option)
+ {
+ 	struct sockaddr_storage addr = { 0 };
+-	struct sockaddr *paddr = (struct sockaddr *)&addr;
++	struct zsock_sockaddr *paddr = (struct zsock_sockaddr *)&addr;
+ 	const char *addr_str, *next;
+ 	struct net_if_addr *ifaddr;
+ 	uint8_t mask_len = 0;
+@@ -97,14 +91,14 @@ static int setup_iface(struct net_if *eth_iface,
+ 		inet_ntop(paddr->sa_family, net_sin(paddr)->sin_addr.s4_addr,
+ 			  my_addr, sizeof(my_addr));
+ 
+-		if (paddr->sa_family == AF_INET) {
+-			struct sockaddr_in *addr4 = (struct sockaddr_in *)paddr;
++		if (paddr->sa_family == ZSOCK_AF_INET) {
++			struct zsock_sockaddr_in *addr4 = (struct zsock_sockaddr_in *)paddr;
+ 			struct sockaddr_in mask;
+ 
+ 			ifaddr = net_if_ipv4_addr_add(vlan_iface, &addr4->sin_addr,
+ 						      NET_ADDR_MANUAL, 0);
+ 
+-			ret = net_mask_len_to_netmask(AF_INET, mask_len,
++			ret = net_mask_len_to_netmask(ZSOCK_AF_INET, mask_len,
+ 						      (struct sockaddr *)&mask);
+ 			if (ret < 0) {
+ 				LOG_ERR("Invalid network mask length (%d)", ret);
+@@ -115,9 +109,9 @@ static int setup_iface(struct net_if *eth_iface,
+ 								 &addr4->sin_addr,
+ 								 &mask.sin_addr);
+ 
+-		} else if (paddr->sa_family == AF_INET6) {
+-			struct sockaddr_in6 *addr6 = (struct sockaddr_in6 *)paddr;
+-			struct in6_addr netaddr6;
++		} else if (paddr->sa_family == ZSOCK_AF_INET6) {
++			struct zsock_sockaddr_in6 *addr6 = (struct zsock_sockaddr_in6 *)paddr;
++			struct zsock_in6_addr netaddr6;
+ 
+ 			ifaddr = net_if_ipv6_addr_add(vlan_iface, &addr6->sin6_addr,
+ 						      NET_ADDR_MANUAL, 0);
+diff --git a/samples/net/dhcpv4_client/CMakeLists.txt b/samples/net/dhcpv4_client/CMakeLists.txt
+index 0ecd8bd1706..8fb47460850 100644
+--- a/samples/net/dhcpv4_client/CMakeLists.txt
++++ b/samples/net/dhcpv4_client/CMakeLists.txt
+@@ -4,5 +4,6 @@ cmake_minimum_required(VERSION 3.20.0)
+ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+ project(dhcpv4_client)
+ 
++
+ FILE(GLOB app_sources src/*.c)
+ target_sources(app PRIVATE ${app_sources})
+diff --git a/samples/net/dhcpv4_client/prj.conf b/samples/net/dhcpv4_client/prj.conf
+index 0b93365f113..35810a47bd2 100644
+--- a/samples/net/dhcpv4_client/prj.conf
++++ b/samples/net/dhcpv4_client/prj.conf
+@@ -1,3 +1,4 @@
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ CONFIG_NETWORKING=y
+ CONFIG_NET_IPV6=n
+ CONFIG_NET_IPV4=y
+diff --git a/samples/net/dhcpv4_client/src/main.c b/samples/net/dhcpv4_client/src/main.c
+index 72f7a17f273..6b6b40e6ed7 100644
+--- a/samples/net/dhcpv4_client/src/main.c
++++ b/samples/net/dhcpv4_client/src/main.c
+@@ -56,15 +56,15 @@ static void handler(struct net_mgmt_event_callback *cb,
+ 		}
+ 
+ 		LOG_INF("   Address[%d]: %s", net_if_get_by_iface(iface),
+-			net_addr_ntop(AF_INET,
++			net_addr_ntop(ZSOCK_AF_INET,
+ 			    &iface->config.ip.ipv4->unicast[i].ipv4.address.in_addr,
+ 						  buf, sizeof(buf)));
+ 		LOG_INF("    Subnet[%d]: %s", net_if_get_by_iface(iface),
+-			net_addr_ntop(AF_INET,
++			net_addr_ntop(ZSOCK_AF_INET,
+ 				       &iface->config.ip.ipv4->unicast[i].netmask,
+ 				       buf, sizeof(buf)));
+ 		LOG_INF("    Router[%d]: %s", net_if_get_by_iface(iface),
+-			net_addr_ntop(AF_INET,
++			net_addr_ntop(ZSOCK_AF_INET,
+ 						 &iface->config.ip.ipv4->gw,
+ 						 buf, sizeof(buf)));
+ 		LOG_INF("Lease time[%d]: %u seconds", net_if_get_by_iface(iface),
+@@ -80,7 +80,7 @@ static void option_handler(struct net_dhcpv4_option_callback *cb,
+ 	char buf[NET_IPV4_ADDR_LEN];
+ 
+ 	LOG_INF("DHCP Option %d: %s", cb->option,
+-		net_addr_ntop(AF_INET, cb->data, buf, sizeof(buf)));
++		net_addr_ntop(ZSOCK_AF_INET, cb->data, buf, sizeof(buf)));
+ }
+ 
+ int main(void)
+diff --git a/samples/net/dns_resolve/prj.conf b/samples/net/dns_resolve/prj.conf
+index 16d77bdaace..62064b7d265 100644
+--- a/samples/net/dns_resolve/prj.conf
++++ b/samples/net/dns_resolve/prj.conf
+@@ -1,3 +1,4 @@
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ CONFIG_NETWORKING=y
+ CONFIG_NET_UDP=y
+ CONFIG_ENTROPY_GENERATOR=y
+diff --git a/samples/net/dns_resolve/src/main.c b/samples/net/dns_resolve/src/main.c
+index 5302f569874..d8070ab6a82 100644
+--- a/samples/net/dns_resolve/src/main.c
++++ b/samples/net/dns_resolve/src/main.c
+@@ -64,10 +64,10 @@ void dns_result_cb(enum dns_resolve_status status,
+ 		return;
+ 	}
+ 
+-	if (info->ai_family == AF_INET) {
++	if (info->ai_family == ZSOCK_AF_INET) {
+ 		hr_family = "IPv4";
+ 		addr = &net_sin(&info->ai_addr)->sin_addr;
+-	} else if (info->ai_family == AF_INET6) {
++	} else if (info->ai_family == ZSOCK_AF_INET6) {
+ 		hr_family = "IPv6";
+ 		addr = &net_sin6(&info->ai_addr)->sin6_addr;
+ 	} else {
+@@ -113,10 +113,10 @@ void mdns_result_cb(enum dns_resolve_status status,
+ 		return;
+ 	}
+ 
+-	if (info->ai_family == AF_INET) {
++	if (info->ai_family == ZSOCK_AF_INET) {
+ 		hr_family = "IPv4";
+ 		addr = &net_sin(&info->ai_addr)->sin_addr;
+-	} else if (info->ai_family == AF_INET6) {
++	} else if (info->ai_family == ZSOCK_AF_INET6) {
+ 		hr_family = "IPv6";
+ 		addr = &net_sin6(&info->ai_addr)->sin6_addr;
+ 	} else {
+@@ -181,16 +181,16 @@ static void print_dhcpv4_addr(struct net_if *iface, struct net_if_addr *if_addr,
+ 	}
+ 
+ 	LOG_INF("IPv4 address: %s",
+-		net_addr_ntop(AF_INET, &if_addr->address.in_addr,
++		net_addr_ntop(ZSOCK_AF_INET, &if_addr->address.in_addr,
+ 			      hr_addr, NET_IPV4_ADDR_LEN));
+ 	LOG_INF("Lease time: %u seconds", iface->config.dhcpv4.lease_time);
+ 
+ 	netmask = net_if_ipv4_get_netmask_by_addr(iface,
+ 						  &if_addr->address.in_addr);
+ 	LOG_INF("Subnet: %s",
+-		net_addr_ntop(AF_INET, &netmask, hr_addr, NET_IPV4_ADDR_LEN));
++		net_addr_ntop(ZSOCK_AF_INET, &netmask, hr_addr, NET_IPV4_ADDR_LEN));
+ 	LOG_INF("Router: %s",
+-		net_addr_ntop(AF_INET,
++		net_addr_ntop(ZSOCK_AF_INET,
+ 			      &iface->config.ip.ipv4->gw,
+ 			      hr_addr, NET_IPV4_ADDR_LEN));
+ 
+diff --git a/samples/net/dsa/CMakeLists.txt b/samples/net/dsa/CMakeLists.txt
+index f22d38467c7..8aed86d772f 100644
+--- a/samples/net/dsa/CMakeLists.txt
++++ b/samples/net/dsa/CMakeLists.txt
+@@ -5,5 +5,6 @@ cmake_minimum_required(VERSION 3.20.0)
+ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+ project(dsa)
+ 
++
+ target_sources(app PRIVATE src/main.c)
+ target_sources_ifdef(CONFIG_NET_SAMPLE_DSA_LLDP app PRIVATE src/dsa_lldp.c)
+diff --git a/samples/net/gptp/CMakeLists.txt b/samples/net/gptp/CMakeLists.txt
+index 8e4559f82d3..26b9c0d116c 100644
+--- a/samples/net/gptp/CMakeLists.txt
++++ b/samples/net/gptp/CMakeLists.txt
+@@ -5,4 +5,5 @@ cmake_minimum_required(VERSION 3.20.0)
+ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+ project(gptp)
+ 
++
+ target_sources(app PRIVATE src/main.c src/gptp.c)
+diff --git a/samples/net/gptp/prj.conf b/samples/net/gptp/prj.conf
+index ddccab21fea..1402e465649 100644
+--- a/samples/net/gptp/prj.conf
++++ b/samples/net/gptp/prj.conf
+@@ -1,3 +1,4 @@
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ CONFIG_NETWORKING=y
+ CONFIG_NET_LOG=y
+ CONFIG_LOG=y
+diff --git a/samples/net/ipv4_autoconf/prj.conf b/samples/net/ipv4_autoconf/prj.conf
+index fc0cd2997c1..7ddadcf2d1b 100644
+--- a/samples/net/ipv4_autoconf/prj.conf
++++ b/samples/net/ipv4_autoconf/prj.conf
+@@ -1,3 +1,4 @@
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ CONFIG_NETWORKING=y
+ CONFIG_NET_IPV6=n
+ CONFIG_NET_IPV4=y
+diff --git a/samples/net/ipv4_autoconf/src/main.c b/samples/net/ipv4_autoconf/src/main.c
+index 9dd9fa53bb7..5946a1675bf 100644
+--- a/samples/net/ipv4_autoconf/src/main.c
++++ b/samples/net/ipv4_autoconf/src/main.c
+@@ -48,11 +48,11 @@ static void handler(struct net_mgmt_event_callback *cb,
+ 		}
+ 
+ 		LOG_INF("Your address: %s",
+-			net_addr_ntop(AF_INET,
++			net_addr_ntop(ZSOCK_AF_INET,
+ 				    &cfg->ip.ipv4->unicast[i].ipv4.address.in_addr,
+ 				    buf, sizeof(buf)));
+ 		LOG_INF("Your netmask: %s",
+-			net_addr_ntop(AF_INET,
++			net_addr_ntop(ZSOCK_AF_INET,
+ 				    &cfg->ip.ipv4->unicast[i].netmask,
+ 				    buf, sizeof(buf)));
+ 	}
+diff --git a/samples/net/latmon/CMakeLists.txt b/samples/net/latmon/CMakeLists.txt
+index 85ded7c5c74..12b590e97a0 100644
+--- a/samples/net/latmon/CMakeLists.txt
++++ b/samples/net/latmon/CMakeLists.txt
+@@ -4,4 +4,5 @@ cmake_minimum_required(VERSION 3.20.0)
+ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+ project(latmon)
+ 
++
+ target_sources(app PRIVATE src/main.c)
+diff --git a/samples/net/lldp/CMakeLists.txt b/samples/net/lldp/CMakeLists.txt
+index 0b27f510097..de0fcc6cd57 100644
+--- a/samples/net/lldp/CMakeLists.txt
++++ b/samples/net/lldp/CMakeLists.txt
+@@ -5,4 +5,5 @@ cmake_minimum_required(VERSION 3.20.0)
+ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+ project(lldp)
+ 
++
+ target_sources(app PRIVATE src/main.c)
+diff --git a/samples/net/lldp/prj.conf b/samples/net/lldp/prj.conf
+index ca4c6835e33..a59c99e3ae4 100644
+--- a/samples/net/lldp/prj.conf
++++ b/samples/net/lldp/prj.conf
+@@ -1,3 +1,4 @@
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ CONFIG_NETWORKING=y
+ CONFIG_NET_LOG=y
+ CONFIG_NET_IPV6=y
+diff --git a/samples/net/lldp/src/main.c b/samples/net/lldp/src/main.c
+index d4d90f2e439..4e52f329540 100644
+--- a/samples/net/lldp/src/main.c
++++ b/samples/net/lldp/src/main.c
+@@ -73,7 +73,7 @@ static int setup_iface(struct net_if *eth_iface,
+ 		LOG_ERR("Cannot enable VLAN for tag %d (%d)", vlan_tag, ret);
+ 	}
+ 
+-	if (net_addr_pton(AF_INET6, ipv6_addr, &addr6)) {
++	if (net_addr_pton(ZSOCK_AF_INET6, ipv6_addr, &addr6)) {
+ 		LOG_ERR("Invalid address: %s", ipv6_addr);
+ 		return -EINVAL;
+ 	}
+@@ -84,7 +84,7 @@ static int setup_iface(struct net_if *eth_iface,
+ 		return -EINVAL;
+ 	}
+ 
+-	if (net_addr_pton(AF_INET, ipv4_addr, &addr4)) {
++	if (net_addr_pton(ZSOCK_AF_INET, ipv4_addr, &addr4)) {
+ 		LOG_ERR("Invalid address: %s", ipv4_addr);
+ 		return -EINVAL;
+ 	}
+diff --git a/samples/net/lwm2m_client/boards/nrf9160dk_nrf52840.conf b/samples/net/lwm2m_client/boards/nrf9160dk_nrf52840.conf
+index 175066b865a..964eb5d8c2e 100644
+--- a/samples/net/lwm2m_client/boards/nrf9160dk_nrf52840.conf
++++ b/samples/net/lwm2m_client/boards/nrf9160dk_nrf52840.conf
+@@ -1,3 +1,4 @@
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ CONFIG_UART_ASYNC_API=y
+ CONFIG_UART_1_ASYNC=y
+ CONFIG_UART_1_INTERRUPT_DRIVEN=n
+diff --git a/samples/net/lwm2m_client/prj.conf b/samples/net/lwm2m_client/prj.conf
+index 0911fdf34e1..ba8f6b9f935 100644
+--- a/samples/net/lwm2m_client/prj.conf
++++ b/samples/net/lwm2m_client/prj.conf
+@@ -1,3 +1,4 @@
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ CONFIG_NETWORKING=y
+ CONFIG_LOG=y
+ CONFIG_GPIO=y
+diff --git a/samples/net/midi2/prj.conf b/samples/net/midi2/prj.conf
+index 49dcaadd77b..b9f9cfa2364 100644
+--- a/samples/net/midi2/prj.conf
++++ b/samples/net/midi2/prj.conf
+@@ -1,3 +1,4 @@
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ CONFIG_NETWORKING=y
+ CONFIG_ZVFS_POLL_MAX=4
+ CONFIG_NET_IF_MCAST_IPV6_ADDR_COUNT=5
+diff --git a/samples/net/openthread/border_router/CMakeLists.txt b/samples/net/openthread/border_router/CMakeLists.txt
+index dee550e4133..1c87c9e82ca 100644
+--- a/samples/net/openthread/border_router/CMakeLists.txt
++++ b/samples/net/openthread/border_router/CMakeLists.txt
+@@ -5,5 +5,6 @@ cmake_minimum_required(VERSION 3.20.0)
+ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+ project(openthread_border_router)
+ 
++
+ FILE(GLOB app_sources src/*.c)
+ target_sources(app PRIVATE ${app_sources})
+diff --git a/samples/net/openthread/coap/prj.conf b/samples/net/openthread/coap/prj.conf
+index 959fb3c6268..f3e538e1ada 100644
+--- a/samples/net/openthread/coap/prj.conf
++++ b/samples/net/openthread/coap/prj.conf
+@@ -1,3 +1,4 @@
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ CONFIG_NETWORKING=y
+ CONFIG_NET_L2_OPENTHREAD=y
+ CONFIG_OPENTHREAD_COAP=y
+diff --git a/samples/net/openthread/coprocessor/prj.conf b/samples/net/openthread/coprocessor/prj.conf
+index 2128b7bbf7d..702bf355a2c 100644
+--- a/samples/net/openthread/coprocessor/prj.conf
++++ b/samples/net/openthread/coprocessor/prj.conf
+@@ -1,3 +1,4 @@
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ CONFIG_NETWORKING=y
+ CONFIG_NET_L2_OPENTHREAD=y
+ 
+diff --git a/samples/net/openthread/shell/CMakeLists.txt b/samples/net/openthread/shell/CMakeLists.txt
+index 8ed710a9eb5..899b1a329fb 100644
+--- a/samples/net/openthread/shell/CMakeLists.txt
++++ b/samples/net/openthread/shell/CMakeLists.txt
+@@ -5,5 +5,6 @@ cmake_minimum_required(VERSION 3.20.0)
+ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+ project(openthread_shell)
+ 
++
+ FILE(GLOB app_sources src/*.c)
+ target_sources(app PRIVATE ${app_sources})
+diff --git a/samples/net/openthread/shell/prj-ot-host.conf b/samples/net/openthread/shell/prj-ot-host.conf
+index ccd248c45d2..560aa169164 100644
+--- a/samples/net/openthread/shell/prj-ot-host.conf
++++ b/samples/net/openthread/shell/prj-ot-host.conf
+@@ -1,3 +1,4 @@
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ # SPDX-License-Identifier: Apache-2.0
+ 
+ # Enable Networking and OpenThread stack
+diff --git a/samples/net/openthread/shell/prj.conf b/samples/net/openthread/shell/prj.conf
+index 78ddc17ac1b..860650311ad 100644
+--- a/samples/net/openthread/shell/prj.conf
++++ b/samples/net/openthread/shell/prj.conf
+@@ -1,3 +1,4 @@
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ # SPDX-License-Identifier: Apache-2.0
+ 
+ # Increased main stack size required for initialization
+diff --git a/samples/net/pkt_filter/prj.conf b/samples/net/pkt_filter/prj.conf
+index 151fa6d7300..628032bb2f9 100644
+--- a/samples/net/pkt_filter/prj.conf
++++ b/samples/net/pkt_filter/prj.conf
+@@ -1,3 +1,4 @@
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ # Generic network options
+ CONFIG_NETWORKING=y
+ CONFIG_NET_LOG=y
+diff --git a/samples/net/prometheus/CMakeLists.txt b/samples/net/prometheus/CMakeLists.txt
+index 5042d5199cb..37a673939b6 100644
+--- a/samples/net/prometheus/CMakeLists.txt
++++ b/samples/net/prometheus/CMakeLists.txt
+@@ -7,6 +7,7 @@ find_package(Python REQUIRED COMPONENTS Interpreter)
+ 
+ project(prometheus_sample)
+ 
++
+ if(CONFIG_NET_SOCKETS_SOCKOPT_TLS AND
+    CONFIG_MBEDTLS_KEY_EXCHANGE_PSK_ENABLED AND
+    (CONFIG_NET_SAMPLE_PSK_HEADER_FILE STREQUAL "dummy_psk.h"))
+diff --git a/samples/net/promiscuous_mode/CMakeLists.txt b/samples/net/promiscuous_mode/CMakeLists.txt
+index a0da9a740b7..3382ef62465 100644
+--- a/samples/net/promiscuous_mode/CMakeLists.txt
++++ b/samples/net/promiscuous_mode/CMakeLists.txt
+@@ -4,4 +4,5 @@ cmake_minimum_required(VERSION 3.20.0)
+ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+ project(promiscuous_mode)
+ 
++
+ target_sources(app PRIVATE src/main.c)
+diff --git a/samples/net/promiscuous_mode/prj.conf b/samples/net/promiscuous_mode/prj.conf
+index 5690ffbb560..6753e9bbfbe 100644
+--- a/samples/net/promiscuous_mode/prj.conf
++++ b/samples/net/promiscuous_mode/prj.conf
+@@ -1,3 +1,4 @@
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ # Generic networking options
+ CONFIG_NETWORKING=y
+ CONFIG_NET_UDP=y
+diff --git a/samples/net/promiscuous_mode/src/main.c b/samples/net/promiscuous_mode/src/main.c
+index 1014c5e972f..357a954779a 100644
+--- a/samples/net/promiscuous_mode/src/main.c
++++ b/samples/net/promiscuous_mode/src/main.c
+@@ -60,7 +60,7 @@ static void print_info(struct net_pkt *pkt)
+ 	char src_addr_buf[NET_IPV6_ADDR_LEN], *src_addr;
+ 	char dst_addr_buf[NET_IPV6_ADDR_LEN], *dst_addr;
+ 	uint16_t dst_port = 0U, src_port = 0U;
+-	sa_family_t family = AF_UNSPEC;
++	sa_family_t family = ZSOCK_AF_UNSPEC;
+ 	void *dst, *src;
+ 	uint8_t next_hdr;
+ 	const char *proto;
+@@ -72,16 +72,16 @@ static void print_info(struct net_pkt *pkt)
+ 
+ 	switch (NET_IPV6_HDR(pkt)->vtc & 0xf0) {
+ 	case 0x60:
+-		family = AF_INET6;
+-		net_pkt_set_family(pkt, AF_INET6);
++		family = ZSOCK_AF_INET6;
++		net_pkt_set_family(pkt, ZSOCK_AF_INET6);
+ 		dst = &NET_IPV6_HDR(pkt)->dst;
+ 		src = &NET_IPV6_HDR(pkt)->src;
+ 		next_hdr = NET_IPV6_HDR(pkt)->nexthdr;
+ 		net_pkt_set_ip_hdr_len(pkt, sizeof(struct net_ipv6_hdr));
+ 		break;
+ 	case 0x40:
+-		family = AF_INET;
+-		net_pkt_set_family(pkt, AF_INET);
++		family = ZSOCK_AF_INET;
++		net_pkt_set_family(pkt, ZSOCK_AF_INET);
+ 		dst = &NET_IPV4_HDR(pkt)->dst;
+ 		src = &NET_IPV4_HDR(pkt)->src;
+ 		next_hdr = NET_IPV4_HDR(pkt)->proto;
+@@ -89,7 +89,7 @@ static void print_info(struct net_pkt *pkt)
+ 		break;
+ 	}
+ 
+-	if (family == AF_UNSPEC) {
++	if (family == ZSOCK_AF_UNSPEC) {
+ 		LOG_INF("Recv %p len %zd (unknown address family)",
+ 			pkt, net_pkt_get_len(pkt));
+ 		return;
+@@ -98,16 +98,16 @@ static void print_info(struct net_pkt *pkt)
+ 	ret = 0;
+ 
+ 	switch (next_hdr) {
+-	case IPPROTO_TCP:
++	case ZSOCK_IPPROTO_TCP:
+ 		proto = "TCP";
+ 		ret = get_ports(pkt, &src_port, &dst_port);
+ 		break;
+-	case IPPROTO_UDP:
++	case ZSOCK_IPPROTO_UDP:
+ 		proto = "UDP";
+ 		ret = get_ports(pkt, &src_port, &dst_port);
+ 		break;
+-	case IPPROTO_ICMPV6:
+-	case IPPROTO_ICMP:
++	case ZSOCK_IPPROTO_ICMPV6:
++	case ZSOCK_IPPROTO_ICMP:
+ 		proto = "ICMP";
+ 		break;
+ 	default:
+@@ -127,8 +127,8 @@ static void print_info(struct net_pkt *pkt)
+ 
+ 	len = net_pkt_get_len(pkt);
+ 
+-	if (family == AF_INET) {
+-		if (next_hdr == IPPROTO_TCP || next_hdr == IPPROTO_UDP) {
++	if (family == ZSOCK_AF_INET) {
++		if (next_hdr == ZSOCK_IPPROTO_TCP || next_hdr == ZSOCK_IPPROTO_UDP) {
+ 			LOG_INF("%s %s (%zd) %s:%u -> %s:%u",
+ 				"IPv4", proto, len,
+ 				src_addr, src_port,
+@@ -139,7 +139,7 @@ static void print_info(struct net_pkt *pkt)
+ 				dst_addr);
+ 		}
+ 	} else {
+-		if (next_hdr == IPPROTO_TCP || next_hdr == IPPROTO_UDP) {
++		if (next_hdr == ZSOCK_IPPROTO_TCP || next_hdr == ZSOCK_IPPROTO_UDP) {
+ 			LOG_INF("%s %s (%zd) [%s]:%u -> [%s]:%u",
+ 				"IPv6", proto, len,
+ 				src_addr, src_port,
+diff --git a/samples/net/ptp/CMakeLists.txt b/samples/net/ptp/CMakeLists.txt
+index edbda19d0c9..7be41e87134 100644
+--- a/samples/net/ptp/CMakeLists.txt
++++ b/samples/net/ptp/CMakeLists.txt
+@@ -7,4 +7,5 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+ target_include_directories(app PRIVATE ${ZEPHYR_BASE}/subsys/net/lib)
+ 
+ project(ptp)
++
+ target_sources(app PRIVATE src/main.c)
+diff --git a/samples/net/ptp/prj.conf b/samples/net/ptp/prj.conf
+index 2c4e13f8389..b9ab0686aef 100644
+--- a/samples/net/ptp/prj.conf
++++ b/samples/net/ptp/prj.conf
+@@ -1,3 +1,4 @@
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ CONFIG_NETWORKING=y
+ CONFIG_NET_LOG=y
+ CONFIG_LOG=y
+diff --git a/samples/net/qos/ethernet/CMakeLists.txt b/samples/net/qos/ethernet/CMakeLists.txt
+index def810f0dc0..56ba7b3ddab 100644
+--- a/samples/net/qos/ethernet/CMakeLists.txt
++++ b/samples/net/qos/ethernet/CMakeLists.txt
+@@ -5,5 +5,6 @@ cmake_minimum_required(VERSION 3.20.0)
+ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+ project(ethernet_qos_demo)
+ 
++
+ FILE(GLOB app_sources src/*.c)
+ target_sources(app PRIVATE ${app_sources})
+diff --git a/samples/net/qos/ethernet/prj.conf b/samples/net/qos/ethernet/prj.conf
+index 7719c937ff4..dd27abebc9d 100644
+--- a/samples/net/qos/ethernet/prj.conf
++++ b/samples/net/qos/ethernet/prj.conf
+@@ -1,3 +1,4 @@
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ # Networking config
+ CONFIG_NETWORKING=y
+ CONFIG_NET_IPV4=y
+diff --git a/samples/net/secure_mqtt_sensor_actuator/CMakeLists.txt b/samples/net/secure_mqtt_sensor_actuator/CMakeLists.txt
+index af4feece2dc..04c371f449a 100644
+--- a/samples/net/secure_mqtt_sensor_actuator/CMakeLists.txt
++++ b/samples/net/secure_mqtt_sensor_actuator/CMakeLists.txt
+@@ -5,6 +5,8 @@ cmake_minimum_required(VERSION 3.20.0)
+ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+ project(secure_mqtt_sensor_actuator)
+ 
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
++
+ FILE(GLOB app_sources src/*.c)
+ target_sources(app PRIVATE ${app_sources})
+ 
+diff --git a/samples/net/secure_mqtt_sensor_actuator/src/mqtt_client.h b/samples/net/secure_mqtt_sensor_actuator/src/mqtt_client.h
+index d78c2b05d34..19b125c9bc3 100644
+--- a/samples/net/secure_mqtt_sensor_actuator/src/mqtt_client.h
++++ b/samples/net/secure_mqtt_sensor_actuator/src/mqtt_client.h
+@@ -7,6 +7,8 @@
+ #ifndef __MQTT_CLIENT_H__
+ #define __MQTT_CLIENT_H__
+ 
++#include <zephyr/net/mqtt.h>
++
+ /** MQTT connection timeouts */
+ #define MSECS_NET_POLL_TIMEOUT	5000
+ #define MSECS_WAIT_RECONNECT	1000
+diff --git a/samples/net/sockets/can/CMakeLists.txt b/samples/net/sockets/can/CMakeLists.txt
+index b29e07cbb7a..43a51101361 100644
+--- a/samples/net/sockets/can/CMakeLists.txt
++++ b/samples/net/sockets/can/CMakeLists.txt
+@@ -5,4 +5,5 @@ cmake_minimum_required(VERSION 3.20.0)
+ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+ project(sockets_can)
+ 
++
+ target_sources(app PRIVATE src/main.c)
+diff --git a/samples/net/sockets/coap_client/CMakeLists.txt b/samples/net/sockets/coap_client/CMakeLists.txt
+index 658a92562ca..c9921a67687 100644
+--- a/samples/net/sockets/coap_client/CMakeLists.txt
++++ b/samples/net/sockets/coap_client/CMakeLists.txt
+@@ -4,6 +4,8 @@ cmake_minimum_required(VERSION 3.20.0)
+ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+ project(coap_client)
+ 
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
++
+ FILE(GLOB app_sources src/*.c)
+ target_sources(app PRIVATE ${app_sources})
+ target_include_directories(app PRIVATE ${ZEPHYR_BASE}/subsys/net/ip)
+diff --git a/samples/net/sockets/coap_download/CMakeLists.txt b/samples/net/sockets/coap_download/CMakeLists.txt
+index 0ca793a2bb5..571c694628c 100644
+--- a/samples/net/sockets/coap_download/CMakeLists.txt
++++ b/samples/net/sockets/coap_download/CMakeLists.txt
+@@ -5,6 +5,7 @@ cmake_minimum_required(VERSION 3.20.0)
+ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+ project(coap_download)
+ 
++
+ target_sources(app PRIVATE
+     src/main.c
+ )
+diff --git a/samples/net/sockets/dumb_http_server_mt/CMakeLists.txt b/samples/net/sockets/dumb_http_server_mt/CMakeLists.txt
+index 69aa851df90..6330e2a6b9e 100644
+--- a/samples/net/sockets/dumb_http_server_mt/CMakeLists.txt
++++ b/samples/net/sockets/dumb_http_server_mt/CMakeLists.txt
+@@ -4,6 +4,7 @@ cmake_minimum_required(VERSION 3.20.0)
+ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+ project(dumb_http_server_mt)
+ 
++
+ FILE(GLOB app_sources src/*.c)
+ target_sources(app PRIVATE ${app_sources})
+ 
+diff --git a/samples/net/sockets/echo/boards/cc3220sf_launchxl.conf b/samples/net/sockets/echo/boards/cc3220sf_launchxl.conf
+index 55eea093465..64a349fa7c1 100644
+--- a/samples/net/sockets/echo/boards/cc3220sf_launchxl.conf
++++ b/samples/net/sockets/echo/boards/cc3220sf_launchxl.conf
+@@ -1,3 +1,4 @@
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ # Networking Config:
+ CONFIG_NETWORKING=y
+ CONFIG_NET_NATIVE=n
+diff --git a/samples/net/sockets/echo/boards/cc3235sf_launchxl.conf b/samples/net/sockets/echo/boards/cc3235sf_launchxl.conf
+index 2d3f9921a4e..f9bc48d3f86 100644
+--- a/samples/net/sockets/echo/boards/cc3235sf_launchxl.conf
++++ b/samples/net/sockets/echo/boards/cc3235sf_launchxl.conf
+@@ -1,3 +1,4 @@
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ # Networking Config:
+ CONFIG_NETWORKING=y
+ CONFIG_NET_NATIVE=n
+diff --git a/samples/net/sockets/http_client/CMakeLists.txt b/samples/net/sockets/http_client/CMakeLists.txt
+index b13b4fd09b5..71e3fd695c9 100644
+--- a/samples/net/sockets/http_client/CMakeLists.txt
++++ b/samples/net/sockets/http_client/CMakeLists.txt
+@@ -4,6 +4,7 @@ cmake_minimum_required(VERSION 3.20.0)
+ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+ project(http_client)
+ 
++
+ FILE(GLOB app_sources src/*.c)
+ target_sources(app PRIVATE ${app_sources})
+ 
+diff --git a/samples/net/sockets/http_get/boards/cc3220sf_launchxl.conf b/samples/net/sockets/http_get/boards/cc3220sf_launchxl.conf
+index 99f962225e5..a698d7275f4 100644
+--- a/samples/net/sockets/http_get/boards/cc3220sf_launchxl.conf
++++ b/samples/net/sockets/http_get/boards/cc3220sf_launchxl.conf
+@@ -1,3 +1,4 @@
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ # Networking Config:
+ CONFIG_NETWORKING=y
+ CONFIG_NET_NATIVE=n
+diff --git a/samples/net/sockets/http_get/boards/cc3235sf_launchxl.conf b/samples/net/sockets/http_get/boards/cc3235sf_launchxl.conf
+index 99f962225e5..a698d7275f4 100644
+--- a/samples/net/sockets/http_get/boards/cc3235sf_launchxl.conf
++++ b/samples/net/sockets/http_get/boards/cc3235sf_launchxl.conf
+@@ -1,3 +1,4 @@
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ # Networking Config:
+ CONFIG_NETWORKING=y
+ CONFIG_NET_NATIVE=n
+diff --git a/samples/net/sockets/http_server/src/ws.c b/samples/net/sockets/http_server/src/ws.c
+index 08ab5e3bdee..e7e82980e2d 100644
+--- a/samples/net/sockets/http_server/src/ws.c
++++ b/samples/net/sockets/http_server/src/ws.c
+@@ -144,7 +144,7 @@ static void ws_echo_handler(void *ptr1, void *ptr2, void *ptr3)
+ 			continue;
+ 		}
+ 
+-		if (cfg->fds[0].revents & ZSOCK_POLLHUP) {
++		if (cfg->fds[0].revents & POLLHUP) {
+ 			LOG_DBG("Client #%d has disconnected", client);
+ 			break;
+ 		}
+diff --git a/samples/net/sockets/sntp_client/boards/cc3220sf_launchxl.conf b/samples/net/sockets/sntp_client/boards/cc3220sf_launchxl.conf
+index 7daf0c8cd34..600cf2fc71c 100644
+--- a/samples/net/sockets/sntp_client/boards/cc3220sf_launchxl.conf
++++ b/samples/net/sockets/sntp_client/boards/cc3220sf_launchxl.conf
+@@ -1,3 +1,4 @@
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ # Networking Config:
+ CONFIG_NETWORKING=y
+ CONFIG_NET_NATIVE=n
+diff --git a/samples/net/sockets/tcp/CMakeLists.txt b/samples/net/sockets/tcp/CMakeLists.txt
+index 5d07bb4e3c8..2b6134f2e09 100644
+--- a/samples/net/sockets/tcp/CMakeLists.txt
++++ b/samples/net/sockets/tcp/CMakeLists.txt
+@@ -5,6 +5,7 @@ cmake_minimum_required(VERSION 3.20.0)
+ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+ project(tcp)
+ 
++
+ target_include_directories(app PRIVATE ${ZEPHYR_BASE}/subsys/net/ip)
+ 
+ target_sources(app PRIVATE src/main.c)
+diff --git a/samples/net/sockets/websocket_client/CMakeLists.txt b/samples/net/sockets/websocket_client/CMakeLists.txt
+index b13b4fd09b5..71e3fd695c9 100644
+--- a/samples/net/sockets/websocket_client/CMakeLists.txt
++++ b/samples/net/sockets/websocket_client/CMakeLists.txt
+@@ -4,6 +4,7 @@ cmake_minimum_required(VERSION 3.20.0)
+ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+ project(http_client)
+ 
++
+ FILE(GLOB app_sources src/*.c)
+ target_sources(app PRIVATE ${app_sources})
+ 
+diff --git a/samples/net/stats/prj.conf b/samples/net/stats/prj.conf
+index 694e89a7397..da1f081e38d 100644
+--- a/samples/net/stats/prj.conf
++++ b/samples/net/stats/prj.conf
+@@ -1,3 +1,4 @@
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ # Generic network options
+ CONFIG_NETWORKING=y
+ CONFIG_NET_LOG=y
+diff --git a/samples/net/telnet/prj.conf b/samples/net/telnet/prj.conf
+index b2b1c1285f0..9e3bac2c1f4 100644
+--- a/samples/net/telnet/prj.conf
++++ b/samples/net/telnet/prj.conf
+@@ -1,3 +1,4 @@
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ CONFIG_PRINTK=y
+ 
+ CONFIG_NETWORKING=y
+diff --git a/samples/net/telnet/src/telnet.c b/samples/net/telnet/src/telnet.c
+index f8df416e39a..5eca0a4666d 100644
+--- a/samples/net/telnet/src/telnet.c
++++ b/samples/net/telnet/src/telnet.c
+@@ -15,6 +15,7 @@ LOG_MODULE_REGISTER(net_telnet_sample, LOG_LEVEL_DBG);
+ #include <zephyr/net/net_core.h>
+ #include <zephyr/net/net_if.h>
+ #include <zephyr/net/net_mgmt.h>
++#include <zephyr/net/net_ip.h>
+ 
+ #include "net_sample_common.h"
+ 
+@@ -23,10 +24,10 @@ LOG_MODULE_REGISTER(net_telnet_sample, LOG_LEVEL_DBG);
+ 
+ static void setup_ipv6(void)
+ {
+-	struct in6_addr addr;
++	struct zsock_in6_addr addr;
+ 	struct net_if *iface = net_if_get_default();
+ 
+-	if (net_addr_pton(AF_INET6, MCAST_IP6ADDR, &addr)) {
++	if (net_addr_pton(ZSOCK_AF_INET6, MCAST_IP6ADDR, &addr)) {
+ 		LOG_ERR("Invalid address: %s", MCAST_IP6ADDR);
+ 		return;
+ 	}
+diff --git a/samples/net/virtual/src/main.c b/samples/net/virtual/src/main.c
+index bbc803cd4a3..099e69448d8 100644
+--- a/samples/net/virtual/src/main.c
++++ b/samples/net/virtual/src/main.c
+@@ -230,14 +230,14 @@ static int setup_iface(struct net_if *iface,
+ {
+ 	struct virtual_interface_req_params params = { 0 };
+ 	struct net_if_addr *ifaddr;
+-	struct in_addr addr4;
+-	struct in6_addr addr6;
++	struct zsock_in_addr addr4;
++	struct zsock_in6_addr addr6;
+ 	int ret;
+ 
+ 	if (IS_ENABLED(CONFIG_NET_IPV6) &&
+ 	    net_if_flag_is_set(iface, NET_IF_IPV6)) {
+ 
+-		if (net_addr_pton(AF_INET6, ipv6_addr, &addr6)) {
++		if (net_addr_pton(ZSOCK_AF_INET6, ipv6_addr, &addr6)) {
+ 			LOG_ERR("Invalid address: %s", ipv6_addr);
+ 			return -EINVAL;
+ 		}
+@@ -254,9 +254,9 @@ static int setup_iface(struct net_if *iface,
+ 			goto try_ipv4;
+ 		}
+ 
+-		params.family = AF_INET6;
++		params.family = ZSOCK_AF_INET6;
+ 
+-		if (net_addr_pton(AF_INET6, peer6addr, &addr6)) {
++		if (net_addr_pton(ZSOCK_AF_INET6, peer6addr, &addr6)) {
+ 			LOG_ERR("Cannot parse peer %s address %s to tunnel",
+ 				"IPv6", peer6addr);
+ 		} else {
+@@ -288,7 +288,7 @@ try_ipv4:
+ 	if (IS_ENABLED(CONFIG_NET_IPV4) &&
+ 	    net_if_flag_is_set(iface, NET_IF_IPV4)) {
+ 
+-		if (net_addr_pton(AF_INET, ipv4_addr, &addr4)) {
++		if (net_addr_pton(ZSOCK_AF_INET, ipv4_addr, &addr4)) {
+ 			LOG_ERR("Invalid address: %s", ipv4_addr);
+ 			return -EINVAL;
+ 		}
+@@ -302,9 +302,9 @@ try_ipv4:
+ 		}
+ 
+ 		if (netmask) {
+-			struct in_addr nm;
++			struct zsock_in_addr nm;
+ 
+-			if (net_addr_pton(AF_INET, netmask, &nm)) {
++			if (net_addr_pton(ZSOCK_AF_INET, netmask, &nm)) {
+ 				LOG_ERR("Invalid netmask: %s", netmask);
+ 				return -EINVAL;
+ 			}
+@@ -316,9 +316,9 @@ try_ipv4:
+ 			goto done;
+ 		}
+ 
+-		params.family = AF_INET;
++		params.family = ZSOCK_AF_INET;
+ 
+-		if (net_addr_pton(AF_INET, peer4addr, &addr4)) {
++		if (net_addr_pton(ZSOCK_AF_INET, peer4addr, &addr4)) {
+ 			LOG_ERR("Cannot parse peer %s address %s to tunnel",
+ 				"IPv4", peer4addr);
+ 		} else {
+diff --git a/samples/net/wifi/apsta_mode/CMakeLists.txt b/samples/net/wifi/apsta_mode/CMakeLists.txt
+index a74cc22b3c8..64f9dc4ade7 100644
+--- a/samples/net/wifi/apsta_mode/CMakeLists.txt
++++ b/samples/net/wifi/apsta_mode/CMakeLists.txt
+@@ -5,4 +5,5 @@ cmake_minimum_required(VERSION 3.20.0)
+ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+ project(wifi_apsta_mode)
+ 
++
+ target_sources(app PRIVATE src/main.c)
+diff --git a/samples/net/wifi/apsta_mode/src/main.c b/samples/net/wifi/apsta_mode/src/main.c
+index 38f16351041..666834f3d03 100644
+--- a/samples/net/wifi/apsta_mode/src/main.c
++++ b/samples/net/wifi/apsta_mode/src/main.c
+@@ -88,12 +88,12 @@ static void enable_dhcpv4_server(void)
+ 	static struct in_addr addr;
+ 	static struct in_addr netmaskAddr;
+ 
+-	if (net_addr_pton(AF_INET, CONFIG_WIFI_SAMPLE_AP_IP_ADDRESS, &addr)) {
++	if (net_addr_pton(ZSOCK_AF_INET, CONFIG_WIFI_SAMPLE_AP_IP_ADDRESS, &addr)) {
+ 		LOG_ERR("Invalid address: %s", CONFIG_WIFI_SAMPLE_AP_IP_ADDRESS);
+ 		return;
+ 	}
+ 
+-	if (net_addr_pton(AF_INET, CONFIG_WIFI_SAMPLE_AP_NETMASK, &netmaskAddr)) {
++	if (net_addr_pton(ZSOCK_AF_INET, CONFIG_WIFI_SAMPLE_AP_NETMASK, &netmaskAddr)) {
+ 		LOG_ERR("Invalid netmask: %s", CONFIG_WIFI_SAMPLE_AP_NETMASK);
+ 		return;
+ 	}
+diff --git a/samples/net/wifi/shell/prj.conf b/samples/net/wifi/shell/prj.conf
+index e1a1b40a409..60268bf03e2 100644
+--- a/samples/net/wifi/shell/prj.conf
++++ b/samples/net/wifi/shell/prj.conf
+@@ -1,3 +1,4 @@
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ CONFIG_EARLY_CONSOLE=y
+ 
+ CONFIG_NETWORKING=y
+diff --git a/samples/net/wpan_serial/CMakeLists.txt b/samples/net/wpan_serial/CMakeLists.txt
+index f2d8a46696f..746d68843ea 100644
+--- a/samples/net/wpan_serial/CMakeLists.txt
++++ b/samples/net/wpan_serial/CMakeLists.txt
+@@ -4,6 +4,7 @@ cmake_minimum_required(VERSION 3.20.0)
+ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+ project(wpan_serial)
+ 
++
+ target_include_directories(app PRIVATE ${ZEPHYR_BASE}/subsys/net/ip)
+ 
+ FILE(GLOB app_sources src/*.c)
+diff --git a/samples/net/wpan_serial/prj.conf b/samples/net/wpan_serial/prj.conf
+index 14c182119ae..6e73bc7d590 100644
+--- a/samples/net/wpan_serial/prj.conf
++++ b/samples/net/wpan_serial/prj.conf
+@@ -1,3 +1,4 @@
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ CONFIG_GPIO=y
+ CONFIG_SERIAL=y
+ CONFIG_UART_LINE_CTRL=y
