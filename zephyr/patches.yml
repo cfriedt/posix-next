@@ -238,16 +238,17 @@ patches:
     upstreamable: true
     comments: |
       x86 arch-level support for userspace signals in syscall handling.
-  - path: hostap/fix-zephyr-select-api.patch
-    sha256sum: f90ad77cafd895b74aa22d9e57775c5bf286a8f794c725ff4563fdb466143c37
+  - path: hostap/posix-networking.patch
+    sha256sum: eea3fefcc445fe354938967a03d540e74c988817eaddaa0115e4d03af729c3df
     module: modules/lib/hostap
     author: Chris Friedt
     email: chris@fr4.co
-    date: 2026-05-16
+    date: 2026-07-08
     upstreamable: true
     comments: |
-      Map Zephyr socket select APIs to the POSIX names used by HostAP when CONFIG_POSIX_API is
-      disabled.
+      Use standard POSIX networking headers in HostAP (arpa/inet.h, netinet/in.h,
+      sys/select.h, sys/socket.h, sys/time.h, unistd.h) instead of CONFIG_POSIX_API
+      conditional zsock includes. Unconditional netinet/in.h for in_addr types.
   - path: hostap/fix-xsi-kconfig.patch
     sha256sum: 2c0211d78e58b40ed79d6bd84ff54f193f9107681f1c7418e209d84a94d5ac7e
     module: zephyr
@@ -776,6 +777,18 @@ patches:
       Set _DECLARED guards inside each compat alias block in net_ip.h and
       socket.h so that POSIX headers included after Zephyr headers skip
       redefining types that are already aliased (fixes hybrid build order).
+  - path: zephyr/net-headers-zsock-macro-guards.patch
+    sha256sum: c3c06b9f7b4b97e99892ae0cb5f7cb2ad4e511954b02029c05ba38bd9f5a6302
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-11
+    upstreamable: true
+    comments: |
+      Wrap remaining bare compat macro aliases in net_ip.h and socket.h with
+      #ifndef guards (IPPROTO_IP, AI_PASSIVE, NI_NUMERICHOST, SOL_SOCKET,
+      TCP_NODELAY, IN6_IS_ADDR_UNSPECIFIED) so they do not redefine macros
+      already provided by POSIX headers in hybrid builds.
   - path: zephyr/drivers-net-zsock-namespace.patch
     sha256sum: 1a39ece15a44f9657121f4d7dfd75cbe281bd95b087f0a7aea76ff4444985441
     module: zephyr
@@ -861,3 +874,83 @@ patches:
     comments: |
       Route picolibc and newlib <sys/time.h> through the POSIX shim so timeval and
       fd_set from picolibc's _select.h do not clash with POSIX networking select.
+  - path: zephyr/samples-net-posix-includes.patch
+    sha256sum: 0aeae7ada10c398429ad482e5d61419678c6b18ec5d755ae889cf3b847211eed
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-08
+    upstreamable: true
+    comments: |
+      Adds explicit POSIX networking includes and CONFIG_POSIX_AEP_CHOICE_PSE53 to samples/net
+      that previously relied on zephyr/net/socket.h tail includes. Also adds missing
+      <zephyr/net/socket.h> before POSIX headers in net_mgmt (include order fix),
+      <netdb.h> in tftp_client, and <zephyr/net/net_if.h> in hostap/supp_main.h.
+      Extends to cover echo_async, echo_async_select, dumb_http_server, big_http_download,
+      and txtime (which previously had a redundant __ZEPHYR__-gated zephyr/net/socket.h include).
+  - path: hostap/l2-packet-zsock.patch
+    sha256sum: 06318c7fa8d6df85e476b74e05b7de8bca8a671011cc937d7605eddaafa93076
+    module: modules/lib/hostap
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-12
+    upstreamable: true
+    comments: |
+      Convert l2_packet_zephyr.c from bare POSIX types to ZSOCK_ equivalents:
+      struct sockaddr_ll -> zsock_sockaddr_ll, struct sockaddr -> zsock_sockaddr,
+      send/sendto -> zsock_send/zsock_sendto, ZSOCK_AF_PACKET, zsock_htons,
+      zsock_socklen_t. The file includes <zephyr/net/net_ip.h> directly (no POSIX
+      headers) so all references must use the ZSOCK_ namespace.
+  - path: zephyr/net-headers-zsock-cleanup.patch
+    sha256sum: 8843eef8f319aa7208d29b7f334e5b4b6745706e40bb45870b60d20899890529
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-12
+    upstreamable: true
+    comments: |
+      Remove TEMP_POSIX_ZSOCK_NS_WORKAROUND compat-alias blocks from
+      include/zephyr/net/socket.h and include/zephyr/net/net_ip.h now that all
+      in-tree consumers have been migrated to ZSOCK_ names.  Also converts
+      Zephyr-internal networking files (drivers/net/nsos*, subsys/net/lib/*,
+      tests/net/*, samples/net/*) from bare POSIX socket types and functions
+      (struct sockaddr, AF_INET, htons, send, recv, …) to their ZSOCK_-prefixed
+      equivalents (struct zsock_sockaddr, ZSOCK_AF_INET, zsock_htons,
+      zsock_send, zsock_recv, …) so they compile without CONFIG_POSIX_NETWORKING.
+  - path: zephyr/net-zsock-symbol-fixes.patch
+    sha256sum: b5e56b4cdca95d5c2d71e38799fb105c16a7b1ec5906af42639d7d83b515352d
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-13
+    upstreamable: true
+    comments: |
+      Fix remaining bare POSIX socket symbols missed by net-headers-zsock-cleanup.patch:
+      vlan.c (inet_ntop -> zsock_inet_ntop), tls_ext (INET_ADDRSTRLEN, SO_REUSEADDR),
+      MQTT tcp/tls (setsockopt -> zsock_setsockopt), OpenThread mdns_socket/trel/infra_if
+      (struct sockaddr_in6/in, AF_INET6/INET, SOCK_DGRAM, IPPROTO_UDP/IPV6/IP,
+      SOL_SOCKET, SO_*, IPV6_*, socklen_t, htons/htonl/ntohs, IN6ADDR_ANY_INIT),
+      dns_upstream_resolver (htons), nrf_wifi shim (AF_PACKET).
+  - path: zephyr/net-zsock-hybrid-fixes.patch
+    sha256sum: 6f902f7668a012698ad01ccfddb8f91e022ce4d97261ea29e230872225137a1c
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-13
+    upstreamable: true
+    comments: |
+      Fix type mismatches in hybrid samples/tests that include both POSIX and Zephyr
+      net headers: echo_client (cast struct in6_addr* -> zsock_in6_addr* for
+      net_ipv6_addr_cmp), tls_configurations (add zephyr/net/socket.h for SOL_TLS/
+      TLS_SEC_TAG_LIST, ZSOCK_POLLIN -> POLLIN), socket/service (sockaddr_in6 ->
+      zsock_sockaddr_in6), can sample (recvfrom -> zsock_recvfrom), echo_server
+      tcp.c (htons -> zsock_htons), tls_ext (INADDR_ANY -> ZSOCK_INADDR_ANY),
+      echo_client/tcp.c and cellular_modem/main.c (add zephyr/net/socket.h),
+      IPPROTO_TLS/DTLS_* -> ZSOCK_IPPROTO_TLS/DTLS_* in modem drivers, simplelink,
+      hawkbit, updatehub, smp_udp, offload_dispatcher; AF_NET_MGMT ->
+      ZSOCK_AF_NET_MGMT and net_ipv6_addr_create cast in net_mgmt sample; add
+      zephyr/net/socket.h to big_http_download, echo_client/udp.c,
+      echo_server/udp.c; tftp_client sockaddr_storage -> zsock_sockaddr_storage;
+      coap_download struct sockaddr sa -> sockaddr_in6 and zsock_sockaddr cast for
+      coap_client_req; txtime zsock_in_addr/net_if_ipv4_select_src_addr casts and
+      net_ipaddr_parse zsock_sockaddr cast.

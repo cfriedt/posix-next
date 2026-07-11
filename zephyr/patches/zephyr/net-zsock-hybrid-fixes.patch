@@ -1,0 +1,683 @@
+diff --git a/drivers/modem/hl78xx/hl78xx_sockets.c b/drivers/modem/hl78xx/hl78xx_sockets.c
+index c30c0ccfe2a..e5d955e8cae 100644
+--- a/drivers/modem/hl78xx/hl78xx_sockets.c
++++ b/drivers/modem/hl78xx/hl78xx_sockets.c
+@@ -1467,7 +1467,7 @@ static int create_socket(struct modem_socket *sock, const struct zsock_sockaddr
+ 		LOG_DBG("send_udp_config returned %d", ret);
+ 		return ret;
+ 	}
+-	mode = (sock->ip_proto == IPPROTO_TLS_1_2) ? 3 : 0;
++	mode = (sock->ip_proto == ZSOCK_IPPROTO_TLS_1_2) ? 3 : 0;
+ 	/* only TCP and TLS are supported */
+ 	if (sock->ip_proto != ZSOCK_IPPROTO_TCP && sock->ip_proto != ZSOCK_IPPROTO_TLS_1_2) {
+ 		LOG_ERR("Unsupported protocol: %d", sock->ip_proto);
+@@ -2579,7 +2579,7 @@ static bool offload_is_supported(int family, int type, int proto)
+ 		return true;
+ 	}
+ #if defined(CONFIG_MODEM_HL78XX_SOCKETS_SOCKOPT_TLS)
+-	if (proto == IPPROTO_TLS_1_2) {
++	if (proto == ZSOCK_IPPROTO_TLS_1_2) {
+ 		return true;
+ 	}
+ #endif
+diff --git a/drivers/modem/ublox-sara-r4.c b/drivers/modem/ublox-sara-r4.c
+index 4331db19558..700e557ea03 100644
+--- a/drivers/modem/ublox-sara-r4.c
++++ b/drivers/modem/ublox-sara-r4.c
+@@ -1410,7 +1410,7 @@ static int create_socket(struct modem_socket *sock, const struct zsock_sockaddr
+ 		goto error;
+ 	}
+
+-	if (sock->ip_proto == IPPROTO_TLS_1_2) {
++	if (sock->ip_proto == ZSOCK_IPPROTO_TLS_1_2) {
+ 		char atbuf[sizeof("AT+USECPRF=#,#,#######\r")];
+
+ 		/* Enable socket security */
+@@ -1946,7 +1946,7 @@ static bool offload_is_supported(int family, int type, int proto)
+
+ 	if (proto != ZSOCK_IPPROTO_TCP &&
+ 	    proto != ZSOCK_IPPROTO_UDP &&
+-	    proto != IPPROTO_TLS_1_2) {
++	    proto != ZSOCK_IPPROTO_TLS_1_2) {
+ 		return false;
+ 	}
+
+diff --git a/drivers/wifi/eswifi/eswifi_socket.c b/drivers/wifi/eswifi/eswifi_socket.c
+index 6b11b0b0416..77acbca5297 100644
+--- a/drivers/wifi/eswifi/eswifi_socket.c
++++ b/drivers/wifi/eswifi/eswifi_socket.c
+@@ -20,7 +20,7 @@ LOG_MODULE_DECLARE(LOG_MODULE_NAME);
+ int eswifi_socket_type_from_zephyr(int proto, enum eswifi_transport_type *type)
+ {
+ 	if (IS_ENABLED(CONFIG_NET_SOCKETS_SOCKOPT_TLS) &&
+-	    proto >= IPPROTO_TLS_1_0 && proto <= IPPROTO_TLS_1_2) {
++	    proto >= ZSOCK_IPPROTO_TLS_1_0 && proto <= ZSOCK_IPPROTO_TLS_1_2) {
+ 		*type = ESWIFI_TRANSPORT_TCP_SSL;
+ 	} else if (proto == ZSOCK_IPPROTO_TCP) {
+ 		*type = ESWIFI_TRANSPORT_TCP;
+diff --git a/drivers/wifi/simplelink/simplelink_sockets.c b/drivers/wifi/simplelink/simplelink_sockets.c
+index ccbd447ab2a..8abe86a6c23 100644
+--- a/drivers/wifi/simplelink/simplelink_sockets.c
++++ b/drivers/wifi/simplelink/simplelink_sockets.c
+@@ -223,9 +223,9 @@ static int simplelink_socket_type_from_posix(int type, int *type_sl)
+
+ static int simplelink_socket_proto_from_zephyr(int proto, int *proto_sl)
+ {
+-	if (proto >= IPPROTO_TLS_1_0 && proto <= IPPROTO_TLS_1_2) {
++	if (proto >= ZSOCK_IPPROTO_TLS_1_0 && proto <= ZSOCK_IPPROTO_TLS_1_2) {
+ 		*proto_sl = SL_SEC_SOCKET;
+-	} else if (proto >= IPPROTO_DTLS_1_0 && proto <= IPPROTO_DTLS_1_2) {
++	} else if (proto >= ZSOCK_IPPROTO_DTLS_1_0 && proto <= ZSOCK_IPPROTO_DTLS_1_2) {
+ 		/* SimpleLink doesn't handle DTLS yet! */
+ 		return -EPROTONOSUPPORT;
+ 	} else {
+@@ -281,7 +281,7 @@ static int simplelink_socket(int family, int type, int proto)
+ 		if (IS_ENABLED(CONFIG_NET_SOCKETS_SOCKOPT_TLS)
+ 		    && sl_proto == SL_SEC_SOCKET) {
+ 			/* Now, set specific TLS version via setsockopt(): */
+-			sec_method = (proto - IPPROTO_TLS_1_0) +
++			sec_method = (proto - ZSOCK_IPPROTO_TLS_1_0) +
+ 				SL_SO_SEC_METHOD_TLSV1;
+ 			retval = sl_SetSockOpt(sd, SL_SOL_SOCKET,
+ 				SL_SO_SECMETHOD,
+diff --git a/samples/net/cellular_modem/src/main.c b/samples/net/cellular_modem/src/main.c
+index 5bc8d924c94..2c615b77458 100644
+--- a/samples/net/cellular_modem/src/main.c
++++ b/samples/net/cellular_modem/src/main.c
+@@ -11,6 +11,7 @@
+
+ #include <zephyr/device.h>
+ #include <zephyr/kernel.h>
++#include <zephyr/net/socket.h>
+ #include <zephyr/net/net_if.h>
+ #include <zephyr/net/dns_resolve.h>
+ #include <zephyr/pm/device.h>
+diff --git a/samples/net/sockets/big_http_download/src/big_http_download.c b/samples/net/sockets/big_http_download/src/big_http_download.c
+index d4a23e2cb38..2012179ad6e 100644
+--- a/samples/net/sockets/big_http_download/src/big_http_download.c
++++ b/samples/net/sockets/big_http_download/src/big_http_download.c
+@@ -22,6 +22,7 @@
+ #if defined(__ZEPHYR__)
+
+ #include <zephyr/kernel.h>
++#include <zephyr/net/socket.h>
+
+ #if defined(CONFIG_NET_SOCKETS_SOCKOPT_TLS)
+ #include <zephyr/net/tls_credentials.h>
+@@ -257,7 +258,7 @@ bool download(struct addrinfo *ai, bool is_tls, bool *redirect)
+
+ 	if (is_tls) {
+ #if defined(CONFIG_NET_SOCKETS_SOCKOPT_TLS)
+-		sock = socket(ai->ai_family, ai->ai_socktype, IPPROTO_TLS_1_2);
++		sock = socket(ai->ai_family, ai->ai_socktype, ZSOCK_IPPROTO_TLS_1_2);
+ # else
+ 		printf("TLS not supported\n");
+ 		return false;
+diff --git a/samples/net/sockets/can/src/main.c b/samples/net/sockets/can/src/main.c
+index b569d608e9f..177e91c745e 100644
+--- a/samples/net/sockets/can/src/main.c
++++ b/samples/net/sockets/can/src/main.c
+@@ -127,8 +127,8 @@ static void rx(void *p1, void *p2, void *p3)
+ 		memset(&sframe, 0, sizeof(sframe));
+ 		addr_len = sizeof(can_addr);
+
+-		ret = recvfrom(fd, &sframe, sizeof(struct socketcan_frame),
+-			       0, (struct zsock_sockaddr *)&can_addr, &addr_len);
++		ret = zsock_recvfrom(fd, &sframe, sizeof(struct socketcan_frame),
++				     0, (struct zsock_sockaddr *)&can_addr, &addr_len);
+ 		if (ret < 0) {
+ 			LOG_ERR("[%d] Cannot receive CAN frame (%d)", fd,
+ 				-errno);
+diff --git a/samples/net/sockets/coap_download/src/main.c b/samples/net/sockets/coap_download/src/main.c
+index 1608ed04cbc..4e76bf97a99 100644
+--- a/samples/net/sockets/coap_download/src/main.c
++++ b/samples/net/sockets/coap_download/src/main.c
+@@ -80,7 +80,7 @@ static void do_coap_download(struct sockaddr *sa)
+
+ 	start_time = k_uptime_get();
+
+-	ret = coap_client_req(&client, sockfd, sa, &request, NULL);
++	ret = coap_client_req(&client, sockfd, (struct zsock_sockaddr *)sa, &request, NULL);
+ 	if (ret) {
+ 		LOG_ERR("Failed to send CoAP request, err %d", ret);
+ 		return;
+@@ -107,7 +107,7 @@ int main(void)
+ 	k_sem_take(&net_connected_sem, K_FOREVER);
+ 	LOG_INF("Network L4 is connected");
+
+-	struct sockaddr sa;
++	struct sockaddr_in6 sa;
+
+ #if defined(CONFIG_NET_IPV4)
+ 	struct sockaddr_in *addr4 = (struct sockaddr_in *)&sa;
+diff --git a/samples/net/sockets/echo_client/src/echo-client.c b/samples/net/sockets/echo_client/src/echo-client.c
+index 8f1550e887c..4b3e1377671 100644
+--- a/samples/net/sockets/echo_client/src/echo-client.c
++++ b/samples/net/sockets/echo_client/src/echo-client.c
+@@ -224,7 +224,8 @@ static int check_our_ipv6_sockets(int sock,
+ 		return -errno;
+ 	}
+
+-	if (!net_ipv6_addr_cmp(deprecated_addr, &addr.sin6_addr)) {
++	if (!net_ipv6_addr_cmp((const struct zsock_in6_addr *)deprecated_addr,
++			       (const struct zsock_in6_addr *)&addr.sin6_addr)) {
+ 		return -ENOENT;
+ 	}
+
+diff --git a/samples/net/sockets/echo_client/src/tcp.c b/samples/net/sockets/echo_client/src/tcp.c
+index 8abe3c6bdb2..0f5eefecf57 100644
+--- a/samples/net/sockets/echo_client/src/tcp.c
++++ b/samples/net/sockets/echo_client/src/tcp.c
+@@ -20,6 +20,7 @@ LOG_MODULE_DECLARE(net_echo_client_sample, LOG_LEVEL_DBG);
+ #include <fcntl.h>
+ #include <poll.h>
+
++#include <zephyr/net/socket.h>
+ #include <zephyr/net/tls_credentials.h>
+ #include <zephyr/random/random.h>
+
+diff --git a/samples/net/sockets/echo_client/src/udp.c b/samples/net/sockets/echo_client/src/udp.c
+index 0f104d0dd5e..52c13308d39 100644
+--- a/samples/net/sockets/echo_client/src/udp.c
++++ b/samples/net/sockets/echo_client/src/udp.c
+@@ -20,6 +20,7 @@ LOG_MODULE_DECLARE(net_echo_client_sample, LOG_LEVEL_DBG);
+ #include <fcntl.h>
+ #include <poll.h>
+
++#include <zephyr/net/socket.h>
+ #include <zephyr/net/tls_credentials.h>
+ #include <zephyr/random/random.h>
+
+@@ -202,7 +203,7 @@ static int start_udp_proto(struct sample_data *data, sa_family_t family,
+ 	int ret;
+
+ #if defined(CONFIG_NET_SOCKETS_SOCKOPT_TLS)
+-	data->udp.sock = socket(family, SOCK_DGRAM, IPPROTO_DTLS_1_2);
++	data->udp.sock = socket(family, SOCK_DGRAM, ZSOCK_IPPROTO_DTLS_1_2);
+ #else
+ 	data->udp.sock = socket(family, SOCK_DGRAM, IPPROTO_UDP);
+ #endif
+diff --git a/samples/net/sockets/echo_server/src/tcp.c b/samples/net/sockets/echo_server/src/tcp.c
+index 99dd3a875e8..71fee206122 100644
+--- a/samples/net/sockets/echo_server/src/tcp.c
++++ b/samples/net/sockets/echo_server/src/tcp.c
+@@ -312,7 +312,7 @@ static void process_tcp4(void)
+
+ 	(void)memset(&addr4, 0, sizeof(addr4));
+ 	addr4.sin_family = ZSOCK_AF_INET;
+-	addr4.sin_port = htons(MY_PORT);
++	addr4.sin_port = zsock_htons(MY_PORT);
+
+ 	ret = start_tcp_proto(&conf.ipv4, (struct zsock_sockaddr *)&addr4,
+ 			      sizeof(addr4));
+@@ -338,7 +338,7 @@ static void process_tcp6(void)
+
+ 	(void)memset(&addr6, 0, sizeof(addr6));
+ 	addr6.sin6_family = ZSOCK_AF_INET6;
+-	addr6.sin6_port = htons(MY_PORT);
++	addr6.sin6_port = zsock_htons(MY_PORT);
+
+ 	ret = start_tcp_proto(&conf.ipv6, (struct zsock_sockaddr *)&addr6,
+ 			      sizeof(addr6));
+diff --git a/samples/net/sockets/echo_server/src/udp.c b/samples/net/sockets/echo_server/src/udp.c
+index 37bf01e1b1f..b6cbda903fe 100644
+--- a/samples/net/sockets/echo_server/src/udp.c
++++ b/samples/net/sockets/echo_server/src/udp.c
+@@ -17,6 +17,7 @@ LOG_MODULE_DECLARE(net_echo_server_sample, LOG_LEVEL_DBG);
+ #include <netinet/in.h>
+ #include <unistd.h>
+
++#include <zephyr/net/socket.h>
+ #include <zephyr/net/tls_credentials.h>
+
+ #include "common.h"
+@@ -43,7 +44,7 @@ static int start_udp_proto(struct data *data, struct sockaddr *bind_addr,
+
+ #if defined(CONFIG_NET_SOCKETS_SOCKOPT_TLS)
+ 	data->udp.sock = socket(bind_addr->sa_family, SOCK_DGRAM,
+-				IPPROTO_DTLS_1_2);
++				ZSOCK_IPPROTO_DTLS_1_2);
+ #else
+ 	data->udp.sock = socket(bind_addr->sa_family, SOCK_DGRAM, IPPROTO_UDP);
+ #endif
+diff --git a/samples/net/sockets/net_mgmt/src/main.c b/samples/net/sockets/net_mgmt/src/main.c
+index 18927fdee34..edb85f9d31e 100644
+--- a/samples/net/sockets/net_mgmt/src/main.c
++++ b/samples/net/sockets/net_mgmt/src/main.c
+@@ -44,7 +44,7 @@ static void trigger_events(void *p1, void *p2, void *p3)
+
+ 	iface = net_if_get_default();
+
+-	net_ipv6_addr_create(&addr_v6, 0x2001, 0x0db8, 0, 0, 0, 0, 0, 0x0003);
++	net_ipv6_addr_create((struct zsock_in6_addr *)&addr_v6, 0x2001, 0x0db8, 0, 0, 0, 0, 0, 0x0003);
+
+ 	while (1) {
+ 		switch (operation) {
+@@ -106,7 +106,7 @@ static void listener(void *p1, void *p2, void *p3)
+ 	uint8_t buf[MAX_BUF_LEN];
+ 	int fd, ret;
+
+-	fd = socket(AF_NET_MGMT, SOCK_DGRAM, NET_MGMT_EVENT_PROTO);
++	fd = socket(ZSOCK_AF_NET_MGMT, SOCK_DGRAM, NET_MGMT_EVENT_PROTO);
+ 	if (fd < 0) {
+ 		printk("Cannot create net_mgmt socket (%d)\n", errno);
+ 		exit(1);
+@@ -114,7 +114,7 @@ static void listener(void *p1, void *p2, void *p3)
+
+ 	memset(&sockaddr, 0, sizeof(sockaddr));
+
+-	sockaddr.nm_family = AF_NET_MGMT;
++	sockaddr.nm_family = ZSOCK_AF_NET_MGMT;
+ 	sockaddr.nm_ifindex = 0; /* Any network interface */
+ 	sockaddr.nm_pid = (uintptr_t)k_current_get();
+ 	sockaddr.nm_mask = NET_EVENT_IPV6_DAD_SUCCEED |
+diff --git a/samples/net/sockets/txtime/src/main.c b/samples/net/sockets/txtime/src/main.c
+index 198fd30b338..8acdb539d54 100644
+--- a/samples/net/sockets/txtime/src/main.c
++++ b/samples/net/sockets/txtime/src/main.c
+@@ -51,7 +51,7 @@ static struct net_mgmt_event_callback dhcpv4_cb;
+
+ struct app_data {
+ 	const struct device *clk;
+-	struct sockaddr peer;
++	struct sockaddr_storage peer;
+ 	socklen_t peer_addr_len;
+ 	int sock;
+ };
+@@ -141,13 +141,13 @@ static void rx(void *p1, void *p2, void *p3)
+
+ 	struct app_data *data = p1;
+ 	static uint8_t recv_buf[sizeof(txtime_str)];
+-	struct sockaddr src;
++	struct sockaddr_storage src;
+ 	socklen_t addr_len = data->peer_addr_len;
+ 	ssize_t len = 0;
+
+ 	while (true) {
+ 		len += recvfrom(data->sock, recv_buf, sizeof(recv_buf), 0,
+-				&src, &addr_len);
++				(struct sockaddr *)&src, &addr_len);
+ 		if (!(len % (100 * 1024))) {
+ 			LOG_DBG("Received %zd kb data", len / 1024);
+ 		}
+@@ -247,19 +247,20 @@ static int get_local_ipv6(struct net_if *iface, struct sockaddr *peer,
+ static int get_local_ipv4(struct net_if *iface, struct sockaddr *peer,
+ 			  struct sockaddr *local, socklen_t *addrlen)
+ {
+-	const struct in_addr *addr;
++	const struct zsock_in_addr *addr;
+
+ 	if (peer->sa_family != AF_INET) {
+ 		return 0;
+ 	}
+
+-	addr = net_if_ipv4_select_src_addr(iface, &posix_sin(peer)->sin_addr);
++	addr = net_if_ipv4_select_src_addr(iface,
++					   (const struct zsock_in_addr *)&posix_sin(peer)->sin_addr);
+ 	if (!addr) {
+ 		LOG_ERR("Cannot get local %s address", "IPv4");
+ 		return -EINVAL;
+ 	}
+
+-	memcpy(&posix_sin(local)->sin_addr, addr, sizeof(*addr));
++	memcpy(&posix_sin(local)->sin_addr, (const struct in_addr *)addr, sizeof(*addr));
+ 	local->sa_family = AF_INET;
+ 	*addrlen = sizeof(struct sockaddr_in);
+
+@@ -268,7 +269,7 @@ static int get_local_ipv4(struct net_if *iface, struct sockaddr *peer,
+
+ static int create_socket(struct net_if *iface, struct sockaddr *peer)
+ {
+-	struct sockaddr local;
++	struct sockaddr_storage local;
+ 	socklen_t addrlen;
+ 	int optval;
+ 	uint8_t priority;
+@@ -287,7 +288,7 @@ static int create_socket(struct net_if *iface, struct sockaddr *peer)
+ 			return -errno;
+ 		}
+
+-		addr = (struct sockaddr_ll *)&local;
++		addr = (struct sockaddr_ll *)&local; /* sockaddr_storage large enough */
+ 		addr->sll_ifindex = net_if_get_by_iface(net_if_get_default());
+ 		addr->sll_family = AF_PACKET;
+ 		addrlen = sizeof(struct sockaddr_ll);
+@@ -307,21 +308,25 @@ static int create_socket(struct net_if *iface, struct sockaddr *peer)
+
+ 		if (IS_ENABLED(CONFIG_NET_IPV6) &&
+ 		    peer->sa_family == AF_INET6) {
+-			ret = get_local_ipv6(iface, peer, &local, &addrlen);
++			ret = get_local_ipv6(iface, peer,
++					     (struct sockaddr *)&local, &addrlen);
+ 			if (ret < 0) {
+ 				return ret;
+ 			}
+
+-			net_addr_ntop(AF_INET6, &posix_sin6(&local)->sin6_addr,
++			net_addr_ntop(AF_INET6,
++				      &posix_sin6((struct sockaddr *)&local)->sin6_addr,
+ 				      addr_str, sizeof(addr_str));
+ 		} else if (IS_ENABLED(CONFIG_NET_IPV4) &&
+ 			   peer->sa_family == AF_INET) {
+-			ret = get_local_ipv4(iface, peer, &local, &addrlen);
++			ret = get_local_ipv4(iface, peer,
++					     (struct sockaddr *)&local, &addrlen);
+ 			if (ret < 0) {
+ 				return ret;
+ 			}
+
+-			net_addr_ntop(AF_INET, &posix_sin(&local)->sin_addr,
++			net_addr_ntop(AF_INET,
++				      &posix_sin((struct sockaddr *)&local)->sin_addr,
+ 				      addr_str, sizeof(addr_str));
+ 		} else {
+ 			LOG_ERR("Invalid socket family %d", peer->sa_family);
+@@ -331,7 +336,7 @@ static int create_socket(struct net_if *iface, struct sockaddr *peer)
+ 		LOG_DBG("Binding to %s", addr_str);
+ 	}
+
+-	ret = bind(sock, &local, addrlen);
++	ret = bind(sock, (struct sockaddr *)&local, addrlen);
+ 	if (ret < 0) {
+ 		LOG_ERR("Cannot bind socket (%d)", -errno);
+ 		return -errno;
+@@ -362,34 +367,36 @@ static int get_peer_address(struct net_if **iface, char *addr_str,
+
+ 	ret = net_ipaddr_parse(CONFIG_NET_SAMPLE_PEER,
+ 			       strlen(CONFIG_NET_SAMPLE_PEER),
+-			       &peer_data.peer);
++			       (struct zsock_sockaddr *)&peer_data.peer);
+ 	if (!ret) {
+ 		LOG_ERR("Cannot parse '%s'", CONFIG_NET_SAMPLE_PEER);
+ 		return -EINVAL;
+ 	}
+
+-	if (posix_sin(&peer_data.peer)->sin_port == 0) {
+-		posix_sin(&peer_data.peer)->sin_port = htons(4242);
++	if (posix_sin((struct sockaddr *)&peer_data.peer)->sin_port == 0) {
++		posix_sin((struct sockaddr *)&peer_data.peer)->sin_port = htons(4242);
+ 	}
+
+ 	if (IS_ENABLED(CONFIG_NET_IPV6) &&
+-					peer_data.peer.sa_family == AF_INET6) {
++				((struct sockaddr *)&peer_data.peer)->sa_family == AF_INET6) {
+ 		*iface = net_if_ipv6_select_src_iface(
+-					&posix_sin6(&peer_data.peer)->sin6_addr);
++			(const struct zsock_in6_addr *)
++			&posix_sin6((struct sockaddr *)&peer_data.peer)->sin6_addr);
+
+-		net_addr_ntop(peer_data.peer.sa_family,
+-			      &posix_sin6(&peer_data.peer)->sin6_addr, addr_str,
+-			      addr_str_len);
++		net_addr_ntop(((struct sockaddr *)&peer_data.peer)->sa_family,
++			      &posix_sin6((struct sockaddr *)&peer_data.peer)->sin6_addr,
++			      addr_str, addr_str_len);
+ 		peer_data.peer_addr_len = sizeof(struct sockaddr_in6);
+
+ 	} else if (IS_ENABLED(CONFIG_NET_IPV4) &&
+-					peer_data.peer.sa_family == AF_INET) {
++				((struct sockaddr *)&peer_data.peer)->sa_family == AF_INET) {
+ 		*iface = net_if_ipv4_select_src_iface(
+-					&posix_sin(&peer_data.peer)->sin_addr);
++			(const struct zsock_in_addr *)
++			&posix_sin((struct sockaddr *)&peer_data.peer)->sin_addr);
+
+-		net_addr_ntop(peer_data.peer.sa_family,
+-			      &posix_sin(&peer_data.peer)->sin_addr, addr_str,
+-			      addr_str_len);
++		net_addr_ntop(((struct sockaddr *)&peer_data.peer)->sa_family,
++			      &posix_sin((struct sockaddr *)&peer_data.peer)->sin_addr,
++			      addr_str, addr_str_len);
+ 		peer_data.peer_addr_len = sizeof(struct sockaddr_in);
+ 	}
+
+@@ -617,7 +624,7 @@ int main(void)
+ 		LOG_INF("Socket SO_TXTIME sample to %s port %d using "
+ 			"interface %d (%p) and PTP clock %p",
+ 			addr_str,
+-			ntohs(posix_sin(&peer_data.peer)->sin_port),
++			ntohs(posix_sin((struct sockaddr *)&peer_data.peer)->sin_port),
+ 			if_index, iface, peer_data.clk);
+ 	}
+
+@@ -627,7 +634,7 @@ int main(void)
+ 			if_index, iface, peer_data.clk);
+ 	}
+
+-	peer_data.sock = create_socket(iface, &peer_data.peer);
++	peer_data.sock = create_socket(iface, (struct sockaddr *)&peer_data.peer);
+ 	if (peer_data.sock < 0) {
+ 		LOG_ERR("Cannot create socket (%d)", peer_data.sock);
+ 		return 0;
+diff --git a/samples/net/tftp_client/src/tftp-client.c b/samples/net/tftp_client/src/tftp-client.c
+index 550fca6f32b..ef2981a96f1 100644
+--- a/samples/net/tftp_client/src/tftp-client.c
++++ b/samples/net/tftp_client/src/tftp-client.c
+@@ -40,7 +40,7 @@ static void tftp_event_callback(const struct tftp_evt *evt)
+
+ static int tftp_init(const char *hostname)
+ {
+-	struct sockaddr_storage remote_addr;
++	struct zsock_sockaddr_storage remote_addr;
+ 	struct addrinfo *res, hints = {0};
+ 	int ret;
+
+diff --git a/subsys/mgmt/hawkbit/hawkbit.c b/subsys/mgmt/hawkbit/hawkbit.c
+index 1452836dc7a..9fd2ad24af0 100644
+--- a/subsys/mgmt/hawkbit/hawkbit.c
++++ b/subsys/mgmt/hawkbit/hawkbit.c
+@@ -77,9 +77,9 @@ static bool hawkbit_initialized;
+ #ifdef CONFIG_DNS_RESOLVER_MAX_QUERY_LEN
+ #define SERVER_ADDR_LEN CONFIG_DNS_RESOLVER_MAX_QUERY_LEN
+ #elif defined(CONFIG_NET_IPV6)
+-#define SERVER_ADDR_LEN INET6_ADDRSTRLEN
++#define SERVER_ADDR_LEN ZSOCK_INET6_ADDRSTRLEN
+ #else
+-#define SERVER_ADDR_LEN INET_ADDRSTRLEN
++#define SERVER_ADDR_LEN ZSOCK_INET_ADDRSTRLEN
+ #endif
+
+ static struct hawkbit_config {
+@@ -467,7 +467,7 @@ static bool start_http_client(int *hb_sock)
+ 	struct zsock_addrinfo *addr;
+ 	struct zsock_addrinfo hints = {0};
+ 	int resolve_attempts = 10;
+-	int protocol = IS_ENABLED(CONFIG_HAWKBIT_USE_TLS) ? IPPROTO_TLS_1_2 : IPPROTO_TCP;
++	int protocol = IS_ENABLED(CONFIG_HAWKBIT_USE_TLS) ? ZSOCK_IPPROTO_TLS_1_2 : IPPROTO_TCP;
+
+ 	if (IS_ENABLED(CONFIG_NET_IPV6)) {
+ 		hints.ai_family = AF_INET6;
+diff --git a/subsys/mgmt/mcumgr/transport/src/smp_udp.c b/subsys/mgmt/mcumgr/transport/src/smp_udp.c
+index 822f71fd524..0527761f499 100644
+--- a/subsys/mgmt/mcumgr/transport/src/smp_udp.c
++++ b/subsys/mgmt/mcumgr/transport/src/smp_udp.c
+@@ -196,7 +196,7 @@ static int create_socket(enum proto_type proto, int *sock)
+ 	}
+
+ #if defined(CONFIG_MCUMGR_TRANSPORT_UDP_DTLS)
+-	tmp_sock = zsock_socket(addr->sa_family, SOCK_DGRAM, IPPROTO_DTLS_1_2);
++	tmp_sock = zsock_socket(addr->sa_family, SOCK_DGRAM, ZSOCK_IPPROTO_DTLS_1_2);
+ #else
+ 	tmp_sock = zsock_socket(addr->sa_family, SOCK_DGRAM, IPPROTO_UDP);
+ #endif
+diff --git a/subsys/mgmt/updatehub/updatehub.c b/subsys/mgmt/updatehub/updatehub.c
+index 2cada59864a..80d47329def 100644
+--- a/subsys/mgmt/updatehub/updatehub.c
++++ b/subsys/mgmt/updatehub/updatehub.c
+@@ -185,7 +185,7 @@ static bool start_coap_client(void)
+ #if defined(CONFIG_UPDATEHUB_DTLS)
+ 	int verify = TLS_PEER_VERIFY_REQUIRED;
+ 	sec_tag_t sec_list[] = { CA_CERTIFICATE_TAG };
+-	int protocol = IPPROTO_DTLS_1_2;
++	int protocol = ZSOCK_IPPROTO_DTLS_1_2;
+ 	char port[] = "5684";
+ #else
+ 	int protocol = IPPROTO_UDP;
+diff --git a/tests/net/socket/offload_dispatcher/src/main.c b/tests/net/socket/offload_dispatcher/src/main.c
+index d1fe616f38e..920a7da2970 100644
+--- a/tests/net/socket/offload_dispatcher/src/main.c
++++ b/tests/net/socket/offload_dispatcher/src/main.c
+@@ -433,7 +433,7 @@ static void test_socket_setup_tls(void *dummy)
+ 	ARG_UNUSED(dummy);
+ 	test_result_reset();
+
+-	test_sock = zsock_socket(ZSOCK_AF_INET, ZSOCK_SOCK_STREAM, IPPROTO_TLS_1_2);
++	test_sock = zsock_socket(ZSOCK_AF_INET, ZSOCK_SOCK_STREAM, ZSOCK_IPPROTO_TLS_1_2);
+ 	zassert_true(test_sock >= 0, "Failed to create socket");
+ 	zassert_false(test_socket_ctx[OFFLOAD_1].socket_called,
+ 		      "Socket should'nt have been dispatched yet");
+diff --git a/tests/net/socket/service/src/main.c b/tests/net/socket/service/src/main.c
+index bc5c1270d7b..a8998a6eb26 100644
+--- a/tests/net/socket/service/src/main.c
++++ b/tests/net/socket/service/src/main.c
+@@ -7,16 +7,9 @@
+ #include <zephyr/logging/log.h>
+ LOG_MODULE_REGISTER(net_test, CONFIG_NET_SOCKETS_LOG_LEVEL);
+
+-#include <stdio.h>
+-#include <netinet/in.h>
+-#include <sys/socket.h>
+-#include <arpa/inet.h>
+-#include <unistd.h>
+-#include <fcntl.h>
+-#include <poll.h>
+-
+ #include <zephyr/ztest_assert.h>
+
++#include <zephyr/net/socket.h>
+ #include <zephyr/net/socket_service.h>
+
+ #include "../../socket_helpers.h"
+@@ -71,8 +64,8 @@ void run_test_service(const struct net_socket_service_desc *udp_service,
+ 	int c_sock_tcp;
+ 	int s_sock_tcp;
+ 	int new_sock;
+-	struct sockaddr_in6 c_addr;
+-	struct sockaddr_in6 s_addr;
++	struct zsock_sockaddr_in6 c_addr;
++	struct zsock_sockaddr_in6 s_addr;
+ 	ssize_t len;
+ 	char buf[10];
+ 	struct zsock_pollfd sock[2] = {
+@@ -100,14 +93,14 @@ void run_test_service(const struct net_socket_service_desc *udp_service,
+ 	ret = net_socket_service_register(tcp_service, sock, ARRAY_SIZE(sock), NULL);
+ 	zassert_equal(ret, 0, "Cannot register tcp service (%d)", ret);
+
+-	ret = bind(s_sock_udp, (struct sockaddr *)&s_addr, sizeof(s_addr));
++	ret = zsock_bind(s_sock_udp, (struct zsock_sockaddr *)&s_addr, sizeof(s_addr));
+ 	zassert_equal(ret, 0, "bind failed");
+
+-	ret = connect(c_sock_udp, (struct sockaddr *)&s_addr, sizeof(s_addr));
++	ret = zsock_connect(c_sock_udp, (struct zsock_sockaddr *)&s_addr, sizeof(s_addr));
+ 	zassert_equal(ret, 0, "connect failed");
+
+ 	/* Send pkt for s_sock_udp and poll with timeout of 10 */
+-	len = send(c_sock_udp, BUF_AND_SIZE(TEST_STR_SMALL), 0);
++	len = zsock_send(c_sock_udp, BUF_AND_SIZE(TEST_STR_SMALL), 0);
+ 	zassert_equal(len, STRLEN(TEST_STR_SMALL), "invalid send len");
+
+ 	if (k_sem_take(&wait_data, K_MSEC(WAIT_TIME))) {
+@@ -115,29 +108,29 @@ void run_test_service(const struct net_socket_service_desc *udp_service,
+ 	}
+
+ 	/* Recv pkt from s_sock_udp and ensure no poll events happen */
+-	len = recv(s_sock_udp, BUF_AND_SIZE(buf), 0);
++	len = zsock_recv(s_sock_udp, BUF_AND_SIZE(buf), 0);
+ 	zassert_equal(len, STRLEN(TEST_STR_SMALL), "invalid recv len");
+
+-	ret = bind(s_sock_tcp, (struct sockaddr *)&s_addr, sizeof(s_addr));
++	ret = zsock_bind(s_sock_tcp, (struct zsock_sockaddr *)&s_addr, sizeof(s_addr));
+ 	zassert_equal(ret, 0, "bind failed (%d)", -errno);
+-	ret = listen(s_sock_tcp, 0);
++	ret = zsock_listen(s_sock_tcp, 0);
+ 	zassert_equal(ret, 0, "");
+
+-	ret = connect(c_sock_tcp, (const struct sockaddr *)&s_addr,
++	ret = zsock_connect(c_sock_tcp, (const struct zsock_sockaddr *)&s_addr,
+ 		      sizeof(s_addr));
+ 	zassert_equal(ret, 0, "");
+
+ 	/* Let the network stack run */
+ 	k_msleep(10);
+
+-	len = send(c_sock_tcp, BUF_AND_SIZE(TEST_STR_SMALL), 0);
++	len = zsock_send(c_sock_tcp, BUF_AND_SIZE(TEST_STR_SMALL), 0);
+ 	zassert_equal(len, STRLEN(TEST_STR_SMALL), "invalid send len");
+
+ 	if (k_sem_take(&wait_data_tcp, K_MSEC(WAIT_TIME))) {
+ 		zassert_true(0, "Timeout while waiting callback");
+ 	}
+
+-	new_sock = accept(s_sock_tcp, NULL, NULL);
++	new_sock = zsock_accept(s_sock_tcp, NULL, NULL);
+ 	zassert_true(new_sock >= 0, "");
+
+ 	sock[1].fd = new_sock;
+@@ -150,7 +143,7 @@ void run_test_service(const struct net_socket_service_desc *udp_service,
+ 		zassert_true(0, "Timeout while waiting callback");
+ 	}
+
+-	len = recv(new_sock, BUF_AND_SIZE(buf), 0);
++	len = zsock_recv(new_sock, BUF_AND_SIZE(buf), 0);
+ 	zassert_equal(len, STRLEN(TEST_STR_SMALL), "invalid recv len");
+
+ 	ret = net_socket_service_unregister(tcp_service);
+@@ -162,19 +155,19 @@ void run_test_service(const struct net_socket_service_desc *udp_service,
+ 	ret = net_socket_service_unregister(tcp_service_small);
+ 	zassert_equal(ret, 0, "Cannot unregister tcp service (%d)", ret);
+
+-	ret = close(new_sock);
++	ret = zsock_close(new_sock);
+ 	zassert_equal(ret, 0, "close failed");
+
+-	ret = close(c_sock_tcp);
++	ret = zsock_close(c_sock_tcp);
+ 	zassert_equal(ret, 0, "close failed");
+
+-	ret = close(s_sock_tcp);
++	ret = zsock_close(s_sock_tcp);
+ 	zassert_equal(ret, 0, "close failed");
+
+-	ret = close(c_sock_udp);
++	ret = zsock_close(c_sock_udp);
+ 	zassert_equal(ret, 0, "close failed");
+
+-	ret = close(s_sock_udp);
++	ret = zsock_close(s_sock_udp);
+ 	zassert_equal(ret, 0, "close failed");
+
+ 	/* Let the stack close the TCP sockets properly */
+diff --git a/tests/net/socket/tls_configurations/src/main.c b/tests/net/socket/tls_configurations/src/main.c
+index d725a05e241..55632e7cf89 100644
+--- a/tests/net/socket/tls_configurations/src/main.c
++++ b/tests/net/socket/tls_configurations/src/main.c
+@@ -20,6 +20,7 @@ LOG_MODULE_REGISTER(tls_configuration_sample, LOG_LEVEL_INF);
+
+ #include <zephyr/net/tls_credentials.h>
+ #include <zephyr/net/net_if.h>
++#include <zephyr/net/socket.h>
+ #include <zephyr/sys/util.h>
+
+ /* This include is required for the definition of the Mbed TLS internal symbol
+@@ -138,7 +139,7 @@ static int create_socket(void)
+
+ 	/* Prepare file descriptor for polling */
+ 	fds[0].fd = socket_fd;
+-	fds[0].events = ZSOCK_POLLIN;
++	fds[0].events = POLLIN;
+
+ 	return ret;
+ }
+diff --git a/tests/net/socket/tls_ext/src/main.c b/tests/net/socket/tls_ext/src/main.c
+index 32cf2dae406..d42a8b139ff 100644
+--- a/tests/net/socket/tls_ext/src/main.c
++++ b/tests/net/socket/tls_ext/src/main.c
+@@ -266,7 +266,7 @@ static int test_configure_server(k_tid_t *server_thread_id, int peer_verify,
+
+ 	memset(&sa, 0, sizeof(sa));
+ 	/* The server listens on all network interfaces */
+-	sa.sin_addr.s_addr = INADDR_ANY;
++	sa.sin_addr.s_addr = ZSOCK_INADDR_ANY;
+ 	sa.sin_family = ZSOCK_AF_INET;
+ 	sa.sin_port = zsock_htons(PORT);
+

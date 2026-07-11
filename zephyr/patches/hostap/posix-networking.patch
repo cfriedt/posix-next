@@ -1,0 +1,81 @@
+diff --git a/src/ap/ap_config.h b/src/ap/ap_config.h
+index 5974250af..6be4faee3 100644
+--- a/src/ap/ap_config.h
++++ b/src/ap/ap_config.h
+@@ -9,6 +9,10 @@
+ #ifndef HOSTAPD_CONFIG_H
+ #define HOSTAPD_CONFIG_H
+
++#ifndef IFNAMSIZ
++#define IFNAMSIZ CONFIG_NET_INTERFACE_NAME_LEN
++#endif
++
+ #include "common/defs.h"
+ #include "utils/list.h"
+ #include "ip_addr.h"
+diff --git a/src/utils/includes.h b/src/utils/includes.h
+index 91784ecae..c739e4c63 100644
+--- a/src/utils/includes.h
++++ b/src/utils/includes.h
+@@ -47,16 +47,13 @@
+
+ #if defined(__ZEPHYR__)
+ #include <strings.h>
+-#if defined(CONFIG_POSIX_API)
+-#include <zephyr/posix/arpa/inet.h>
+-#include <zephyr/posix/sys/select.h>
+-#include <zephyr/posix/sys/socket.h>
+-#include <zephyr/posix/unistd.h>
+-#else /* defined(CONFIG_POSIX_API) */
+-#include <zephyr/net/socket.h>
+-#include <zephyr/net/socket_select.h>
+-#include <zephyr/net/net_ip.h>
+-#endif /* defined(CONFIG_POSIX_API) */
++#include <arpa/inet.h>
++#include <netinet/in.h>
++#include <sys/select.h>
++#include <sys/socket.h>
++#include <sys/time.h>
++#include <unistd.h>
++#include <zephyr/net/net_if.h>
+ #include <zephyr/shell/shell.h>
+
+ #define signal(a, b) (void)(b)
+diff --git a/src/utils/ip_addr.h b/src/utils/ip_addr.h
+index 1d35e0b1e..c72d5a179 100644
+--- a/src/utils/ip_addr.h
++++ b/src/utils/ip_addr.h
+@@ -9,6 +9,8 @@
+ #ifndef IP_ADDR_H
+ #define IP_ADDR_H
+
++#include <netinet/in.h>
++
+ struct hostapd_ip_addr {
+ 	int af; /* AF_INET / AF_INET6 */
+ 	union {
+diff --git a/src/utils/os_zephyr.c b/src/utils/os_zephyr.c
+index 198dbaded..03c11eb50 100644
+--- a/src/utils/os_zephyr.c
++++ b/src/utils/os_zephyr.c
+@@ -7,7 +7,6 @@
+
+ #include <time.h>
+
+-#include <zephyr/posix/sys/time.h>
+ #include <zephyr/random/random.h>
+
+ #include "includes.h"
+diff --git a/wpa_supplicant/wpa_supplicant_i.h b/wpa_supplicant/wpa_supplicant_i.h
+index 5e24bea4c..488c4e1a5 100644
+--- a/wpa_supplicant/wpa_supplicant_i.h
++++ b/wpa_supplicant/wpa_supplicant_i.h
+@@ -9,6 +9,8 @@
+ #ifndef WPA_SUPPLICANT_I_H
+ #define WPA_SUPPLICANT_I_H
+
++#include <netinet/in.h>
++
+ #include "utils/bitfield.h"
+ #include "utils/list.h"
+ #include "common/defs.h"

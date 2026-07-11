@@ -1,0 +1,143 @@
+diff --git a/src/l2_packet/l2_packet_zephyr.c b/src/l2_packet/l2_packet_zephyr.c
+index 3a20428b0..2c623b190 100644
+--- a/src/l2_packet/l2_packet_zephyr.c
++++ b/src/l2_packet/l2_packet_zephyr.c
+@@ -11,6 +11,7 @@
+ #include <zephyr/net/net_core.h>
+ #include <zephyr/net/net_ip.h>
+ #include <zephyr/net/net_pkt.h>
++#include <zephyr/net/socket.h>
+
+ #include "includes.h"
+ #include "common.h"
+@@ -48,22 +49,22 @@ int l2_packet_send(struct l2_packet_data *l2, const u8 *dst_addr, u16 proto,
+ 	}
+
+ 	if (l2->l2_hdr) {
+-		ret = send(l2->fd, buf, len, 0);
++		ret = zsock_send(l2->fd, buf, len, 0);
+ 		if (ret < 0) {
+ 			wpa_printf(MSG_ERROR, "l2_packet_send - send: %s",
+ 				   strerror(errno));
+ 		}
+ 	} else {
+-		struct sockaddr_ll ll;
++		struct zsock_sockaddr_ll ll;
+
+ 		os_memset(&ll, 0, sizeof(ll));
+-		ll.sll_family = AF_PACKET;
++		ll.sll_family = ZSOCK_AF_PACKET;
+ 		ll.sll_ifindex = l2->ifindex;
+-		ll.sll_protocol = htons(proto);
++		ll.sll_protocol = zsock_htons(proto);
+ 		ll.sll_halen = ETH_ALEN;
+ 		os_memcpy(ll.sll_addr, dst_addr, ETH_ALEN);
+ 		// TODO: This takes up too much stack, call wifi driver TX directly?
+-		ret = sendto(l2->fd, buf, len, 0, (struct sockaddr *) &ll,
++		ret = zsock_sendto(l2->fd, buf, len, 0, (struct zsock_sockaddr *) &ll,
+ 			     sizeof(ll));
+ 		if (ret < 0) {
+ 			wpa_printf(MSG_ERROR, "l2_packet_send - sendto: %s",
+@@ -78,13 +79,13 @@ static void l2_packet_receive(int sock, void *eloop_ctx, void *sock_ctx)
+ 	struct l2_packet_data *l2 = eloop_ctx;
+ 	u8 buf[2300];
+ 	int res;
+-	struct sockaddr_ll ll;
+-	socklen_t fromlen;
++	struct zsock_sockaddr_ll ll;
++	zsock_socklen_t fromlen;
+ 	const struct ieee802_1x_hdr *hdr;
+
+ 	os_memset(&ll, 0, sizeof(ll));
+ 	fromlen = sizeof(ll);
+-	res = recvfrom(sock, buf, sizeof(buf), 0, (struct sockaddr *)&ll,
++	res = zsock_recvfrom(sock, buf, sizeof(buf), 0, (struct zsock_sockaddr *)&ll,
+ 		       &fromlen);
+ 	if (res < 0) {
+ 		wpa_printf(MSG_ERROR, "RAW : failed to recv error %d", errno);
+@@ -94,7 +95,7 @@ static void l2_packet_receive(int sock, void *eloop_ctx, void *sock_ctx)
+ 	// FIXME: sll_addr is not being filled as L2 header is not removed
+ 	hdr = (const struct ieee802_1x_hdr *) buf;
+
+-	if (ntohs(ll.sll_protocol) != ETH_P_EAPOL) {
++	if (zsock_ntohs(ll.sll_protocol) != ETH_P_EAPOL) {
+ 		return;
+ 	}
+
+@@ -110,7 +111,7 @@ l2_packet_init(const char *ifname, const u8 *own_addr, unsigned short protocol,
+ 	       void *rx_callback_ctx, int l2_hdr)
+ {
+ 	struct l2_packet_data *l2;
+-	struct sockaddr_ll ll;
++	struct zsock_sockaddr_ll ll;
+ 	int ret = 0;
+ 	struct net_linkaddr *link_addr = NULL;
+ 	struct net_if *iface;
+@@ -143,25 +144,25 @@ l2_packet_init(const char *ifname, const u8 *own_addr, unsigned short protocol,
+ 	link_addr = &iface->if_dev->link_addr;
+ 	os_memcpy(l2->own_addr, link_addr->addr, link_addr->len);
+
+-	l2->fd = socket(AF_PACKET, l2_hdr ? SOCK_RAW : SOCK_DGRAM,
+-			htons(protocol));
++	l2->fd = zsock_socket(ZSOCK_AF_PACKET, l2_hdr ? ZSOCK_SOCK_RAW : ZSOCK_SOCK_DGRAM,
++			zsock_htons(protocol));
+ 	if (l2->fd < 0) {
+ 		wpa_printf(MSG_ERROR,
+ 			   "Failed to open socket: %s, proto: %d, af: %d",
+-			   strerror(errno), htons(protocol), AF_PACKET);
++			   strerror(errno), zsock_htons(protocol), ZSOCK_AF_PACKET);
+ 		goto fail;
+ 	}
+
+ 	os_memset(&ll, 0, sizeof(ll));
+-	ll.sll_family = AF_PACKET;
++	ll.sll_family = ZSOCK_AF_PACKET;
+
+ 	ll.sll_ifindex = l2->ifindex;
+-	ll.sll_protocol = htons(protocol);
++	ll.sll_protocol = zsock_htons(protocol);
+
+ 	// FIXME: This should skip bind_default to ETH_P_ALL, but its not.
+ 	memcpy(ll.sll_addr, l2->own_addr, ETH_ALEN);
+
+-	ret = bind(l2->fd, (const struct sockaddr *) &ll, sizeof(ll));
++	ret = zsock_bind(l2->fd, (const struct zsock_sockaddr *) &ll, sizeof(ll));
+ 	if (ret < 0) {
+ 		goto fail;
+ 	}
+@@ -175,7 +176,7 @@ l2_packet_init(const char *ifname, const u8 *own_addr, unsigned short protocol,
+ 	 */
+ 	if (IS_ENABLED(CONFIG_NET_CONTEXT_PRIORITY)) {
+ 		uint8_t priority = 6;
+-		ret = setsockopt(l2->fd, SOL_SOCKET, SO_PRIORITY, &priority,
++		ret = zsock_setsockopt(l2->fd, ZSOCK_SOL_SOCKET, SO_PRIORITY, &priority,
+ 				sizeof(priority));
+ 		if (ret < 0) {
+ 			goto fail;
+@@ -192,7 +193,7 @@ l2_packet_init(const char *ifname, const u8 *own_addr, unsigned short protocol,
+ 	return l2;
+ fail:
+ 	if (l2->fd >= 0)
+-		close(l2->fd);
++		zsock_close(l2->fd);
+ 	os_free(l2);
+ 	wpa_printf(MSG_ERROR, "Failed to create l2_packet: %d\n", ret);
+ 	return NULL;
+@@ -217,7 +218,7 @@ void l2_packet_deinit(struct l2_packet_data *l2)
+
+ 	if (l2->fd >= 0) {
+ 		eloop_unregister_read_sock(l2->fd);
+-		close(l2->fd);
++		zsock_close(l2->fd);
+ 	}
+
+ 	os_free(l2);
+@@ -227,7 +228,7 @@ int l2_packet_get_ip_addr(struct l2_packet_data *l2, char *buf, size_t len)
+ {
+ #ifdef CONFIG_NET_IPV4
+ 	char addr_buf[NET_IPV4_ADDR_LEN];
+-	os_strlcpy(buf, net_addr_ntop(AF_INET,
++	os_strlcpy(buf, net_addr_ntop(ZSOCK_AF_INET,
+ 				&l2->iface->config.ip.ipv4->unicast[0].ipv4.address.in_addr.s_addr,
+ 				addr_buf, sizeof(addr_buf)), len);
+ 	return 0;

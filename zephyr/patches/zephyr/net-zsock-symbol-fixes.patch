@@ -1,0 +1,482 @@
+diff --git a/modules/nrf_wifi/os/shim.c b/modules/nrf_wifi/os/shim.c
+index 79137e46e13..aa183b106ed 100644
+--- a/modules/nrf_wifi/os/shim.c
++++ b/modules/nrf_wifi/os/shim.c
+@@ -607,7 +607,7 @@ void *net_raw_pkt_from_nbuf(void *iface, void *frm,
+ 		goto out;
+ 	}
+
+-	pkt = net_pkt_rx_alloc_with_buffer(iface, total_len, AF_PACKET, ETH_P_ALL, K_MSEC(100));
++	pkt = net_pkt_rx_alloc_with_buffer(iface, total_len, ZSOCK_AF_PACKET, ETH_P_ALL, K_MSEC(100));
+ 	if (!pkt) {
+ 		LOG_ERR("%s: Unable to allocate net packet buffer", __func__);
+ 		goto out;
+diff --git a/modules/openthread/platform/dns_upstream_resolver.c b/modules/openthread/platform/dns_upstream_resolver.c
+index 2bd605c48f2..0e136815239 100644
+--- a/modules/openthread/platform/dns_upstream_resolver.c
++++ b/modules/openthread/platform/dns_upstream_resolver.c
+@@ -159,7 +159,7 @@ static void dns_pkt_recv_cb(struct net_buf *dns_data, size_t buf_len, void *user
+ 			     OT_ERROR_NONE);
+
+ 		(void)memcpy(req->buffer, dns_data->data, buf_len);
+-		UNALIGNED_PUT(htons(ctx->originated_query_id), (uint16_t *)(req->buffer));
++		UNALIGNED_PUT(zsock_htons(ctx->originated_query_id), (uint16_t *)(req->buffer));
+ 		req->length = buf_len;
+ 		req->cb = dns_upstream_resolver_handle_response;
+ 		req->user_data = user_data;
+diff --git a/modules/openthread/platform/infra_if.c b/modules/openthread/platform/infra_if.c
+index ea136f0de76..a8793dfb050 100644
+--- a/modules/openthread/platform/infra_if.c
++++ b/modules/openthread/platform/infra_if.c
+@@ -50,7 +50,7 @@ otError otPlatInfraIfSendIcmp6Nd(uint32_t aInfraIfIndex, const otIp6Address *aDe
+ 	src = net_if_ipv6_select_src_addr(ail_iface_ptr, &dst);
+ 	VerifyOrExit(!net_ipv6_is_addr_unspecified(src), error = OT_ERROR_FAILED);
+
+-	pkt = net_pkt_alloc_with_buffer(ail_iface_ptr, aBufferLength, AF_INET6, IPPROTO_ICMPV6,
++	pkt = net_pkt_alloc_with_buffer(ail_iface_ptr, aBufferLength, ZSOCK_AF_INET6, ZSOCK_IPPROTO_ICMPV6,
+ 					K_MSEC(100));
+ 	VerifyOrExit(pkt, error = OT_ERROR_FAILED);
+
+@@ -60,7 +60,7 @@ otError otPlatInfraIfSendIcmp6Nd(uint32_t aInfraIfIndex, const otIp6Address *aDe
+ 	VerifyOrExit(net_pkt_write(pkt, aBuffer, aBufferLength) == 0, error = OT_ERROR_FAILED);
+ 	net_pkt_cursor_init(pkt);
+
+-	VerifyOrExit(net_ipv6_finalize(pkt, IPPROTO_ICMPV6) == 0, error = OT_ERROR_FAILED);
++	VerifyOrExit(net_ipv6_finalize(pkt, ZSOCK_IPPROTO_ICMPV6) == 0, error = OT_ERROR_FAILED);
+ 	VerifyOrExit(net_send_data(pkt) == 0, error = OT_ERROR_FAILED);
+
+ exit:
+@@ -237,13 +237,13 @@ otError infra_if_start_icmp6_listener(void)
+ {
+ 	otError error = OT_ERROR_NONE;
+
+-	VerifyOrExit(net_icmp_init_ctx(&ra_ctx, AF_INET6, NET_ICMPV6_RA, 0,
++	VerifyOrExit(net_icmp_init_ctx(&ra_ctx, ZSOCK_AF_INET6, NET_ICMPV6_RA, 0,
+ 				       handle_icmp6_input) == 0,
+ 		     error = OT_ERROR_FAILED);
+-	VerifyOrExit(net_icmp_init_ctx(&rs_ctx, AF_INET6, NET_ICMPV6_RS, 0,
++	VerifyOrExit(net_icmp_init_ctx(&rs_ctx, ZSOCK_AF_INET6, NET_ICMPV6_RS, 0,
+ 				       handle_icmp6_input) == 0,
+ 		     error = OT_ERROR_FAILED);
+-	VerifyOrExit(net_icmp_init_ctx(&na_ctx, AF_INET6, NET_ICMPV6_NA, 0,
++	VerifyOrExit(net_icmp_init_ctx(&na_ctx, ZSOCK_AF_INET6, NET_ICMPV6_NA, 0,
+ 				       handle_icmp6_input) == 0,
+ 		     error = OT_ERROR_FAILED);
+
+diff --git a/modules/openthread/platform/mdns_socket.c b/modules/openthread/platform/mdns_socket.c
+index 71abb3150c3..eefe4471e82 100644
+--- a/modules/openthread/platform/mdns_socket.c
++++ b/modules/openthread/platform/mdns_socket.c
+@@ -109,45 +109,45 @@ static otError mdns_socket_init_v6(uint32_t ail_iface_idx)
+ 	int mcast_hops = 255;
+ 	int on = 1;
+
+-	struct sockaddr_in6 addr = {.sin6_family = AF_INET6,
+-				    .sin6_port = htons(MULTICAST_PORT),
++	struct zsock_sockaddr_in6 addr = {.sin6_family = ZSOCK_AF_INET6,
++				    .sin6_port = zsock_htons(MULTICAST_PORT),
+ 				    .sin6_addr = {{{0}}},
+ 				    .sin6_scope_id = 0};
+
+-	mdns_sock_v6 = zsock_socket(AF_INET6, SOCK_DGRAM | SOCK_NONBLOCK, IPPROTO_UDP);
++	mdns_sock_v6 = zsock_socket(ZSOCK_AF_INET6, ZSOCK_SOCK_DGRAM | SOCK_NONBLOCK, ZSOCK_IPPROTO_UDP);
+ 	VerifyOrExit(mdns_sock_v6 >= 0, error = OT_ERROR_FAILED);
+ 	VerifyOrExit(net_if_get_name(net_if_get_by_index(ail_iface_idx), name,
+ 				     CONFIG_NET_INTERFACE_NAME_LEN) > 0,
+ 		     error = OT_ERROR_FAILED);
+ 	memcpy(if_req.ifr_name, name, MIN(sizeof(name) - 1, sizeof(if_req.ifr_name) - 1));
+-	VerifyOrExit(zsock_setsockopt(mdns_sock_v6, SOL_SOCKET, SO_BINDTODEVICE, &if_req,
++	VerifyOrExit(zsock_setsockopt(mdns_sock_v6, ZSOCK_SOL_SOCKET, ZSOCK_SO_BINDTODEVICE, &if_req,
+ 				      sizeof(if_req)) == 0,
+ 		     error = OT_ERROR_FAILED);
+-	VerifyOrExit(zsock_setsockopt(mdns_sock_v6, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) == 0,
++	VerifyOrExit(zsock_setsockopt(mdns_sock_v6, ZSOCK_SOL_SOCKET, ZSOCK_SO_REUSEADDR, &on, sizeof(on)) == 0,
+ 		     error = OT_ERROR_FAILED);
+-	VerifyOrExit(zsock_setsockopt(mdns_sock_v6, SOL_SOCKET, SO_REUSEPORT, &on, sizeof(on)) == 0,
++	VerifyOrExit(zsock_setsockopt(mdns_sock_v6, ZSOCK_SOL_SOCKET, ZSOCK_SO_REUSEPORT, &on, sizeof(on)) == 0,
+ 		     error = OT_ERROR_FAILED);
+-	VerifyOrExit(zsock_setsockopt(mdns_sock_v6, IPPROTO_IPV6, IPV6_V6ONLY, &on,
++	VerifyOrExit(zsock_setsockopt(mdns_sock_v6, ZSOCK_IPPROTO_IPV6, ZSOCK_IPV6_V6ONLY, &on,
+ 				      sizeof(on)) == 0,
+ 		     error = OT_ERROR_FAILED);
+ 	mreq_v6.ipv6mr_ifindex = ail_iface_idx;
+ 	net_ipv6_addr_create(&mreq_v6.ipv6mr_multiaddr, 0xff02, 0, 0, 0, 0, 0, 0, 0x00fb);
+-	VerifyOrExit(zsock_setsockopt(mdns_sock_v6, IPPROTO_IPV6, IPV6_ADD_MEMBERSHIP, &mreq_v6,
++	VerifyOrExit(zsock_setsockopt(mdns_sock_v6, ZSOCK_IPPROTO_IPV6, IPV6_ADD_MEMBERSHIP, &mreq_v6,
+ 				      sizeof(mreq_v6)) == 0,
+ 		     error = OT_ERROR_FAILED);
+-	VerifyOrExit(zsock_setsockopt(mdns_sock_v6, IPPROTO_IPV6, IPV6_MULTICAST_LOOP,
++	VerifyOrExit(zsock_setsockopt(mdns_sock_v6, ZSOCK_IPPROTO_IPV6, ZSOCK_IPV6_MULTICAST_LOOP,
+ 				      &on, sizeof(on)) == 0,
+ 		     error = OT_ERROR_FAILED);
+-	VerifyOrExit(zsock_setsockopt(mdns_sock_v6, IPPROTO_IPV6, IPV6_MULTICAST_IF,
++	VerifyOrExit(zsock_setsockopt(mdns_sock_v6, ZSOCK_IPPROTO_IPV6, ZSOCK_IPV6_MULTICAST_IF,
+ 				      &ail_iface_index, sizeof(ail_iface_index)) == 0,
+ 		     error = OT_ERROR_FAILED);
+-	VerifyOrExit(zsock_setsockopt(mdns_sock_v6, IPPROTO_IPV6, IPV6_MULTICAST_HOPS,
++	VerifyOrExit(zsock_setsockopt(mdns_sock_v6, ZSOCK_IPPROTO_IPV6, ZSOCK_IPV6_MULTICAST_HOPS,
+ 				      &mcast_hops, sizeof(mcast_hops)) == 0,
+ 		     error = OT_ERROR_FAILED);
+-	VerifyOrExit(zsock_setsockopt(mdns_sock_v6, IPPROTO_IPV6, IPV6_UNICAST_HOPS,
++	VerifyOrExit(zsock_setsockopt(mdns_sock_v6, ZSOCK_IPPROTO_IPV6, ZSOCK_IPV6_UNICAST_HOPS,
+ 				      &mcast_hops, sizeof(mcast_hops)) == 0,
+ 		     error = OT_ERROR_FAILED);
+-	VerifyOrExit(zsock_bind(mdns_sock_v6, (struct sockaddr *)&addr, sizeof(addr)) == 0,
++	VerifyOrExit(zsock_bind(mdns_sock_v6, (struct zsock_sockaddr *)&addr, sizeof(addr)) == 0,
+ 		     error = OT_ERROR_FAILED);
+
+ 	sockfd_udp[0].fd = mdns_sock_v6;
+@@ -171,41 +171,41 @@ static otError mdns_socket_init_v4(uint32_t ail_iface_idx)
+ 	int mcast_hops = 255;
+ 	int on = 1;
+
+-	struct sockaddr_in addr = {.sin_family = AF_INET,
+-				   .sin_port = htons(MULTICAST_PORT),
++	struct zsock_sockaddr_in addr = {.sin_family = ZSOCK_AF_INET,
++				   .sin_port = zsock_htons(MULTICAST_PORT),
+ 				   .sin_addr = {{{0}}}};
+
+-	mdns_sock_v4 = zsock_socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK, IPPROTO_UDP);
++	mdns_sock_v4 = zsock_socket(ZSOCK_AF_INET, ZSOCK_SOCK_DGRAM | SOCK_NONBLOCK, ZSOCK_IPPROTO_UDP);
+ 	VerifyOrExit(mdns_sock_v4 >= 0, error = OT_ERROR_FAILED);
+ 	VerifyOrExit(net_if_get_name(net_if_get_by_index(ail_iface_idx), name,
+ 				     CONFIG_NET_INTERFACE_NAME_LEN) > 0,
+ 		     error = OT_ERROR_FAILED);
+ 	memcpy(if_req.ifr_name, name, MIN(sizeof(name) - 1, sizeof(if_req.ifr_name) - 1));
+-	VerifyOrExit(zsock_setsockopt(mdns_sock_v4, SOL_SOCKET, SO_BINDTODEVICE, &if_req,
++	VerifyOrExit(zsock_setsockopt(mdns_sock_v4, ZSOCK_SOL_SOCKET, ZSOCK_SO_BINDTODEVICE, &if_req,
+ 				      sizeof(if_req)) == 0,
+ 		     error = OT_ERROR_FAILED);
+-	VerifyOrExit(zsock_setsockopt(mdns_sock_v4, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) == 0,
++	VerifyOrExit(zsock_setsockopt(mdns_sock_v4, ZSOCK_SOL_SOCKET, ZSOCK_SO_REUSEADDR, &on, sizeof(on)) == 0,
+ 		     error = OT_ERROR_FAILED);
+-	VerifyOrExit(zsock_setsockopt(mdns_sock_v4, SOL_SOCKET, SO_REUSEPORT, &on, sizeof(on)) == 0,
++	VerifyOrExit(zsock_setsockopt(mdns_sock_v4, ZSOCK_SOL_SOCKET, ZSOCK_SO_REUSEPORT, &on, sizeof(on)) == 0,
+ 		     error = OT_ERROR_FAILED);
+ 	mreq_v4.imr_ifindex = ail_iface_idx;
+-	mreq_v4.imr_multiaddr.s_addr = htonl(0xE00000FB);
+-	VerifyOrExit(zsock_setsockopt(mdns_sock_v4, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq_v4,
++	mreq_v4.imr_multiaddr.s_addr = zsock_htonl(0xE00000FB);
++	VerifyOrExit(zsock_setsockopt(mdns_sock_v4, ZSOCK_IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq_v4,
+ 				      sizeof(mreq_v4)) == 0,
+ 		     error = OT_ERROR_FAILED);
+-	VerifyOrExit(zsock_setsockopt(mdns_sock_v4, IPPROTO_IP, IP_MULTICAST_LOOP, &on,
++	VerifyOrExit(zsock_setsockopt(mdns_sock_v4, ZSOCK_IPPROTO_IP, IP_MULTICAST_LOOP, &on,
+ 				      sizeof(on)) == 0,
+ 		     error = OT_ERROR_FAILED);
+-	VerifyOrExit(zsock_setsockopt(mdns_sock_v4, IPPROTO_IP, IP_MULTICAST_IF, &mreq_v4,
++	VerifyOrExit(zsock_setsockopt(mdns_sock_v4, ZSOCK_IPPROTO_IP, IP_MULTICAST_IF, &mreq_v4,
+ 				      sizeof(mreq_v4)) == 0,
+ 		     error = OT_ERROR_FAILED);
+-	VerifyOrExit(zsock_setsockopt(mdns_sock_v4, IPPROTO_IP, IP_MULTICAST_TTL,
++	VerifyOrExit(zsock_setsockopt(mdns_sock_v4, ZSOCK_IPPROTO_IP, IP_MULTICAST_TTL,
+ 				      &mcast_hops, sizeof(mcast_hops)) == 0,
+ 		     error = OT_ERROR_FAILED);
+-	VerifyOrExit(zsock_setsockopt(mdns_sock_v4, IPPROTO_IP, IP_TTL,
++	VerifyOrExit(zsock_setsockopt(mdns_sock_v4, ZSOCK_IPPROTO_IP, IP_TTL,
+ 				      &mcast_hops, sizeof(mcast_hops)) == 0,
+ 		     error = OT_ERROR_FAILED);
+-	VerifyOrExit(zsock_bind(mdns_sock_v4, (struct sockaddr *)&addr, sizeof(addr)) == 0,
++	VerifyOrExit(zsock_bind(mdns_sock_v4, (struct zsock_sockaddr *)&addr, sizeof(addr)) == 0,
+ 		     error = OT_ERROR_FAILED);
+
+ 	sockfd_udp[1].fd = mdns_sock_v4;
+@@ -245,13 +245,13 @@ static void mdns_send_multicast(otMessage *message, uint32_t ail_iface_idx)
+ {
+ 	uint16_t length = otMessageGetLength(message);
+ 	struct otbr_msg_ctx *req = NULL;
+-	struct sockaddr_in6 addr_v6 = {.sin6_family = AF_INET6,
+-				       .sin6_port = htons(MULTICAST_PORT),
+-				       .sin6_addr = IN6ADDR_ANY_INIT,
++	struct zsock_sockaddr_in6 addr_v6 = {.sin6_family = ZSOCK_AF_INET6,
++				       .sin6_port = zsock_htons(MULTICAST_PORT),
++				       .sin6_addr = ZSOCK_IN6ADDR_ANY_INIT,
+ 				       .sin6_scope_id = 0};
+ #if defined(CONFIG_NET_IPV4)
+-	struct sockaddr_in addr_v4 = {.sin_family = AF_INET,
+-				      .sin_port = htons(MULTICAST_PORT),
++	struct zsock_sockaddr_in addr_v4 = {.sin_family = ZSOCK_AF_INET,
++				      .sin_port = zsock_htons(MULTICAST_PORT),
+ 				      .sin_addr = INADDR_ANY_INIT};
+ #endif /* CONFIG_NET_IPV4*/
+
+@@ -260,15 +260,15 @@ static void mdns_send_multicast(otMessage *message, uint32_t ail_iface_idx)
+
+ 	net_ipv6_addr_create(&addr_v6.sin6_addr, 0xff02, 0, 0, 0, 0, 0, 0, 0x00fb);
+ #if defined(CONFIG_NET_IPV4)
+-	addr_v4.sin_addr.s_addr = htonl(0xE00000FB);
++	addr_v4.sin_addr.s_addr = zsock_htonl(0xE00000FB);
+ #endif /* CONFIG_NET_IPV4 */
+
+ 	VerifyOrExit(otMessageRead(message, 0, req->buffer, length) == length);
+
+-	VerifyOrExit(zsock_sendto(mdns_sock_v6, req->buffer, length, 0, (struct sockaddr *)&addr_v6,
++	VerifyOrExit(zsock_sendto(mdns_sock_v6, req->buffer, length, 0, (struct zsock_sockaddr *)&addr_v6,
+ 		     sizeof(addr_v6)) > 0);
+ #if defined(CONFIG_NET_IPV4)
+-	VerifyOrExit(zsock_sendto(mdns_sock_v4, req->buffer, length, 0, (struct sockaddr *)&addr_v4,
++	VerifyOrExit(zsock_sendto(mdns_sock_v4, req->buffer, length, 0, (struct zsock_sockaddr *)&addr_v4,
+ 		     sizeof(addr_v4)) > 0);
+ #endif /* CONFIG_NET_IPV4 */
+ exit:
+@@ -285,19 +285,19 @@ static void mdns_send_unicast(otMessage *message, const otPlatMdnsAddressInfo *a
+ 	otIp4Address ot_ipv4_addr = {0};
+ #if defined(CONFIG_NET_IPV4)
+ 	bool send_ipv4 = false;
+-	struct sockaddr_in addr_v4 = {0};
++	struct zsock_sockaddr_in addr_v4 = {0};
+ #endif /* CONFIG_NET_IPV4*/
+-	struct sockaddr_in6 addr_v6 = {.sin6_family = AF_INET6,
+-				       .sin6_port = htons(aAddress->mPort),
+-				       .sin6_addr = IN6ADDR_ANY_INIT,
++	struct zsock_sockaddr_in6 addr_v6 = {.sin6_family = ZSOCK_AF_INET6,
++				       .sin6_port = zsock_htons(aAddress->mPort),
++				       .sin6_addr = ZSOCK_IN6ADDR_ANY_INIT,
+ 				       .sin6_scope_id = 0};
+
+ 	VerifyOrExit(length <= OTBR_MESSAGE_SIZE);
+ 	VerifyOrExit(openthread_border_router_allocate_message((void **)&req) == OT_ERROR_NONE);
+ #if defined(CONFIG_NET_IPV4)
+ 	if (otIp4FromIp4MappedIp6Address(&aAddress->mAddress, &ot_ipv4_addr) == OT_ERROR_NONE) {
+-		addr_v4.sin_family = AF_INET;
+-		addr_v4.sin_port = htons(aAddress->mPort);
++		addr_v4.sin_family = ZSOCK_AF_INET;
++		addr_v4.sin_port = zsock_htons(aAddress->mPort);
+ 		memcpy(&addr_v4.sin_addr.s_addr, &ot_ipv4_addr, sizeof(otIp4Address));
+ 		send_ipv4 = true;
+ 	}
+@@ -306,12 +306,12 @@ static void mdns_send_unicast(otMessage *message, const otPlatMdnsAddressInfo *a
+
+ 	VerifyOrExit(otMessageRead(message, 0, req->buffer, length) == length);
+
+-	VerifyOrExit(zsock_sendto(mdns_sock_v6, req->buffer, length, 0, (struct sockaddr *)&addr_v6,
++	VerifyOrExit(zsock_sendto(mdns_sock_v6, req->buffer, length, 0, (struct zsock_sockaddr *)&addr_v6,
+ 		     sizeof(addr_v6)) > 0);
+ #if defined(CONFIG_NET_IPV4)
+ 	if (send_ipv4) {
+ 		VerifyOrExit(zsock_sendto(mdns_sock_v4, req->buffer, length, 0,
+-					  (struct sockaddr *)&addr_v4,
++					  (struct zsock_sockaddr *)&addr_v4,
+ 					  sizeof(addr_v4)) > 0);
+ 	}
+ #endif /* CONFIG_NET_IPV4 */
+@@ -324,12 +324,12 @@ exit:
+
+ static void mdns_receive_handler(struct net_socket_service_event *evt)
+ {
+-	struct sockaddr_in6 addr_v6 = {0};
++	struct zsock_sockaddr_in6 addr_v6 = {0};
+ #if defined(CONFIG_NET_IPV4)
+-	struct sockaddr_in addr_v4 = {0};
+-	socklen_t optlen = sizeof(int);
++	struct zsock_sockaddr_in addr_v4 = {0};
++	zsock_socklen_t optlen = sizeof(int);
+ #endif /* CONFIG_NET_IPV4 */
+-	socklen_t addrlen;
++	zsock_socklen_t addrlen;
+ 	ssize_t len = 0;
+ 	int family;
+ 	struct otbr_msg_ctx *req = NULL;
+@@ -337,25 +337,25 @@ static void mdns_receive_handler(struct net_socket_service_event *evt)
+ 	VerifyOrExit(evt->event.revents & ZSOCK_POLLIN);
+ 	VerifyOrExit(openthread_border_router_allocate_message((void **)&req) == OT_ERROR_NONE);
+ #if defined(CONFIG_NET_IPV4)
+-	(void)zsock_getsockopt(evt->event.fd, SOL_SOCKET, SO_DOMAIN, &family, &optlen);
++	(void)zsock_getsockopt(evt->event.fd, ZSOCK_SOL_SOCKET, ZSOCK_SO_DOMAIN, &family, &optlen);
+
+-	if (family == AF_INET) {
++	if (family == ZSOCK_AF_INET) {
+ 		addrlen = sizeof(addr_v4);
+ 		len = zsock_recvfrom(mdns_sock_v4, req->buffer, sizeof(req->buffer), 0,
+-			       (struct sockaddr *)&addr_v4, &addrlen);
++			       (struct zsock_sockaddr *)&addr_v4, &addrlen);
+ 		VerifyOrExit(len > 0);
+ 		otIp4ToIp4MappedIp6Address((otIp4Address *)&addr_v4.sin_addr.s_addr,
+ 					   &req->addr_info.mAddress);
+-		req->addr_info.mPort = ntohs(addr_v4.sin_port);
++		req->addr_info.mPort = zsock_ntohs(addr_v4.sin_port);
+ 	} else {
+ #endif /* CONFIG_NET_IPV4 */
+ 		addrlen = sizeof(addr_v6);
+ 		len = zsock_recvfrom(mdns_sock_v6, req->buffer, sizeof(req->buffer), 0,
+-			       (struct sockaddr *)&addr_v6, &addrlen);
++			       (struct zsock_sockaddr *)&addr_v6, &addrlen);
+ 		VerifyOrExit(len > 0);
+ 		memcpy(&req->addr_info.mAddress, &addr_v6.sin6_addr,
+ 		       sizeof(req->addr_info.mAddress));
+-		req->addr_info.mPort = ntohs(addr_v6.sin6_port);
++		req->addr_info.mPort = zsock_ntohs(addr_v6.sin6_port);
+ #if defined(CONFIG_NET_IPV4)
+ 	}
+ #endif /* CONFIG_NET_IPV4 */
+diff --git a/modules/openthread/platform/trel.c b/modules/openthread/platform/trel.c
+index 58ae1a559e5..432aff6981f 100644
+--- a/modules/openthread/platform/trel.c
++++ b/modules/openthread/platform/trel.c
+@@ -29,19 +29,19 @@ NET_SOCKET_SERVICE_SYNC_DEFINE_STATIC(trel_udp_service, trel_receive_handler, MA
+
+ void otPlatTrelEnable(otInstance *aInstance, uint16_t *aUdpPort)
+ {
+-	struct sockaddr_in6 addr = {.sin6_family = AF_INET6,
++	struct zsock_sockaddr_in6 addr = {.sin6_family = ZSOCK_AF_INET6,
+ 				    .sin6_port = 0,
+ 				    .sin6_addr = IN6ADDR_ANY_INIT,
+ 				    .sin6_scope_id = 0};
+-	socklen_t len = sizeof(addr);
++	zsock_socklen_t len = sizeof(addr);
+
+-	trel_sock = zsock_socket(AF_INET6, SOCK_DGRAM | SOCK_NONBLOCK, IPPROTO_UDP);
++	trel_sock = zsock_socket(ZSOCK_AF_INET6, ZSOCK_SOCK_DGRAM | SOCK_NONBLOCK, ZSOCK_IPPROTO_UDP);
+ 	VerifyOrExit(trel_sock >= 0);
+-	VerifyOrExit(zsock_bind(trel_sock, (struct sockaddr *)&addr, sizeof(addr)) == 0);
++	VerifyOrExit(zsock_bind(trel_sock, (struct zsock_sockaddr *)&addr, sizeof(addr)) == 0);
+
+-	VerifyOrExit(zsock_getsockname(trel_sock, (struct sockaddr *)&addr, &len) == 0);
++	VerifyOrExit(zsock_getsockname(trel_sock, (struct zsock_sockaddr *)&addr, &len) == 0);
+
+-	*aUdpPort = ntohs(addr.sin6_port);
++	*aUdpPort = zsock_ntohs(addr.sin6_port);
+
+ 	otPlatTrelResetCounters(aInstance);
+
+@@ -74,15 +74,15 @@ void otPlatTrelSend(otInstance *aInstance, const uint8_t *aUdpPayload, uint16_t
+ {
+ 	VerifyOrExit(trel_is_enabled);
+
+-	struct sockaddr_in6 dest_sock_addr = {.sin6_family = AF_INET6,
+-				.sin6_port = htons(aDestSockAddr->mPort),
++	struct zsock_sockaddr_in6 dest_sock_addr = {.sin6_family = ZSOCK_AF_INET6,
++				.sin6_port = zsock_htons(aDestSockAddr->mPort),
+ 				.sin6_addr = {{{0}}},
+ 				.sin6_scope_id = 0};
+
+ 	memcpy(&dest_sock_addr.sin6_addr, &aDestSockAddr->mAddress, sizeof(otIp6Address));
+
+ 	if (zsock_sendto(trel_sock, aUdpPayload, aUdpPayloadLen, 0,
+-				(struct sockaddr *)&dest_sock_addr,
++				(struct zsock_sockaddr *)&dest_sock_addr,
+ 				sizeof(dest_sock_addr)) == aUdpPayloadLen) {
+ 		trel_counters.mTxBytes += aUdpPayloadLen;
+ 		trel_counters.mTxPackets++;
+@@ -108,8 +108,8 @@ void otPlatTrelResetCounters(otInstance *aInstance)
+
+ static void trel_receive_handler(struct net_socket_service_event *evt)
+ {
+-	struct sockaddr_in6 addr = {0};
+-	socklen_t addrlen = sizeof(addr);
++	struct zsock_sockaddr_in6 addr = {0};
++	zsock_socklen_t addrlen = sizeof(addr);
+ 	ssize_t len = 0;
+ 	struct otbr_msg_ctx *req = NULL;
+
+@@ -119,14 +119,14 @@ static void trel_receive_handler(struct net_socket_service_event *evt)
+ 	VerifyOrExit(openthread_border_router_allocate_message((void **)&req) == OT_ERROR_NONE);
+
+ 	len = zsock_recvfrom(trel_sock, req->buffer, sizeof(req->buffer), 0,
+-		       (struct sockaddr *)&addr, &addrlen);
++		       (struct zsock_sockaddr *)&addr, &addrlen);
+ 	VerifyOrExit(len > 0);
+
+ 	trel_counters.mRxBytes += len;
+
+ 	memcpy(&req->sock_addr.mAddress, &addr.sin6_addr, sizeof(otIp6Address));
+ 	req->length = (uint16_t)len;
+-	req->sock_addr.mPort = ntohs(addr.sin6_port);
++	req->sock_addr.mPort = zsock_ntohs(addr.sin6_port);
+ 	req->cb = process_trel_message;
+
+ 	openthread_border_router_post_message(req);
+@@ -153,7 +153,7 @@ otError trel_plat_init(otInstance *instance, struct net_if *ail_iface_ptr)
+ 				     CONFIG_NET_INTERFACE_NAME_LEN) > 0,
+ 		     error = OT_ERROR_FAILED);
+ 	memcpy(if_req.ifr_name, name, MIN(sizeof(name) - 1, sizeof(if_req.ifr_name) - 1));
+-	VerifyOrExit(zsock_setsockopt(trel_sock, SOL_SOCKET, SO_BINDTODEVICE, &if_req,
++	VerifyOrExit(zsock_setsockopt(trel_sock, ZSOCK_SOL_SOCKET, ZSOCK_SO_BINDTODEVICE, &if_req,
+ 				      sizeof(if_req)) == 0,
+ 		      error = OT_ERROR_FAILED);
+
+diff --git a/samples/net/common/vlan.c b/samples/net/common/vlan.c
+index f6d0fcf5362..1db7c194caa 100644
+--- a/samples/net/common/vlan.c
++++ b/samples/net/common/vlan.c
+@@ -88,8 +88,8 @@ static int setup_iface(struct net_if *eth_iface,
+ 			return -EINVAL;
+ 		}
+
+-		inet_ntop(paddr->sa_family, net_sin(paddr)->sin_addr.s4_addr,
+-			  my_addr, sizeof(my_addr));
++		zsock_inet_ntop(paddr->sa_family, net_sin(paddr)->sin_addr.s4_addr,
++				my_addr, sizeof(my_addr));
+
+ 		if (paddr->sa_family == ZSOCK_AF_INET) {
+ 			struct zsock_sockaddr_in *addr4 = (struct zsock_sockaddr_in *)paddr;
+diff --git a/subsys/net/lib/mqtt/mqtt_transport_socket_tcp.c b/subsys/net/lib/mqtt/mqtt_transport_socket_tcp.c
+index 0a0b3a632d6..69680059659 100644
+--- a/subsys/net/lib/mqtt/mqtt_transport_socket_tcp.c
++++ b/subsys/net/lib/mqtt/mqtt_transport_socket_tcp.c
+@@ -51,8 +51,8 @@ int mqtt_client_tcp_connect(struct mqtt_client *client)
+
+ #if defined(CONFIG_SOCKS)
+ 	if (client->transport.proxy.addrlen != 0) {
+-		ret = setsockopt(client->transport.tcp.sock,
+-				 ZSOCK_SOL_SOCKET, ZSOCK_SO_SOCKS5,
++		ret = zsock_setsockopt(client->transport.tcp.sock,
++				       ZSOCK_SOL_SOCKET, ZSOCK_SO_SOCKS5,
+ 				 &client->transport.proxy.addr,
+ 				 client->transport.proxy.addrlen);
+ 		if (ret < 0) {
+diff --git a/subsys/net/lib/mqtt/mqtt_transport_socket_tls.c b/subsys/net/lib/mqtt/mqtt_transport_socket_tls.c
+index 11a1923e459..a579c048b72 100644
+--- a/subsys/net/lib/mqtt/mqtt_transport_socket_tls.c
++++ b/subsys/net/lib/mqtt/mqtt_transport_socket_tls.c
+@@ -52,8 +52,8 @@ int mqtt_client_tls_connect(struct mqtt_client *client)
+
+ #if defined(CONFIG_SOCKS)
+ 	if (client->transport.proxy.addrlen != 0) {
+-		ret = setsockopt(client->transport.tls.sock,
+-				 ZSOCK_SOL_SOCKET, ZSOCK_SO_SOCKS5,
++		ret = zsock_setsockopt(client->transport.tls.sock,
++				       ZSOCK_SOL_SOCKET, ZSOCK_SO_SOCKS5,
+ 				 &client->transport.proxy.addr,
+ 				 client->transport.proxy.addrlen);
+ 		if (ret < 0) {
+diff --git a/tests/net/socket/tls_ext/src/main.c b/tests/net/socket/tls_ext/src/main.c
+index cbc05194ee1..32cf2dae406 100644
+--- a/tests/net/socket/tls_ext/src/main.c
++++ b/tests/net/socket/tls_ext/src/main.c
+@@ -156,7 +156,7 @@ static void server_thread_fn(void *arg0, void *arg1, void *arg2)
+ 	int r;
+ 	int client_fd;
+ 	zsock_socklen_t addrlen;
+-	char addrstr[INET_ADDRSTRLEN];
++	char addrstr[ZSOCK_INET_ADDRSTRLEN];
+ 	struct zsock_sockaddr_in sa;
+ 	char *addrstrp;
+
+@@ -216,7 +216,7 @@ static int test_configure_server(k_tid_t *server_thread_id, int peer_verify,
+ 		SERVER_CERTIFICATE_TAG,
+ 	};
+
+-	char addrstr[INET_ADDRSTRLEN];
++	char addrstr[ZSOCK_INET_ADDRSTRLEN];
+ 	const sec_tag_t *sec_tag_list;
+ 	size_t sec_tag_list_size;
+ 	struct zsock_sockaddr_in sa;
+@@ -232,7 +232,7 @@ static int test_configure_server(k_tid_t *server_thread_id, int peer_verify,
+ 	zassert_not_equal(r, -1, "failed to create server zsock_socket (%d)", errno);
+ 	server_fd = r;
+
+-	r = zsock_setsockopt(server_fd, ZSOCK_SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
++	r = zsock_setsockopt(server_fd, ZSOCK_SOL_SOCKET, ZSOCK_SO_REUSEADDR, &yes, sizeof(yes));
+ 	zassert_not_equal(r, -1, "failed to set SO_REUSEADDR (%d)", errno);
+
+ 	switch (peer_verify) {
+@@ -310,7 +310,7 @@ static int test_configure_client(struct zsock_sockaddr_in *sa, bool own_cert,
+ 		CLIENT_CERTIFICATE_TAG,
+ 	};
+
+-	char addrstr[INET_ADDRSTRLEN];
++	char addrstr[ZSOCK_INET_ADDRSTRLEN];
+ 	const sec_tag_t *sec_tag_list;
+ 	size_t sec_tag_list_size;
+ 	char *addrstrp;

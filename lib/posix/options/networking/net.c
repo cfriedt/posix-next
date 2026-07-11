@@ -325,9 +325,11 @@ int getnameinfo(const struct sockaddr *addr, socklen_t addrlen, char *host, sock
 		return zsock_getnameinfo(NULL, 0, host, hostlen, serv, servlen, flags);
 	}
 
-	return zsock_getnameinfo(
-		posix_sockaddr_to_zsock(addr, addrlen, posix_zsock_sa_buf(&zbuf), &zaddrlen),
-		(zsock_socklen_t)zaddrlen, host, hostlen, serv, servlen, flags);
+	const struct zsock_sockaddr *zaddr =
+		posix_sockaddr_to_zsock(addr, addrlen, posix_zsock_sa_buf(&zbuf), &zaddrlen);
+
+	return zsock_getnameinfo(zaddr, (zsock_socklen_t)zaddrlen, host, hostlen, serv, servlen,
+				 flags);
 }
 
 struct netent *getnetent(void)
@@ -424,10 +426,10 @@ int bind(int sock, const struct sockaddr *addr, socklen_t addrlen)
 		return -1;
 	}
 
-	return zsock_bind(sock,
-			  posix_sockaddr_to_zsock(addr, addrlen, posix_zsock_sa_buf(&zbuf),
-						  &zaddrlen),
-			  (zsock_socklen_t)zaddrlen);
+	const struct zsock_sockaddr *zaddr =
+		posix_sockaddr_to_zsock(addr, addrlen, posix_zsock_sa_buf(&zbuf), &zaddrlen);
+
+	return zsock_bind(sock, zaddr, (zsock_socklen_t)zaddrlen);
 }
 
 int connect(int sock, const struct sockaddr *addr, socklen_t addrlen)
@@ -440,10 +442,10 @@ int connect(int sock, const struct sockaddr *addr, socklen_t addrlen)
 		return -1;
 	}
 
-	return zsock_connect(sock,
-			     posix_sockaddr_to_zsock(addr, addrlen, posix_zsock_sa_buf(&zbuf),
-						     &zaddrlen),
-			     (zsock_socklen_t)zaddrlen);
+	const struct zsock_sockaddr *zaddr =
+		posix_sockaddr_to_zsock(addr, addrlen, posix_zsock_sa_buf(&zbuf), &zaddrlen);
+
+	return zsock_connect(sock, zaddr, (zsock_socklen_t)zaddrlen);
 }
 
 int gethostname(char *name, size_t namelen)

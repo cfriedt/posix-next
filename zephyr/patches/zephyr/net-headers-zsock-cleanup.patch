@@ -1,0 +1,3945 @@
+diff --git a/drivers/net/nsos.h b/drivers/net/nsos.h
+index 9b901d9189c..efff7257a35 100644
+--- a/drivers/net/nsos.h
++++ b/drivers/net/nsos.h
+@@ -70,12 +70,12 @@ struct nsos_mid_sockaddr_in6 {
+ 
+ #define UNIX_PATH_MAX 108
+ struct nsos_mid_sockaddr_un {
+-	sa_family_t sun_family;              /* AF_UNIX */
++	uint16_t sun_family;              /* AF_UNIX */
+ 	char        sun_path[UNIX_PATH_MAX]; /* pathname */
+ };
+ 
+ struct nsos_mid_sockaddr_ll {
+-	sa_family_t sll_family;   /**< Always AF_PACKET                   */
++	uint16_t sll_family;   /**< Always AF_PACKET                   */
+ 	uint16_t    sll_protocol; /**< Physical-layer protocol            */
+ 	int         sll_ifindex;  /**< Interface number                   */
+ 	uint16_t    sll_hatype;   /**< ARP hardware type                  */
+diff --git a/drivers/net/nsos_sockets.c b/drivers/net/nsos_sockets.c
+index 0fc41d5321a..4e4470ce94a 100644
+--- a/drivers/net/nsos_sockets.c
++++ b/drivers/net/nsos_sockets.c
+@@ -489,8 +489,8 @@ static int sockaddr_to_nsos_mid(const struct zsock_sockaddr *addr, zsock_socklen
+ 		return 0;
+ 	}
+ 	case ZSOCK_AF_PACKET: {
+-		const struct sockaddr_ll *addr_ll =
+-			(const struct sockaddr_ll *)addr;
++		const struct zsock_sockaddr_ll *addr_ll =
++			(const struct zsock_sockaddr_ll *)addr;
+ 		struct nsos_mid_sockaddr_ll *addr_ll_mid =
+ 			(struct nsos_mid_sockaddr_ll *)*addr_mid;
+ 
+diff --git a/include/zephyr/net/net_ip.h b/include/zephyr/net/net_ip.h
+index 62d47b07ff5..84980130cdc 100644
+--- a/include/zephyr/net/net_ip.h
++++ b/include/zephyr/net/net_ip.h
+@@ -49,6 +49,12 @@ extern "C" {
+ #define ZSOCK_PF_NET_MGMT     5          /**< Network management info.      */
+ #define ZSOCK_PF_LOCAL        6          /**< Inter-process communication   */
+ #define ZSOCK_PF_UNIX         ZSOCK_PF_LOCAL   /**< Inter-process communication   */
++#ifndef PF_PACKET
++#define PF_PACKET ZSOCK_PF_PACKET
++#endif
++#ifndef PF_CAN
++#define PF_CAN ZSOCK_PF_CAN
++#endif
+ 
+ /* Address families. */
+ #define ZSOCK_AF_UNSPEC      ZSOCK_PF_UNSPEC   /**< Unspecified address family.   */
+@@ -59,55 +65,11 @@ extern "C" {
+ #define ZSOCK_AF_NET_MGMT    ZSOCK_PF_NET_MGMT /**< Network management info.      */
+ #define ZSOCK_AF_LOCAL       ZSOCK_PF_LOCAL    /**< Inter-process communication   */
+ #define ZSOCK_AF_UNIX        ZSOCK_PF_UNIX     /**< Inter-process communication   */
+-
+-/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
+-#ifndef PF_UNSPEC
+-#define PF_UNSPEC       ZSOCK_PF_UNSPEC
+-#endif
+-#ifndef PF_INET
+-#define PF_INET         ZSOCK_PF_INET
+-#endif
+-#ifndef PF_INET6
+-#define PF_INET6        ZSOCK_PF_INET6
+-#endif
+-#ifndef PF_PACKET
+-#define PF_PACKET       ZSOCK_PF_PACKET
+-#endif
+-#ifndef PF_CAN
+-#define PF_CAN          ZSOCK_PF_CAN
+-#endif
+-#ifndef PF_NET_MGMT
+-#define PF_NET_MGMT     ZSOCK_PF_NET_MGMT
+-#endif
+-#ifndef PF_LOCAL
+-#define PF_LOCAL        ZSOCK_PF_LOCAL
+-#endif
+-#ifndef PF_UNIX
+-#define PF_UNIX         ZSOCK_PF_UNIX
+-#endif
+-#ifndef AF_UNSPEC
+-#define AF_UNSPEC       ZSOCK_AF_UNSPEC
+-#endif
+-#ifndef AF_INET
+-#define AF_INET         ZSOCK_AF_INET
+-#endif
+-#ifndef AF_INET6
+-#define AF_INET6        ZSOCK_AF_INET6
+-#endif
+ #ifndef AF_PACKET
+-#define AF_PACKET       ZSOCK_AF_PACKET
++#define AF_PACKET ZSOCK_AF_PACKET
+ #endif
+ #ifndef AF_CAN
+-#define AF_CAN          ZSOCK_AF_CAN
+-#endif
+-#ifndef AF_NET_MGMT
+-#define AF_NET_MGMT     ZSOCK_AF_NET_MGMT
+-#endif
+-#ifndef AF_LOCAL
+-#define AF_LOCAL        ZSOCK_AF_LOCAL
+-#endif
+-#ifndef AF_UNIX
+-#define AF_UNIX         ZSOCK_AF_UNIX
++#define AF_CAN ZSOCK_AF_CAN
+ #endif
+ 
+ /** Protocol numbers from IANA/BSD */
+@@ -124,6 +86,10 @@ enum net_ip_protocol {
+ 	ZSOCK_IPPROTO_RAW = 255,         /**< RAW IP packets  */
+ };
+ 
++#ifndef IPPROTO_ETH_P_ALL
++#define IPPROTO_ETH_P_ALL ZSOCK_IPPROTO_ETH_P_ALL
++#endif
++
+ /** Protocol numbers for TLS protocols */
+ enum net_ip_protocol_secure {
+ 	ZSOCK_IPPROTO_TLS_1_0 = 256,     /**< TLS 1.0 protocol */
+@@ -141,65 +107,6 @@ enum net_sock_type {
+ 	ZSOCK_SOCK_RAW                   /**< RAW socket type      */
+ };
+ 
+-/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
+-#ifndef IPPROTO_IP
+-#define IPPROTO_IP      ZSOCK_IPPROTO_IP
+-#endif
+-#ifndef IPPROTO_ICMP
+-#define IPPROTO_ICMP    ZSOCK_IPPROTO_ICMP
+-#endif
+-#ifndef IPPROTO_IGMP
+-#define IPPROTO_IGMP    ZSOCK_IPPROTO_IGMP
+-#endif
+-#ifndef IPPROTO_ETH_P_ALL
+-#define IPPROTO_ETH_P_ALL ZSOCK_IPPROTO_ETH_P_ALL
+-#endif
+-#ifndef IPPROTO_IPIP
+-#define IPPROTO_IPIP    ZSOCK_IPPROTO_IPIP
+-#endif
+-#ifndef IPPROTO_TCP
+-#define IPPROTO_TCP     ZSOCK_IPPROTO_TCP
+-#endif
+-#ifndef IPPROTO_UDP
+-#define IPPROTO_UDP     ZSOCK_IPPROTO_UDP
+-#endif
+-#ifndef IPPROTO_IPV6
+-#define IPPROTO_IPV6    ZSOCK_IPPROTO_IPV6
+-#endif
+-#ifndef IPPROTO_ICMPV6
+-#define IPPROTO_ICMPV6  ZSOCK_IPPROTO_ICMPV6
+-#endif
+-#ifndef IPPROTO_RAW
+-#define IPPROTO_RAW     ZSOCK_IPPROTO_RAW
+-#endif
+-#ifndef IPPROTO_TLS_1_0
+-#define IPPROTO_TLS_1_0 ZSOCK_IPPROTO_TLS_1_0
+-#endif
+-#ifndef IPPROTO_TLS_1_1
+-#define IPPROTO_TLS_1_1 ZSOCK_IPPROTO_TLS_1_1
+-#endif
+-#ifndef IPPROTO_TLS_1_2
+-#define IPPROTO_TLS_1_2 ZSOCK_IPPROTO_TLS_1_2
+-#endif
+-#ifndef IPPROTO_TLS_1_3
+-#define IPPROTO_TLS_1_3 ZSOCK_IPPROTO_TLS_1_3
+-#endif
+-#ifndef IPPROTO_DTLS_1_0
+-#define IPPROTO_DTLS_1_0 ZSOCK_IPPROTO_DTLS_1_0
+-#endif
+-#ifndef IPPROTO_DTLS_1_2
+-#define IPPROTO_DTLS_1_2 ZSOCK_IPPROTO_DTLS_1_2
+-#endif
+-#ifndef SOCK_STREAM
+-#define SOCK_STREAM     ZSOCK_SOCK_STREAM
+-#endif
+-#ifndef SOCK_DGRAM
+-#define SOCK_DGRAM      ZSOCK_SOCK_DGRAM
+-#endif
+-#ifndef SOCK_RAW
+-#define SOCK_RAW        ZSOCK_SOCK_RAW
+-#endif
+-
+ /** @brief Convert 16-bit value from network to host byte order.
+  *
+  * @param x The network byte order value to convert.
+@@ -240,20 +147,6 @@ enum net_sock_type {
+  */
+ #define zsock_htonl(x) sys_cpu_to_be32(x)
+ 
+-/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
+-#ifndef htons
+-#define htons(x)        zsock_htons(x)
+-#endif
+-#ifndef ntohs
+-#define ntohs(x)        zsock_ntohs(x)
+-#endif
+-#ifndef htonl
+-#define htonl(x)        zsock_htonl(x)
+-#endif
+-#ifndef ntohl
+-#define ntohl(x)        zsock_ntohl(x)
+-#endif
+-
+ /** @brief Convert 64-bit value from host to network byte order.
+  *
+  * @param x The host byte order value to convert.
+@@ -263,7 +156,6 @@ enum net_sock_type {
+ #define htonll(x) sys_cpu_to_be64(x)
+ 
+ /** IPv6 address struct */
+-#if !defined(_ZSOCK_IN6_ADDR_STRUCT_DEFINED)
+ struct zsock_in6_addr {
+ 	union {
+ 		uint8_t s6_addr[16];   /**< IPv6 address buffer */
+@@ -271,8 +163,6 @@ struct zsock_in6_addr {
+ 		uint32_t s6_addr32[4]; /**< In big endian */
+ 	};
+ };
+-#define _ZSOCK_IN6_ADDR_STRUCT_DEFINED
+-#endif
+ 
+ /** Binary size of the IPv6 address */
+ #define NET_IPV6_ADDR_SIZE 16
+@@ -296,10 +186,6 @@ typedef uint16_t zsock_sa_family_t;
+ /** Length of a socket address */
+ typedef uint32_t zsock_socklen_t;
+ 
+-/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
+-typedef zsock_sa_family_t sa_family_t;
+-typedef zsock_socklen_t socklen_t;
+-
+ /*
+  * Note that the sin_port and sin6_port are in network byte order
+  * in various sockaddr* structs.
+@@ -397,23 +283,6 @@ struct zsock_cmsghdr {
+ 	z_max_align_t cmsg_data[]; /**< Flexible array member to force alignment of cmsghdr */
+ };
+ 
+-/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
+-#ifndef _IOVEC_DECLARED
+-#define iovec           zsock_iovec
+-#define _IOVEC_DECLARED
+-#define __iovec_defined
+-#endif
+-#ifndef _MSGHDR_DECLARED
+-#define msghdr          zsock_msghdr
+-#define _MSGHDR_DECLARED
+-#define __msghdr_defined
+-#endif
+-#ifndef _CMSGHDR_DECLARED
+-#define cmsghdr         zsock_cmsghdr
+-#define _CMSGHDR_DECLARED
+-#define __cmsghdr_defined
+-#endif
+-
+ /** @cond INTERNAL_HIDDEN */
+ 
+ /* Alignment for headers and data. These are arch specific but define
+@@ -474,23 +343,6 @@ struct zsock_cmsghdr {
+  */
+ #define ZSOCK_CMSG_LEN(length) (ALIGN_D(sizeof(struct zsock_cmsghdr)) + length)
+ 
+-/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
+-#ifndef CMSG_DATA
+-#define CMSG_DATA(cmsg)           ZSOCK_CMSG_DATA(cmsg)
+-#endif
+-#ifndef CMSG_SPACE
+-#define CMSG_SPACE(length)        ZSOCK_CMSG_SPACE(length)
+-#endif
+-#ifndef CMSG_LEN
+-#define CMSG_LEN(length)          ZSOCK_CMSG_LEN(length)
+-#endif
+-#ifndef CMSG_FIRSTHDR
+-#define CMSG_FIRSTHDR(msghdr)     ZSOCK_CMSG_FIRSTHDR(msghdr)
+-#endif
+-#ifndef CMSG_NXTHDR
+-#define CMSG_NXTHDR(msghdr, cmsg) ZSOCK_CMSG_NXTHDR(msghdr, cmsg)
+-#endif
+-
+ /** @cond INTERNAL_HIDDEN */
+ 
+ /* Packet types.  */
+@@ -584,50 +436,6 @@ struct zsock_sockaddr_un {
+ 	char        sun_path[NET_SOCKADDR_MAX_SIZE - sizeof(zsock_sa_family_t)];
+ };
+ 
+-/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
+-#ifndef _SOCKADDR_DECLARED
+-#define sockaddr          zsock_sockaddr
+-#define _SOCKADDR_DECLARED
+-#define __sockaddr_defined
+-#endif
+-#ifndef _SOCKADDR_IN_DECLARED
+-#define sockaddr_in       zsock_sockaddr_in
+-#define _SOCKADDR_IN_DECLARED
+-#define __sockaddr_in_defined
+-#endif
+-#ifndef _SOCKADDR_IN6_DECLARED
+-#define sockaddr_in6      zsock_sockaddr_in6
+-#define _SOCKADDR_IN6_DECLARED
+-#define __sockaddr_in6_defined
+-#endif
+-#ifndef _SOCKADDR_STORAGE_DECLARED
+-#define sockaddr_storage  zsock_sockaddr_storage
+-#define _SOCKADDR_STORAGE_DECLARED
+-#define __sockaddr_storage_defined
+-#endif
+-#ifndef _SOCKADDR_UN_DECLARED
+-#define sockaddr_un       zsock_sockaddr_un
+-#define _SOCKADDR_UN_DECLARED
+-#endif
+-#ifndef _SOCKADDR_LL_DECLARED
+-#define sockaddr_ll       zsock_sockaddr_ll
+-#define _SOCKADDR_LL_DECLARED
+-#endif
+-#ifndef _SOCKADDR_CAN_DECLARED
+-#define sockaddr_can      zsock_sockaddr_can
+-#define _SOCKADDR_CAN_DECLARED
+-#endif
+-#ifndef _IN_ADDR_DECLARED
+-#define in_addr           zsock_in_addr
+-#define _IN_ADDR_DECLARED
+-#define __in_addr_defined
+-#endif
+-#ifndef _IN6_ADDR_DECLARED
+-#define in6_addr          zsock_in6_addr
+-#define _IN6_ADDR_DECLARED
+-#define __in6_addr_defined
+-#endif
+-
+ struct net_addr {
+ 	zsock_sa_family_t family;
+ 	union {
+@@ -637,20 +445,6 @@ struct net_addr {
+ };
+ 
+ /** A pointer to IPv6 any address (all values zero) */
+-/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
+-#ifndef _POSIX_NET_IN6ADDR_DECLARED
+-extern const struct zsock_in6_addr in6addr_any;
+-/** A pointer to IPv6 loopback address (::1) */
+-extern const struct zsock_in6_addr in6addr_loopback;
+-#define _POSIX_NET_IN6ADDR_DECLARED
+-#endif
+-#ifndef zsock_in6addr_any
+-#define zsock_in6addr_any in6addr_any
+-#endif
+-#ifndef zsock_in6addr_loopback
+-#define zsock_in6addr_loopback in6addr_loopback
+-#endif
+-
+ /** @endcond */
+ 
+ /** IPv6 address initializer */
+@@ -661,13 +455,8 @@ extern const struct zsock_in6_addr in6addr_loopback;
+ #define ZSOCK_IN6ADDR_LOOPBACK_INIT { { { 0, 0, 0, 0, 0, 0, 0, \
+ 				0, 0, 0, 0, 0, 0, 0, 0, 1 } } }
+ 
+-/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
+-#ifndef IN6ADDR_ANY_INIT
+-#define IN6ADDR_ANY_INIT      ZSOCK_IN6ADDR_ANY_INIT
+-#endif
+-#ifndef IN6ADDR_LOOPBACK_INIT
+-#define IN6ADDR_LOOPBACK_INIT ZSOCK_IN6ADDR_LOOPBACK_INIT
+-#endif
++extern const struct zsock_in6_addr zsock_in6addr_any;
++extern const struct zsock_in6_addr zsock_in6addr_loopback;
+ 
+ /** IPv4 any address */
+ #define ZSOCK_INADDR_ANY 0
+@@ -675,18 +464,10 @@ extern const struct zsock_in6_addr in6addr_loopback;
+ /** IPv4 broadcast address */
+ #define ZSOCK_INADDR_BROADCAST 0xffffffff
+ 
+-/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
+-#ifndef INADDR_ANY
+-#define INADDR_ANY        ZSOCK_INADDR_ANY
+-#endif
+-#ifndef INADDR_BROADCAST
+-#define INADDR_BROADCAST  ZSOCK_INADDR_BROADCAST
+-#endif
+-
+-/** IPv4 address initializer */
++/** IPv4 any-address initializer */
+ #define INADDR_ANY_INIT { { { ZSOCK_INADDR_ANY } } }
+ 
+-/** IPv6 loopback address initializer */
++/** IPv4 loopback address initializer */
+ #define INADDR_LOOPBACK_INIT  { { { 127, 0, 0, 1 } } }
+ 
+ /** Max length of the IPv4 address as a string. Defined by POSIX. */
+@@ -696,14 +477,6 @@ extern const struct zsock_in6_addr in6addr_loopback;
+  */
+ #define ZSOCK_INET6_ADDRSTRLEN 46
+ 
+-/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
+-#ifndef INET_ADDRSTRLEN
+-#define INET_ADDRSTRLEN   ZSOCK_INET_ADDRSTRLEN
+-#endif
+-#ifndef INET6_ADDRSTRLEN
+-#define INET6_ADDRSTRLEN  ZSOCK_INET6_ADDRSTRLEN
+-#endif
+-
+ /** @cond INTERNAL_HIDDEN */
+ 
+ /* These are for internal usage of the stack */
+diff --git a/include/zephyr/net/socket.h b/include/zephyr/net/socket.h
+index 8963d8f87b3..362ee43ae30 100644
+--- a/include/zephyr/net/socket.h
++++ b/include/zephyr/net/socket.h
+@@ -76,26 +76,11 @@ extern "C" {
+ #define ZSOCK_MSG_TRUNC 0x20
+ /** zsock_recv/zsock_send: Override operation to non-blocking */
+ #define ZSOCK_MSG_DONTWAIT 0x40
+-/** zsock_recv: block until the full amount of data can be returned */
+-#define ZSOCK_MSG_WAITALL 0x100
+-
+-/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
+-#ifndef MSG_PEEK
+-#define MSG_PEEK       ZSOCK_MSG_PEEK
+-#endif
+-#ifndef MSG_CTRUNC
+-#define MSG_CTRUNC     ZSOCK_MSG_CTRUNC
+-#endif
+-#ifndef MSG_TRUNC
+-#define MSG_TRUNC      ZSOCK_MSG_TRUNC
+-#endif
+ #ifndef MSG_DONTWAIT
+-#define MSG_DONTWAIT   ZSOCK_MSG_DONTWAIT
+-#endif
+-#ifndef MSG_WAITALL
+-#define MSG_WAITALL    ZSOCK_MSG_WAITALL
++#define MSG_DONTWAIT ZSOCK_MSG_DONTWAIT
+ #endif
+-/** @} */
++/** zsock_recv: block until the full amount of data can be returned */
++#define ZSOCK_MSG_WAITALL 0x100
+ 
+ /**
+  * @name Options for zsock_shutdown()
+@@ -111,18 +96,6 @@ extern "C" {
+ /** zsock_shutdown: Shut down for both reading and writing */
+ #define ZSOCK_SHUT_RDWR 2
+ 
+-/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
+-#ifndef SHUT_RD
+-#define SHUT_RD        ZSOCK_SHUT_RD
+-#endif
+-#ifndef SHUT_WR
+-#define SHUT_WR        ZSOCK_SHUT_WR
+-#endif
+-#ifndef SHUT_RDWR
+-#define SHUT_RDWR      ZSOCK_SHUT_RDWR
+-#endif
+-/** @} */
+-
+ /**
+  * @defgroup secure_sockets_options Socket options for TLS
+  * @since 1.13
+@@ -355,13 +328,6 @@ struct zsock_addrinfo {
+ /** @endcond */
+ };
+ 
+-/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
+-#ifndef _ADDRINFO_DECLARED
+-#define addrinfo zsock_addrinfo
+-#define _ADDRINFO_DECLARED
+-#define __addrinfo_defined
+-#endif
+-
+ /**
+  * @brief Obtain a file descriptor's associated net context
+  *
+@@ -828,32 +794,6 @@ __syscall int z_zsock_getaddrinfo_internal(const char *host,
+ /** Assume service (port) is numeric */
+ #define ZSOCK_AI_NUMERICSERV 0x400
+ 
+-/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
+-#ifndef AI_PASSIVE
+-#define AI_PASSIVE     ZSOCK_AI_PASSIVE
+-#endif
+-#ifndef AI_CANONNAME
+-#define AI_CANONNAME   ZSOCK_AI_CANONNAME
+-#endif
+-#ifndef AI_NUMERICHOST
+-#define AI_NUMERICHOST ZSOCK_AI_NUMERICHOST
+-#endif
+-#ifndef AI_V4MAPPED
+-#define AI_V4MAPPED    ZSOCK_AI_V4MAPPED
+-#endif
+-#ifndef AI_ALL
+-#define AI_ALL         ZSOCK_AI_ALL
+-#endif
+-#ifndef AI_ADDRCONFIG
+-#define AI_ADDRCONFIG  ZSOCK_AI_ADDRCONFIG
+-#endif
+-#ifndef AI_NUMERICSERV
+-#define AI_NUMERICSERV ZSOCK_AI_NUMERICSERV
+-#endif
+-/** Extra flags present (see RFC 5014) */
+-#define AI_EXTFLAGS 0x800
+-/** @} */
+-
+ /**
+  * @brief Resolve a domain name to one or more network addresses
+  *
+@@ -902,32 +842,14 @@ const char *zsock_gai_strerror(int errcode);
+ #define ZSOCK_NI_NAMEREQD 8
+ /** zsock_getnameinfo(): Dummy option for compatibility */
+ #define ZSOCK_NI_DGRAM 16
+-
+-/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
+-#ifndef NI_NUMERICHOST
+-#define NI_NUMERICHOST ZSOCK_NI_NUMERICHOST
+-#endif
+-#ifndef NI_NUMERICSERV
+-#define NI_NUMERICSERV ZSOCK_NI_NUMERICSERV
+-#endif
+-#ifndef NI_NOFQDN
+-#define NI_NOFQDN      ZSOCK_NI_NOFQDN
+-#endif
+-#ifndef NI_NAMEREQD
+-#define NI_NAMEREQD    ZSOCK_NI_NAMEREQD
+-#endif
+-#ifndef NI_DGRAM
+-#define NI_DGRAM       ZSOCK_NI_DGRAM
++/** zsock_getnameinfo(): Numeric scope id (glibc/GNU extension) */
++#define ZSOCK_NI_NUMERICSCOPE 64
++#ifndef NI_NUMERICSCOPE
++#define NI_NUMERICSCOPE ZSOCK_NI_NUMERICSCOPE
+ #endif
+ 
+ /** zsock_getnameinfo(): Max supported hostname length */
+ #define ZSOCK_NI_MAXHOST 1025
+-/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
+-#ifndef NI_MAXHOST
+-#define NI_MAXHOST ZSOCK_NI_MAXHOST
+-#endif
+-/** @} */
+-
+ /**
+  * @brief Resolve a network address to a domain name or ASCII address
+  *
+@@ -956,11 +878,9 @@ int zsock_getnameinfo(const struct zsock_sockaddr *addr, zsock_socklen_t addrlen
+ #else
+ #define ZSOCK_IFNAMSIZ Z_DEVICE_MAX_NAME_LEN
+ #endif
+-/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
+ #ifndef IFNAMSIZ
+ #define IFNAMSIZ ZSOCK_IFNAMSIZ
+ #endif
+-
+ /** Interface description structure */
+ struct ifreq {
+ 	char ifr_name[ZSOCK_IFNAMSIZ]; /**< Network interface name */
+@@ -1000,6 +920,9 @@ struct ifreq {
+ #define ZSOCK_SO_OOBINLINE 10
+ /** Socket priority */
+ #define ZSOCK_SO_PRIORITY 12
++#ifndef SO_PRIORITY
++#define SO_PRIORITY ZSOCK_SO_PRIORITY
++#endif
+ /** Socket lingers on close (ignored, for compatibility) */
+ #define ZSOCK_SO_LINGER 13
+ /** Allow multiple sockets to reuse a single port */
+@@ -1038,89 +961,14 @@ struct ifreq {
+ 
+ /** Socket TX time (when the data should be sent) */
+ #define ZSOCK_SO_TXTIME 61
+-
+-/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
+-#ifndef SOL_SOCKET
+-#define SOL_SOCKET     ZSOCK_SOL_SOCKET
+-#endif
+-#ifndef SO_DEBUG
+-#define SO_DEBUG       ZSOCK_SO_DEBUG
+-#endif
+-#ifndef SO_REUSEADDR
+-#define SO_REUSEADDR   ZSOCK_SO_REUSEADDR
+-#endif
+-#ifndef SO_TYPE
+-#define SO_TYPE        ZSOCK_SO_TYPE
+-#endif
+-#ifndef SO_ERROR
+-#define SO_ERROR       ZSOCK_SO_ERROR
+-#endif
+-#ifndef SO_DONTROUTE
+-#define SO_DONTROUTE   ZSOCK_SO_DONTROUTE
+-#endif
+-#ifndef SO_BROADCAST
+-#define SO_BROADCAST   ZSOCK_SO_BROADCAST
+-#endif
+-#ifndef SO_SNDBUF
+-#define SO_SNDBUF      ZSOCK_SO_SNDBUF
+-#endif
+-#ifndef SO_RCVBUF
+-#define SO_RCVBUF      ZSOCK_SO_RCVBUF
+-#endif
+-#ifndef SO_KEEPALIVE
+-#define SO_KEEPALIVE   ZSOCK_SO_KEEPALIVE
+-#endif
+-#ifndef SO_OOBINLINE
+-#define SO_OOBINLINE   ZSOCK_SO_OOBINLINE
+-#endif
+-#ifndef SO_PRIORITY
+-#define SO_PRIORITY    ZSOCK_SO_PRIORITY
+-#endif
+-#ifndef SO_LINGER
+-#define SO_LINGER      ZSOCK_SO_LINGER
+-#endif
+-#ifndef SO_REUSEPORT
+-#define SO_REUSEPORT   ZSOCK_SO_REUSEPORT
+-#endif
+-#ifndef SO_RCVLOWAT
+-#define SO_RCVLOWAT    ZSOCK_SO_RCVLOWAT
+-#endif
+-#ifndef SO_SNDLOWAT
+-#define SO_SNDLOWAT    ZSOCK_SO_SNDLOWAT
+-#endif
+-#ifndef SO_RCVTIMEO
+-#define SO_RCVTIMEO    ZSOCK_SO_RCVTIMEO
+-#endif
+-#ifndef SO_SNDTIMEO
+-#define SO_SNDTIMEO    ZSOCK_SO_SNDTIMEO
+-#endif
+-#ifndef SO_BINDTODEVICE
+-#define SO_BINDTODEVICE ZSOCK_SO_BINDTODEVICE
+-#endif
+-#ifndef SO_ACCEPTCONN
+-#define SO_ACCEPTCONN  ZSOCK_SO_ACCEPTCONN
+-#endif
+-#ifndef SO_TIMESTAMPING
+-#define SO_TIMESTAMPING ZSOCK_SO_TIMESTAMPING
+-#endif
+-#ifndef SO_PROTOCOL
+-#define SO_PROTOCOL    ZSOCK_SO_PROTOCOL
+-#endif
+-#ifndef SO_DOMAIN
+-#define SO_DOMAIN      ZSOCK_SO_DOMAIN
+-#endif
+-#ifndef SO_SOCKS5
+-#define SO_SOCKS5      ZSOCK_SO_SOCKS5
+-#endif
+ #ifndef SO_TXTIME
+-#define SO_TXTIME      ZSOCK_SO_TXTIME
++#define SO_TXTIME ZSOCK_SO_TXTIME
+ #endif
++
+ /** Socket TX time (same as ZSOCK_SO_TXTIME) */
+ #define ZSOCK_SCM_TXTIME ZSOCK_SO_TXTIME
+-
+-/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
+ #ifndef SCM_TXTIME
+-#define SCM_TXTIME     ZSOCK_SCM_TXTIME
++#define SCM_TXTIME ZSOCK_SCM_TXTIME
+ #endif
+ 
+ /** Timestamp generation flags */
+@@ -1151,20 +999,6 @@ struct ifreq {
+ /** Number of keepalives before dropping connection */
+ #define ZSOCK_TCP_KEEPCNT 4
+ 
+-/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
+-#ifndef TCP_NODELAY
+-#define TCP_NODELAY    ZSOCK_TCP_NODELAY
+-#endif
+-#ifndef TCP_KEEPIDLE
+-#define TCP_KEEPIDLE   ZSOCK_TCP_KEEPIDLE
+-#endif
+-#ifndef TCP_KEEPINTVL
+-#define TCP_KEEPINTVL  ZSOCK_TCP_KEEPINTVL
+-#endif
+-#ifndef TCP_KEEPCNT
+-#define TCP_KEEPCNT    ZSOCK_TCP_KEEPCNT
+-#endif
+-
+ /** @} */
+ 
+ /**
+@@ -1248,35 +1082,15 @@ struct ip_mreq  {
+ /** Set the unicast hop limit for the socket. */
+ #define ZSOCK_IPV6_UNICAST_HOPS	16
+ 
+-/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
+-#ifndef IPV6_UNICAST_HOPS
+-#define IPV6_UNICAST_HOPS ZSOCK_IPV6_UNICAST_HOPS
+-#endif
+-
+ /** Set multicast output network interface index for the socket. */
+ #define ZSOCK_IPV6_MULTICAST_IF       17
+ 
+-/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
+-#ifndef IPV6_MULTICAST_IF
+-#define IPV6_MULTICAST_IF   ZSOCK_IPV6_MULTICAST_IF
+-#endif
+-
+ /** Set the multicast hop limit for the socket. */
+ #define ZSOCK_IPV6_MULTICAST_HOPS 18
+ 
+-/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
+-#ifndef IPV6_MULTICAST_HOPS
+-#define IPV6_MULTICAST_HOPS ZSOCK_IPV6_MULTICAST_HOPS
+-#endif
+-
+ /** Set the multicast loop bit for the socket. */
+ #define ZSOCK_IPV6_MULTICAST_LOOP 19
+ 
+-/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
+-#ifndef IPV6_MULTICAST_LOOP
+-#define IPV6_MULTICAST_LOOP ZSOCK_IPV6_MULTICAST_LOOP
+-#endif
+-
+ /** Join IPv6 multicast group. */
+ #define IPV6_ADD_MEMBERSHIP 20
+ 
+@@ -1300,13 +1114,6 @@ struct zsock_ipv6_mreq {
+ 	int ipv6mr_ifindex;
+ };
+ 
+-/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
+-#ifndef _IPV6_MREQ_DECLARED
+-#define ipv6_mreq zsock_ipv6_mreq
+-#define _IPV6_MREQ_DECLARED
+-#define __ipv6_mreq_defined
+-#endif
+-
+ /** For getsockopt(), retrieve the current known IPv6 path MTU of the given socket.
+  * Valid only when the socket has been connected.
+  * For setsockopt(), set the MTU to be used for the socket. The MTU is limited by
+@@ -1317,16 +1124,6 @@ struct zsock_ipv6_mreq {
+ /** Don't support IPv4 access */
+ #define ZSOCK_IPV6_V6ONLY 26
+ 
+-/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
+-#ifndef IPV6_JOIN_GROUP
+-#define IPV6_JOIN_GROUP  ZSOCK_IPV6_JOIN_GROUP
+-#endif
+-#ifndef IPV6_LEAVE_GROUP
+-#define IPV6_LEAVE_GROUP ZSOCK_IPV6_LEAVE_GROUP
+-#endif
+-#ifndef IPV6_V6ONLY
+-#define IPV6_V6ONLY      ZSOCK_IPV6_V6ONLY
+-#endif
+ /** Pass an IPV6_RECVPKTINFO ancillary message that contains a
+  *  in6_pktinfo structure that supplies some information about the
+  *  incoming packet. See RFC 3542.
+@@ -1346,22 +1143,20 @@ struct zsock_ipv6_mreq {
+ 
+ /** RFC5014: Source address selection. */
+ #define ZSOCK_IPV6_ADDR_PREFERENCES   72
++#ifndef IPV6_ADDR_PREFERENCES
++#define IPV6_ADDR_PREFERENCES ZSOCK_IPV6_ADDR_PREFERENCES
++#endif
+ 
+ /** Prefer temporary address as source. */
+ #define ZSOCK_IPV6_PREFER_SRC_TMP             0x0001
+-/** Prefer public address as source. */
+-#define ZSOCK_IPV6_PREFER_SRC_PUBLIC          0x0002
+-/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
+-#ifndef IPV6_ADDR_PREFERENCES
+-#define IPV6_ADDR_PREFERENCES   ZSOCK_IPV6_ADDR_PREFERENCES
+-#endif
+ #ifndef IPV6_PREFER_SRC_TMP
+-#define IPV6_PREFER_SRC_TMP     ZSOCK_IPV6_PREFER_SRC_TMP
++#define IPV6_PREFER_SRC_TMP ZSOCK_IPV6_PREFER_SRC_TMP
+ #endif
++/** Prefer public address as source. */
++#define ZSOCK_IPV6_PREFER_SRC_PUBLIC          0x0002
+ #ifndef IPV6_PREFER_SRC_PUBLIC
+-#define IPV6_PREFER_SRC_PUBLIC  ZSOCK_IPV6_PREFER_SRC_PUBLIC
++#define IPV6_PREFER_SRC_PUBLIC ZSOCK_IPV6_PREFER_SRC_PUBLIC
+ #endif
+-
+ /** Either public or temporary address is selected as a default source
+  *  depending on the output interface configuration (this is the default value).
+  *  This is Linux specific option not found in the RFC.
+@@ -1398,12 +1193,6 @@ struct in6_pktinfo {
+ /** zsock_listen: The maximum backlog queue length */
+ #define ZSOCK_SOMAXCONN 128
+ 
+-/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
+-#ifndef SOMAXCONN
+-#define SOMAXCONN      ZSOCK_SOMAXCONN
+-#endif
+-/** @} */
+-
+ /**
+  * @name Macros for checking special IPv6 addresses.
+  * @{
+@@ -1442,41 +1231,6 @@ struct in6_pktinfo {
+ /** Check IPv6 multicast organization local address */
+ #define ZSOCK_IN6_IS_ADDR_MC_ORGLOCAL(addr) net_ipv6_is_addr_mcast_org(addr)
+ 
+-/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
+-#ifndef IN6_IS_ADDR_UNSPECIFIED
+-#define IN6_IS_ADDR_UNSPECIFIED(addr)  ZSOCK_IN6_IS_ADDR_UNSPECIFIED(addr)
+-#endif
+-#ifndef IN6_IS_ADDR_LOOPBACK
+-#define IN6_IS_ADDR_LOOPBACK(addr)     ZSOCK_IN6_IS_ADDR_LOOPBACK(addr)
+-#endif
+-#ifndef IN6_IS_ADDR_MULTICAST
+-#define IN6_IS_ADDR_MULTICAST(addr)    ZSOCK_IN6_IS_ADDR_MULTICAST(addr)
+-#endif
+-#ifndef IN6_IS_ADDR_LINKLOCAL
+-#define IN6_IS_ADDR_LINKLOCAL(addr)    ZSOCK_IN6_IS_ADDR_LINKLOCAL(addr)
+-#endif
+-#ifndef IN6_IS_ADDR_SITELOCAL
+-#define IN6_IS_ADDR_SITELOCAL(addr)    ZSOCK_IN6_IS_ADDR_SITELOCAL(addr)
+-#endif
+-#ifndef IN6_IS_ADDR_V4MAPPED
+-#define IN6_IS_ADDR_V4MAPPED(addr)     ZSOCK_IN6_IS_ADDR_V4MAPPED(addr)
+-#endif
+-#ifndef IN6_IS_ADDR_MC_GLOBAL
+-#define IN6_IS_ADDR_MC_GLOBAL(addr)    ZSOCK_IN6_IS_ADDR_MC_GLOBAL(addr)
+-#endif
+-#ifndef IN6_IS_ADDR_MC_NODELOCAL
+-#define IN6_IS_ADDR_MC_NODELOCAL(addr) ZSOCK_IN6_IS_ADDR_MC_NODELOCAL(addr)
+-#endif
+-#ifndef IN6_IS_ADDR_MC_LINKLOCAL
+-#define IN6_IS_ADDR_MC_LINKLOCAL(addr) ZSOCK_IN6_IS_ADDR_MC_LINKLOCAL(addr)
+-#endif
+-#ifndef IN6_IS_ADDR_MC_SITELOCAL
+-#define IN6_IS_ADDR_MC_SITELOCAL(addr) ZSOCK_IN6_IS_ADDR_MC_SITELOCAL(addr)
+-#endif
+-#ifndef IN6_IS_ADDR_MC_ORGLOCAL
+-#define IN6_IS_ADDR_MC_ORGLOCAL(addr)  ZSOCK_IN6_IS_ADDR_MC_ORGLOCAL(addr)
+-#endif
+-
+ /** @} */
+ 
+ /** @cond INTERNAL_HIDDEN */
+@@ -1558,26 +1312,6 @@ struct socket_op_vtable {
+ 
+ #include <zephyr/syscalls/socket.h>
+ 
+-#if defined(CONFIG_POSIX_NETWORKING)
+-/* TEMP_POSIX_ZSOCK_NS_WORKAROUND: Include POSIX networking shims to provide function
+- * declarations (socket, bind, connect, …) for hybrid consumers that skip POSIX headers
+- * on Zephyr via #ifndef __ZEPHYR__. netdb.h and net/if.h are intentionally excluded
+- * because their symbols (NI_MAXHOST, IFNAMSIZ) conflict with aliases defined above.
+- * unistd.h is intentionally excluded because it pulls in pathconf.h whose _PC_* enum
+- * members conflict with picolibc _PC_* numeric macros when both are present.
+- * Removed once all hybrid consumers switch to pure POSIX includes.
+- */
+-#if !defined(ZEPHYR_INCLUDE_POSIX_SYS_SOCKET_H_)
+-#include <zephyr/posix/sys/socket.h>
+-#endif
+-#if !defined(ZEPHYR_INCLUDE_POSIX_ARPA_INET_H_)
+-#include <zephyr/posix/arpa/inet.h>
+-#endif
+-#if !defined(ZEPHYR_INCLUDE_POSIX_POLL_H_)
+-#include <zephyr/posix/poll.h>
+-#endif
+-#endif /* CONFIG_POSIX_NETWORKING */
+-
+ /**
+  * @}
+  */
+diff --git a/include/zephyr/net/zperf.h b/include/zephyr/net/zperf.h
+index d8f599d0330..ccb04809b77 100644
+--- a/include/zephyr/net/zperf.h
++++ b/include/zephyr/net/zperf.h
+@@ -57,7 +57,7 @@ struct zperf_upload_params {
+ 	uint32_t duration_ms;
+ 	uint32_t rate_kbps;
+ 	uint16_t packet_size;
+-	char if_name[IFNAMSIZ];
++	char if_name[ZSOCK_IFNAMSIZ];
+ 	struct {
+ 		uint8_t tos;
+ 		int tcp_nodelay;
+@@ -73,7 +73,7 @@ struct zperf_upload_params {
+ struct zperf_download_params {
+ 	uint16_t port;
+ 	struct zsock_sockaddr addr;
+-	char if_name[IFNAMSIZ];
++	char if_name[ZSOCK_IFNAMSIZ];
+ };
+ 
+ /** @endcond */
+diff --git a/modules/hostap/src/supp_main.c b/modules/hostap/src/supp_main.c
+index 6c45815b5df..9ba58ed98c0 100644
+--- a/modules/hostap/src/supp_main.c
++++ b/modules/hostap/src/supp_main.c
+@@ -301,7 +301,7 @@ static void zephyr_hostap_ctrl_iface_msg_cb(void *ctx, int level, enum wpa_msg_t
+ static int add_interface(struct supplicant_context *ctx, struct net_if *iface)
+ {
+ 	struct wpa_supplicant *wpa_s;
+-	char ifname[IFNAMSIZ + 1] = { 0 };
++	char ifname[ZSOCK_IFNAMSIZ + 1] = { 0 };
+ 	int ret, retry = 0, count = IFACE_NOTIFY_TIMEOUT_MS / IFACE_NOTIFY_RETRY_MS;
+ 
+ 	ret = net_if_get_name(iface, ifname, sizeof(ifname) - 1);
+@@ -372,7 +372,7 @@ static int del_interface(struct supplicant_context *ctx, struct net_if *iface)
+ 	struct wpa_supplicant *wpa_s;
+ 	union wpa_event_data *event = NULL;
+ 	int ret, retry = 0, count = IFACE_NOTIFY_TIMEOUT_MS / IFACE_NOTIFY_RETRY_MS;
+-	char ifname[IFNAMSIZ + 1] = { 0 };
++	char ifname[ZSOCK_IFNAMSIZ + 1] = { 0 };
+ 
+ 	ret = net_if_get_name(iface, ifname, sizeof(ifname) - 1);
+ 	if (ret < 0) {
+@@ -763,7 +763,7 @@ static enum net_verdict eapol_recv(struct net_if *iface, uint16_t ptype,
+ 	ARG_UNUSED(iface);
+ 	ARG_UNUSED(ptype);
+ 
+-	net_pkt_set_family(pkt, AF_UNSPEC);
++	net_pkt_set_family(pkt, ZSOCK_AF_UNSPEC);
+ 
+ 	return NET_CONTINUE;
+ }
+diff --git a/samples/net/cellular_modem/src/main.c b/samples/net/cellular_modem/src/main.c
+index 5b559955594..5bc8d924c94 100644
+--- a/samples/net/cellular_modem/src/main.c
++++ b/samples/net/cellular_modem/src/main.c
+@@ -494,12 +494,12 @@ int main(void)
+ 
+ 		switch (sample_test_dns_addrinfo.ai_addr.sa_family) {
+ 		case AF_INET:
+-			src = &net_sin(&sample_test_dns_addrinfo.ai_addr)->sin_addr;
+-			port = &net_sin(&sample_test_dns_addrinfo.ai_addr)->sin_port;
++			src = &net_sin((struct zsock_sockaddr *)&sample_test_dns_addrinfo.ai_addr)->sin_addr;
++			port = &net_sin((struct zsock_sockaddr *)&sample_test_dns_addrinfo.ai_addr)->sin_port;
+ 			break;
+ 		case AF_INET6:
+-			src = &net_sin6(&sample_test_dns_addrinfo.ai_addr)->sin6_addr;
+-			port = &net_sin6(&sample_test_dns_addrinfo.ai_addr)->sin6_port;
++			src = &net_sin6((struct zsock_sockaddr *)&sample_test_dns_addrinfo.ai_addr)->sin6_addr;
++			port = &net_sin6((struct zsock_sockaddr *)&sample_test_dns_addrinfo.ai_addr)->sin6_port;
+ 			break;
+ 		default:
+ 			printk("Unsupported address family\n");
+diff --git a/samples/net/cloud/mqtt_azure/src/main.c b/samples/net/cloud/mqtt_azure/src/main.c
+index 26c24b37a37..6f3e537219d 100644
+--- a/samples/net/cloud/mqtt_azure/src/main.c
++++ b/samples/net/cloud/mqtt_azure/src/main.c
+@@ -7,6 +7,8 @@
+ #include <sys/socket.h>
+ #include <netinet/in.h>
+ #include <arpa/inet.h>
++#include <netdb.h>
++#include <poll.h>
+ #include <unistd.h>
+ #include <zephyr/logging/log.h>
+ LOG_MODULE_REGISTER(mqtt_azure, LOG_LEVEL_DBG);
+@@ -131,7 +133,7 @@ static void broker_init(void)
+ 
+ #if defined(CONFIG_DNS_RESOLVER)
+ 	net_ipaddr_copy(&broker4->sin_addr,
+-			&net_sin(haddr->ai_addr)->sin_addr);
++			&net_sin((struct zsock_sockaddr *)haddr->ai_addr)->sin_addr);
+ #else
+ 	inet_pton(AF_INET, SERVER_ADDR, &broker4->sin_addr);
+ #endif
+diff --git a/samples/net/common/vlan.c b/samples/net/common/vlan.c
+index 7898e890d77..f6d0fcf5362 100644
+--- a/samples/net/common/vlan.c
++++ b/samples/net/common/vlan.c
+@@ -48,7 +48,7 @@ static int setup_iface(struct net_if *eth_iface,
+ 		       struct net_if *vlan_iface,
+ 		       const char *option)
+ {
+-	struct sockaddr_storage addr = { 0 };
++	struct zsock_sockaddr_storage addr = { 0 };
+ 	struct zsock_sockaddr *paddr = (struct zsock_sockaddr *)&addr;
+ 	const char *addr_str, *next;
+ 	struct net_if_addr *ifaddr;
+@@ -79,7 +79,7 @@ static int setup_iface(struct net_if *eth_iface,
+ 	addr_str = ++next;
+ 
+ 	do {
+-		char my_addr[INET6_ADDRSTRLEN] = { 'N', 'o', ' ', 'I', 'P', '\0'};
++		char my_addr[ZSOCK_INET6_ADDRSTRLEN] = { 'N', 'o', ' ', 'I', 'P', '\0'};
+ 
+ 		next = net_ipaddr_parse_mask(addr_str, strlen(addr_str),
+ 					     paddr, &mask_len);
+@@ -93,13 +93,13 @@ static int setup_iface(struct net_if *eth_iface,
+ 
+ 		if (paddr->sa_family == ZSOCK_AF_INET) {
+ 			struct zsock_sockaddr_in *addr4 = (struct zsock_sockaddr_in *)paddr;
+-			struct sockaddr_in mask;
++			struct zsock_sockaddr_in mask;
+ 
+ 			ifaddr = net_if_ipv4_addr_add(vlan_iface, &addr4->sin_addr,
+ 						      NET_ADDR_MANUAL, 0);
+ 
+ 			ret = net_mask_len_to_netmask(ZSOCK_AF_INET, mask_len,
+-						      (struct sockaddr *)&mask);
++						      (struct zsock_sockaddr *)&mask);
+ 			if (ret < 0) {
+ 				LOG_ERR("Invalid network mask length (%d)", ret);
+ 				return ret;
+diff --git a/samples/net/dns_resolve/src/main.c b/samples/net/dns_resolve/src/main.c
+index d8070ab6a82..a3220fd3ac3 100644
+--- a/samples/net/dns_resolve/src/main.c
++++ b/samples/net/dns_resolve/src/main.c
+@@ -170,7 +170,7 @@ static void print_dhcpv4_addr(struct net_if *iface, struct net_if_addr *if_addr,
+ {
+ 	bool *found = (bool *)user_data;
+ 	char hr_addr[NET_IPV4_ADDR_LEN];
+-	struct in_addr netmask;
++	struct zsock_in_addr netmask;
+ 
+ 	if (*found) {
+ 		return;
+diff --git a/samples/net/lldp/src/main.c b/samples/net/lldp/src/main.c
+index 4e52f329540..094df782dfc 100644
+--- a/samples/net/lldp/src/main.c
++++ b/samples/net/lldp/src/main.c
+@@ -26,7 +26,7 @@ static void set_optional_tlv(struct net_if *iface)
+ {
+ 	NET_DBG("");
+ 
+-	tlv.type_length = htons((LLDP_TLV_SYSTEM_NAME << 9) |
++	tlv.type_length = zsock_htons((LLDP_TLV_SYSTEM_NAME << 9) |
+ 				((sizeof(tlv) - sizeof(uint16_t)) & 0x01ff));
+ 
+ 	net_lldp_config_optional(iface, (uint8_t *)&tlv, sizeof(tlv));
+@@ -64,8 +64,8 @@ static int setup_iface(struct net_if *eth_iface,
+ 		       uint16_t vlan_tag)
+ {
+ 	struct net_if_addr *ifaddr;
+-	struct in_addr addr4;
+-	struct in6_addr addr6;
++	struct zsock_in_addr addr4;
++	struct zsock_in6_addr addr6;
+ 	int ret;
+ 
+ 	ret = net_eth_vlan_enable(eth_iface, vlan_tag);
+diff --git a/samples/net/mdns_responder/src/service.c b/samples/net/mdns_responder/src/service.c
+index 56941317678..98629f7b28a 100644
+--- a/samples/net/mdns_responder/src/service.c
++++ b/samples/net/mdns_responder/src/service.c
+@@ -16,14 +16,14 @@
+ #include <zephyr/logging/log.h>
+ LOG_MODULE_REGISTER(mdns_echo_service, LOG_LEVEL_DBG);
+ 
+-/* A default port of 0 causes bind(2) to request an ephemeral port */
++/* A default port of 0 causes zsock_bind(2) to request an ephemeral port */
+ #define DEFAULT_PORT 0
+ 
+ static int welcome(int fd)
+ {
+ 	static const char msg[] = "Bonjour, Zephyr world!\n";
+ 
+-	return send(fd, msg, sizeof(msg), 0);
++	return zsock_send(fd, msg, sizeof(msg), 0);
+ }
+ 
+ /* This is mainly here to bind to a port to get service advertisement
+@@ -35,14 +35,14 @@ void service(void)
+ 	int r;
+ 	int server_fd;
+ 	int client_fd;
+-	socklen_t len;
++	zsock_socklen_t len;
+ 	void *addrp;
+ 	uint16_t *portp;
+-	struct sockaddr client_addr;
++	struct zsock_sockaddr client_addr;
+ 	char addrstr[INET6_ADDRSTRLEN];
+ 	uint8_t line[64];
+ 
+-	static struct sockaddr server_addr;
++	static struct zsock_sockaddr server_addr;
+ 
+ #if DEFAULT_PORT == 0
+ 	/* The advanced use case: ephemeral port */
+@@ -62,57 +62,57 @@ void service(void)
+ #endif
+ 
+ 	if (IS_ENABLED(CONFIG_NET_IPV6)) {
+-		net_sin6(&server_addr)->sin6_family = AF_INET6;
+-		net_sin6(&server_addr)->sin6_addr = in6addr_any;
+-		net_sin6(&server_addr)->sin6_port = sys_cpu_to_be16(DEFAULT_PORT);
++		net_sin6((struct zsock_sockaddr *)&server_addr)->sin6_family = AF_INET6;
++		net_sin6((struct zsock_sockaddr *)&server_addr)->sin6_addr = (struct zsock_in6_addr)ZSOCK_IN6ADDR_ANY_INIT;
++		net_sin6((struct zsock_sockaddr *)&server_addr)->sin6_port = sys_cpu_to_be16(DEFAULT_PORT);
+ 	} else if (IS_ENABLED(CONFIG_NET_IPV4)) {
+-		net_sin(&server_addr)->sin_family = AF_INET;
+-		net_sin(&server_addr)->sin_addr.s_addr = htonl(INADDR_ANY);
+-		net_sin(&server_addr)->sin_port = sys_cpu_to_be16(DEFAULT_PORT);
++		net_sin((struct zsock_sockaddr *)&server_addr)->sin_family = AF_INET;
++		net_sin((struct zsock_sockaddr *)&server_addr)->sin_addr.s_addr = htonl(INADDR_ANY);
++		net_sin((struct zsock_sockaddr *)&server_addr)->sin_port = sys_cpu_to_be16(DEFAULT_PORT);
+ 	} else {
+ 		__ASSERT(false, "Neither IPv6 nor IPv4 are enabled");
+ 	}
+ 
+-	r = socket(server_addr.sa_family, SOCK_STREAM, 0);
++	r = zsock_socket(server_addr.sa_family, ZSOCK_ZSOCK_SOCK_STREAM, 0);
+ 	if (r == -1) {
+-		NET_DBG("socket() failed (%d)", errno);
++		NET_DBG("zsock_socket() failed (%d)", errno);
+ 		return;
+ 	}
+ 
+ 	server_fd = r;
+ 	NET_DBG("server_fd is %d", server_fd);
+ 
+-	r = bind(server_fd, &server_addr, sizeof(server_addr));
++	r = zsock_bind(server_fd, &server_addr, sizeof(server_addr));
+ 	if (r == -1) {
+-		NET_DBG("bind() failed (%d)", errno);
+-		close(server_fd);
++		NET_DBG("zsock_bind() failed (%d)", errno);
++		zsock_close(server_fd);
+ 		return;
+ 	}
+ 
+ 	if (server_addr.sa_family == AF_INET6) {
+-		addrp = &net_sin6(&server_addr)->sin6_addr;
+-		portp = &net_sin6(&server_addr)->sin6_port;
++		addrp = &net_sin6((struct zsock_sockaddr *)&server_addr)->sin6_addr;
++		portp = &net_sin6((struct zsock_sockaddr *)&server_addr)->sin6_port;
+ 	} else {
+-		addrp = &net_sin(&server_addr)->sin_addr;
+-		portp = &net_sin(&server_addr)->sin_port;
++		addrp = &net_sin((struct zsock_sockaddr *)&server_addr)->sin_addr;
++		portp = &net_sin((struct zsock_sockaddr *)&server_addr)->sin_port;
+ 	}
+ 
+ 	inet_ntop(server_addr.sa_family, addrp, addrstr, sizeof(addrstr));
+ 	NET_DBG("bound to [%s]:%u",
+ 		addrstr, ntohs(*portp));
+ 
+-	r = listen(server_fd, 1);
++	r = zsock_listen(server_fd, 1);
+ 	if (r == -1) {
+-		NET_DBG("listen() failed (%d)", errno);
+-		close(server_fd);
++		NET_DBG("zsock_listen() failed (%d)", errno);
++		zsock_close(server_fd);
+ 		return;
+ 	}
+ 
+ 	for (;;) {
+ 		len = sizeof(client_addr);
+-		r = accept(server_fd, (struct sockaddr *)&client_addr, &len);
++		r = zsock_accept(server_fd, (struct zsock_sockaddr *)&client_addr, &len);
+ 		if (r == -1) {
+-			NET_DBG("accept() failed (%d)", errno);
++			NET_DBG("zsock_accept() failed (%d)", errno);
+ 			continue;
+ 		}
+ 
+@@ -125,25 +125,25 @@ void service(void)
+ 		/* send a banner */
+ 		r = welcome(client_fd);
+ 		if (r == -1) {
+-			NET_DBG("send() failed (%d)", errno);
+-			close(client_fd);
++			NET_DBG("zsock_send() failed (%d)", errno);
++			zsock_close(client_fd);
+ 			return;
+ 		}
+ 
+ 		for (;;) {
+ 			/* echo 1 line at a time */
+-			r = recv(client_fd, line, sizeof(line), 0);
++			r = zsock_recv(client_fd, line, sizeof(line), 0);
+ 			if (r == -1) {
+-				NET_DBG("recv() failed (%d)", errno);
+-				close(client_fd);
++				NET_DBG("zsock_recv() failed (%d)", errno);
++				zsock_close(client_fd);
+ 				break;
+ 			}
+ 			len = r;
+ 
+-			r = send(client_fd, line, len, 0);
++			r = zsock_send(client_fd, line, len, 0);
+ 			if (r == -1) {
+-				NET_DBG("send() failed (%d)", errno);
+-				close(client_fd);
++				NET_DBG("zsock_send() failed (%d)", errno);
++				zsock_close(client_fd);
+ 				break;
+ 			}
+ 		}
+diff --git a/samples/net/promiscuous_mode/src/main.c b/samples/net/promiscuous_mode/src/main.c
+index 357a954779a..d0d93d29389 100644
+--- a/samples/net/promiscuous_mode/src/main.c
++++ b/samples/net/promiscuous_mode/src/main.c
+@@ -49,8 +49,8 @@ static int get_ports(struct net_pkt *pkt, uint16_t *src, uint16_t *dst)
+ 		return -EINVAL;
+ 	}
+ 
+-	*src = ntohs(udp_hdr->src_port);
+-	*dst = ntohs(udp_hdr->dst_port);
++	*src = zsock_ntohs(udp_hdr->src_port);
++	*dst = zsock_ntohs(udp_hdr->dst_port);
+ 
+ 	return 0;
+ }
+@@ -60,7 +60,7 @@ static void print_info(struct net_pkt *pkt)
+ 	char src_addr_buf[NET_IPV6_ADDR_LEN], *src_addr;
+ 	char dst_addr_buf[NET_IPV6_ADDR_LEN], *dst_addr;
+ 	uint16_t dst_port = 0U, src_port = 0U;
+-	sa_family_t family = ZSOCK_AF_UNSPEC;
++	zsock_sa_family_t family = ZSOCK_AF_UNSPEC;
+ 	void *dst, *src;
+ 	uint8_t next_hdr;
+ 	const char *proto;
+diff --git a/samples/net/qos/ethernet/src/main.c b/samples/net/qos/ethernet/src/main.c
+index a6d9a3756d8..820f3248b34 100644
+--- a/samples/net/qos/ethernet/src/main.c
++++ b/samples/net/qos/ethernet/src/main.c
+@@ -183,7 +183,7 @@ static void try_recv_data(struct net_if *iface, uint16_t ptype, enum service_typ
+ 
+ 	copy_mac_to(dest);
+ 
+-	pkt = net_pkt_rx_alloc_with_buffer(iface, MTU, AF_UNSPEC, 0, K_NO_WAIT);
++	pkt = net_pkt_rx_alloc_with_buffer(iface, MTU, ZSOCK_AF_UNSPEC, 0, K_NO_WAIT);
+ 	if (pkt == NULL) {
+ 		return;
+ 	}
+@@ -374,7 +374,7 @@ static enum net_verdict l2_service(struct net_if *iface, uint16_t ptype, struct
+ 	posix_cpu_hold(simulated_work_time);
+ 
+ 	if (type == SERVICE_TYPE_ECHO) {
+-		echo_reply = net_pkt_alloc_with_buffer(iface, 12, AF_UNSPEC, 0, K_NO_WAIT);
++		echo_reply = net_pkt_alloc_with_buffer(iface, 12, ZSOCK_AF_UNSPEC, 0, K_NO_WAIT);
+ 		if (echo_reply) {
+ 			net_pkt_set_ll_proto_type(echo_reply, net_pkt_ll_proto_type(pkt));
+ 			net_pkt_set_priority(echo_reply, net_pkt_priority(pkt));
+diff --git a/samples/net/sockets/can/src/main.c b/samples/net/sockets/can/src/main.c
+index 6322cf248ed..b569d608e9f 100644
+--- a/samples/net/sockets/can/src/main.c
++++ b/samples/net/sockets/can/src/main.c
+@@ -69,7 +69,7 @@ static void tx(void *p1, void *p2, void *p3)
+ 	LOG_DBG("Sending CAN data...");
+ 
+ 	while (1) {
+-		ret = send(fd, &sframe, sizeof(sframe), 0);
++		ret = zsock_send(fd, &sframe, sizeof(sframe), 0);
+ 		if (ret < 0) {
+ 			LOG_ERR("Cannot send CAN frame (%d)", -errno);
+ 		}
+@@ -80,7 +80,7 @@ static void tx(void *p1, void *p2, void *p3)
+ 
+ static int create_socket(const struct socketcan_filter *sfilter)
+ {
+-	struct sockaddr_can can_addr;
++	struct zsock_sockaddr_can can_addr;
+ 	int fd, ret;
+ 
+ 	fd = socket(AF_CAN, SOCK_RAW, CAN_RAW);
+@@ -93,7 +93,7 @@ static int create_socket(const struct socketcan_filter *sfilter)
+ 		net_if_get_first_by_type(&NET_L2_GET_NAME(CANBUS_RAW)));
+ 	can_addr.can_family = PF_CAN;
+ 
+-	ret = bind(fd, (struct sockaddr *)&can_addr, sizeof(can_addr));
++	ret = zsock_bind(fd, (struct zsock_sockaddr *)&can_addr, sizeof(can_addr));
+ 	if (ret < 0) {
+ 		LOG_ERR("Cannot bind %s CAN socket (%d)", "2nd", -errno);
+ 		(void)close(fd);
+@@ -113,7 +113,7 @@ static void rx(void *p1, void *p2, void *p3)
+ 	const struct socketcan_filter *sfilter = p3;
+ 	int close_period = POINTER_TO_INT(do_close_period);
+ 	int fd = POINTER_TO_INT(can_fd);
+-	struct sockaddr_can can_addr;
++	struct zsock_sockaddr_can can_addr;
+ 	socklen_t addr_len;
+ 	struct can_frame zframe;
+ 	struct socketcan_frame sframe;
+@@ -128,7 +128,7 @@ static void rx(void *p1, void *p2, void *p3)
+ 		addr_len = sizeof(can_addr);
+ 
+ 		ret = recvfrom(fd, &sframe, sizeof(struct socketcan_frame),
+-			       0, (struct sockaddr *)&can_addr, &addr_len);
++			       0, (struct zsock_sockaddr *)&can_addr, &addr_len);
+ 		if (ret < 0) {
+ 			LOG_ERR("[%d] Cannot receive CAN frame (%d)", fd,
+ 				-errno);
+@@ -177,7 +177,7 @@ static void rx(void *p1, void *p2, void *p3)
+ 
+ static int setup_socket(void)
+ {
+-	struct sockaddr_can can_addr;
++	struct zsock_sockaddr_can can_addr;
+ 	struct net_if *iface;
+ 	int fd, rx_fd;
+ 	int ret;
+@@ -200,7 +200,7 @@ static int setup_socket(void)
+ 	can_addr.can_ifindex = net_if_get_by_iface(iface);
+ 	can_addr.can_family = PF_CAN;
+ 
+-	ret = bind(fd, (struct sockaddr *)&can_addr, sizeof(can_addr));
++	ret = zsock_bind(fd, (struct zsock_sockaddr *)&can_addr, sizeof(can_addr));
+ 	if (ret < 0) {
+ 		ret = -errno;
+ 		LOG_ERR("Cannot bind %s CAN socket (%d)", "1st", ret);
+diff --git a/samples/net/sockets/coap_download/src/main.c b/samples/net/sockets/coap_download/src/main.c
+index 4a103c29d95..1608ed04cbc 100644
+--- a/samples/net/sockets/coap_download/src/main.c
++++ b/samples/net/sockets/coap_download/src/main.c
+@@ -116,7 +116,7 @@ int main(void)
+ 	addr4->sin_port = htons(CONFIG_NET_SAMPLE_COAP_SERVER_PORT);
+ 	zsock_inet_pton(AF_INET, CONFIG_NET_CONFIG_PEER_IPV4_ADDR, &addr4->sin_addr);
+ 
+-	do_coap_download(&sa);
++	do_coap_download((struct sockaddr *)&sa);
+ #endif
+ 
+ #if defined(CONFIG_NET_IPV6)
+@@ -126,7 +126,7 @@ int main(void)
+ 	addr6->sin6_port = htons(CONFIG_NET_SAMPLE_COAP_SERVER_PORT);
+ 	zsock_inet_pton(AF_INET6, CONFIG_NET_CONFIG_PEER_IPV6_ADDR, &addr6->sin6_addr);
+ 
+-	do_coap_download(&sa);
++	do_coap_download((struct sockaddr *)&sa);
+ #endif
+ 
+ 	return 0;
+diff --git a/samples/net/sockets/coap_server/src/core.c b/samples/net/sockets/coap_server/src/core.c
+index 00f4adb4d34..d83e13620c3 100644
+--- a/samples/net/sockets/coap_server/src/core.c
++++ b/samples/net/sockets/coap_server/src/core.c
+@@ -14,7 +14,7 @@ LOG_MODULE_DECLARE(net_coap_service_sample);
+ 
+ static int core_get(struct coap_resource *resource,
+ 		    struct coap_packet *request,
+-		    struct sockaddr *addr, socklen_t addr_len)
++		    struct zsock_sockaddr *addr, zsock_socklen_t addr_len)
+ {
+ 	static const char dummy_str[] = "Just a test\n";
+ 	uint8_t data[CONFIG_COAP_SERVER_MESSAGE_SIZE];
+diff --git a/samples/net/sockets/coap_server/src/large.c b/samples/net/sockets/coap_server/src/large.c
+index 8656a5b53b1..319bee02e6e 100644
+--- a/samples/net/sockets/coap_server/src/large.c
++++ b/samples/net/sockets/coap_server/src/large.c
+@@ -15,7 +15,7 @@ LOG_MODULE_DECLARE(net_coap_service_sample);
+ 
+ static int large_get(struct coap_resource *resource,
+ 		     struct coap_packet *request,
+-		     struct sockaddr *addr, socklen_t addr_len)
++		     struct zsock_sockaddr *addr, zsock_socklen_t addr_len)
+ 
+ {
+ 	uint8_t data[CONFIG_COAP_SERVER_MESSAGE_SIZE];
+@@ -94,7 +94,7 @@ static int large_get(struct coap_resource *resource,
+ 
+ static int large_update_put(struct coap_resource *resource,
+ 			    struct coap_packet *request,
+-			    struct sockaddr *addr, socklen_t addr_len)
++			    struct zsock_sockaddr *addr, zsock_socklen_t addr_len)
+ {
+ 	uint8_t data[CONFIG_COAP_SERVER_MESSAGE_SIZE];
+ 	static struct coap_block_context ctx;
+@@ -174,7 +174,7 @@ static int large_update_put(struct coap_resource *resource,
+ 
+ static int large_create_post(struct coap_resource *resource,
+ 			     struct coap_packet *request,
+-			     struct sockaddr *addr, socklen_t addr_len)
++			     struct zsock_sockaddr *addr, zsock_socklen_t addr_len)
+ {
+ 	uint8_t data[CONFIG_COAP_SERVER_MESSAGE_SIZE];
+ 	static struct coap_block_context ctx;
+diff --git a/samples/net/sockets/coap_server/src/location_query.c b/samples/net/sockets/coap_server/src/location_query.c
+index bce4eb67b86..0bddce9da78 100644
+--- a/samples/net/sockets/coap_server/src/location_query.c
++++ b/samples/net/sockets/coap_server/src/location_query.c
+@@ -13,7 +13,7 @@ LOG_MODULE_DECLARE(net_coap_service_sample);
+ 
+ static int location_query_post(struct coap_resource *resource,
+ 			       struct coap_packet *request,
+-			       struct sockaddr *addr, socklen_t addr_len)
++			       struct zsock_sockaddr *addr, zsock_socklen_t addr_len)
+ {
+ 	static const char *const location_query[] = { "first=1",
+ 						      "second=2",
+diff --git a/samples/net/sockets/coap_server/src/main.c b/samples/net/sockets/coap_server/src/main.c
+index 64db9d128cd..e1bc21c919a 100644
+--- a/samples/net/sockets/coap_server/src/main.c
++++ b/samples/net/sockets/coap_server/src/main.c
+@@ -109,11 +109,11 @@ static int setup_dtls(void)
+ 
+ static int join_coap_multicast_group(uint16_t port)
+ {
+-	static struct in6_addr my_addr = MY_IP6ADDR;
+-	struct sockaddr_in6 mcast_addr = {
+-		.sin6_family = AF_INET6,
++	static struct zsock_in6_addr my_addr = MY_IP6ADDR;
++	struct zsock_sockaddr_in6 mcast_addr = {
++		.sin6_family = ZSOCK_AF_INET6,
+ 		.sin6_addr = ALL_NODES_LOCAL_COAP_MCAST,
+-		.sin6_port = htons(port) };
++		.sin6_port = zsock_htons(port) };
+ 	struct net_if_addr *ifaddr;
+ 	struct net_if *iface;
+ 	int ret;
+@@ -125,7 +125,7 @@ static int join_coap_multicast_group(uint16_t port)
+ 	}
+ 
+ #if defined(CONFIG_NET_CONFIG_SETTINGS)
+-	if (net_addr_pton(AF_INET6,
++	if (net_addr_pton(ZSOCK_AF_INET6,
+ 			  CONFIG_NET_CONFIG_MY_IPV6_ADDR,
+ 			  &my_addr) < 0) {
+ 		LOG_ERR("Invalid IPv6 address %s",
+diff --git a/samples/net/sockets/coap_server/src/observer.c b/samples/net/sockets/coap_server/src/observer.c
+index 8a14d316c61..7647565a934 100644
+--- a/samples/net/sockets/coap_server/src/observer.c
++++ b/samples/net/sockets/coap_server/src/observer.c
+@@ -18,8 +18,8 @@ static void update_counter(struct k_work *work);
+ K_WORK_DELAYABLE_DEFINE(obs_work, update_counter);
+ 
+ static int send_notification_packet(struct coap_resource *resource,
+-				    const struct sockaddr *addr,
+-				    socklen_t addr_len,
++				    const struct zsock_sockaddr *addr,
++				    zsock_socklen_t addr_len,
+ 				    uint16_t age, uint16_t id,
+ 				    const uint8_t *token, uint8_t tkl,
+ 				    bool is_response)
+@@ -87,7 +87,7 @@ static int send_notification_packet(struct coap_resource *resource,
+ 
+ static int obs_get(struct coap_resource *resource,
+ 		   struct coap_packet *request,
+-		   struct sockaddr *addr, socklen_t addr_len)
++		   struct zsock_sockaddr *addr, zsock_socklen_t addr_len)
+ {
+ 	uint8_t token[COAP_TOKEN_MAX_LEN];
+ 	uint16_t id;
+diff --git a/samples/net/sockets/coap_server/src/query.c b/samples/net/sockets/coap_server/src/query.c
+index 95272189d9c..0784258cac7 100644
+--- a/samples/net/sockets/coap_server/src/query.c
++++ b/samples/net/sockets/coap_server/src/query.c
+@@ -13,7 +13,7 @@ LOG_MODULE_DECLARE(net_coap_service_sample);
+ 
+ static int query_get(struct coap_resource *resource,
+ 		     struct coap_packet *request,
+-		     struct sockaddr *addr, socklen_t addr_len)
++		     struct zsock_sockaddr *addr, zsock_socklen_t addr_len)
+ {
+ 	uint8_t data[CONFIG_COAP_SERVER_MESSAGE_SIZE];
+ 	struct coap_option options[4];
+diff --git a/samples/net/sockets/coap_server/src/separate.c b/samples/net/sockets/coap_server/src/separate.c
+index 7a5b1737cba..6b557e91e76 100644
+--- a/samples/net/sockets/coap_server/src/separate.c
++++ b/samples/net/sockets/coap_server/src/separate.c
+@@ -13,7 +13,7 @@ LOG_MODULE_DECLARE(net_coap_service_sample);
+ 
+ static int separate_get(struct coap_resource *resource,
+ 			struct coap_packet *request,
+-			struct sockaddr *addr, socklen_t addr_len)
++			struct zsock_sockaddr *addr, zsock_socklen_t addr_len)
+ {
+ 	uint8_t data[CONFIG_COAP_SERVER_MESSAGE_SIZE];
+ 	struct coap_packet response;
+diff --git a/samples/net/sockets/coap_server/src/test.c b/samples/net/sockets/coap_server/src/test.c
+index 52885b31a5d..dbe3027f29a 100644
+--- a/samples/net/sockets/coap_server/src/test.c
++++ b/samples/net/sockets/coap_server/src/test.c
+@@ -15,7 +15,7 @@ LOG_MODULE_DECLARE(net_coap_service_sample);
+ 
+ static int piggyback_get(struct coap_resource *resource,
+ 			 struct coap_packet *request,
+-			 struct sockaddr *addr, socklen_t addr_len)
++			 struct zsock_sockaddr *addr, zsock_socklen_t addr_len)
+ {
+ 	uint8_t data[CONFIG_COAP_SERVER_MESSAGE_SIZE];
+ 	struct coap_packet response;
+@@ -80,7 +80,7 @@ static int piggyback_get(struct coap_resource *resource,
+ 
+ static int test_del(struct coap_resource *resource,
+ 		    struct coap_packet *request,
+-		    struct sockaddr *addr, socklen_t addr_len)
++		    struct zsock_sockaddr *addr, zsock_socklen_t addr_len)
+ {
+ 	uint8_t data[CONFIG_COAP_SERVER_MESSAGE_SIZE];
+ 	struct coap_packet response;
+@@ -120,7 +120,7 @@ static int test_del(struct coap_resource *resource,
+ 
+ static int test_put(struct coap_resource *resource,
+ 		    struct coap_packet *request,
+-		    struct sockaddr *addr, socklen_t addr_len)
++		    struct zsock_sockaddr *addr, zsock_socklen_t addr_len)
+ {
+ 	uint8_t data[CONFIG_COAP_SERVER_MESSAGE_SIZE];
+ 	struct coap_packet response;
+@@ -167,7 +167,7 @@ static int test_put(struct coap_resource *resource,
+ 
+ static int test_post(struct coap_resource *resource,
+ 		     struct coap_packet *request,
+-		     struct sockaddr *addr, socklen_t addr_len)
++		     struct zsock_sockaddr *addr, zsock_socklen_t addr_len)
+ {
+ 	static const char * const location_path[] = { "location1",
+ 						      "location2",
+diff --git a/samples/net/sockets/coap_upload/src/main.c b/samples/net/sockets/coap_upload/src/main.c
+index 448aca0f75c..7dd2a647669 100644
+--- a/samples/net/sockets/coap_upload/src/main.c
++++ b/samples/net/sockets/coap_upload/src/main.c
+@@ -217,7 +217,7 @@ int main(void)
+ 		return ret;
+ 	}
+ 
+-	struct sockaddr sa;
++	struct sockaddr_in6 sa;
+ 
+ #if defined(CONFIG_NET_IPV4)
+ 	struct sockaddr_in *addr4 = (struct sockaddr_in *)&sa;
+@@ -226,7 +226,7 @@ int main(void)
+ 	addr4->sin_port = htons(CONFIG_NET_SAMPLE_COAP_SERVER_PORT);
+ 	inet_pton(AF_INET, CONFIG_NET_CONFIG_PEER_IPV4_ADDR, &addr4->sin_addr);
+ 
+-	coap_upload(&client, &sa, sizeof(struct sockaddr_in));
++	coap_upload(&client, (struct sockaddr *)&sa, sizeof(struct sockaddr_in));
+ #endif
+ 
+ #if defined(CONFIG_NET_IPV6)
+@@ -236,7 +236,7 @@ int main(void)
+ 	addr6->sin6_port = htons(CONFIG_NET_SAMPLE_COAP_SERVER_PORT);
+ 	inet_pton(AF_INET6, CONFIG_NET_CONFIG_PEER_IPV6_ADDR, &addr6->sin6_addr);
+ 
+-	coap_upload(&client, &sa, sizeof(struct sockaddr_in6));
++	coap_upload(&client, (struct sockaddr *)&sa, sizeof(struct sockaddr_in6));
+ #endif
+ 
+ 	return 0;
+diff --git a/samples/net/sockets/echo_client/src/echo-client.c b/samples/net/sockets/echo_client/src/echo-client.c
+index e048f9ed1ce..8f1550e887c 100644
+--- a/samples/net/sockets/echo_client/src/echo-client.c
++++ b/samples/net/sockets/echo_client/src/echo-client.c
+@@ -257,7 +257,7 @@ static void ipv6_event_handler(struct net_mgmt_event_callback *cb,
+ 
+ 		memcpy(&added_addr, cb->info, sizeof(struct in6_addr));
+ 
+-		ifaddr = net_if_ipv6_addr_lookup(&added_addr, &iface);
++		ifaddr = net_if_ipv6_addr_lookup((const struct zsock_in6_addr *)&added_addr, &iface);
+ 		if (ifaddr == NULL) {
+ 			return;
+ 		}
+diff --git a/samples/net/sockets/echo_client/src/tcp.c b/samples/net/sockets/echo_client/src/tcp.c
+index e5f00f19568..796504544ca 100644
+--- a/samples/net/sockets/echo_client/src/tcp.c
++++ b/samples/net/sockets/echo_client/src/tcp.c
+@@ -40,7 +40,7 @@ LOG_MODULE_DECLARE(net_echo_client_sample, LOG_LEVEL_DBG);
+ static ssize_t sendall(int sock, const void *buf, size_t len)
+ {
+ 	while (len) {
+-		ssize_t out_len = send(sock, buf, len, 0);
++		ssize_t out_len = zsock_send(sock, buf, len, 0);
+ 
+ 		if (out_len < 0) {
+ 			return out_len;
+@@ -93,49 +93,49 @@ static int compare_tcp_data(struct sample_data *data, const char *buf, uint32_t
+ }
+ 
+ static int start_tcp_proto(struct sample_data *data, sa_family_t family,
+-			   struct sockaddr *addr, socklen_t addrlen)
++			   struct zsock_sockaddr *addr, zsock_socklen_t addrlen)
+ {
+ 	int optval;
+ 	int ret;
+ 
+ #if defined(CONFIG_NET_SOCKETS_SOCKOPT_TLS)
+-	data->tcp.sock = socket(family, SOCK_STREAM, IPPROTO_TLS_1_2);
++	data->tcp.sock = zsock_socket(family, ZSOCK_SOCK_STREAM, ZSOCK_IPPROTO_TLS_1_2);
+ #else
+-	data->tcp.sock = socket(family, SOCK_STREAM, IPPROTO_TCP);
++	data->tcp.sock = zsock_socket(family, ZSOCK_SOCK_STREAM, ZSOCK_IPPROTO_TCP);
+ #endif
+ 	if (data->tcp.sock < 0) {
+-		LOG_ERR("Failed to create TCP socket (%s): %d", data->proto,
++		LOG_ERR("Failed to create TCP zsock_socket (%s): %d", data->proto,
+ 			errno);
+ 		return -errno;
+ 	}
+ 
+ 	if (IS_ENABLED(CONFIG_SOCKS)) {
+-		struct sockaddr proxy_addr;
+-		socklen_t proxy_addrlen;
++		struct zsock_sockaddr proxy_addr;
++		zsock_socklen_t proxy_addrlen;
+ 
+-		if (family == AF_INET) {
+-			struct sockaddr_in *proxy4 =
+-				(struct sockaddr_in *)&proxy_addr;
++		if (family == ZSOCK_AF_INET) {
++			struct zsock_sockaddr_in *proxy4 =
++				(struct zsock_sockaddr_in *)&proxy_addr;
+ 
+-			proxy4->sin_family = AF_INET;
++			proxy4->sin_family = ZSOCK_AF_INET;
+ 			proxy4->sin_port = htons(SOCKS5_PROXY_PORT);
+-			inet_pton(AF_INET, SOCKS5_PROXY_V4_ADDR,
++			inet_pton(ZSOCK_AF_INET, SOCKS5_PROXY_V4_ADDR,
+ 				  &proxy4->sin_addr);
+-			proxy_addrlen = sizeof(struct sockaddr_in);
+-		} else if (family == AF_INET6) {
+-			struct sockaddr_in6 *proxy6 =
+-				(struct sockaddr_in6 *)&proxy_addr;
++			proxy_addrlen = sizeof(struct zsock_sockaddr_in);
++		} else if (family == ZSOCK_AF_INET6) {
++			struct zsock_sockaddr_in6 *proxy6 =
++				(struct zsock_sockaddr_in6 *)&proxy_addr;
+ 
+-			proxy6->sin6_family = AF_INET6;
++			proxy6->sin6_family = ZSOCK_AF_INET6;
+ 			proxy6->sin6_port = htons(SOCKS5_PROXY_PORT);
+-			inet_pton(AF_INET6, SOCKS5_PROXY_V6_ADDR,
++			inet_pton(ZSOCK_AF_INET6, SOCKS5_PROXY_V6_ADDR,
+ 				  &proxy6->sin6_addr);
+-			proxy_addrlen = sizeof(struct sockaddr_in6);
++			proxy_addrlen = sizeof(struct zsock_sockaddr_in6);
+ 		} else {
+ 			return -EINVAL;
+ 		}
+ 
+-		ret = setsockopt(data->tcp.sock, SOL_SOCKET, SO_SOCKS5,
++		ret = zsock_setsockopt(data->tcp.sock, ZSOCK_SOL_SOCKET, ZSOCK_SO_SOCKS5,
+ 				 &proxy_addr, proxy_addrlen);
+ 		if (ret < 0) {
+ 			return ret;
+@@ -150,7 +150,7 @@ static int start_tcp_proto(struct sample_data *data, sa_family_t family,
+ #endif
+ 	};
+ 
+-	ret = setsockopt(data->tcp.sock, SOL_TLS, TLS_SEC_TAG_LIST,
++	ret = zsock_setsockopt(data->tcp.sock, SOL_TLS, TLS_SEC_TAG_LIST,
+ 			 sec_tag_list, sizeof(sec_tag_list));
+ 	if (ret < 0) {
+ 		LOG_ERR("Failed to set TLS_SEC_TAG_LIST option (%s): %d",
+@@ -158,7 +158,7 @@ static int start_tcp_proto(struct sample_data *data, sa_family_t family,
+ 		ret = -errno;
+ 	}
+ 
+-	ret = setsockopt(data->tcp.sock, SOL_TLS, TLS_HOSTNAME,
++	ret = zsock_setsockopt(data->tcp.sock, SOL_TLS, TLS_HOSTNAME,
+ 			 TLS_PEER_HOSTNAME, sizeof(TLS_PEER_HOSTNAME));
+ 	if (ret < 0) {
+ 		LOG_ERR("Failed to set TLS_HOSTNAME option (%s): %d",
+@@ -168,14 +168,14 @@ static int start_tcp_proto(struct sample_data *data, sa_family_t family,
+ #endif
+ 
+ 	/* Prefer IPv6 temporary addresses */
+-	if (family == AF_INET6) {
+-		optval = IPV6_PREFER_SRC_TMP;
+-		(void)setsockopt(data->tcp.sock, IPPROTO_IPV6,
+-				 IPV6_ADDR_PREFERENCES,
++	if (family == ZSOCK_AF_INET6) {
++		optval = ZSOCK_IPV6_PREFER_SRC_TMP;
++		(void)zsock_setsockopt(data->tcp.sock, ZSOCK_IPPROTO_IPV6,
++				 ZSOCK_IPV6_ADDR_PREFERENCES,
+ 				 &optval, sizeof(optval));
+ 	}
+ 
+-	ret = connect(data->tcp.sock, addr, addrlen);
++	ret = zsock_connect(data->tcp.sock, addr, addrlen);
+ 	if (ret < 0) {
+ 		LOG_ERR("Cannot connect to TCP remote (%s): %d", data->proto,
+ 			errno);
+@@ -191,7 +191,7 @@ static int process_tcp_proto(struct sample_data *data)
+ 	char buf[RECV_BUF_SIZE];
+ 
+ 	do {
+-		received = recv(data->tcp.sock, buf, sizeof(buf), MSG_DONTWAIT);
++		received = zsock_recv(data->tcp.sock, buf, sizeof(buf), ZSOCK_MSG_DONTWAIT);
+ 
+ 		/* No data or error. */
+ 		if (received == 0) {
+@@ -238,17 +238,17 @@ static int process_tcp_proto(struct sample_data *data)
+ int start_tcp(void)
+ {
+ 	int ret = 0;
+-	struct sockaddr_in addr4;
+-	struct sockaddr_in6 addr6;
++	struct zsock_sockaddr_in addr4;
++	struct zsock_sockaddr_in6 addr6;
+ 
+ 	if (IS_ENABLED(CONFIG_NET_IPV6)) {
+-		addr6.sin6_family = AF_INET6;
++		addr6.sin6_family = ZSOCK_AF_INET6;
+ 		addr6.sin6_port = htons(PEER_PORT);
+-		inet_pton(AF_INET6, CONFIG_NET_CONFIG_PEER_IPV6_ADDR,
++		inet_pton(ZSOCK_AF_INET6, CONFIG_NET_CONFIG_PEER_IPV6_ADDR,
+ 			  &addr6.sin6_addr);
+ 
+-		ret = start_tcp_proto(&conf.ipv6, AF_INET6,
+-				      (struct sockaddr *)&addr6,
++		ret = start_tcp_proto(&conf.ipv6, ZSOCK_AF_INET6,
++				      (struct zsock_sockaddr *)&addr6,
+ 				      sizeof(addr6));
+ 		if (ret < 0) {
+ 			return ret;
+@@ -256,13 +256,13 @@ int start_tcp(void)
+ 	}
+ 
+ 	if (IS_ENABLED(CONFIG_NET_IPV4)) {
+-		addr4.sin_family = AF_INET;
++		addr4.sin_family = ZSOCK_AF_INET;
+ 		addr4.sin_port = htons(PEER_PORT);
+-		inet_pton(AF_INET, CONFIG_NET_CONFIG_PEER_IPV4_ADDR,
++		inet_pton(ZSOCK_AF_INET, CONFIG_NET_CONFIG_PEER_IPV4_ADDR,
+ 			  &addr4.sin_addr);
+ 
+-		ret = start_tcp_proto(&conf.ipv4, AF_INET,
+-				      (struct sockaddr *)&addr4,
++		ret = start_tcp_proto(&conf.ipv4, ZSOCK_AF_INET,
++				      (struct zsock_sockaddr *)&addr4,
+ 				      sizeof(addr4));
+ 		if (ret < 0) {
+ 			return ret;
+@@ -308,13 +308,13 @@ void stop_tcp(void)
+ {
+ 	if (IS_ENABLED(CONFIG_NET_IPV6)) {
+ 		if (conf.ipv6.tcp.sock >= 0) {
+-			(void)close(conf.ipv6.tcp.sock);
++			(void)zsock_close(conf.ipv6.tcp.sock);
+ 		}
+ 	}
+ 
+ 	if (IS_ENABLED(CONFIG_NET_IPV4)) {
+ 		if (conf.ipv4.tcp.sock >= 0) {
+-			(void)close(conf.ipv4.tcp.sock);
++			(void)zsock_close(conf.ipv4.tcp.sock);
+ 		}
+ 	}
+ }
+diff --git a/samples/net/sockets/echo_server/src/tcp.c b/samples/net/sockets/echo_server/src/tcp.c
+index 9a33dd05de1..59ba914d1ba 100644
+--- a/samples/net/sockets/echo_server/src/tcp.c
++++ b/samples/net/sockets/echo_server/src/tcp.c
+@@ -54,7 +54,7 @@ K_THREAD_DEFINE(tcp6_thread_id, STACK_SIZE,
+ static ssize_t sendall(int sock, const void *buf, size_t len)
+ {
+ 	while (len) {
+-		ssize_t out_len = send(sock, buf, len, 0);
++		ssize_t out_len = zsock_send(sock, buf, len, 0);
+ 
+ 		if (out_len < 0) {
+ 			return out_len;
+@@ -67,21 +67,21 @@ static ssize_t sendall(int sock, const void *buf, size_t len)
+ }
+ 
+ static int start_tcp_proto(struct data *data,
+-			   struct sockaddr *bind_addr,
+-			   socklen_t bind_addrlen)
++			   struct zsock_sockaddr *bind_addr,
++			   zsock_socklen_t bind_addrlen)
+ {
+ 	int optval;
+ 	int ret;
+ 
+ #if defined(CONFIG_NET_SOCKETS_SOCKOPT_TLS)
+-	data->tcp.sock = socket(bind_addr->sa_family, SOCK_STREAM,
+-				IPPROTO_TLS_1_2);
++	data->tcp.sock = zsock_socket(bind_addr->sa_family, ZSOCK_SOCK_STREAM,
++				ZSOCK_IPPROTO_TLS_1_2);
+ #else
+-	data->tcp.sock = socket(bind_addr->sa_family, SOCK_STREAM,
+-				IPPROTO_TCP);
++	data->tcp.sock = zsock_socket(bind_addr->sa_family, ZSOCK_SOCK_STREAM,
++				ZSOCK_IPPROTO_TCP);
+ #endif
+ 	if (data->tcp.sock < 0) {
+-		LOG_ERR("Failed to create TCP socket (%s): %d", data->proto,
++		LOG_ERR("Failed to create TCP zsock_socket (%s): %d", data->proto,
+ 			errno);
+ 		return -errno;
+ 	}
+@@ -94,7 +94,7 @@ static int start_tcp_proto(struct data *data,
+ #endif
+ 	};
+ 
+-	ret = setsockopt(data->tcp.sock, SOL_TLS, TLS_SEC_TAG_LIST,
++	ret = zsock_setsockopt(data->tcp.sock, SOL_TLS, TLS_SEC_TAG_LIST,
+ 			 sec_tag_list, sizeof(sec_tag_list));
+ 	if (ret < 0) {
+ 		LOG_ERR("Failed to set TCP secure option (%s): %d", data->proto,
+@@ -103,11 +103,11 @@ static int start_tcp_proto(struct data *data,
+ 	}
+ #endif
+ 
+-	if (bind_addr->sa_family == AF_INET6) {
++	if (bind_addr->sa_family == ZSOCK_AF_INET6) {
+ 		/* Prefer IPv6 temporary addresses */
+-		optval = IPV6_PREFER_SRC_PUBLIC;
+-		(void)setsockopt(data->tcp.sock, IPPROTO_IPV6,
+-				 IPV6_ADDR_PREFERENCES,
++		optval = ZSOCK_IPV6_PREFER_SRC_PUBLIC;
++		(void)zsock_setsockopt(data->tcp.sock, ZSOCK_IPPROTO_IPV6,
++				 ZSOCK_IPV6_ADDR_PREFERENCES,
+ 				 &optval, sizeof(optval));
+ 
+ 		/*
+@@ -115,20 +115,20 @@ static int start_tcp_proto(struct data *data,
+ 		 * IPv4 using another socket
+ 		 */
+ 		optval = 1;
+-		(void)setsockopt(data->tcp.sock, IPPROTO_IPV6, IPV6_V6ONLY,
++		(void)zsock_setsockopt(data->tcp.sock, ZSOCK_IPPROTO_IPV6, ZSOCK_IPV6_V6ONLY,
+ 				 &optval, sizeof(optval));
+ 	}
+ 
+-	ret = bind(data->tcp.sock, bind_addr, bind_addrlen);
++	ret = zsock_bind(data->tcp.sock, bind_addr, bind_addrlen);
+ 	if (ret < 0) {
+-		LOG_ERR("Failed to bind TCP socket (%s): %d", data->proto,
++		LOG_ERR("Failed to bind TCP zsock_socket (%s): %d", data->proto,
+ 			errno);
+ 		return -errno;
+ 	}
+ 
+-	ret = listen(data->tcp.sock, MAX_CLIENT_QUEUE);
++	ret = zsock_listen(data->tcp.sock, MAX_CLIENT_QUEUE);
+ 	if (ret < 0) {
+-		LOG_ERR("Failed to listen on TCP socket (%s): %d",
++		LOG_ERR("Failed to listen on TCP zsock_socket (%s): %d",
+ 			data->proto, errno);
+ 		ret = -errno;
+ 	}
+@@ -149,7 +149,7 @@ static void handle_data(void *ptr1, void *ptr2, void *ptr3)
+ 	client = data->tcp.accepted[slot].sock;
+ 
+ 	do {
+-		received = recv(client,
++		received = zsock_recv(client,
+ 			data->tcp.accepted[slot].recv_buffer + offset,
+ 			sizeof(data->tcp.accepted[slot].recv_buffer) - offset,
+ 			0);
+@@ -174,7 +174,7 @@ static void handle_data(void *ptr1, void *ptr2, void *ptr3)
+ 		 * buffer is full or there is no more data to read
+ 		 */
+ 		if (offset == sizeof(data->tcp.accepted[slot].recv_buffer) ||
+-		    (recv(client,
++		    (zsock_recv(client,
+ 			  data->tcp.accepted[slot].recv_buffer + offset,
+ 			  sizeof(data->tcp.accepted[slot].recv_buffer) -
+ 								offset,
+@@ -206,7 +206,7 @@ static void handle_data(void *ptr1, void *ptr2, void *ptr3)
+ 
+ 	*in_use = false;
+ 
+-	(void)close(client);
++	(void)zsock_close(client);
+ 
+ 	data->tcp.accepted[slot].sock = -1;
+ }
+@@ -228,13 +228,13 @@ static int process_tcp(struct data *data)
+ {
+ 	int client;
+ 	int slot;
+-	struct sockaddr_in client_addr;
+-	socklen_t client_addr_len = sizeof(client_addr);
++	struct zsock_sockaddr_in client_addr;
++	zsock_socklen_t client_addr_len = sizeof(client_addr);
+ 
+ 	LOG_INF("Waiting for TCP connection on port %d (%s)...",
+ 		MY_PORT, data->proto);
+ 
+-	client = accept(data->tcp.sock, (struct sockaddr *)&client_addr,
++	client = zsock_accept(data->tcp.sock, (struct zsock_sockaddr *)&client_addr,
+ 			&client_addr_len);
+ 	if (client < 0) {
+ 		LOG_ERR("%s accept error (%d)", data->proto, -errno);
+@@ -244,7 +244,7 @@ static int process_tcp(struct data *data)
+ 	slot = get_free_slot(data);
+ 	if (slot < 0) {
+ 		LOG_ERR("Cannot accept more connections");
+-		close(client);
++		zsock_close(client);
+ 		return 0;
+ 	}
+ 
+@@ -255,7 +255,7 @@ static int process_tcp(struct data *data)
+ #define MAX_NAME_LEN sizeof("tcp6[xxx]")
+ 
+ #if defined(CONFIG_NET_IPV6)
+-	if (client_addr.sin_family == AF_INET6) {
++	if (client_addr.sin_family == ZSOCK_AF_INET6) {
+ 		tcp6_handler_in_use[slot] = true;
+ 
+ 		k_thread_create(
+@@ -279,7 +279,7 @@ static int process_tcp(struct data *data)
+ #endif
+ 
+ #if defined(CONFIG_NET_IPV4)
+-	if (client_addr.sin_family == AF_INET) {
++	if (client_addr.sin_family == ZSOCK_AF_INET) {
+ 		tcp4_handler_in_use[slot] = true;
+ 
+ 		k_thread_create(
+@@ -308,13 +308,13 @@ static int process_tcp(struct data *data)
+ static void process_tcp4(void)
+ {
+ 	int ret;
+-	struct sockaddr_in addr4;
++	struct zsock_sockaddr_in addr4;
+ 
+ 	(void)memset(&addr4, 0, sizeof(addr4));
+-	addr4.sin_family = AF_INET;
++	addr4.sin_family = ZSOCK_AF_INET;
+ 	addr4.sin_port = htons(MY_PORT);
+ 
+-	ret = start_tcp_proto(&conf.ipv4, (struct sockaddr *)&addr4,
++	ret = start_tcp_proto(&conf.ipv4, (struct zsock_sockaddr *)&addr4,
+ 			      sizeof(addr4));
+ 	if (ret < 0) {
+ 		quit();
+@@ -334,13 +334,13 @@ static void process_tcp4(void)
+ static void process_tcp6(void)
+ {
+ 	int ret;
+-	struct sockaddr_in6 addr6;
++	struct zsock_sockaddr_in6 addr6;
+ 
+ 	(void)memset(&addr6, 0, sizeof(addr6));
+-	addr6.sin6_family = AF_INET6;
++	addr6.sin6_family = ZSOCK_AF_INET6;
+ 	addr6.sin6_port = htons(MY_PORT);
+ 
+-	ret = start_tcp_proto(&conf.ipv6, (struct sockaddr *)&addr6,
++	ret = start_tcp_proto(&conf.ipv6, (struct zsock_sockaddr *)&addr6,
+ 			      sizeof(addr6));
+ 	if (ret < 0) {
+ 		quit();
+@@ -436,7 +436,7 @@ void stop_tcp(void)
+ 	if (IS_ENABLED(CONFIG_NET_IPV6)) {
+ 		k_thread_abort(tcp6_thread_id);
+ 		if (conf.ipv6.tcp.sock >= 0) {
+-			(void)close(conf.ipv6.tcp.sock);
++			(void)zsock_close(conf.ipv6.tcp.sock);
+ 		}
+ 
+ 		for (i = 0; i < CONFIG_NET_SAMPLE_NUM_HANDLERS; i++) {
+@@ -446,7 +446,7 @@ void stop_tcp(void)
+ 			}
+ #endif
+ 			if (conf.ipv6.tcp.accepted[i].sock >= 0) {
+-				(void)close(conf.ipv6.tcp.accepted[i].sock);
++				(void)zsock_close(conf.ipv6.tcp.accepted[i].sock);
+ 			}
+ 		}
+ 	}
+@@ -454,7 +454,7 @@ void stop_tcp(void)
+ 	if (IS_ENABLED(CONFIG_NET_IPV4)) {
+ 		k_thread_abort(tcp4_thread_id);
+ 		if (conf.ipv4.tcp.sock >= 0) {
+-			(void)close(conf.ipv4.tcp.sock);
++			(void)zsock_close(conf.ipv4.tcp.sock);
+ 		}
+ 
+ 		for (i = 0; i < CONFIG_NET_SAMPLE_NUM_HANDLERS; i++) {
+@@ -464,7 +464,7 @@ void stop_tcp(void)
+ 			}
+ #endif
+ 			if (conf.ipv4.tcp.accepted[i].sock >= 0) {
+-				(void)close(conf.ipv4.tcp.accepted[i].sock);
++				(void)zsock_close(conf.ipv4.tcp.accepted[i].sock);
+ 			}
+ 		}
+ 	}
+diff --git a/samples/net/sockets/echo_service/src/main.c b/samples/net/sockets/echo_service/src/main.c
+index bf694542d58..8e18ac8c3bd 100644
+--- a/samples/net/sockets/echo_service/src/main.c
++++ b/samples/net/sockets/echo_service/src/main.c
+@@ -19,6 +19,7 @@ LOG_MODULE_REGISTER(net_echo_server_svc_sample, LOG_LEVEL_DBG);
+ #include <unistd.h>
+ #include <poll.h>
+ #include <arpa/inet.h>
++#include <netinet/in.h>
+ #include <sys/socket.h>
+ #include <zephyr/net/socket_service.h>
+ 
+diff --git a/samples/net/sockets/http_client/src/main.c b/samples/net/sockets/http_client/src/main.c
+index 8ceb9b87055..fe74577be2e 100644
+--- a/samples/net/sockets/http_client/src/main.c
++++ b/samples/net/sockets/http_client/src/main.c
+@@ -50,13 +50,13 @@ static int setup_socket(sa_family_t family, const char *server, int port,
+ 	memset(addr, 0, addr_len);
+ 
+ 	if (family == AF_INET) {
+-		net_sin(addr)->sin_family = AF_INET;
+-		net_sin(addr)->sin_port = htons(port);
+-		inet_pton(family, server, &net_sin(addr)->sin_addr);
++		net_sin((struct zsock_sockaddr *)addr)->sin_family = AF_INET;
++		net_sin((struct zsock_sockaddr *)addr)->sin_port = htons(port);
++		inet_pton(family, server, &net_sin((struct zsock_sockaddr *)addr)->sin_addr);
+ 	} else {
+-		net_sin6(addr)->sin6_family = AF_INET6;
+-		net_sin6(addr)->sin6_port = htons(port);
+-		inet_pton(family, server, &net_sin6(addr)->sin6_addr);
++		net_sin6((struct zsock_sockaddr *)addr)->sin6_family = AF_INET6;
++		net_sin6((struct zsock_sockaddr *)addr)->sin6_port = htons(port);
++		inet_pton(family, server, &net_sin6((struct zsock_sockaddr *)addr)->sin6_addr);
+ 	}
+ 
+ 	if (IS_ENABLED(CONFIG_NET_SOCKETS_SOCKOPT_TLS)) {
+@@ -64,7 +64,7 @@ static int setup_socket(sa_family_t family, const char *server, int port,
+ 			CA_CERTIFICATE_TAG,
+ 		};
+ 
+-		*sock = socket(family, SOCK_STREAM, IPPROTO_TLS_1_2);
++		*sock = socket(family, SOCK_STREAM, ZSOCK_IPPROTO_TLS_1_2);
+ 		if (*sock >= 0) {
+ 			ret = setsockopt(*sock, SOL_TLS, TLS_SEC_TAG_LIST,
+ 					 sec_tag_list, sizeof(sec_tag_list));
+@@ -114,7 +114,7 @@ static int payload_cb(int sock, struct http_request *req, void *user_data)
+ 
+ 	pos += snprintk(tmp + pos, sizeof(tmp) - pos, "0\r\n\r\n");
+ 
+-	(void)send(sock, tmp, pos, 0);
++	(void)zsock_send(sock, tmp, pos, 0);
+ 
+ 	return pos;
+ }
+diff --git a/samples/net/sockets/http_get/src/http_get.c b/samples/net/sockets/http_get/src/http_get.c
+index 1e232e3cf9c..e926593ce00 100644
+--- a/samples/net/sockets/http_get/src/http_get.c
++++ b/samples/net/sockets/http_get/src/http_get.c
+@@ -92,7 +92,7 @@ int main(void)
+ 	dump_addrinfo(res);
+ 
+ #if defined(CONFIG_NET_SOCKETS_SOCKOPT_TLS)
+-	sock = socket(res->ai_family, res->ai_socktype, IPPROTO_TLS_1_2);
++	sock = socket(res->ai_family, res->ai_socktype, ZSOCK_IPPROTO_TLS_1_2);
+ #else
+ 	sock = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+ #endif
+diff --git a/samples/net/sockets/net_mgmt/src/main.c b/samples/net/sockets/net_mgmt/src/main.c
+index dc8f12ddf54..18927fdee34 100644
+--- a/samples/net/sockets/net_mgmt/src/main.c
++++ b/samples/net/sockets/net_mgmt/src/main.c
+@@ -49,7 +49,7 @@ static void trigger_events(void *p1, void *p2, void *p3)
+ 	while (1) {
+ 		switch (operation) {
+ 		case 0:
+-			ifaddr_v6 = net_if_ipv6_addr_add(iface, &addr_v6,
++			ifaddr_v6 = net_if_ipv6_addr_add(iface, (struct zsock_in6_addr *)&addr_v6,
+ 							 NET_ADDR_MANUAL, 0);
+ 			if (!ifaddr_v6) {
+ 				LOG_ERR("Cannot add IPv%c address", '6');
+@@ -58,7 +58,7 @@ static void trigger_events(void *p1, void *p2, void *p3)
+ 
+ 			break;
+ 		case 1:
+-			ret = net_if_ipv6_addr_rm(iface, &addr_v6);
++			ret = net_if_ipv6_addr_rm(iface, (const struct zsock_in6_addr *)&addr_v6);
+ 			if (!ret) {
+ 				LOG_ERR("Cannot del IPv%c address", '6');
+ 				break;
+diff --git a/samples/net/sockets/packet/src/packet.c b/samples/net/sockets/packet/src/packet.c
+index 9274f08740c..4491da0b084 100644
+--- a/samples/net/sockets/packet/src/packet.c
++++ b/samples/net/sockets/packet/src/packet.c
+@@ -12,6 +12,7 @@ LOG_MODULE_REGISTER(net_pkt_sock_sample, LOG_LEVEL_DBG);
+ #include <stdio.h>
+ #include <netinet/in.h>
+ #include <sys/socket.h>
++#include <netpacket/packet.h>
+ #include <arpa/inet.h>
+ #include <unistd.h>
+ #include <netdb.h>
+diff --git a/samples/net/sockets/txtime/src/main.c b/samples/net/sockets/txtime/src/main.c
+index d574b60d67f..198fd30b338 100644
+--- a/samples/net/sockets/txtime/src/main.c
++++ b/samples/net/sockets/txtime/src/main.c
+@@ -225,13 +225,13 @@ static void tx(void *p1, void *p2, void *p3)
+ static int get_local_ipv6(struct net_if *iface, struct sockaddr *peer,
+ 			  struct sockaddr *local, socklen_t *addrlen)
+ {
+-	const struct in6_addr *addr;
++	const struct zsock_in6_addr *addr;
+ 
+ 	if (peer->sa_family != AF_INET6) {
+ 		return 0;
+ 	}
+ 
+-	addr = net_if_ipv6_select_src_addr(iface, &posix_sin6(peer)->sin6_addr);
++	addr = net_if_ipv6_select_src_addr(iface, (const struct zsock_in6_addr *)&posix_sin6(peer)->sin6_addr);
+ 	if (!addr) {
+ 		LOG_ERR("Cannot get local %s address", "IPv6");
+ 		return -EINVAL;
+diff --git a/samples/net/sockets/websocket_client/src/main.c b/samples/net/sockets/websocket_client/src/main.c
+index 2da46ed79a8..9ef5b37a5d1 100644
+--- a/samples/net/sockets/websocket_client/src/main.c
++++ b/samples/net/sockets/websocket_client/src/main.c
+@@ -61,13 +61,13 @@ static int setup_socket(sa_family_t family, const char *server, int port,
+ 	memset(addr, 0, addr_len);
+ 
+ 	if (family == AF_INET) {
+-		net_sin(addr)->sin_family = AF_INET;
+-		net_sin(addr)->sin_port = htons(port);
+-		inet_pton(family, server, &net_sin(addr)->sin_addr);
++		net_sin((struct zsock_sockaddr *)addr)->sin_family = AF_INET;
++		net_sin((struct zsock_sockaddr *)addr)->sin_port = htons(port);
++		inet_pton(family, server, &net_sin((struct zsock_sockaddr *)addr)->sin_addr);
+ 	} else {
+-		net_sin6(addr)->sin6_family = AF_INET6;
+-		net_sin6(addr)->sin6_port = htons(port);
+-		inet_pton(family, server, &net_sin6(addr)->sin6_addr);
++		net_sin6((struct zsock_sockaddr *)addr)->sin6_family = AF_INET6;
++		net_sin6((struct zsock_sockaddr *)addr)->sin6_port = htons(port);
++		inet_pton(family, server, &net_sin6((struct zsock_sockaddr *)addr)->sin6_addr);
+ 	}
+ 
+ 	if (IS_ENABLED(CONFIG_NET_SOCKETS_SOCKOPT_TLS)) {
+@@ -75,7 +75,7 @@ static int setup_socket(sa_family_t family, const char *server, int port,
+ 			CA_CERTIFICATE_TAG,
+ 		};
+ 
+-		*sock = socket(family, SOCK_STREAM, IPPROTO_TLS_1_2);
++		*sock = socket(family, SOCK_STREAM, ZSOCK_IPPROTO_TLS_1_2);
+ 		if (*sock >= 0) {
+ 			ret = setsockopt(*sock, SOL_TLS, TLS_SEC_TAG_LIST,
+ 					 sec_tag_list, sizeof(sec_tag_list));
+diff --git a/samples/net/tftp_client/src/tftp-client.c b/samples/net/tftp_client/src/tftp-client.c
+index 5a4ac4630dc..550fca6f32b 100644
+--- a/samples/net/tftp_client/src/tftp-client.c
++++ b/samples/net/tftp_client/src/tftp-client.c
+@@ -40,12 +40,12 @@ static void tftp_event_callback(const struct tftp_evt *evt)
+ 
+ static int tftp_init(const char *hostname)
+ {
+-	struct sockaddr remote_addr;
++	struct sockaddr_storage remote_addr;
+ 	struct addrinfo *res, hints = {0};
+ 	int ret;
+ 
+ 	/* Setup TFTP server address */
+-	hints.ai_socktype = SOCK_DGRAM;
++	hints.ai_socktype = ZSOCK_SOCK_DGRAM;
+ 
+ 	ret = getaddrinfo(hostname, CONFIG_TFTP_APP_PORT, &hints, &res);
+ 	if (ret != 0) {
+@@ -54,7 +54,7 @@ static int tftp_init(const char *hostname)
+ 		return -ENOENT;
+ 	}
+ 
+-	memcpy(&remote_addr, res->ai_addr, sizeof(remote_addr));
++	memcpy(&remote_addr, res->ai_addr, res->ai_addrlen);
+ 	freeaddrinfo(res);
+ 
+ 	/* Save sockaddr into TFTP client handler */
+diff --git a/samples/net/wifi/apsta_mode/src/main.c b/samples/net/wifi/apsta_mode/src/main.c
+index 666834f3d03..22a020a6af5 100644
+--- a/samples/net/wifi/apsta_mode/src/main.c
++++ b/samples/net/wifi/apsta_mode/src/main.c
+@@ -85,8 +85,8 @@ static void wifi_event_handler(struct net_mgmt_event_callback *cb, uint64_t mgmt
+ #if CONFIG_WIFI_SAMPLE_DHCPV4_START
+ static void enable_dhcpv4_server(void)
+ {
+-	static struct in_addr addr;
+-	static struct in_addr netmaskAddr;
++	static struct zsock_in_addr addr;
++	static struct zsock_in_addr netmaskAddr;
+ 
+ 	if (net_addr_pton(ZSOCK_AF_INET, CONFIG_WIFI_SAMPLE_AP_IP_ADDRESS, &addr)) {
+ 		LOG_ERR("Invalid address: %s", CONFIG_WIFI_SAMPLE_AP_IP_ADDRESS);
+diff --git a/subsys/net/lib/dns/resolve.c b/subsys/net/lib/dns/resolve.c
+index 09bc970661b..7f6afd73b6c 100644
+--- a/subsys/net/lib/dns/resolve.c
++++ b/subsys/net/lib/dns/resolve.c
+@@ -446,7 +446,7 @@ static bool is_server_name_found(struct dns_resolve_context *ctx,
+ 			}
+ 
+ 			if (iface_str != NULL && ctx->servers[i].if_index > 0) {
+-				char iface_name[IFNAMSIZ];
++				char iface_name[ZSOCK_IFNAMSIZ];
+ 
+ 				net_if_get_name(net_if_get_by_index(
+ 						ctx->servers[i].if_index),
+@@ -669,7 +669,7 @@ static int dns_resolve_init_locked(struct dns_resolve_context *ctx,
+ 	}
+ 
+ 	for (i = 0; servers_sa != NULL && idx < SERVER_COUNT && servers_sa[i] != NULL; i++) {
+-		char iface_str[IFNAMSIZ] = { 0 };
++		char iface_str[ZSOCK_IFNAMSIZ] = { 0 };
+ 		int found_idx;
+ 
+ 		found_idx = idx_of_server_addr(ctx, servers_sa[i],
+diff --git a/subsys/net/lib/mqtt_sn/mqtt_sn_transport_udp.c b/subsys/net/lib/mqtt_sn/mqtt_sn_transport_udp.c
+index b1b0c9229d9..f64e543a470 100644
+--- a/subsys/net/lib/mqtt_sn/mqtt_sn_transport_udp.c
++++ b/subsys/net/lib/mqtt_sn/mqtt_sn_transport_udp.c
+@@ -96,7 +96,7 @@ static int tp_udp_init(struct mqtt_sn_transport *transport)
+ 			addrm.sa_family = ZSOCK_AF_INET6;
+ 			((struct zsock_sockaddr_in6 *)&addrm)->sin6_port =
+ 				((struct zsock_sockaddr_in6 *)&udp->bcaddr)->sin6_port;
+-			memcpy(&((struct zsock_sockaddr_in6 *)&addrm)->sin6_addr, &zsock_in6addr_any,
++			memcpy(&((struct zsock_sockaddr_in6 *)&addrm)->sin6_addr, &(struct zsock_in6_addr)ZSOCK_IN6ADDR_ANY_INIT,
+ 			       sizeof(struct zsock_in6_addr));
+ 			break;
+ 		}
+diff --git a/subsys/net/lib/shell/dhcpv4.c b/subsys/net/lib/shell/dhcpv4.c
+index a88fb2144f5..12b674d2746 100644
+--- a/subsys/net/lib/shell/dhcpv4.c
++++ b/subsys/net/lib/shell/dhcpv4.c
+@@ -127,7 +127,7 @@ static void dhcpv4_lease_cb(struct net_if *iface,
+ 	char expiry_str[] = "4294967295"; /* Lease time is uint32_t, so take
+ 					   * theoretical max.
+ 					   */
+-	char iface_name[IFNAMSIZ] = "";
++	char iface_name[ZSOCK_IFNAMSIZ] = "";
+ 
+ 	if (*count == 0) {
+ 		PR("     Iface         Address\t    State\tExpiry (sec)\n");
+diff --git a/subsys/net/lib/shell/dns.c b/subsys/net/lib/shell/dns.c
+index ada8400cfef..5cd3309f70b 100644
+--- a/subsys/net/lib/shell/dns.c
++++ b/subsys/net/lib/shell/dns.c
+@@ -140,7 +140,7 @@ static void print_dns_info(const struct shell *sh,
+ 
+ 	for (i = 0; i < CONFIG_DNS_RESOLVER_MAX_SERVERS +
+ 		     DNS_MAX_MCAST_SERVERS; i++) {
+-		char iface_name[IFNAMSIZ] = { 0 };
++		char iface_name[ZSOCK_IFNAMSIZ] = { 0 };
+ 
+ 		if (ctx->servers[i].if_index > 0) {
+ 			ret = net_if_get_name(
+diff --git a/subsys/net/lib/shell/vlan.c b/subsys/net/lib/shell/vlan.c
+index b0a52afca0d..503f0426aaa 100644
+--- a/subsys/net/lib/shell/vlan.c
++++ b/subsys/net/lib/shell/vlan.c
+@@ -49,7 +49,7 @@ static void iface_vlan_cb(struct net_if *iface, void *user_data)
+ 	struct net_shell_user_data *data = user_data;
+ 	const struct shell *sh = data->sh;
+ 	int *count = data->user_data;
+-	char name[IFNAMSIZ];
++	char name[ZSOCK_IFNAMSIZ];
+ 
+ 	if (!net_eth_is_vlan_interface(iface)) {
+ 		return;
+diff --git a/subsys/net/lib/utils/addr_utils.c b/subsys/net/lib/utils/addr_utils.c
+index a5e59c6e9c1..9a917069fe8 100644
+--- a/subsys/net/lib/utils/addr_utils.c
++++ b/subsys/net/lib/utils/addr_utils.c
+@@ -35,7 +35,7 @@ int net_getaddrinfo_addr_str(const char *addr_str, const char *def_port,
+ 			     struct zsock_addrinfo **res)
+ {
+ 	const char *port;
+-	char host[NI_MAXHOST];
++	char host[ZSOCK_NI_MAXHOST];
+ 
+ 	if (addr_str == NULL) {
+ 		errno = EINVAL;
+diff --git a/subsys/net/lib/zperf/zperf_shell.c b/subsys/net/lib/zperf/zperf_shell.c
+index 7af84873bde..abb548a6466 100644
+--- a/subsys/net/lib/zperf/zperf_shell.c
++++ b/subsys/net/lib/zperf/zperf_shell.c
+@@ -396,7 +396,7 @@ static int shell_cmd_download(const struct shell *sh, size_t argc,
+ 		switch (argv[i][1]) {
+ 		case 'I':
+ 			/*
+-			 * IFNAMSIZ by default CONFIG_NET_INTERFACE_NAME_LEN
++			 * ZSOCK_IFNAMSIZ by default CONFIG_NET_INTERFACE_NAME_LEN
+ 			 * is at least 1 so no overflow risk here
+ 			 */
+ 			i++;
+@@ -405,8 +405,8 @@ static int shell_cmd_download(const struct shell *sh, size_t argc,
+ 					      "-I <interface name>\n");
+ 				return -ENOEXEC;
+ 			}
+-			(void)memset(param->if_name, 0x0, IFNAMSIZ);
+-			strncpy(param->if_name, argv[i], IFNAMSIZ - 1);
++			(void)memset(param->if_name, 0x0, ZSOCK_IFNAMSIZ);
++			strncpy(param->if_name, argv[i], ZSOCK_IFNAMSIZ - 1);
+ 
+ 			opt_cnt += 2;
+ 			break;
+@@ -1056,8 +1056,8 @@ static int shell_cmd_upload(const struct shell *sh, size_t argc,
+ 					      "-I <interface name>\n");
+ 				return -ENOEXEC;
+ 			}
+-			(void)memset(param.if_name, 0x0, IFNAMSIZ);
+-			strncpy(param.if_name, argv[i], IFNAMSIZ - 1);
++			(void)memset(param.if_name, 0x0, ZSOCK_IFNAMSIZ);
++			strncpy(param.if_name, argv[i], ZSOCK_IFNAMSIZ - 1);
+ 
+ 			opt_cnt += 2;
+ 			break;
+@@ -1309,8 +1309,8 @@ static int shell_cmd_upload2(const struct shell *sh, size_t argc,
+ 					      "-I <interface name>\n");
+ 				return -ENOEXEC;
+ 			}
+-			(void)memset(param.if_name, 0x0, IFNAMSIZ);
+-			strncpy(param.if_name, argv[i], IFNAMSIZ - 1);
++			(void)memset(param.if_name, 0x0, ZSOCK_IFNAMSIZ);
++			strncpy(param.if_name, argv[i], ZSOCK_IFNAMSIZ - 1);
+ 
+ 			opt_cnt += 2;
+ 			break;
+diff --git a/subsys/net/lib/zperf/zperf_udp_receiver.c b/subsys/net/lib/zperf/zperf_udp_receiver.c
+index d15cfcdc096..3f54e3d815a 100644
+--- a/subsys/net/lib/zperf/zperf_udp_receiver.c
++++ b/subsys/net/lib/zperf/zperf_udp_receiver.c
+@@ -50,7 +50,7 @@ static void udp_svc_handler(struct net_socket_service_event *pev);
+ 
+ NET_SOCKET_SERVICE_SYNC_DEFINE_STATIC(svc_udp, udp_svc_handler,
+ 				      SOCK_ID_MAX);
+-static char udp_server_iface_name[IFNAMSIZ];
++static char udp_server_iface_name[ZSOCK_IFNAMSIZ];
+ 
+ static inline void build_reply(struct zperf_udp_datagram *hdr,
+ 			       struct zperf_server_hdr *stat,
+@@ -535,12 +535,12 @@ int zperf_udp_download(const struct zperf_download_params *param,
+ 
+ 	if (param->if_name[0]) {
+ 		/*
+-		 * IFNAMSIZ by default CONFIG_NET_INTERFACE_NAME_LEN
++		 * ZSOCK_IFNAMSIZ by default CONFIG_NET_INTERFACE_NAME_LEN
+ 		 * is at least 1 so no overflow risk here
+ 		 */
+-		(void)memset(udp_server_iface_name, 0, IFNAMSIZ);
+-		strncpy(udp_server_iface_name, param->if_name, IFNAMSIZ);
+-		udp_server_iface_name[IFNAMSIZ - 1] = 0;
++		(void)memset(udp_server_iface_name, 0, ZSOCK_IFNAMSIZ);
++		strncpy(udp_server_iface_name, param->if_name, ZSOCK_IFNAMSIZ);
++		udp_server_iface_name[ZSOCK_IFNAMSIZ - 1] = 0;
+ 	} else {
+ 		udp_server_iface_name[0] = 0;
+ 	}
+diff --git a/subsys/net/lib/zperf/zperf_udp_uploader.c b/subsys/net/lib/zperf/zperf_udp_uploader.c
+index 6eebccdd81c..9b6b9141b7a 100644
+--- a/subsys/net/lib/zperf/zperf_udp_uploader.c
++++ b/subsys/net/lib/zperf/zperf_udp_uploader.c
+@@ -343,8 +343,8 @@ int zperf_udp_upload(const struct zperf_upload_params *param,
+ 
+ 	if (param->if_name[0]) {
+ 		(void)memset(req.ifr_name, 0, sizeof(req.ifr_name));
+-		strncpy(req.ifr_name, param->if_name, IFNAMSIZ);
+-		req.ifr_name[IFNAMSIZ - 1] = 0;
++		strncpy(req.ifr_name, param->if_name, ZSOCK_IFNAMSIZ);
++		req.ifr_name[ZSOCK_IFNAMSIZ - 1] = 0;
+ 
+ 		if (zsock_setsockopt(sock, ZSOCK_SOL_SOCKET, ZSOCK_SO_BINDTODEVICE, &req,
+ 				     sizeof(struct ifreq)) != 0) {
+diff --git a/tests/net/6lo/src/main.c b/tests/net/6lo/src/main.c
+index 8c76d39c221..08d32e02794 100644
+--- a/tests/net/6lo/src/main.c
++++ b/tests/net/6lo/src/main.c
+@@ -703,7 +703,7 @@ static struct net_6lo_data test_data_8 = {
+ 	.ipv6.tcflow = 0x0,
+ 	.ipv6.flow = 0x0,
+ 	.ipv6.len = 0,
+-	.ipv6.nexthdr = IPPROTO_ICMPV6,
++	.ipv6.nexthdr = ZSOCK_IPPROTO_ICMPV6,
+ 	.ipv6.hop_limit = 0xff,
+ 	.ipv6.src = src_sam10,
+ 	.ipv6.dst = dst_m1_dam10,
+@@ -779,7 +779,7 @@ static struct net_6lo_data test_data_12 = {
+ 	.ipv6.tcflow = 0x20,
+ 	.ipv6.flow = 0x00,
+ 	.ipv6.len = 0,
+-	.ipv6.nexthdr = IPPROTO_ICMPV6,
++	.ipv6.nexthdr = ZSOCK_IPPROTO_ICMPV6,
+ 	.ipv6.hop_limit = 0xff,
+ 	.ipv6.src = src_sac1_sam00,
+ 	.ipv6.dst = dst_m1_dam00,
+diff --git a/tests/net/checksum_offload/src/main.c b/tests/net/checksum_offload/src/main.c
+index 35a561fedea..305ea98047a 100644
+--- a/tests/net/checksum_offload/src/main.c
++++ b/tests/net/checksum_offload/src/main.c
+@@ -247,7 +247,7 @@ static void test_receiving(struct net_pkt *pkt)
+ 				udp_hdr->chksum++;
+ 			}
+ 		} else if (test_proto == ZSOCK_IPPROTO_ICMP ||
+-			   test_proto == IPPROTO_ICMPV6) {
++			   test_proto == ZSOCK_IPPROTO_ICMPV6) {
+ 			NET_PKT_DATA_ACCESS_CONTIGUOUS_DEFINE(
+ 					icmp_access, struct net_icmp_hdr);
+ 			struct net_icmp_hdr *icmp_hdr;
+@@ -294,7 +294,7 @@ static void test_fragment(struct net_pkt *pkt, bool offloaded)
+ 			chksum = get_udp_chksum(pkt);
+ 			hdr_offset += sizeof(struct net_udp_hdr);
+ 		} else if (test_proto == ZSOCK_IPPROTO_ICMP ||
+-			   test_proto == IPPROTO_ICMPV6) {
++			   test_proto == ZSOCK_IPPROTO_ICMPV6) {
+ 			chksum = get_icmp_chksum(pkt);
+ 			hdr_offset += sizeof(struct net_icmp_hdr) +
+ 				      sizeof(struct net_icmpv6_echo_req);
+@@ -356,7 +356,7 @@ static int eth_tx_offloading_disabled(const struct device *dev,
+ 		if (test_proto == ZSOCK_IPPROTO_UDP) {
+ 			chksum = get_udp_chksum(pkt);
+ 		} else if (test_proto == ZSOCK_IPPROTO_ICMP ||
+-			   test_proto == IPPROTO_ICMPV6) {
++			   test_proto == ZSOCK_IPPROTO_ICMPV6) {
+ 			chksum = get_icmp_chksum(pkt);
+ 		}
+ 
+@@ -399,7 +399,7 @@ static int eth_tx_offloading_enabled(const struct device *dev,
+ 		if (test_proto == ZSOCK_IPPROTO_UDP) {
+ 			chksum = get_udp_chksum(pkt);
+ 		} else if (test_proto == ZSOCK_IPPROTO_ICMP ||
+-			   test_proto == IPPROTO_ICMPV6) {
++			   test_proto == ZSOCK_IPPROTO_ICMPV6) {
+ 			chksum = get_icmp_chksum(pkt);
+ 		}
+ 
+@@ -1181,7 +1181,7 @@ static int icmp_handler(struct net_icmp_ctx *ctx,
+ 	 */
+ 	zassert_not_equal(icmp_hdr->chksum, 0, "Checksum is not set");
+ 
+-	if (test_proto == IPPROTO_ICMPV6) {
++	if (test_proto == ZSOCK_IPPROTO_ICMPV6) {
+ 		zassert_equal(net_calc_chksum_icmpv6(pkt), 0, "Incorrect checksum");
+ 	} else {
+ 		zassert_equal(net_calc_chksum_icmpv4(pkt), 0, "Incorrect checksum");
+diff --git a/tests/net/icmp/src/main.c b/tests/net/icmp/src/main.c
+index 2744263d8c5..f26eded639c 100644
+--- a/tests/net/icmp/src/main.c
++++ b/tests/net/icmp/src/main.c
+@@ -716,7 +716,7 @@ ZTEST(icmp_tests, test_malformed_icmpv4_echo_request_on_ipv6)
+ 	}
+ 
+ 	net_pkt_cursor_init(pkt);
+-	net_ipv6_finalize(pkt, IPPROTO_ICMPV6);
++	net_ipv6_finalize(pkt, ZSOCK_IPPROTO_ICMPV6);
+ 
+ 	if (net_try_send_data(pkt, K_NO_WAIT) != 0) {
+ 		net_pkt_unref(pkt);
+diff --git a/tests/net/ieee802154/l2/src/ieee802154_test.c b/tests/net/ieee802154/l2/src/ieee802154_test.c
+index c75dca64fa4..c86ee470622 100644
+--- a/tests/net/ieee802154/l2/src/ieee802154_test.c
++++ b/tests/net/ieee802154/l2/src/ieee802154_test.c
+@@ -394,9 +394,9 @@ static bool tear_down_security(void)
+ 
+ static int set_up_recv_socket(enum net_sock_type socket_type)
+ {
+-	struct sockaddr_ll socket_sll = {
++	struct zsock_sockaddr_ll socket_sll = {
+ 		.sll_ifindex = net_if_get_by_iface(net_iface),
+-		.sll_family = AF_PACKET,
++		.sll_family = ZSOCK_AF_PACKET,
+ 		.sll_protocol = zsock_htons(ETH_P_IEEE802154),
+ 	};
+ 	struct timeval timeo_optval = {
+@@ -411,7 +411,7 @@ static int set_up_recv_socket(enum net_sock_type socket_type)
+ 		return fd;
+ 	}
+ 
+-	if (zsock_bind(fd, (const struct zsock_sockaddr *)&socket_sll, sizeof(struct sockaddr_ll))) {
++	if (zsock_bind(fd, (const struct zsock_sockaddr *)&socket_sll, sizeof(struct zsock_sockaddr_ll))) {
+ 		NET_ERR("*** Failed to bind packet socket : %d", errno);
+ 		goto release_fd;
+ 	}
+@@ -680,10 +680,10 @@ static bool test_dgram_packet_sending(void *dst_sll, uint8_t dst_sll_halen, uint
+ {
+ 	/* tests should be run sequentially, so no need for context locking */
+ 	struct ieee802154_context *ctx = net_if_l2_data(net_iface);
+-	struct sockaddr_ll socket_sll = {.sll_ifindex = net_if_get_by_iface(net_iface),
+-					 .sll_family = AF_PACKET,
++	struct zsock_sockaddr_ll socket_sll = {.sll_ifindex = net_if_get_by_iface(net_iface),
++					 .sll_family = ZSOCK_AF_PACKET,
+ 					 .sll_protocol = zsock_htons(ETH_P_IEEE802154)};
+-	struct sockaddr_ll pkt_dst_sll = {
++	struct zsock_sockaddr_ll pkt_dst_sll = {
+ 		.sll_halen = dst_sll_halen,
+ 		.sll_protocol = zsock_htons(ETH_P_IEEE802154),
+ 	};
+@@ -696,7 +696,7 @@ static bool test_dgram_packet_sending(void *dst_sll, uint8_t dst_sll_halen, uint
+ 		goto out;
+ 	}
+ 
+-	NET_INFO("- Sending DGRAM packet via AF_PACKET socket");
++	NET_INFO("- Sending DGRAM packet via ZSOCK_AF_PACKET socket");
+ 	fd = zsock_socket(ZSOCK_AF_PACKET, ZSOCK_SOCK_DGRAM, zsock_htons(ETH_P_IEEE802154));
+ 	if (fd < 0) {
+ 		NET_ERR("*** Failed to create DGRAM socket : %d", errno);
+@@ -715,13 +715,13 @@ static bool test_dgram_packet_sending(void *dst_sll, uint8_t dst_sll_halen, uint
+ 		goto release_fd;
+ 	}
+ 
+-	if (zsock_bind(fd, (const struct zsock_sockaddr *)&socket_sll, sizeof(struct sockaddr_ll))) {
++	if (zsock_bind(fd, (const struct zsock_sockaddr *)&socket_sll, sizeof(struct zsock_sockaddr_ll))) {
+ 		NET_ERR("*** Failed to bind packet socket : %d", errno);
+ 		goto release_fd;
+ 	}
+ 
+ 	if (zsock_sendto(fd, payload, sizeof(payload), 0, (const struct zsock_sockaddr *)&pkt_dst_sll,
+-			 sizeof(struct sockaddr_ll)) != sizeof(payload)) {
++			 sizeof(struct zsock_sockaddr_ll)) != sizeof(payload)) {
+ 		NET_ERR("*** Failed to send, errno %d", errno);
+ 		goto release_fd;
+ 	}
+@@ -778,7 +778,7 @@ static bool test_dgram_packet_reception(void *src_ll_addr, uint8_t src_ll_addr_l
+ 	uint8_t payload[] = {0x01, 0x02, 0x03, 0x04};
+ 	uint16_t our_short_addr = ctx->short_addr; /* CPU byte order */
+ 	uint8_t ll_hdr_len = 0, authtag_len = 0;
+-	struct sockaddr_ll recv_src_sll = {0};
++	struct zsock_sockaddr_ll recv_src_sll = {0};
+ 	uint8_t received_payload[4] = {0};
+ 	zsock_socklen_t recv_src_sll_len;
+ 	struct net_buf *frame_buf;
+@@ -796,7 +796,7 @@ static bool test_dgram_packet_reception(void *src_ll_addr, uint8_t src_ll_addr_l
+ 		goto out;
+ 	}
+ 
+-	NET_INFO("- Receiving DGRAM packet via AF_PACKET socket");
++	NET_INFO("- Receiving DGRAM packet via ZSOCK_AF_PACKET socket");
+ 
+ 	fd = set_up_recv_socket(ZSOCK_SOCK_DGRAM);
+ 	if (fd < 0) {
+@@ -898,8 +898,8 @@ static bool test_dgram_packet_reception(void *src_ll_addr, uint8_t src_ll_addr_l
+ 		goto release_pkt;
+ 	}
+ 
+-	if (recv_src_sll_len != sizeof(struct sockaddr_ll) ||
+-	    recv_src_sll.sll_family != AF_PACKET ||
++	if (recv_src_sll_len != sizeof(struct zsock_sockaddr_ll) ||
++	    recv_src_sll.sll_family != ZSOCK_AF_PACKET ||
+ 	    recv_src_sll.sll_protocol != zsock_htons(ETH_P_IEEE802154) ||
+ 	    recv_src_sll.sll_ifindex != net_if_get_by_iface(net_iface) ||
+ 	    recv_src_sll.sll_halen != src_ll_addr_len ||
+@@ -923,14 +923,14 @@ out:
+ static bool test_raw_packet_sending(void)
+ {
+ 	/* tests should be run sequentially, so no need for context locking */
+-	struct sockaddr_ll socket_sll = {0};
++	struct zsock_sockaddr_ll socket_sll = {0};
+ 	struct ieee802154_mpdu mpdu;
+ 	struct zsock_msghdr msg = {0};
+ 	struct zsock_iovec io_vector;
+ 	bool result = false;
+ 	int fd;
+ 
+-	NET_INFO("- Sending RAW packet via AF_PACKET socket");
++	NET_INFO("- Sending RAW packet via ZSOCK_AF_PACKET socket");
+ 
+ 	fd = zsock_socket(ZSOCK_AF_PACKET, ZSOCK_SOCK_RAW, zsock_htons(ETH_P_IEEE802154));
+ 	if (fd < 0) {
+@@ -939,10 +939,10 @@ static bool test_raw_packet_sending(void)
+ 	}
+ 
+ 	socket_sll.sll_ifindex = net_if_get_by_iface(net_iface);
+-	socket_sll.sll_family = AF_PACKET;
++	socket_sll.sll_family = ZSOCK_AF_PACKET;
+ 	socket_sll.sll_protocol = zsock_htons(ETH_P_IEEE802154);
+ 
+-	if (zsock_bind(fd, (const struct zsock_sockaddr *)&socket_sll, sizeof(struct sockaddr_ll))) {
++	if (zsock_bind(fd, (const struct zsock_sockaddr *)&socket_sll, sizeof(struct zsock_sockaddr_ll))) {
+ 		NET_ERR("*** Failed to bind packet socket : %d", errno);
+ 		goto release_fd;
+ 	}
+@@ -1001,7 +1001,7 @@ static bool test_raw_packet_reception(void)
+ 
+ 	result = false;
+ 
+-	NET_INFO("- Receiving RAW packet via AF_PACKET socket");
++	NET_INFO("- Receiving RAW packet via ZSOCK_AF_PACKET socket");
+ 
+ 	fd = set_up_recv_socket(ZSOCK_SOCK_RAW);
+ 	if (fd < 0) {
+@@ -1095,10 +1095,10 @@ static bool test_recv_and_send_ack_reply(struct ieee802154_pkt_test *t)
+ 		0x00, 0x00, 0x00, 0x00, 0x00, 0x00,		/* Padding */
+ 	};
+ 	struct ieee802154_context *ctx = net_if_l2_data(net_iface);
+-	struct sockaddr_ll recv_src_sll = {0};
+-	struct sockaddr_ll socket_sll = {
++	struct zsock_sockaddr_ll recv_src_sll = {0};
++	struct zsock_sockaddr_ll socket_sll = {
+ 		.sll_ifindex = net_if_get_by_iface(net_iface),
+-		.sll_family = AF_PACKET,
++		.sll_family = ZSOCK_AF_PACKET,
+ 		.sll_protocol = zsock_htons(ETH_P_IEEE802154),
+ 	};
+ 	uint8_t received_payload[80] = {0};
+@@ -1122,7 +1122,7 @@ static bool test_recv_and_send_ack_reply(struct ieee802154_pkt_test *t)
+ 		goto out;
+ 	}
+ 
+-	if (zsock_bind(fd, (const struct zsock_sockaddr *)&socket_sll, sizeof(struct sockaddr_ll))) {
++	if (zsock_bind(fd, (const struct zsock_sockaddr *)&socket_sll, sizeof(struct zsock_sockaddr_ll))) {
+ 		NET_ERR("*** Failed to bind packet socket : %d", errno);
+ 		goto release_fd;
+ 	}
+@@ -1155,9 +1155,9 @@ static bool test_recv_and_send_ack_reply(struct ieee802154_pkt_test *t)
+ 	}
+ 
+ 	sys_memcpy_swap(mac_be, ctx->ext_addr, IEEE802154_EXT_ADDR_LENGTH);
+-	if (recv_src_sll_len != sizeof(struct sockaddr_ll) ||
++	if (recv_src_sll_len != sizeof(struct zsock_sockaddr_ll) ||
+ 	    recv_src_sll.sll_ifindex != net_if_get_by_iface(net_iface) ||
+-	    recv_src_sll.sll_family != AF_PACKET ||
++	    recv_src_sll.sll_family != ZSOCK_AF_PACKET ||
+ 	    recv_src_sll.sll_protocol != zsock_htons(ETH_P_IEEE802154) ||
+ 	    recv_src_sll.sll_halen != IEEE802154_EXT_ADDR_LENGTH ||
+ 	    memcmp(recv_src_sll.sll_addr, mac_be, IEEE802154_EXT_ADDR_LENGTH)) {
+diff --git a/tests/net/ipv6/src/main.c b/tests/net/ipv6/src/main.c
+index 80763754dd0..cc344afb3ca 100644
+--- a/tests/net/ipv6/src/main.c
++++ b/tests/net/ipv6/src/main.c
+@@ -259,7 +259,7 @@ static void inject_na_message(struct net_if *iface, struct zsock_in6_addr *src,
+ 	uint8_t na_tlla_opt[] = { 0x02, 0x01, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa, 0xaa };
+ 
+ 	pkt = net_pkt_alloc_with_buffer(iface, TEST_MSG_SIZE, ZSOCK_AF_INET6,
+-					IPPROTO_ICMPV6, K_NO_WAIT);
++					ZSOCK_IPPROTO_ICMPV6, K_NO_WAIT);
+ 	zassert_not_null(pkt, "Failed to allocate packet");
+ 
+ 	net_pkt_set_ipv6_hop_limit(pkt, NET_IPV6_ND_HOP_LIMIT);
+@@ -281,7 +281,7 @@ static void inject_na_message(struct net_if *iface, struct zsock_in6_addr *src,
+ 	zassert_ok(net_pkt_write(pkt, na_tlla_opt, sizeof(na_tlla_opt)));
+ 
+ 	net_pkt_cursor_init(pkt);
+-	net_ipv6_finalize(pkt, IPPROTO_ICMPV6);
++	net_ipv6_finalize(pkt, ZSOCK_IPPROTO_ICMPV6);
+ 
+ 	/* Fill L2 header. */
+ 	net_buf_push_mem(pkt->frags, &hdr, sizeof(struct net_eth_hdr));
+diff --git a/tests/net/ipv6_fragment/src/main.c b/tests/net/ipv6_fragment/src/main.c
+index efc62d10b40..b05cdd7892a 100644
+--- a/tests/net/ipv6_fragment/src/main.c
++++ b/tests/net/ipv6_fragment/src/main.c
+@@ -2247,7 +2247,7 @@ static int handle_ipv6_echo_reply(struct net_icmp_ctx *ctx,
+ 	zassert_mem_equal(&hdr->flow, &ipv6_reass_frag1[offsetof(struct net_ipv6_hdr, flow)],
+ 			  sizeof(hdr->flow), "IPv6 header flow mismatch");
+ 	zassert_equal(hdr->len, expected_icmpv6_length, "IPv6 header len mismatch");
+-	zassert_equal(hdr->nexthdr, IPPROTO_ICMPV6, "IPv6 header nexthdr mismatch");
++	zassert_equal(hdr->nexthdr, ZSOCK_IPPROTO_ICMPV6, "IPv6 header nexthdr mismatch");
+ 	zassert_equal(hdr->hop_limit, ipv6_reass_frag1[offsetof(struct net_ipv6_hdr, hop_limit)],
+ 		      "IPv6 header hop_limit mismatch");
+ 	zassert_mem_equal(hdr->src, &ipv6_reass_frag1[offsetof(struct net_ipv6_hdr, src)],
+diff --git a/tests/net/lib/dns_sd/src/main.c b/tests/net/lib/dns_sd/src/main.c
+index ca52ee0ea42..e3729c1e083 100644
+--- a/tests/net/lib/dns_sd/src/main.c
++++ b/tests/net/lib/dns_sd/src/main.c
+@@ -719,7 +719,7 @@ ZTEST(dns_sd, test_setup_dst_addr)
+ 	zassert_true(xx >= 0, "Create IPV4 udp socket failed");
+ 
+ 	zassert_equal(-EPFNOSUPPORT,
+-		      setup_dst_addr(xx, AF_PACKET, NULL, 0, &dst, &dst_len), "");
++		      setup_dst_addr(xx, ZSOCK_AF_PACKET, NULL, 0, &dst, &dst_len), "");
+ }
+ 
+ /** test for @ref dns_sd_is_service_type_enumeration */
+diff --git a/tests/net/lib/http_server/tls/src/main.c b/tests/net/lib/http_server/tls/src/main.c
+index 3cd51ef59c3..712360db2fb 100644
+--- a/tests/net/lib/http_server/tls/src/main.c
++++ b/tests/net/lib/http_server/tls/src/main.c
+@@ -133,7 +133,7 @@ static void test_tls(void)
+ {
+ 	int ret, recv_len;
+ 	int client_fd;
+-	int proto = IPPROTO_TCP;
++	int proto = ZSOCK_IPPROTO_TCP;
+ 	size_t len;
+ 	char *ptr;
+ 	const char *data;
+@@ -148,12 +148,12 @@ static void test_tls(void)
+ 
+ 	/* set the common protocol for both client and server */
+ 	if (IS_ENABLED(CONFIG_NET_SOCKETS_SOCKOPT_TLS)) {
+-		proto = IPPROTO_TLS_1_2;
++		proto = ZSOCK_IPPROTO_TLS_1_2;
+ 	}
+ 
+ 	zassert_ok(http_server_start(), "Failed to start the server");
+ 
+-	ret = socket(AF_INET, SOCK_STREAM, proto);
++	ret = socket(ZSOCK_AF_INET, ZSOCK_SOCK_STREAM, proto);
+ 	zassert_not_equal(ret, -1, "failed to create client socket (%d)", errno);
+ 	client_fd = ret;
+ 
+@@ -177,16 +177,16 @@ static void test_tls(void)
+ 		zassert_not_equal(ret, -1, "failed to set TLS_HOSTNAME (%d)", errno);
+ 	}
+ 
+-	sa.sin_family = AF_INET;
++	sa.sin_family = ZSOCK_AF_INET;
+ 	sa.sin_port = htons(SERVER_PORT);
+ 
+-	ret = inet_pton(AF_INET, MY_IPV4_ADDR, &sa.sin_addr.s_addr);
++	ret = inet_pton(ZSOCK_AF_INET, MY_IPV4_ADDR, &sa.sin_addr.s_addr);
+ 	zassert_not_equal(-1, ret, "inet_pton() failed (%d)", errno);
+ 	zassert_not_equal(ret, 0, "%s is not a valid IPv4 address", MY_IPV4_ADDR);
+ 	zassert_equal(ret, 1, "inet_pton() failed to convert %s", MY_IPV4_ADDR);
+ 
+ 	memset(buf, '\0', sizeof(buf));
+-	ptr = (char *)inet_ntop(AF_INET, &sa.sin_addr, buf, sizeof(buf));
++	ptr = (char *)inet_ntop(ZSOCK_AF_INET, &sa.sin_addr, buf, sizeof(buf));
+ 	zassert_not_equal(ptr, NULL, "inet_ntop() failed (%d)", errno);
+ 
+ 	ret = connect(client_fd, (struct sockaddr *)&sa, sizeof(sa));
+diff --git a/tests/net/lib/mqtt/v3_1_1/mqtt_client/src/main.c b/tests/net/lib/mqtt/v3_1_1/mqtt_client/src/main.c
+index 04e21df694a..39f5bc0db4a 100644
+--- a/tests/net/lib/mqtt/v3_1_1/mqtt_client/src/main.c
++++ b/tests/net/lib/mqtt/v3_1_1/mqtt_client/src/main.c
+@@ -712,7 +712,7 @@ ZTEST(mqtt_client, test_mqtt_connect)
+ 
+ ZTEST(mqtt_client, test_mqtt_connect_with_binding)
+ {
+-	char name_buf[IFNAMSIZ] = { 0 };
++	char name_buf[ZSOCK_IFNAMSIZ] = { 0 };
+ 	int ret = net_if_get_name(net_if_get_first_by_type(&NET_L2_GET_NAME(DUMMY)),
+ 				  name_buf, sizeof(name_buf));
+ 
+diff --git a/tests/net/mld/src/main.c b/tests/net/mld/src/main.c
+index be304353d03..4bc3b8dd35f 100644
+--- a/tests/net/mld/src/main.c
++++ b/tests/net/mld/src/main.c
+@@ -434,7 +434,7 @@ static void send_query(struct net_if *iface)
+ 
+ 	/* router alert opt + icmpv6 reserved space + mldv2 mcast record */
+ 	pkt = net_pkt_alloc_with_buffer(iface, 144, ZSOCK_AF_INET6,
+-					IPPROTO_ICMPV6, K_FOREVER);
++					ZSOCK_IPPROTO_ICMPV6, K_FOREVER);
+ 	zassert_not_null(pkt, "Cannot allocate pkt");
+ 
+ 	net_pkt_set_ipv6_hop_limit(pkt, 1); /* RFC 3810 ch 7.4 */
+@@ -442,7 +442,7 @@ static void send_query(struct net_if *iface)
+ 	zassert_false(ret, "Cannot create ipv6 pkt");
+ 
+ 	/* Add hop-by-hop option and router alert option, RFC 3810 ch 5. */
+-	ret = net_pkt_write_u8(pkt, IPPROTO_ICMPV6);
++	ret = net_pkt_write_u8(pkt, ZSOCK_IPPROTO_ICMPV6);
+ 	zassert_false(ret, "Failed to write");
+ 	ret = net_pkt_write_u8(pkt, 0); /* length (0 means 8 bytes) */
+ 	zassert_false(ret, "Failed to write");
+@@ -483,7 +483,7 @@ static void send_query(struct net_if *iface)
+ 	zassert_false(ret, "Failed to write");
+ 
+ 	net_pkt_cursor_init(pkt);
+-	ret = net_ipv6_finalize(pkt, IPPROTO_ICMPV6);
++	ret = net_ipv6_finalize(pkt, ZSOCK_IPPROTO_ICMPV6);
+ 	zassert_false(ret, "Failed to finalize ipv6 packet");
+ 
+ 	net_pkt_cursor_init(pkt);
+diff --git a/tests/net/net_pkt/src/main.c b/tests/net/net_pkt/src/main.c
+index 88238914629..0be07f31984 100644
+--- a/tests/net/net_pkt/src/main.c
++++ b/tests/net/net_pkt/src/main.c
+@@ -217,10 +217,10 @@ ZTEST(net_pkt_test_suite, test_net_pkt_allocate_with_buffer)
+ 	zassert_true(atomic_get(&pkt->atomic_ref) == 0,
+ 		     "Pkt not properly unreferenced");
+ 
+-	/* e) - with a zero payload but AF_PACKET family
++	/* e) - with a zero payload but ZSOCK_AF_PACKET family
+ 	 */
+ 	pkt = net_pkt_alloc_with_buffer(eth_if, 0,
+-					AF_PACKET, 0, K_NO_WAIT);
++					ZSOCK_AF_PACKET, 0, K_NO_WAIT);
+ 	zassert_true(pkt != NULL, "Pkt not allocated");
+ 
+ 	/* Did we get the requested size? */
+diff --git a/tests/net/pmtu/src/main.c b/tests/net/pmtu/src/main.c
+index 389ffae7483..9b672ea4981 100644
+--- a/tests/net/pmtu/src/main.c
++++ b/tests/net/pmtu/src/main.c
+@@ -545,7 +545,7 @@ static int create_icmpv6_ptb(struct net_if *iface,
+ 	}
+ 
+ 	net_pkt_cursor_init(ptb_pkt);
+-	net_ipv6_finalize(ptb_pkt, IPPROTO_ICMPV6);
++	net_ipv6_finalize(ptb_pkt, ZSOCK_IPPROTO_ICMPV6);
+ 
+ 	net_pkt_set_iface(ptb_pkt, iface);
+ 
+diff --git a/tests/net/socket/af_inet_raw/src/main.c b/tests/net/socket/af_inet_raw/src/main.c
+index 76c97dbdf98..4bae0cd6c03 100644
+--- a/tests/net/socket/af_inet_raw/src/main.c
++++ b/tests/net/socket/af_inet_raw/src/main.c
+@@ -189,7 +189,7 @@ static void prepare_udp_sock_2(zsock_sa_family_t family)
+ 
+ static void prepare_packet_sock(uint16_t proto)
+ {
+-	struct sockaddr_ll addr = { 0 };
++	struct zsock_sockaddr_ll addr = { 0 };
+ 	struct timeval optval = {
+ 		.tv_usec = 100000,
+ 	};
+diff --git a/tests/net/socket/af_packet/src/main.c b/tests/net/socket/af_packet/src/main.c
+index 6dcd8bfe2d1..184d8ce310d 100644
+--- a/tests/net/socket/af_packet/src/main.c
++++ b/tests/net/socket/af_packet/src/main.c
+@@ -29,7 +29,7 @@ LOG_MODULE_REGISTER(net_test, CONFIG_NET_SOCKETS_LOG_LEVEL);
+  *     - test_raw_sock_sendto_no_proto_unbound_no_addr
+  *     - test_raw_sock_sendmsg_no_proto
+  *
+- *   * (ZSOCK_AF_PACKET, ZSOCK_SOCK_DGRAM, 0) - User needs to supply `struct sockaddr_ll` with
++ *   * (ZSOCK_AF_PACKET, ZSOCK_SOCK_DGRAM, 0) - User needs to supply `struct zsock_sockaddr_ll` with
+  *     all the relevant fields filled so that L2 header can be constructed:
+  *     - test_dgram_sock_sendto_no_proto_bound
+  *     - test_dgram_sock_sendto_no_proto_unbound
+@@ -44,7 +44,7 @@ LOG_MODULE_REGISTER(net_test, CONFIG_NET_SOCKETS_LOG_LEVEL);
+  *     - test_raw_sock_sendmsg_proto_wildcard
+  *
+  *   * (ZSOCK_AF_PACKET, ZSOCK_SOCK_DGRAM, <protocol>) -  L2 header is constructed according
+- *     to protocol and `struct sockaddr_ll`:
++ *     to protocol and `struct zsock_sockaddr_ll`:
+  *     - test_dgram_sock_sendto_proto_wildcard
+  *     - test_dgram_sock_sendto_proto_match
+  *     - test_dgram_sock_sendmsg_proto_wildcard
+@@ -202,7 +202,7 @@ static void setup_packet_socket(int *sock, int type, int proto)
+ 
+ static void bind_packet_socket(int sock, struct net_if *iface)
+ {
+-	struct sockaddr_ll addr;
++	struct zsock_sockaddr_ll addr;
+ 	int ret;
+ 
+ 	memset(&addr, 0, sizeof(addr));
+@@ -282,7 +282,7 @@ ZTEST(socket_packet, test_raw_packet_sockets_udp_send)
+ {
+ 	uint8_t data_to_send[] = { 10, 11, 12, 13, 14, 15, 16, 17, 18, 19 };
+ 	uint8_t data_to_receive[sizeof(data_to_send) + HDR_SIZE];
+-	struct sockaddr_ll src;
++	struct zsock_sockaddr_ll src;
+ 	struct zsock_sockaddr_in sockaddr;
+ 	int ret;
+ 	zsock_socklen_t addrlen;
+@@ -347,8 +347,8 @@ ZTEST(socket_packet, test_packet_sockets)
+ 
+ ZTEST(socket_packet, test_packet_sockets_dgram)
+ {
+-	zsock_socklen_t addrlen = sizeof(struct sockaddr_ll);
+-	struct sockaddr_ll dst, src;
++	zsock_socklen_t addrlen = sizeof(struct zsock_sockaddr_ll);
++	struct zsock_sockaddr_ll dst, src;
+ 	int ret;
+ 
+ 	prepare_packet_socket(&packet_sock_1, ud.first, ZSOCK_SOCK_DGRAM, zsock_htons(ETH_P_TSN));
+@@ -360,7 +360,7 @@ ZTEST(socket_packet, test_packet_sockets_dgram)
+ 	memcpy(dst.sll_addr, lladdr1, sizeof(lladdr1));
+ 
+ 	ret = zsock_sendto(packet_sock_2, test_payload, sizeof(test_payload), 0,
+-			   (const struct zsock_sockaddr *)&dst, sizeof(struct sockaddr_ll));
++			   (const struct zsock_sockaddr *)&dst, sizeof(struct zsock_sockaddr_ll));
+ 	zassert_equal(ret, sizeof(test_payload), "Cannot send all data (%d)",
+ 		      -errno);
+ 
+@@ -377,10 +377,10 @@ ZTEST(socket_packet, test_packet_sockets_dgram)
+ 		      "Cannot receive all data (%d vs %zd) (%d)",
+ 		      ret, sizeof(test_payload), -errno);
+ 
+-	zassert_equal(addrlen, sizeof(struct sockaddr_ll),
++	zassert_equal(addrlen, sizeof(struct zsock_sockaddr_ll),
+ 		      "Invalid address length (%d)", addrlen);
+ 
+-	struct sockaddr_ll src_expected = {
++	struct zsock_sockaddr_ll src_expected = {
+ 		.sll_family = ZSOCK_AF_PACKET,
+ 		.sll_protocol = dst.sll_protocol,
+ 		.sll_ifindex = net_if_get_by_iface(ud.first),
+@@ -401,7 +401,7 @@ ZTEST(socket_packet, test_packet_sockets_dgram)
+ 	 * data in socket 1
+ 	 */
+ 	ret = zsock_sendto(packet_sock_2, test_payload, sizeof(test_payload), 0,
+-			   (const struct zsock_sockaddr *)&dst, sizeof(struct sockaddr_ll));
++			   (const struct zsock_sockaddr *)&dst, sizeof(struct zsock_sockaddr_ll));
+ 	zassert_equal(ret, sizeof(test_payload), "Cannot send all data (%d)",
+ 		      -errno);
+ 
+@@ -419,10 +419,10 @@ ZTEST(socket_packet, test_packet_sockets_dgram)
+ 			     0, (struct zsock_sockaddr *)&src, &addrlen);
+ 	zassert_equal(ret, sizeof(test_payload), "Cannot receive all data (%d)",
+ 		      -errno);
+-	zassert_equal(addrlen, sizeof(struct sockaddr_ll),
++	zassert_equal(addrlen, sizeof(struct zsock_sockaddr_ll),
+ 		      "Invalid address length (%d)", addrlen);
+ 
+-	src_expected = (struct sockaddr_ll){
++	src_expected = (struct zsock_sockaddr_ll){
+ 		.sll_family = ZSOCK_AF_PACKET,
+ 		.sll_protocol = dst.sll_protocol,
+ 		.sll_ifindex = net_if_get_by_iface(ud.second),
+@@ -450,7 +450,7 @@ ZTEST(socket_packet, test_packet_sockets_dgram)
+ 	payload_ip_length[5] = 1;
+ 
+ 	ret = zsock_sendto(packet_sock_2, payload_ip_length, sizeof(payload_ip_length), 0,
+-			   (const struct zsock_sockaddr *)&dst, sizeof(struct sockaddr_ll));
++			   (const struct zsock_sockaddr *)&dst, sizeof(struct zsock_sockaddr_ll));
+ 	zassert_equal(ret, sizeof(payload_ip_length), "Cannot send all data (%d)", -errno);
+ 
+ 	memset(&src, 0, sizeof(src));
+@@ -465,8 +465,8 @@ ZTEST(socket_packet, test_packet_sockets_dgram)
+ 
+ ZTEST(socket_packet, test_raw_and_dgram_socket_exchange)
+ {
+-	zsock_socklen_t addrlen = sizeof(struct sockaddr_ll);
+-	struct sockaddr_ll dst, src;
++	zsock_socklen_t addrlen = sizeof(struct zsock_sockaddr_ll);
++	struct zsock_sockaddr_ll dst, src;
+ 	int ret;
+ 	const uint8_t expected_payload_raw[] = {
+ 		0x02, 0x02, 0x02, 0x02, 0x02, 0x02, /* Dst ll addr */
+@@ -492,7 +492,7 @@ ZTEST(socket_packet, test_raw_and_dgram_socket_exchange)
+ 	/* ZSOCK_SOCK_DGRAM to ZSOCK_SOCK_RAW */
+ 
+ 	ret = zsock_sendto(packet_sock_1, test_payload, sizeof(test_payload), 0,
+-			   (const struct zsock_sockaddr *)&dst, sizeof(struct sockaddr_ll));
++			   (const struct zsock_sockaddr *)&dst, sizeof(struct zsock_sockaddr_ll));
+ 	zassert_equal(ret, sizeof(test_payload), "Cannot send all data (%d)",
+ 		      -errno);
+ 
+@@ -515,7 +515,7 @@ ZTEST(socket_packet, test_raw_and_dgram_socket_exchange)
+ 	/* ZSOCK_SOCK_RAW to ZSOCK_SOCK_DGRAM */
+ 
+ 	ret = zsock_sendto(packet_sock_2, send_payload_raw, sizeof(send_payload_raw), 0,
+-			   (const struct zsock_sockaddr *)&dst, sizeof(struct sockaddr_ll));
++			   (const struct zsock_sockaddr *)&dst, sizeof(struct zsock_sockaddr_ll));
+ 	zassert_equal(ret, sizeof(send_payload_raw), "Cannot send all data (%d)",
+ 		      -errno);
+ 
+@@ -532,8 +532,8 @@ ZTEST(socket_packet, test_raw_and_dgram_socket_exchange)
+ 
+ ZTEST(socket_packet, test_raw_and_dgram_socket_recv)
+ {
+-	zsock_socklen_t addrlen = sizeof(struct sockaddr_ll);
+-	struct sockaddr_ll dst, src;
++	zsock_socklen_t addrlen = sizeof(struct zsock_sockaddr_ll);
++	struct zsock_sockaddr_ll dst, src;
+ 	int ret;
+ 	const uint8_t expected_payload_raw[] = {
+ 		0x02, 0x02, 0x02, 0x02, 0x02, 0x02, /* Dst ll addr */
+@@ -552,7 +552,7 @@ ZTEST(socket_packet, test_raw_and_dgram_socket_recv)
+ 	memcpy(dst.sll_addr, lladdr2, sizeof(lladdr1));
+ 
+ 	ret = zsock_sendto(packet_sock_1, test_payload, sizeof(test_payload), 0,
+-			   (const struct zsock_sockaddr *)&dst, sizeof(struct sockaddr_ll));
++			   (const struct zsock_sockaddr *)&dst, sizeof(struct zsock_sockaddr_ll));
+ 	zassert_equal(ret, sizeof(test_payload), "Cannot send all data (%d)",
+ 		      -errno);
+ 
+@@ -638,10 +638,10 @@ static void prepare_test_packet(int sock_type, uint16_t proto,
+ 	*pkt_len = offset;
+ }
+ 
+-static void prepare_test_dst_lladdr(struct sockaddr_ll *ll_dst, uint16_t proto,
++static void prepare_test_dst_lladdr(struct zsock_sockaddr_ll *ll_dst, uint16_t proto,
+ 				    uint8_t *ll_addr, struct net_if *iface)
+ {
+-	memset(ll_dst, 0, sizeof(struct sockaddr_ll));
++	memset(ll_dst, 0, sizeof(struct zsock_sockaddr_ll));
+ 
+ 	ll_dst->sll_family = ZSOCK_AF_PACKET;
+ 	ll_dst->sll_protocol = zsock_htons(proto);
+@@ -657,7 +657,7 @@ static void test_sendto_common(int sock_type, int proto, bool do_bind,
+ 			       bool success)
+ {
+ 	struct zsock_sockaddr_in ip_src;
+-	struct sockaddr_ll ll_dst;
++	struct zsock_sockaddr_ll ll_dst;
+ 	uint16_t pkt_len;
+ 	int ret;
+ 
+@@ -674,7 +674,7 @@ static void test_sendto_common(int sock_type, int proto, bool do_bind,
+ 
+ 	ret = zsock_sendto(packet_sock_1, tx_buf, pkt_len, 0,
+ 			   set_dst_addr ? (struct zsock_sockaddr *)&ll_dst : NULL,
+-			   set_dst_addr ? sizeof(struct sockaddr_ll) : 0);
++			   set_dst_addr ? sizeof(struct zsock_sockaddr_ll) : 0);
+ 	if (success) {
+ 		zassert_not_equal(ret, -1, "Failed to send (%d)", errno);
+ 		zassert_equal(ret, pkt_len, "Invalid data length sent (%d/%d)", ret, pkt_len);
+@@ -715,7 +715,7 @@ ZTEST(socket_packet, test_raw_sock_sendto_no_proto_unbound_no_addr)
+ static void test_sendmsg_common(int sock_type, int proto)
+ {
+ 	struct zsock_sockaddr_in ip_src;
+-	struct sockaddr_ll ll_dst;
++	struct zsock_sockaddr_ll ll_dst;
+ 	struct zsock_iovec io_vector;
+ 	struct zsock_msghdr msg = { 0 };
+ 	uint16_t pkt_len;
+@@ -808,7 +808,7 @@ ZTEST(socket_packet, test_dgram_sock_sendmsg_proto_match)
+ 
+ static void test_recv_common(int sock_type, int proto, bool success)
+ {
+-	struct sockaddr_ll ll_dst;
++	struct zsock_sockaddr_ll ll_dst;
+ 	uint16_t offset = 0;
+ 	uint16_t pkt_len;
+ 	int ret;
+@@ -823,7 +823,7 @@ static void test_recv_common(int sock_type, int proto, bool success)
+ 
+ 	ret = zsock_sendto(packet_sock_1, tx_buf, pkt_len, 0,
+ 			   (struct zsock_sockaddr *)&ll_dst,
+-			   sizeof(struct sockaddr_ll));
++			   sizeof(struct zsock_sockaddr_ll));
+ 	zassert_not_equal(ret, -1, "Failed to send (%d)", errno);
+ 	zassert_equal(ret, pkt_len, "Invalid data length sent (%d/%d)", ret, pkt_len);
+ 
+@@ -871,10 +871,10 @@ ZTEST(socket_packet, test_raw_sock_recv_proto_wildcard)
+ 	test_recv_common(ZSOCK_SOCK_RAW, ETH_P_ALL, true);
+ }
+ 
+-static void validate_recvfrom_addr(struct sockaddr_ll *ll_rx, zsock_socklen_t addrlen,
++static void validate_recvfrom_addr(struct zsock_sockaddr_ll *ll_rx, zsock_socklen_t addrlen,
+ 				   int iface, uint8_t *lladdr)
+ {
+-	zassert_equal(addrlen, sizeof(struct sockaddr_ll),
++	zassert_equal(addrlen, sizeof(struct zsock_sockaddr_ll),
+ 		      "Invalid address length (%u)", addrlen);
+ 	zassert_equal(ll_rx->sll_family, ZSOCK_AF_PACKET, "Invalid family");
+ 	zassert_equal(ll_rx->sll_protocol, zsock_htons(ETH_P_IP), "Invalid protocol");
+@@ -887,8 +887,8 @@ static void validate_recvfrom_addr(struct sockaddr_ll *ll_rx, zsock_socklen_t ad
+ 
+ static void test_recvfrom_common(int sock_type, int proto)
+ {
+-	struct sockaddr_ll ll_dst;
+-	struct sockaddr_ll ll_rx = { 0 };
++	struct zsock_sockaddr_ll ll_dst;
++	struct zsock_sockaddr_ll ll_rx = { 0 };
+ 	zsock_socklen_t addrlen = sizeof(ll_rx);
+ 	uint16_t pkt_len;
+ 	uint16_t offset = 0;
+@@ -904,7 +904,7 @@ static void test_recvfrom_common(int sock_type, int proto)
+ 
+ 	ret = zsock_sendto(packet_sock_1, tx_buf, pkt_len, 0,
+ 			   (struct zsock_sockaddr *)&ll_dst,
+-			   sizeof(struct sockaddr_ll));
++			   sizeof(struct zsock_sockaddr_ll));
+ 	zassert_not_equal(ret, -1, "Failed to send (%d)", errno);
+ 	zassert_equal(ret, pkt_len, "Invalid data length sent (%d/%d)", ret, pkt_len);
+ 
+@@ -922,7 +922,7 @@ static void test_recvfrom_common(int sock_type, int proto)
+ 		      ret, pkt_len);
+ 	zassert_mem_equal(rx_buf, tx_buf + offset, pkt_len,
+ 			  "Invalid payload received");
+-	zassert_equal(addrlen, sizeof(struct sockaddr_ll),
++	zassert_equal(addrlen, sizeof(struct zsock_sockaddr_ll),
+ 		      "Invalid address length (%u)", addrlen);
+ 	validate_recvfrom_addr(&ll_rx, addrlen, net_if_get_by_iface(ud.first),
+ 			       lladdr2);
+@@ -948,8 +948,8 @@ static void test_recvfrom_unbound_round(int tx_sock, int rx_sock, int sock_type,
+ 					uint8_t *dst_addr, struct net_if *dst_iface)
+ {
+ 	uint16_t offset = (sock_type == ZSOCK_SOCK_DGRAM) ? sizeof(struct net_eth_hdr) : 0;
+-	struct sockaddr_ll ll_dst;
+-	struct sockaddr_ll ll_rx = { 0 };
++	struct zsock_sockaddr_ll ll_dst;
++	struct zsock_sockaddr_ll ll_rx = { 0 };
+ 	zsock_socklen_t addrlen = sizeof(ll_rx);
+ 	uint16_t pkt_len;
+ 	int ret;
+@@ -959,7 +959,7 @@ static void test_recvfrom_unbound_round(int tx_sock, int rx_sock, int sock_type,
+ 
+ 	ret = zsock_sendto(packet_sock_1, tx_buf, pkt_len, 0,
+ 			   (struct zsock_sockaddr *)&ll_dst,
+-			   sizeof(struct sockaddr_ll));
++			   sizeof(struct zsock_sockaddr_ll));
+ 	zassert_not_equal(ret, -1, "Failed to send (%d)", errno);
+ 	zassert_equal(ret, pkt_len, "Invalid data length sent (%d/%d)", ret, pkt_len);
+ 
+@@ -979,7 +979,7 @@ static void test_recvfrom_unbound_round(int tx_sock, int rx_sock, int sock_type,
+ 
+ static void test_recvfrom_common_unbound(int sock_type, bool bind_iface_0)
+ {
+-	struct sockaddr_ll ll_dst;
++	struct zsock_sockaddr_ll ll_dst;
+ 	static uint8_t dummy_lladdr[] = { 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f };
+ 	uint16_t pkt_len;
+ 	int ret;
+@@ -1008,7 +1008,7 @@ static void test_recvfrom_common_unbound(int sock_type, bool bind_iface_0)
+ 	prepare_test_packet(sock_type, ETH_P_IP, lladdr2, dummy_lladdr, &pkt_len);
+ 	ret = zsock_sendto(packet_sock_2, tx_buf, pkt_len, 0,
+ 			   (struct zsock_sockaddr *)&ll_dst,
+-			   sizeof(struct sockaddr_ll));
++			   sizeof(struct zsock_sockaddr_ll));
+ 	zassert_not_equal(ret, -1, "Failed to send (%d)", errno);
+ 	zassert_equal(ret, pkt_len, "Invalid data length sent (%d/%d)", ret, pkt_len);
+ 
+@@ -1044,7 +1044,7 @@ ZTEST(socket_packet, test_dgram_sock_recvfrom_proto_wildcard_bound_iface_0)
+ 
+ static void test_recv_common_bound_other_iface(int sock_type)
+ {
+-	struct sockaddr_ll ll_dst;
++	struct zsock_sockaddr_ll ll_dst;
+ 	struct zsock_sockaddr_in ip_src;
+ 	uint16_t pkt_len;
+ 	int ret;
+@@ -1060,7 +1060,7 @@ static void test_recv_common_bound_other_iface(int sock_type)
+ 
+ 	ret = zsock_sendto(packet_sock_1, tx_buf, pkt_len, 0,
+ 			   (struct zsock_sockaddr *)&ll_dst,
+-			   sizeof(struct sockaddr_ll));
++			   sizeof(struct zsock_sockaddr_ll));
+ 	zassert_not_equal(ret, -1, "Failed to send (%d)", errno);
+ 	zassert_equal(ret, pkt_len, "Invalid data length sent (%d/%d)", ret, pkt_len);
+ 
+@@ -1087,7 +1087,7 @@ ZTEST(socket_packet, test_dgram_sock_recv_proto_wildcard_bound_other_iface)
+ ZTEST(socket_packet, test_raw_dgram_udp_socks_recv)
+ {
+ 	struct zsock_sockaddr_in ip_src;
+-	struct sockaddr_ll ll_dst;
++	struct zsock_sockaddr_ll ll_dst;
+ 	uint8_t offset = 0;
+ 	uint16_t pkt_len;
+ 	int ret;
+@@ -1105,7 +1105,7 @@ ZTEST(socket_packet, test_raw_dgram_udp_socks_recv)
+ 
+ 	ret = zsock_sendto(packet_sock_1, tx_buf, pkt_len, 0,
+ 			   (struct zsock_sockaddr *)&ll_dst,
+-			   sizeof(struct sockaddr_ll));
++			   sizeof(struct zsock_sockaddr_ll));
+ 	zassert_not_equal(ret, -1, "Failed to send (%d)", errno);
+ 	zassert_equal(ret, pkt_len, "Invalid data length sent (%d/%d)", ret, pkt_len);
+ 
+diff --git a/tests/net/socket/register/src/main.c b/tests/net/socket/register/src/main.c
+index 51d1fba7c9a..e14ab9bb5b4 100644
+--- a/tests/net/socket/register/src/main.c
++++ b/tests/net/socket/register/src/main.c
+@@ -117,14 +117,14 @@ static const struct test_result {
+ 		/* 12 */
+ 		.test_case.family = ZSOCK_AF_INET6,
+ 		.test_case.type = ZSOCK_SOCK_STREAM,
+-		.test_case.proto = IPPROTO_TLS_1_2,
++		.test_case.proto = ZSOCK_IPPROTO_TLS_1_2,
+ 		.result = 0,
+ 	},
+ 	{
+ 		/* 13 */
+ 		.test_case.family = ZSOCK_AF_INET,
+ 		.test_case.type = ZSOCK_SOCK_DGRAM,
+-		.test_case.proto = IPPROTO_DTLS_1_0,
++		.test_case.proto = ZSOCK_IPPROTO_DTLS_1_0,
+ 		.result = 0,
+ 	},
+ 	{
+@@ -191,8 +191,8 @@ static int socket_test_ok(int family, int type, int proto)
+ static bool is_tls(int family, int type, int proto)
+ {
+ 	if ((family == ZSOCK_AF_INET || family == ZSOCK_AF_INET6) &&
+-	    (((proto >= IPPROTO_TLS_1_0) && (proto <= IPPROTO_TLS_1_2)) ||
+-	     (proto >= IPPROTO_DTLS_1_0 && proto <= IPPROTO_DTLS_1_2))) {
++	    (((proto >= ZSOCK_IPPROTO_TLS_1_0) && (proto <= ZSOCK_IPPROTO_TLS_1_2)) ||
++	     (proto >= ZSOCK_IPPROTO_DTLS_1_0 && proto <= ZSOCK_IPPROTO_DTLS_1_2))) {
+ 		return true;
+ 	}
+ 
+diff --git a/tests/net/socket/socket_helpers.h b/tests/net/socket/socket_helpers.h
+index 09006a7e109..5e1814688a1 100644
+--- a/tests/net/socket/socket_helpers.h
++++ b/tests/net/socket/socket_helpers.h
+@@ -6,56 +6,55 @@
+ 
+ #include <zephyr/ztest_assert.h>
+ 
++#include <zephyr/net/socket.h>
+ #if defined(CONFIG_POSIX_NETWORKING)
+ #include <sys/socket.h>
+ #include <arpa/inet.h>
+ #include <unistd.h>
+-#else
+-#include <zephyr/net/socket.h>
+ #endif
+ 
+ #define clear_buf(buf) memset(buf, 0, sizeof(buf))
+ 
+-static inline int prepare_listen_sock_udp_v4(struct sockaddr_in *addr)
++static inline int prepare_listen_sock_udp_v4(struct zsock_sockaddr_in *addr)
+ {
+ 	int ret, sock;
+ 
+ 	zassert_not_null(addr, "null sockaddr");
+ 
+-	ret = zsock_socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
++	ret = zsock_socket(ZSOCK_AF_INET, ZSOCK_SOCK_DGRAM, ZSOCK_IPPROTO_UDP);
+ 	zassert_true(ret >= 0, "socket open failed");
+ 
+ 	sock = ret;
+ 
+-	zassert_equal(addr->sin_family, AF_INET, "Invalid family");
++	zassert_equal(addr->sin_family, ZSOCK_AF_INET, "Invalid family");
+ 
+-	ret = zsock_bind(sock, (struct sockaddr *)addr, sizeof(*addr));
++	ret = zsock_bind(sock, (struct zsock_sockaddr *)addr, sizeof(*addr));
+ 	zassert_equal(ret, 0, "bind failed (%d/%d)", ret, errno);
+ 
+ 	return sock;
+ }
+ 
+-static inline int prepare_listen_sock_udp_v6(struct sockaddr_in6 *addr)
++static inline int prepare_listen_sock_udp_v6(struct zsock_sockaddr_in6 *addr)
+ {
+ 	int ret, sock;
+ 
+ 	zassert_not_null(addr, "null sockaddr");
+ 
+-	ret = zsock_socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP);
++	ret = zsock_socket(ZSOCK_AF_INET6, ZSOCK_SOCK_DGRAM, ZSOCK_IPPROTO_UDP);
+ 	zassert_true(ret >= 0, "socket open failed");
+ 
+ 	sock = ret;
+ 
+-	zassert_equal(addr->sin6_family, AF_INET6, "Invalid family");
++	zassert_equal(addr->sin6_family, ZSOCK_AF_INET6, "Invalid family");
+ 
+-	ret = zsock_bind(sock, (struct sockaddr *)addr, sizeof(*addr));
++	ret = zsock_bind(sock, (struct zsock_sockaddr *)addr, sizeof(*addr));
+ 	zassert_equal(ret, 0, "bind failed (%d/%d)", ret, errno);
+ 
+ 	return sock;
+ }
+ 
+ static inline void prepare_sock_udp_v4(const char *addr, uint16_t port,
+-				       int *sock, struct sockaddr_in *sockaddr)
++				       int *sock, struct zsock_sockaddr_in *sockaddr)
+ {
+ 	int rv;
+ 
+@@ -63,17 +62,17 @@ static inline void prepare_sock_udp_v4(const char *addr, uint16_t port,
+ 	zassert_not_null(sock, "null sock");
+ 	zassert_not_null(sockaddr, "null sockaddr");
+ 
+-	*sock = zsock_socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
++	*sock = zsock_socket(ZSOCK_AF_INET, ZSOCK_SOCK_DGRAM, ZSOCK_IPPROTO_UDP);
+ 	zassert_true(*sock >= 0, "socket open failed");
+ 
+-	sockaddr->sin_family = AF_INET;
+-	sockaddr->sin_port = htons(port);
+-	rv = zsock_inet_pton(AF_INET, addr, &sockaddr->sin_addr);
++	sockaddr->sin_family = ZSOCK_AF_INET;
++	sockaddr->sin_port = zsock_htons(port);
++	rv = zsock_inet_pton(ZSOCK_AF_INET, addr, &sockaddr->sin_addr);
+ 	zassert_equal(rv, 1, "inet_pton failed");
+ }
+ 
+ static inline void prepare_sock_udp_v6(const char *addr, uint16_t port,
+-				       int *sock, struct sockaddr_in6 *sockaddr)
++				       int *sock, struct zsock_sockaddr_in6 *sockaddr)
+ {
+ 	int rv;
+ 
+@@ -81,18 +80,18 @@ static inline void prepare_sock_udp_v6(const char *addr, uint16_t port,
+ 	zassert_not_null(sock, "null sock");
+ 	zassert_not_null(sockaddr, "null sockaddr");
+ 
+-	*sock = zsock_socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP);
++	*sock = zsock_socket(ZSOCK_AF_INET6, ZSOCK_SOCK_DGRAM, ZSOCK_IPPROTO_UDP);
+ 	zassert_true(*sock >= 0, "socket open failed");
+ 
+ 	(void)memset(sockaddr, 0, sizeof(*sockaddr));
+-	sockaddr->sin6_family = AF_INET6;
+-	sockaddr->sin6_port = htons(port);
+-	rv = zsock_inet_pton(AF_INET6, addr, &sockaddr->sin6_addr);
++	sockaddr->sin6_family = ZSOCK_AF_INET6;
++	sockaddr->sin6_port = zsock_htons(port);
++	rv = zsock_inet_pton(ZSOCK_AF_INET6, addr, &sockaddr->sin6_addr);
+ 	zassert_equal(rv, 1, "inet_pton failed");
+ }
+ 
+ static inline void prepare_sock_tcp_v4(const char *addr, uint16_t port,
+-				       int *sock, struct sockaddr_in *sockaddr)
++				       int *sock, struct zsock_sockaddr_in *sockaddr)
+ {
+ 	int rv;
+ 
+@@ -100,17 +99,17 @@ static inline void prepare_sock_tcp_v4(const char *addr, uint16_t port,
+ 	zassert_not_null(sock, "null sock");
+ 	zassert_not_null(sockaddr, "null sockaddr");
+ 
+-	*sock = zsock_socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
++	*sock = zsock_socket(ZSOCK_AF_INET, ZSOCK_SOCK_STREAM, ZSOCK_IPPROTO_TCP);
+ 	zassert_true(*sock >= 0, "socket open failed");
+ 
+-	sockaddr->sin_family = AF_INET;
+-	sockaddr->sin_port = htons(port);
+-	rv = zsock_inet_pton(AF_INET, addr, &sockaddr->sin_addr);
++	sockaddr->sin_family = ZSOCK_AF_INET;
++	sockaddr->sin_port = zsock_htons(port);
++	rv = zsock_inet_pton(ZSOCK_AF_INET, addr, &sockaddr->sin_addr);
+ 	zassert_equal(rv, 1, "inet_pton failed");
+ }
+ 
+ static inline void prepare_sock_tcp_v6(const char *addr, uint16_t port,
+-				       int *sock, struct sockaddr_in6 *sockaddr)
++				       int *sock, struct zsock_sockaddr_in6 *sockaddr)
+ {
+ 	int rv;
+ 
+@@ -118,17 +117,17 @@ static inline void prepare_sock_tcp_v6(const char *addr, uint16_t port,
+ 	zassert_not_null(sock, "null sock");
+ 	zassert_not_null(sockaddr, "null sockaddr");
+ 
+-	*sock = zsock_socket(AF_INET6, SOCK_STREAM, IPPROTO_TCP);
++	*sock = zsock_socket(ZSOCK_AF_INET6, ZSOCK_SOCK_STREAM, ZSOCK_IPPROTO_TCP);
+ 	zassert_true(*sock >= 0, "socket open failed");
+ 
+-	sockaddr->sin6_family = AF_INET6;
+-	sockaddr->sin6_port = htons(port);
+-	rv = zsock_inet_pton(AF_INET6, addr, &sockaddr->sin6_addr);
++	sockaddr->sin6_family = ZSOCK_AF_INET6;
++	sockaddr->sin6_port = zsock_htons(port);
++	rv = zsock_inet_pton(ZSOCK_AF_INET6, addr, &sockaddr->sin6_addr);
+ 	zassert_equal(rv, 1, "inet_pton failed");
+ }
+ 
+ static inline void prepare_sock_tls_v4(const char *addr, uint16_t port,
+-				       int *sock, struct sockaddr_in *sockaddr,
++				       int *sock, struct zsock_sockaddr_in *sockaddr,
+ 				       enum net_ip_protocol_secure proto)
+ {
+ 	int rv;
+@@ -137,17 +136,17 @@ static inline void prepare_sock_tls_v4(const char *addr, uint16_t port,
+ 	zassert_not_null(sock, "null sock");
+ 	zassert_not_null(sockaddr, "null sockaddr");
+ 
+-	*sock = zsock_socket(AF_INET, SOCK_STREAM, proto);
++	*sock = zsock_socket(ZSOCK_AF_INET, ZSOCK_SOCK_STREAM, proto);
+ 	zassert_true(*sock >= 0, "socket open failed");
+ 
+-	sockaddr->sin_family = AF_INET;
+-	sockaddr->sin_port = htons(port);
+-	rv = zsock_inet_pton(AF_INET, addr, &sockaddr->sin_addr);
++	sockaddr->sin_family = ZSOCK_AF_INET;
++	sockaddr->sin_port = zsock_htons(port);
++	rv = zsock_inet_pton(ZSOCK_AF_INET, addr, &sockaddr->sin_addr);
+ 	zassert_equal(rv, 1, "inet_pton failed");
+ }
+ 
+ static inline void prepare_sock_tls_v6(const char *addr, uint16_t port,
+-				       int *sock, struct sockaddr_in6 *sockaddr,
++				       int *sock, struct zsock_sockaddr_in6 *sockaddr,
+ 				       enum net_ip_protocol_secure proto)
+ {
+ 	int rv;
+@@ -156,17 +155,17 @@ static inline void prepare_sock_tls_v6(const char *addr, uint16_t port,
+ 	zassert_not_null(sock, "null sock");
+ 	zassert_not_null(sockaddr, "null sockaddr");
+ 
+-	*sock = zsock_socket(AF_INET6, SOCK_STREAM, proto);
++	*sock = zsock_socket(ZSOCK_AF_INET6, ZSOCK_SOCK_STREAM, proto);
+ 	zassert_true(*sock >= 0, "socket open failed");
+ 
+-	sockaddr->sin6_family = AF_INET6;
+-	sockaddr->sin6_port = htons(port);
+-	rv = zsock_inet_pton(AF_INET6, addr, &sockaddr->sin6_addr);
++	sockaddr->sin6_family = ZSOCK_AF_INET6;
++	sockaddr->sin6_port = zsock_htons(port);
++	rv = zsock_inet_pton(ZSOCK_AF_INET6, addr, &sockaddr->sin6_addr);
+ 	zassert_equal(rv, 1, "inet_pton failed");
+ }
+ 
+ static inline void prepare_sock_dtls_v4(const char *addr, uint16_t port,
+-					int *sock, struct sockaddr_in *sockaddr,
++					int *sock, struct zsock_sockaddr_in *sockaddr,
+ 					enum net_ip_protocol_secure proto)
+ {
+ 	int rv;
+@@ -175,17 +174,17 @@ static inline void prepare_sock_dtls_v4(const char *addr, uint16_t port,
+ 	zassert_not_null(sock, "null sock");
+ 	zassert_not_null(sockaddr, "null sockaddr");
+ 
+-	*sock = zsock_socket(AF_INET, SOCK_DGRAM, proto);
++	*sock = zsock_socket(ZSOCK_AF_INET, ZSOCK_SOCK_DGRAM, proto);
+ 	zassert_true(*sock >= 0, "socket open failed");
+ 
+-	sockaddr->sin_family = AF_INET;
+-	sockaddr->sin_port = htons(port);
+-	rv = zsock_inet_pton(AF_INET, addr, &sockaddr->sin_addr);
++	sockaddr->sin_family = ZSOCK_AF_INET;
++	sockaddr->sin_port = zsock_htons(port);
++	rv = zsock_inet_pton(ZSOCK_AF_INET, addr, &sockaddr->sin_addr);
+ 	zassert_equal(rv, 1, "inet_pton failed");
+ }
+ 
+ static inline void prepare_sock_dtls_v6(const char *addr, uint16_t port,
+-					int *sock, struct sockaddr_in6 *sockaddr,
++					int *sock, struct zsock_sockaddr_in6 *sockaddr,
+ 					enum net_ip_protocol_secure proto)
+ {
+ 	int rv;
+@@ -194,11 +193,11 @@ static inline void prepare_sock_dtls_v6(const char *addr, uint16_t port,
+ 	zassert_not_null(sock, "null sock");
+ 	zassert_not_null(sockaddr, "null sockaddr");
+ 
+-	*sock = zsock_socket(AF_INET6, SOCK_DGRAM, proto);
++	*sock = zsock_socket(ZSOCK_AF_INET6, ZSOCK_SOCK_DGRAM, proto);
+ 	zassert_true(*sock >= 0, "socket open failed");
+ 
+-	sockaddr->sin6_family = AF_INET6;
+-	sockaddr->sin6_port = htons(port);
+-	rv = zsock_inet_pton(AF_INET6, addr, &sockaddr->sin6_addr);
++	sockaddr->sin6_family = ZSOCK_AF_INET6;
++	sockaddr->sin6_port = zsock_htons(port);
++	rv = zsock_inet_pton(ZSOCK_AF_INET6, addr, &sockaddr->sin6_addr);
+ 	zassert_equal(rv, 1, "inet_pton failed");
+ }
+diff --git a/tests/net/socket/socketpair/src/expected_failures.c b/tests/net/socket/socketpair/src/expected_failures.c
+index 5557259b7ff..80aaa109b19 100644
+--- a/tests/net/socket/socketpair/src/expected_failures.c
++++ b/tests/net/socket/socketpair/src/expected_failures.c
+@@ -35,7 +35,7 @@ ZTEST_USER_F(net_socketpair, test_expected_failures)
+ 	zassert_equal(errno, EPROTOTYPE,
+ 				  "errno should be EPROTOTYPE with bad socket type");
+ 
+-	res = zsock_socketpair(ZSOCK_AF_UNIX, ZSOCK_SOCK_STREAM, IPPROTO_TLS_1_0, fixture->sv);
++	res = zsock_socketpair(ZSOCK_AF_UNIX, ZSOCK_SOCK_STREAM, ZSOCK_IPPROTO_TLS_1_0, fixture->sv);
+ 	if (res != -1) {
+ 		for (int i = 0; i < 2; ++i) {
+ 			zassert_ok(zsock_close(fixture->sv[i]));
+diff --git a/tests/net/socket/tls/src/main.c b/tests/net/socket/tls/src/main.c
+index 5440a6b5f29..1a7fdd27e13 100644
+--- a/tests/net/socket/tls/src/main.c
++++ b/tests/net/socket/tls/src/main.c
+@@ -212,8 +212,8 @@ ZTEST(net_socket_tls, test_so_type)
+ 	int optval;
+ 	zsock_socklen_t optlen = sizeof(optval);
+ 
+-	prepare_sock_tls_v4(MY_IPV4_ADDR, ANY_PORT, &sock1, &bind_addr4, IPPROTO_TLS_1_2);
+-	prepare_sock_tls_v6(MY_IPV6_ADDR, ANY_PORT, &sock2, &bind_addr6, IPPROTO_TLS_1_2);
++	prepare_sock_tls_v4(MY_IPV4_ADDR, ANY_PORT, &sock1, &bind_addr4, ZSOCK_IPPROTO_TLS_1_2);
++	prepare_sock_tls_v6(MY_IPV6_ADDR, ANY_PORT, &sock2, &bind_addr6, ZSOCK_IPPROTO_TLS_1_2);
+ 
+ 	rv = zsock_getsockopt(sock1, ZSOCK_SOL_SOCKET, ZSOCK_SO_TYPE, &optval, &optlen);
+ 	zassert_equal(rv, 0, "getsockopt failed (%d)", errno);
+@@ -237,18 +237,18 @@ ZTEST(net_socket_tls, test_so_protocol)
+ 	int optval;
+ 	zsock_socklen_t optlen = sizeof(optval);
+ 
+-	prepare_sock_tls_v4(MY_IPV4_ADDR, ANY_PORT, &sock1, &bind_addr4, IPPROTO_TLS_1_2);
+-	prepare_sock_tls_v6(MY_IPV6_ADDR, ANY_PORT, &sock2, &bind_addr6, IPPROTO_TLS_1_1);
++	prepare_sock_tls_v4(MY_IPV4_ADDR, ANY_PORT, &sock1, &bind_addr4, ZSOCK_IPPROTO_TLS_1_2);
++	prepare_sock_tls_v6(MY_IPV6_ADDR, ANY_PORT, &sock2, &bind_addr6, ZSOCK_IPPROTO_TLS_1_1);
+ 
+ 	rv = zsock_getsockopt(sock1, ZSOCK_SOL_SOCKET, ZSOCK_SO_PROTOCOL, &optval, &optlen);
+ 	zassert_equal(rv, 0, "getsockopt failed (%d)", errno);
+-	zassert_equal(optval, IPPROTO_TLS_1_2,
++	zassert_equal(optval, ZSOCK_IPPROTO_TLS_1_2,
+ 		      "getsockopt got invalid protocol");
+ 	zassert_equal(optlen, sizeof(optval), "getsockopt got invalid size");
+ 
+ 	rv = zsock_getsockopt(sock2, ZSOCK_SOL_SOCKET, ZSOCK_SO_PROTOCOL, &optval, &optlen);
+ 	zassert_equal(rv, 0, "getsockopt failed (%d)", errno);
+-	zassert_equal(optval, IPPROTO_TLS_1_1,
++	zassert_equal(optval, ZSOCK_IPPROTO_TLS_1_1,
+ 		      "getsockopt got invalid protocol");
+ 	zassert_equal(optlen, sizeof(optval), "getsockopt got invalid size");
+ 
+@@ -320,17 +320,17 @@ static void test_prepare_tls_connection(zsock_sa_family_t family)
+ 	if (family == ZSOCK_AF_INET6) {
+ 		prepare_sock_tls_v6(MY_IPV6_ADDR, ANY_PORT, &c_sock,
+ 				    (struct zsock_sockaddr_in6 *)&c_saddr,
+-				    IPPROTO_TLS_1_2);
++				    ZSOCK_IPPROTO_TLS_1_2);
+ 		prepare_sock_tls_v6(MY_IPV6_ADDR, ANY_PORT, &s_sock,
+ 				    (struct zsock_sockaddr_in6 *)&s_saddr,
+-				    IPPROTO_TLS_1_2);
++				    ZSOCK_IPPROTO_TLS_1_2);
+ 	} else {
+ 		prepare_sock_tls_v4(MY_IPV4_ADDR, ANY_PORT, &c_sock,
+ 				    (struct zsock_sockaddr_in *)&c_saddr,
+-				    IPPROTO_TLS_1_2);
++				    ZSOCK_IPPROTO_TLS_1_2);
+ 		prepare_sock_tls_v4(MY_IPV4_ADDR, ANY_PORT, &s_sock,
+ 				    (struct zsock_sockaddr_in *)&s_saddr,
+-				    IPPROTO_TLS_1_2);
++				    ZSOCK_IPPROTO_TLS_1_2);
+ 	}
+ 
+ 	test_config_psk(s_sock, c_sock);
+@@ -369,17 +369,17 @@ static void test_prepare_dtls_connection(zsock_sa_family_t family)
+ 	if (family == ZSOCK_AF_INET6) {
+ 		prepare_sock_dtls_v6(MY_IPV6_ADDR, ANY_PORT, &c_sock,
+ 				     (struct zsock_sockaddr_in6 *)&c_saddr,
+-				     IPPROTO_DTLS_1_2);
++				     ZSOCK_IPPROTO_DTLS_1_2);
+ 		prepare_sock_dtls_v6(MY_IPV6_ADDR, ANY_PORT, &s_sock,
+ 				     (struct zsock_sockaddr_in6 *)&s_saddr,
+-				     IPPROTO_DTLS_1_2);
++				     ZSOCK_IPPROTO_DTLS_1_2);
+ 	} else {
+ 		prepare_sock_dtls_v4(MY_IPV4_ADDR, ANY_PORT, &c_sock,
+ 				     (struct zsock_sockaddr_in *)&c_saddr,
+-				     IPPROTO_DTLS_1_2);
++				     ZSOCK_IPPROTO_DTLS_1_2);
+ 		prepare_sock_dtls_v4(MY_IPV4_ADDR, ANY_PORT, &s_sock,
+ 				     (struct zsock_sockaddr_in *)&s_saddr,
+-				     IPPROTO_DTLS_1_2);
++				     ZSOCK_IPPROTO_DTLS_1_2);
+ 	}
+ 
+ 	test_config_psk(s_sock, c_sock);
+@@ -826,7 +826,7 @@ ZTEST(net_socket_tls, test_close_while_accept)
+ 	zsock_socklen_t addrlen = sizeof(addr);
+ 	struct close_data close_work_data;
+ 
+-	prepare_sock_tls_v6(MY_IPV6_ADDR, ANY_PORT, &s_sock, &s_saddr, IPPROTO_TLS_1_2);
++	prepare_sock_tls_v6(MY_IPV6_ADDR, ANY_PORT, &s_sock, &s_saddr, ZSOCK_IPPROTO_TLS_1_2);
+ 
+ 	test_config_psk(s_sock, -1);
+ 
+@@ -880,7 +880,7 @@ ZTEST(net_socket_tls, test_connect_timeout)
+ 	int ret;
+ 
+ 	prepare_sock_tls_v6(MY_IPV6_ADDR, ANY_PORT, &c_sock, &c_saddr,
+-			    IPPROTO_TLS_1_2);
++			    ZSOCK_IPPROTO_TLS_1_2);
+ 	test_config_psk(-1, c_sock);
+ 
+ 	s_saddr.sin6_family = ZSOCK_AF_INET6;
+@@ -909,7 +909,7 @@ ZTEST(net_socket_tls, test_connect_closed_port)
+ 	int ret;
+ 
+ 	prepare_sock_tls_v6(MY_IPV6_ADDR, ANY_PORT, &c_sock, &c_saddr,
+-			    IPPROTO_TLS_1_2);
++			    ZSOCK_IPPROTO_TLS_1_2);
+ 	test_config_psk(-1, c_sock);
+ 
+ 	s_saddr.sin6_family = ZSOCK_AF_INET6;
+@@ -998,7 +998,7 @@ ZTEST(net_socket_tls, test_connect_invalid_handshake_data)
+ 	struct zsock_sockaddr_in6 s_saddr;
+ 
+ 	prepare_sock_tls_v6(MY_IPV6_ADDR, ANY_PORT, &c_sock, &c_saddr,
+-			    IPPROTO_TLS_1_2);
++			    ZSOCK_IPPROTO_TLS_1_2);
+ 	test_config_psk(-1, c_sock);
+ 	test_prepare_fake_tcp_server(&server_data, ZSOCK_AF_INET6, &s_sock,
+ 				     (struct zsock_sockaddr *)&s_saddr, true);
+@@ -1025,7 +1025,7 @@ ZTEST(net_socket_tls, test_connect_no_handshake_data)
+ 	struct zsock_sockaddr s_saddr;
+ 
+ 	prepare_sock_tls_v6(MY_IPV6_ADDR, ANY_PORT, &c_sock, &c_saddr,
+-			    IPPROTO_TLS_1_2);
++			    ZSOCK_IPPROTO_TLS_1_2);
+ 	test_config_psk(-1, c_sock);
+ 	test_prepare_fake_tcp_server(&server_data, ZSOCK_AF_INET6, &s_sock,
+ 				     (struct zsock_sockaddr *)&s_saddr, false);
+@@ -1048,7 +1048,7 @@ ZTEST(net_socket_tls, test_accept_non_block)
+ 	struct zsock_sockaddr_in6 s_saddr;
+ 
+ 	prepare_sock_tls_v6(MY_IPV6_ADDR, SERVER_PORT, &s_sock, &s_saddr,
+-			    IPPROTO_TLS_1_2);
++			    ZSOCK_IPPROTO_TLS_1_2);
+ 
+ 	test_config_psk(s_sock, -1);
+ 	test_fcntl(s_sock, F_SETFL, O_NONBLOCK);
+@@ -1071,7 +1071,7 @@ ZTEST(net_socket_tls, test_accept_invalid_handshake_data)
+ 	struct zsock_sockaddr_in6 c_saddr;
+ 
+ 	prepare_sock_tls_v6(MY_IPV6_ADDR, ANY_PORT, &s_sock, &s_saddr,
+-			    IPPROTO_TLS_1_2);
++			    ZSOCK_IPPROTO_TLS_1_2);
+ 	prepare_sock_tcp_v6(MY_IPV6_ADDR, ANY_PORT, &c_sock, &c_saddr);
+ 
+ 	test_config_psk(s_sock, -1);
+@@ -1865,9 +1865,9 @@ static void test_bad_cred_common(bool test_dtls)
+ 				      sizeof(bad_psk)), "Failed to add psk");
+ 
+ 	if (test_dtls) {
+-		s_sock = zsock_socket(ZSOCK_AF_INET, ZSOCK_SOCK_DGRAM, IPPROTO_DTLS_1_2);
++		s_sock = zsock_socket(ZSOCK_AF_INET, ZSOCK_SOCK_DGRAM, ZSOCK_IPPROTO_DTLS_1_2);
+ 	} else {
+-		s_sock = zsock_socket(ZSOCK_AF_INET, ZSOCK_SOCK_STREAM, IPPROTO_TLS_1_2);
++		s_sock = zsock_socket(ZSOCK_AF_INET, ZSOCK_SOCK_STREAM, ZSOCK_IPPROTO_TLS_1_2);
+ 	}
+ 
+ 	zassert_true(s_sock >= 0, "socket open failed");
+diff --git a/tests/net/socket/tls_configurations/src/main.c b/tests/net/socket/tls_configurations/src/main.c
+index e17cb77a7f3..d725a05e241 100644
+--- a/tests/net/socket/tls_configurations/src/main.c
++++ b/tests/net/socket/tls_configurations/src/main.c
+@@ -90,14 +90,14 @@ static int create_socket(void)
+ 	int ret = 0;
+ 	struct sockaddr_in addr;
+ 
+-	addr.sin_family = AF_INET;
++	addr.sin_family = ZSOCK_AF_INET;
+ 	addr.sin_port = htons(CONFIG_SERVER_PORT);
+-	inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
++	inet_pton(ZSOCK_AF_INET, "127.0.0.1", &addr.sin_addr);
+ 
+ #if defined(CONFIG_MBEDTLS_SSL_PROTO_TLS1_3)
+-	socket_fd = socket(addr.sin_family, SOCK_STREAM, IPPROTO_TLS_1_3);
++	socket_fd = socket(addr.sin_family, ZSOCK_SOCK_STREAM, ZSOCK_IPPROTO_TLS_1_3);
+ #else
+-	socket_fd = socket(addr.sin_family, SOCK_STREAM, IPPROTO_TLS_1_2);
++	socket_fd = socket(addr.sin_family, ZSOCK_SOCK_STREAM, ZSOCK_IPPROTO_TLS_1_2);
+ #endif
+ 	if (socket_fd < 0) {
+ 		LOG_ERR("Failed to create TLS socket (%d)", errno);
+@@ -138,7 +138,7 @@ static int create_socket(void)
+ 
+ 	/* Prepare file descriptor for polling */
+ 	fds[0].fd = socket_fd;
+-	fds[0].events = POLLIN;
++	fds[0].events = ZSOCK_POLLIN;
+ 
+ 	return ret;
+ }
+diff --git a/tests/net/socket/tls_ext/src/main.c b/tests/net/socket/tls_ext/src/main.c
+index 36d6f211a87..cbc05194ee1 100644
+--- a/tests/net/socket/tls_ext/src/main.c
++++ b/tests/net/socket/tls_ext/src/main.c
+@@ -155,9 +155,9 @@ static void server_thread_fn(void *arg0, void *arg1, void *arg2)
+ 
+ 	int r;
+ 	int client_fd;
+-	socklen_t addrlen;
++	zsock_socklen_t addrlen;
+ 	char addrstr[INET_ADDRSTRLEN];
+-	struct sockaddr_in sa;
++	struct zsock_sockaddr_in sa;
+ 	char *addrstrp;
+ 
+ 	k_thread_name_set(k_current_get(), "server");
+@@ -169,39 +169,39 @@ static void server_thread_fn(void *arg0, void *arg1, void *arg2)
+ 
+ 	NET_DBG("Accepting client connection..");
+ 	k_sem_give(&server_sem);
+-	r = accept(server_fd, (struct sockaddr *)&sa, &addrlen);
++	r = zsock_accept(server_fd, (struct zsock_sockaddr *)&sa, &addrlen);
+ 	if (expect_failure) {
+-		zassert_equal(r, -1, "accept() should've failed");
++		zassert_equal(r, -1, "zsock_accept() should've failed");
+ 		return;
+ 	}
+-	zassert_not_equal(r, -1, "accept() failed (%d)", r);
++	zassert_not_equal(r, -1, "zsock_accept() failed (%d)", r);
+ 	client_fd = r;
+ 
+ 	memset(addrstr, '\0', sizeof(addrstr));
+-	addrstrp = (char *)inet_ntop(AF_INET, &sa.sin_addr,
++	addrstrp = (char *)zsock_inet_ntop(ZSOCK_AF_INET, &sa.sin_addr,
+ 				     addrstr, sizeof(addrstr));
+-	zassert_not_equal(addrstrp, NULL, "inet_ntop() failed (%d)", errno);
++	zassert_not_equal(addrstrp, NULL, "zsock_inet_ntop() failed (%d)", errno);
+ 
+ 	NET_DBG("accepted connection from [%s]:%d as fd %d",
+-		addrstr, ntohs(sa.sin_port), client_fd);
++		addrstr, zsock_ntohs(sa.sin_port), client_fd);
+ 
+ 	if (echo) {
+-		NET_DBG("calling recv()");
+-		r = recv(client_fd, addrstr, sizeof(addrstr), 0);
+-		zassert_not_equal(r, -1, "recv() failed (%d)", errno);
++		NET_DBG("calling zsock_recv()");
++		r = zsock_recv(client_fd, addrstr, sizeof(addrstr), 0);
++		zassert_not_equal(r, -1, "zsock_recv() failed (%d)", errno);
+ 		zassert_equal(r, SECRET_SIZE, "expected: %zu actual: %d",
+ 			      SECRET_SIZE, r);
+ 
+-		NET_DBG("calling send()");
+-		r = send(client_fd, SECRET, SECRET_SIZE, 0);
+-		zassert_not_equal(r, -1, "send() failed (%d)", errno);
++		NET_DBG("calling zsock_send()");
++		r = zsock_send(client_fd, SECRET, SECRET_SIZE, 0);
++		zassert_not_equal(r, -1, "zsock_send() failed (%d)", errno);
+ 		zassert_equal(r, SECRET_SIZE, "expected: %zu actual: %d",
+ 			      SECRET_SIZE, r);
+ 	}
+ 
+ 	NET_DBG("closing client fd");
+-	r = close(client_fd);
+-	zassert_not_equal(r, -1, "close() failed on the server fd (%d)", errno);
++	r = zsock_close(client_fd);
++	zassert_not_equal(r, -1, "zsock_close() failed on the server fd (%d)", errno);
+ }
+ 
+ static int test_configure_server(k_tid_t *server_thread_id, int peer_verify,
+@@ -219,7 +219,7 @@ static int test_configure_server(k_tid_t *server_thread_id, int peer_verify,
+ 	char addrstr[INET_ADDRSTRLEN];
+ 	const sec_tag_t *sec_tag_list;
+ 	size_t sec_tag_list_size;
+-	struct sockaddr_in sa;
++	struct zsock_sockaddr_in sa;
+ 	const int yes = true;
+ 	char *addrstrp;
+ 	int server_fd;
+@@ -228,11 +228,11 @@ static int test_configure_server(k_tid_t *server_thread_id, int peer_verify,
+ 	k_sem_init(&server_sem, 0, 1);
+ 
+ 	NET_DBG("Creating server socket");
+-	r = socket(AF_INET, SOCK_STREAM, IPPROTO_TLS_1_2);
+-	zassert_not_equal(r, -1, "failed to create server socket (%d)", errno);
++	r = zsock_socket(ZSOCK_AF_INET, ZSOCK_SOCK_STREAM, ZSOCK_IPPROTO_TLS_1_2);
++	zassert_not_equal(r, -1, "failed to create server zsock_socket (%d)", errno);
+ 	server_fd = r;
+ 
+-	r = setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
++	r = zsock_setsockopt(server_fd, ZSOCK_SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+ 	zassert_not_equal(r, -1, "failed to set SO_REUSEADDR (%d)", errno);
+ 
+ 	switch (peer_verify) {
+@@ -245,7 +245,7 @@ static int test_configure_server(k_tid_t *server_thread_id, int peer_verify,
+ 		sec_tag_list = server_tag_list_verify;
+ 		sec_tag_list_size = sizeof(server_tag_list_verify);
+ 
+-		r = setsockopt(server_fd, SOL_TLS, TLS_PEER_VERIFY,
++		r = zsock_setsockopt(server_fd, SOL_TLS, TLS_PEER_VERIFY,
+ 			       &peer_verify, sizeof(peer_verify));
+ 		zassert_not_equal(r, -1, "failed to set TLS_PEER_VERIFY (%d)",
+ 				  errno);
+@@ -256,33 +256,33 @@ static int test_configure_server(k_tid_t *server_thread_id, int peer_verify,
+ 		return -1;
+ 	}
+ 
+-	r = setsockopt(server_fd, SOL_TLS, TLS_SEC_TAG_LIST,
++	r = zsock_setsockopt(server_fd, SOL_TLS, TLS_SEC_TAG_LIST,
+ 		       sec_tag_list, sec_tag_list_size);
+ 	zassert_not_equal(r, -1, "failed to set TLS_SEC_TAG_LIST (%d)", errno);
+ 
+-	r = setsockopt(server_fd, SOL_TLS, TLS_HOSTNAME, "localhost",
++	r = zsock_setsockopt(server_fd, SOL_TLS, TLS_HOSTNAME, "localhost",
+ 		       sizeof("localhost"));
+ 	zassert_not_equal(r, -1, "failed to set TLS_HOSTNAME (%d)", errno);
+ 
+ 	memset(&sa, 0, sizeof(sa));
+ 	/* The server listens on all network interfaces */
+ 	sa.sin_addr.s_addr = INADDR_ANY;
+-	sa.sin_family = AF_INET;
+-	sa.sin_port = htons(PORT);
++	sa.sin_family = ZSOCK_AF_INET;
++	sa.sin_port = zsock_htons(PORT);
+ 
+-	r = bind(server_fd, (struct sockaddr *)&sa, sizeof(sa));
+-	zassert_not_equal(r, -1, "failed to bind (%d)", errno);
++	r = zsock_bind(server_fd, (struct zsock_sockaddr *)&sa, sizeof(sa));
++	zassert_not_equal(r, -1, "failed to zsock_bind (%d)", errno);
+ 
+-	r = listen(server_fd, 1);
+-	zassert_not_equal(r, -1, "failed to listen (%d)", errno);
++	r = zsock_listen(server_fd, 1);
++	zassert_not_equal(r, -1, "failed to zsock_listen (%d)", errno);
+ 
+ 	memset(addrstr, '\0', sizeof(addrstr));
+-	addrstrp = (char *)inet_ntop(AF_INET, &sa.sin_addr,
++	addrstrp = (char *)zsock_inet_ntop(ZSOCK_AF_INET, &sa.sin_addr,
+ 				     addrstr, sizeof(addrstr));
+-	zassert_not_equal(addrstrp, NULL, "inet_ntop() failed (%d)", errno);
++	zassert_not_equal(addrstrp, NULL, "zsock_inet_ntop() failed (%d)", errno);
+ 
+ 	NET_DBG("listening on [%s]:%d as fd %d",
+-		addrstr, ntohs(sa.sin_port), server_fd);
++		addrstr, zsock_ntohs(sa.sin_port), server_fd);
+ 
+ 	NET_DBG("Creating server thread");
+ 	*server_thread_id = k_thread_create(&server_thread, server_stack,
+@@ -298,7 +298,7 @@ static int test_configure_server(k_tid_t *server_thread_id, int peer_verify,
+ 	return server_fd;
+ }
+ 
+-static int test_configure_client(struct sockaddr_in *sa, bool own_cert,
++static int test_configure_client(struct zsock_sockaddr_in *sa, bool own_cert,
+ 				 const char *hostname)
+ {
+ 	static const sec_tag_t client_tag_list_verify_none[] = {
+@@ -320,8 +320,8 @@ static int test_configure_client(struct sockaddr_in *sa, bool own_cert,
+ 	k_thread_name_set(k_current_get(), "client");
+ 
+ 	NET_DBG("Creating client socket");
+-	r = socket(AF_INET, SOCK_STREAM, IPPROTO_TLS_1_2);
+-	zassert_not_equal(r, -1, "failed to create client socket (%d)", errno);
++	r = zsock_socket(ZSOCK_AF_INET, ZSOCK_SOCK_STREAM, ZSOCK_IPPROTO_TLS_1_2);
++	zassert_not_equal(r, -1, "failed to create client zsock_socket (%d)", errno);
+ 	client_fd = r;
+ 
+ 	if (own_cert) {
+@@ -332,28 +332,28 @@ static int test_configure_client(struct sockaddr_in *sa, bool own_cert,
+ 		sec_tag_list_size = sizeof(client_tag_list_verify_none);
+ 	}
+ 
+-	r = setsockopt(client_fd, SOL_TLS, TLS_SEC_TAG_LIST,
++	r = zsock_setsockopt(client_fd, SOL_TLS, TLS_SEC_TAG_LIST,
+ 		       sec_tag_list, sec_tag_list_size);
+ 	zassert_not_equal(r, -1, "failed to set TLS_SEC_TAG_LIST (%d)", errno);
+ 
+-	r = setsockopt(client_fd, SOL_TLS, TLS_HOSTNAME, hostname,
++	r = zsock_setsockopt(client_fd, SOL_TLS, TLS_HOSTNAME, hostname,
+ 		       strlen(hostname) + 1);
+ 	zassert_not_equal(r, -1, "failed to set TLS_HOSTNAME (%d)", errno);
+ 
+-	sa->sin_family = AF_INET;
+-	sa->sin_port = htons(PORT);
+-	r = inet_pton(AF_INET, MY_IPV4_ADDR, &sa->sin_addr.s_addr);
+-	zassert_not_equal(-1, r, "inet_pton() failed (%d)", errno);
++	sa->sin_family = ZSOCK_AF_INET;
++	sa->sin_port = zsock_htons(PORT);
++	r = zsock_inet_pton(ZSOCK_AF_INET, MY_IPV4_ADDR, &sa->sin_addr.s_addr);
++	zassert_not_equal(-1, r, "zsock_inet_pton() failed (%d)", errno);
+ 	zassert_not_equal(0, r, "%s is not a valid IPv4 address", MY_IPV4_ADDR);
+-	zassert_equal(1, r, "inet_pton() failed to convert %s", MY_IPV4_ADDR);
++	zassert_equal(1, r, "zsock_inet_pton() failed to convert %s", MY_IPV4_ADDR);
+ 
+ 	memset(addrstr, '\0', sizeof(addrstr));
+-	addrstrp = (char *)inet_ntop(AF_INET, &sa->sin_addr,
++	addrstrp = (char *)zsock_inet_ntop(ZSOCK_AF_INET, &sa->sin_addr,
+ 				     addrstr, sizeof(addrstr));
+-	zassert_not_equal(addrstrp, NULL, "inet_ntop() failed (%d)", errno);
++	zassert_not_equal(addrstrp, NULL, "zsock_inet_ntop() failed (%d)", errno);
+ 
+ 	NET_DBG("connecting to [%s]:%d with fd %d",
+-		addrstr, ntohs(sa->sin_port), client_fd);
++		addrstr, zsock_ntohs(sa->sin_port), client_fd);
+ 
+ 	return client_fd;
+ }
+@@ -362,12 +362,12 @@ static void test_shutdown(int client_fd, int server_fd, k_tid_t server_thread_id
+ 	int r;
+ 
+ 	NET_DBG("closing client fd");
+-	r = close(client_fd);
+-	zassert_not_equal(-1, r, "close() failed on the client fd (%d)", errno);
++	r = zsock_close(client_fd);
++	zassert_not_equal(-1, r, "zsock_close() failed on the client fd (%d)", errno);
+ 
+ 	NET_DBG("closing server fd");
+-	r = close(server_fd);
+-	zassert_not_equal(-1, r, "close() failed on the server fd (%d)", errno);
++	r = zsock_close(server_fd);
++	zassert_not_equal(-1, r, "zsock_close() failed on the server fd (%d)", errno);
+ 
+ 	r = k_thread_join(&server_thread, K_FOREVER);
+ 	zassert_equal(0, r, "k_thread_join() failed (%d)", r);
+@@ -378,7 +378,7 @@ static void test_shutdown(int client_fd, int server_fd, k_tid_t server_thread_id
+ static void test_common(int peer_verify)
+ {
+ 	k_tid_t server_thread_id;
+-	struct sockaddr_in sa;
++	struct zsock_sockaddr_in sa;
+ 	uint8_t rx_buf[16];
+ 	int server_fd;
+ 	int client_fd;
+@@ -400,18 +400,18 @@ static void test_common(int peer_verify)
+ 	 * The main part of the test
+ 	 */
+ 
+-	r = connect(client_fd, (struct sockaddr *)&sa, sizeof(sa));
+-	zassert_not_equal(r, -1, "failed to connect (%d)", errno);
++	r = zsock_connect(client_fd, (struct zsock_sockaddr *)&sa, sizeof(sa));
++	zassert_not_equal(r, -1, "failed to zsock_connect (%d)", errno);
+ 
+-	NET_DBG("Calling send()");
+-	r = send(client_fd, SECRET, SECRET_SIZE, 0);
+-	zassert_not_equal(r, -1, "send() failed (%d)", errno);
++	NET_DBG("Calling zsock_send()");
++	r = zsock_send(client_fd, SECRET, SECRET_SIZE, 0);
++	zassert_not_equal(r, -1, "zsock_send() failed (%d)", errno);
+ 	zassert_equal(SECRET_SIZE, r, "expected: %zu actual: %d", SECRET_SIZE, r);
+ 
+-	NET_DBG("Calling recv()");
++	NET_DBG("Calling zsock_recv()");
+ 	memset(rx_buf, 0, sizeof(rx_buf));
+-	r = recv(client_fd, rx_buf, sizeof(rx_buf), 0);
+-	zassert_not_equal(r, -1, "recv() failed (%d)", errno);
++	r = zsock_recv(client_fd, rx_buf, sizeof(rx_buf), 0);
++	zassert_not_equal(r, -1, "zsock_recv() failed (%d)", errno);
+ 	zassert_equal(SECRET_SIZE, r, "expected: %zu actual: %d", SECRET_SIZE, r);
+ 	zassert_mem_equal(SECRET, rx_buf, SECRET_SIZE,
+ 			  "expected: %s actual: %s", SECRET, rx_buf);
+@@ -441,9 +441,9 @@ static void test_tls_cert_verify_result_opt_common(uint32_t expect)
+ {
+ 	int server_fd, client_fd, ret;
+ 	k_tid_t server_thread_id;
+-	struct sockaddr_in sa;
++	struct zsock_sockaddr_in sa;
+ 	uint32_t optval;
+-	socklen_t optlen = sizeof(optval);
++	zsock_socklen_t optlen = sizeof(optval);
+ 	const char *hostname = "localhost";
+ 	int peer_verify = TLS_PEER_VERIFY_OPTIONAL;
+ 
+@@ -459,8 +459,8 @@ static void test_tls_cert_verify_result_opt_common(uint32_t expect)
+ 			       &peer_verify, sizeof(peer_verify));
+ 	zassert_ok(ret, "failed to set TLS_PEER_VERIFY (%d)", errno);
+ 
+-	ret = zsock_connect(client_fd, (struct sockaddr *)&sa, sizeof(sa));
+-	zassert_not_equal(ret, -1, "failed to connect (%d)", errno);
++	ret = zsock_connect(client_fd, (struct zsock_sockaddr *)&sa, sizeof(sa));
++	zassert_not_equal(ret, -1, "failed to zsock_connect (%d)", errno);
+ 
+ 	ret = zsock_getsockopt(client_fd, SOL_TLS, TLS_CERT_VERIFY_RESULT,
+ 			       &optval, &optlen);
+@@ -506,7 +506,7 @@ static void test_tls_cert_verify_cb_opt_common(int result)
+ {
+ 	int server_fd, client_fd, ret;
+ 	k_tid_t server_thread_id;
+-	struct sockaddr_in sa;
++	struct zsock_sockaddr_in sa;
+ 	struct test_cert_verify_ctx ctx = {
+ 		.cb_called = false,
+ 		.result = result,
+@@ -524,12 +524,12 @@ static void test_tls_cert_verify_cb_opt_common(int result)
+ 			       &cb, sizeof(cb));
+ 	zassert_ok(ret, "failed to set TLS_CERT_VERIFY_CALLBACK (%d)", errno);
+ 
+-	ret = zsock_connect(client_fd, (struct sockaddr *)&sa, sizeof(sa));
++	ret = zsock_connect(client_fd, (struct zsock_sockaddr *)&sa, sizeof(sa));
+ 	zassert_true(ctx.cb_called, "callback not called");
+ 	if (result == 0) {
+-		zassert_equal(ret, 0, "failed to connect (%d)", errno);
++		zassert_equal(ret, 0, "failed to zsock_connect (%d)", errno);
+ 	} else {
+-		zassert_equal(ret, -1, "connect() should fail");
++		zassert_equal(ret, -1, "zsock_connect() should fail");
+ 		zassert_equal(errno, ECONNABORTED, "invalid errno");
+ 	}
+ 
+diff --git a/tests/net/socket/udp/src/main.c b/tests/net/socket/udp/src/main.c
+index 5a01826f63a..36c21072ca7 100644
+--- a/tests/net/socket/udp/src/main.c
++++ b/tests/net/socket/udp/src/main.c
+@@ -1956,7 +1956,7 @@ ZTEST(net_socket_udp, test_30_setup_eth_for_ipv4)
+ 
+ static int bind_socket(int sock, struct net_if *iface)
+ {
+-	struct sockaddr_ll addr;
++	struct zsock_sockaddr_ll addr;
+ 
+ 	memset(&addr, 0, sizeof(addr));
+ 
+@@ -1983,7 +1983,7 @@ static void test_check_ttl(int sock_c, int sock_s, int sock_p,
+ #define V6_HDR_SIZE (IPV6_HDR_SIZE + UDP_HDR_SIZE)
+ #define MAX_HDR_SIZE (IPV6_HDR_SIZE + UDP_HDR_SIZE)
+ 	uint8_t data_to_receive[sizeof(tx_buf) + MAX_HDR_SIZE];
+-	struct sockaddr_ll src;
++	struct zsock_sockaddr_ll src;
+ 	zsock_socklen_t addrlen;
+ 	char ifname[CONFIG_NET_INTERFACE_NAME_LEN];
+ 	struct ifreq ifreq = { 0 };
+diff --git a/tests/net/tcp/src/main.c b/tests/net/tcp/src/main.c
+index 77d6bc9221f..6220b1097d7 100644
+--- a/tests/net/tcp/src/main.c
++++ b/tests/net/tcp/src/main.c
+@@ -396,7 +396,7 @@ static bool is_icmp_pkt(struct net_pkt *pkt)
+ 	if (net_pkt_family(pkt) == ZSOCK_AF_INET) {
+ 		return NET_IPV4_HDR(pkt)->proto == ZSOCK_IPPROTO_ICMP;
+ 	} else {
+-		return NET_IPV6_HDR(pkt)->nexthdr == IPPROTO_ICMPV6;
++		return NET_IPV6_HDR(pkt)->nexthdr == ZSOCK_IPPROTO_ICMPV6;
+ 	}
+ }
+ 
+diff --git a/tests/net/virtual/src/main.c b/tests/net/virtual/src/main.c
+index 81a8d39e261..16cd7ecd92f 100644
+--- a/tests/net/virtual/src/main.c
++++ b/tests/net/virtual/src/main.c
+@@ -1006,7 +1006,7 @@ static void test_virtual_recv_data_from_tunnel(int remote_ip,
+ 				      innerv4);
+ 		zassert_equal(ret, 0, "Cannot create outer %s (%d)", "IPv4",
+ 			      ret);
+-		next_header = IPPROTO_IPIP;
++		next_header = ZSOCK_IPPROTO_IPIP;
+ 		addrlen = sizeof(struct zsock_sockaddr_in);
+ 	} else {
+ 		inner = create_inner(iface, ZSOCK_AF_INET6, ZSOCK_IPPROTO_IPV6,
+diff --git a/tests/net/vlan/src/main.c b/tests/net/vlan/src/main.c
+index 0c4c90c87ad..01fbaf1866c 100644
+--- a/tests/net/vlan/src/main.c
++++ b/tests/net/vlan/src/main.c
+@@ -1147,7 +1147,7 @@ ZTEST(net_vlan, test_vlan_tag_0)
+ 	pkt = net_pkt_rx_alloc_with_buffer(iface,
+ 					   sizeof(icmpv6_echo_request),
+ 					   ZSOCK_AF_INET6,
+-					   IPPROTO_ICMPV6,
++					   ZSOCK_IPPROTO_ICMPV6,
+ 					   K_NO_WAIT);
+ 	zassert_not_null(pkt, "Cannot allocate pkt");
+ 

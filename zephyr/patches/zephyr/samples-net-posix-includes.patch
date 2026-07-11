@@ -1,0 +1,970 @@
+diff --git a/samples/net/cloud/aws_iot_mqtt/src/main.c b/samples/net/cloud/aws_iot_mqtt/src/main.c
+index 61548c338f4..c75e1156c17 100644
+--- a/samples/net/cloud/aws_iot_mqtt/src/main.c
++++ b/samples/net/cloud/aws_iot_mqtt/src/main.c
+@@ -4,6 +4,10 @@
+  * SPDX-License-Identifier: Apache-2.0
+  */
+
++#include <sys/socket.h>
++#include <netinet/in.h>
++#include <arpa/inet.h>
++#include <unistd.h>
+ #include "creds/creds.h"
+
+ #include <errno.h>
+diff --git a/samples/net/cloud/mqtt_azure/CMakeLists.txt b/samples/net/cloud/mqtt_azure/CMakeLists.txt
+index c12baae7603..8a11a5ac74f 100644
+--- a/samples/net/cloud/mqtt_azure/CMakeLists.txt
++++ b/samples/net/cloud/mqtt_azure/CMakeLists.txt
+@@ -5,5 +5,6 @@ cmake_minimum_required(VERSION 3.20.0)
+ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+ project(mqtt-azure)
+
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+ FILE(GLOB app_sources src/*.c)
+ target_sources(app PRIVATE ${app_sources})
+diff --git a/samples/net/cloud/mqtt_azure/src/main.c b/samples/net/cloud/mqtt_azure/src/main.c
+index 538461af2d1..26c24b37a37 100644
+--- a/samples/net/cloud/mqtt_azure/src/main.c
++++ b/samples/net/cloud/mqtt_azure/src/main.c
+@@ -4,6 +4,10 @@
+  * SPDX-License-Identifier: Apache-2.0
+  */
+
++#include <sys/socket.h>
++#include <netinet/in.h>
++#include <arpa/inet.h>
++#include <unistd.h>
+ #include <zephyr/logging/log.h>
+ LOG_MODULE_REGISTER(mqtt_azure, LOG_LEVEL_DBG);
+
+diff --git a/samples/net/cloud/tagoio_http_post/src/main.c b/samples/net/cloud/tagoio_http_post/src/main.c
+index b253057949f..d25ad7d5905 100644
+--- a/samples/net/cloud/tagoio_http_post/src/main.c
++++ b/samples/net/cloud/tagoio_http_post/src/main.c
+@@ -4,6 +4,10 @@
+  * SPDX-License-Identifier: Apache-2.0
+  */
+
++#include <sys/socket.h>
++#include <netinet/in.h>
++#include <arpa/inet.h>
++#include <unistd.h>
+ #include <zephyr/logging/log.h>
+ LOG_MODULE_REGISTER(tagoio_http_post, CONFIG_TAGOIO_HTTP_POST_LOG_LEVEL);
+
+diff --git a/samples/net/cloud/tagoio_http_post/src/sockets.c b/samples/net/cloud/tagoio_http_post/src/sockets.c
+index e7bd79d8506..84d5ee9a657 100644
+--- a/samples/net/cloud/tagoio_http_post/src/sockets.c
++++ b/samples/net/cloud/tagoio_http_post/src/sockets.c
+@@ -4,6 +4,10 @@
+  * SPDX-License-Identifier: Apache-2.0
+  */
+
++#include <sys/socket.h>
++#include <netinet/in.h>
++#include <arpa/inet.h>
++#include <unistd.h>
+ #include <zephyr/logging/log.h>
+ LOG_MODULE_DECLARE(tagoio_http_post, CONFIG_TAGOIO_HTTP_POST_LOG_LEVEL);
+
+diff --git a/samples/net/dsa/src/dsa_lldp.c b/samples/net/dsa/src/dsa_lldp.c
+index 368579cddd9..8e23164cf67 100644
+--- a/samples/net/dsa/src/dsa_lldp.c
++++ b/samples/net/dsa/src/dsa_lldp.c
+@@ -4,6 +4,10 @@
+  * SPDX-License-Identifier: Apache-2.0
+  */
+
++#include <sys/socket.h>
++#include <netinet/in.h>
++#include <arpa/inet.h>
++#include <unistd.h>
+ #include <stdlib.h>
+ #include <stdio.h>
+ #include <string.h>
+diff --git a/samples/net/latmon/src/main.c b/samples/net/latmon/src/main.c
+index 92eb1fc82aa..7aca5e11d71 100644
+--- a/samples/net/latmon/src/main.c
++++ b/samples/net/latmon/src/main.c
+@@ -5,6 +5,10 @@
+  * Copyright (c) 2025 Jorge Ramirez-Ortiz <jorge.ramirez@oss.qualcomm.com>
+  */
+
++#include <sys/socket.h>
++#include <netinet/in.h>
++#include <arpa/inet.h>
++#include <unistd.h>
+ #include <zephyr/logging/log.h>
+ LOG_MODULE_REGISTER(sample_latmon, LOG_LEVEL_DBG);
+
+diff --git a/samples/net/mqtt_publisher/src/main.c b/samples/net/mqtt_publisher/src/main.c
+index 03050685b41..85ca85e33f4 100644
+--- a/samples/net/mqtt_publisher/src/main.c
++++ b/samples/net/mqtt_publisher/src/main.c
+@@ -4,6 +4,12 @@
+  * SPDX-License-Identifier: Apache-2.0
+  */
+
++#include <sys/socket.h>
++#include <netinet/in.h>
++#include <arpa/inet.h>
++#include <unistd.h>
++#include <poll.h>
++#include <zephyr/net/socket.h>
+ #include <zephyr/logging/log.h>
+ LOG_MODULE_REGISTER(net_mqtt_publisher_sample, LOG_LEVEL_DBG);
+
+diff --git a/samples/net/mqtt_sn_publisher/prj.conf b/samples/net/mqtt_sn_publisher/prj.conf
+index c943a391f39..9e23b0fa446 100644
+--- a/samples/net/mqtt_sn_publisher/prj.conf
++++ b/samples/net/mqtt_sn_publisher/prj.conf
+@@ -1,3 +1,4 @@
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ # Generic networking options
+ CONFIG_NETWORKING=y
+ CONFIG_NET_UDP=y
+diff --git a/samples/net/mqtt_sn_publisher/src/main.c b/samples/net/mqtt_sn_publisher/src/main.c
+index fddeb4c976f..fa05a2b396f 100644
+--- a/samples/net/mqtt_sn_publisher/src/main.c
++++ b/samples/net/mqtt_sn_publisher/src/main.c
+@@ -4,6 +4,10 @@
+  * SPDX-License-Identifier: Apache-2.0
+  */
+
++#include <sys/socket.h>
++#include <netinet/in.h>
++#include <arpa/inet.h>
++#include <unistd.h>
+ #include "common.h"
+
+ #include <errno.h>
+diff --git a/samples/net/mqtt_sn_publisher/src/udp.c b/samples/net/mqtt_sn_publisher/src/udp.c
+index fa369520959..360af6d97be 100644
+--- a/samples/net/mqtt_sn_publisher/src/udp.c
++++ b/samples/net/mqtt_sn_publisher/src/udp.c
+@@ -4,6 +4,10 @@
+  * SPDX-License-Identifier: Apache-2.0
+  */
+
++#include <sys/socket.h>
++#include <netinet/in.h>
++#include <arpa/inet.h>
++#include <unistd.h>
+ #include "common.h"
+
+ #include <errno.h>
+@@ -12,7 +16,6 @@
+ #include <zephyr/net/mqtt_sn.h>
+ #include <zephyr/net/conn_mgr_monitor.h>
+ #include <zephyr/net/net_mgmt.h>
+-#include <zephyr/net/socket.h>
+
+ #include <zephyr/logging/log.h>
+ LOG_MODULE_DECLARE(mqtt_sn_publisher_sample);
+@@ -132,13 +135,14 @@ static void process_thread(void)
+
+ 	LOG_DBG("Parsing Broadcast Address " CONFIG_NET_SAMPLE_MQTT_SN_BROADCAST_ADDRESS);
+ 	success = net_ipaddr_parse(CONFIG_NET_SAMPLE_MQTT_SN_BROADCAST_ADDRESS,
+-				   strlen(CONFIG_NET_SAMPLE_MQTT_SN_BROADCAST_ADDRESS), &bcaddr);
++				   strlen(CONFIG_NET_SAMPLE_MQTT_SN_BROADCAST_ADDRESS),
++				   (struct zsock_sockaddr *)&bcaddr);
+ 	__ASSERT(success, "net_ipaddr_parse() failed");
+
+ 	LOG_INF("Waiting for connection...");
+ 	LOG_HEXDUMP_DBG(&bcaddr, sizeof(bcaddr), " broadcast address");
+
+-	err = mqtt_sn_transport_udp_init(&tp, &bcaddr, sizeof((bcaddr)));
++	err = mqtt_sn_transport_udp_init(&tp, (struct zsock_sockaddr *)&bcaddr, sizeof(bcaddr));
+ 	__ASSERT(err == 0, "mqtt_sn_transport_udp_init() failed %d", err);
+
+ 	err = mqtt_sn_client_init(&mqtt_client, &client_id, &tp.tp, evt_cb, tx_buf, sizeof(tx_buf),
+@@ -150,7 +154,8 @@ static void process_thread(void)
+ 		struct sockaddr gwaddr = {0};
+
+ 		LOG_DBG("Parsing Gateway address %s", SAMPLE_GW_ADDRESS);
+-		success = net_ipaddr_parse(SAMPLE_GW_ADDRESS, strlen(SAMPLE_GW_ADDRESS), &gwaddr);
++		success = net_ipaddr_parse(SAMPLE_GW_ADDRESS, strlen(SAMPLE_GW_ADDRESS),
++					   (struct zsock_sockaddr *)&gwaddr);
+ 		__ASSERT(success, "net_ipaddr_parse() failed");
+ 		struct mqtt_sn_data gwaddr_data = {.data = (uint8_t *)&gwaddr,
+ 						   .size = sizeof(gwaddr)};
+diff --git a/samples/net/ocpp/src/main.c b/samples/net/ocpp/src/main.c
+index b703428bce4..93e614f2f98 100644
+--- a/samples/net/ocpp/src/main.c
++++ b/samples/net/ocpp/src/main.c
+@@ -7,11 +7,16 @@
+ #include <stdio.h>
+ #include <time.h>
+
++#include <sys/socket.h>
++#include <netinet/in.h>
++#include <arpa/inet.h>
++#include <netdb.h>
+ #include <zephyr/net/net_if.h>
+ #include <zephyr/net/net_core.h>
+ #include <zephyr/net/net_context.h>
+ #include <zephyr/net/net_mgmt.h>
+ #include <zephyr/net/sntp.h>
++#include <zephyr/net/socket.h>
+ #include <zephyr/net/ocpp.h>
+ #include <zephyr/random/random.h>
+ #include <zephyr/zbus/zbus.h>
+@@ -35,18 +40,18 @@ static int ocpp_get_time_from_sntp(void)
+ {
+ 	struct sntp_ctx ctx;
+ 	struct sntp_time stime;
+-	struct sockaddr_in addr;
++	struct zsock_sockaddr_in addr;
+ 	struct timespec tv;
+ 	int ret;
+
+ 	/* ipv4 */
+ 	memset(&addr, 0, sizeof(addr));
+-	addr.sin_family = AF_INET;
+-	addr.sin_port = htons(123);
+-	inet_pton(AF_INET, CONFIG_NET_SAMPLE_SNTP_SERVER, &addr.sin_addr);
++	addr.sin_family = ZSOCK_AF_INET;
++	addr.sin_port = zsock_htons(123);
++	zsock_inet_pton(ZSOCK_AF_INET, CONFIG_NET_SAMPLE_SNTP_SERVER, &addr.sin_addr);
+
+-	ret = sntp_init(&ctx, (struct sockaddr *) &addr,
+-			sizeof(struct sockaddr_in));
++	ret = sntp_init(&ctx, (struct zsock_sockaddr *) &addr,
++			sizeof(struct zsock_sockaddr_in));
+ 	if (ret < 0) {
+ 		LOG_ERR("Failed to init SNTP IPv4 ctx: %d", ret);
+ 		return ret;
+diff --git a/samples/net/openthread/border_router/prj.conf b/samples/net/openthread/border_router/prj.conf
+index 5412ebd31fb..194d9be7ae6 100644
+--- a/samples/net/openthread/border_router/prj.conf
++++ b/samples/net/openthread/border_router/prj.conf
+@@ -1,3 +1,4 @@
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ CONFIG_EARLY_CONSOLE=y
+ # Generic networking options
+ CONFIG_NETWORKING=y
+diff --git a/samples/net/prometheus/src/main.c b/samples/net/prometheus/src/main.c
+index f4380ef45be..5cfc33c5300 100644
+--- a/samples/net/prometheus/src/main.c
++++ b/samples/net/prometheus/src/main.c
+@@ -4,6 +4,10 @@
+  * SPDX-License-Identifier: Apache-2.0
+  */
+
++#include <sys/socket.h>
++#include <netinet/in.h>
++#include <arpa/inet.h>
++#include <unistd.h>
+ #include <zephyr/kernel.h>
+ #include <zephyr/drivers/sensor.h>
+ #include <zephyr/kernel.h>
+diff --git a/samples/net/secure_mqtt_sensor_actuator/src/mqtt_client.c b/samples/net/secure_mqtt_sensor_actuator/src/mqtt_client.c
+index 2d2b4012d4b..2bb10c0b58a 100644
+--- a/samples/net/secure_mqtt_sensor_actuator/src/mqtt_client.c
++++ b/samples/net/secure_mqtt_sensor_actuator/src/mqtt_client.c
+@@ -4,6 +4,10 @@
+  * SPDX-License-Identifier: Apache-2.0
+  */
+
++#include <sys/socket.h>
++#include <netinet/in.h>
++#include <arpa/inet.h>
++#include <unistd.h>
+ #include <zephyr/logging/log.h>
+ LOG_MODULE_REGISTER(app_mqtt, LOG_LEVEL_DBG);
+
+@@ -27,7 +31,7 @@ static uint8_t payload_buf[CONFIG_NET_SAMPLE_MQTT_PAYLOAD_SIZE];
+ static struct sockaddr_storage broker;
+
+ /* Socket descriptor */
+-static struct zsock_pollfd fds[1];
++static struct pollfd fds[1];
+ static int nfds;
+
+ /* JSON payload format */
+@@ -80,7 +84,7 @@ static void prepare_fds(struct mqtt_client *client)
+ 	}
+ #endif
+
+-	fds[0].events = ZSOCK_POLLIN;
++	fds[0].events = POLLIN;
+ 	nfds = 1;
+ }
+
+@@ -255,7 +259,7 @@ static int poll_mqtt_socket(struct mqtt_client *client, int timeout)
+ 		return -EINVAL;
+ 	}
+
+-	rc = zsock_poll(fds, nfds, timeout);
++	rc = poll(fds, nfds, timeout);
+ 	if (rc < 0) {
+ 		LOG_ERR("Socket poll error [%d]", rc);
+ 	}
+@@ -362,7 +366,7 @@ int app_mqtt_process(struct mqtt_client *client)
+
+ 	rc = poll_mqtt_socket(client, mqtt_keepalive_time_left(client));
+ 	if (rc != 0) {
+-		if (fds[0].revents & ZSOCK_POLLIN) {
++		if (fds[0].revents & POLLIN) {
+ 			/* MQTT data received */
+ 			rc = mqtt_input(client);
+ 			if (rc != 0) {
+@@ -370,7 +374,7 @@ int app_mqtt_process(struct mqtt_client *client)
+ 				return rc;
+ 			}
+ 			/* Socket error */
+-			if (fds[0].revents & (ZSOCK_POLLHUP | ZSOCK_POLLERR)) {
++			if (fds[0].revents & (POLLHUP | POLLERR)) {
+ 				LOG_ERR("MQTT socket closed / error");
+ 				return -ENOTCONN;
+ 			}
+diff --git a/samples/net/sockets/big_http_download/CMakeLists.txt b/samples/net/sockets/big_http_download/CMakeLists.txt
+index c0d6d6c9654..c55caf288a4 100644
+--- a/samples/net/sockets/big_http_download/CMakeLists.txt
++++ b/samples/net/sockets/big_http_download/CMakeLists.txt
+@@ -7,4 +7,6 @@ project(big_http_download)
+ FILE(GLOB app_sources src/*.c)
+ target_sources(app PRIVATE ${app_sources})
+
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
++
+ include(${ZEPHYR_BASE}/samples/net/common/common.cmake)
+diff --git a/samples/net/sockets/can/src/main.c b/samples/net/sockets/can/src/main.c
+index 8bd51984a64..6322cf248ed 100644
+--- a/samples/net/sockets/can/src/main.c
++++ b/samples/net/sockets/can/src/main.c
+@@ -4,6 +4,13 @@
+  * SPDX-License-Identifier: Apache-2.0
+  */
+
++#if defined(__ZEPHYR__)
++#include <zephyr/net/socket.h>
++#endif
++#include <sys/socket.h>
++#include <netinet/in.h>
++#include <arpa/inet.h>
++#include <unistd.h>
+ #include <zephyr/logging/log.h>
+ LOG_MODULE_REGISTER(net_socket_can_sample, LOG_LEVEL_DBG);
+
+diff --git a/samples/net/sockets/coap_download/prj.conf b/samples/net/sockets/coap_download/prj.conf
+index a81c659f382..efe81b3caf9 100644
+--- a/samples/net/sockets/coap_download/prj.conf
++++ b/samples/net/sockets/coap_download/prj.conf
+@@ -1,3 +1,4 @@
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ # Networking
+ CONFIG_NETWORKING=y
+ CONFIG_NET_UDP=y
+diff --git a/samples/net/sockets/coap_download/src/main.c b/samples/net/sockets/coap_download/src/main.c
+index 73345d4492c..4a103c29d95 100644
+--- a/samples/net/sockets/coap_download/src/main.c
++++ b/samples/net/sockets/coap_download/src/main.c
+@@ -4,6 +4,13 @@
+  * SPDX-License-Identifier: Apache-2.0
+  */
+
++#if defined(__ZEPHYR__)
++#include <zephyr/net/socket.h>
++#endif
++#include <sys/socket.h>
++#include <netinet/in.h>
++#include <arpa/inet.h>
++#include <unistd.h>
+ #include <zephyr/kernel.h>
+ #include <zephyr/logging/log.h>
+ #include <zephyr/net/net_mgmt.h>
+diff --git a/samples/net/sockets/coap_upload/CMakeLists.txt b/samples/net/sockets/coap_upload/CMakeLists.txt
+index 15f73a1962b..bb7666eab38 100644
+--- a/samples/net/sockets/coap_upload/CMakeLists.txt
++++ b/samples/net/sockets/coap_upload/CMakeLists.txt
+@@ -9,4 +9,5 @@ target_sources(app PRIVATE
+     src/main.c
+ )
+
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+ include(${ZEPHYR_BASE}/samples/net/common/common.cmake)
+diff --git a/samples/net/sockets/coap_upload/prj.conf b/samples/net/sockets/coap_upload/prj.conf
+index f46558ae1b5..7e55f2028a7 100644
+--- a/samples/net/sockets/coap_upload/prj.conf
++++ b/samples/net/sockets/coap_upload/prj.conf
+@@ -1,3 +1,4 @@
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ # Networking
+ CONFIG_NETWORKING=y
+ CONFIG_NET_UDP=y
+diff --git a/samples/net/sockets/coap_upload/src/main.c b/samples/net/sockets/coap_upload/src/main.c
+index 62eba2a922d..448aca0f75c 100644
+--- a/samples/net/sockets/coap_upload/src/main.c
++++ b/samples/net/sockets/coap_upload/src/main.c
+@@ -4,6 +4,13 @@
+  * SPDX-License-Identifier: Apache-2.0
+  */
+
++#if defined(__ZEPHYR__)
++#include <zephyr/net/socket.h>
++#endif
++#include <sys/socket.h>
++#include <netinet/in.h>
++#include <arpa/inet.h>
++#include <unistd.h>
+ #include <zephyr/kernel.h>
+ #include <zephyr/logging/log.h>
+ #include <zephyr/misc/lorem_ipsum.h>
+@@ -169,13 +176,13 @@ static void coap_upload(struct coap_client *client, struct sockaddr *sa,
+ 	LOG_INF("");
+ 	LOG_INF("* Starting CoAP upload using %s", (AF_INET == sa->sa_family) ? "IPv4" : "IPv6");
+
+-	sock = zsock_socket(sa->sa_family, SOCK_DGRAM, 0);
++	sock = socket(sa->sa_family, SOCK_DGRAM, 0);
+ 	if (sock < 0) {
+ 		LOG_ERR("Failed to create socket, err %d", errno);
+ 		return;
+ 	}
+
+-	ret = zsock_connect(sock, sa, addrlen);
++	ret = connect(sock, sa, addrlen);
+ 	if (ret < 0) {
+ 		LOG_ERR("Failed to connect socket, err %d", errno);
+ 		goto out;
+@@ -194,7 +201,7 @@ static void coap_upload(struct coap_client *client, struct sockaddr *sa,
+ out:
+ 	coap_client_cancel_requests(client);
+
+-	zsock_close(sock);
++	close(sock);
+ }
+
+ int main(void)
+@@ -217,7 +224,7 @@ int main(void)
+
+ 	addr4->sin_family = AF_INET;
+ 	addr4->sin_port = htons(CONFIG_NET_SAMPLE_COAP_SERVER_PORT);
+-	zsock_inet_pton(AF_INET, CONFIG_NET_CONFIG_PEER_IPV4_ADDR, &addr4->sin_addr);
++	inet_pton(AF_INET, CONFIG_NET_CONFIG_PEER_IPV4_ADDR, &addr4->sin_addr);
+
+ 	coap_upload(&client, &sa, sizeof(struct sockaddr_in));
+ #endif
+@@ -227,7 +234,7 @@ int main(void)
+
+ 	addr6->sin6_family = AF_INET6;
+ 	addr6->sin6_port = htons(CONFIG_NET_SAMPLE_COAP_SERVER_PORT);
+-	zsock_inet_pton(AF_INET6, CONFIG_NET_CONFIG_PEER_IPV6_ADDR, &addr6->sin6_addr);
++	inet_pton(AF_INET6, CONFIG_NET_CONFIG_PEER_IPV6_ADDR, &addr6->sin6_addr);
+
+ 	coap_upload(&client, &sa, sizeof(struct sockaddr_in6));
+ #endif
+diff --git a/samples/net/sockets/dumb_http_server/CMakeLists.txt b/samples/net/sockets/dumb_http_server/CMakeLists.txt
+index d7524223d8b..fad4969995c 100644
+--- a/samples/net/sockets/dumb_http_server/CMakeLists.txt
++++ b/samples/net/sockets/dumb_http_server/CMakeLists.txt
+@@ -7,6 +7,8 @@ project(dumb_http_server)
+ FILE(GLOB app_sources src/*.c)
+ target_sources(app PRIVATE ${app_sources})
+
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
++
+ set(gen_dir ${ZEPHYR_BINARY_DIR}/include/generated/)
+
+ generate_inc_file_for_target(app src/response_small.html.bin ${gen_dir}/response_small.html.bin.inc)
+diff --git a/samples/net/sockets/echo/CMakeLists.txt b/samples/net/sockets/echo/CMakeLists.txt
+index 1a1c3f4194f..50f710a02d0 100644
+--- a/samples/net/sockets/echo/CMakeLists.txt
++++ b/samples/net/sockets/echo/CMakeLists.txt
+@@ -8,4 +8,5 @@ project(sockets_echo)
+ FILE(GLOB app_sources src/*.c)
+ target_sources(app PRIVATE ${app_sources})
+
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+ include(${ZEPHYR_BASE}/samples/net/common/common.cmake)
+diff --git a/samples/net/sockets/echo/src/socket_echo.c b/samples/net/sockets/echo/src/socket_echo.c
+index c8aad2bb068..97bdbf681d2 100644
+--- a/samples/net/sockets/echo/src/socket_echo.c
++++ b/samples/net/sockets/echo/src/socket_echo.c
+@@ -4,22 +4,17 @@
+  * SPDX-License-Identifier: Apache-2.0
+  */
+
+-#include <stdio.h>
+-#include <stdlib.h>
+-#include <errno.h>
+-
+-#ifndef __ZEPHYR__
+-
+ #include <netinet/in.h>
+ #include <sys/socket.h>
+ #include <arpa/inet.h>
+ #include <unistd.h>
+-
+-#else
++#include <stdio.h>
++#include <stdlib.h>
++#include <errno.h>
+
+ #include <zephyr/net/socket.h>
++#ifdef __ZEPHYR__
+ #include <zephyr/kernel.h>
+-
+ #endif
+
+ #define BIND_PORT 4242
+diff --git a/samples/net/sockets/echo_async/CMakeLists.txt b/samples/net/sockets/echo_async/CMakeLists.txt
+index 42879273cba..b265d8a7b6b 100644
+--- a/samples/net/sockets/echo_async/CMakeLists.txt
++++ b/samples/net/sockets/echo_async/CMakeLists.txt
+@@ -7,4 +7,6 @@ project(sockets_echo_async)
+ FILE(GLOB app_sources src/*.c)
+ target_sources(app PRIVATE ${app_sources})
+
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
++
+ include(${ZEPHYR_BASE}/samples/net/common/common.cmake)
+diff --git a/samples/net/sockets/echo_async/src/socket_echo.c b/samples/net/sockets/echo_async/src/socket_echo.c
+index 5ef00ae9c73..90ebf85bed4 100644
+--- a/samples/net/sockets/echo_async/src/socket_echo.c
++++ b/samples/net/sockets/echo_async/src/socket_echo.c
+@@ -15,20 +15,14 @@
+ #include <fcntl.h>
+ #include <poll.h>
+
+-#if !defined(__ZEPHYR__)
+-
+-#define USE_IPV6
+-
+-#else
+-
++#ifdef __ZEPHYR__
+ #include <zephyr/kernel.h>
+-
+ #include "net_sample_common.h"
+-
+ #ifdef CONFIG_NET_IPV6
+ #define USE_IPV6
+ #endif
+-
++#else
++#define USE_IPV6
+ #endif
+
+ /* For Zephyr, keep max number of fd's in sync with max poll() capacity */
+diff --git a/samples/net/sockets/echo_async_select/CMakeLists.txt b/samples/net/sockets/echo_async_select/CMakeLists.txt
+index 47d24c33fa1..76d4a09643c 100644
+--- a/samples/net/sockets/echo_async_select/CMakeLists.txt
++++ b/samples/net/sockets/echo_async_select/CMakeLists.txt
+@@ -7,4 +7,6 @@ project(sockets_echo_async_select)
+ FILE(GLOB app_sources src/*.c)
+ target_sources(app PRIVATE ${app_sources})
+
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
++
+ include(${ZEPHYR_BASE}/samples/net/common/common.cmake)
+diff --git a/samples/net/sockets/echo_async_select/src/socket_echo_select.c b/samples/net/sockets/echo_async_select/src/socket_echo_select.c
+index 641e63756b6..312db9f5a20 100644
+--- a/samples/net/sockets/echo_async_select/src/socket_echo_select.c
++++ b/samples/net/sockets/echo_async_select/src/socket_echo_select.c
+@@ -9,8 +9,6 @@
+ #include <errno.h>
+ #include <stdlib.h>
+
+-#if !defined(__ZEPHYR__)
+-
+ #include <netinet/in.h>
+ #include <sys/socket.h>
+ #include <sys/select.h>
+@@ -18,23 +16,13 @@
+ #include <unistd.h>
+ #include <fcntl.h>
+
+-/* Generic read()/write() is available in POSIX config, so use it. */
+-#define READ(fd, buf, sz) read(fd, buf, sz)
+-#define WRITE(fd, buf, sz) write(fd, buf, sz)
+-
+-#else
+-
+-#include <fcntl.h>
+-#include <sys/select.h>
+-#include <zephyr/net/socket.h>
++#ifdef __ZEPHYR__
+ #include <zephyr/kernel.h>
+-
+-/* Generic read()/write() are not defined, so use socket-specific recv(). */
+-#define READ(fd, buf, sz) recv(fd, buf, sz, 0)
+-#define WRITE(fd, buf, sz) send(fd, buf, sz, 0)
+-
+ #endif
+
++#define READ(fd, buf, sz) read(fd, buf, sz)
++#define WRITE(fd, buf, sz) write(fd, buf, sz)
++
+ /* For Zephyr, keep max number of fd's in sync with max poll() capacity */
+ #ifdef CONFIG_ZVFS_POLL_MAX
+ #define NUM_FDS CONFIG_ZVFS_POLL_MAX
+diff --git a/samples/net/sockets/echo_server/src/udp.c b/samples/net/sockets/echo_server/src/udp.c
+index ececcef139e..37bf01e1b1f 100644
+--- a/samples/net/sockets/echo_server/src/udp.c
++++ b/samples/net/sockets/echo_server/src/udp.c
+@@ -14,6 +14,7 @@ LOG_MODULE_DECLARE(net_echo_server_sample, LOG_LEVEL_DBG);
+ #include <errno.h>
+ #include <stdio.h>
+ #include <sys/socket.h>
++#include <netinet/in.h>
+ #include <unistd.h>
+
+ #include <zephyr/net/tls_credentials.h>
+diff --git a/samples/net/sockets/http_client/src/main.c b/samples/net/sockets/http_client/src/main.c
+index 3751f580cc1..8ceb9b87055 100644
+--- a/samples/net/sockets/http_client/src/main.c
++++ b/samples/net/sockets/http_client/src/main.c
+@@ -4,6 +4,13 @@
+  * SPDX-License-Identifier: Apache-2.0
+  */
+
++#if defined(__ZEPHYR__)
++#include <zephyr/net/socket.h>
++#endif
++#include <sys/socket.h>
++#include <netinet/in.h>
++#include <arpa/inet.h>
++#include <unistd.h>
+ #include <zephyr/logging/log.h>
+ LOG_MODULE_REGISTER(net_http_client_sample, LOG_LEVEL_DBG);
+
+diff --git a/samples/net/sockets/http_get/src/http_get.c b/samples/net/sockets/http_get/src/http_get.c
+index 18a94ef6c30..1e232e3cf9c 100644
+--- a/samples/net/sockets/http_get/src/http_get.c
++++ b/samples/net/sockets/http_get/src/http_get.c
+@@ -6,6 +6,11 @@
+
+ #include <stdio.h>
+ #include <stdlib.h>
++
++#if defined(__ZEPHYR__)
++#include <zephyr/net/socket.h>
++#endif
++
+ #include <netinet/in.h>
+ #include <sys/socket.h>
+ #include <arpa/inet.h>
+diff --git a/samples/net/sockets/http_server/CMakeLists.txt b/samples/net/sockets/http_server/CMakeLists.txt
+index d883212ef29..7f5a7c96728 100644
+--- a/samples/net/sockets/http_server/CMakeLists.txt
++++ b/samples/net/sockets/http_server/CMakeLists.txt
+@@ -38,6 +38,7 @@ option(INCLUDE_HTML_CONTENT "Include the HTML content" ON)
+
+ target_sources(app PRIVATE src/main.c)
+
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+ set(gen_dir ${ZEPHYR_BINARY_DIR}/include/generated/)
+
+ target_sources_ifdef(CONFIG_NET_SAMPLE_WEBSOCKET_SERVICE app PRIVATE src/ws.c)
+diff --git a/samples/net/sockets/http_server/src/main.c b/samples/net/sockets/http_server/src/main.c
+index ff2ec17ac25..dfd011722fd 100644
+--- a/samples/net/sockets/http_server/src/main.c
++++ b/samples/net/sockets/http_server/src/main.c
+@@ -5,6 +5,10 @@
+  * SPDX-License-Identifier: Apache-2.0
+  */
+
++#include <sys/socket.h>
++#include <netinet/in.h>
++#include <arpa/inet.h>
++#include <unistd.h>
+ #include <stdio.h>
+ #include <inttypes.h>
+
+diff --git a/samples/net/sockets/net_mgmt/src/main.c b/samples/net/sockets/net_mgmt/src/main.c
+index 4e7d0e3fd35..dc8f12ddf54 100644
+--- a/samples/net/sockets/net_mgmt/src/main.c
++++ b/samples/net/sockets/net_mgmt/src/main.c
+@@ -10,6 +10,7 @@ LOG_MODULE_REGISTER(net_mgmt_sock_sample, LOG_LEVEL_DBG);
+ #include <zephyr/kernel.h>
+ #include <errno.h>
+ #include <stdio.h>
++#include <zephyr/net/socket.h>
+ #include <netinet/in.h>
+ #include <sys/socket.h>
+ #include <arpa/inet.h>
+diff --git a/samples/net/sockets/sntp_client/CMakeLists.txt b/samples/net/sockets/sntp_client/CMakeLists.txt
+index b42a3549dd6..b75ce7ccd0d 100644
+--- a/samples/net/sockets/sntp_client/CMakeLists.txt
++++ b/samples/net/sockets/sntp_client/CMakeLists.txt
+@@ -7,4 +7,5 @@ project(sntp_client)
+ FILE(GLOB app_sources src/*.c)
+ target_sources(app PRIVATE ${app_sources})
+
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+ include(${ZEPHYR_BASE}/samples/net/common/common.cmake)
+diff --git a/samples/net/sockets/sntp_client/src/main.c b/samples/net/sockets/sntp_client/src/main.c
+index 3725f46d91a..6713770ad95 100644
+--- a/samples/net/sockets/sntp_client/src/main.c
++++ b/samples/net/sockets/sntp_client/src/main.c
+@@ -5,13 +5,18 @@
+  * SPDX-License-Identifier: Apache-2.0
+  */
+
++#include <sys/socket.h>
++#include <netinet/in.h>
++#include <arpa/inet.h>
++#include <netdb.h>
++#include <unistd.h>
+ #include <zephyr/logging/log.h>
+ LOG_MODULE_REGISTER(net_sntp_client_sample, LOG_LEVEL_DBG);
+
+ #include <zephyr/net/socket.h>
+ #include <zephyr/net/socket_service.h>
+ #include <zephyr/net/sntp.h>
+-#include <arpa/inet.h>
++#include <zephyr/posix/zsock_conversion.h>
+
+ #include "net_sample_common.h"
+
+@@ -43,9 +48,13 @@ int dns_query(const char *host, uint16_t port, int family, int socktype, struct
+ 	/* Free the allocated memory */
+ 	freeaddrinfo(res);
+ 	/* Store the port */
+-	net_sin(addr)->sin_port = htons(port);
+-	/* Print the found address */
+-	inet_ntop(addr->sa_family, &net_sin(addr)->sin_addr, addr_str, sizeof(addr_str));
++	if (addr->sa_family == AF_INET) {
++		posix_sin(addr)->sin_port = htons(port);
++		inet_ntop(AF_INET, &posix_sin(addr)->sin_addr, addr_str, sizeof(addr_str));
++	} else {
++		posix_sin6(addr)->sin6_port = htons(port);
++		inet_ntop(AF_INET6, &posix_sin6(addr)->sin6_addr, addr_str, sizeof(addr_str));
++	}
+ 	LOG_INF("%s -> %s", host, addr_str);
+ 	return 0;
+ }
+@@ -76,19 +85,24 @@ static void do_sntp(int family)
+ 	char *family_str = family == AF_INET ? "IPv4" : "IPv6";
+ 	struct sntp_time s_time;
+ 	struct sntp_ctx ctx;
+-	struct sockaddr addr;
++	struct sockaddr_storage addr;
+ 	socklen_t addrlen;
++	struct zsock_sockaddr zaddr;
++	size_t zaddrlen = sizeof(zaddr);
++	struct zsock_sockaddr *zsa;
+ 	int rv;
+
+ 	/* Get SNTP server */
+ 	rv = dns_query(CONFIG_NET_SAMPLE_SNTP_SERVER_ADDRESS, CONFIG_NET_SAMPLE_SNTP_SERVER_PORT,
+-				   family, SOCK_DGRAM, &addr, &addrlen);
++				   family, SOCK_DGRAM, (struct sockaddr *)&addr, &addrlen);
+ 	if (rv != 0) {
+ 		LOG_ERR("Failed to lookup %s SNTP server (%d)", family_str, rv);
+ 		return;
+ 	}
+
+-	rv = sntp_init(&ctx, &addr, addrlen);
++	zsa = posix_sockaddr_to_zsock((struct sockaddr *)&addr, addrlen, &zaddr, &zaddrlen);
++
++	rv = sntp_init(&ctx, zsa, zaddrlen);
+ 	if (rv < 0) {
+ 		LOG_ERR("Failed to init SNTP %s ctx: %d", family_str, rv);
+ 		goto end;
+@@ -105,7 +119,9 @@ static void do_sntp(int family)
+
+ 	sntp_close(&ctx);
+
+-	rv = sntp_init_async(&ctx, &addr, addrlen, &service_sntp_async);
++	zsa = posix_sockaddr_to_zsock((struct sockaddr *)&addr, addrlen, &zaddr, &zaddrlen);
++
++	rv = sntp_init_async(&ctx, zsa, zaddrlen, &service_sntp_async);
+ 	if (rv < 0) {
+ 		LOG_ERR("Failed to initialise SNTP context (%d)", rv);
+ 		goto end;
+diff --git a/samples/net/sockets/tcp/src/main.c b/samples/net/sockets/tcp/src/main.c
+index 7b961e0c821..79f82ec377b 100644
+--- a/samples/net/sockets/tcp/src/main.c
++++ b/samples/net/sockets/tcp/src/main.c
+@@ -6,6 +6,10 @@
+
+ /* TCP Sample for TTCN-3 based Sanity Check */
+
++#include <sys/socket.h>
++#include <netinet/in.h>
++#include <arpa/inet.h>
++#include <unistd.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <errno.h>
+diff --git a/samples/net/sockets/txtime/CMakeLists.txt b/samples/net/sockets/txtime/CMakeLists.txt
+index 44eef0c70e4..6ede0bce83e 100644
+--- a/samples/net/sockets/txtime/CMakeLists.txt
++++ b/samples/net/sockets/txtime/CMakeLists.txt
+@@ -7,4 +7,6 @@ project(sockets_txtime)
+
+ target_sources(app PRIVATE src/main.c)
+
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
++
+ include(${ZEPHYR_BASE}/samples/net/common/common.cmake)
+diff --git a/samples/net/sockets/txtime/src/main.c b/samples/net/sockets/txtime/src/main.c
+index 870e10f8ff7..d574b60d67f 100644
+--- a/samples/net/sockets/txtime/src/main.c
++++ b/samples/net/sockets/txtime/src/main.c
+@@ -4,6 +4,12 @@
+  * SPDX-License-Identifier: Apache-2.0
+  */
+
++#include <sys/socket.h>
++#include <netinet/in.h>
++#include <arpa/inet.h>
++#include <netpacket/packet.h>
++#include <unistd.h>
++
+ #include <zephyr/logging/log.h>
+ LOG_MODULE_REGISTER(net_txtime_sample, LOG_LEVEL_DBG);
+
+@@ -22,6 +28,7 @@ LOG_MODULE_REGISTER(net_txtime_sample, LOG_LEVEL_DBG);
+ #include <zephyr/net/ethernet.h>
+ #include <zephyr/net/ethernet_mgmt.h>
+
++#include <zephyr/posix/zsock_conversion.h>
+ #include "net_sample_common.h"
+
+ #define APP_BANNER "Run SO_TXTIME client"
+@@ -224,13 +231,13 @@ static int get_local_ipv6(struct net_if *iface, struct sockaddr *peer,
+ 		return 0;
+ 	}
+
+-	addr = net_if_ipv6_select_src_addr(iface, &net_sin6(peer)->sin6_addr);
++	addr = net_if_ipv6_select_src_addr(iface, &posix_sin6(peer)->sin6_addr);
+ 	if (!addr) {
+ 		LOG_ERR("Cannot get local %s address", "IPv6");
+ 		return -EINVAL;
+ 	}
+
+-	memcpy(&net_sin6(local)->sin6_addr, addr, sizeof(*addr));
++	memcpy(&posix_sin6(local)->sin6_addr, addr, sizeof(*addr));
+ 	local->sa_family = AF_INET6;
+ 	*addrlen = sizeof(struct sockaddr_in6);
+
+@@ -246,13 +253,13 @@ static int get_local_ipv4(struct net_if *iface, struct sockaddr *peer,
+ 		return 0;
+ 	}
+
+-	addr = net_if_ipv4_select_src_addr(iface, &net_sin(peer)->sin_addr);
++	addr = net_if_ipv4_select_src_addr(iface, &posix_sin(peer)->sin_addr);
+ 	if (!addr) {
+ 		LOG_ERR("Cannot get local %s address", "IPv4");
+ 		return -EINVAL;
+ 	}
+
+-	memcpy(&net_sin(local)->sin_addr, addr, sizeof(*addr));
++	memcpy(&posix_sin(local)->sin_addr, addr, sizeof(*addr));
+ 	local->sa_family = AF_INET;
+ 	*addrlen = sizeof(struct sockaddr_in);
+
+@@ -305,7 +312,7 @@ static int create_socket(struct net_if *iface, struct sockaddr *peer)
+ 				return ret;
+ 			}
+
+-			net_addr_ntop(AF_INET6, &net_sin6(&local)->sin6_addr,
++			net_addr_ntop(AF_INET6, &posix_sin6(&local)->sin6_addr,
+ 				      addr_str, sizeof(addr_str));
+ 		} else if (IS_ENABLED(CONFIG_NET_IPV4) &&
+ 			   peer->sa_family == AF_INET) {
+@@ -314,7 +321,7 @@ static int create_socket(struct net_if *iface, struct sockaddr *peer)
+ 				return ret;
+ 			}
+
+-			net_addr_ntop(AF_INET, &net_sin(&local)->sin_addr,
++			net_addr_ntop(AF_INET, &posix_sin(&local)->sin_addr,
+ 				      addr_str, sizeof(addr_str));
+ 		} else {
+ 			LOG_ERR("Invalid socket family %d", peer->sa_family);
+@@ -361,27 +368,27 @@ static int get_peer_address(struct net_if **iface, char *addr_str,
+ 		return -EINVAL;
+ 	}
+
+-	if (net_sin(&peer_data.peer)->sin_port == 0) {
+-		net_sin(&peer_data.peer)->sin_port = htons(4242);
++	if (posix_sin(&peer_data.peer)->sin_port == 0) {
++		posix_sin(&peer_data.peer)->sin_port = htons(4242);
+ 	}
+
+ 	if (IS_ENABLED(CONFIG_NET_IPV6) &&
+ 					peer_data.peer.sa_family == AF_INET6) {
+ 		*iface = net_if_ipv6_select_src_iface(
+-					&net_sin6(&peer_data.peer)->sin6_addr);
++					&posix_sin6(&peer_data.peer)->sin6_addr);
+
+ 		net_addr_ntop(peer_data.peer.sa_family,
+-			      &net_sin6(&peer_data.peer)->sin6_addr, addr_str,
++			      &posix_sin6(&peer_data.peer)->sin6_addr, addr_str,
+ 			      addr_str_len);
+ 		peer_data.peer_addr_len = sizeof(struct sockaddr_in6);
+
+ 	} else if (IS_ENABLED(CONFIG_NET_IPV4) &&
+ 					peer_data.peer.sa_family == AF_INET) {
+ 		*iface = net_if_ipv4_select_src_iface(
+-					&net_sin(&peer_data.peer)->sin_addr);
++					&posix_sin(&peer_data.peer)->sin_addr);
+
+ 		net_addr_ntop(peer_data.peer.sa_family,
+-			      &net_sin(&peer_data.peer)->sin_addr, addr_str,
++			      &posix_sin(&peer_data.peer)->sin_addr, addr_str,
+ 			      addr_str_len);
+ 		peer_data.peer_addr_len = sizeof(struct sockaddr_in);
+ 	}
+@@ -610,7 +617,7 @@ int main(void)
+ 		LOG_INF("Socket SO_TXTIME sample to %s port %d using "
+ 			"interface %d (%p) and PTP clock %p",
+ 			addr_str,
+-			ntohs(net_sin(&peer_data.peer)->sin_port),
++			ntohs(posix_sin(&peer_data.peer)->sin_port),
+ 			if_index, iface, peer_data.clk);
+ 	}
+
+diff --git a/samples/net/sockets/websocket_client/src/main.c b/samples/net/sockets/websocket_client/src/main.c
+index 17205cd8123..2da46ed79a8 100644
+--- a/samples/net/sockets/websocket_client/src/main.c
++++ b/samples/net/sockets/websocket_client/src/main.c
+@@ -10,6 +10,10 @@ LOG_MODULE_REGISTER(net_websocket_client_sample, LOG_LEVEL_DBG);
+ #include <zephyr/misc/lorem_ipsum.h>
+ #include <zephyr/net/net_ip.h>
+ #include <zephyr/net/socket.h>
++#include <sys/socket.h>
++#include <netinet/in.h>
++#include <arpa/inet.h>
++#include <unistd.h>
+ #include <zephyr/net/tls_credentials.h>
+ #include <zephyr/net/websocket.h>
+ #include <zephyr/random/random.h>
+diff --git a/samples/net/syslog_net/prj.conf b/samples/net/syslog_net/prj.conf
+index 46a0276a820..dcb840e0214 100644
+--- a/samples/net/syslog_net/prj.conf
++++ b/samples/net/syslog_net/prj.conf
+@@ -1,3 +1,4 @@
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ CONFIG_NETWORKING=y
+ CONFIG_NET_UDP=y
+ CONFIG_ENTROPY_GENERATOR=y
+diff --git a/samples/net/tftp_client/src/tftp-client.c b/samples/net/tftp_client/src/tftp-client.c
+index be65dadd5ea..5a4ac4630dc 100644
+--- a/samples/net/tftp_client/src/tftp-client.c
++++ b/samples/net/tftp_client/src/tftp-client.c
+@@ -10,6 +10,10 @@
+ #include <zephyr/logging/log.h>
+ LOG_MODULE_REGISTER(LOG_MODULE_NAME);
+
++#if defined(__ZEPHYR__)
++#include <zephyr/net/socket.h>
++#endif
++#include <netdb.h>
+ #include <zephyr/net/tftp.h>
+
+ #define APP_BANNER		"Run TFTP client"
+diff --git a/samples/net/wifi/apsta_mode/prj.conf b/samples/net/wifi/apsta_mode/prj.conf
+index 632f1aface9..d22f43ca367 100644
+--- a/samples/net/wifi/apsta_mode/prj.conf
++++ b/samples/net/wifi/apsta_mode/prj.conf
+@@ -1,3 +1,4 @@
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ # Wi-Fi Configuration
+ CONFIG_WIFI=y
+
