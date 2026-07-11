@@ -27,8 +27,6 @@
 extern "C" {
 #endif
 
-#if defined(_POSIX_C_SOURCE) || defined(__DOXYGEN__)
-
 #if !defined(_NFDS_T_DECLARED) && !defined(__nfds_t_defined)
 /** @brief Type for the number of file descriptors passed to poll().  @ingroup posix_option_group_device_io*/
 typedef int nfds_t;
@@ -78,9 +76,6 @@ BUILD_ASSERT(POLLWRNORM == POLLOUT, "POLLWRNORM must be equal to POLLOUT");
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/poll.html
  */
 int poll(struct pollfd *fds, nfds_t nfds, int timeout);
-
-
-#endif /* _POSIX_C_SOURCE || __DOXYGEN__ */
 
 #ifdef __cplusplus
 }

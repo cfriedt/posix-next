@@ -86,14 +86,14 @@ char *inet_ntoa(struct in_addr in)
 	return buf;
 }
 
-char *inet_ntop(sa_family_t family, const void *src, char *dst, size_t size)
+const char *inet_ntop(int af, const void *restrict src, char *restrict dst, socklen_t size)
 {
-	return zsock_inet_ntop(family, src, dst, size);
+	return zsock_inet_ntop(af, src, dst, size);
 }
 
-int inet_pton(sa_family_t family, const char *src, void *dst)
+int inet_pton(int af, const char *restrict src, void *restrict dst)
 {
-	return zsock_inet_pton(family, src, dst);
+	return zsock_inet_pton(af, src, dst);
 }
 
 /* From net/if.h */

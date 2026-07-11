@@ -1,15 +1,12 @@
 /*
- * Copyright (c) 2019 Linaro Limited
+ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 /**
  * @file
- * @brief POSIX network database operations (<netdb.h>)
- *
- * Provides hostname and service resolution (getaddrinfo/getnameinfo) and the
- * legacy host/network/protocol/service database functions.
+ * @brief Network database operations (<netdb.h>)
  *
  * @see <a href="https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/netdb.h.html">
  *      POSIX.1-2017 &lt;netdb.h&gt;</a>
@@ -20,244 +17,394 @@
 #ifndef ZEPHYR_INCLUDE_POSIX_NETDB_H_
 #define ZEPHYR_INCLUDE_POSIX_NETDB_H_
 
+#include <stdint.h>
 #include <zephyr/net/socket.h>
-
-#ifndef NI_MAXSERV
-/** @brief Reasonable buffer size for getnameinfo() service names.  @ingroup posix_option_group_networking*/
-#define NI_MAXSERV 32
-#endif
-
-/** @brief Flags argument to getaddrinfo() contained an invalid value.  @ingroup posix_option_group_networking*/
-#define EAI_BADFLAGS DNS_EAI_BADFLAGS
-/** @brief The name does not resolve for the supplied parameters.  @ingroup posix_option_group_networking*/
-#define EAI_NONAME   DNS_EAI_NONAME
-/** @brief Temporary failure in name resolution.  @ingroup posix_option_group_networking*/
-#define EAI_AGAIN    DNS_EAI_AGAIN
-/** @brief Non-recoverable failure in name resolution.  @ingroup posix_option_group_networking*/
-#define EAI_FAIL     DNS_EAI_FAIL
-/** @brief The requested name is valid but has no address data.  @ingroup posix_option_group_networking*/
-#define EAI_NODATA   DNS_EAI_NODATA
-/** @brief Memory allocation failure.  @ingroup posix_option_group_networking*/
-#define EAI_MEMORY   DNS_EAI_MEMORY
-/** @brief A system error occurred; errno is set.  @ingroup posix_option_group_networking*/
-#define EAI_SYSTEM   DNS_EAI_SYSTEM
-/** @brief Requested service not available for the given socket type.  @ingroup posix_option_group_networking*/
-#define EAI_SERVICE  DNS_EAI_SERVICE
-/** @brief Socket type not supported.  @ingroup posix_option_group_networking*/
-#define EAI_SOCKTYPE DNS_EAI_SOCKTYPE
-/** @brief Address family not supported.  @ingroup posix_option_group_networking*/
-#define EAI_FAMILY   DNS_EAI_FAMILY
-/** @brief Output buffer overflow.  @ingroup posix_option_group_networking*/
-#define EAI_OVERFLOW DNS_EAI_OVERFLOW
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/** @brief Host entry returned by gethostbyname() (legacy). */
+#if !defined(_IN_PORT_T_DECLARED) && !defined(__in_port_t_defined)
+typedef uint16_t in_port_t;
+#define _IN_PORT_T_DECLARED
+#define __in_port_t_defined
+#endif
+
+#if !defined(_IN_ADDR_T_DECLARED) && !defined(__in_addr_t_defined)
+typedef uint32_t in_addr_t;
+#define _IN_ADDR_T_DECLARED
+#define __in_addr_t_defined
+#endif
+
+#if !(defined(_HOSTENT_DECLARED) || defined(__hostent_defined)) || defined(__DOXYGEN__)
+/** @brief Host database entry. */
 struct hostent {
-	char *h_name;       /**< Official name of the host. */
-	char **h_aliases;   /**< NULL-terminated list of alternate names. */
-	int h_addrtype;     /**< Address type (AF_INET, etc.). */
-	int h_length;       /**< Length of each address in bytes. */
-	char **h_addr_list; /**< NULL-terminated list of addresses. */
+	/** @brief Official name of the host. */
+	char *h_name;
+	/** @brief Null-terminated list of alternative host names. */
+	char **h_aliases;
+	/** @brief Address type. */
+	int h_addrtype;
+	/** @brief Length of each address in bytes. */
+	int h_length;
+	/** @brief Null-terminated list of network addresses for the host. */
+	char **h_addr_list;
 };
+#define _HOSTENT_DECLARED
+#define __hostent_defined
+#endif
 
-/** @brief Network entry returned by getnetbyname() (legacy). */
+#if !(defined(_NETENT_DECLARED) || defined(__netent_defined)) || defined(__DOXYGEN__)
+/** @brief Network database entry. */
 struct netent {
-	char *n_name;     /**< Official network name. */
-	char **n_aliases; /**< NULL-terminated list of alternate names. */
-	int n_addrtype;   /**< Address type (AF_INET). */
-	uint32_t n_net;   /**< Network number (host byte order). */
+	/** @brief Official, fully-qualified name of the network. */
+	char *n_name;
+	/** @brief Null-terminated list of alternative network names. */
+	char **n_aliases;
+	/** @brief Address type of the network. */
+	int n_addrtype;
+	/** @brief Network number in host byte order. */
+	uint32_t n_net;
 };
+#define _NETENT_DECLARED
+#define __netent_defined
+#endif
 
-/** @brief Protocol entry returned by getprotobyname() (legacy). */
+#if !(defined(_PROTOENT_DECLARED) || defined(__protoent_defined)) || defined(__DOXYGEN__)
+/** @brief Protocol database entry. */
 struct protoent {
-	char *p_name;     /**< Official protocol name. */
-	char **p_aliases; /**< NULL-terminated list of alternate names. */
-	int p_proto;      /**< Protocol number. */
+	/** @brief Official name of the protocol. */
+	char *p_name;
+	/** @brief Null-terminated list of alternative protocol names. */
+	char **p_aliases;
+	/** @brief Protocol number. */
+	int p_proto;
 };
+#define _PROTOENT_DECLARED
+#define __protoent_defined
+#endif
 
-/** @brief Service entry returned by getservbyname() (legacy). */
+#if !(defined(_SERVENT_DECLARED) || defined(__servent_defined)) || defined(__DOXYGEN__)
+/** @brief Service database entry. */
 struct servent {
-	char *s_name;     /**< Official service name. */
-	char **s_aliases; /**< NULL-terminated list of alternate names. */
-	int s_port;       /**< Port number (network byte order). */
-	char *s_proto;    /**< Protocol to use ("tcp" or "udp"). */
+	/** @brief Official name of the service. */
+	char *s_name;
+	/** @brief Null-terminated list of alternative service names. */
+	char **s_aliases;
+	/** @brief Port number in network byte order. */
+	int s_port;
+	/** @brief Name of the protocol to use when contacting the service. */
+	char *s_proto;
 };
+#define _SERVENT_DECLARED
+#define __servent_defined
+#endif
 
-/** @brief Address info structure (alias for zsock_addrinfo).  @ingroup posix_option_group_networking*/
-#define addrinfo zsock_addrinfo
+#if !defined(_SA_FAMILY_T_DECLARED) && !defined(__sa_family_t_defined)
+typedef uint16_t sa_family_t;
+#define _SA_FAMILY_T_DECLARED
+#define __sa_family_t_defined
+#endif
 
-/** @brief Close the hosts database (legacy, no-op on most systems).  @ingroup posix_option_group_networking*/
+#if !defined(_SOCKLEN_T_DECLARED) && !defined(__socklen_t_defined)
+typedef uint32_t socklen_t;
+#define _SOCKLEN_T_DECLARED
+#define __socklen_t_defined
+#endif
+
+#if !defined(_SOCKADDR_DECLARED) && !defined(__sockaddr_defined)
+struct sockaddr {
+	sa_family_t sa_family;
+	char sa_data[];
+};
+#define _SOCKADDR_DECLARED
+#define __sockaddr_defined
+#endif
+
+#if !(defined(_ADDRINFO_DECLARED) || defined(__addrinfo_defined)) || defined(__DOXYGEN__)
+/**
+ * @brief Address information structure.
+ *
+ * @note Field order matches @ref zsock_addrinfo so that a plain cast between
+ *       the two struct types is valid when all named fields share the same
+ *       offset and size.  POSIX does not mandate field order, so this
+ *       deviation is conformant.  @c ai_eflags is a Zephyr extension used by
+ *       the DNS resolver; POSIX code may safely ignore it.
+ */
+struct addrinfo {
+	/** @brief Pointer to next entry in the list. */
+	struct addrinfo *ai_next;
+	/** @brief Input flags. */
+	int ai_flags;
+	/** @brief Address family of socket. */
+	int ai_family;
+	/** @brief Socket type. */
+	int ai_socktype;
+	/** @brief Protocol of socket. */
+	int ai_protocol;
+	/** @brief Extended flags (Zephyr extension, ignored by POSIX code). */
+	int ai_eflags;
+	/** @brief Length of socket address. */
+	socklen_t ai_addrlen;
+	/** @brief Socket address of socket. */
+	struct sockaddr *ai_addr;
+	/** @brief Canonical name of service location. */
+	char *ai_canonname;
+};
+#define _ADDRINFO_DECLARED
+#define __addrinfo_defined
+#endif
+
+/** @brief Highest reserved Internet port number. */
+#define IPPORT_RESERVED 1023
+
+/** @brief Socket address is intended for bind(). */
+#define AI_PASSIVE     ZSOCK_AI_PASSIVE
+/** @brief Request canonical name. */
+#define AI_CANONNAME   ZSOCK_AI_CANONNAME
+/** @brief Return numeric host address as name. */
+#define AI_NUMERICHOST ZSOCK_AI_NUMERICHOST
+/** @brief Inhibit service name resolution. */
+#define AI_NUMERICSERV ZSOCK_AI_NUMERICSERV
+/** @brief Return IPv4-mapped IPv6 addresses when no IPv6 addresses are found. */
+#define AI_V4MAPPED    ZSOCK_AI_V4MAPPED
+/** @brief Query for both IPv4 and IPv6 addresses. */
+#define AI_ALL         ZSOCK_AI_ALL
+/** @brief Limit address families to those configured on the local system. */
+#define AI_ADDRCONFIG  ZSOCK_AI_ADDRCONFIG
+
+/** @brief Return only the nodename portion of the FQDN for local hosts. */
+#define NI_NOFQDN      ZSOCK_NI_NOFQDN
+/** @brief Return the numeric form of the node address. */
+#define NI_NUMERICHOST ZSOCK_NI_NUMERICHOST
+/** @brief Return an error if the node name cannot be located. */
+#define NI_NAMEREQD    ZSOCK_NI_NAMEREQD
+/** @brief Return the numeric form of the service address. */
+#define NI_NUMERICSERV ZSOCK_NI_NUMERICSERV
+/** @brief Indicate that the service is a datagram service (@c SOCK_DGRAM). */
+#define NI_DGRAM       ZSOCK_NI_DGRAM
+
+/** @brief Recommended maximum host name buffer size for getnameinfo(). */
+#define NI_MAXHOST     ZSOCK_NI_MAXHOST
+
+/** @brief Temporary failure in name resolution. */
+#define EAI_AGAIN      DNS_EAI_AGAIN
+/** @brief Invalid flags value. */
+#define EAI_BADFLAGS   DNS_EAI_BADFLAGS
+/** @brief Non-recoverable failure in name resolution. */
+#define EAI_FAIL       DNS_EAI_FAIL
+/** @brief Address family not recognized or invalid address length. */
+#define EAI_FAMILY     DNS_EAI_FAMILY
+/** @brief Memory allocation failure. */
+#define EAI_MEMORY     DNS_EAI_MEMORY
+/** @brief Name does not resolve for the supplied parameters. */
+#define EAI_NONAME     DNS_EAI_NONAME
+/** @brief Service not recognized for the specified socket type. */
+#define EAI_SERVICE    DNS_EAI_SERVICE
+/** @brief Intended socket type not recognized. */
+#define EAI_SOCKTYPE   DNS_EAI_SOCKTYPE
+/** @brief System error; see @c errno. */
+#define EAI_SYSTEM     DNS_EAI_SYSTEM
+/** @brief Argument buffer overflow. */
+#define EAI_OVERFLOW   DNS_EAI_OVERFLOW
+
+/**
+ * @brief Close the host database.
+ *
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/endhostent.html
+ */
 void endhostent(void);
-/** @brief Close the networks database (legacy, no-op on most systems).  @ingroup posix_option_group_networking*/
+
+/**
+ * @brief Close the network database.
+ *
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/endnetent.html
+ */
 void endnetent(void);
-/** @brief Close the protocols database (legacy).  @ingroup posix_option_group_networking*/
+
+/**
+ * @brief Close the protocol database.
+ *
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/endprotoent.html
+ */
 void endprotoent(void);
-/** @brief Close the services database (legacy).  @ingroup posix_option_group_networking*/
+
+/**
+ * @brief Close the services database.
+ *
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/endservent.html
+ */
 void endservent(void);
 
 /**
- * @brief Free addrinfo list returned by getaddrinfo().
- * @ingroup posix_option_group_networking
+ * @brief Free a list returned by getaddrinfo().
+ *
  * @param ai Linked list to free.
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/freeaddrinfo.html
  */
-void freeaddrinfo(struct zsock_addrinfo *ai);
+void freeaddrinfo(struct addrinfo *ai);
 
 /**
- * @brief Return a string describing a getaddrinfo() error code.
- * @ingroup posix_option_group_networking
- * @param errcode Error code returned by getaddrinfo().
+ * @brief Return a string describing a getaddrinfo() or getnameinfo() error code.
+ *
+ * @param errcode Error code returned by getaddrinfo() or getnameinfo().
  * @return Pointer to a description string.
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/gai_strerror.html
  */
 const char *gai_strerror(int errcode);
 
 /**
- * @brief Translate a hostname and service to a list of socket addresses.
- * @ingroup posix_option_group_networking
- * @param host    Hostname or numeric address string, or NULL.
+ * @brief Translate a host name and service to a list of socket addresses.
+ *
+ * @param node    Host name or numeric address string, or NULL.
  * @param service Service name or numeric port string, or NULL.
  * @param hints   Criteria for address selection, or NULL for defaults.
  * @param res     Output: linked list of matching addresses.
- * @return 0 on success, or a non-zero EAI_* error code.
+ * @return 0 on success, or a non-zero @c EAI_* error code.
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/getaddrinfo.html
  */
-int getaddrinfo(const char *host, const char *service, const struct zsock_addrinfo *hints,
-		struct zsock_addrinfo **res);
+int getaddrinfo(const char *restrict node, const char *restrict service,
+		const struct addrinfo *restrict hints, struct addrinfo **restrict res);
 
 /**
- * @brief Get the next entry from the hosts database (legacy, sequential).
- * @ingroup posix_option_group_networking
- * @return Pointer to a static hostent on success, or NULL at end or on error.
+ * @brief Get the next entry from the host database.
+ *
+ * @return Pointer to a static @c hostent on success, or NULL at end of file or on error.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/gethostent.html
  */
 struct hostent *gethostent(void);
 
 /**
- * @brief Translate a socket address to a hostname and service name.
- * @ingroup posix_option_group_networking
- * @param addr     Socket address to look up.
- * @param addrlen  Size of @p addr.
- * @param host     Output buffer for the hostname, or NULL.
+ * @brief Translate a socket address to a host name and service name.
+ *
+ * @param sa       Socket address to look up.
+ * @param salen    Size of @p sa.
+ * @param host     Output buffer for the host name, or NULL.
  * @param hostlen  Size of @p host.
  * @param serv     Output buffer for the service name, or NULL.
  * @param servlen  Size of @p serv.
- * @param flags    NI_* flags controlling the conversion.
- * @return 0 on success, or a non-zero EAI_* error code.
+ * @param flags    @c NI_* flags controlling the conversion.
+ * @return 0 on success, or a non-zero @c EAI_* error code.
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/getnameinfo.html
  */
-int getnameinfo(const struct sockaddr *addr, socklen_t addrlen, char *host, socklen_t hostlen,
-		char *serv, socklen_t servlen, int flags);
+int getnameinfo(const struct sockaddr *restrict sa, socklen_t salen, char *restrict host,
+		socklen_t hostlen, char *restrict serv, socklen_t servlen, int flags);
 
 /**
- * @brief Look up a network by address (legacy).
- * @ingroup posix_option_group_networking
- * @param net  Network number (host byte order).
- * @param type Address type (AF_INET).
- * @return Pointer to a static netent, or NULL on failure.
+ * @brief Look up a network by address.
+ *
+ * @param net  Network number in host byte order.
+ * @param type Address type.
+ * @return Pointer to a static @c netent on success, or NULL on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/getnetbyaddr.html
  */
 struct netent *getnetbyaddr(uint32_t net, int type);
 
 /**
- * @brief Look up a network by name (legacy).
- * @ingroup posix_option_group_networking
+ * @brief Look up a network by name.
+ *
  * @param name Network name.
- * @return Pointer to a static netent, or NULL on failure.
+ * @return Pointer to a static @c netent on success, or NULL on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/getnetbyname.html
  */
 struct netent *getnetbyname(const char *name);
 
 /**
- * @brief Get the next entry from the networks database (legacy, sequential).
- * @ingroup posix_option_group_networking
- * @return Pointer to a static netent, or NULL at end or on error.
+ * @brief Get the next entry from the network database.
+ *
+ * @return Pointer to a static @c netent on success, or NULL at end of file or on error.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/getnetent.html
  */
 struct netent *getnetent(void);
 
 /**
- * @brief Look up a protocol by name (legacy).
- * @ingroup posix_option_group_networking
- * @param name Protocol name (e.g. "tcp").
- * @return Pointer to a static protoent, or NULL on failure.
+ * @brief Look up a protocol by name.
+ *
+ * @param name Protocol name.
+ * @return Pointer to a static @c protoent on success, or NULL on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/getprotobyname.html
  */
 struct protoent *getprotobyname(const char *name);
 
 /**
- * @brief Look up a protocol by number (legacy).
- * @ingroup posix_option_group_networking
+ * @brief Look up a protocol by number.
+ *
  * @param proto Protocol number.
- * @return Pointer to a static protoent, or NULL on failure.
+ * @return Pointer to a static @c protoent on success, or NULL on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/getprotobynumber.html
  */
 struct protoent *getprotobynumber(int proto);
 
 /**
- * @brief Get the next entry from the protocols database (legacy, sequential).
- * @ingroup posix_option_group_networking
- * @return Pointer to a static protoent, or NULL at end or on error.
+ * @brief Get the next entry from the protocol database.
+ *
+ * @return Pointer to a static @c protoent on success, or NULL at end of file or on error.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/getprotoent.html
  */
 struct protoent *getprotoent(void);
 
 /**
- * @brief Look up a service by name and protocol (legacy).
- * @ingroup posix_option_group_networking
- * @param name  Service name (e.g. "http").
- * @param proto Protocol ("tcp", "udp", or NULL for any).
- * @return Pointer to a static servent, or NULL on failure.
+ * @brief Look up a service by name and protocol.
+ *
+ * @param name  Service name.
+ * @param proto Protocol name, or NULL for any protocol.
+ * @return Pointer to a static @c servent on success, or NULL on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/getservbyname.html
  */
 struct servent *getservbyname(const char *name, const char *proto);
 
 /**
- * @brief Look up a service by port number and protocol (legacy).
- * @ingroup posix_option_group_networking
- * @param port  Port number (network byte order).
- * @param proto Protocol ("tcp", "udp", or NULL for any).
- * @return Pointer to a static servent, or NULL on failure.
+ * @brief Look up a service by port number and protocol.
+ *
+ * @param port  Port number in network byte order.
+ * @param proto Protocol name, or NULL for any protocol.
+ * @return Pointer to a static @c servent on success, or NULL on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/getservbyport.html
  */
 struct servent *getservbyport(int port, const char *proto);
 
 /**
- * @brief Get the next entry from the services database (legacy, sequential).
- * @ingroup posix_option_group_networking
- * @return Pointer to a static servent, or NULL at end or on error.
+ * @brief Get the next entry from the services database.
+ *
+ * @return Pointer to a static @c servent on success, or NULL at end of file or on error.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/getservent.html
  */
 struct servent *getservent(void);
 
 /**
- * @brief Open the hosts database (legacy).
- * @ingroup posix_option_group_networking
- * @param stayopen Non-zero to keep the database connection open.
+ * @brief Open the host database.
+ *
+ * @param stayopen Non-zero to keep the database open between queries.
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/sethostent.html
  */
 void sethostent(int stayopen);
 
 /**
- * @brief Open the networks database (legacy).
- * @ingroup posix_option_group_networking
- * @param stayopen Non-zero to keep the database connection open.
+ * @brief Open the network database.
+ *
+ * @param stayopen Non-zero to keep the database open between queries.
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/setnetent.html
  */
 void setnetent(int stayopen);
 
 /**
- * @brief Open the protocols database (legacy).
- * @ingroup posix_option_group_networking
- * @param stayopen Non-zero to keep the database connection open.
+ * @brief Open the protocol database.
+ *
+ * @param stayopen Non-zero to keep the database open between queries.
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/setprotoent.html
  */
 void setprotoent(int stayopen);
 
 /**
- * @brief Open the services database (legacy).
- * @ingroup posix_option_group_networking
- * @param stayopen Non-zero to keep the database connection open.
+ * @brief Open the services database.
+ *
+ * @param stayopen Non-zero to keep the database open between queries.
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/setservent.html
  */
 void setservent(int stayopen);
-
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif	/* ZEPHYR_INCLUDE_POSIX_NETDB_H_ */
+#endif /* ZEPHYR_INCLUDE_POSIX_NETDB_H_ */

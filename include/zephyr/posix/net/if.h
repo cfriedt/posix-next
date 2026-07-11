@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019 Linaro Limited
+ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -17,60 +17,68 @@
 #ifndef ZEPHYR_INCLUDE_POSIX_NET_IF_H_
 #define ZEPHYR_INCLUDE_POSIX_NET_IF_H_
 
-#ifdef CONFIG_NET_INTERFACE_NAME_LEN
-/** @brief Maximum length of a network interface name including the NUL terminator.  @ingroup posix_option_group_networking*/
-#define IF_NAMESIZE CONFIG_NET_INTERFACE_NAME_LEN
-#else
-#define IF_NAMESIZE 1
-#endif
+#include <zephyr/net/socket.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+#if !(defined(_IF_NAMEINDEX_DECLARED) || defined(__if_nameindex_defined)) || defined(__DOXYGEN__)
 /** @brief Network interface name-to-index mapping. */
 struct if_nameindex {
-	unsigned int if_index; /**< Numeric interface index. */
-	char *if_name;         /**< Interface name string. */
+	/** @brief Numeric index of the interface. */
+	unsigned int if_index;
+	/** @brief Null-terminated name of the interface. */
+	char *if_name;
 };
+#define _IF_NAMEINDEX_DECLARED
+#define __if_nameindex_defined
+#endif
 
-/**
- * @brief Map a network interface index to its name.
- * @ingroup posix_option_group_networking
- * @param ifindex Numeric interface index.
- * @param ifname  Output buffer of at least IF_NAMESIZE bytes.
- * @return @p ifname on success, or NULL with errno set on failure.
- * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/if_indextoname.html
- */
-char *if_indextoname(unsigned int ifindex, char *ifname);
+#ifdef CONFIG_NET_INTERFACE_NAME_LEN
+/** @brief Interface name length. */
+#define IF_NAMESIZE CONFIG_NET_INTERFACE_NAME_LEN
+#else
+#define IF_NAMESIZE 1
+#endif
 
 /**
  * @brief Free a list returned by if_nameindex().
- * @ingroup posix_option_group_networking
+ *
  * @param ptr List to free (must have been returned by if_nameindex()).
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/if_freenameindex.html
  */
 void if_freenameindex(struct if_nameindex *ptr);
 
 /**
+ * @brief Map a network interface index to its name.
+ *
+ * @param ifindex Numeric interface index.
+ * @param ifname  Output buffer of at least @c IF_NAMESIZE bytes.
+ * @return @p ifname on success, or NULL with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/if_indextoname.html
+ */
+char *if_indextoname(unsigned int ifindex, char *ifname);
+
+/**
  * @brief Return all network interfaces as a name-index array.
- * @ingroup posix_option_group_networking
  *
  * The returned array is terminated by an entry with @c if_index == 0 and
- * @c if_name == NULL.  Free with if_freenameindex().
+ * @c if_name == NULL. Free with if_freenameindex().
  *
  * @return Allocated array on success, or NULL with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/if_nameindex.html
  */
 struct if_nameindex *if_nameindex(void);
 
 /**
  * @brief Map a network interface name to its index.
- * @ingroup posix_option_group_networking
+ *
  * @param ifname Interface name string.
  * @return Interface index on success, or 0 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/if_nametoindex.html
  */
 unsigned int if_nametoindex(const char *ifname);
-
 
 #ifdef __cplusplus
 }
