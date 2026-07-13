@@ -59,46 +59,28 @@ struct in_addr {
  * @param x The value to convert.
  * @return The converted value.
  */
-#define htonl(x) ((uint32_t)((((uint32_t)(x) & 0x000000ffU) << 24) |              \
-				    (((uint32_t)(x) & 0x0000ff00U) << 8) |              \
-				    (((uint32_t)(x) & 0x00ff0000U) >> 8) |              \
-				    (((uint32_t)(x) & 0xff000000U) >> 24)))
+#define htonl(x) zsock_htonl(x)
 /**
  * @brief Convert 16-bit value from host to network byte order.
  *
  * @param x The value to convert.
  * @return The converted value.
  */
-#define htons(x) ((uint16_t)((((uint16_t)(x) & 0x00ffU) << 8) |                 \
-				     (((uint16_t)(x) & 0xff00U) >> 8)))
+#define htons(x) zsock_htons(x)
 /**
  * @brief Convert 32-bit value from network to host byte order.
  *
  * @param x The value to convert.
  * @return The converted value.
  */
-#define ntohl(x) htonl(x)
+#define ntohl(x) zsock_ntohl(x)
 /**
  * @brief Convert 16-bit value from network to host byte order.
  *
  * @param x The value to convert.
  * @return The converted value.
  */
-#define ntohs(x) htons(x)
-
-#if defined(__GNUC__) || defined(__clang__)
-
-#undef htonl
-#undef htons
-#undef ntohl
-#undef ntohs
-
-#define htonl(x) __builtin_bswap32((uint32_t)(x))
-#define htons(x) __builtin_bswap16((uint16_t)(x))
-#define ntohl(x) __builtin_bswap32((uint32_t)(x))
-#define ntohs(x) __builtin_bswap16((uint16_t)(x))
-
-#endif /* defined(__GNUC__) || defined(__clang__) */
+#define ntohs(x) zsock_ntohs(x)
 
 #endif /* !(defined(htonl) && ... && defined(ntohs)) */
 

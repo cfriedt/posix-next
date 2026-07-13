@@ -909,9 +909,12 @@ patches:
     date: 2026-07-12
     upstreamable: true
     comments: |
-      Remove TEMP_POSIX_ZSOCK_NS_WORKAROUND compat-alias blocks from
-      include/zephyr/net/socket.h and include/zephyr/net/net_ip.h now that all
-      in-tree consumers have been migrated to ZSOCK_ names.  Also converts
+      Remove TEMP_POSIX_ZSOCK_NS_WORKAROUND compat-alias blocks for POSIX
+      SSOT symbols from include/zephyr/net/socket.h and net_ip.h once in-tree
+      consumers use ZSOCK_ names, while retaining #ifndef Linux/BSD extension
+      aliases (AF/PF_PACKET, AF/PF_CAN, MSG_DONTWAIT, IFNAMSIZ, SO_PRIORITY,
+      SO_TXTIME/SCM_TXTIME, IPV6_ADDR_PREFERENCES/IPV6_PREFER_SRC_*,
+      IPPROTO_ETH_P_ALL, NI_NUMERICSCOPE). Also converts
       Zephyr-internal networking files (drivers/net/nsos*, subsys/net/lib/*,
       tests/net/*, samples/net/*) from bare POSIX socket types and functions
       (struct sockaddr, AF_INET, htons, send, recv, …) to their ZSOCK_-prefixed
@@ -954,3 +957,15 @@ patches:
       coap_download struct sockaddr sa -> sockaddr_in6 and zsock_sockaddr cast for
       coap_client_req; txtime zsock_in_addr/net_if_ipv4_select_src_addr casts and
       net_ipaddr_parse zsock_sockaddr cast.
+  - path: zephyr/net-headers-zsock-inaddr-init.patch
+    sha256sum: 6c9690fa5ac275cc0f1aa7c4076c7e7f41f2b3e5e38d2c720a3d498715ae7c67
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-13
+    upstreamable: true
+    comments: |
+      Rename bare POSIX INADDR_ANY_INIT and INADDR_LOOPBACK_INIT macros in
+      net_ip.h to ZSOCK_INADDR_ANY_INIT and ZSOCK_INADDR_LOOPBACK_INIT, and
+      provide #ifndef Linux/BSD aliases back to the ZSOCK_ names so in-tree
+      callers can keep using the short names.
