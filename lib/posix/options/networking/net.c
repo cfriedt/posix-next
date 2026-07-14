@@ -6,16 +6,22 @@
  */
 
 #include <ctype.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 
-#include <zephyr/net/hostname.h>
-#include <zephyr/net/net_if.h>
-#include <zephyr/net/socket.h>
 #include <arpa/inet.h>
+#include <netdb.h>
 #include <netinet/in.h>
 #include <net/if.h>
 #include <sys/socket.h>
+
+#include <zephyr/net/hostname.h>
+#include <zephyr/net/net_if.h>
+#include <zephyr/net/net_ip.h>
+#include <zephyr/net/socket.h>
+
+#include "zsock_conversion.h"
 
 /* From arpa/inet.h */
 
@@ -88,7 +94,7 @@ char *inet_ntoa(struct in_addr in)
 
 const char *inet_ntop(int af, const void *restrict src, char *restrict dst, socklen_t size)
 {
-	return zsock_inet_ntop(af, src, dst, size);
+	return zsock_inet_ntop(af, src, dst, (size_t)size);
 }
 
 int inet_pton(int af, const char *restrict src, void *restrict dst)
@@ -197,9 +203,30 @@ void endservent(void)
 {
 }
 
-void freeaddrinfo(struct zsock_addrinfo *ai)
+void freeaddrinfo(struct addrinfo *ai)
 {
-	zsock_freeaddrinfo(ai);
+	if (posix_addrinfo_layout_eq()) {
+		zsock_freeaddrinfo((struct zsock_addrinfo *)ai);
+		return;
+	}
+
+	/*
+	 * Slow path: ai points to a caller-allocated array of struct addrinfo
+	 * wrappers whose ai_next chain we built during getaddrinfo().  Free the
+	 * underlying zsock chain first, then the wrapper array.
+	 */
+	struct addrinfo *node = ai;
+
+	while (node != NULL) {
+		struct addrinfo *next_posix = node->ai_next;
+		struct zsock_addrinfo *znode =
+			(struct zsock_addrinfo *)((uint8_t *)node +
+						  sizeof(struct addrinfo));
+
+		zsock_freeaddrinfo(znode);
+		node = next_posix;
+	}
+	free(ai);
 }
 
 const char *gai_strerror(int errcode)
@@ -207,10 +234,80 @@ const char *gai_strerror(int errcode)
 	return zsock_gai_strerror(errcode);
 }
 
-int getaddrinfo(const char *host, const char *service, const struct zsock_addrinfo *hints,
-		struct zsock_addrinfo **res)
+int getaddrinfo(const char *host, const char *service, const struct addrinfo *hints,
+		struct addrinfo **res)
 {
-	return zsock_getaddrinfo(host, service, hints, res);
+	if (posix_addrinfo_layout_eq()) {
+		return zsock_getaddrinfo(host, service,
+					 (const struct zsock_addrinfo *)hints,
+					 (struct zsock_addrinfo **)res);
+	}
+
+	/*
+	 * Slow path for libcs (e.g. glibc) whose struct addrinfo differs from
+	 * struct zsock_addrinfo in layout.
+	 *
+	 * 1. Convert hints to zsock_addrinfo (copies only the lookup fields).
+	 * 2. Call zsock_getaddrinfo; it returns a zsock_addrinfo linked list.
+	 * 3. Allocate one struct addrinfo per result node that stores the POSIX
+	 *    view alongside a back-pointer to the original zsock node (needed
+	 *    for freeaddrinfo).  The zsock node is embedded immediately after
+	 *    the addrinfo in the same allocation so freeaddrinfo can find it.
+	 * 4. Build the POSIX ai_next chain and return.
+	 */
+	struct zsock_addrinfo zhints_buf;
+	const struct zsock_addrinfo *zhints =
+		posix_addrinfo_hints_to_zsock(hints, &zhints_buf);
+	struct zsock_addrinfo *zres = NULL;
+	int rc;
+
+	rc = zsock_getaddrinfo(host, service, zhints, &zres);
+	if (rc != 0 || zres == NULL) {
+		*res = NULL;
+		return rc;
+	}
+
+	/* Count nodes */
+	int count = 0;
+
+	for (struct zsock_addrinfo *z = zres; z != NULL; z = z->ai_next) {
+		count++;
+	}
+
+	/*
+	 * Allocate an array of (struct addrinfo + embedded struct zsock_addrinfo)
+	 * pairs so that freeaddrinfo can recover the zsock pointer.
+	 */
+	size_t pair_size = sizeof(struct addrinfo) + sizeof(struct zsock_addrinfo);
+	uint8_t *buf = malloc((size_t)count * pair_size);
+
+	if (buf == NULL) {
+		zsock_freeaddrinfo(zres);
+		*res = NULL;
+		return EAI_MEMORY;
+	}
+
+	struct zsock_addrinfo *znode = zres;
+	struct addrinfo *prev = NULL;
+
+	for (int i = 0; i < count; i++, znode = znode->ai_next) {
+		struct addrinfo *node = (struct addrinfo *)(buf + (size_t)i * pair_size);
+		struct zsock_addrinfo *zembedded =
+			(struct zsock_addrinfo *)((uint8_t *)node + sizeof(struct addrinfo));
+
+		*zembedded = *znode;
+		zsock_addrinfo_to_posix_fields(znode, node);
+		node->ai_next = NULL;
+
+		if (prev != NULL) {
+			prev->ai_next = node;
+		} else {
+			*res = node;
+		}
+		prev = node;
+	}
+
+	return 0;
 }
 
 struct hostent *gethostent(void)
@@ -221,22 +318,16 @@ struct hostent *gethostent(void)
 int getnameinfo(const struct sockaddr *addr, socklen_t addrlen, char *host, socklen_t hostlen,
 		char *serv, socklen_t servlen, int flags)
 {
-	return zsock_getnameinfo(addr, addrlen, host, hostlen, serv, servlen, flags);
-}
+	struct posix_zsock_sockaddr_buf zbuf;
+	size_t zaddrlen = sizeof(zbuf);
 
-struct netent *getnetbyaddr(uint32_t net, int type)
-{
-	ARG_UNUSED(net);
-	ARG_UNUSED(type);
+	if (addr == NULL) {
+		return zsock_getnameinfo(NULL, 0, host, hostlen, serv, servlen, flags);
+	}
 
-	return NULL;
-}
-
-struct netent *getnetbyname(const char *name)
-{
-	ARG_UNUSED(name);
-
-	return NULL;
+	return zsock_getnameinfo(
+		posix_sockaddr_to_zsock(addr, addrlen, posix_zsock_sa_buf(&zbuf), &zaddrlen),
+		(zsock_socklen_t)zaddrlen, host, hostlen, serv, servlen, flags);
 }
 
 struct netent *getnetent(void)
@@ -246,34 +337,24 @@ struct netent *getnetent(void)
 
 int getpeername(int sock, struct sockaddr *addr, socklen_t *addrlen)
 {
-	return zsock_getpeername(sock, addr, addrlen);
-}
+	struct posix_zsock_sockaddr_buf zbuf;
+	zsock_socklen_t zaddrlen = sizeof(zbuf);
+	size_t out_len;
+	int ret;
 
-struct protoent *getprotobyname(const char *name)
-{
-	ARG_UNUSED(name);
+	if (addr == NULL || addrlen == NULL) {
+		return zsock_getpeername(sock, NULL, addrlen);
+	}
 
-	return NULL;
-}
+	ret = zsock_getpeername(sock, posix_zsock_sa_buf(&zbuf), &zaddrlen);
+	if (ret < 0) {
+		return ret;
+	}
 
-struct protoent *getprotobynumber(int proto)
-{
-	ARG_UNUSED(proto);
-
-	return NULL;
-}
-
-struct protoent *getprotoent(void)
-{
-	return NULL;
-}
-
-struct servent *getservbyname(const char *name, const char *proto)
-{
-	ARG_UNUSED(name);
-	ARG_UNUSED(proto);
-
-	return NULL;
+	out_len = *addrlen;
+	zsock_sockaddr_to_posix(posix_zsock_sa_buf(&zbuf), zaddrlen, addr, &out_len);
+	*addrlen = (socklen_t)out_len;
+	return ret;
 }
 
 struct servent *getservbyport(int port, const char *proto)
@@ -313,17 +394,56 @@ void setservent(int stayopen)
 
 int accept(int sock, struct sockaddr *addr, socklen_t *addrlen)
 {
-	return zsock_accept(sock, addr, addrlen);
+	struct posix_zsock_sockaddr_buf zbuf;
+	zsock_socklen_t zaddrlen = sizeof(zbuf);
+	size_t out_len;
+	int ret;
+
+	if (addr == NULL || addrlen == NULL) {
+		return zsock_accept(sock, NULL, addrlen);
+	}
+
+	ret = zsock_accept(sock, posix_zsock_sa_buf(&zbuf), &zaddrlen);
+	if (ret < 0) {
+		return ret;
+	}
+
+	out_len = *addrlen;
+	zsock_sockaddr_to_posix(posix_zsock_sa_buf(&zbuf), zaddrlen, addr, &out_len);
+	*addrlen = (socklen_t)out_len;
+	return ret;
 }
 
 int bind(int sock, const struct sockaddr *addr, socklen_t addrlen)
 {
-	return zsock_bind(sock, addr, addrlen);
+	struct posix_zsock_sockaddr_buf zbuf;
+	size_t zaddrlen = sizeof(zbuf);
+
+	if (addr == NULL) {
+		errno = EDESTADDRREQ;
+		return -1;
+	}
+
+	return zsock_bind(sock,
+			  posix_sockaddr_to_zsock(addr, addrlen, posix_zsock_sa_buf(&zbuf),
+						  &zaddrlen),
+			  (zsock_socklen_t)zaddrlen);
 }
 
 int connect(int sock, const struct sockaddr *addr, socklen_t addrlen)
 {
-	return zsock_connect(sock, addr, addrlen);
+	struct posix_zsock_sockaddr_buf zbuf;
+	size_t zaddrlen = sizeof(zbuf);
+
+	if (addr == NULL) {
+		errno = EDESTADDRREQ;
+		return -1;
+	}
+
+	return zsock_connect(sock,
+			     posix_sockaddr_to_zsock(addr, addrlen, posix_zsock_sa_buf(&zbuf),
+						     &zaddrlen),
+			     (zsock_socklen_t)zaddrlen);
 }
 
 int gethostname(char *name, size_t namelen)
@@ -333,7 +453,24 @@ int gethostname(char *name, size_t namelen)
 
 int getsockname(int sock, struct sockaddr *addr, socklen_t *addrlen)
 {
-	return zsock_getsockname(sock, addr, addrlen);
+	struct posix_zsock_sockaddr_buf zbuf;
+	zsock_socklen_t zaddrlen = sizeof(zbuf);
+	size_t out_len;
+	int ret;
+
+	if (addr == NULL || addrlen == NULL) {
+		return zsock_getsockname(sock, NULL, addrlen);
+	}
+
+	ret = zsock_getsockname(sock, posix_zsock_sa_buf(&zbuf), &zaddrlen);
+	if (ret < 0) {
+		return ret;
+	}
+
+	out_len = *addrlen;
+	zsock_sockaddr_to_posix(posix_zsock_sa_buf(&zbuf), zaddrlen, addr, &out_len);
+	*addrlen = (socklen_t)out_len;
+	return ret;
 }
 
 int getsockopt(int sock, int level, int optname, void *optval, socklen_t *optlen)
@@ -354,12 +491,65 @@ ssize_t recv(int sock, void *buf, size_t max_len, int flags)
 ssize_t recvfrom(int sock, void *buf, size_t max_len, int flags, struct sockaddr *src_addr,
 		 socklen_t *addrlen)
 {
-	return zsock_recvfrom(sock, buf, max_len, flags, src_addr, addrlen);
+	bool want_addr = src_addr != NULL && addrlen != NULL;
+	struct posix_zsock_sockaddr_buf zbuf;
+	zsock_socklen_t zaddrlen = sizeof(zbuf);
+	size_t out_len;
+	ssize_t ret;
+
+	ret = zsock_recvfrom(sock, buf, max_len, flags,
+			     want_addr ? posix_zsock_sa_buf(&zbuf) : NULL,
+			     want_addr ? &zaddrlen : NULL);
+	if (ret < 0 || !want_addr) {
+		return ret;
+	}
+
+	out_len = *addrlen;
+	zsock_sockaddr_to_posix(posix_zsock_sa_buf(&zbuf), zaddrlen, src_addr, &out_len);
+	*addrlen = (socklen_t)out_len;
+	return ret;
 }
 
 ssize_t recvmsg(int sock, struct msghdr *msg, int flags)
 {
-	return zsock_recvmsg(sock, msg, flags);
+	struct posix_zsock_sockaddr_buf zaddr;
+	struct zsock_msghdr zmsg;
+	struct zsock_msghdr *pzmsg;
+	bool need_addr_conv;
+	size_t out_len;
+	ssize_t ret;
+
+	if (msg == NULL) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	pzmsg = posix_msghdr_to_zsock(msg, &zmsg);
+	need_addr_conv = (pzmsg == &zmsg) && msg->msg_name != NULL && msg->msg_namelen > 0;
+
+	if (need_addr_conv) {
+		pzmsg->msg_name = posix_zsock_sa_buf(&zaddr);
+		pzmsg->msg_namelen = sizeof(zaddr);
+	} else if (pzmsg == &zmsg) {
+		pzmsg->msg_name = msg->msg_name;
+		pzmsg->msg_namelen = msg->msg_namelen;
+	}
+
+	ret = zsock_recvmsg(sock, pzmsg, flags);
+	if (ret < 0) {
+		return ret;
+	}
+
+	if (need_addr_conv && pzmsg->msg_namelen > 0) {
+		struct zsock_sockaddr *zsa = posix_zsock_sa_buf(&zaddr);
+
+		out_len = msg->msg_namelen;
+		zsock_sockaddr_to_posix(zsa, pzmsg->msg_namelen, msg->msg_name, &out_len);
+		msg->msg_namelen = (socklen_t)out_len;
+	}
+
+	zsock_msghdr_to_posix(pzmsg, msg);
+	return ret;
 }
 
 ssize_t send(int sock, const void *buf, size_t len, int flags)
@@ -369,13 +559,39 @@ ssize_t send(int sock, const void *buf, size_t len, int flags)
 
 ssize_t sendmsg(int sock, const struct msghdr *message, int flags)
 {
-	return zsock_sendmsg(sock, message, flags);
+	struct posix_zsock_sockaddr_buf zaddr;
+	struct zsock_msghdr zmsg;
+	struct zsock_msghdr *pzmsg;
+	size_t zaddrlen = sizeof(zaddr);
+
+	if (message == NULL) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	pzmsg = posix_msghdr_to_zsock(message, &zmsg);
+
+	if (pzmsg == &zmsg && message->msg_name != NULL && message->msg_namelen > 0) {
+		pzmsg->msg_name = posix_sockaddr_to_zsock(message->msg_name, message->msg_namelen,
+							  posix_zsock_sa_buf(&zaddr), &zaddrlen);
+		pzmsg->msg_namelen = (zsock_socklen_t)zaddrlen;
+	}
+
+	return zsock_sendmsg(sock, pzmsg, flags);
 }
 
 ssize_t sendto(int sock, const void *buf, size_t len, int flags, const struct sockaddr *dest_addr,
 	       socklen_t addrlen)
 {
-	return zsock_sendto(sock, buf, len, flags, dest_addr, addrlen);
+	struct posix_zsock_sockaddr_buf zbuf;
+	size_t zaddrlen = sizeof(zbuf);
+	const struct zsock_sockaddr *zaddr =
+		dest_addr != NULL ? posix_sockaddr_to_zsock(dest_addr, addrlen,
+							    posix_zsock_sa_buf(&zbuf), &zaddrlen)
+				  : NULL;
+
+	return zsock_sendto(sock, buf, len, flags, zaddr,
+			    zaddr != NULL ? (zsock_socklen_t)zaddrlen : 0);
 }
 
 int setsockopt(int sock, int level, int optname, const void *optval, socklen_t optlen)
