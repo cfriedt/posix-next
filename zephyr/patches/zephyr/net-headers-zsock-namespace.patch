@@ -1,0 +1,4256 @@
+diff --git a/include/zephyr/logging/log_backend_net.h b/include/zephyr/logging/log_backend_net.h
+index 71b22e1e0e9..ec218fcf61c 100644
+--- a/include/zephyr/logging/log_backend_net.h
++++ b/include/zephyr/logging/log_backend_net.h
+@@ -53,7 +53,7 @@ bool log_backend_net_set_addr(const char *addr);
+  *
+  * @return True if address could be set, false otherwise.
+  */
+-bool log_backend_net_set_ip(const struct sockaddr *addr);
++bool log_backend_net_set_ip(const struct zsock_sockaddr *addr);
+
+ /**
+  * @brief update the hostname
+diff --git a/include/zephyr/net/canbus.h b/include/zephyr/net/canbus.h
+index 1d7056a72ea..060406dd113 100644
+--- a/include/zephyr/net/canbus.h
++++ b/include/zephyr/net/canbus.h
+@@ -39,12 +39,12 @@ struct canbus_api {
+ 	/** Set socket CAN option */
+ 	int (*setsockopt)(const struct device *dev, void *obj, int level,
+ 			  int optname,
+-			  const void *optval, socklen_t optlen);
++			  const void *optval, zsock_socklen_t optlen);
+
+ 	/** Get socket CAN option */
+ 	int (*getsockopt)(const struct device *dev, void *obj, int level,
+ 			  int optname,
+-			  const void *optval, socklen_t *optlen);
++			  const void *optval, zsock_socklen_t *optlen);
+ };
+
+ /* Make sure that the network interface API is properly setup inside
+diff --git a/include/zephyr/net/capture.h b/include/zephyr/net/capture.h
+index 1ebb3da414e..c3f39a96647 100644
+--- a/include/zephyr/net/capture.h
++++ b/include/zephyr/net/capture.h
+@@ -337,8 +337,8 @@ struct net_capture_info {
+ 	const struct device *capture_dev;
+ 	struct net_if *capture_iface;
+ 	struct net_if *tunnel_iface;
+-	struct sockaddr *peer;
+-	struct sockaddr *local;
++	struct zsock_sockaddr *peer;
++	struct zsock_sockaddr *local;
+ 	bool is_enabled;
+ };
+
+diff --git a/include/zephyr/net/coap.h b/include/zephyr/net/coap.h
+index 22234e64ab1..57c89253f6b 100644
+--- a/include/zephyr/net/coap.h
++++ b/include/zephyr/net/coap.h
+@@ -262,7 +262,7 @@ struct coap_resource;
+  */
+ typedef int (*coap_method_t)(struct coap_resource *resource,
+ 			     struct coap_packet *request,
+-			     struct sockaddr *addr, socklen_t addr_len);
++			     struct zsock_sockaddr *addr, zsock_socklen_t addr_len);
+
+ /**
+  * @typedef coap_notify_t
+@@ -300,7 +300,7 @@ struct coap_observer {
+ 	/** Observer list node */
+ 	sys_snode_t list;
+ 	/** Observer connection end point information */
+-	struct sockaddr addr;
++	struct zsock_sockaddr addr;
+ 	/** Observer token */
+ 	uint8_t token[8];
+ 	/** Extended token length */
+@@ -350,7 +350,7 @@ struct coap_option {
+  */
+ typedef int (*coap_reply_t)(const struct coap_packet *response,
+ 			    struct coap_reply *reply,
+-			    const struct sockaddr *from);
++			    const struct zsock_sockaddr *from);
+
+ /**
+  * @brief CoAP transmission parameters.
+@@ -375,7 +375,7 @@ struct coap_transmission_parameters {
+  * @brief Represents a request awaiting for an acknowledgment (ACK).
+  */
+ struct coap_pending {
+-	struct sockaddr addr; /**< Remote address */
++	struct zsock_sockaddr addr; /**< Remote address */
+ 	int64_t t0;           /**< Time when the request was sent */
+ 	uint32_t timeout;     /**< Timeout in ms */
+ 	uint16_t id;          /**< Message id */
+@@ -707,7 +707,7 @@ int coap_handle_request_len(struct coap_packet *cpkt,
+ 			    size_t resources_len,
+ 			    struct coap_option *options,
+ 			    uint8_t opt_num,
+-			    struct sockaddr *addr, socklen_t addr_len);
++			    struct zsock_sockaddr *addr, zsock_socklen_t addr_len);
+
+ /**
+  * @brief When a request is received, call the appropriate methods of
+@@ -729,7 +729,7 @@ int coap_handle_request(struct coap_packet *cpkt,
+ 			struct coap_resource *resources,
+ 			struct coap_option *options,
+ 			uint8_t opt_num,
+-			struct sockaddr *addr, socklen_t addr_len);
++			struct zsock_sockaddr *addr, zsock_socklen_t addr_len);
+
+ /**
+  * Represents the size of each block that will be transferred using
+@@ -996,7 +996,7 @@ size_t coap_next_block(const struct coap_packet *cpkt,
+  */
+ void coap_observer_init(struct coap_observer *observer,
+ 			const struct coap_packet *request,
+-			const struct sockaddr *addr);
++			const struct zsock_sockaddr *addr);
+
+ /**
+  * @brief After the observer is initialized, associate the observer
+@@ -1037,7 +1037,7 @@ bool coap_remove_observer(struct coap_resource *resource,
+  */
+ struct coap_observer *coap_find_observer(
+ 	struct coap_observer *observers, size_t len,
+-	const struct sockaddr *addr,
++	const struct zsock_sockaddr *addr,
+ 	const uint8_t *token, uint8_t token_len);
+
+ /**
+@@ -1055,7 +1055,7 @@ struct coap_observer *coap_find_observer(
+  */
+ struct coap_observer *coap_find_observer_by_addr(
+ 	struct coap_observer *observers, size_t len,
+-	const struct sockaddr *addr);
++	const struct zsock_sockaddr *addr);
+
+ /**
+  * @brief Returns the observer that has token @a token.
+@@ -1114,7 +1114,7 @@ void coap_reply_init(struct coap_reply *reply,
+  */
+ int coap_pending_init(struct coap_pending *pending,
+ 		      const struct coap_packet *request,
+-		      const struct sockaddr *addr,
++		      const struct zsock_sockaddr *addr,
+ 		      const struct coap_transmission_parameters *params);
+
+ /**
+@@ -1174,7 +1174,7 @@ struct coap_pending *coap_pending_received(
+  */
+ struct coap_reply *coap_response_received(
+ 	const struct coap_packet *response,
+-	const struct sockaddr *from,
++	const struct zsock_sockaddr *from,
+ 	struct coap_reply *replies, size_t len);
+
+ /**
+diff --git a/include/zephyr/net/coap_client.h b/include/zephyr/net/coap_client.h
+index 1d3b959a7d2..edc8e57445c 100644
+--- a/include/zephyr/net/coap_client.h
++++ b/include/zephyr/net/coap_client.h
+@@ -164,8 +164,8 @@ struct coap_client_internal_request {
+
+ struct coap_client {
+ 	int fd;
+-	struct sockaddr address;
+-	socklen_t socklen;
++	struct zsock_sockaddr address;
++	zsock_socklen_t socklen;
+ 	struct k_mutex lock;
+ 	uint8_t recv_buf[MAX_COAP_MSG_LEN];
+ 	struct coap_client_internal_request requests[CONFIG_COAP_CLIENT_MAX_REQUESTS];
+@@ -206,7 +206,7 @@ int coap_client_init(struct coap_client *client, const char *info);
+  * @return zero when operation started successfully or negative error code otherwise.
+  */
+
+-int coap_client_req(struct coap_client *client, int sock, const struct sockaddr *addr,
++int coap_client_req(struct coap_client *client, int sock, const struct zsock_sockaddr *addr,
+ 		    struct coap_client_request *req, struct coap_transmission_parameters *params);
+
+ /**
+diff --git a/include/zephyr/net/coap_service.h b/include/zephyr/net/coap_service.h
+index c83d3cead21..02e032a6f14 100644
+--- a/include/zephyr/net/coap_service.h
++++ b/include/zephyr/net/coap_service.h
+@@ -100,7 +100,7 @@ struct coap_service {
+  *     static const struct gpio_dt_spec led = GPIO_DT_SPEC_GET(DT_ALIAS(led0), gpios);
+  *
+  *     static int led_put(struct coap_resource *resource, struct coap_packet *request,
+- *                        struct sockaddr *addr, socklen_t addr_len)
++ *                        struct zsock_sockaddr *addr, zsock_socklen_t addr_len)
+  *     {
+  *             const uint8_t *payload;
+  *             uint16_t payload_len;
+@@ -288,7 +288,7 @@ int coap_service_is_running(const struct coap_service *service);
+  * @return 0 in case of success or negative in case of error.
+  */
+ int coap_service_send(const struct coap_service *service, const struct coap_packet *cpkt,
+-		      const struct sockaddr *addr, socklen_t addr_len,
++		      const struct zsock_sockaddr *addr, zsock_socklen_t addr_len,
+ 		      const struct coap_transmission_parameters *params);
+
+ /**
+@@ -304,7 +304,7 @@ int coap_service_send(const struct coap_service *service, const struct coap_pack
+  * @return 0 in case of success or negative in case of error.
+  */
+ int coap_resource_send(const struct coap_resource *resource, const struct coap_packet *cpkt,
+-		       const struct sockaddr *addr, socklen_t addr_len,
++		       const struct zsock_sockaddr *addr, zsock_socklen_t addr_len,
+ 		       const struct coap_transmission_parameters *params);
+
+ /**
+@@ -321,7 +321,7 @@ int coap_resource_send(const struct coap_resource *resource, const struct coap_p
+  * @return the observe option value in case of success or negative in case of error.
+  */
+ int coap_resource_parse_observe(struct coap_resource *resource, const struct coap_packet *request,
+-				const struct sockaddr *addr);
++				const struct zsock_sockaddr *addr);
+
+ /**
+  * @brief Lookup an observer by address and remove it from the @p resource .
+@@ -333,7 +333,7 @@ int coap_resource_parse_observe(struct coap_resource *resource, const struct coa
+  * @return 0 in case of success or negative in case of error.
+  */
+ int coap_resource_remove_observer_by_addr(struct coap_resource *resource,
+-					  const struct sockaddr *addr);
++					  const struct zsock_sockaddr *addr);
+
+ /**
+  * @brief Lookup an observer by token and remove it from the @p resource .
+diff --git a/include/zephyr/net/dhcpv4_server.h b/include/zephyr/net/dhcpv4_server.h
+index 1cd0bbdb49e..de79752cde1 100644
+--- a/include/zephyr/net/dhcpv4_server.h
++++ b/include/zephyr/net/dhcpv4_server.h
+@@ -48,7 +48,7 @@ struct dhcpv4_client_id {
+ struct dhcpv4_addr_slot {
+ 	enum dhcpv4_server_addr_state state;
+ 	struct dhcpv4_client_id client_id;
+-	struct in_addr addr;
++	struct zsock_in_addr addr;
+ 	uint32_t lease_time;
+ 	k_timepoint_t expiry;
+ };
+@@ -69,7 +69,7 @@ struct dhcpv4_addr_slot {
+  *
+  *  @return 0 on success, a negative error code otherwise.
+  */
+-int net_dhcpv4_server_start(struct net_if *iface, struct in_addr *base_addr);
++int net_dhcpv4_server_start(struct net_if *iface, struct zsock_in_addr *base_addr);
+
+ /**
+  *  @brief Stop DHCPv4 server instance on an iface
+@@ -126,7 +126,7 @@ int net_dhcpv4_server_foreach_lease(struct net_if *iface,
+  */
+ typedef int (*net_dhcpv4_server_provider_cb_t)(struct net_if *iface,
+ 					       const struct dhcpv4_client_id *client_id,
+-					       struct in_addr *addr,
++					       struct zsock_in_addr *addr,
+ 					       void *user_data);
+ /**
+  * @brief Set the callback used to provide addresses to the DHCP server.
+diff --git a/include/zephyr/net/dns_resolve.h b/include/zephyr/net/dns_resolve.h
+index aed2b17d767..f59a444318a 100644
+--- a/include/zephyr/net/dns_resolve.h
++++ b/include/zephyr/net/dns_resolve.h
+@@ -214,7 +214,7 @@ struct dns_socket_dispatcher;
+  * @return 0 if ok, <0 if error
+  */
+ typedef int (*dns_socket_dispatcher_cb)(struct dns_socket_dispatcher *ctx, int sock,
+-					struct sockaddr *addr, size_t addrlen,
++					struct zsock_sockaddr *addr, size_t addrlen,
+ 					struct net_buf *buf, size_t data_len);
+
+ /** @brief DNS socket dispatcher context. */
+@@ -235,7 +235,7 @@ struct dns_socket_dispatcher {
+ 	/** Type of the socket (resolver / responder) */
+ 	enum dns_socket_type type;
+ 	/** Local endpoint address (used when binding the socket) */
+-	struct sockaddr local_addr;
++	struct zsock_sockaddr local_addr;
+ 	/** DNS socket dispatcher callback is called for incoming traffic */
+ 	dns_socket_dispatcher_cb cb;
+ 	/** Socket descriptors to poll */
+@@ -312,16 +312,16 @@ struct dns_addrinfo {
+ 	union {
+ 		struct {
+ 			/** Length of the ai_addr field or ai_canonname */
+-			socklen_t ai_addrlen;
++			zsock_socklen_t ai_addrlen;
+
+-			/* AF_INET or AF_INET6 address info */
+-			struct sockaddr ai_addr;
++			/* ZSOCK_AF_INET or ZSOCK_AF_INET6 address info */
++			struct zsock_sockaddr ai_addr;
+
+ 			/** AF_LOCAL Canonical name of the address */
+ 			char ai_canonname[DNS_MAX_NAME_SIZE + 1];
+ 		};
+
+-		/* AF_UNSPEC extensions */
++		/* ZSOCK_AF_UNSPEC extensions */
+ 		struct {
+ 			enum dns_resolve_extension ai_extension;
+
+@@ -427,7 +427,7 @@ struct dns_resolve_context {
+ 	/** List of configured DNS servers */
+ 	struct dns_server {
+ 		/** DNS server information */
+-		struct sockaddr dns_server;
++		struct zsock_sockaddr dns_server;
+
+ 		/** Connection to the DNS server */
+ 		int sock;
+@@ -536,7 +536,7 @@ struct mdns_probe_user_data {
+ };
+
+ struct mdns_responder_context {
+-	struct sockaddr server_addr;
++	struct zsock_sockaddr server_addr;
+ 	struct dns_socket_dispatcher dispatcher;
+ 	struct zsock_pollfd fds[1];
+ 	int sock;
+@@ -555,7 +555,7 @@ struct mdns_responder_context {
+  *
+  * @details This function sets the DNS server address and initializes the
+  * DNS context that is used by the actual resolver. DNS server addresses
+- * can be specified either in textual form, or as struct sockaddr (or both).
++ * can be specified either in textual form, or as struct zsock_sockaddr (or both).
+  * Note that the recommended way to resolve DNS names is to use
+  * the dns_get_addr_info() API. In that case user does not need to
+  * call dns_resolve_init() as the DNS servers are already setup by the system.
+@@ -571,15 +571,15 @@ struct mdns_responder_context {
+  *    IPv4 + port : 10.0.9.1:5353
+  *    IPv6        : 2001:db8::22:42
+  *    IPv6 + port : [2001:db8::22:42]:5353
+- * @param dns_servers_sa DNS server addresses as struct sockaddr. The array
+- * is NULL terminated. Port numbers are optional in struct sockaddr, the
++ * @param dns_servers_sa DNS server addresses as struct zsock_sockaddr. The array
++ * is NULL terminated. Port numbers are optional in struct zsock_sockaddr, the
+  * default will be used if set to 0.
+  *
+  * @return 0 if ok, <0 if error.
+  */
+ int dns_resolve_init(struct dns_resolve_context *ctx,
+ 		     const char *dns_servers_str[],
+-		     const struct sockaddr *dns_servers_sa[]);
++		     const struct zsock_sockaddr *dns_servers_sa[]);
+
+ /**
+  * @brief Init DNS resolving context with default Kconfig options.
+@@ -615,8 +615,8 @@ int dns_resolve_close(struct dns_resolve_context *ctx);
+  *    IPv4 + port : 10.0.9.1:5353
+  *    IPv6        : 2001:db8::22:42
+  *    IPv6 + port : [2001:db8::22:42]:5353
+- * @param servers_sa DNS server addresses as struct sockaddr. The array
+- * is NULL terminated. Port numbers are optional in struct sockaddr, the
++ * @param servers_sa DNS server addresses as struct zsock_sockaddr. The array
++ * is NULL terminated. Port numbers are optional in struct zsock_sockaddr, the
+  * default will be used if set to 0.
+  * @param source Source of the DNS servers, e.g., manual, DHCPv4/6, etc.
+  *
+@@ -624,7 +624,7 @@ int dns_resolve_close(struct dns_resolve_context *ctx);
+  */
+ int dns_resolve_reconfigure(struct dns_resolve_context *ctx,
+ 			    const char *servers_str[],
+-			    const struct sockaddr *servers_sa[],
++			    const struct zsock_sockaddr *servers_sa[],
+ 			    enum dns_server_source source);
+
+ /**
+@@ -639,8 +639,8 @@ int dns_resolve_reconfigure(struct dns_resolve_context *ctx,
+  *           IPv4 + port : 10.0.9.1:5353
+  *           IPv6        : 2001:db8::22:42
+  *           IPv6 + port : [2001:db8::22:42]:5353
+- * @param servers_sa DNS server addresses as struct sockaddr. The array
+- *        is NULL terminated. Port numbers are optional in struct sockaddr, the
++ * @param servers_sa DNS server addresses as struct zsock_sockaddr. The array
++ *        is NULL terminated. Port numbers are optional in struct zsock_sockaddr, the
+  *        default will be used if set to 0.
+  * @param interfaces Network interfaces to which the DNS servers are bound.
+  *        This is an array of network interface indices. The array must be
+@@ -651,7 +651,7 @@ int dns_resolve_reconfigure(struct dns_resolve_context *ctx,
+  */
+ int dns_resolve_reconfigure_with_interfaces(struct dns_resolve_context *ctx,
+ 					    const char *servers_str[],
+-					    const struct sockaddr *servers_sa[],
++					    const struct zsock_sockaddr *servers_sa[],
+ 					    int interfaces[],
+ 					    enum dns_server_source source);
+
+@@ -682,8 +682,8 @@ int dns_resolve_remove_source(struct dns_resolve_context *ctx, int if_index,
+  * @brief Remove servers from the DNS resolving context that have a specific IP address.
+  *
+  * @param ctx DNS context
+- * @param servers_sa DNS server addresses as struct sockaddr. The array
+- *        is NULL terminated. Port numbers are optional in struct sockaddr, the
++ * @param servers_sa DNS server addresses as struct zsock_sockaddr. The array
++ *        is NULL terminated. Port numbers are optional in struct zsock_sockaddr, the
+  *        default will be used if set to 0.
+  * @param interfaces Network interfaces to which the DNS servers are bound.
+  *        This is an array of network interface indices. The array must be
+@@ -692,7 +692,7 @@ int dns_resolve_remove_source(struct dns_resolve_context *ctx, int if_index,
+  * @return 0 if ok, <0 if error.
+  */
+ int dns_resolve_remove_server_addresses(struct dns_resolve_context *ctx,
+-					const struct sockaddr *servers_sa[],
++					const struct zsock_sockaddr *servers_sa[],
+ 					int interfaces[]);
+
+ /**
+diff --git a/include/zephyr/net/ethernet.h b/include/zephyr/net/ethernet.h
+index 8d4d915790e..234419b03cb 100644
+--- a/include/zephyr/net/ethernet.h
++++ b/include/zephyr/net/ethernet.h
+@@ -925,7 +925,7 @@ const struct net_eth_addr *net_eth_broadcast_addr(void);
+  * @param ipv4_addr IPv4 multicast address
+  * @param mac_addr Output buffer for Ethernet address
+  */
+-void net_eth_ipv4_mcast_to_mac_addr(const struct in_addr *ipv4_addr,
++void net_eth_ipv4_mcast_to_mac_addr(const struct zsock_in_addr *ipv4_addr,
+ 				    struct net_eth_addr *mac_addr);
+
+ /**
+@@ -934,7 +934,7 @@ void net_eth_ipv4_mcast_to_mac_addr(const struct in_addr *ipv4_addr,
+  * @param ipv6_addr IPv6 multicast address
+  * @param mac_addr Output buffer for Ethernet address
+  */
+-void net_eth_ipv6_mcast_to_mac_addr(const struct in6_addr *ipv6_addr,
++void net_eth_ipv6_mcast_to_mac_addr(const struct zsock_in6_addr *ipv6_addr,
+ 				    struct net_eth_addr *mac_addr);
+
+ /**
+diff --git a/include/zephyr/net/http/parser.h b/include/zephyr/net/http/parser.h
+index dab7d43b6ae..fad9589bf74 100644
+--- a/include/zephyr/net/http/parser.h
++++ b/include/zephyr/net/http/parser.h
+@@ -193,7 +193,7 @@ struct http_parser {
+ 	/* Remote socket address of http connection, where parser can initiate
+ 	 * replies if necessary.
+ 	 */
+-	const struct sockaddr *addr;
++	const struct zsock_sockaddr *addr;
+ };
+
+
+diff --git a/include/zephyr/net/icmp.h b/include/zephyr/net/icmp.h
+index 126e934c8d1..0198e73bcc9 100644
+--- a/include/zephyr/net/icmp.h
++++ b/include/zephyr/net/icmp.h
+@@ -76,7 +76,7 @@ typedef int (*net_icmp_handler_t)(struct net_icmp_ctx *ctx,
+  */
+ typedef int (*net_icmp_offload_ping_handler_t)(struct net_icmp_ctx *ctx,
+ 					       struct net_if *iface,
+-					       struct sockaddr *dst,
++					       struct zsock_sockaddr *dst,
+ 					       struct net_icmp_ping_params *params,
+ 					       void *user_data);
+
+@@ -118,8 +118,8 @@ struct net_icmp_ip_hdr {
+ 		struct net_ipv6_hdr *ipv6;
+ 	};
+
+-	/** Is the header IPv4 or IPv6 one. Value of either AF_INET or AF_INET6 */
+-	sa_family_t family;
++	/** Is the header IPv4 or IPv6 one. Value of either ZSOCK_AF_INET or ZSOCK_AF_INET6 */
++	zsock_sa_family_t family;
+ };
+
+ /**
+@@ -194,7 +194,7 @@ int net_icmp_cleanup_ctx(struct net_icmp_ctx *ctx);
+  */
+ int net_icmp_send_echo_request(struct net_icmp_ctx *ctx,
+ 			       struct net_if *iface,
+-			       struct sockaddr *dst,
++			       struct zsock_sockaddr *dst,
+ 			       struct net_icmp_ping_params *params,
+ 			       void *user_data);
+
+@@ -218,7 +218,7 @@ int net_icmp_send_echo_request(struct net_icmp_ctx *ctx,
+  */
+ int net_icmp_send_echo_request_no_wait(struct net_icmp_ctx *ctx,
+ 				       struct net_if *iface,
+-				       struct sockaddr *dst,
++				       struct zsock_sockaddr *dst,
+ 				       struct net_icmp_ping_params *params,
+ 				       void *user_data);
+
+diff --git a/include/zephyr/net/igmp.h b/include/zephyr/net/igmp.h
+index 099bbda377f..86b1c5e4b83 100644
+--- a/include/zephyr/net/igmp.h
++++ b/include/zephyr/net/igmp.h
+@@ -31,7 +31,7 @@ extern "C" {
+
+ /** IGMP parameters */
+ struct igmp_param {
+-	struct in_addr *source_list; /**< List of sources to include or exclude */
++	struct zsock_in_addr *source_list; /**< List of sources to include or exclude */
+ 	size_t sources_len;          /**< Length of source list */
+ 	bool include;                /**< Source list filter type */
+ };
+@@ -46,10 +46,10 @@ struct igmp_param {
+  * @return Return 0 if joining was done, <0 otherwise.
+  */
+ #if defined(CONFIG_NET_IPV4_IGMP)
+-int net_ipv4_igmp_join(struct net_if *iface, const struct in_addr *addr,
++int net_ipv4_igmp_join(struct net_if *iface, const struct zsock_in_addr *addr,
+ 		       const struct igmp_param *param);
+ #else
+-static inline int net_ipv4_igmp_join(struct net_if *iface, const struct in_addr *addr,
++static inline int net_ipv4_igmp_join(struct net_if *iface, const struct zsock_in_addr *addr,
+ 				     const struct igmp_param *param)
+ {
+ 	ARG_UNUSED(iface);
+@@ -69,10 +69,10 @@ static inline int net_ipv4_igmp_join(struct net_if *iface, const struct in_addr
+  * @return Return 0 if leaving is done, <0 otherwise.
+  */
+ #if defined(CONFIG_NET_IPV4_IGMP)
+-int net_ipv4_igmp_leave(struct net_if *iface, const struct in_addr *addr);
++int net_ipv4_igmp_leave(struct net_if *iface, const struct zsock_in_addr *addr);
+ #else
+ static inline int net_ipv4_igmp_leave(struct net_if *iface,
+-				      const struct in_addr *addr)
++				      const struct zsock_in_addr *addr)
+ {
+ 	ARG_UNUSED(iface);
+ 	ARG_UNUSED(addr);
+diff --git a/include/zephyr/net/latmon.h b/include/zephyr/net/latmon.h
+index 1a6831761a9..c95de338e4a 100644
+--- a/include/zephyr/net/latmon.h
++++ b/include/zephyr/net/latmon.h
+@@ -59,7 +59,7 @@ void net_latmon_start(int latmus, net_latmon_measure_t measure_func);
+  * negative errno code on failure.
+  *
+  */
+-int net_latmon_connect(int socket, struct in_addr *ip);
++int net_latmon_connect(int socket, struct zsock_in_addr *ip);
+
+ /**
+  * @brief Get a socket for the Latmus service.
+@@ -73,7 +73,7 @@ int net_latmon_connect(int socket, struct in_addr *ip);
+  *
+  * @return A valid socket descriptor on success, negative errno code on failure.
+  */
+-int net_latmon_get_socket(struct sockaddr *bind_addr);
++int net_latmon_get_socket(struct zsock_sockaddr *bind_addr);
+
+ /**
+  * @brief Check if the latency monitor is running.
+diff --git a/include/zephyr/net/lwm2m.h b/include/zephyr/net/lwm2m.h
+index adbf990ac41..34467007765 100644
+--- a/include/zephyr/net/lwm2m.h
++++ b/include/zephyr/net/lwm2m.h
+@@ -206,7 +206,7 @@ enum lwm2m_socket_states {
+  */
+ struct lwm2m_ctx {
+ 	/** Destination address storage */
+-	struct sockaddr remote_addr;
++	struct zsock_sockaddr remote_addr;
+
+ 	/** @cond INTERNAL_HIDDEN
+ 	 * Private CoAP and networking structures + 1 is for RD Client own message
+diff --git a/include/zephyr/net/midi2.h b/include/zephyr/net/midi2.h
+index e7bda15a82a..9a1de987bcb 100644
+--- a/include/zephyr/net/midi2.h
++++ b/include/zephyr/net/midi2.h
+@@ -169,9 +169,9 @@ struct netmidi2_session {
+ 	/** Sequence number of the next universal MIDI packet to receive */
+ 	uint16_t rx_ump_seq;
+ 	/** Remote address of the peer */
+-	struct sockaddr_storage addr;
++	struct zsock_sockaddr_storage addr;
+ 	/** Length of the peer's remote address */
+-	socklen_t addr_len;
++	zsock_socklen_t addr_len;
+ 	/** The Network MIDI2 endpoint to which this session belongs */
+ 	struct netmidi2_ep *ep;
+ #if defined(CONFIG_NETMIDI2_HOST_AUTH) || defined(__DOXYGEN__)
+@@ -208,9 +208,9 @@ struct netmidi2_ep {
+ 	const char *piid;
+ 	/** The local endpoint address */
+ 	union {
+-		struct sockaddr addr;
+-		struct sockaddr_in addr4;
+-		struct sockaddr_in6 addr6;
++		struct zsock_sockaddr addr;
++		struct zsock_sockaddr_in addr4;
++		struct zsock_sockaddr_in6 addr6;
+ 	};
+ 	/** The listening socket wrapped in a poll descriptor */
+ 	struct zsock_pollfd pollsock;
+diff --git a/include/zephyr/net/mld.h b/include/zephyr/net/mld.h
+index 031eb03c931..1620ae1258e 100644
+--- a/include/zephyr/net/mld.h
++++ b/include/zephyr/net/mld.h
+@@ -40,10 +40,10 @@ extern "C" {
+  * @return 0 if joining was done, <0 otherwise.
+  */
+ #if defined(CONFIG_NET_IPV6_MLD)
+-int net_ipv6_mld_join(struct net_if *iface, const struct in6_addr *addr);
++int net_ipv6_mld_join(struct net_if *iface, const struct zsock_in6_addr *addr);
+ #else
+ static inline int
+-net_ipv6_mld_join(struct net_if *iface, const struct in6_addr *addr)
++net_ipv6_mld_join(struct net_if *iface, const struct zsock_in6_addr *addr)
+ {
+ 	ARG_UNUSED(addr);
+ 	ARG_UNUSED(iface);
+@@ -61,10 +61,10 @@ net_ipv6_mld_join(struct net_if *iface, const struct in6_addr *addr)
+  * @return 0 if leaving is done, <0 otherwise.
+  */
+ #if defined(CONFIG_NET_IPV6_MLD)
+-int net_ipv6_mld_leave(struct net_if *iface, const struct in6_addr *addr);
++int net_ipv6_mld_leave(struct net_if *iface, const struct zsock_in6_addr *addr);
+ #else
+ static inline int
+-net_ipv6_mld_leave(struct net_if *iface, const struct in6_addr *addr)
++net_ipv6_mld_leave(struct net_if *iface, const struct zsock_in6_addr *addr)
+ {
+ 	ARG_UNUSED(iface);
+ 	ARG_UNUSED(addr);
+diff --git a/include/zephyr/net/mqtt.h b/include/zephyr/net/mqtt.h
+index a6864d676fb..65475da3428 100644
+--- a/include/zephyr/net/mqtt.h
++++ b/include/zephyr/net/mqtt.h
+@@ -855,8 +855,8 @@ struct mqtt_transport {
+
+ #if defined(CONFIG_SOCKS)
+ 	struct {
+-		struct sockaddr addr;
+-		socklen_t addrlen;
++		struct zsock_sockaddr addr;
++		zsock_socklen_t addrlen;
+ 	} proxy;
+ #endif
+ };
+@@ -1047,8 +1047,8 @@ void mqtt_client_init(struct mqtt_client *client);
+  * @note Must be called before calling mqtt_connect().
+  */
+ int mqtt_client_set_proxy(struct mqtt_client *client,
+-			  struct sockaddr *proxy_addr,
+-			  socklen_t addrlen);
++			  struct zsock_sockaddr *proxy_addr,
++			  zsock_socklen_t addrlen);
+ #endif
+
+ /**
+diff --git a/include/zephyr/net/mqtt_sn.h b/include/zephyr/net/mqtt_sn.h
+index 56a95315f73..f0dd2ae1cd4 100644
+--- a/include/zephyr/net/mqtt_sn.h
++++ b/include/zephyr/net/mqtt_sn.h
+@@ -230,8 +230,8 @@ struct mqtt_sn_transport_udp {
+ 	int sock;
+
+ 	/** Address of broadcasts */
+-	struct sockaddr bcaddr;
+-	socklen_t bcaddrlen;
++	struct zsock_sockaddr bcaddr;
++	zsock_socklen_t bcaddrlen;
+ };
+
+ #define UDP_TRANSPORT(transport) CONTAINER_OF(transport, struct mqtt_sn_transport_udp, tp)
+@@ -243,8 +243,8 @@ struct mqtt_sn_transport_udp {
+  * @param[in] gwaddr Pre-initialized gateway address
+  * @param[in] addrlen Size of the gwaddr structure.
+  */
+-int mqtt_sn_transport_udp_init(struct mqtt_sn_transport_udp *udp, struct sockaddr *gwaddr,
+-			       socklen_t addrlen);
++int mqtt_sn_transport_udp_init(struct mqtt_sn_transport_udp *udp, struct zsock_sockaddr *gwaddr,
++			       zsock_socklen_t addrlen);
+ #endif
+
+ /**
+diff --git a/include/zephyr/net/net_context.h b/include/zephyr/net/net_context.h
+index 93772ba7ee9..ed22b1225cf 100644
+--- a/include/zephyr/net/net_context.h
++++ b/include/zephyr/net/net_context.h
+@@ -140,8 +140,8 @@ typedef void (*net_context_send_cb_t)(struct net_context *context,
+  * @param user_data The user data given in net_context_accept() call.
+  */
+ typedef void (*net_tcp_accept_cb_t)(struct net_context *new_context,
+-				    struct sockaddr *addr,
+-				    socklen_t addrlen,
++				    struct zsock_sockaddr *addr,
++				    zsock_socklen_t addrlen,
+ 				    int status,
+ 				    void *user_data);
+
+@@ -231,7 +231,7 @@ __net_socket struct net_context {
+ 	/** Remote endpoint address. Note that the values are in network byte
+ 	 * order.
+ 	 */
+-	struct sockaddr remote;
++	struct zsock_sockaddr remote;
+
+ 	/** Connection handle */
+ 	struct net_conn_handle *conn_handler;
+@@ -314,8 +314,8 @@ __net_socket struct net_context {
+ #if defined(CONFIG_SOCKS)
+ 		/** Socks proxy address */
+ 		struct {
+-			struct sockaddr addr;
+-			socklen_t addrlen;
++			struct zsock_sockaddr addr;
++			zsock_socklen_t addrlen;
+ 		} proxy;
+ #endif
+ #if defined(CONFIG_NET_CONTEXT_CLAMP_PORT_RANGE)
+@@ -356,7 +356,7 @@ __net_socket struct net_context {
+ 		uint8_t dscp_ecn;
+ #endif
+ #if defined(CONFIG_NET_CONTEXT_REUSEADDR)
+-		/** Re-use address (SO_REUSEADDR) flag on a socket. */
++		/** Re-use address (ZSOCK_SO_REUSEADDR) flag on a socket. */
+ 		bool reuseaddr;
+ #endif
+ #if defined(CONFIG_NET_CONTEXT_REUSEPORT)
+@@ -386,13 +386,13 @@ __net_socket struct net_context {
+ 		union {
+ 			/**
+ 			 * IPv6 multicast output network interface for this context/socket.
+-			 * Only allowed for SOCK_DGRAM or SOCK_RAW type sockets.
++			 * Only allowed for ZSOCK_SOCK_DGRAM or ZSOCK_SOCK_RAW type sockets.
+ 			 */
+ 			uint8_t ipv6_mcast_ifindex;
+
+ 			/**
+ 			 * IPv4 multicast output network interface for this context/socket.
+-			 * Only allowed for SOCK_DGRAM type sockets.
++			 * Only allowed for ZSOCK_SOCK_DGRAM type sockets.
+ 			 */
+ 			uint8_t ipv4_mcast_ifindex;
+ 		};
+@@ -583,7 +583,7 @@ static inline void net_context_set_state(struct net_context *context,
+  *
+  * @return Network state.
+  */
+-static inline sa_family_t net_context_get_family(struct net_context *context)
++static inline zsock_sa_family_t net_context_get_family(struct net_context *context)
+ {
+ 	NET_ASSERT(context);
+
+@@ -593,21 +593,21 @@ static inline sa_family_t net_context_get_family(struct net_context *context)
+ /**
+  * @brief Set address family for this network context.
+  *
+- * @details This function sets the address family (IPv4, IPv6 or AF_PACKET)
++ * @details This function sets the address family (IPv4, IPv6 or ZSOCK_AF_PACKET)
+  * of the context.
+  *
+  * @param context Network context.
+- * @param family Address family (AF_INET, AF_INET6, AF_PACKET, AF_CAN)
++ * @param family Address family (ZSOCK_AF_INET, ZSOCK_AF_INET6, ZSOCK_AF_PACKET, ZSOCK_AF_CAN)
+  */
+ static inline void net_context_set_family(struct net_context *context,
+-					  sa_family_t family)
++					  zsock_sa_family_t family)
+ {
+ 	uint8_t flag = 0U;
+
+ 	NET_ASSERT(context);
+
+-	if (family == AF_UNSPEC || family == AF_INET || family == AF_INET6 ||
+-	    family == AF_PACKET || family == AF_CAN) {
++	if (family == ZSOCK_AF_UNSPEC || family == ZSOCK_AF_INET || family == ZSOCK_AF_INET6 ||
++	    family == ZSOCK_AF_PACKET || family == ZSOCK_AF_CAN) {
+ 		/* Family is in BIT(4), BIT(5) and BIT(6) */
+ 		flag = (uint8_t)(family << 3);
+ 	}
+@@ -640,7 +640,7 @@ enum net_sock_type net_context_get_type(struct net_context *context)
+  * of the context.
+  *
+  * @param context Network context.
+- * @param type Context type (SOCK_STREAM or SOCK_DGRAM)
++ * @param type Context type (ZSOCK_SOCK_STREAM or ZSOCK_SOCK_DGRAM)
+  */
+ static inline void net_context_set_type(struct net_context *context,
+ 					enum net_sock_type type)
+@@ -649,7 +649,7 @@ static inline void net_context_set_type(struct net_context *context,
+
+ 	NET_ASSERT(context);
+
+-	if (type == SOCK_DGRAM || type == SOCK_STREAM || type == SOCK_RAW) {
++	if (type == ZSOCK_SOCK_DGRAM || type == ZSOCK_SOCK_STREAM || type == ZSOCK_SOCK_RAW) {
+ 		/* Type is in BIT(6) and BIT(7)*/
+ 		flag = (uint16_t)(type << 6);
+ 	}
+@@ -729,7 +729,7 @@ static inline uint16_t net_context_get_proto(struct net_context *context)
+  * of the context.
+  *
+  * @param context Network context.
+- * @param proto Context IP protocol (IPPROTO_UDP, IPPROTO_TCP or IEEE 802.3
++ * @param proto Context IP protocol (ZSOCK_IPPROTO_UDP, ZSOCK_IPPROTO_TCP or IEEE 802.3
+  * protocol value)
+  */
+ static inline void net_context_set_proto(struct net_context *context,
+@@ -1030,15 +1030,15 @@ static inline bool net_context_is_proxy_enabled(struct net_context *context)
+  * context is created. This is similar as BSD socket() function.
+  * The context will be created with a reference count of 1.
+  *
+- * @param family IP address family (AF_INET or AF_INET6)
+- * @param type Type of the socket, SOCK_STREAM or SOCK_DGRAM
+- * @param ip_proto IP protocol, IPPROTO_UDP or IPPROTO_TCP. For raw socket
++ * @param family IP address family (ZSOCK_AF_INET or ZSOCK_AF_INET6)
++ * @param type Type of the socket, ZSOCK_SOCK_STREAM or ZSOCK_SOCK_DGRAM
++ * @param ip_proto IP protocol, ZSOCK_IPPROTO_UDP or ZSOCK_IPPROTO_TCP. For raw socket
+  * access, the value is the L2 protocol value from IEEE 802.3 (see ethernet.h)
+  * @param context The allocated context is returned to the caller.
+  *
+  * @return 0 if ok, < 0 if error
+  */
+-int net_context_get(sa_family_t family,
++int net_context_get(zsock_sa_family_t family,
+ 		    enum net_sock_type type,
+ 		    uint16_t ip_proto,
+ 		    struct net_context **context);
+@@ -1100,13 +1100,13 @@ int net_context_unref(struct net_context *context);
+ #if defined(CONFIG_NET_IPV4)
+ int net_context_create_ipv4_new(struct net_context *context,
+ 				struct net_pkt *pkt,
+-				const struct in_addr *src,
+-				const struct in_addr *dst);
++				const struct zsock_in_addr *src,
++				const struct zsock_in_addr *dst);
+ #else
+ static inline int net_context_create_ipv4_new(struct net_context *context,
+ 					      struct net_pkt *pkt,
+-					      const struct in_addr *src,
+-					      const struct in_addr *dst)
++					      const struct zsock_in_addr *src,
++					      const struct zsock_in_addr *dst)
+ {
+ 	return -1;
+ }
+@@ -1125,13 +1125,13 @@ static inline int net_context_create_ipv4_new(struct net_context *context,
+ #if defined(CONFIG_NET_IPV6)
+ int net_context_create_ipv6_new(struct net_context *context,
+ 				struct net_pkt *pkt,
+-				const struct in6_addr *src,
+-				const struct in6_addr *dst);
++				const struct zsock_in6_addr *src,
++				const struct zsock_in6_addr *dst);
+ #else
+ static inline int net_context_create_ipv6_new(struct net_context *context,
+ 					      struct net_pkt *pkt,
+-					      const struct in6_addr *src,
+-					      const struct in6_addr *dst)
++					      const struct zsock_in6_addr *src,
++					      const struct zsock_in6_addr *dst)
+ {
+ 	ARG_UNUSED(context);
+ 	ARG_UNUSED(pkt);
+@@ -1153,8 +1153,8 @@ static inline int net_context_create_ipv6_new(struct net_context *context,
+  * @return 0 if ok, < 0 if error
+  */
+ int net_context_bind(struct net_context *context,
+-		     const struct sockaddr *addr,
+-		     socklen_t addrlen);
++		     const struct zsock_sockaddr *addr,
++		     zsock_socklen_t addrlen);
+
+ /**
+  * @brief Mark the context as a listening one.
+@@ -1177,7 +1177,7 @@ int net_context_listen(struct net_context *context,
+  *                   connection is established, the user-supplied callback (cb)
+  *                   is executed. cb is called even if the timeout was set to
+  *                   K_FOREVER. cb is not called if the timeout expires.
+- *                   For datagram sockets (SOCK_DGRAM), this function only sets
++ *                   For datagram sockets (ZSOCK_SOCK_DGRAM), this function only sets
+  *                   the peer address.
+  *                   This function is similar to the BSD connect() function.
+  *
+@@ -1198,8 +1198,8 @@ int net_context_listen(struct net_context *context,
+  * @return           -ETIMEDOUT if the connect operation times out.
+  */
+ int net_context_connect(struct net_context *context,
+-			const struct sockaddr *addr,
+-			socklen_t addrlen,
++			const struct zsock_sockaddr *addr,
++			zsock_socklen_t addrlen,
+ 			net_context_connect_cb_t cb,
+ 			k_timeout_t timeout,
+ 			void *user_data);
+@@ -1240,7 +1240,7 @@ int net_context_accept(struct net_context *context,
+  * @details This function can be used to send network data to a peer
+  * connection. After the network buffer is sent, a caller-supplied
+  * callback is called. Note that the callback might be called after this
+- * function has returned. For context of type SOCK_DGRAM, the destination
++ * function has returned. For context of type ZSOCK_SOCK_DGRAM, the destination
+  * address must have been set by the call to net_context_connect().
+  * This is similar as BSD send() function.
+  *
+@@ -1265,7 +1265,7 @@ int net_context_send(struct net_context *context,
+  *
+  * @details This function can be used to send network data to a peer
+  * specified by address. This variant can only be used for datagram
+- * connections of type SOCK_DGRAM. After the network buffer is sent,
++ * connections of type ZSOCK_SOCK_DGRAM. After the network buffer is sent,
+  * a caller-supplied callback is called. Note that the callback might be
+  * called after this function has returned.
+  * This is similar as BSD sendto() function.
+@@ -1284,8 +1284,8 @@ int net_context_send(struct net_context *context,
+ int net_context_sendto(struct net_context *context,
+ 		       const void *buf,
+ 		       size_t len,
+-		       const struct sockaddr *dst_addr,
+-		       socklen_t addrlen,
++		       const struct zsock_sockaddr *dst_addr,
++		       zsock_socklen_t addrlen,
+ 		       net_context_send_cb_t cb,
+ 		       k_timeout_t timeout,
+ 		       void *user_data);
+@@ -1309,7 +1309,7 @@ int net_context_sendto(struct net_context *context,
+  * @return numbers of bytes sent on success, a negative errno otherwise
+  */
+ int net_context_sendmsg(struct net_context *context,
+-			const struct msghdr *msghdr,
++			const struct zsock_msghdr *msghdr,
+ 			int flags,
+ 			net_context_send_cb_t cb,
+ 			k_timeout_t timeout,
+@@ -1501,7 +1501,7 @@ static inline void net_context_setup_pools(struct net_context *context,
+  * @return false if the port is not bound
+  */
+ bool net_context_port_in_use(enum net_ip_protocol ip_proto,
+-	uint16_t local_port, const struct sockaddr *local_addr);
++	uint16_t local_port, const struct zsock_sockaddr *local_addr);
+
+ #ifdef __cplusplus
+ }
+diff --git a/include/zephyr/net/net_event.h b/include/zephyr/net/net_event.h
+index 556a78ae99e..d08046fd5ba 100644
+--- a/include/zephyr/net/net_event.h
++++ b/include/zephyr/net/net_event.h
+@@ -482,7 +482,7 @@ enum net_event_l4_cmd {
+  */
+ struct net_event_ipv6_addr {
+ 	/** IPv6 address related to this event */
+-	struct in6_addr addr;
++	struct zsock_in6_addr addr;
+ };
+
+ /**
+@@ -496,7 +496,7 @@ struct net_event_ipv6_addr {
+  */
+ struct net_event_ipv6_nbr {
+ 	/** Neighbor IPv6 address */
+-	struct in6_addr addr;
++	struct zsock_in6_addr addr;
+ 	/** Neighbor index in cache */
+ 	int idx;
+ };
+@@ -511,9 +511,9 @@ struct net_event_ipv6_nbr {
+  */
+ struct net_event_ipv6_route {
+ 	/** IPv6 address of the next hop */
+-	struct in6_addr nexthop;
++	struct zsock_in6_addr nexthop;
+ 	/** IPv6 address or prefix of the route */
+-	struct in6_addr addr;
++	struct zsock_in6_addr addr;
+ 	/** IPv6 prefix length */
+ 	uint8_t prefix_len;
+ };
+@@ -528,7 +528,7 @@ struct net_event_ipv6_route {
+  */
+ struct net_event_ipv6_prefix {
+ 	/** IPv6 prefix */
+-	struct in6_addr addr;
++	struct zsock_in6_addr addr;
+ 	/** IPv6 prefix length */
+ 	uint8_t len;
+ 	/** IPv6 prefix lifetime in seconds */
+@@ -558,7 +558,7 @@ struct net_event_l4_hostname {
+  */
+ struct net_event_ipv6_pe_filter {
+ 	/** IPv6 address of privacy extension filter */
+-	struct in6_addr prefix;
++	struct zsock_in6_addr prefix;
+ 	/** IPv6 filter deny or allow list */
+ 	bool is_deny_list;
+ };
+@@ -572,7 +572,7 @@ struct net_event_ipv6_pe_filter {
+  */
+ struct net_event_ipv4_pmtu_info {
+ 	/** IPv4 address */
+-	struct in_addr dst;
++	struct zsock_in_addr dst;
+ 	/** New MTU */
+ 	uint16_t mtu;
+ };
+@@ -586,7 +586,7 @@ struct net_event_ipv4_pmtu_info {
+  */
+ struct net_event_ipv6_pmtu_info {
+ 	/** IPv6 address */
+-	struct in6_addr dst;
++	struct zsock_in6_addr dst;
+ 	/** New MTU */
+ 	uint32_t mtu;
+ };
+diff --git a/include/zephyr/net/net_if.h b/include/zephyr/net/net_if.h
+index 7f403c8ef46..c64b3ba3b81 100644
+--- a/include/zephyr/net/net_if.h
++++ b/include/zephyr/net/net_if.h
+@@ -195,7 +195,7 @@ struct net_if_ipv6_prefix {
+ 	struct net_timeout lifetime;
+
+ 	/** IPv6 prefix */
+-	struct in6_addr prefix;
++	struct zsock_in6_addr prefix;
+
+ 	/** Backpointer to network interface where this prefix is used */
+ 	struct net_if *iface;
+@@ -443,10 +443,10 @@ struct net_if_dhcpv6 {
+ 	uint8_t prefix_len;
+
+ 	/** Assigned IPv6 prefix. */
+-	struct in6_addr prefix;
++	struct zsock_in6_addr prefix;
+
+ 	/** Assigned IPv6 address. */
+-	struct in6_addr addr;
++	struct zsock_in6_addr addr;
+ };
+ #endif /* defined(CONFIG_NET_DHCPV6) && defined(CONFIG_NET_NATIVE_IPV6) */
+
+@@ -469,7 +469,7 @@ struct net_if_addr_ipv4 {
+ 	/** IPv4 address */
+ 	struct net_if_addr ipv4;
+ 	/** Netmask */
+-	struct in_addr netmask;
++	struct zsock_in_addr netmask;
+ };
+
+ /** IPv4 configuration */
+@@ -481,7 +481,7 @@ struct net_if_ipv4 {
+ 	struct net_if_mcast_addr mcast[NET_IF_MAX_IPV4_MADDR];
+
+ 	/** Gateway */
+-	struct in_addr gw;
++	struct zsock_in_addr gw;
+
+ 	/** IPv4 time-to-live */
+ 	uint8_t ttl;
+@@ -518,13 +518,13 @@ struct net_if_dhcpv4 {
+ 	uint32_t rebinding_time;
+
+ 	/** Server ID */
+-	struct in_addr server_id;
++	struct zsock_in_addr server_id;
+
+ 	/** Requested IP addr */
+-	struct in_addr requested_ip;
++	struct zsock_in_addr requested_ip;
+
+ 	/** Received netmask from the server */
+-	struct in_addr netmask;
++	struct zsock_in_addr netmask;
+
+ 	/**
+ 	 *  DHCPv4 client state in the process of network
+@@ -536,14 +536,14 @@ struct net_if_dhcpv4 {
+ 	uint8_t attempts;
+
+ 	/** The address of the server the request is sent to */
+-	struct in_addr request_server_addr;
++	struct zsock_in_addr request_server_addr;
+
+ 	/** The source address of a received DHCP message */
+-	struct in_addr response_src_addr;
++	struct zsock_in_addr response_src_addr;
+
+ #ifdef CONFIG_NET_DHCPV4_OPTION_NTP_SERVER
+ 	/** NTP server address */
+-	struct in_addr ntp_addr;
++	struct zsock_in_addr ntp_addr;
+ #endif
+ };
+ #endif /* CONFIG_NET_DHCPV4 */
+@@ -554,7 +554,7 @@ struct net_if_ipv4_autoconf {
+ 	struct net_if *iface;
+
+ 	/** Requested IP addr */
+-	struct in_addr requested_ip;
++	struct zsock_in_addr requested_ip;
+
+ 	/** IPV4 Autoconf state in the process of network address allocation.
+ 	 */
+@@ -1275,10 +1275,10 @@ static inline void net_if_stop_rs(struct net_if *iface)
+  * @param ipv6_addr Pointer to the IPv6 address of the neighbor node.
+  */
+ #if defined(CONFIG_NET_IPV6_ND) && defined(CONFIG_NET_NATIVE_IPV6)
+-void net_if_nbr_reachability_hint(struct net_if *iface, const struct in6_addr *ipv6_addr);
++void net_if_nbr_reachability_hint(struct net_if *iface, const struct zsock_in6_addr *ipv6_addr);
+ #else
+ static inline void net_if_nbr_reachability_hint(struct net_if *iface,
+-						const struct in6_addr *ipv6_addr)
++						const struct zsock_in6_addr *ipv6_addr)
+ {
+ 	ARG_UNUSED(iface);
+ 	ARG_UNUSED(ipv6_addr);
+@@ -1317,7 +1317,7 @@ int net_if_set_link_addr_locked(struct net_if *iface,
+
+ #if CONFIG_NET_IF_LOG_LEVEL >= LOG_LEVEL_DBG
+ extern int net_if_addr_unref_debug(struct net_if *iface,
+-				   sa_family_t family,
++				   zsock_sa_family_t family,
+ 				   const void *addr,
+ 				   struct net_if_addr **ifaddr,
+ 				   const char *caller, int line);
+@@ -1325,7 +1325,7 @@ extern int net_if_addr_unref_debug(struct net_if *iface,
+ 	net_if_addr_unref_debug(iface, family, addr, ifaddr, __func__, __LINE__)
+
+ extern struct net_if_addr *net_if_addr_ref_debug(struct net_if *iface,
+-						 sa_family_t family,
++						 zsock_sa_family_t family,
+ 						 const void *addr,
+ 						 const char *caller,
+ 						 int line);
+@@ -1333,11 +1333,11 @@ extern struct net_if_addr *net_if_addr_ref_debug(struct net_if *iface,
+ 	net_if_addr_ref_debug(iface, family, addr, __func__, __LINE__)
+ #else
+ extern int net_if_addr_unref(struct net_if *iface,
+-			     sa_family_t family,
++			     zsock_sa_family_t family,
+ 			     const void *addr,
+ 			     struct net_if_addr **ifaddr);
+ extern struct net_if_addr *net_if_addr_ref(struct net_if *iface,
+-					   sa_family_t family,
++					   zsock_sa_family_t family,
+ 					   const void *addr);
+ #endif /* CONFIG_NET_IF_LOG_LEVEL */
+
+@@ -1535,7 +1535,7 @@ struct net_if_addr *net_if_ipv6_addr_lookup_raw(const uint8_t *addr,
+  *
+  * @return Pointer to interface address, NULL if not found.
+  */
+-struct net_if_addr *net_if_ipv6_addr_lookup(const struct in6_addr *addr,
++struct net_if_addr *net_if_ipv6_addr_lookup(const struct zsock_in6_addr *addr,
+ 					    struct net_if **iface);
+
+ /** @cond INTERNAL_HIDDEN */
+@@ -1552,7 +1552,7 @@ struct net_if_addr *net_if_ipv6_addr_lookup_by_iface_raw(struct net_if *iface,
+  * @return Pointer to interface address, NULL if not found.
+  */
+ struct net_if_addr *net_if_ipv6_addr_lookup_by_iface(struct net_if *iface,
+-						     const struct in6_addr *addr);
++						     const struct zsock_in6_addr *addr);
+
+ /**
+  * @brief Check if this IPv6 address belongs to one of the interface indices.
+@@ -1562,7 +1562,7 @@ struct net_if_addr *net_if_ipv6_addr_lookup_by_iface(struct net_if *iface,
+  * @return >0 if address was found in given network interface index,
+  * all other values mean address was not found
+  */
+-__syscall int net_if_ipv6_addr_lookup_by_index(const struct in6_addr *addr);
++__syscall int net_if_ipv6_addr_lookup_by_index(const struct zsock_in6_addr *addr);
+
+ /**
+  * @brief Add a IPv6 address to an interface
+@@ -1575,7 +1575,7 @@ __syscall int net_if_ipv6_addr_lookup_by_index(const struct in6_addr *addr);
+  * @return Pointer to interface address, NULL if cannot be added
+  */
+ struct net_if_addr *net_if_ipv6_addr_add(struct net_if *iface,
+-					 const struct in6_addr *addr,
++					 const struct zsock_in6_addr *addr,
+ 					 enum net_addr_type addr_type,
+ 					 uint32_t vlifetime);
+
+@@ -1590,7 +1590,7 @@ struct net_if_addr *net_if_ipv6_addr_add(struct net_if *iface,
+  * @return True if ok, false if address could not be added
+  */
+ __syscall bool net_if_ipv6_addr_add_by_index(int index,
+-					     const struct in6_addr *addr,
++					     const struct zsock_in6_addr *addr,
+ 					     enum net_addr_type addr_type,
+ 					     uint32_t vlifetime);
+
+@@ -1611,7 +1611,7 @@ void net_if_ipv6_addr_update_lifetime(struct net_if_addr *ifaddr,
+  *
+  * @return True if successfully removed, false otherwise
+  */
+-bool net_if_ipv6_addr_rm(struct net_if *iface, const struct in6_addr *addr);
++bool net_if_ipv6_addr_rm(struct net_if *iface, const struct zsock_in6_addr *addr);
+
+ /**
+  * @brief Remove an IPv6 address from an interface by index
+@@ -1622,7 +1622,7 @@ bool net_if_ipv6_addr_rm(struct net_if *iface, const struct in6_addr *addr);
+  * @return True if successfully removed, false otherwise
+  */
+ __syscall bool net_if_ipv6_addr_rm_by_index(int index,
+-					    const struct in6_addr *addr);
++					    const struct zsock_in6_addr *addr);
+
+ /**
+  * @typedef net_if_ip_addr_cb_t
+@@ -1656,7 +1656,7 @@ void net_if_ipv6_addr_foreach(struct net_if *iface, net_if_ip_addr_cb_t cb,
+  * @return Pointer to interface multicast address, NULL if cannot be added
+  */
+ struct net_if_mcast_addr *net_if_ipv6_maddr_add(struct net_if *iface,
+-						const struct in6_addr *addr);
++						const struct zsock_in6_addr *addr);
+
+ /**
+  * @brief Remove an IPv6 multicast address from an interface
+@@ -1666,7 +1666,7 @@ struct net_if_mcast_addr *net_if_ipv6_maddr_add(struct net_if *iface,
+  *
+  * @return True if successfully removed, false otherwise
+  */
+-bool net_if_ipv6_maddr_rm(struct net_if *iface, const struct in6_addr *addr);
++bool net_if_ipv6_maddr_rm(struct net_if *iface, const struct zsock_in6_addr *addr);
+
+ /**
+  * @typedef net_if_ip_maddr_cb_t
+@@ -1707,7 +1707,7 @@ struct net_if_mcast_addr *net_if_ipv6_maddr_lookup_raw(const uint8_t *maddr,
+  *
+  * @return Pointer to interface multicast address, NULL if not found.
+  */
+-struct net_if_mcast_addr *net_if_ipv6_maddr_lookup(const struct in6_addr *addr,
++struct net_if_mcast_addr *net_if_ipv6_maddr_lookup(const struct zsock_in6_addr *addr,
+ 						   struct net_if **iface);
+
+ /**
+@@ -1815,7 +1815,7 @@ void net_if_ipv6_maddr_leave(struct net_if *iface,
+  * @return Pointer to prefix, NULL if not found.
+  */
+ struct net_if_ipv6_prefix *net_if_ipv6_prefix_get(struct net_if *iface,
+-						  const struct in6_addr *addr);
++						  const struct zsock_in6_addr *addr);
+
+ /**
+  * @brief Check if this IPv6 prefix belongs to this interface
+@@ -1827,7 +1827,7 @@ struct net_if_ipv6_prefix *net_if_ipv6_prefix_get(struct net_if *iface,
+  * @return Pointer to prefix, NULL if not found.
+  */
+ struct net_if_ipv6_prefix *net_if_ipv6_prefix_lookup(struct net_if *iface,
+-						     const struct in6_addr *addr,
++						     const struct zsock_in6_addr *addr,
+ 						     uint8_t len);
+
+ /**
+@@ -1841,7 +1841,7 @@ struct net_if_ipv6_prefix *net_if_ipv6_prefix_lookup(struct net_if *iface,
+  * @return Pointer to prefix, NULL if the prefix was not added.
+  */
+ struct net_if_ipv6_prefix *net_if_ipv6_prefix_add(struct net_if *iface,
+-						  const struct in6_addr *prefix,
++						  const struct zsock_in6_addr *prefix,
+ 						  uint8_t len,
+ 						  uint32_t lifetime);
+
+@@ -1854,7 +1854,7 @@ struct net_if_ipv6_prefix *net_if_ipv6_prefix_add(struct net_if *iface,
+  *
+  * @return True if successfully removed, false otherwise
+  */
+-bool net_if_ipv6_prefix_rm(struct net_if *iface, const struct in6_addr *addr,
++bool net_if_ipv6_prefix_rm(struct net_if *iface, const struct zsock_in6_addr *addr,
+ 			   uint8_t len);
+
+ /**
+@@ -1895,7 +1895,7 @@ void net_if_ipv6_prefix_unset_timer(struct net_if_ipv6_prefix *prefix);
+  *
+  * @return True if address is part of our subnet, false otherwise
+  */
+-bool net_if_ipv6_addr_onlink(struct net_if **iface, const struct in6_addr *addr);
++bool net_if_ipv6_addr_onlink(struct net_if **iface, const struct zsock_in6_addr *addr);
+
+ /**
+  * @brief Get the IPv6 address of the given router
+@@ -1904,7 +1904,7 @@ bool net_if_ipv6_addr_onlink(struct net_if **iface, const struct in6_addr *addr)
+  * @return pointer to the IPv6 address, or NULL if none
+  */
+ #if defined(CONFIG_NET_NATIVE_IPV6)
+-static inline struct in6_addr *net_if_router_ipv6(struct net_if_router *router)
++static inline struct zsock_in6_addr *net_if_router_ipv6(struct net_if_router *router)
+ {
+ 	if (router == NULL) {
+ 		return NULL;
+@@ -1913,9 +1913,9 @@ static inline struct in6_addr *net_if_router_ipv6(struct net_if_router *router)
+ 	return &router->address.in6_addr;
+ }
+ #else
+-static inline struct in6_addr *net_if_router_ipv6(struct net_if_router *router)
++static inline struct zsock_in6_addr *net_if_router_ipv6(struct net_if_router *router)
+ {
+-	static struct in6_addr addr;
++	static struct zsock_in6_addr addr;
+
+ 	ARG_UNUSED(router);
+
+@@ -1933,7 +1933,7 @@ static inline struct in6_addr *net_if_router_ipv6(struct net_if_router *router)
+  * @return Pointer to router information, NULL if cannot be found
+  */
+ struct net_if_router *net_if_ipv6_router_lookup(struct net_if *iface,
+-						const struct in6_addr *addr);
++						const struct zsock_in6_addr *addr);
+
+ /**
+  * @brief Find default router for this IPv6 address.
+@@ -1945,7 +1945,7 @@ struct net_if_router *net_if_ipv6_router_lookup(struct net_if *iface,
+  * @return Pointer to router information, NULL if cannot be found
+  */
+ struct net_if_router *net_if_ipv6_router_find_default(struct net_if *iface,
+-						      const struct in6_addr *addr);
++						      const struct zsock_in6_addr *addr);
+
+ /**
+  * @brief Update validity lifetime time of a router.
+@@ -1966,7 +1966,7 @@ void net_if_ipv6_router_update_lifetime(struct net_if_router *router,
+  * @return Pointer to router information, NULL if could not be added
+  */
+ struct net_if_router *net_if_ipv6_router_add(struct net_if *iface,
+-					     const struct in6_addr *addr,
++					     const struct zsock_in6_addr *addr,
+ 					     uint16_t router_lifetime);
+
+ /**
+@@ -2206,11 +2206,11 @@ static inline uint32_t net_if_ipv6_get_retrans_timer(struct net_if *iface)
+  * could be found.
+  */
+ #if defined(CONFIG_NET_IPV6)
+-const struct in6_addr *net_if_ipv6_select_src_addr(struct net_if *iface,
+-						   const struct in6_addr *dst);
++const struct zsock_in6_addr *net_if_ipv6_select_src_addr(struct net_if *iface,
++						   const struct zsock_in6_addr *dst);
+ #else
+-static inline const struct in6_addr *net_if_ipv6_select_src_addr(
+-	struct net_if *iface, const struct in6_addr *dst)
++static inline const struct zsock_in6_addr *net_if_ipv6_select_src_addr(
++	struct net_if *iface, const struct zsock_in6_addr *dst)
+ {
+ 	ARG_UNUSED(iface);
+ 	ARG_UNUSED(dst);
+@@ -2233,12 +2233,12 @@ static inline const struct in6_addr *net_if_ipv6_select_src_addr(
+  * could be found.
+  */
+ #if defined(CONFIG_NET_IPV6)
+-const struct in6_addr *net_if_ipv6_select_src_addr_hint(struct net_if *iface,
+-							const struct in6_addr *dst,
++const struct zsock_in6_addr *net_if_ipv6_select_src_addr_hint(struct net_if *iface,
++							const struct zsock_in6_addr *dst,
+ 							int flags);
+ #else
+-static inline const struct in6_addr *net_if_ipv6_select_src_addr_hint(
+-	struct net_if *iface, const struct in6_addr *dst, int flags)
++static inline const struct zsock_in6_addr *net_if_ipv6_select_src_addr_hint(
++	struct net_if *iface, const struct zsock_in6_addr *dst, int flags)
+ {
+ 	ARG_UNUSED(iface);
+ 	ARG_UNUSED(dst);
+@@ -2258,10 +2258,10 @@ static inline const struct in6_addr *net_if_ipv6_select_src_addr_hint(
+  * could be found.
+  */
+ #if defined(CONFIG_NET_IPV6)
+-struct net_if *net_if_ipv6_select_src_iface(const struct in6_addr *dst);
++struct net_if *net_if_ipv6_select_src_iface(const struct zsock_in6_addr *dst);
+ #else
+ static inline struct net_if *net_if_ipv6_select_src_iface(
+-	const struct in6_addr *dst)
++	const struct zsock_in6_addr *dst)
+ {
+ 	ARG_UNUSED(dst);
+
+@@ -2282,11 +2282,11 @@ static inline struct net_if *net_if_ipv6_select_src_iface(
+  * could be found.
+  */
+ #if defined(CONFIG_NET_IPV6)
+-struct net_if *net_if_ipv6_select_src_iface_addr(const struct in6_addr *dst,
+-						 const struct in6_addr **src_addr);
++struct net_if *net_if_ipv6_select_src_iface_addr(const struct zsock_in6_addr *dst,
++						 const struct zsock_in6_addr **src_addr);
+ #else
+ static inline struct net_if *net_if_ipv6_select_src_iface_addr(
+-	const struct in6_addr *dst, const struct in6_addr **src_addr)
++	const struct zsock_in6_addr *dst, const struct zsock_in6_addr **src_addr)
+ {
+ 	ARG_UNUSED(dst);
+ 	ARG_UNUSED(src_addr);
+@@ -2304,7 +2304,7 @@ static inline struct net_if *net_if_ipv6_select_src_iface_addr(
+  * @return Pointer to link local IPv6 address, NULL if no proper IPv6 address
+  * could be found.
+  */
+-struct in6_addr *net_if_ipv6_get_ll(struct net_if *iface,
++struct zsock_in6_addr *net_if_ipv6_get_ll(struct net_if *iface,
+ 				    enum net_addr_state addr_state);
+
+ /**
+@@ -2316,7 +2316,7 @@ struct in6_addr *net_if_ipv6_get_ll(struct net_if *iface,
+  *
+  * @return Pointer to IPv6 address, NULL if not found.
+  */
+-struct in6_addr *net_if_ipv6_get_ll_addr(enum net_addr_state state,
++struct zsock_in6_addr *net_if_ipv6_get_ll_addr(enum net_addr_state state,
+ 					 struct net_if **iface);
+
+ /**
+@@ -2326,7 +2326,7 @@ struct in6_addr *net_if_ipv6_get_ll_addr(enum net_addr_state state,
+  * @param iface Interface where the DAD was running.
+  * @param addr IPv6 address that failed DAD
+  */
+-void net_if_ipv6_dad_failed(struct net_if *iface, const struct in6_addr *addr);
++void net_if_ipv6_dad_failed(struct net_if *iface, const struct zsock_in6_addr *addr);
+
+ /**
+  * @brief Return global IPv6 address from the first interface that has
+@@ -2339,7 +2339,7 @@ void net_if_ipv6_dad_failed(struct net_if *iface, const struct in6_addr *addr);
+  *
+  * @return Pointer to IPv6 address, NULL if not found.
+  */
+-struct in6_addr *net_if_ipv6_get_global_addr(enum net_addr_state state,
++struct zsock_in6_addr *net_if_ipv6_get_global_addr(enum net_addr_state state,
+ 					     struct net_if **iface);
+
+ /**
+@@ -2406,7 +2406,7 @@ void net_if_ipv4_set_mcast_ttl(struct net_if *iface, uint8_t ttl);
+  *
+  * @return Pointer to interface address, NULL if not found.
+  */
+-struct net_if_addr *net_if_ipv4_addr_lookup(const struct in_addr *addr,
++struct net_if_addr *net_if_ipv4_addr_lookup(const struct zsock_in_addr *addr,
+ 					    struct net_if **iface);
+
+ /**
+@@ -2420,7 +2420,7 @@ struct net_if_addr *net_if_ipv4_addr_lookup(const struct in_addr *addr,
+  * @return Pointer to interface address, NULL if cannot be added
+  */
+ struct net_if_addr *net_if_ipv4_addr_add(struct net_if *iface,
+-					 const struct in_addr *addr,
++					 const struct zsock_in_addr *addr,
+ 					 enum net_addr_type addr_type,
+ 					 uint32_t vlifetime);
+
+@@ -2432,7 +2432,7 @@ struct net_if_addr *net_if_ipv4_addr_add(struct net_if *iface,
+  *
+  * @return True if successfully removed, false otherwise
+  */
+-bool net_if_ipv4_addr_rm(struct net_if *iface, const struct in_addr *addr);
++bool net_if_ipv4_addr_rm(struct net_if *iface, const struct zsock_in_addr *addr);
+
+ /**
+  * @brief Check if this IPv4 address belongs to one of the interface indices.
+@@ -2442,7 +2442,7 @@ bool net_if_ipv4_addr_rm(struct net_if *iface, const struct in_addr *addr);
+  * @return >0 if address was found in given network interface index,
+  * all other values mean address was not found
+  */
+-__syscall int net_if_ipv4_addr_lookup_by_index(const struct in_addr *addr);
++__syscall int net_if_ipv4_addr_lookup_by_index(const struct zsock_in_addr *addr);
+
+ /**
+  * @brief Add a IPv4 address to an interface by network interface index
+@@ -2455,7 +2455,7 @@ __syscall int net_if_ipv4_addr_lookup_by_index(const struct in_addr *addr);
+  * @return True if ok, false if the address could not be added
+  */
+ __syscall bool net_if_ipv4_addr_add_by_index(int index,
+-					     const struct in_addr *addr,
++					     const struct zsock_in_addr *addr,
+ 					     enum net_addr_type addr_type,
+ 					     uint32_t vlifetime);
+
+@@ -2468,7 +2468,7 @@ __syscall bool net_if_ipv4_addr_add_by_index(int index,
+  * @return True if successfully removed, false otherwise
+  */
+ __syscall bool net_if_ipv4_addr_rm_by_index(int index,
+-					    const struct in_addr *addr);
++					    const struct zsock_in_addr *addr);
+
+ /**
+  * @brief Go through all IPv4 addresses on a network interface and call callback
+@@ -2490,7 +2490,7 @@ void net_if_ipv4_addr_foreach(struct net_if *iface, net_if_ip_addr_cb_t cb,
+  * @return Pointer to interface multicast address, NULL if cannot be added
+  */
+ struct net_if_mcast_addr *net_if_ipv4_maddr_add(struct net_if *iface,
+-						const struct in_addr *addr);
++						const struct zsock_in_addr *addr);
+
+ /**
+  * @brief Remove an IPv4 multicast address from an interface
+@@ -2500,7 +2500,7 @@ struct net_if_mcast_addr *net_if_ipv4_maddr_add(struct net_if *iface,
+  *
+  * @return True if successfully removed, false otherwise
+  */
+-bool net_if_ipv4_maddr_rm(struct net_if *iface, const struct in_addr *addr);
++bool net_if_ipv4_maddr_rm(struct net_if *iface, const struct zsock_in_addr *addr);
+
+ /**
+  * @brief Go through all IPv4 multicast addresses on a network interface and call
+@@ -2523,7 +2523,7 @@ void net_if_ipv4_maddr_foreach(struct net_if *iface, net_if_ip_maddr_cb_t cb,
+  *
+  * @return Pointer to interface multicast address, NULL if not found.
+  */
+-struct net_if_mcast_addr *net_if_ipv4_maddr_lookup(const struct in_addr *addr,
++struct net_if_mcast_addr *net_if_ipv4_maddr_lookup(const struct zsock_in_addr *addr,
+ 						   struct net_if **iface);
+
+ /**
+@@ -2567,7 +2567,7 @@ void net_if_ipv4_maddr_leave(struct net_if *iface,
+  * @return pointer to the IPv4 address, or NULL if none
+  */
+ #if defined(CONFIG_NET_NATIVE_IPV4)
+-static inline struct in_addr *net_if_router_ipv4(struct net_if_router *router)
++static inline struct zsock_in_addr *net_if_router_ipv4(struct net_if_router *router)
+ {
+ 	if (router == NULL) {
+ 		return NULL;
+@@ -2576,9 +2576,9 @@ static inline struct in_addr *net_if_router_ipv4(struct net_if_router *router)
+ 	return &router->address.in_addr;
+ }
+ #else
+-static inline struct in_addr *net_if_router_ipv4(struct net_if_router *router)
++static inline struct zsock_in_addr *net_if_router_ipv4(struct net_if_router *router)
+ {
+-	static struct in_addr addr;
++	static struct zsock_in_addr addr;
+
+ 	ARG_UNUSED(router);
+
+@@ -2596,7 +2596,7 @@ static inline struct in_addr *net_if_router_ipv4(struct net_if_router *router)
+  * @return Pointer to router information, NULL if cannot be found
+  */
+ struct net_if_router *net_if_ipv4_router_lookup(struct net_if *iface,
+-						const struct in_addr *addr);
++						const struct zsock_in_addr *addr);
+
+ /**
+  * @brief Find default router for this IPv4 address.
+@@ -2608,7 +2608,7 @@ struct net_if_router *net_if_ipv4_router_lookup(struct net_if *iface,
+  * @return Pointer to router information, NULL if cannot be found
+  */
+ struct net_if_router *net_if_ipv4_router_find_default(struct net_if *iface,
+-						      const struct in_addr *addr);
++						      const struct zsock_in_addr *addr);
+ /**
+  * @brief Add IPv4 router to the system.
+  *
+@@ -2620,7 +2620,7 @@ struct net_if_router *net_if_ipv4_router_find_default(struct net_if *iface,
+  * @return Pointer to router information, NULL if could not be added
+  */
+ struct net_if_router *net_if_ipv4_router_add(struct net_if *iface,
+-					     const struct in_addr *addr,
++					     const struct zsock_in_addr *addr,
+ 					     bool is_default,
+ 					     uint16_t router_lifetime);
+
+@@ -2642,7 +2642,7 @@ bool net_if_ipv4_router_rm(struct net_if_router *router);
+  * @return True if address is part of local subnet, false otherwise.
+  */
+ bool net_if_ipv4_addr_mask_cmp(struct net_if *iface,
+-			       const struct in_addr *addr);
++			       const struct zsock_in_addr *addr);
+
+ /**
+  * @brief Check if the given IPv4 address is a broadcast address.
+@@ -2653,7 +2653,7 @@ bool net_if_ipv4_addr_mask_cmp(struct net_if *iface,
+  * @return True if address is a broadcast address, false otherwise.
+  */
+ bool net_if_ipv4_is_addr_bcast(struct net_if *iface,
+-			       const struct in_addr *addr);
++			       const struct zsock_in_addr *addr);
+
+ /**
+  * @brief Get a network interface that should be used when sending
+@@ -2665,10 +2665,10 @@ bool net_if_ipv4_is_addr_bcast(struct net_if *iface,
+  * could be found.
+  */
+ #if defined(CONFIG_NET_IPV4)
+-struct net_if *net_if_ipv4_select_src_iface(const struct in_addr *dst);
++struct net_if *net_if_ipv4_select_src_iface(const struct zsock_in_addr *dst);
+ #else
+ static inline struct net_if *net_if_ipv4_select_src_iface(
+-	const struct in_addr *dst)
++	const struct zsock_in_addr *dst)
+ {
+ 	ARG_UNUSED(dst);
+
+@@ -2689,11 +2689,11 @@ static inline struct net_if *net_if_ipv4_select_src_iface(
+  * could be found.
+  */
+ #if defined(CONFIG_NET_IPV4)
+-struct net_if *net_if_ipv4_select_src_iface_addr(const struct in_addr *dst,
+-						 const struct in_addr **src_addr);
++struct net_if *net_if_ipv4_select_src_iface_addr(const struct zsock_in_addr *dst,
++						 const struct zsock_in_addr **src_addr);
+ #else
+ static inline struct net_if *net_if_ipv4_select_src_iface_addr(
+-	const struct in_addr *dst, const struct in_addr **src_addr)
++	const struct zsock_in_addr *dst, const struct zsock_in_addr **src_addr)
+ {
+ 	ARG_UNUSED(dst);
+ 	ARG_UNUSED(src_addr);
+@@ -2714,11 +2714,11 @@ static inline struct net_if *net_if_ipv4_select_src_iface_addr(
+  * could be found.
+  */
+ #if defined(CONFIG_NET_IPV4)
+-const struct in_addr *net_if_ipv4_select_src_addr(struct net_if *iface,
+-						  const struct in_addr *dst);
++const struct zsock_in_addr *net_if_ipv4_select_src_addr(struct net_if *iface,
++						  const struct zsock_in_addr *dst);
+ #else
+-static inline const struct in_addr *net_if_ipv4_select_src_addr(
+-	struct net_if *iface, const struct in_addr *dst)
++static inline const struct zsock_in_addr *net_if_ipv4_select_src_addr(
++	struct net_if *iface, const struct zsock_in_addr *dst)
+ {
+ 	ARG_UNUSED(iface);
+ 	ARG_UNUSED(dst);
+@@ -2736,7 +2736,7 @@ static inline const struct in_addr *net_if_ipv4_select_src_addr(
+  * @return Pointer to link local IPv4 address, NULL if no proper IPv4 address
+  * could be found.
+  */
+-struct in_addr *net_if_ipv4_get_ll(struct net_if *iface,
++struct zsock_in_addr *net_if_ipv4_get_ll(struct net_if *iface,
+ 				   enum net_addr_state addr_state);
+
+ /**
+@@ -2748,7 +2748,7 @@ struct in_addr *net_if_ipv4_get_ll(struct net_if *iface,
+  * @return Pointer to link local IPv4 address, NULL if no proper IPv4 address
+  * could be found.
+  */
+-struct in_addr *net_if_ipv4_get_global_addr(struct net_if *iface,
++struct zsock_in_addr *net_if_ipv4_get_global_addr(struct net_if *iface,
+ 					    enum net_addr_state addr_state);
+
+ /**
+@@ -2760,8 +2760,8 @@ struct in_addr *net_if_ipv4_get_global_addr(struct net_if *iface,
+  * @return The netmask set on the interface related to the give address,
+  *         unspecified address if not found.
+  */
+-struct in_addr net_if_ipv4_get_netmask_by_addr(struct net_if *iface,
+-					       const struct in_addr *addr);
++struct zsock_in_addr net_if_ipv4_get_netmask_by_addr(struct net_if *iface,
++					       const struct zsock_in_addr *addr);
+
+ /**
+  * @brief Get IPv4 netmask of an interface.
+@@ -2772,7 +2772,7 @@ struct in_addr net_if_ipv4_get_netmask_by_addr(struct net_if *iface,
+  *
+  * @return The netmask set on the interface, unspecified address if not found.
+  */
+-__deprecated struct in_addr net_if_ipv4_get_netmask(struct net_if *iface);
++__deprecated struct zsock_in_addr net_if_ipv4_get_netmask(struct net_if *iface);
+
+ /**
+  * @brief Set IPv4 netmask for an interface.
+@@ -2783,7 +2783,7 @@ __deprecated struct in_addr net_if_ipv4_get_netmask(struct net_if *iface);
+  * @param netmask IPv4 netmask
+  */
+ __deprecated void net_if_ipv4_set_netmask(struct net_if *iface,
+-					  const struct in_addr *netmask);
++					  const struct zsock_in_addr *netmask);
+
+ /**
+  * @brief Set IPv4 netmask for an interface index.
+@@ -2796,7 +2796,7 @@ __deprecated void net_if_ipv4_set_netmask(struct net_if *iface,
+  * @return True if netmask was added, false otherwise.
+  */
+ __deprecated __syscall bool net_if_ipv4_set_netmask_by_index(int index,
+-							     const struct in_addr *netmask);
++							     const struct zsock_in_addr *netmask);
+
+ /**
+  * @brief Set IPv4 netmask for an interface index for a given address.
+@@ -2808,8 +2808,8 @@ __deprecated __syscall bool net_if_ipv4_set_netmask_by_index(int index,
+  * @return True if netmask was added, false otherwise.
+  */
+ __syscall bool net_if_ipv4_set_netmask_by_addr_by_index(int index,
+-							const struct in_addr *addr,
+-							const struct in_addr *netmask);
++							const struct zsock_in_addr *addr,
++							const struct zsock_in_addr *netmask);
+
+ /**
+  * @brief Set IPv4 netmask for an interface index for a given address.
+@@ -2821,8 +2821,8 @@ __syscall bool net_if_ipv4_set_netmask_by_addr_by_index(int index,
+  * @return True if netmask was added, false otherwise.
+  */
+ bool net_if_ipv4_set_netmask_by_addr(struct net_if *iface,
+-				     const struct in_addr *addr,
+-				     const struct in_addr *netmask);
++				     const struct zsock_in_addr *addr,
++				     const struct zsock_in_addr *netmask);
+
+ /**
+  * @brief Get IPv4 gateway of an interface.
+@@ -2831,7 +2831,7 @@ bool net_if_ipv4_set_netmask_by_addr(struct net_if *iface,
+  *
+  * @return The gateway set on the interface, unspecified address if not found.
+  */
+-struct in_addr net_if_ipv4_get_gw(struct net_if *iface);
++struct zsock_in_addr net_if_ipv4_get_gw(struct net_if *iface);
+
+ /**
+  * @brief Set IPv4 gateway for an interface.
+@@ -2839,7 +2839,7 @@ struct in_addr net_if_ipv4_get_gw(struct net_if *iface);
+  * @param iface Interface to use.
+  * @param gw IPv4 address of an gateway
+  */
+-void net_if_ipv4_set_gw(struct net_if *iface, const struct in_addr *gw);
++void net_if_ipv4_set_gw(struct net_if *iface, const struct zsock_in_addr *gw);
+
+ /**
+  * @brief Set IPv4 gateway for an interface index.
+@@ -2849,7 +2849,7 @@ void net_if_ipv4_set_gw(struct net_if *iface, const struct in_addr *gw);
+  *
+  * @return True if gateway was added, false otherwise.
+  */
+-__syscall bool net_if_ipv4_set_gw_by_index(int index, const struct in_addr *gw);
++__syscall bool net_if_ipv4_set_gw_by_index(int index, const struct zsock_in_addr *gw);
+
+ /**
+  * @brief Get a network interface that should be used when sending
+@@ -2861,7 +2861,7 @@ __syscall bool net_if_ipv4_set_gw_by_index(int index, const struct in_addr *gw);
+  * will return the default network interface if the best network interface
+  * is not found.
+  */
+-struct net_if *net_if_select_src_iface(const struct sockaddr *dst);
++struct net_if *net_if_select_src_iface(const struct zsock_sockaddr *dst);
+
+ /**
+  * @typedef net_if_link_callback_t
+diff --git a/include/zephyr/net/net_ip.h b/include/zephyr/net/net_ip.h
+index 6cc199d7583..878cdd9259f 100644
+--- a/include/zephyr/net/net_ip.h
++++ b/include/zephyr/net/net_ip.h
+@@ -41,54 +41,54 @@ extern "C" {
+ /** @endcond */
+
+ /* Protocol families. */
+-#define PF_UNSPEC       0          /**< Unspecified protocol family.  */
+-#define PF_INET         1          /**< IP protocol family version 4. */
+-#define PF_INET6        2          /**< IP protocol family version 6. */
+-#define PF_PACKET       3          /**< Packet family.                */
+-#define PF_CAN          4          /**< Controller Area Network.      */
+-#define PF_NET_MGMT     5          /**< Network management info.      */
+-#define PF_LOCAL        6          /**< Inter-process communication   */
+-#define PF_UNIX         PF_LOCAL   /**< Inter-process communication   */
++#define ZSOCK_PF_UNSPEC       0          /**< Unspecified protocol family.  */
++#define ZSOCK_PF_INET         1          /**< IP protocol family version 4. */
++#define ZSOCK_PF_INET6        2          /**< IP protocol family version 6. */
++#define ZSOCK_PF_PACKET       3          /**< Packet family.                */
++#define ZSOCK_PF_CAN          4          /**< Controller Area Network.      */
++#define ZSOCK_PF_NET_MGMT     5          /**< Network management info.      */
++#define ZSOCK_PF_LOCAL        6          /**< Inter-process communication   */
++#define ZSOCK_PF_UNIX         ZSOCK_PF_LOCAL   /**< Inter-process communication   */
+
+ /* Address families. */
+-#define AF_UNSPEC      PF_UNSPEC   /**< Unspecified address family.   */
+-#define AF_INET        PF_INET     /**< IP protocol family version 4. */
+-#define AF_INET6       PF_INET6    /**< IP protocol family version 6. */
+-#define AF_PACKET      PF_PACKET   /**< Packet family.                */
+-#define AF_CAN         PF_CAN      /**< Controller Area Network.      */
+-#define AF_NET_MGMT    PF_NET_MGMT /**< Network management info.      */
+-#define AF_LOCAL       PF_LOCAL    /**< Inter-process communication   */
+-#define AF_UNIX        PF_UNIX     /**< Inter-process communication   */
++#define ZSOCK_AF_UNSPEC      ZSOCK_PF_UNSPEC   /**< Unspecified address family.   */
++#define ZSOCK_AF_INET        ZSOCK_PF_INET     /**< IP protocol family version 4. */
++#define ZSOCK_AF_INET6       ZSOCK_PF_INET6    /**< IP protocol family version 6. */
++#define ZSOCK_AF_PACKET      ZSOCK_PF_PACKET   /**< Packet family.                */
++#define ZSOCK_AF_CAN         ZSOCK_PF_CAN      /**< Controller Area Network.      */
++#define ZSOCK_AF_NET_MGMT    ZSOCK_PF_NET_MGMT /**< Network management info.      */
++#define ZSOCK_AF_LOCAL       ZSOCK_PF_LOCAL    /**< Inter-process communication   */
++#define ZSOCK_AF_UNIX        ZSOCK_PF_UNIX     /**< Inter-process communication   */
+
+ /** Protocol numbers from IANA/BSD */
+ enum net_ip_protocol {
+-	IPPROTO_IP = 0,            /**< IP protocol (pseudo-val for setsockopt() */
+-	IPPROTO_ICMP = 1,          /**< ICMP protocol   */
+-	IPPROTO_IGMP = 2,          /**< IGMP protocol   */
+-	IPPROTO_ETH_P_ALL = 3,     /**< Every packet. from linux if_ether.h   */
+-	IPPROTO_IPIP = 4,          /**< IPIP tunnels    */
+-	IPPROTO_TCP = 6,           /**< TCP protocol    */
+-	IPPROTO_UDP = 17,          /**< UDP protocol    */
+-	IPPROTO_IPV6 = 41,         /**< IPv6 protocol   */
+-	IPPROTO_ICMPV6 = 58,       /**< ICMPv6 protocol */
+-	IPPROTO_RAW = 255,         /**< RAW IP packets  */
++	ZSOCK_IPPROTO_IP = 0,            /**< IP protocol (pseudo-val for setsockopt() */
++	ZSOCK_IPPROTO_ICMP = 1,          /**< ICMP protocol   */
++	ZSOCK_IPPROTO_IGMP = 2,          /**< IGMP protocol   */
++	ZSOCK_IPPROTO_ETH_P_ALL = 3,     /**< Every packet. from linux if_ether.h   */
++	ZSOCK_IPPROTO_IPIP = 4,          /**< IPIP tunnels    */
++	ZSOCK_IPPROTO_TCP = 6,           /**< TCP protocol    */
++	ZSOCK_IPPROTO_UDP = 17,          /**< UDP protocol    */
++	ZSOCK_IPPROTO_IPV6 = 41,         /**< IPv6 protocol   */
++	ZSOCK_IPPROTO_ICMPV6 = 58,       /**< ICMPv6 protocol */
++	ZSOCK_IPPROTO_RAW = 255,         /**< RAW IP packets  */
+ };
+
+ /** Protocol numbers for TLS protocols */
+ enum net_ip_protocol_secure {
+-	IPPROTO_TLS_1_0 = 256,     /**< TLS 1.0 protocol */
+-	IPPROTO_TLS_1_1 = 257,     /**< TLS 1.1 protocol */
+-	IPPROTO_TLS_1_2 = 258,     /**< TLS 1.2 protocol */
+-	IPPROTO_TLS_1_3 = 259,     /**< TLS 1.3 protocol */
+-	IPPROTO_DTLS_1_0 = 272,    /**< DTLS 1.0 protocol */
+-	IPPROTO_DTLS_1_2 = 273,    /**< DTLS 1.2 protocol */
++	ZSOCK_IPPROTO_TLS_1_0 = 256,     /**< TLS 1.0 protocol */
++	ZSOCK_IPPROTO_TLS_1_1 = 257,     /**< TLS 1.1 protocol */
++	ZSOCK_IPPROTO_TLS_1_2 = 258,     /**< TLS 1.2 protocol */
++	ZSOCK_IPPROTO_TLS_1_3 = 259,     /**< TLS 1.3 protocol */
++	ZSOCK_IPPROTO_DTLS_1_0 = 272,    /**< DTLS 1.0 protocol */
++	ZSOCK_IPPROTO_DTLS_1_2 = 273,    /**< DTLS 1.2 protocol */
+ };
+
+ /** Socket type */
+ enum net_sock_type {
+-	SOCK_STREAM = 1,           /**< Stream socket type   */
+-	SOCK_DGRAM,                /**< Datagram socket type */
+-	SOCK_RAW                   /**< RAW socket type      */
++	ZSOCK_SOCK_STREAM = 1,           /**< Stream socket type   */
++	ZSOCK_SOCK_DGRAM,                /**< Datagram socket type */
++	ZSOCK_SOCK_RAW                   /**< RAW socket type      */
+ };
+
+ /** @brief Convert 16-bit value from network to host byte order.
+@@ -97,7 +97,7 @@ enum net_sock_type {
+  *
+  * @return Host byte order value.
+  */
+-#define ntohs(x) sys_be16_to_cpu(x)
++#define zsock_ntohs(x) sys_be16_to_cpu(x)
+
+ /** @brief Convert 32-bit value from network to host byte order.
+  *
+@@ -105,7 +105,7 @@ enum net_sock_type {
+  *
+  * @return Host byte order value.
+  */
+-#define ntohl(x) sys_be32_to_cpu(x)
++#define zsock_ntohl(x) sys_be32_to_cpu(x)
+
+ /** @brief Convert 64-bit value from network to host byte order.
+  *
+@@ -121,7 +121,7 @@ enum net_sock_type {
+  *
+  * @return Network byte order value.
+  */
+-#define htons(x) sys_cpu_to_be16(x)
++#define zsock_htons(x) sys_cpu_to_be16(x)
+
+ /** @brief Convert 32-bit value from host to network byte order.
+  *
+@@ -129,7 +129,7 @@ enum net_sock_type {
+  *
+  * @return Network byte order value.
+  */
+-#define htonl(x) sys_cpu_to_be32(x)
++#define zsock_htonl(x) sys_cpu_to_be32(x)
+
+ /** @brief Convert 64-bit value from host to network byte order.
+  *
+@@ -140,19 +140,22 @@ enum net_sock_type {
+ #define htonll(x) sys_cpu_to_be64(x)
+
+ /** IPv6 address struct */
+-struct in6_addr {
++#if !defined(_ZSOCK_IN6_ADDR_STRUCT_DEFINED)
++struct zsock_in6_addr {
+ 	union {
+ 		uint8_t s6_addr[16];   /**< IPv6 address buffer */
+ 		uint16_t s6_addr16[8]; /**< In big endian */
+ 		uint32_t s6_addr32[4]; /**< In big endian */
+ 	};
+ };
++#define _ZSOCK_IN6_ADDR_STRUCT_DEFINED
++#endif
+
+ /** Binary size of the IPv6 address */
+ #define NET_IPV6_ADDR_SIZE 16
+
+ /** IPv4 address struct */
+-struct in_addr {
++struct zsock_in_addr {
+ 	union {
+ 		uint8_t s4_addr[4];    /**< IPv4 address buffer */
+ 		uint16_t s4_addr16[2]; /**< In big endian */
+@@ -165,13 +168,10 @@ struct in_addr {
+ #define NET_IPV4_ADDR_SIZE 4
+
+ /** Socket address family type */
+-typedef unsigned short int sa_family_t;
++typedef uint16_t zsock_sa_family_t;
+
+ /** Length of a socket address */
+-#ifndef __socklen_t_defined
+-typedef uint32_t socklen_t;
+-#define __socklen_t_defined
+-#endif
++typedef uint32_t zsock_socklen_t;
+
+ /*
+  * Note that the sin_port and sin6_port are in network byte order
+@@ -179,23 +179,23 @@ typedef uint32_t socklen_t;
+  */
+
+ /** Socket address struct for IPv6. */
+-struct sockaddr_in6 {
+-	sa_family_t		sin6_family;   /**< AF_INET6               */
++struct zsock_sockaddr_in6 {
++	zsock_sa_family_t		sin6_family;   /**< ZSOCK_AF_INET6               */
+ 	uint16_t		sin6_port;     /**< Port number            */
+-	struct in6_addr		sin6_addr;     /**< IPv6 address           */
++	struct zsock_in6_addr		sin6_addr;     /**< IPv6 address           */
+ 	uint8_t			sin6_scope_id; /**< Interfaces for a scope */
+ };
+
+ /** Socket address struct for IPv4. */
+-struct sockaddr_in {
+-	sa_family_t		sin_family;    /**< AF_INET      */
++struct zsock_sockaddr_in {
++	zsock_sa_family_t		sin_family;    /**< ZSOCK_AF_INET      */
+ 	uint16_t		sin_port;      /**< Port number  */
+-	struct in_addr		sin_addr;      /**< IPv4 address */
++	struct zsock_in_addr		sin_addr;      /**< IPv4 address */
+ };
+
+ /** Socket address struct for packet socket. */
+-struct sockaddr_ll {
+-	sa_family_t sll_family;   /**< Always AF_PACKET                   */
++struct zsock_sockaddr_ll {
++	zsock_sa_family_t sll_family;   /**< Always ZSOCK_AF_PACKET                   */
+ 	uint16_t    sll_protocol; /**< Physical-layer protocol            */
+ 	int         sll_ifindex;  /**< Interface number                   */
+ 	uint16_t    sll_hatype;   /**< ARP hardware type                  */
+@@ -208,22 +208,22 @@ struct sockaddr_ll {
+
+ /** Socket address struct for IPv6 where address is a pointer */
+ struct sockaddr_in6_ptr {
+-	sa_family_t		sin6_family;   /**< AF_INET6               */
++	zsock_sa_family_t		sin6_family;   /**< ZSOCK_AF_INET6               */
+ 	uint16_t		sin6_port;     /**< Port number            */
+-	struct in6_addr		*sin6_addr;    /**< IPv6 address           */
++	struct zsock_in6_addr		*sin6_addr;    /**< IPv6 address           */
+ 	uint8_t			sin6_scope_id; /**< interfaces for a scope */
+ };
+
+ /** Socket address struct for IPv4 where address is a pointer */
+ struct sockaddr_in_ptr {
+-	sa_family_t		sin_family;    /**< AF_INET      */
++	zsock_sa_family_t		sin_family;    /**< ZSOCK_AF_INET      */
+ 	uint16_t		sin_port;      /**< Port number  */
+-	struct in_addr		*sin_addr;     /**< IPv4 address */
++	struct zsock_in_addr		*sin_addr;     /**< IPv4 address */
+ };
+
+ /** Socket address struct for packet socket where address is a pointer */
+ struct sockaddr_ll_ptr {
+-	sa_family_t sll_family;   /**< Always AF_PACKET                   */
++	zsock_sa_family_t sll_family;   /**< Always ZSOCK_AF_PACKET                   */
+ 	uint16_t    sll_protocol; /**< Physical-layer protocol            */
+ 	int         sll_ifindex;  /**< Interface number                   */
+ 	uint16_t    sll_hatype;   /**< ARP hardware type                  */
+@@ -234,30 +234,28 @@ struct sockaddr_ll_ptr {
+
+ /** Socket address struct for unix socket where address is a pointer */
+ struct sockaddr_un_ptr {
+-	sa_family_t sun_family;    /**< Always AF_UNIX */
++	zsock_sa_family_t sun_family;    /**< Always ZSOCK_AF_UNIX */
+ 	char        *sun_path;     /**< pathname */
+ };
+
+ struct sockaddr_can_ptr {
+-	sa_family_t can_family;
++	zsock_sa_family_t can_family;
+ 	int         can_ifindex;
+ };
+
+ /** @endcond */
+
+-#if !defined(HAVE_IOVEC)
+ /** IO vector array element */
+-struct iovec {
++struct zsock_iovec {
+ 	void  *iov_base; /**< Pointer to data */
+ 	size_t iov_len;  /**< Length of the data */
+ };
+-#endif
+
+ /** Message struct */
+-struct msghdr {
++struct zsock_msghdr {
+ 	void         *msg_name;       /**< Optional socket address, big endian */
+-	socklen_t     msg_namelen;    /**< Size of socket address */
+-	struct iovec *msg_iov;        /**< Scatter/gather array */
++	zsock_socklen_t     msg_namelen;    /**< Size of socket address */
++	struct zsock_iovec *msg_iov;        /**< Scatter/gather array */
+ 	size_t        msg_iovlen;     /**< Number of elements in msg_iov */
+ 	void         *msg_control;    /**< Ancillary data */
+ 	size_t        msg_controllen; /**< Ancillary data buffer len */
+@@ -265,8 +263,8 @@ struct msghdr {
+ };
+
+ /** Control message ancillary data */
+-struct cmsghdr {
+-	socklen_t cmsg_len;    /**< Number of bytes, including header */
++struct zsock_cmsghdr {
++	zsock_socklen_t cmsg_len;    /**< Number of bytes, including header */
+ 	int       cmsg_level;  /**< Originating protocol */
+ 	int       cmsg_type;   /**< Protocol-specific type */
+ 	z_max_align_t cmsg_data[]; /**< Flexible array member to force alignment of cmsghdr */
+@@ -278,7 +276,7 @@ struct cmsghdr {
+  * them here atm if not found already.
+  */
+ #if !defined(ALIGN_H)
+-#define ALIGN_H(x) ROUND_UP(x, __alignof__(struct cmsghdr))
++#define ALIGN_H(x) ROUND_UP(x, __alignof__(struct zsock_cmsghdr))
+ #endif
+ #if !defined(ALIGN_D)
+ #define ALIGN_D(x) ROUND_UP(x, __alignof__(z_max_align_t))
+@@ -286,33 +284,30 @@ struct cmsghdr {
+
+ /** @endcond */
+
+-#if !defined(CMSG_FIRSTHDR)
++#if !defined(ZSOCK_CMSG_FIRSTHDR)
+ /**
+  * Returns a pointer to the first cmsghdr in the ancillary data buffer
+  * associated with the passed msghdr.  It returns NULL if there isn't
+  * enough space for a cmsghdr in the buffer.
+  */
+-#define CMSG_FIRSTHDR(msghdr)					\
+-	((msghdr)->msg_controllen >= sizeof(struct cmsghdr) ?	\
+-	 (struct cmsghdr *)((msghdr)->msg_control) : NULL)
++#define ZSOCK_CMSG_FIRSTHDR(msghdr)					\
++	((msghdr)->msg_controllen >= sizeof(struct zsock_cmsghdr) ?	\
++	 (struct zsock_cmsghdr *)((msghdr)->msg_control) : NULL)
+ #endif
+
+-#if !defined(CMSG_NXTHDR)
+ /**
+  * Returns the next valid cmsghdr after the passed cmsghdr. It returns NULL
+  * when there isn't enough space left in the buffer.
+  */
+-#define CMSG_NXTHDR(msghdr, cmsg)					 \
+-	(((cmsg) == NULL) ? CMSG_FIRSTHDR(msghdr) :			 \
++#define ZSOCK_CMSG_NXTHDR(msghdr, cmsg)					 \
++	(((cmsg) == NULL) ? ZSOCK_CMSG_FIRSTHDR(msghdr) :			 \
+ 	 (((uint8_t *)(cmsg) + ALIGN_H((cmsg)->cmsg_len) +		 \
+-	   ALIGN_D(sizeof(struct cmsghdr)) >				 \
++	   ALIGN_D(sizeof(struct zsock_cmsghdr)) >				 \
+ 	   (uint8_t *)((msghdr)->msg_control) + (msghdr)->msg_controllen) ? \
+ 	  NULL :							 \
+-	  (struct cmsghdr *)((uint8_t *)(cmsg) +			 \
++	  (struct zsock_cmsghdr *)((uint8_t *)(cmsg) +			 \
+ 			     ALIGN_H((cmsg)->cmsg_len))))
+-#endif
+
+-#if !defined(CMSG_DATA)
+ /**
+  * Returns a pointer to the data portion of a cmsghdr.  The pointer returned
+  * cannot be assumed to be suitably aligned for accessing arbitrary payload
+@@ -320,25 +315,20 @@ struct cmsghdr {
+  * the payload, but should instead use memcpy(3) to copy data to or from a
+  * suitably declared object.
+  */
+-#define CMSG_DATA(cmsg) ((uint8_t *)(cmsg) + ALIGN_D(sizeof(struct cmsghdr)))
+-#endif
++#define ZSOCK_CMSG_DATA(cmsg) ((uint8_t *)(cmsg) + ALIGN_D(sizeof(struct zsock_cmsghdr)))
+
+-#if !defined(CMSG_SPACE)
+ /**
+  * Returns the number of bytes an ancillary element with payload of the passed
+  * data length occupies.
+  */
+-#define CMSG_SPACE(length) (ALIGN_D(sizeof(struct cmsghdr)) + ALIGN_H(length))
+-#endif
++#define ZSOCK_CMSG_SPACE(length) (ALIGN_D(sizeof(struct zsock_cmsghdr)) + ALIGN_H(length))
+
+-#if !defined(CMSG_LEN)
+ /**
+  * Returns the value to store in the cmsg_len member of the cmsghdr structure,
+  * taking into account any necessary alignment.
+  * It takes the data length as an argument.
+  */
+-#define CMSG_LEN(length) (ALIGN_D(sizeof(struct cmsghdr)) + length)
+-#endif
++#define ZSOCK_CMSG_LEN(length) (ALIGN_D(sizeof(struct zsock_cmsghdr)) + length)
+
+ /** @cond INTERNAL_HIDDEN */
+
+@@ -360,20 +350,20 @@ struct cmsghdr {
+ #if defined(CONFIG_NET_IPV4)
+ #undef NET_SOCKADDR_MAX_SIZE
+ #undef NET_SOCKADDR_PTR_MAX_SIZE
+-#define NET_SOCKADDR_MAX_SIZE (sizeof(struct sockaddr_in))
++#define NET_SOCKADDR_MAX_SIZE (sizeof(struct zsock_sockaddr_in))
+ #define NET_SOCKADDR_PTR_MAX_SIZE (sizeof(struct sockaddr_in_ptr))
+ #endif
+
+ #if defined(CONFIG_NET_SOCKETS_PACKET)
+ #undef NET_SOCKADDR_MAX_SIZE
+ #undef NET_SOCKADDR_PTR_MAX_SIZE
+-#define NET_SOCKADDR_MAX_SIZE (sizeof(struct sockaddr_ll))
++#define NET_SOCKADDR_MAX_SIZE (sizeof(struct zsock_sockaddr_ll))
+ #define NET_SOCKADDR_PTR_MAX_SIZE (sizeof(struct sockaddr_ll_ptr))
+ #endif
+
+ #if defined(CONFIG_NET_IPV6)
+ #undef NET_SOCKADDR_MAX_SIZE
+-#define NET_SOCKADDR_MAX_SIZE (sizeof(struct sockaddr_in6))
++#define NET_SOCKADDR_MAX_SIZE (sizeof(struct zsock_sockaddr_in6))
+ #if !defined(CONFIG_NET_SOCKETS_PACKET)
+ #undef NET_SOCKADDR_PTR_MAX_SIZE
+ #define NET_SOCKADDR_PTR_MAX_SIZE (sizeof(struct sockaddr_in6_ptr))
+@@ -381,10 +371,10 @@ struct cmsghdr {
+ #endif
+
+ #if defined(CONFIG_NET_NATIVE_OFFLOADED_SOCKETS)
+-#define UNIX_PATH_MAX 108
++#define ZSOCK_UNIX_PATH_MAX 108
+ #undef NET_SOCKADDR_MAX_SIZE
+-/* Define NET_SOCKADDR_MAX_SIZE to be struct of sa_family_t + char[UNIX_PATH_MAX] */
+-#define NET_SOCKADDR_MAX_SIZE (UNIX_PATH_MAX+sizeof(sa_family_t))
++/* Define NET_SOCKADDR_MAX_SIZE to be struct of zsock_sa_family_t + char[UNIX_PATH_MAX] */
++#define NET_SOCKADDR_MAX_SIZE (ZSOCK_UNIX_PATH_MAX+sizeof(zsock_sa_family_t))
+ #if !defined(CONFIG_NET_SOCKETS_PACKET)
+ #undef NET_SOCKADDR_PTR_MAX_SIZE
+ #define NET_SOCKADDR_PTR_MAX_SIZE (sizeof(struct sockaddr_un_ptr))
+@@ -395,7 +385,7 @@ struct cmsghdr {
+ #if !defined(CONFIG_NET_IPV6)
+ #if !defined(CONFIG_NET_SOCKETS_PACKET)
+ #if !defined(CONFIG_NET_NATIVE_OFFLOADED_SOCKETS)
+-#define NET_SOCKADDR_MAX_SIZE (sizeof(struct sockaddr_in6))
++#define NET_SOCKADDR_MAX_SIZE (sizeof(struct zsock_sockaddr_in6))
+ #define NET_SOCKADDR_PTR_MAX_SIZE (sizeof(struct sockaddr_in6_ptr))
+ #endif
+ #endif
+@@ -407,74 +397,74 @@ struct cmsghdr {
+ #define SOCKADDR_ALIGN (4)
+
+ /** Generic sockaddr struct. Must be cast to proper type. */
+-struct sockaddr {
+-	sa_family_t sa_family; /**< Address family */
++struct zsock_sockaddr {
++	zsock_sa_family_t sa_family; /**< Address family */
+ /** @cond INTERNAL_HIDDEN */
+-	char data[NET_SOCKADDR_MAX_SIZE - sizeof(sa_family_t)];
++	char data[NET_SOCKADDR_MAX_SIZE - sizeof(zsock_sa_family_t)];
+ /** @endcond */
+ } __aligned(SOCKADDR_ALIGN);
+
+ /** @cond INTERNAL_HIDDEN */
+
+ struct sockaddr_ptr {
+-	sa_family_t family;
+-	char data[NET_SOCKADDR_PTR_MAX_SIZE - sizeof(sa_family_t)];
++	zsock_sa_family_t family;
++	char data[NET_SOCKADDR_PTR_MAX_SIZE - sizeof(zsock_sa_family_t)];
+ } __aligned(SOCKADDR_ALIGN);
+
+ /* Same as sockaddr in our case */
+-struct sockaddr_storage {
+-	sa_family_t ss_family;
+-	char data[NET_SOCKADDR_MAX_SIZE - sizeof(sa_family_t)];
++struct zsock_sockaddr_storage {
++	zsock_sa_family_t ss_family;
++	char data[NET_SOCKADDR_MAX_SIZE - sizeof(zsock_sa_family_t)];
+ } __aligned(SOCKADDR_ALIGN);
+
+ /* Socket address struct for UNIX domain sockets */
+-struct sockaddr_un {
+-	sa_family_t sun_family;    /* AF_UNIX */
+-	char        sun_path[NET_SOCKADDR_MAX_SIZE - sizeof(sa_family_t)];
++struct zsock_sockaddr_un {
++	zsock_sa_family_t sun_family;    /* ZSOCK_AF_UNIX */
++	char        sun_path[NET_SOCKADDR_MAX_SIZE - sizeof(zsock_sa_family_t)];
+ };
+
+ struct net_addr {
+-	sa_family_t family;
++	zsock_sa_family_t family;
+ 	union {
+-		struct in6_addr in6_addr;
+-		struct in_addr in_addr;
++		struct zsock_in6_addr in6_addr;
++		struct zsock_in_addr in_addr;
+ 	};
+ };
+
+ /** A pointer to IPv6 any address (all values zero) */
+-extern const struct in6_addr in6addr_any;
++extern const struct zsock_in6_addr zsock_in6addr_any;
+
+ /** A pointer to IPv6 loopback address (::1) */
+-extern const struct in6_addr in6addr_loopback;
++extern const struct zsock_in6_addr zsock_in6addr_loopback;
+
+ /** @endcond */
+
+ /** IPv6 address initializer */
+-#define IN6ADDR_ANY_INIT { { { 0, 0, 0, 0, 0, 0, 0, 0, 0, \
++#define ZSOCK_IN6ADDR_ANY_INIT { { { 0, 0, 0, 0, 0, 0, 0, 0, 0, \
+ 				0, 0, 0, 0, 0, 0, 0 } } }
+
+ /** IPv6 loopback address initializer */
+-#define IN6ADDR_LOOPBACK_INIT { { { 0, 0, 0, 0, 0, 0, 0, \
++#define ZSOCK_IN6ADDR_LOOPBACK_INIT { { { 0, 0, 0, 0, 0, 0, 0, \
+ 				0, 0, 0, 0, 0, 0, 0, 0, 1 } } }
+
+ /** IPv4 any address */
+-#define INADDR_ANY 0
++#define ZSOCK_INADDR_ANY 0
+
+ /** IPv4 broadcast address */
+-#define INADDR_BROADCAST 0xffffffff
++#define ZSOCK_INADDR_BROADCAST 0xffffffff
+
+ /** IPv4 address initializer */
+-#define INADDR_ANY_INIT { { { INADDR_ANY } } }
++#define INADDR_ANY_INIT { { { ZSOCK_INADDR_ANY } } }
+
+ /** IPv6 loopback address initializer */
+ #define INADDR_LOOPBACK_INIT  { { { 127, 0, 0, 1 } } }
+
+ /** Max length of the IPv4 address as a string. Defined by POSIX. */
+-#define INET_ADDRSTRLEN 16
++#define ZSOCK_INET_ADDRSTRLEN 16
+ /** Max length of the IPv6 address as a string. Takes into account possible
+  * mapped IPv4 addresses.
+  */
+-#define INET6_ADDRSTRLEN 46
++#define ZSOCK_INET6_ADDRSTRLEN 46
+
+ /** @cond INTERNAL_HIDDEN */
+
+@@ -681,7 +671,7 @@ static inline bool net_ipv6_is_addr_loopback_raw(const uint8_t *addr)
+ 	return UNALIGNED_GET((uint32_t *)addr) == 0 &&
+ 	       UNALIGNED_GET((uint32_t *)addr + 1) == 0 &&
+ 	       UNALIGNED_GET((uint32_t *)addr + 2) == 0 &&
+-	       ntohl(UNALIGNED_GET((uint32_t *)addr + 3)) == 1;
++	       zsock_ntohl(UNALIGNED_GET((uint32_t *)addr + 3)) == 1;
+ }
+ /** @endcond */
+
+@@ -692,7 +682,7 @@ static inline bool net_ipv6_is_addr_loopback_raw(const uint8_t *addr)
+  *
+  * @return True if address is a loopback address, False otherwise.
+  */
+-static inline bool net_ipv6_is_addr_loopback(const struct in6_addr *addr)
++static inline bool net_ipv6_is_addr_loopback(const struct zsock_in6_addr *addr)
+ {
+ 	return net_ipv6_is_addr_loopback_raw(addr->s6_addr);
+ }
+@@ -711,7 +701,7 @@ static inline bool net_ipv6_is_addr_mcast_raw(const uint8_t *addr)
+  *
+  * @return True if address is multicast address, False otherwise.
+  */
+-static inline bool net_ipv6_is_addr_mcast(const struct in6_addr *addr)
++static inline bool net_ipv6_is_addr_mcast(const struct zsock_in6_addr *addr)
+ {
+ 	return net_ipv6_is_addr_mcast_raw(addr->s6_addr);
+ }
+@@ -729,7 +719,7 @@ static inline bool net_ipv6_is_my_addr_raw(const uint8_t *addr)
+ }
+ /** @endcond */
+
+-extern struct net_if_addr *net_if_ipv6_addr_lookup(const struct in6_addr *addr,
++extern struct net_if_addr *net_if_ipv6_addr_lookup(const struct zsock_in6_addr *addr,
+ 						   struct net_if **iface);
+
+ /**
+@@ -739,13 +729,13 @@ extern struct net_if_addr *net_if_ipv6_addr_lookup(const struct in6_addr *addr,
+  *
+  * @return True if address was found, False otherwise.
+  */
+-static inline bool net_ipv6_is_my_addr(struct in6_addr *addr)
++static inline bool net_ipv6_is_my_addr(struct zsock_in6_addr *addr)
+ {
+ 	return net_if_ipv6_addr_lookup(addr, NULL) != NULL;
+ }
+
+ extern struct net_if_mcast_addr *net_if_ipv6_maddr_lookup(
+-	const struct in6_addr *addr, struct net_if **iface);
++	const struct zsock_in6_addr *addr, struct net_if **iface);
+
+ /**
+  * @brief Check if IPv6 multicast address is found in one of the
+@@ -755,7 +745,7 @@ extern struct net_if_mcast_addr *net_if_ipv6_maddr_lookup(
+  *
+  * @return True if address was found, False otherwise.
+  */
+-static inline bool net_ipv6_is_my_maddr(struct in6_addr *maddr)
++static inline bool net_ipv6_is_my_maddr(struct zsock_in6_addr *maddr)
+ {
+ 	return net_if_ipv6_maddr_lookup(maddr, NULL) != NULL;
+ }
+@@ -845,7 +835,7 @@ static inline bool net_ipv4_is_addr_loopback_raw(const uint8_t *addr)
+  *
+  * @return True if address is a loopback address, False otherwise.
+  */
+-static inline bool net_ipv4_is_addr_loopback(const struct in_addr *addr)
++static inline bool net_ipv4_is_addr_loopback(const struct zsock_in_addr *addr)
+ {
+ 	return net_ipv4_is_addr_loopback_raw(addr->s4_addr);
+ }
+@@ -864,7 +854,7 @@ static inline bool net_ipv4_is_addr_unspecified_raw(const uint8_t *addr)
+  *
+  *  @return True if the address is unspecified, false otherwise.
+  */
+-static inline bool net_ipv4_is_addr_unspecified(const struct in_addr *addr)
++static inline bool net_ipv4_is_addr_unspecified(const struct zsock_in_addr *addr)
+ {
+ 	return net_ipv4_is_addr_unspecified_raw(addr->s4_addr);
+ }
+@@ -872,7 +862,7 @@ static inline bool net_ipv4_is_addr_unspecified(const struct in_addr *addr)
+ /** @cond INTERNAL_HIDDEN */
+ static inline bool net_ipv4_is_addr_mcast_raw(const uint8_t *addr)
+ {
+-	return (ntohl(UNALIGNED_GET((uint32_t *)addr)) & 0xF0000000) == 0xE0000000;
++	return (zsock_ntohl(UNALIGNED_GET((uint32_t *)addr)) & 0xF0000000) == 0xE0000000;
+ }
+ /** @endcond */
+
+@@ -883,7 +873,7 @@ static inline bool net_ipv4_is_addr_mcast_raw(const uint8_t *addr)
+  *
+  * @return True if address is multicast address, False otherwise.
+  */
+-static inline bool net_ipv4_is_addr_mcast(const struct in_addr *addr)
++static inline bool net_ipv4_is_addr_mcast(const struct zsock_in_addr *addr)
+ {
+ 	return net_ipv4_is_addr_mcast_raw(addr->s4_addr);
+ }
+@@ -891,7 +881,7 @@ static inline bool net_ipv4_is_addr_mcast(const struct in_addr *addr)
+ /** @cond INTERNAL_HIDDEN */
+ static inline bool net_ipv4_is_ll_addr_raw(const uint8_t *addr)
+ {
+-	return (ntohl(UNALIGNED_GET((uint32_t *)addr)) & 0xFFFF0000) == 0xA9FE0000;
++	return (zsock_ntohl(UNALIGNED_GET((uint32_t *)addr)) & 0xFFFF0000) == 0xA9FE0000;
+ }
+ /** @endcond */
+
+@@ -902,7 +892,7 @@ static inline bool net_ipv4_is_ll_addr_raw(const uint8_t *addr)
+  *
+  * @return True if it is, false otherwise.
+  */
+-static inline bool net_ipv4_is_ll_addr(const struct in_addr *addr)
++static inline bool net_ipv4_is_ll_addr(const struct zsock_in_addr *addr)
+ {
+ 	return net_ipv4_is_ll_addr_raw(addr->s4_addr);
+ }
+@@ -916,11 +906,11 @@ static inline bool net_ipv4_is_ll_addr(const struct in_addr *addr)
+  *
+  * @return True if it is, false otherwise.
+  */
+-static inline bool net_ipv4_is_private_addr(const struct in_addr *addr)
++static inline bool net_ipv4_is_private_addr(const struct zsock_in_addr *addr)
+ {
+ 	uint32_t masked_24, masked_16, masked_12, masked_10, masked_8;
+
+-	masked_24 = ntohl(UNALIGNED_GET(&addr->s_addr)) & 0xFFFFFF00;
++	masked_24 = zsock_ntohl(UNALIGNED_GET(&addr->s_addr)) & 0xFFFFFF00;
+ 	masked_16 = masked_24 & 0xFFFF0000;
+ 	masked_12 = masked_24 & 0xFFF00000;
+ 	masked_10 = masked_24 & 0xFFC00000;
+@@ -955,7 +945,7 @@ static inline bool net_ipv4_is_private_addr(const struct in_addr *addr)
+ static inline void net_ipv4_addr_copy_raw(uint8_t *dest,
+ 					  const uint8_t *src)
+ {
+-	net_ipaddr_copy((struct in_addr *)dest, (const struct in_addr *)src);
++	net_ipaddr_copy((struct zsock_in_addr *)dest, (const struct zsock_in_addr *)src);
+ }
+
+ /**
+@@ -967,7 +957,7 @@ static inline void net_ipv4_addr_copy_raw(uint8_t *dest,
+ static inline void net_ipv6_addr_copy_raw(uint8_t *dest,
+ 					  const uint8_t *src)
+ {
+-	memcpy(dest, src, sizeof(struct in6_addr));
++	memcpy(dest, src, sizeof(struct zsock_in6_addr));
+ }
+
+ /**
+@@ -992,8 +982,8 @@ static inline bool net_ipv4_addr_cmp_raw(const uint8_t *addr1,
+  *
+  *  @return True if the addresses are the same, false otherwise.
+  */
+-static inline bool net_ipv4_addr_cmp(const struct in_addr *addr1,
+-				     const struct in_addr *addr2)
++static inline bool net_ipv4_addr_cmp(const struct zsock_in_addr *addr1,
++				     const struct zsock_in_addr *addr2)
+ {
+ 	return net_ipv4_addr_cmp_raw(addr1->s4_addr, addr2->s4_addr);
+ }
+@@ -1006,10 +996,10 @@ static inline bool net_ipv4_addr_cmp(const struct in_addr *addr1,
+  *
+  *  @return True if the addresses are the same, false otherwise.
+  */
+-static inline bool net_ipv6_addr_cmp(const struct in6_addr *addr1,
+-				     const struct in6_addr *addr2)
++static inline bool net_ipv6_addr_cmp(const struct zsock_in6_addr *addr1,
++				     const struct zsock_in6_addr *addr2)
+ {
+-	return !memcmp(addr1, addr2, sizeof(struct in6_addr));
++	return !memcmp(addr1, addr2, sizeof(struct zsock_in6_addr));
+ }
+
+ /**
+@@ -1023,14 +1013,14 @@ static inline bool net_ipv6_addr_cmp(const struct in6_addr *addr1,
+ static inline bool net_ipv6_addr_cmp_raw(const uint8_t *addr1,
+ 					 const uint8_t *addr2)
+ {
+-	return net_ipv6_addr_cmp((const struct in6_addr *)addr1,
+-				 (const struct in6_addr *)addr2);
++	return net_ipv6_addr_cmp((const struct zsock_in6_addr *)addr1,
++				 (const struct zsock_in6_addr *)addr2);
+ }
+
+ /** @cond INTERNAL_HIDDEN */
+ static inline bool net_ipv6_is_ll_addr_raw(const uint8_t *addr)
+ {
+-	return UNALIGNED_GET((uint16_t *)addr) == htons(0xFE80);
++	return UNALIGNED_GET((uint16_t *)addr) == zsock_htons(0xFE80);
+ }
+ /** @endcond */
+
+@@ -1041,7 +1031,7 @@ static inline bool net_ipv6_is_ll_addr_raw(const uint8_t *addr)
+  *
+  * @return True if it is, false otherwise.
+  */
+-static inline bool net_ipv6_is_ll_addr(const struct in6_addr *addr)
++static inline bool net_ipv6_is_ll_addr(const struct zsock_in6_addr *addr)
+ {
+ 	return net_ipv6_is_ll_addr_raw(addr->s6_addr);
+ }
+@@ -1053,9 +1043,9 @@ static inline bool net_ipv6_is_ll_addr(const struct in6_addr *addr)
+  *
+  * @return True if it is, false otherwise.
+  */
+-static inline bool net_ipv6_is_sl_addr(const struct in6_addr *addr)
++static inline bool net_ipv6_is_sl_addr(const struct zsock_in6_addr *addr)
+ {
+-	return UNALIGNED_GET(&addr->s6_addr16[0]) == htons(0xFEC0);
++	return UNALIGNED_GET(&addr->s6_addr16[0]) == zsock_htons(0xFEC0);
+ }
+
+
+@@ -1066,7 +1056,7 @@ static inline bool net_ipv6_is_sl_addr(const struct in6_addr *addr)
+  *
+  * @return True if it is, false otherwise.
+  */
+-static inline bool net_ipv6_is_ula_addr(const struct in6_addr *addr)
++static inline bool net_ipv6_is_ula_addr(const struct zsock_in6_addr *addr)
+ {
+ 	return addr->s6_addr[0] == 0xFD;
+ }
+@@ -1078,7 +1068,7 @@ static inline bool net_ipv6_is_ula_addr(const struct in6_addr *addr)
+  *
+  * @return True if it is, false otherwise.
+  */
+-static inline bool net_ipv6_is_global_addr(const struct in6_addr *addr)
++static inline bool net_ipv6_is_global_addr(const struct zsock_in6_addr *addr)
+ {
+ 	return (addr->s6_addr[0] & 0xE0) == 0x20;
+ }
+@@ -1092,11 +1082,11 @@ static inline bool net_ipv6_is_global_addr(const struct in6_addr *addr)
+  *
+  * @return True if it is, false otherwise.
+  */
+-static inline bool net_ipv6_is_private_addr(const struct in6_addr *addr)
++static inline bool net_ipv6_is_private_addr(const struct zsock_in6_addr *addr)
+ {
+ 	uint32_t masked_32, masked_7;
+
+-	masked_32 = ntohl(UNALIGNED_GET(&addr->s6_addr32[0]));
++	masked_32 = zsock_ntohl(UNALIGNED_GET(&addr->s6_addr32[0]));
+ 	masked_7 = masked_32 & 0xfc000000;
+
+ 	return masked_32 == 0x20010db8 || /* 2001:db8::/32 */
+@@ -1108,25 +1098,25 @@ static inline bool net_ipv6_is_private_addr(const struct in6_addr *addr)
+  *
+  * @return Any IPv6 address.
+  */
+-const struct in6_addr *net_ipv6_unspecified_address(void);
++const struct zsock_in6_addr *net_ipv6_unspecified_address(void);
+
+ /**
+  * @brief Return pointer to any (all bits zeros) IPv4 address.
+  *
+  * @return Any IPv4 address.
+  */
+-const struct in_addr *net_ipv4_unspecified_address(void);
++const struct zsock_in_addr *net_ipv4_unspecified_address(void);
+
+ /**
+  * @brief Return pointer to broadcast (all bits ones) IPv4 address.
+  *
+  * @return Broadcast IPv4 address.
+  */
+-const struct in_addr *net_ipv4_broadcast_address(void);
++const struct zsock_in_addr *net_ipv4_broadcast_address(void);
+
+ struct net_if;
+ extern bool net_if_ipv4_addr_mask_cmp(struct net_if *iface,
+-				      const struct in_addr *addr);
++				      const struct zsock_in_addr *addr);
+
+ /**
+  * @brief Check if the given address belongs to same subnet that
+@@ -1138,7 +1128,7 @@ extern bool net_if_ipv4_addr_mask_cmp(struct net_if *iface,
+  * @return True if address is in same subnet, false otherwise.
+  */
+ static inline bool net_ipv4_addr_mask_cmp(struct net_if *iface,
+-					  const struct in_addr *addr)
++					  const struct zsock_in_addr *addr)
+ {
+ 	return net_if_ipv4_addr_mask_cmp(iface, addr);
+ }
+@@ -1170,7 +1160,7 @@ static inline bool net_ipv4_is_addr_bcast_raw(struct net_if *iface,
+ /** @endcond */
+
+ extern bool net_if_ipv4_is_addr_bcast(struct net_if *iface,
+-				      const struct in_addr *addr);
++				      const struct zsock_in_addr *addr);
+
+ /**
+  * @brief Check if the given IPv4 address is a broadcast address.
+@@ -1182,7 +1172,7 @@ extern bool net_if_ipv4_is_addr_bcast(struct net_if *iface,
+  */
+ #if defined(CONFIG_NET_NATIVE_IPV4)
+ static inline bool net_ipv4_is_addr_bcast(struct net_if *iface,
+-					  const struct in_addr *addr)
++					  const struct zsock_in_addr *addr)
+ {
+ 	if (net_ipv4_addr_cmp(addr, net_ipv4_broadcast_address())) {
+ 		return true;
+@@ -1192,7 +1182,7 @@ static inline bool net_ipv4_is_addr_bcast(struct net_if *iface,
+ }
+ #else
+ static inline bool net_ipv4_is_addr_bcast(struct net_if *iface,
+-					  const struct in_addr *addr)
++					  const struct zsock_in_addr *addr)
+ {
+ 	ARG_UNUSED(iface);
+ 	ARG_UNUSED(addr);
+@@ -1218,7 +1208,7 @@ static inline bool net_ipv4_is_my_addr_raw(const uint8_t *addr)
+ }
+ /** @endcond */
+
+-extern struct net_if_addr *net_if_ipv4_addr_lookup(const struct in_addr *addr,
++extern struct net_if_addr *net_if_ipv4_addr_lookup(const struct zsock_in_addr *addr,
+ 						   struct net_if **iface);
+
+ /**
+@@ -1230,7 +1220,7 @@ extern struct net_if_addr *net_if_ipv4_addr_lookup(const struct in_addr *addr,
+  * @return True if IPv4 address is found in one of the network interfaces,
+  * False otherwise.
+  */
+-static inline bool net_ipv4_is_my_addr(const struct in_addr *addr)
++static inline bool net_ipv4_is_my_addr(const struct zsock_in_addr *addr)
+ {
+ 	bool ret;
+
+@@ -1259,7 +1249,7 @@ static inline bool net_ipv6_is_addr_unspecified_raw(const uint8_t *addr)
+  *
+  *  @return True if the address is unspecified, false otherwise.
+  */
+-static inline bool net_ipv6_is_addr_unspecified(const struct in6_addr *addr)
++static inline bool net_ipv6_is_addr_unspecified(const struct zsock_in6_addr *addr)
+ {
+ 	return net_ipv6_is_addr_unspecified_raw(addr->s6_addr);
+ }
+@@ -1267,11 +1257,11 @@ static inline bool net_ipv6_is_addr_unspecified(const struct in6_addr *addr)
+ /** @cond INTERNAL_HIDDEN */
+ static inline bool net_ipv6_is_addr_solicited_node_raw(const uint8_t *addr)
+ {
+-	return UNALIGNED_GET((uint32_t *)addr) == htonl(0xff020000) &&
++	return UNALIGNED_GET((uint32_t *)addr) == zsock_htonl(0xff020000) &&
+ 	       UNALIGNED_GET((uint32_t *)addr + 1) == 0x00000000 &&
+-	       UNALIGNED_GET((uint32_t *)addr + 2) == htonl(0x00000001) &&
+-	       ((UNALIGNED_GET((uint32_t *)addr + 3) & htonl(0xff000000)) ==
+-		htonl(0xff000000));
++	       UNALIGNED_GET((uint32_t *)addr + 2) == zsock_htonl(0x00000001) &&
++	       ((UNALIGNED_GET((uint32_t *)addr + 3) & zsock_htonl(0xff000000)) ==
++		zsock_htonl(0xff000000));
+ }
+ /** @endcond */
+
+@@ -1283,7 +1273,7 @@ static inline bool net_ipv6_is_addr_solicited_node_raw(const uint8_t *addr)
+  *
+  *  @return True if the address is solicited node address, false otherwise.
+  */
+-static inline bool net_ipv6_is_addr_solicited_node(const struct in6_addr *addr)
++static inline bool net_ipv6_is_addr_solicited_node(const struct zsock_in6_addr *addr)
+ {
+ 	return net_ipv6_is_addr_solicited_node_raw(addr->s6_addr);
+ }
+@@ -1317,7 +1307,7 @@ static inline int net_ipv6_get_addr_mcast_scope_raw(const uint8_t *addr)
+  * @return True if the address is in given scope multicast address,
+  * false otherwise.
+  */
+-static inline bool net_ipv6_is_addr_mcast_scope(const struct in6_addr *addr,
++static inline bool net_ipv6_is_addr_mcast_scope(const struct zsock_in6_addr *addr,
+ 						int scope)
+ {
+ 	return net_ipv6_is_addr_mcast_scope_raw(addr->s6_addr, scope);
+@@ -1332,8 +1322,8 @@ static inline bool net_ipv6_is_addr_mcast_scope(const struct in6_addr *addr,
+  * @return True if both addresses have same multicast scope,
+  * false otherwise.
+  */
+-static inline bool net_ipv6_is_same_mcast_scope(const struct in6_addr *addr_1,
+-						const struct in6_addr *addr_2)
++static inline bool net_ipv6_is_same_mcast_scope(const struct zsock_in6_addr *addr_1,
++						const struct zsock_in6_addr *addr_2)
+ {
+ 	return (addr_1->s6_addr[0] == 0xff) && (addr_2->s6_addr[0] == 0xff) &&
+ 			(addr_1->s6_addr[1] == addr_2->s6_addr[1]);
+@@ -1346,7 +1336,7 @@ static inline bool net_ipv6_is_same_mcast_scope(const struct in6_addr *addr_1,
+  *
+  * @return Scope of the address, -1 if address is not multicast.
+  */
+-static inline int net_ipv6_get_addr_mcast_scope(const struct in6_addr *addr)
++static inline int net_ipv6_get_addr_mcast_scope(const struct zsock_in6_addr *addr)
+ {
+ 	return net_ipv6_get_addr_mcast_scope_raw(addr->s6_addr);
+ }
+@@ -1385,7 +1375,7 @@ static inline bool net_ipv6_is_addr_mcast_org_raw(const uint8_t *addr)
+  *
+  * @return True if the address is global multicast address, false otherwise.
+  */
+-static inline bool net_ipv6_is_addr_mcast_global(const struct in6_addr *addr)
++static inline bool net_ipv6_is_addr_mcast_global(const struct zsock_in6_addr *addr)
+ {
+ 	return net_ipv6_is_addr_mcast_scope(addr, 0x0e);
+ }
+@@ -1399,7 +1389,7 @@ static inline bool net_ipv6_is_addr_mcast_global(const struct in6_addr *addr)
+  * @return True if the address is a interface scope multicast address,
+  * false otherwise.
+  */
+-static inline bool net_ipv6_is_addr_mcast_iface(const struct in6_addr *addr)
++static inline bool net_ipv6_is_addr_mcast_iface(const struct zsock_in6_addr *addr)
+ {
+ 	return net_ipv6_is_addr_mcast_scope(addr, 0x01);
+ }
+@@ -1413,7 +1403,7 @@ static inline bool net_ipv6_is_addr_mcast_iface(const struct in6_addr *addr)
+  * @return True if the address is a link local scope multicast address,
+  * false otherwise.
+  */
+-static inline bool net_ipv6_is_addr_mcast_link(const struct in6_addr *addr)
++static inline bool net_ipv6_is_addr_mcast_link(const struct zsock_in6_addr *addr)
+ {
+ 	return net_ipv6_is_addr_mcast_scope(addr, 0x02);
+ }
+@@ -1427,7 +1417,7 @@ static inline bool net_ipv6_is_addr_mcast_link(const struct in6_addr *addr)
+  * @return True if the address is a mesh-local scope multicast address,
+  * false otherwise.
+  */
+-static inline bool net_ipv6_is_addr_mcast_mesh(const struct in6_addr *addr)
++static inline bool net_ipv6_is_addr_mcast_mesh(const struct zsock_in6_addr *addr)
+ {
+ 	return net_ipv6_is_addr_mcast_scope(addr, 0x03);
+ }
+@@ -1441,7 +1431,7 @@ static inline bool net_ipv6_is_addr_mcast_mesh(const struct in6_addr *addr)
+  * @return True if the address is a site scope multicast address,
+  * false otherwise.
+  */
+-static inline bool net_ipv6_is_addr_mcast_site(const struct in6_addr *addr)
++static inline bool net_ipv6_is_addr_mcast_site(const struct zsock_in6_addr *addr)
+ {
+ 	return net_ipv6_is_addr_mcast_scope(addr, 0x05);
+ }
+@@ -1455,7 +1445,7 @@ static inline bool net_ipv6_is_addr_mcast_site(const struct in6_addr *addr)
+  * @return True if the address is an organization scope multicast address,
+  * false otherwise.
+  */
+-static inline bool net_ipv6_is_addr_mcast_org(const struct in6_addr *addr)
++static inline bool net_ipv6_is_addr_mcast_org(const struct zsock_in6_addr *addr)
+ {
+ 	return net_ipv6_is_addr_mcast_scope(addr, 0x08);
+ }
+@@ -1481,8 +1471,8 @@ static inline bool net_ipv6_is_addr_mcast_group_raw(const uint8_t *addr,
+  * @return True if the IPv6 multicast address belongs to given multicast
+  * group, false otherwise.
+  */
+-static inline bool net_ipv6_is_addr_mcast_group(const struct in6_addr *addr,
+-						const struct in6_addr *group)
++static inline bool net_ipv6_is_addr_mcast_group(const struct zsock_in6_addr *addr,
++						const struct zsock_in6_addr *group)
+ {
+ 	return net_ipv6_is_addr_mcast_group_raw(addr->s6_addr, group->s6_addr);
+ }
+@@ -1508,7 +1498,7 @@ static inline bool net_ipv6_is_addr_mcast_all_nodes_group_raw(const uint8_t *add
+  * group, false otherwise
+  */
+ static inline bool
+-net_ipv6_is_addr_mcast_all_nodes_group(const struct in6_addr *addr)
++net_ipv6_is_addr_mcast_all_nodes_group(const struct zsock_in6_addr *addr)
+ {
+ 	return net_ipv6_is_addr_mcast_all_nodes_group_raw(addr->s6_addr);
+ }
+@@ -1523,7 +1513,7 @@ net_ipv6_is_addr_mcast_all_nodes_group(const struct in6_addr *addr)
+  * false otherwise.
+  */
+ static inline bool
+-net_ipv6_is_addr_mcast_iface_all_nodes(const struct in6_addr *addr)
++net_ipv6_is_addr_mcast_iface_all_nodes(const struct zsock_in6_addr *addr)
+ {
+ 	return net_ipv6_is_addr_mcast_iface(addr) &&
+ 	       net_ipv6_is_addr_mcast_all_nodes_group(addr);
+@@ -1547,7 +1537,7 @@ static inline bool net_ipv6_is_addr_mcast_link_all_nodes_raw(const uint8_t *addr
+  * address, false otherwise.
+  */
+ static inline bool
+-net_ipv6_is_addr_mcast_link_all_nodes(const struct in6_addr *addr)
++net_ipv6_is_addr_mcast_link_all_nodes(const struct zsock_in6_addr *addr)
+ {
+ 	return net_ipv6_is_addr_mcast_link(addr) &&
+ 	       net_ipv6_is_addr_mcast_all_nodes_group(addr);
+@@ -1561,8 +1551,8 @@ net_ipv6_is_addr_mcast_link_all_nodes(const struct in6_addr *addr)
+  *  @param dst IPv6 address.
+  */
+ static inline
+-void net_ipv6_addr_create_solicited_node(const struct in6_addr *src,
+-					 struct in6_addr *dst)
++void net_ipv6_addr_create_solicited_node(const struct zsock_in6_addr *src,
++					 struct zsock_in6_addr *dst)
+ {
+ 	dst->s6_addr[0]   = 0xFF;
+ 	dst->s6_addr[1]   = 0x02;
+@@ -1589,20 +1579,20 @@ void net_ipv6_addr_create_solicited_node(const struct in6_addr *src,
+  *  @param addr6 16-bit word which is part of the address
+  *  @param addr7 16-bit word which is part of the address
+  */
+-static inline void net_ipv6_addr_create(struct in6_addr *addr,
++static inline void net_ipv6_addr_create(struct zsock_in6_addr *addr,
+ 					uint16_t addr0, uint16_t addr1,
+ 					uint16_t addr2, uint16_t addr3,
+ 					uint16_t addr4, uint16_t addr5,
+ 					uint16_t addr6, uint16_t addr7)
+ {
+-	UNALIGNED_PUT(htons(addr0), &addr->s6_addr16[0]);
+-	UNALIGNED_PUT(htons(addr1), &addr->s6_addr16[1]);
+-	UNALIGNED_PUT(htons(addr2), &addr->s6_addr16[2]);
+-	UNALIGNED_PUT(htons(addr3), &addr->s6_addr16[3]);
+-	UNALIGNED_PUT(htons(addr4), &addr->s6_addr16[4]);
+-	UNALIGNED_PUT(htons(addr5), &addr->s6_addr16[5]);
+-	UNALIGNED_PUT(htons(addr6), &addr->s6_addr16[6]);
+-	UNALIGNED_PUT(htons(addr7), &addr->s6_addr16[7]);
++	UNALIGNED_PUT(zsock_htons(addr0), &addr->s6_addr16[0]);
++	UNALIGNED_PUT(zsock_htons(addr1), &addr->s6_addr16[1]);
++	UNALIGNED_PUT(zsock_htons(addr2), &addr->s6_addr16[2]);
++	UNALIGNED_PUT(zsock_htons(addr3), &addr->s6_addr16[3]);
++	UNALIGNED_PUT(zsock_htons(addr4), &addr->s6_addr16[4]);
++	UNALIGNED_PUT(zsock_htons(addr5), &addr->s6_addr16[5]);
++	UNALIGNED_PUT(zsock_htons(addr6), &addr->s6_addr16[6]);
++	UNALIGNED_PUT(zsock_htons(addr7), &addr->s6_addr16[7]);
+ }
+
+ /**
+@@ -1610,7 +1600,7 @@ static inline void net_ipv6_addr_create(struct in6_addr *addr,
+  *
+  *  @param addr IPv6 address
+  */
+-static inline void net_ipv6_addr_create_ll_allnodes_mcast(struct in6_addr *addr)
++static inline void net_ipv6_addr_create_ll_allnodes_mcast(struct zsock_in6_addr *addr)
+ {
+ 	net_ipv6_addr_create(addr, 0xff02, 0, 0, 0, 0, 0, 0, 0x0001);
+ }
+@@ -1620,7 +1610,7 @@ static inline void net_ipv6_addr_create_ll_allnodes_mcast(struct in6_addr *addr)
+  *
+  *  @param addr IPv6 address
+  */
+-static inline void net_ipv6_addr_create_ll_allrouters_mcast(struct in6_addr *addr)
++static inline void net_ipv6_addr_create_ll_allrouters_mcast(struct zsock_in6_addr *addr)
+ {
+ 	net_ipv6_addr_create(addr, 0xff02, 0, 0, 0, 0, 0, 0, 0x0002);
+ }
+@@ -1631,12 +1621,12 @@ static inline void net_ipv6_addr_create_ll_allrouters_mcast(struct in6_addr *add
+  *  @param addr4 IPv4 address
+  *  @param addr6 IPv6 address to be created
+  */
+-static inline void net_ipv6_addr_create_v4_mapped(const struct in_addr *addr4,
+-						  struct in6_addr *addr6)
++static inline void net_ipv6_addr_create_v4_mapped(const struct zsock_in_addr *addr4,
++						  struct zsock_in6_addr *addr6)
+ {
+ 	net_ipv6_addr_create(addr6, 0, 0, 0, 0, 0, 0xffff,
+-			     ntohs(addr4->s4_addr16[0]),
+-			     ntohs(addr4->s4_addr16[1]));
++			     zsock_ntohs(addr4->s4_addr16[0]),
++			     zsock_ntohs(addr4->s4_addr16[1]));
+ }
+
+ /**
+@@ -1647,7 +1637,7 @@ static inline void net_ipv6_addr_create_v4_mapped(const struct in_addr *addr4,
+  *
+  *  @return True if IPv6 address is a IPv4 mapped address, False otherwise.
+  */
+-static inline bool net_ipv6_addr_is_v4_mapped(const struct in6_addr *addr)
++static inline bool net_ipv6_addr_is_v4_mapped(const struct zsock_in6_addr *addr)
+ {
+ 	if (UNALIGNED_GET(&addr->s6_addr32[0]) == 0 &&
+ 	    UNALIGNED_GET(&addr->s6_addr32[1]) == 0 &&
+@@ -1677,10 +1667,10 @@ static inline bool net_ipv6_addr_is_v4_mapped(const struct in6_addr *addr)
+  *  @return 0 if ok, < 0 if error
+  */
+ int net_ipv6_addr_generate_iid(struct net_if *iface,
+-			       const struct in6_addr *prefix,
++			       const struct zsock_in6_addr *prefix,
+ 			       uint8_t *network_id, size_t network_id_len,
+ 			       uint8_t dad_counter,
+-			       struct in6_addr *addr,
++			       struct zsock_in6_addr *addr,
+ 			       struct net_linkaddr *lladdr);
+
+ /**
+@@ -1689,7 +1679,7 @@ int net_ipv6_addr_generate_iid(struct net_if *iface,
+  *  @param addr IPv6 address
+  *  @param lladdr Link local address
+  */
+-static inline void net_ipv6_addr_create_iid(struct in6_addr *addr,
++static inline void net_ipv6_addr_create_iid(struct zsock_in6_addr *addr,
+ 					    struct net_linkaddr *lladdr)
+ {
+ 	(void)net_ipv6_addr_generate_iid(NULL, NULL, NULL, 0, 0, addr, lladdr);
+@@ -1752,7 +1742,7 @@ static inline bool net_ipv6_addr_based_on_ll_raw(const uint8_t *addr,
+  *
+  *  @return True if it is, False otherwise
+  */
+-static inline bool net_ipv6_addr_based_on_ll(const struct in6_addr *addr,
++static inline bool net_ipv6_addr_based_on_ll(const struct zsock_in6_addr *addr,
+ 					     const struct net_linkaddr *lladdr)
+ {
+ 	if (addr == NULL || lladdr == NULL) {
+@@ -1768,11 +1758,11 @@ static inline bool net_ipv6_addr_based_on_ll(const struct in6_addr *addr,
+  *
+  * @param addr Socket storage address
+  *
+- * @return Pointer to socket address (struct sockaddr)
++ * @return Pointer to socket address (struct zsock_sockaddr)
+  */
+-static inline struct sockaddr *net_sad(const struct sockaddr_storage *addr)
++static inline struct zsock_sockaddr *net_sad(const struct zsock_sockaddr_storage *addr)
+ {
+-	return (struct sockaddr *)addr;
++	return (struct zsock_sockaddr *)addr;
+ }
+
+ /**
+@@ -1783,9 +1773,9 @@ static inline struct sockaddr *net_sad(const struct sockaddr_storage *addr)
+  *
+  * @return Pointer to IPv6 socket address
+  */
+-static inline struct sockaddr_in6 *net_sin6(const struct sockaddr *addr)
++static inline struct zsock_sockaddr_in6 *net_sin6(const struct zsock_sockaddr *addr)
+ {
+-	return (struct sockaddr_in6 *)addr;
++	return (struct zsock_sockaddr_in6 *)addr;
+ }
+
+ /**
+@@ -1796,9 +1786,9 @@ static inline struct sockaddr_in6 *net_sin6(const struct sockaddr *addr)
+  *
+  * @return Pointer to IPv4 socket address
+  */
+-static inline struct sockaddr_in *net_sin(const struct sockaddr *addr)
++static inline struct zsock_sockaddr_in *net_sin(const struct zsock_sockaddr *addr)
+ {
+-	return (struct sockaddr_in *)addr;
++	return (struct zsock_sockaddr_in *)addr;
+ }
+
+ /**
+@@ -1860,56 +1850,56 @@ struct sockaddr_can_ptr *net_can_ptr(const struct sockaddr_ptr *addr)
+ /**
+  * @brief Convert a string to IP address.
+  *
+- * @param family IP address family (AF_INET or AF_INET6)
++ * @param family IP address family (ZSOCK_AF_INET or ZSOCK_AF_INET6)
+  * @param src IP address in a null terminated string
+- * @param dst Pointer to struct in_addr if family is AF_INET or
+- * pointer to struct in6_addr if family is AF_INET6
++ * @param dst Pointer to struct zsock_in_addr if family is ZSOCK_AF_INET or
++ * pointer to struct zsock_in6_addr if family is ZSOCK_AF_INET6
+  *
+  * @note This function doesn't do precise error checking,
+  * do not use for untrusted strings.
+  *
+  * @return 0 if ok, < 0 if error
+  */
+-__syscall int net_addr_pton(sa_family_t family, const char *src, void *dst);
++__syscall int net_addr_pton(zsock_sa_family_t family, const char *src, void *dst);
+
+ /**
+  * @brief Convert IP address to string form.
+  *
+- * @param family IP address family (AF_INET or AF_INET6)
+- * @param src Pointer to struct in_addr if family is AF_INET or
+- *        pointer to struct in6_addr if family is AF_INET6
++ * @param family IP address family (ZSOCK_AF_INET or ZSOCK_AF_INET6)
++ * @param src Pointer to struct zsock_in_addr if family is ZSOCK_AF_INET or
++ *        pointer to struct zsock_in6_addr if family is ZSOCK_AF_INET6
+  * @param dst Buffer for IP address as a null terminated string
+  * @param size Number of bytes available in the buffer
+  *
+  * @return dst pointer if ok, NULL if error
+  */
+-__syscall char *net_addr_ntop(sa_family_t family, const void *src,
++__syscall char *net_addr_ntop(zsock_sa_family_t family, const void *src,
+ 			      char *dst, size_t size);
+
+ /**
+  * @brief Create netmask from mask length.
+  *
+- * @param family IP address family (AF_INET or AF_INET6)
++ * @param family IP address family (ZSOCK_AF_INET or ZSOCK_AF_INET6)
+  * @param mask_len Netmask length (in IPv4) or prefix length (in IPv6)
+- * @param mask Pointer to struct sockaddr_in if family is AF_INET or
+- * pointer to struct sockaddr_in6 if family is AF_INET6
++ * @param mask Pointer to struct zsock_sockaddr_in if family is ZSOCK_AF_INET or
++ * pointer to struct zsock_sockaddr_in6 if family is ZSOCK_AF_INET6
+  *
+  * @return 0 if ok, < 0 if error
+  */
+-int net_mask_len_to_netmask(sa_family_t family, uint8_t mask_len,
+-			    struct sockaddr *mask);
++int net_mask_len_to_netmask(zsock_sa_family_t family, uint8_t mask_len,
++			    struct zsock_sockaddr *mask);
+
+ /**
+  * @brief Create mask length from netmask.
+  *
+- * @param family IP address family (AF_INET or AF_INET6)
+- * @param mask Pointer to struct sockaddr_in if family is AF_INET or
+- * pointer to struct sockaddr_in6 if family is AF_INET6
++ * @param family IP address family (ZSOCK_AF_INET or ZSOCK_AF_INET6)
++ * @param mask Pointer to struct zsock_sockaddr_in if family is ZSOCK_AF_INET or
++ * pointer to struct zsock_sockaddr_in6 if family is ZSOCK_AF_INET6
+  * @param mask_len Netmask length (in IPv4) or prefix length (in IPv6)
+  *
+  * @return 0 if ok, < 0 if error
+  */
+-int net_netmask_to_mask_len(sa_family_t family, struct sockaddr *mask,
++int net_netmask_to_mask_len(zsock_sa_family_t family, struct zsock_sockaddr *mask,
+ 			    uint8_t *mask_len);
+
+ /**
+@@ -1929,12 +1919,12 @@ int net_netmask_to_mask_len(sa_family_t family, struct sockaddr *mask,
+  *
+  * @param str String that contains the IP address.
+  * @param str_len Length of the string to be parsed.
+- * @param addr Pointer to user supplied struct sockaddr.
++ * @param addr Pointer to user supplied struct zsock_sockaddr.
+  *
+  * @return True if parsing could be done, false otherwise.
+  */
+ bool net_ipaddr_parse(const char *str, size_t str_len,
+-		      struct sockaddr *addr);
++		      struct zsock_sockaddr *addr);
+
+ /**
+  * @brief Parse a string that contains either IPv4 or IPv6 address
+@@ -1956,7 +1946,7 @@ bool net_ipaddr_parse(const char *str, size_t str_len,
+  *
+  * @param str String that contains the IP address.
+  * @param str_len Length of the string to be parsed.
+- * @param addr Pointer to user supplied struct sockaddr.
++ * @param addr Pointer to user supplied struct zsock_sockaddr.
+  * @param mask_len Pointer to mask_len which is returned to the caller.
+  *
+  * @return NULL if there was an error while parsing.
+@@ -1964,18 +1954,18 @@ bool net_ipaddr_parse(const char *str, size_t str_len,
+  *         All other values point to next character after the "," or " " in the string.
+  */
+ const char *net_ipaddr_parse_mask(const char *str, size_t str_len,
+-				  struct sockaddr *addr, uint8_t *mask_len);
++				  struct zsock_sockaddr *addr, uint8_t *mask_len);
+
+ /**
+  * @brief Set the default port in the sockaddr structure.
+  * If the port is already set, then do nothing.
+  *
+- * @param addr Pointer to user supplied struct sockaddr.
++ * @param addr Pointer to user supplied struct zsock_sockaddr.
+  * @param default_port Default port number to set.
+  *
+  * @return 0 if ok, <0 if error
+  */
+-int net_port_set_default(struct sockaddr *addr, uint16_t default_port);
++int net_port_set_default(struct zsock_sockaddr *addr, uint16_t default_port);
+
+ /**
+  * @brief Compare TCP sequence numbers.
+@@ -2092,7 +2082,7 @@ static inline uint8_t net_priority2vlan(enum net_priority priority)
+  *
+  * @return Network address family as a string, or NULL if family is unknown.
+  */
+-const char *net_family2str(sa_family_t family);
++const char *net_family2str(zsock_sa_family_t family);
+
+ /**
+  * @brief Add IPv6 prefix as a privacy extension filter.
+@@ -2105,9 +2095,9 @@ const char *net_family2str(sa_family_t family);
+  * @return 0 if ok, <0 if error
+  */
+ #if defined(CONFIG_NET_IPV6_PE)
+-int net_ipv6_pe_add_filter(struct in6_addr *addr, bool is_denylist);
++int net_ipv6_pe_add_filter(struct zsock_in6_addr *addr, bool is_denylist);
+ #else
+-static inline int net_ipv6_pe_add_filter(struct in6_addr *addr,
++static inline int net_ipv6_pe_add_filter(struct zsock_in6_addr *addr,
+ 					 bool is_denylist)
+ {
+ 	ARG_UNUSED(addr);
+@@ -2125,9 +2115,9 @@ static inline int net_ipv6_pe_add_filter(struct in6_addr *addr,
+  * @return 0 if ok, <0 if error
+  */
+ #if defined(CONFIG_NET_IPV6_PE)
+-int net_ipv6_pe_del_filter(struct in6_addr *addr);
++int net_ipv6_pe_del_filter(struct zsock_in6_addr *addr);
+ #else
+-static inline int net_ipv6_pe_del_filter(struct in6_addr *addr)
++static inline int net_ipv6_pe_del_filter(struct zsock_in6_addr *addr)
+ {
+ 	ARG_UNUSED(addr);
+
+diff --git a/include/zephyr/net/net_offload.h b/include/zephyr/net/net_offload.h
+index f1752672aec..35abd38cb55 100644
+--- a/include/zephyr/net/net_offload.h
++++ b/include/zephyr/net/net_offload.h
+@@ -53,7 +53,7 @@ struct net_offload {
+ 	/**
+ 	 * This function is called when the socket is to be opened.
+ 	 */
+-	int (*get)(sa_family_t family,
++	int (*get)(zsock_sa_family_t family,
+ 		   enum net_sock_type type,
+ 		   enum net_ip_protocol ip_proto,
+ 		   struct net_context **context);
+@@ -62,8 +62,8 @@ struct net_offload {
+ 	 * This function is called when user wants to bind to local IP address.
+ 	 */
+ 	int (*bind)(struct net_context *context,
+-		    const struct sockaddr *addr,
+-		    socklen_t addrlen);
++		    const struct zsock_sockaddr *addr,
++		    zsock_socklen_t addrlen);
+
+ 	/**
+ 	 * This function is called when user wants to mark the socket
+@@ -76,8 +76,8 @@ struct net_offload {
+ 	 * to a peer host.
+ 	 */
+ 	int (*connect)(struct net_context *context,
+-		       const struct sockaddr *addr,
+-		       socklen_t addrlen,
++		       const struct zsock_sockaddr *addr,
++		       zsock_socklen_t addrlen,
+ 		       net_context_connect_cb_t cb,
+ 		       int32_t timeout,
+ 		       void *user_data);
+@@ -103,8 +103,8 @@ struct net_offload {
+ 	 * This function is called when user wants to send data to peer host.
+ 	 */
+ 	int (*sendto)(struct net_pkt *pkt,
+-		      const struct sockaddr *dst_addr,
+-		      socklen_t addrlen,
++		      const struct zsock_sockaddr *dst_addr,
++		      zsock_socklen_t addrlen,
+ 		      net_context_send_cb_t cb,
+ 		      int32_t timeout,
+ 		      void *user_data);
+@@ -134,15 +134,15 @@ struct net_offload {
+  *
+  * @param iface Network interface where the offloaded IP stack can be
+  * reached.
+- * @param family IP address family (AF_INET or AF_INET6)
+- * @param type Type of the socket, SOCK_STREAM or SOCK_DGRAM
+- * @param ip_proto IP protocol, IPPROTO_UDP or IPPROTO_TCP
++ * @param family IP address family (ZSOCK_AF_INET or ZSOCK_AF_INET6)
++ * @param type Type of the socket, ZSOCK_SOCK_STREAM or ZSOCK_SOCK_DGRAM
++ * @param ip_proto IP protocol, ZSOCK_IPPROTO_UDP or ZSOCK_IPPROTO_TCP
+  * @param context The allocated context is returned to the caller.
+  *
+  * @return 0 if ok, < 0 if error
+  */
+ static inline int net_offload_get(struct net_if *iface,
+-				  sa_family_t family,
++				  zsock_sa_family_t family,
+ 				  enum net_sock_type type,
+ 				  enum net_ip_protocol ip_proto,
+ 				  struct net_context **context)
+@@ -169,8 +169,8 @@ static inline int net_offload_get(struct net_if *iface,
+  */
+ static inline int net_offload_bind(struct net_if *iface,
+ 				   struct net_context *context,
+-				   const struct sockaddr *addr,
+-				   socklen_t addrlen)
++				   const struct zsock_sockaddr *addr,
++				   zsock_socklen_t addrlen)
+ {
+ 	NET_ASSERT(iface);
+ 	NET_ASSERT(net_if_offload(iface));
+@@ -210,7 +210,7 @@ static inline int net_offload_listen(struct net_if *iface,
+  *                   connection is established, the user-supplied callback (cb)
+  *                   is executed. cb is called even if the timeout was set to
+  *                   K_FOREVER. cb is not called if the timeout expires.
+- *                   For datagram sockets (SOCK_DGRAM), this function only sets
++ *                   For datagram sockets (ZSOCK_SOCK_DGRAM), this function only sets
+  *                   the peer address.
+  *                   This function is similar to the BSD connect() function.
+  *
+@@ -233,8 +233,8 @@ static inline int net_offload_listen(struct net_if *iface,
+  */
+ static inline int net_offload_connect(struct net_if *iface,
+ 				      struct net_context *context,
+-				      const struct sockaddr *addr,
+-				      socklen_t addrlen,
++				      const struct zsock_sockaddr *addr,
++				      zsock_socklen_t addrlen,
+ 				      net_context_connect_cb_t cb,
+ 				      k_timeout_t timeout,
+ 				      void *user_data)
+@@ -303,7 +303,7 @@ static inline int net_offload_accept(struct net_if *iface,
+  * a caller-supplied callback is called. The callback is called even
+  * if timeout was set to K_FOREVER, the callback is called
+  * before this function will return in this case. The callback is not
+- * called if the timeout expires. For context of type SOCK_DGRAM,
++ * called if the timeout expires. For context of type ZSOCK_SOCK_DGRAM,
+  * the destination address must have been set by the call to
+  * net_context_connect().
+  * This is similar as BSD send() function.
+@@ -339,7 +339,7 @@ static inline int net_offload_send(struct net_if *iface,
+  *
+  * @details This function can be used to send network data to a peer
+  * specified by address. This variant can only be used for datagram
+- * connections of type SOCK_DGRAM. This function will return immediately
++ * connections of type ZSOCK_SOCK_DGRAM. This function will return immediately
+  * if the timeout is set to K_NO_WAIT. If the timeout is set to K_FOREVER,
+  * the function will wait until the network packet is sent. Timeout
+  * value > 0 will wait as many ms. After the network packet
+@@ -364,8 +364,8 @@ static inline int net_offload_send(struct net_if *iface,
+  */
+ static inline int net_offload_sendto(struct net_if *iface,
+ 				     struct net_pkt *pkt,
+-				     const struct sockaddr *dst_addr,
+-				     socklen_t addrlen,
++				     const struct zsock_sockaddr *dst_addr,
++				     zsock_socklen_t addrlen,
+ 				     net_context_send_cb_t cb,
+ 				     k_timeout_t timeout,
+ 				     void *user_data)
+@@ -457,7 +457,7 @@ static inline int net_offload_put(struct net_if *iface,
+ /** @cond INTERNAL_HIDDEN */
+
+ static inline int net_offload_get(struct net_if *iface,
+-				  sa_family_t family,
++				  zsock_sa_family_t family,
+ 				  enum net_sock_type type,
+ 				  enum net_ip_protocol ip_proto,
+ 				  struct net_context **context)
+@@ -467,8 +467,8 @@ static inline int net_offload_get(struct net_if *iface,
+
+ static inline int net_offload_bind(struct net_if *iface,
+ 				   struct net_context *context,
+-				   const struct sockaddr *addr,
+-				   socklen_t addrlen)
++				   const struct zsock_sockaddr *addr,
++				   zsock_socklen_t addrlen)
+ {
+ 	return 0;
+ }
+@@ -482,8 +482,8 @@ static inline int net_offload_listen(struct net_if *iface,
+
+ static inline int net_offload_connect(struct net_if *iface,
+ 				      struct net_context *context,
+-				      const struct sockaddr *addr,
+-				      socklen_t addrlen,
++				      const struct zsock_sockaddr *addr,
++				      zsock_socklen_t addrlen,
+ 				      net_context_connect_cb_t cb,
+ 				      k_timeout_t timeout,
+ 				      void *user_data)
+@@ -511,8 +511,8 @@ static inline int net_offload_send(struct net_if *iface,
+
+ static inline int net_offload_sendto(struct net_if *iface,
+ 				     struct net_pkt *pkt,
+-				     const struct sockaddr *dst_addr,
+-				     socklen_t addrlen,
++				     const struct zsock_sockaddr *dst_addr,
++				     zsock_socklen_t addrlen,
+ 				     net_context_send_cb_t cb,
+ 				     k_timeout_t timeout,
+ 				     void *user_data)
+diff --git a/include/zephyr/net/net_pkt.h b/include/zephyr/net/net_pkt.h
+index 617f22470a6..1b59773dda2 100644
+--- a/include/zephyr/net/net_pkt.h
++++ b/include/zephyr/net/net_pkt.h
+@@ -213,13 +213,13 @@ struct net_pkt {
+ 	uint8_t ipv4_acd_arp_msg : 1;  /* Is this pkt IPv4 conflict detection ARP
+ 					* message.
+ 					* Note: family needs to be
+-					* AF_INET.
++					* ZSOCK_AF_INET.
+ 					*/
+ #endif
+ #if defined(CONFIG_NET_LLDP)
+ 	uint8_t lldp_pkt : 1; /* Is this pkt an LLDP message.
+ 			       * Note: family needs to be
+-			       * AF_UNSPEC.
++			       * ZSOCK_AF_UNSPEC.
+ 			       */
+ #endif
+ 	uint8_t ppp_msg : 1; /* This is a PPP message */
+@@ -341,13 +341,13 @@ struct net_pkt {
+ 	 * have network tunneling in use.
+ 	 */
+ 	union {
+-		struct sockaddr remote;
++		struct zsock_sockaddr remote;
+
+ 		/* This will make sure that there is enough storage to store
+ 		 * the address struct. The access to value is via remote
+ 		 * address.
+ 		 */
+-		struct sockaddr_storage remote_storage;
++		struct zsock_sockaddr_storage remote_storage;
+ 	};
+ #endif /* CONFIG_NET_OFFLOAD */
+
+@@ -1484,7 +1484,7 @@ static inline void net_pkt_set_src_ipv6_addr(struct net_pkt *pkt)
+ {
+ 	net_if_ipv6_select_src_addr(net_context_get_iface(
+ 					    net_pkt_context(pkt)),
+-				    (struct in6_addr *)NET_IPV6_HDR(pkt)->src);
++				    (struct zsock_in6_addr *)NET_IPV6_HDR(pkt)->src);
+ }
+
+ static inline void net_pkt_set_overwrite(struct net_pkt *pkt, bool overwrite)
+@@ -1552,14 +1552,14 @@ static inline bool net_pkt_filter_local_in_recv_ok(struct net_pkt *pkt)
+ #endif /* CONFIG_NET_PKT_FILTER && CONFIG_NET_PKT_FILTER_LOCAL_IN_HOOK */
+
+ #if defined(CONFIG_NET_OFFLOAD) || defined(CONFIG_NET_L2_IPIP)
+-static inline struct sockaddr *net_pkt_remote_address(struct net_pkt *pkt)
++static inline struct zsock_sockaddr *net_pkt_remote_address(struct net_pkt *pkt)
+ {
+ 	return &pkt->remote;
+ }
+
+ static inline void net_pkt_set_remote_address(struct net_pkt *pkt,
+-					      struct sockaddr *address,
+-					      socklen_t len)
++					      struct zsock_sockaddr *address,
++					      zsock_socklen_t len)
+ {
+ 	memcpy(&pkt->remote, address, len);
+ }
+@@ -1957,7 +1957,7 @@ int net_pkt_alloc_buffer_raw_debug(struct net_pkt *pkt, size_t size,
+
+ struct net_pkt *net_pkt_alloc_with_buffer_debug(struct net_if *iface,
+ 						size_t size,
+-						sa_family_t family,
++						zsock_sa_family_t family,
+ 						enum net_ip_protocol proto,
+ 						k_timeout_t timeout,
+ 						const char *caller,
+@@ -1970,7 +1970,7 @@ struct net_pkt *net_pkt_alloc_with_buffer_debug(struct net_if *iface,
+
+ struct net_pkt *net_pkt_rx_alloc_with_buffer_debug(struct net_if *iface,
+ 						   size_t size,
+-						   sa_family_t family,
++						   zsock_sa_family_t family,
+ 						   enum net_ip_protocol proto,
+ 						   k_timeout_t timeout,
+ 						   const char *caller,
+@@ -2142,7 +2142,7 @@ int net_pkt_alloc_buffer_raw(struct net_pkt *pkt, size_t size,
+  */
+ struct net_pkt *net_pkt_alloc_with_buffer(struct net_if *iface,
+ 					  size_t size,
+-					  sa_family_t family,
++					  zsock_sa_family_t family,
+ 					  enum net_ip_protocol proto,
+ 					  k_timeout_t timeout);
+
+@@ -2151,7 +2151,7 @@ struct net_pkt *net_pkt_alloc_with_buffer(struct net_if *iface,
+ /* Same as above but specifically for RX packet */
+ struct net_pkt *net_pkt_rx_alloc_with_buffer(struct net_if *iface,
+ 					     size_t size,
+-					     sa_family_t family,
++					     zsock_sa_family_t family,
+ 					     enum net_ip_protocol proto,
+ 					     k_timeout_t timeout);
+
+@@ -2478,7 +2478,7 @@ static inline int net_pkt_write_u8(struct net_pkt *pkt, uint8_t data)
+  */
+ static inline int net_pkt_write_be16(struct net_pkt *pkt, uint16_t data)
+ {
+-	uint16_t data_be16 = htons(data);
++	uint16_t data_be16 = zsock_htons(data);
+
+ 	return net_pkt_write(pkt, &data_be16, sizeof(uint16_t));
+ }
+@@ -2497,7 +2497,7 @@ static inline int net_pkt_write_be16(struct net_pkt *pkt, uint16_t data)
+  */
+ static inline int net_pkt_write_be32(struct net_pkt *pkt, uint32_t data)
+ {
+-	uint32_t data_be32 = htonl(data);
++	uint32_t data_be32 = zsock_htonl(data);
+
+ 	return net_pkt_write(pkt, &data_be32, sizeof(uint32_t));
+ }
+diff --git a/include/zephyr/net/net_pkt_filter.h b/include/zephyr/net/net_pkt_filter.h
+index 44c43c3d52b..35c231fd929 100644
+--- a/include/zephyr/net/net_pkt_filter.h
++++ b/include/zephyr/net/net_pkt_filter.h
+@@ -419,10 +419,10 @@ extern npf_test_fn_t npf_ip_src_addr_unmatch;
+  * addresses contained in the provided set.
+  *
+  * @param _name Name of the condition
+- * @param _ip_addr_array Array of <tt>struct in_addr</tt> or <tt>struct in6_addr</tt> items to test
++ * @param _ip_addr_array Array of <tt>struct zsock_in_addr</tt> or <tt>struct zsock_in6_addr</tt> items to test
+  *against
+  * @param _ip_addr_num number of IP addresses in the array
+- * @param _af Addresses family type (AF_INET / AF_INET6) in the array
++ * @param _af Addresses family type (ZSOCK_AF_INET / ZSOCK_AF_INET6) in the array
+  */
+ #define NPF_IP_SRC_ADDR_ALLOWLIST(_name, _ip_addr_array, _ip_addr_num, _af) \
+ 	struct npf_test_ip _name = {					\
+@@ -442,10 +442,10 @@ extern npf_test_fn_t npf_ip_src_addr_unmatch;
+  * addresses contained in the provided set.
+  *
+  * @param _name Name of the condition
+- * @param _ip_addr_array Array of <tt>struct in_addr</tt> or <tt>struct in6_addr</tt> items to test
++ * @param _ip_addr_array Array of <tt>struct zsock_in_addr</tt> or <tt>struct zsock_in6_addr</tt> items to test
+  *against
+  * @param _ip_addr_num number of IP addresses in the array
+- * @param _af Addresses family type (AF_INET / AF_INET6) in the array
++ * @param _af Addresses family type (ZSOCK_AF_INET / ZSOCK_AF_INET6) in the array
+  */
+ #define NPF_IP_SRC_ADDR_BLOCKLIST(_name, _ip_addr_array, _ip_addr_num, _af) \
+ 	struct npf_test_ip _name = {					\
+@@ -628,7 +628,7 @@ extern npf_test_fn_t npf_eth_vlan_type_unmatch;
+  */
+ #define NPF_ETH_TYPE_MATCH(_name, _type)				\
+ 	struct npf_test_eth_type _name = {				\
+-		.type = htons(_type),					\
++		.type = zsock_htons(_type),					\
+ 		.test.fn = npf_eth_type_match,				\
+ 		IF_ENABLED(NPF_TEST_ENABLE_NAME,			\
+ 			   (.test.name = "eth type",			\
+@@ -643,7 +643,7 @@ extern npf_test_fn_t npf_eth_vlan_type_unmatch;
+  */
+ #define NPF_ETH_TYPE_UNMATCH(_name, _type)				\
+ 	struct npf_test_eth_type _name = {				\
+-		.type = htons(_type),					\
++		.type = zsock_htons(_type),					\
+ 		.test.fn = npf_eth_type_unmatch,			\
+ 		IF_ENABLED(NPF_TEST_ENABLE_NAME,			\
+ 			   (.test.name = "!eth type",			\
+@@ -659,7 +659,7 @@ extern npf_test_fn_t npf_eth_vlan_type_unmatch;
+  */
+ #define NPF_ETH_VLAN_TYPE_MATCH(_name, _type)				\
+ 	struct npf_test_eth_type _name = {				\
+-		.type = htons(_type),					\
++		.type = zsock_htons(_type),					\
+ 		.test.fn = npf_eth_vlan_type_match,			\
+ 		IF_ENABLED(NPF_TEST_ENABLE_NAME,			\
+ 			   (.test.name = "eth vlan type",		\
+@@ -675,7 +675,7 @@ extern npf_test_fn_t npf_eth_vlan_type_unmatch;
+  */
+ #define NPF_ETH_VLAN_TYPE_UNMATCH(_name, _type)				\
+ 	struct npf_test_eth_type _name = {				\
+-		.type = htons(_type),					\
++		.type = zsock_htons(_type),					\
+ 		.test.fn = npf_eth_vlan_type_unmatch,			\
+ 		IF_ENABLED(NPF_TEST_ENABLE_NAME,			\
+ 			   (.test.name = "!eth vlan type",		\
+diff --git a/include/zephyr/net/ocpp.h b/include/zephyr/net/ocpp.h
+index e205097cdf3..5ee350064ed 100644
+--- a/include/zephyr/net/ocpp.h
++++ b/include/zephyr/net/ocpp.h
+@@ -146,7 +146,7 @@ struct ocpp_cs_info {
+ 	char *cs_ip;	/**< Central system IP address */
+ 	char *ws_url;	/**< Websocket url exclude ipaddr & port */
+ 	int port;	/**< Central system port number */
+-	sa_family_t sa_family; /**< IP protocol family type 4/6 */
++	zsock_sa_family_t sa_family; /**< IP protocol family type 4/6 */
+ };
+
+ /** @brief Parameters opaque session handle for ocpp_* API */
+diff --git a/include/zephyr/net/ppp.h b/include/zephyr/net/ppp.h
+index e992a7512bd..cccb9405ed4 100644
+--- a/include/zephyr/net/ppp.h
++++ b/include/zephyr/net/ppp.h
+@@ -390,13 +390,13 @@ struct lcp_options {
+ /** IPv4 control protocol options */
+ struct ipcp_options {
+ 	/** IPv4 address */
+-	struct in_addr address;
++	struct zsock_in_addr address;
+
+ 	/** Primary DNS server address */
+-	struct in_addr dns1_address;
++	struct zsock_in_addr dns1_address;
+
+ 	/** Secondary DNS server address */
+-	struct in_addr dns2_address;
++	struct zsock_in_addr dns2_address;
+ };
+
+ /** IPv6 control protocol options */
+diff --git a/include/zephyr/net/sntp.h b/include/zephyr/net/sntp.h
+index 6b4f1456db3..f5cfd96c663 100644
+--- a/include/zephyr/net/sntp.h
++++ b/include/zephyr/net/sntp.h
+@@ -66,8 +66,8 @@ struct sntp_ctx {
+  *
+  * @return 0 if ok, <0 if error.
+  */
+-int sntp_init(struct sntp_ctx *ctx, struct sockaddr *addr,
+-	      socklen_t addr_len);
++int sntp_init(struct sntp_ctx *ctx, struct zsock_sockaddr *addr,
++	      zsock_socklen_t addr_len);
+
+ /**
+  * @brief Perform SNTP query
+@@ -112,7 +112,7 @@ void sntp_close(struct sntp_ctx *ctx);
+  *
+  * @return 0 if ok, <0 if error.
+  */
+-int sntp_init_async(struct sntp_ctx *ctx, struct sockaddr *addr, socklen_t addr_len,
++int sntp_init_async(struct sntp_ctx *ctx, struct zsock_sockaddr *addr, zsock_socklen_t addr_len,
+ 		    const struct net_socket_service_desc *service);
+
+ /**
+@@ -176,7 +176,7 @@ int sntp_simple(const char *server, uint32_t timeout,
+  *
+  * @return 0 if ok, <0 if error (-ETIMEDOUT if timeout).
+  */
+-int sntp_simple_addr(struct sockaddr *addr, socklen_t addr_len, uint32_t timeout,
++int sntp_simple_addr(struct zsock_sockaddr *addr, zsock_socklen_t addr_len, uint32_t timeout,
+ 		     struct sntp_time *ts);
+
+ #ifdef __cplusplus
+diff --git a/include/zephyr/net/socket.h b/include/zephyr/net/socket.h
+index 35c53cbec1a..88e771a0572 100644
+--- a/include/zephyr/net/socket.h
++++ b/include/zephyr/net/socket.h
+@@ -46,19 +46,19 @@ extern "C" {
+  * @name Options for poll()
+  * @{
+  */
+-/* ZSOCK_POLL* values are compatible with Linux */
++/* ZSOCK_POLL* values alias ZVFS poll flags in fdtable.h */
+ /** zsock_poll: Poll for readability */
+-#define ZSOCK_POLLIN 1
++#define ZSOCK_POLLIN ZVFS_POLLIN
+ /** zsock_poll: Poll for exceptional condition */
+-#define ZSOCK_POLLPRI 2
++#define ZSOCK_POLLPRI ZVFS_POLLPRI
+ /** zsock_poll: Poll for writability */
+-#define ZSOCK_POLLOUT 4
++#define ZSOCK_POLLOUT ZVFS_POLLOUT
+ /** zsock_poll: Poll results in error condition (output value only) */
+-#define ZSOCK_POLLERR 8
++#define ZSOCK_POLLERR ZVFS_POLLERR
+ /** zsock_poll: Poll detected closed connection (output value only) */
+-#define ZSOCK_POLLHUP 0x10
++#define ZSOCK_POLLHUP ZVFS_POLLHUP
+ /** zsock_poll: Invalid socket (output value only) */
+-#define ZSOCK_POLLNVAL 0x20
++#define ZSOCK_POLLNVAL ZVFS_POLLNVAL
+ /** @} */
+
+ /**
+@@ -315,15 +315,15 @@ struct zsock_addrinfo {
+ 	struct zsock_addrinfo *ai_next; /**< Pointer to next address entry */
+ 	int ai_flags;             /**< Additional options */
+ 	int ai_family;            /**< Address family of the returned addresses */
+-	int ai_socktype;          /**< Socket type, for example SOCK_STREAM or SOCK_DGRAM */
++	int ai_socktype;          /**< Socket type, for example ZSOCK_SOCK_STREAM or ZSOCK_SOCK_DGRAM */
+ 	int ai_protocol;          /**< Protocol for addresses, 0 means any protocol */
+ 	int ai_eflags;            /**< Extended flags for special usage */
+-	socklen_t ai_addrlen;     /**< Length of the socket address */
+-	struct sockaddr *ai_addr; /**< Pointer to the address */
++	zsock_socklen_t ai_addrlen;     /**< Length of the socket address */
++	struct zsock_sockaddr *ai_addr; /**< Pointer to the address */
+ 	char *ai_canonname;       /**< Optional official name of the host */
+
+ /** @cond INTERNAL_HIDDEN */
+-	struct sockaddr _ai_addr;
++	struct zsock_sockaddr _ai_addr;
+ 	char _ai_canonname[DNS_MAX_NAME_SIZE + 1];
+ /** @endcond */
+ };
+@@ -429,8 +429,8 @@ __syscall int zsock_shutdown(int sock, int how);
+  * This function is also exposed as `bind()`
+  * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+-__syscall int zsock_bind(int sock, const struct sockaddr *addr,
+-			 socklen_t addrlen);
++__syscall int zsock_bind(int sock, const struct zsock_sockaddr *addr,
++			 zsock_socklen_t addrlen);
+
+ /**
+  * @brief Connect a socket to a peer network address
+@@ -442,8 +442,8 @@ __syscall int zsock_bind(int sock, const struct sockaddr *addr,
+  * This function is also exposed as `connect()`
+  * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+-__syscall int zsock_connect(int sock, const struct sockaddr *addr,
+-			    socklen_t addrlen);
++__syscall int zsock_connect(int sock, const struct zsock_sockaddr *addr,
++			    zsock_socklen_t addrlen);
+
+ /**
+  * @brief Set up a STREAM socket to accept peer connections
+@@ -467,7 +467,7 @@ __syscall int zsock_listen(int sock, int backlog);
+  * This function is also exposed as `accept()`
+  * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+-__syscall int zsock_accept(int sock, struct sockaddr *addr, socklen_t *addrlen);
++__syscall int zsock_accept(int sock, struct zsock_sockaddr *addr, zsock_socklen_t *addrlen);
+
+ /**
+  * @brief Send data to an arbitrary network address
+@@ -480,8 +480,8 @@ __syscall int zsock_accept(int sock, struct sockaddr *addr, socklen_t *addrlen);
+  * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ __syscall ssize_t zsock_sendto(int sock, const void *buf, size_t len,
+-			       int flags, const struct sockaddr *dest_addr,
+-			       socklen_t addrlen);
++			       int flags, const struct zsock_sockaddr *dest_addr,
++			       zsock_socklen_t addrlen);
+
+ /**
+  * @brief Send data to a connected peer
+@@ -509,7 +509,7 @@ static inline ssize_t zsock_send(int sock, const void *buf, size_t len,
+  * This function is also exposed as `sendmsg()`
+  * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+-__syscall ssize_t zsock_sendmsg(int sock, const struct msghdr *msg,
++__syscall ssize_t zsock_sendmsg(int sock, const struct zsock_msghdr *msg,
+ 				int flags);
+
+ /**
+@@ -523,8 +523,8 @@ __syscall ssize_t zsock_sendmsg(int sock, const struct msghdr *msg,
+  * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ __syscall ssize_t zsock_recvfrom(int sock, void *buf, size_t max_len,
+-				 int flags, struct sockaddr *src_addr,
+-				 socklen_t *addrlen);
++				 int flags, struct zsock_sockaddr *src_addr,
++				 zsock_socklen_t *addrlen);
+
+ /**
+  * @brief Receive a message from an arbitrary network address
+@@ -536,7 +536,7 @@ __syscall ssize_t zsock_recvfrom(int sock, void *buf, size_t max_len,
+  * This function is also exposed as `recvmsg()`
+  * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+-__syscall ssize_t zsock_recvmsg(int sock, struct msghdr *msg, int flags);
++__syscall ssize_t zsock_recvmsg(int sock, struct zsock_msghdr *msg, int flags);
+
+ /**
+  * @brief Receive data from a connected peer
+@@ -652,7 +652,7 @@ static inline int zsock_poll(struct zsock_pollfd *fds, int nfds, int timeout)
+  * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ __syscall int zsock_getsockopt(int sock, int level, int optname,
+-			       void *optval, socklen_t *optlen);
++			       void *optval, zsock_socklen_t *optlen);
+
+ /**
+  * @brief Set various socket options
+@@ -668,7 +668,7 @@ __syscall int zsock_getsockopt(int sock, int level, int optname,
+  * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ __syscall int zsock_setsockopt(int sock, int level, int optname,
+-			       const void *optval, socklen_t optlen);
++			       const void *optval, zsock_socklen_t optlen);
+
+ /**
+  * @brief Get peer name
+@@ -680,8 +680,8 @@ __syscall int zsock_setsockopt(int sock, int level, int optname,
+  * This function is also exposed as `getpeername()`
+  * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+-__syscall int zsock_getpeername(int sock, struct sockaddr *addr,
+-				socklen_t *addrlen);
++__syscall int zsock_getpeername(int sock, struct zsock_sockaddr *addr,
++				zsock_socklen_t *addrlen);
+
+ /**
+  * @brief Get socket name
+@@ -693,8 +693,8 @@ __syscall int zsock_getpeername(int sock, struct sockaddr *addr,
+  * This function is also exposed as `getsockname()`
+  * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+-__syscall int zsock_getsockname(int sock, struct sockaddr *addr,
+-				socklen_t *addrlen);
++__syscall int zsock_getsockname(int sock, struct zsock_sockaddr *addr,
++				zsock_socklen_t *addrlen);
+
+ /**
+  * @brief Get local host name
+@@ -718,7 +718,7 @@ __syscall int zsock_gethostname(char *buf, size_t len);
+  * This function is also exposed as `inet_ntop()`
+  * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+-static inline char *zsock_inet_ntop(sa_family_t family, const void *src,
++static inline char *zsock_inet_ntop(zsock_sa_family_t family, const void *src,
+ 				    char *dst, size_t size)
+ {
+ 	return net_addr_ntop(family, src, dst, size);
+@@ -734,7 +734,7 @@ static inline char *zsock_inet_ntop(sa_family_t family, const void *src,
+  * This function is also exposed as `inet_pton()`
+  * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+-__syscall int zsock_inet_pton(sa_family_t family, const char *src, void *dst);
++__syscall int zsock_inet_pton(zsock_sa_family_t family, const char *src, void *dst);
+
+ /** @cond INTERNAL_HIDDEN */
+ __syscall int z_zsock_getaddrinfo_internal(const char *host,
+@@ -750,19 +750,19 @@ __syscall int z_zsock_getaddrinfo_internal(const char *host,
+  * @{
+  */
+ /** Address for bind() (vs for connect()) */
+-#define AI_PASSIVE 0x1
++#define ZSOCK_AI_PASSIVE 0x1
+ /** Fill in ai_canonname */
+-#define AI_CANONNAME 0x2
++#define ZSOCK_AI_CANONNAME 0x2
+ /** Assume host address is in numeric notation, don't DNS lookup */
+-#define AI_NUMERICHOST 0x4
++#define ZSOCK_AI_NUMERICHOST 0x4
+ /** May return IPv4 mapped address for IPv6  */
+-#define AI_V4MAPPED 0x8
++#define ZSOCK_AI_V4MAPPED 0x8
+ /** May return both native IPv6 and mapped IPv4 address for IPv6 */
+-#define AI_ALL 0x10
++#define ZSOCK_AI_ALL 0x10
+ /** IPv4/IPv6 support depends on local system config */
+-#define AI_ADDRCONFIG 0x20
++#define ZSOCK_AI_ADDRCONFIG 0x20
+ /** Assume service (port) is numeric */
+-#define AI_NUMERICSERV 0x400
++#define ZSOCK_AI_NUMERICSERV 0x400
+ /** Extra flags present (see RFC 5014) */
+ #define AI_EXTFLAGS 0x800
+ /** @} */
+@@ -810,21 +810,20 @@ const char *zsock_gai_strerror(int errcode);
+  * @{
+  */
+ /** zsock_getnameinfo(): Resolve to numeric address. */
+-#define NI_NUMERICHOST 1
++#define ZSOCK_NI_NUMERICHOST 1
+ /** zsock_getnameinfo(): Resolve to numeric port number. */
+-#define NI_NUMERICSERV 2
++#define ZSOCK_NI_NUMERICSERV 2
+ /** zsock_getnameinfo(): Return only hostname instead of FQDN */
+-#define NI_NOFQDN 4
++#define ZSOCK_NI_NOFQDN 4
+ /** zsock_getnameinfo(): Dummy option for compatibility */
+-#define NI_NAMEREQD 8
++#define ZSOCK_NI_NAMEREQD 8
+ /** zsock_getnameinfo(): Dummy option for compatibility */
+-#define NI_DGRAM 16
+-
+-/* POSIX extensions */
++#define ZSOCK_NI_DGRAM 16
+
+ /** zsock_getnameinfo(): Max supported hostname length */
++#define ZSOCK_NI_MAXHOST 1025
+ #ifndef NI_MAXHOST
+-#define NI_MAXHOST 64
++#define NI_MAXHOST ZSOCK_NI_MAXHOST
+ #endif
+ /** @} */
+
+@@ -838,9 +837,9 @@ const char *zsock_gai_strerror(int errcode);
+  * This function is also exposed as `getnameinfo()`
+  * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+-int zsock_getnameinfo(const struct sockaddr *addr, socklen_t addrlen,
+-		      char *host, socklen_t hostlen,
+-		      char *serv, socklen_t servlen, int flags);
++int zsock_getnameinfo(const struct zsock_sockaddr *addr, zsock_socklen_t addrlen,
++		      char *host, zsock_socklen_t hostlen,
++		      char *serv, zsock_socklen_t servlen, int flags);
+
+ /**
+  * @name Network interface name description
+@@ -848,90 +847,93 @@ int zsock_getnameinfo(const struct sockaddr *addr, socklen_t addrlen,
+  */
+ /** Network interface name length */
+ #if defined(CONFIG_NET_INTERFACE_NAME)
+-#define IFNAMSIZ CONFIG_NET_INTERFACE_NAME_LEN
++#define ZSOCK_IFNAMSIZ CONFIG_NET_INTERFACE_NAME_LEN
+ #else
+-#define IFNAMSIZ Z_DEVICE_MAX_NAME_LEN
++#define ZSOCK_IFNAMSIZ Z_DEVICE_MAX_NAME_LEN
++#endif
++#ifndef IFNAMSIZ
++#define IFNAMSIZ ZSOCK_IFNAMSIZ
+ #endif
+
+ /** Interface description structure */
+ struct ifreq {
+-	char ifr_name[IFNAMSIZ]; /**< Network interface name */
++	char ifr_name[ZSOCK_IFNAMSIZ]; /**< Network interface name */
+ };
+ /** @} */
+
+ /**
+- * @name Socket level options (SOL_SOCKET)
++ * @name Socket level options (ZSOCK_SOL_SOCKET)
+  * @{
+  */
+ /** Socket-level option */
+-#define SOL_SOCKET 1
++#define ZSOCK_SOL_SOCKET 1
+
+-/* Socket options for SOL_SOCKET level */
++/* Socket options for ZSOCK_SOL_SOCKET level */
+
+ /** Recording debugging information (ignored, for compatibility) */
+-#define SO_DEBUG 1
++#define ZSOCK_SO_DEBUG 1
+ /** address reuse */
+-#define SO_REUSEADDR 2
++#define ZSOCK_SO_REUSEADDR 2
+ /** Type of the socket */
+-#define SO_TYPE 3
++#define ZSOCK_SO_TYPE 3
+ /** Async error */
+-#define SO_ERROR 4
++#define ZSOCK_SO_ERROR 4
+ /** Bypass normal routing and send directly to host (ignored, for compatibility) */
+-#define SO_DONTROUTE 5
++#define ZSOCK_SO_DONTROUTE 5
+ /** Transmission of broadcast messages is supported (ignored, for compatibility) */
+-#define SO_BROADCAST 6
++#define ZSOCK_SO_BROADCAST 6
+
+ /** Size of socket send buffer */
+-#define SO_SNDBUF 7
++#define ZSOCK_SO_SNDBUF 7
+ /** Size of socket recv buffer */
+-#define SO_RCVBUF 8
++#define ZSOCK_SO_RCVBUF 8
+
+ /** Enable sending keep-alive messages on connections */
+-#define SO_KEEPALIVE 9
++#define ZSOCK_SO_KEEPALIVE 9
+ /** Place out-of-band data into receive stream (ignored, for compatibility) */
+-#define SO_OOBINLINE 10
++#define ZSOCK_SO_OOBINLINE 10
+ /** Socket priority */
+-#define SO_PRIORITY 12
++#define ZSOCK_SO_PRIORITY 12
+ /** Socket lingers on close (ignored, for compatibility) */
+-#define SO_LINGER 13
++#define ZSOCK_SO_LINGER 13
+ /** Allow multiple sockets to reuse a single port */
+-#define SO_REUSEPORT 15
++#define ZSOCK_SO_REUSEPORT 15
+
+ /** Receive low watermark (ignored, for compatibility) */
+-#define SO_RCVLOWAT 18
++#define ZSOCK_SO_RCVLOWAT 18
+ /** Send low watermark (ignored, for compatibility) */
+-#define SO_SNDLOWAT 19
++#define ZSOCK_SO_SNDLOWAT 19
+
+ /**
+  * Receive timeout
+  * Applies to receive functions like recv(), but not to connect()
+  */
+-#define SO_RCVTIMEO 20
++#define ZSOCK_SO_RCVTIMEO 20
+ /** Send timeout */
+-#define SO_SNDTIMEO 21
++#define ZSOCK_SO_SNDTIMEO 21
+
+ /** Bind a socket to an interface */
+-#define SO_BINDTODEVICE	25
++#define ZSOCK_SO_BINDTODEVICE	25
+
+ /** Socket accepts incoming connections (ignored, for compatibility) */
+-#define SO_ACCEPTCONN 30
++#define ZSOCK_SO_ACCEPTCONN 30
+
+ /** Timestamp TX RX or both packets. Supports multiple timestamp sources. */
+-#define SO_TIMESTAMPING 37
++#define ZSOCK_SO_TIMESTAMPING 37
+
+ /** Protocol used with the socket */
+-#define SO_PROTOCOL 38
++#define ZSOCK_SO_PROTOCOL 38
+
+ /** Domain used with SOCKET */
+-#define SO_DOMAIN 39
++#define ZSOCK_SO_DOMAIN 39
+
+ /** Enable SOCKS5 for Socket */
+-#define SO_SOCKS5 60
++#define ZSOCK_SO_SOCKS5 60
+
+ /** Socket TX time (when the data should be sent) */
+-#define SO_TXTIME 61
+-/** Socket TX time (same as SO_TXTIME) */
+-#define SCM_TXTIME SO_TXTIME
++#define ZSOCK_SO_TXTIME 61
++/** Socket TX time (same as ZSOCK_SO_TXTIME) */
++#define ZSOCK_SCM_TXTIME ZSOCK_SO_TXTIME
+
+ /** Timestamp generation flags */
+
+@@ -948,26 +950,26 @@ struct ifreq {
+ /** @} */
+
+ /**
+- * @name TCP level options (IPPROTO_TCP)
++ * @name TCP level options (ZSOCK_IPPROTO_TCP)
+  * @{
+  */
+-/* Socket options for IPPROTO_TCP level */
++/* Socket options for ZSOCK_IPPROTO_TCP level */
+ /** Disable TCP buffering (ignored, for compatibility) */
+-#define TCP_NODELAY 1
++#define ZSOCK_TCP_NODELAY 1
+ /** Start keepalives after this period (seconds) */
+-#define TCP_KEEPIDLE 2
++#define ZSOCK_TCP_KEEPIDLE 2
+ /** Interval between keepalives (seconds) */
+-#define TCP_KEEPINTVL 3
++#define ZSOCK_TCP_KEEPINTVL 3
+ /** Number of keepalives before dropping connection */
+-#define TCP_KEEPCNT 4
++#define ZSOCK_TCP_KEEPCNT 4
+
+ /** @} */
+
+ /**
+- * @name IPv4 level options (IPPROTO_IP)
++ * @name IPv4 level options (ZSOCK_IPPROTO_IP)
+  * @{
+  */
+-/* Socket options for IPPROTO_IP level */
++/* Socket options for ZSOCK_IPPROTO_IP level */
+ /** Set or receive the Type-Of-Service value for an outgoing packet. */
+ #define IP_TOS 1
+
+@@ -988,8 +990,8 @@ struct ifreq {
+  */
+ struct in_pktinfo {
+ 	unsigned int   ipi_ifindex;  /**< Network interface index */
+-	struct in_addr ipi_spec_dst; /**< Local address */
+-	struct in_addr ipi_addr;     /**< Header Destination address */
++	struct zsock_in_addr ipi_spec_dst; /**< Local address */
++	struct zsock_in_addr ipi_addr;     /**< Header Destination address */
+ };
+
+ /** Pass an IP_RECVTTL ancillary message that contains information
+@@ -1018,8 +1020,8 @@ struct in_pktinfo {
+  * @brief Struct used when joining or leaving a IPv4 multicast group.
+  */
+ struct ip_mreqn {
+-	struct in_addr imr_multiaddr; /**< IP multicast group address */
+-	struct in_addr imr_address;   /**< IP address of local interface */
++	struct zsock_in_addr imr_multiaddr; /**< IP multicast group address */
++	struct zsock_in_addr imr_address;   /**< IP address of local interface */
+ 	int            imr_ifindex;   /**< Network interface index */
+ };
+
+@@ -1027,8 +1029,8 @@ struct ip_mreqn {
+  * @brief Struct used when setting a IPv4 multicast network interface.
+  */
+ struct ip_mreq  {
+-	struct in_addr imr_multiaddr;   /**< IP multicast group address */
+-	struct in_addr imr_interface;   /**< IP address of local interface */
++	struct zsock_in_addr imr_multiaddr;   /**< IP multicast group address */
++	struct zsock_in_addr imr_interface;   /**< IP address of local interface */
+ };
+
+ /** Clamp down the global port range for a given socket */
+@@ -1037,21 +1039,21 @@ struct ip_mreq  {
+ /** @} */
+
+ /**
+- * @name IPv6 level options (IPPROTO_IPV6)
++ * @name IPv6 level options (ZSOCK_IPPROTO_IPV6)
+  * @{
+  */
+-/* Socket options for IPPROTO_IPV6 level */
++/* Socket options for ZSOCK_IPPROTO_IPV6 level */
+ /** Set the unicast hop limit for the socket. */
+-#define IPV6_UNICAST_HOPS	16
++#define ZSOCK_IPV6_UNICAST_HOPS	16
+
+ /** Set multicast output network interface index for the socket. */
+-#define IPV6_MULTICAST_IF       17
++#define ZSOCK_IPV6_MULTICAST_IF       17
+
+ /** Set the multicast hop limit for the socket. */
+-#define IPV6_MULTICAST_HOPS 18
++#define ZSOCK_IPV6_MULTICAST_HOPS 18
+
+ /** Set the multicast loop bit for the socket. */
+-#define IPV6_MULTICAST_LOOP 19
++#define ZSOCK_IPV6_MULTICAST_LOOP 19
+
+ /** Join IPv6 multicast group. */
+ #define IPV6_ADD_MEMBERSHIP 20
+@@ -1060,17 +1062,17 @@ struct ip_mreq  {
+ #define IPV6_DROP_MEMBERSHIP 21
+
+ /** Join IPv6 multicast group. */
+-#define IPV6_JOIN_GROUP IPV6_ADD_MEMBERSHIP
++#define ZSOCK_IPV6_JOIN_GROUP IPV6_ADD_MEMBERSHIP
+
+ /** Leave IPv6 multicast group. */
+-#define IPV6_LEAVE_GROUP IPV6_DROP_MEMBERSHIP
++#define ZSOCK_IPV6_LEAVE_GROUP IPV6_DROP_MEMBERSHIP
+
+ /**
+  * @brief Struct used when joining or leaving a IPv6 multicast group.
+  */
+-struct ipv6_mreq {
++struct zsock_ipv6_mreq {
+ 	/** IPv6 multicast address of group */
+-	struct in6_addr ipv6mr_multiaddr;
++	struct zsock_in6_addr ipv6mr_multiaddr;
+
+ 	/** Network interface index of the local IPv6 address */
+ 	int ipv6mr_ifindex;
+@@ -1084,7 +1086,7 @@ struct ipv6_mreq {
+ #define IPV6_MTU 24
+
+ /** Don't support IPv4 access */
+-#define IPV6_V6ONLY 26
++#define ZSOCK_IPV6_V6ONLY 26
+
+ /** Pass an IPV6_RECVPKTINFO ancillary message that contains a
+  *  in6_pktinfo structure that supplies some information about the
+@@ -1104,12 +1106,12 @@ struct ipv6_mreq {
+ #define IPV6_HOPLIMIT 52
+
+ /** RFC5014: Source address selection. */
+-#define IPV6_ADDR_PREFERENCES   72
++#define ZSOCK_IPV6_ADDR_PREFERENCES   72
+
+ /** Prefer temporary address as source. */
+-#define IPV6_PREFER_SRC_TMP             0x0001
++#define ZSOCK_IPV6_PREFER_SRC_TMP             0x0001
+ /** Prefer public address as source. */
+-#define IPV6_PREFER_SRC_PUBLIC          0x0002
++#define ZSOCK_IPV6_PREFER_SRC_PUBLIC          0x0002
+ /** Either public or temporary address is selected as a default source
+  *  depending on the output interface configuration (this is the default value).
+  *  This is Linux specific option not found in the RFC.
+@@ -1131,7 +1133,7 @@ struct ipv6_mreq {
+  * option is set.
+  */
+ struct in6_pktinfo {
+-	struct in6_addr ipi6_addr;    /**< Destination IPv6 address */
++	struct zsock_in6_addr ipi6_addr;    /**< Destination IPv6 address */
+ 	unsigned int    ipi6_ifindex; /**< Receive interface index */
+ };
+
+@@ -1144,7 +1146,7 @@ struct in6_pktinfo {
+  * @{
+  */
+ /** listen: The maximum backlog queue length */
+-#define SOMAXCONN 128
++#define ZSOCK_SOMAXCONN 128
+ /** @} */
+
+ /**
+@@ -1152,38 +1154,38 @@ struct in6_pktinfo {
+  * @{
+  */
+ /** Check unspecified IPv6 address. */
+-#define IN6_IS_ADDR_UNSPECIFIED(addr) \
++#define ZSOCK_IN6_IS_ADDR_UNSPECIFIED(addr) \
+ 	net_ipv6_addr_cmp(net_ipv6_unspecified_address(), addr)
+
+ /** Check loopback IPv6 address. */
+-#define IN6_IS_ADDR_LOOPBACK(addr) net_ipv6_is_addr_loopback(addr)
++#define ZSOCK_IN6_IS_ADDR_LOOPBACK(addr) net_ipv6_is_addr_loopback(addr)
+
+ /** Check IPv6 multicast address */
+-#define IN6_IS_ADDR_MULTICAST(addr) net_ipv6_is_addr_mcast(addr)
++#define ZSOCK_IN6_IS_ADDR_MULTICAST(addr) net_ipv6_is_addr_mcast(addr)
+
+ /** Check IPv6 link local address */
+-#define IN6_IS_ADDR_LINKLOCAL(addr) net_ipv6_is_ll_addr(addr)
++#define ZSOCK_IN6_IS_ADDR_LINKLOCAL(addr) net_ipv6_is_ll_addr(addr)
+
+ /** Check IPv6 site local address */
+-#define IN6_IS_ADDR_SITELOCAL(addr) net_ipv6_is_sl_addr(addr)
++#define ZSOCK_IN6_IS_ADDR_SITELOCAL(addr) net_ipv6_is_sl_addr(addr)
+
+ /** Check IPv6 v4 mapped address */
+-#define IN6_IS_ADDR_V4MAPPED(addr) net_ipv6_addr_is_v4_mapped(addr)
++#define ZSOCK_IN6_IS_ADDR_V4MAPPED(addr) net_ipv6_addr_is_v4_mapped(addr)
+
+ /** Check IPv6 multicast global address */
+-#define IN6_IS_ADDR_MC_GLOBAL(addr) net_ipv6_is_addr_mcast_global(addr)
++#define ZSOCK_IN6_IS_ADDR_MC_GLOBAL(addr) net_ipv6_is_addr_mcast_global(addr)
+
+ /** Check IPv6 multicast node local address */
+-#define IN6_IS_ADDR_MC_NODELOCAL(addr) net_ipv6_is_addr_mcast_iface(addr)
++#define ZSOCK_IN6_IS_ADDR_MC_NODELOCAL(addr) net_ipv6_is_addr_mcast_iface(addr)
+
+ /** Check IPv6 multicast link local address */
+-#define IN6_IS_ADDR_MC_LINKLOCAL(addr) net_ipv6_is_addr_mcast_link(addr)
++#define ZSOCK_IN6_IS_ADDR_MC_LINKLOCAL(addr) net_ipv6_is_addr_mcast_link(addr)
+
+ /** Check IPv6 multicast site local address */
+-#define IN6_IS_ADDR_MC_SITELOCAL(addr) net_ipv6_is_addr_mcast_site(addr)
++#define ZSOCK_IN6_IS_ADDR_MC_SITELOCAL(addr) net_ipv6_is_addr_mcast_site(addr)
+
+ /** Check IPv6 multicast organization local address */
+-#define IN6_IS_ADDR_MC_ORGLOCAL(addr) net_ipv6_is_addr_mcast_org(addr)
++#define ZSOCK_IN6_IS_ADDR_MC_ORGLOCAL(addr) net_ipv6_is_addr_mcast_org(addr)
+
+ /** @} */
+
+@@ -1237,25 +1239,25 @@ struct net_socket_register {
+ struct socket_op_vtable {
+ 	struct fd_op_vtable fd_vtable;
+ 	int (*shutdown)(void *obj, int how);
+-	int (*bind)(void *obj, const struct sockaddr *addr, socklen_t addrlen);
+-	int (*connect)(void *obj, const struct sockaddr *addr,
+-		       socklen_t addrlen);
++	int (*bind)(void *obj, const struct zsock_sockaddr *addr, zsock_socklen_t addrlen);
++	int (*connect)(void *obj, const struct zsock_sockaddr *addr,
++		       zsock_socklen_t addrlen);
+ 	int (*listen)(void *obj, int backlog);
+-	int (*accept)(void *obj, struct sockaddr *addr, socklen_t *addrlen);
++	int (*accept)(void *obj, struct zsock_sockaddr *addr, zsock_socklen_t *addrlen);
+ 	ssize_t (*sendto)(void *obj, const void *buf, size_t len, int flags,
+-			  const struct sockaddr *dest_addr, socklen_t addrlen);
++			  const struct zsock_sockaddr *dest_addr, zsock_socklen_t addrlen);
+ 	ssize_t (*recvfrom)(void *obj, void *buf, size_t max_len, int flags,
+-			    struct sockaddr *src_addr, socklen_t *addrlen);
++			    struct zsock_sockaddr *src_addr, zsock_socklen_t *addrlen);
+ 	int (*getsockopt)(void *obj, int level, int optname,
+-			  void *optval, socklen_t *optlen);
++			  void *optval, zsock_socklen_t *optlen);
+ 	int (*setsockopt)(void *obj, int level, int optname,
+-			  const void *optval, socklen_t optlen);
+-	ssize_t (*sendmsg)(void *obj, const struct msghdr *msg, int flags);
+-	ssize_t (*recvmsg)(void *obj, struct msghdr *msg, int flags);
+-	int (*getpeername)(void *obj, struct sockaddr *addr,
+-			   socklen_t *addrlen);
+-	int (*getsockname)(void *obj, struct sockaddr *addr,
+-			   socklen_t *addrlen);
++			  const void *optval, zsock_socklen_t optlen);
++	ssize_t (*sendmsg)(void *obj, const struct zsock_msghdr *msg, int flags);
++	ssize_t (*recvmsg)(void *obj, struct zsock_msghdr *msg, int flags);
++	int (*getpeername)(void *obj, struct zsock_sockaddr *addr,
++			   zsock_socklen_t *addrlen);
++	int (*getsockname)(void *obj, struct zsock_sockaddr *addr,
++			   zsock_socklen_t *addrlen);
+ };
+
+ /** @endcond */
+@@ -1270,35 +1272,5 @@ struct socket_op_vtable {
+  * @}
+  */
+
+-/* Avoid circular loops with POSIX socket headers.
+- * We have these includes here so that we do not need
+- * to change the applications that were only including
+- * zephyr/net/socket.h header file.
+- *
+- * Additionally, if non-zephyr-prefixed headers are used here,
+- * native_sim pulls in those from the host rather than Zephyr's.
+- */
+-#if defined(CONFIG_POSIX_NETWORKING)
+-
+-/*
+- * Note: this is required to avoid globally defining _POSIX_C_SOURCE and _XOPEN_SOURCE. The
+- * dependency loop should be fixed with #97050 or adjacent PRs.
+- */
+-#undef _POSIX_C_SOURCE
+-#define _POSIX_C_SOURCE 200809L
+-#undef _XOPEN_SOURCE
+-#define _XOPEN_SOURCE 700
+-
+-#include <sys/stat.h>
+-#include <arpa/inet.h>
+-#include <netdb.h>
+-#include <unistd.h>
+-#include <poll.h>
+-#include <sys/socket.h>
+-
+-#undef _POSIX_C_SOURCE
+-#undef _XOPEN_SOURCE
+-
+-#endif /* CONFIG_POSIX_NETWORKING */
+
+ #endif /* ZEPHYR_INCLUDE_NET_SOCKET_H_ */
+diff --git a/include/zephyr/net/socket_net_mgmt.h b/include/zephyr/net/socket_net_mgmt.h
+index 595a92bbad9..763dc49bfb0 100644
+--- a/include/zephyr/net/socket_net_mgmt.h
++++ b/include/zephyr/net/socket_net_mgmt.h
+@@ -63,7 +63,7 @@ extern "C" {
+  * implementations are different.
+  *
+  * The socket domain (address family) is AF_NET_MGMT, and the type of socket
+- * is either SOCK_RAW or SOCK_DGRAM, because this is a datagram-oriented
++ * is either ZSOCK_SOCK_RAW or ZSOCK_SOCK_DGRAM, because this is a datagram-oriented
+  * service.
+  *
+  * The protocol (protocol type) selects for which feature the socket is used.
+@@ -75,7 +75,7 @@ extern "C" {
+  */
+ struct sockaddr_nm {
+ 	/** AF_NET_MGMT address family. */
+-	sa_family_t nm_family;
++	zsock_sa_family_t nm_family;
+
+ 	/** Network interface related to this address */
+ 	int nm_ifindex;
+diff --git a/include/zephyr/net/socketcan.h b/include/zephyr/net/socketcan.h
+index ca88d3760c5..8d641c5b99b 100644
+--- a/include/zephyr/net/socketcan.h
++++ b/include/zephyr/net/socketcan.h
+@@ -69,8 +69,8 @@ enum {
+  * struct sockaddr_can - The sockaddr structure for CAN sockets
+  *
+  */
+-struct sockaddr_can {
+-	sa_family_t can_family;   /**< Address family */
++struct zsock_sockaddr_can {
++	zsock_sa_family_t can_family;   /**< Address family */
+ 	int         can_ifindex;  /**< SocketCAN network interface index */
+ };
+
+diff --git a/include/zephyr/net/tftp.h b/include/zephyr/net/tftp.h
+index 5839987be80..716aef0f5ca 100644
+--- a/include/zephyr/net/tftp.h
++++ b/include/zephyr/net/tftp.h
+@@ -128,7 +128,7 @@ typedef void (*tftp_callback_t)(const struct tftp_evt *evt);
+  */
+ struct tftpc {
+ 	/** Socket address pointing to the remote TFTP server */
+-	struct sockaddr server;
++	struct zsock_sockaddr server;
+
+ 	/** Event notification callback. No notification if NULL */
+ 	tftp_callback_t callback;
+diff --git a/include/zephyr/net/virtual.h b/include/zephyr/net/virtual.h
+index d956ff1a4b9..b8034569eb5 100644
+--- a/include/zephyr/net/virtual.h
++++ b/include/zephyr/net/virtual.h
+@@ -79,10 +79,10 @@ struct virtual_interface_link_types {
+ #endif
+
+ struct virtual_interface_config {
+-	sa_family_t family;
++	zsock_sa_family_t family;
+ 	union {
+-		struct in_addr peer4addr;
+-		struct in6_addr peer6addr;
++		struct zsock_in_addr peer4addr;
++		struct zsock_in6_addr peer6addr;
+ 		int mtu;
+ 		struct virtual_interface_link_types link_types;
+ 		struct {
+diff --git a/include/zephyr/net/virtual_mgmt.h b/include/zephyr/net/virtual_mgmt.h
+index 26c091dcb2e..3bc78b12763 100644
+--- a/include/zephyr/net/virtual_mgmt.h
++++ b/include/zephyr/net/virtual_mgmt.h
+@@ -40,10 +40,10 @@ extern "C" {
+ 	(NET_VIRTUAL_INTERFACE_BASE | NET_MGMT_EVENT_BIT)
+
+ struct virtual_interface_req_params {
+-	sa_family_t family;
++	zsock_sa_family_t family;
+ 	union {
+-		struct in_addr peer4addr;
+-		struct in6_addr peer6addr;
++		struct zsock_in_addr peer4addr;
++		struct zsock_in6_addr peer6addr;
+ 		int mtu;
+ 		struct virtual_interface_link_types link_types;
+ 		struct {
+diff --git a/include/zephyr/net/zperf.h b/include/zephyr/net/zperf.h
+index 3b4e9bbb684..d8f599d0330 100644
+--- a/include/zephyr/net/zperf.h
++++ b/include/zephyr/net/zperf.h
+@@ -53,7 +53,7 @@ struct zperf_upload_params {
+ 	uint64_t unix_offset_us;
+ 	zperf_data_load_custom data_loader;
+ 	void *data_loader_ctx;
+-	struct sockaddr peer_addr;
++	struct zsock_sockaddr peer_addr;
+ 	uint32_t duration_ms;
+ 	uint32_t rate_kbps;
+ 	uint16_t packet_size;
+@@ -72,7 +72,7 @@ struct zperf_upload_params {
+
+ struct zperf_download_params {
+ 	uint16_t port;
+-	struct sockaddr addr;
++	struct zsock_sockaddr addr;
+ 	char if_name[IFNAMSIZ];
+ };
+
+diff --git a/subsys/tracing/ctf/tracing_ctf.h b/subsys/tracing/ctf/tracing_ctf.h
+index c6610d0aed1..5bfd6129c41 100644
+--- a/subsys/tracing/ctf/tracing_ctf.h
++++ b/subsys/tracing/ctf/tracing_ctf.h
+@@ -688,8 +688,8 @@ void sys_trace_k_event_wait_exit(struct k_event *event, uint32_t events, int ret
+ /* Do not try to include network headers as it just leads to inclusion
+  * nightmare, just declare couple of structs that are needed.
+  */
+-struct sockaddr;
+-struct msghdr;
++struct zsock_sockaddr;
++struct zsock_msghdr;
+ struct zvfs_pollfd;
+
+ void sys_trace_socket_init(int sock, int family, int type, int proto);
+@@ -697,26 +697,26 @@ void sys_trace_socket_close_enter(int sock);
+ void sys_trace_socket_close_exit(int sock, int ret);
+ void sys_trace_socket_shutdown_enter(int sock, int how);
+ void sys_trace_socket_shutdown_exit(int sock, int ret);
+-void sys_trace_socket_bind_enter(int sock, const struct sockaddr *addr, size_t addrlen);
++void sys_trace_socket_bind_enter(int sock, const struct zsock_sockaddr *addr, size_t addrlen);
+ void sys_trace_socket_bind_exit(int sock, int ret);
+-void sys_trace_socket_connect_enter(int sock, const struct sockaddr *addr, size_t addrlen);
++void sys_trace_socket_connect_enter(int sock, const struct zsock_sockaddr *addr, size_t addrlen);
+ void sys_trace_socket_connect_exit(int sock, int ret);
+ void sys_trace_socket_listen_enter(int sock, int backlog);
+ void sys_trace_socket_listen_exit(int sock, int ret);
+ void sys_trace_socket_accept_enter(int sock);
+-void sys_trace_socket_accept_exit(int sock, const struct sockaddr *addr, const uint32_t *addrlen,
++void sys_trace_socket_accept_exit(int sock, const struct zsock_sockaddr *addr, const uint32_t *addrlen,
+ 				  int ret);
+-void sys_trace_socket_sendto_enter(int sock, int len, int flags, const struct sockaddr *dest_addr,
++void sys_trace_socket_sendto_enter(int sock, int len, int flags, const struct zsock_sockaddr *dest_addr,
+ 				   uint32_t addrlen);
+ void sys_trace_socket_sendto_exit(int sock, int ret);
+-void sys_trace_socket_sendmsg_enter(int sock, const struct msghdr *msg, int flags);
++void sys_trace_socket_sendmsg_enter(int sock, const struct zsock_msghdr *msg, int flags);
+ void sys_trace_socket_sendmsg_exit(int sock, int ret);
+-void sys_trace_socket_recvfrom_enter(int sock, int max_len, int flags, struct sockaddr *addr,
++void sys_trace_socket_recvfrom_enter(int sock, int max_len, int flags, struct zsock_sockaddr *addr,
+ 				     uint32_t *addrlen);
+-void sys_trace_socket_recvfrom_exit(int sock, const struct sockaddr *src_addr,
++void sys_trace_socket_recvfrom_exit(int sock, const struct zsock_sockaddr *src_addr,
+ 				    const uint32_t *addrlen, int ret);
+-void sys_trace_socket_recvmsg_enter(int sock, const struct msghdr *msg, int flags);
+-void sys_trace_socket_recvmsg_exit(int sock, const struct msghdr *msg, int ret);
++void sys_trace_socket_recvmsg_enter(int sock, const struct zsock_msghdr *msg, int flags);
++void sys_trace_socket_recvmsg_exit(int sock, const struct zsock_msghdr *msg, int ret);
+ void sys_trace_socket_fcntl_enter(int sock, int cmd, int flags);
+ void sys_trace_socket_fcntl_exit(int sock, int ret);
+ void sys_trace_socket_ioctl_enter(int sock, int req);
+@@ -730,10 +730,10 @@ void sys_trace_socket_setsockopt_enter(int sock, int level, int optname, const v
+ 				       size_t optlen);
+ void sys_trace_socket_setsockopt_exit(int sock, int ret);
+ void sys_trace_socket_getpeername_enter(int sock);
+-void sys_trace_socket_getpeername_exit(int sock, struct sockaddr *addr, const uint32_t *addrlen,
++void sys_trace_socket_getpeername_exit(int sock, struct zsock_sockaddr *addr, const uint32_t *addrlen,
+ 				       int ret);
+ void sys_trace_socket_getsockname_enter(int sock);
+-void sys_trace_socket_getsockname_exit(int sock, const struct sockaddr *addr,
++void sys_trace_socket_getsockname_exit(int sock, const struct zsock_sockaddr *addr,
+ 				       const uint32_t *addrlen, int ret);
+ void sys_trace_socket_socketpair_enter(int family, int type, int proto, int *sv);
+ void sys_trace_socket_socketpair_exit(int sock_A, int sock_B, int ret);

@@ -1,0 +1,683 @@
+diff --git a/include/zephyr/net/net_ip.h b/include/zephyr/net/net_ip.h
+index 878cdd9259f..e5673a14578 100644
+--- a/include/zephyr/net/net_ip.h
++++ b/include/zephyr/net/net_ip.h
+@@ -60,6 +60,56 @@ extern "C" {
+ #define ZSOCK_AF_LOCAL       ZSOCK_PF_LOCAL    /**< Inter-process communication   */
+ #define ZSOCK_AF_UNIX        ZSOCK_PF_UNIX     /**< Inter-process communication   */
+ 
++/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
++#ifndef PF_UNSPEC
++#define PF_UNSPEC       ZSOCK_PF_UNSPEC
++#endif
++#ifndef PF_INET
++#define PF_INET         ZSOCK_PF_INET
++#endif
++#ifndef PF_INET6
++#define PF_INET6        ZSOCK_PF_INET6
++#endif
++#ifndef PF_PACKET
++#define PF_PACKET       ZSOCK_PF_PACKET
++#endif
++#ifndef PF_CAN
++#define PF_CAN          ZSOCK_PF_CAN
++#endif
++#ifndef PF_NET_MGMT
++#define PF_NET_MGMT     ZSOCK_PF_NET_MGMT
++#endif
++#ifndef PF_LOCAL
++#define PF_LOCAL        ZSOCK_PF_LOCAL
++#endif
++#ifndef PF_UNIX
++#define PF_UNIX         ZSOCK_PF_UNIX
++#endif
++#ifndef AF_UNSPEC
++#define AF_UNSPEC       ZSOCK_AF_UNSPEC
++#endif
++#ifndef AF_INET
++#define AF_INET         ZSOCK_AF_INET
++#endif
++#ifndef AF_INET6
++#define AF_INET6        ZSOCK_AF_INET6
++#endif
++#ifndef AF_PACKET
++#define AF_PACKET       ZSOCK_AF_PACKET
++#endif
++#ifndef AF_CAN
++#define AF_CAN          ZSOCK_AF_CAN
++#endif
++#ifndef AF_NET_MGMT
++#define AF_NET_MGMT     ZSOCK_AF_NET_MGMT
++#endif
++#ifndef AF_LOCAL
++#define AF_LOCAL        ZSOCK_AF_LOCAL
++#endif
++#ifndef AF_UNIX
++#define AF_UNIX         ZSOCK_AF_UNIX
++#endif
++
+ /** Protocol numbers from IANA/BSD */
+ enum net_ip_protocol {
+ 	ZSOCK_IPPROTO_IP = 0,            /**< IP protocol (pseudo-val for setsockopt() */
+@@ -91,6 +141,63 @@ enum net_sock_type {
+ 	ZSOCK_SOCK_RAW                   /**< RAW socket type      */
+ };
+ 
++/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
++#define IPPROTO_IP      ZSOCK_IPPROTO_IP
++#ifndef IPPROTO_ICMP
++#define IPPROTO_ICMP    ZSOCK_IPPROTO_ICMP
++#endif
++#ifndef IPPROTO_IGMP
++#define IPPROTO_IGMP    ZSOCK_IPPROTO_IGMP
++#endif
++#ifndef IPPROTO_ETH_P_ALL
++#define IPPROTO_ETH_P_ALL ZSOCK_IPPROTO_ETH_P_ALL
++#endif
++#ifndef IPPROTO_IPIP
++#define IPPROTO_IPIP    ZSOCK_IPPROTO_IPIP
++#endif
++#ifndef IPPROTO_TCP
++#define IPPROTO_TCP     ZSOCK_IPPROTO_TCP
++#endif
++#ifndef IPPROTO_UDP
++#define IPPROTO_UDP     ZSOCK_IPPROTO_UDP
++#endif
++#ifndef IPPROTO_IPV6
++#define IPPROTO_IPV6    ZSOCK_IPPROTO_IPV6
++#endif
++#ifndef IPPROTO_ICMPV6
++#define IPPROTO_ICMPV6  ZSOCK_IPPROTO_ICMPV6
++#endif
++#ifndef IPPROTO_RAW
++#define IPPROTO_RAW     ZSOCK_IPPROTO_RAW
++#endif
++#ifndef IPPROTO_TLS_1_0
++#define IPPROTO_TLS_1_0 ZSOCK_IPPROTO_TLS_1_0
++#endif
++#ifndef IPPROTO_TLS_1_1
++#define IPPROTO_TLS_1_1 ZSOCK_IPPROTO_TLS_1_1
++#endif
++#ifndef IPPROTO_TLS_1_2
++#define IPPROTO_TLS_1_2 ZSOCK_IPPROTO_TLS_1_2
++#endif
++#ifndef IPPROTO_TLS_1_3
++#define IPPROTO_TLS_1_3 ZSOCK_IPPROTO_TLS_1_3
++#endif
++#ifndef IPPROTO_DTLS_1_0
++#define IPPROTO_DTLS_1_0 ZSOCK_IPPROTO_DTLS_1_0
++#endif
++#ifndef IPPROTO_DTLS_1_2
++#define IPPROTO_DTLS_1_2 ZSOCK_IPPROTO_DTLS_1_2
++#endif
++#ifndef SOCK_STREAM
++#define SOCK_STREAM     ZSOCK_SOCK_STREAM
++#endif
++#ifndef SOCK_DGRAM
++#define SOCK_DGRAM      ZSOCK_SOCK_DGRAM
++#endif
++#ifndef SOCK_RAW
++#define SOCK_RAW        ZSOCK_SOCK_RAW
++#endif
++
+ /** @brief Convert 16-bit value from network to host byte order.
+  *
+  * @param x The network byte order value to convert.
+@@ -131,6 +238,20 @@ enum net_sock_type {
+  */
+ #define zsock_htonl(x) sys_cpu_to_be32(x)
+ 
++/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
++#ifndef htons
++#define htons(x)        zsock_htons(x)
++#endif
++#ifndef ntohs
++#define ntohs(x)        zsock_ntohs(x)
++#endif
++#ifndef htonl
++#define htonl(x)        zsock_htonl(x)
++#endif
++#ifndef ntohl
++#define ntohl(x)        zsock_ntohl(x)
++#endif
++
+ /** @brief Convert 64-bit value from host to network byte order.
+  *
+  * @param x The host byte order value to convert.
+@@ -173,6 +294,10 @@ typedef uint16_t zsock_sa_family_t;
+ /** Length of a socket address */
+ typedef uint32_t zsock_socklen_t;
+ 
++/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
++typedef zsock_sa_family_t sa_family_t;
++typedef zsock_socklen_t socklen_t;
++
+ /*
+  * Note that the sin_port and sin6_port are in network byte order
+  * in various sockaddr* structs.
+@@ -270,6 +395,11 @@ struct zsock_cmsghdr {
+ 	z_max_align_t cmsg_data[]; /**< Flexible array member to force alignment of cmsghdr */
+ };
+ 
++/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
++#define iovec           zsock_iovec
++#define msghdr          zsock_msghdr
++#define cmsghdr         zsock_cmsghdr
++
+ /** @cond INTERNAL_HIDDEN */
+ 
+ /* Alignment for headers and data. These are arch specific but define
+@@ -330,6 +460,23 @@ struct zsock_cmsghdr {
+  */
+ #define ZSOCK_CMSG_LEN(length) (ALIGN_D(sizeof(struct zsock_cmsghdr)) + length)
+ 
++/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
++#ifndef CMSG_DATA
++#define CMSG_DATA(cmsg)           ZSOCK_CMSG_DATA(cmsg)
++#endif
++#ifndef CMSG_SPACE
++#define CMSG_SPACE(length)        ZSOCK_CMSG_SPACE(length)
++#endif
++#ifndef CMSG_LEN
++#define CMSG_LEN(length)          ZSOCK_CMSG_LEN(length)
++#endif
++#ifndef CMSG_FIRSTHDR
++#define CMSG_FIRSTHDR(msghdr)     ZSOCK_CMSG_FIRSTHDR(msghdr)
++#endif
++#ifndef CMSG_NXTHDR
++#define CMSG_NXTHDR(msghdr, cmsg) ZSOCK_CMSG_NXTHDR(msghdr, cmsg)
++#endif
++
+ /** @cond INTERNAL_HIDDEN */
+ 
+ /* Packet types.  */
+@@ -423,6 +570,33 @@ struct zsock_sockaddr_un {
+ 	char        sun_path[NET_SOCKADDR_MAX_SIZE - sizeof(zsock_sa_family_t)];
+ };
+ 
++/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
++#define sockaddr          zsock_sockaddr
++#ifndef _SOCKADDR_IN_DECLARED
++#define sockaddr_in       zsock_sockaddr_in
++#endif
++#ifndef _SOCKADDR_IN6_DECLARED
++#define sockaddr_in6      zsock_sockaddr_in6
++#endif
++#ifndef _SOCKADDR_STORAGE_DECLARED
++#define sockaddr_storage  zsock_sockaddr_storage
++#endif
++#ifndef _SOCKADDR_UN_DECLARED
++#define sockaddr_un       zsock_sockaddr_un
++#endif
++#ifndef _SOCKADDR_LL_DECLARED
++#define sockaddr_ll       zsock_sockaddr_ll
++#endif
++#ifndef _SOCKADDR_CAN_DECLARED
++#define sockaddr_can      zsock_sockaddr_can
++#endif
++#ifndef _IN_ADDR_DECLARED
++#define in_addr           zsock_in_addr
++#endif
++#ifndef _IN6_ADDR_DECLARED
++#define in6_addr          zsock_in6_addr
++#endif
++
+ struct net_addr {
+ 	zsock_sa_family_t family;
+ 	union {
+@@ -432,10 +606,18 @@ struct net_addr {
+ };
+ 
+ /** A pointer to IPv6 any address (all values zero) */
+-extern const struct zsock_in6_addr zsock_in6addr_any;
+-
++/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
++#ifndef _POSIX_NET_IN6ADDR_DECLARED
++extern const struct zsock_in6_addr in6addr_any;
+ /** A pointer to IPv6 loopback address (::1) */
+-extern const struct zsock_in6_addr zsock_in6addr_loopback;
++extern const struct zsock_in6_addr in6addr_loopback;
++#endif
++#ifndef zsock_in6addr_any
++#define zsock_in6addr_any in6addr_any
++#endif
++#ifndef zsock_in6addr_loopback
++#define zsock_in6addr_loopback in6addr_loopback
++#endif
+ 
+ /** @endcond */
+ 
+@@ -447,12 +629,28 @@ extern const struct zsock_in6_addr zsock_in6addr_loopback;
+ #define ZSOCK_IN6ADDR_LOOPBACK_INIT { { { 0, 0, 0, 0, 0, 0, 0, \
+ 				0, 0, 0, 0, 0, 0, 0, 0, 1 } } }
+ 
++/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
++#ifndef IN6ADDR_ANY_INIT
++#define IN6ADDR_ANY_INIT      ZSOCK_IN6ADDR_ANY_INIT
++#endif
++#ifndef IN6ADDR_LOOPBACK_INIT
++#define IN6ADDR_LOOPBACK_INIT ZSOCK_IN6ADDR_LOOPBACK_INIT
++#endif
++
+ /** IPv4 any address */
+ #define ZSOCK_INADDR_ANY 0
+ 
+ /** IPv4 broadcast address */
+ #define ZSOCK_INADDR_BROADCAST 0xffffffff
+ 
++/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
++#ifndef INADDR_ANY
++#define INADDR_ANY        ZSOCK_INADDR_ANY
++#endif
++#ifndef INADDR_BROADCAST
++#define INADDR_BROADCAST  ZSOCK_INADDR_BROADCAST
++#endif
++
+ /** IPv4 address initializer */
+ #define INADDR_ANY_INIT { { { ZSOCK_INADDR_ANY } } }
+ 
+@@ -466,6 +664,14 @@ extern const struct zsock_in6_addr zsock_in6addr_loopback;
+  */
+ #define ZSOCK_INET6_ADDRSTRLEN 46
+ 
++/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
++#ifndef INET_ADDRSTRLEN
++#define INET_ADDRSTRLEN   ZSOCK_INET_ADDRSTRLEN
++#endif
++#ifndef INET6_ADDRSTRLEN
++#define INET6_ADDRSTRLEN  ZSOCK_INET6_ADDRSTRLEN
++#endif
++
+ /** @cond INTERNAL_HIDDEN */
+ 
+ /* These are for internal usage of the stack */
+diff --git a/include/zephyr/net/socket.h b/include/zephyr/net/socket.h
+index f697c8186d5..4b1437342c9 100644
+--- a/include/zephyr/net/socket.h
++++ b/include/zephyr/net/socket.h
+@@ -78,6 +78,23 @@ extern "C" {
+ #define ZSOCK_MSG_DONTWAIT 0x40
+ /** zsock_recv: block until the full amount of data can be returned */
+ #define ZSOCK_MSG_WAITALL 0x100
++
++/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
++#ifndef MSG_PEEK
++#define MSG_PEEK       ZSOCK_MSG_PEEK
++#endif
++#ifndef MSG_CTRUNC
++#define MSG_CTRUNC     ZSOCK_MSG_CTRUNC
++#endif
++#ifndef MSG_TRUNC
++#define MSG_TRUNC      ZSOCK_MSG_TRUNC
++#endif
++#ifndef MSG_DONTWAIT
++#define MSG_DONTWAIT   ZSOCK_MSG_DONTWAIT
++#endif
++#ifndef MSG_WAITALL
++#define MSG_WAITALL    ZSOCK_MSG_WAITALL
++#endif
+ /** @} */
+ 
+ /**
+@@ -93,6 +110,17 @@ extern "C" {
+ #define ZSOCK_SHUT_WR 1
+ /** zsock_shutdown: Shut down for both reading and writing */
+ #define ZSOCK_SHUT_RDWR 2
++
++/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
++#ifndef SHUT_RD
++#define SHUT_RD        ZSOCK_SHUT_RD
++#endif
++#ifndef SHUT_WR
++#define SHUT_WR        ZSOCK_SHUT_WR
++#endif
++#ifndef SHUT_RDWR
++#define SHUT_RDWR      ZSOCK_SHUT_RDWR
++#endif
+ /** @} */
+ 
+ /**
+@@ -327,6 +355,11 @@ struct zsock_addrinfo {
+ /** @endcond */
+ };
+ 
++/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
++#ifndef _ADDRINFO_DECLARED
++#define addrinfo zsock_addrinfo
++#endif
++
+ /**
+  * @brief Obtain a file descriptor's associated net context
+  *
+@@ -792,6 +825,27 @@ __syscall int z_zsock_getaddrinfo_internal(const char *host,
+ #define ZSOCK_AI_ADDRCONFIG 0x20
+ /** Assume service (port) is numeric */
+ #define ZSOCK_AI_NUMERICSERV 0x400
++
++/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
++#define AI_PASSIVE     ZSOCK_AI_PASSIVE
++#ifndef AI_CANONNAME
++#define AI_CANONNAME   ZSOCK_AI_CANONNAME
++#endif
++#ifndef AI_NUMERICHOST
++#define AI_NUMERICHOST ZSOCK_AI_NUMERICHOST
++#endif
++#ifndef AI_V4MAPPED
++#define AI_V4MAPPED    ZSOCK_AI_V4MAPPED
++#endif
++#ifndef AI_ALL
++#define AI_ALL         ZSOCK_AI_ALL
++#endif
++#ifndef AI_ADDRCONFIG
++#define AI_ADDRCONFIG  ZSOCK_AI_ADDRCONFIG
++#endif
++#ifndef AI_NUMERICSERV
++#define AI_NUMERICSERV ZSOCK_AI_NUMERICSERV
++#endif
+ /** Extra flags present (see RFC 5014) */
+ #define AI_EXTFLAGS 0x800
+ /** @} */
+@@ -845,8 +899,24 @@ const char *zsock_gai_strerror(int errcode);
+ /** zsock_getnameinfo(): Dummy option for compatibility */
+ #define ZSOCK_NI_DGRAM 16
+ 
++/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
++#define NI_NUMERICHOST ZSOCK_NI_NUMERICHOST
++#ifndef NI_NUMERICSERV
++#define NI_NUMERICSERV ZSOCK_NI_NUMERICSERV
++#endif
++#ifndef NI_NOFQDN
++#define NI_NOFQDN      ZSOCK_NI_NOFQDN
++#endif
++#ifndef NI_NAMEREQD
++#define NI_NAMEREQD    ZSOCK_NI_NAMEREQD
++#endif
++#ifndef NI_DGRAM
++#define NI_DGRAM       ZSOCK_NI_DGRAM
++#endif
++
+ /** zsock_getnameinfo(): Max supported hostname length */
+ #define ZSOCK_NI_MAXHOST 1025
++/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
+ #ifndef NI_MAXHOST
+ #define NI_MAXHOST ZSOCK_NI_MAXHOST
+ #endif
+@@ -880,6 +950,7 @@ int zsock_getnameinfo(const struct zsock_sockaddr *addr, zsock_socklen_t addrlen
+ #else
+ #define ZSOCK_IFNAMSIZ Z_DEVICE_MAX_NAME_LEN
+ #endif
++/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
+ #ifndef IFNAMSIZ
+ #define IFNAMSIZ ZSOCK_IFNAMSIZ
+ #endif
+@@ -961,9 +1032,89 @@ struct ifreq {
+ 
+ /** Socket TX time (when the data should be sent) */
+ #define ZSOCK_SO_TXTIME 61
++
++/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
++#define SOL_SOCKET     ZSOCK_SOL_SOCKET
++#ifndef SO_DEBUG
++#define SO_DEBUG       ZSOCK_SO_DEBUG
++#endif
++#ifndef SO_REUSEADDR
++#define SO_REUSEADDR   ZSOCK_SO_REUSEADDR
++#endif
++#ifndef SO_TYPE
++#define SO_TYPE        ZSOCK_SO_TYPE
++#endif
++#ifndef SO_ERROR
++#define SO_ERROR       ZSOCK_SO_ERROR
++#endif
++#ifndef SO_DONTROUTE
++#define SO_DONTROUTE   ZSOCK_SO_DONTROUTE
++#endif
++#ifndef SO_BROADCAST
++#define SO_BROADCAST   ZSOCK_SO_BROADCAST
++#endif
++#ifndef SO_SNDBUF
++#define SO_SNDBUF      ZSOCK_SO_SNDBUF
++#endif
++#ifndef SO_RCVBUF
++#define SO_RCVBUF      ZSOCK_SO_RCVBUF
++#endif
++#ifndef SO_KEEPALIVE
++#define SO_KEEPALIVE   ZSOCK_SO_KEEPALIVE
++#endif
++#ifndef SO_OOBINLINE
++#define SO_OOBINLINE   ZSOCK_SO_OOBINLINE
++#endif
++#ifndef SO_PRIORITY
++#define SO_PRIORITY    ZSOCK_SO_PRIORITY
++#endif
++#ifndef SO_LINGER
++#define SO_LINGER      ZSOCK_SO_LINGER
++#endif
++#ifndef SO_REUSEPORT
++#define SO_REUSEPORT   ZSOCK_SO_REUSEPORT
++#endif
++#ifndef SO_RCVLOWAT
++#define SO_RCVLOWAT    ZSOCK_SO_RCVLOWAT
++#endif
++#ifndef SO_SNDLOWAT
++#define SO_SNDLOWAT    ZSOCK_SO_SNDLOWAT
++#endif
++#ifndef SO_RCVTIMEO
++#define SO_RCVTIMEO    ZSOCK_SO_RCVTIMEO
++#endif
++#ifndef SO_SNDTIMEO
++#define SO_SNDTIMEO    ZSOCK_SO_SNDTIMEO
++#endif
++#ifndef SO_BINDTODEVICE
++#define SO_BINDTODEVICE ZSOCK_SO_BINDTODEVICE
++#endif
++#ifndef SO_ACCEPTCONN
++#define SO_ACCEPTCONN  ZSOCK_SO_ACCEPTCONN
++#endif
++#ifndef SO_TIMESTAMPING
++#define SO_TIMESTAMPING ZSOCK_SO_TIMESTAMPING
++#endif
++#ifndef SO_PROTOCOL
++#define SO_PROTOCOL    ZSOCK_SO_PROTOCOL
++#endif
++#ifndef SO_DOMAIN
++#define SO_DOMAIN      ZSOCK_SO_DOMAIN
++#endif
++#ifndef SO_SOCKS5
++#define SO_SOCKS5      ZSOCK_SO_SOCKS5
++#endif
++#ifndef SO_TXTIME
++#define SO_TXTIME      ZSOCK_SO_TXTIME
++#endif
+ /** Socket TX time (same as ZSOCK_SO_TXTIME) */
+ #define ZSOCK_SCM_TXTIME ZSOCK_SO_TXTIME
+ 
++/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
++#ifndef SCM_TXTIME
++#define SCM_TXTIME     ZSOCK_SCM_TXTIME
++#endif
++
+ /** Timestamp generation flags */
+ 
+ /** Request RX timestamps generated by network adapter. */
+@@ -992,6 +1143,18 @@ struct ifreq {
+ /** Number of keepalives before dropping connection */
+ #define ZSOCK_TCP_KEEPCNT 4
+ 
++/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
++#define TCP_NODELAY    ZSOCK_TCP_NODELAY
++#ifndef TCP_KEEPIDLE
++#define TCP_KEEPIDLE   ZSOCK_TCP_KEEPIDLE
++#endif
++#ifndef TCP_KEEPINTVL
++#define TCP_KEEPINTVL  ZSOCK_TCP_KEEPINTVL
++#endif
++#ifndef TCP_KEEPCNT
++#define TCP_KEEPCNT    ZSOCK_TCP_KEEPCNT
++#endif
++
+ /** @} */
+ 
+ /**
+@@ -1075,15 +1238,35 @@ struct ip_mreq  {
+ /** Set the unicast hop limit for the socket. */
+ #define ZSOCK_IPV6_UNICAST_HOPS	16
+ 
++/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
++#ifndef IPV6_UNICAST_HOPS
++#define IPV6_UNICAST_HOPS ZSOCK_IPV6_UNICAST_HOPS
++#endif
++
+ /** Set multicast output network interface index for the socket. */
+ #define ZSOCK_IPV6_MULTICAST_IF       17
+ 
++/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
++#ifndef IPV6_MULTICAST_IF
++#define IPV6_MULTICAST_IF   ZSOCK_IPV6_MULTICAST_IF
++#endif
++
+ /** Set the multicast hop limit for the socket. */
+ #define ZSOCK_IPV6_MULTICAST_HOPS 18
+ 
++/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
++#ifndef IPV6_MULTICAST_HOPS
++#define IPV6_MULTICAST_HOPS ZSOCK_IPV6_MULTICAST_HOPS
++#endif
++
+ /** Set the multicast loop bit for the socket. */
+ #define ZSOCK_IPV6_MULTICAST_LOOP 19
+ 
++/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
++#ifndef IPV6_MULTICAST_LOOP
++#define IPV6_MULTICAST_LOOP ZSOCK_IPV6_MULTICAST_LOOP
++#endif
++
+ /** Join IPv6 multicast group. */
+ #define IPV6_ADD_MEMBERSHIP 20
+ 
+@@ -1107,6 +1290,11 @@ struct zsock_ipv6_mreq {
+ 	int ipv6mr_ifindex;
+ };
+ 
++/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
++#ifndef _IPV6_MREQ_DECLARED
++#define ipv6_mreq zsock_ipv6_mreq
++#endif
++
+ /** For getsockopt(), retrieve the current known IPv6 path MTU of the given socket.
+  * Valid only when the socket has been connected.
+  * For setsockopt(), set the MTU to be used for the socket. The MTU is limited by
+@@ -1117,6 +1305,16 @@ struct zsock_ipv6_mreq {
+ /** Don't support IPv4 access */
+ #define ZSOCK_IPV6_V6ONLY 26
+ 
++/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
++#ifndef IPV6_JOIN_GROUP
++#define IPV6_JOIN_GROUP  ZSOCK_IPV6_JOIN_GROUP
++#endif
++#ifndef IPV6_LEAVE_GROUP
++#define IPV6_LEAVE_GROUP ZSOCK_IPV6_LEAVE_GROUP
++#endif
++#ifndef IPV6_V6ONLY
++#define IPV6_V6ONLY      ZSOCK_IPV6_V6ONLY
++#endif
+ /** Pass an IPV6_RECVPKTINFO ancillary message that contains a
+  *  in6_pktinfo structure that supplies some information about the
+  *  incoming packet. See RFC 3542.
+@@ -1141,6 +1339,17 @@ struct zsock_ipv6_mreq {
+ #define ZSOCK_IPV6_PREFER_SRC_TMP             0x0001
+ /** Prefer public address as source. */
+ #define ZSOCK_IPV6_PREFER_SRC_PUBLIC          0x0002
++/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
++#ifndef IPV6_ADDR_PREFERENCES
++#define IPV6_ADDR_PREFERENCES   ZSOCK_IPV6_ADDR_PREFERENCES
++#endif
++#ifndef IPV6_PREFER_SRC_TMP
++#define IPV6_PREFER_SRC_TMP     ZSOCK_IPV6_PREFER_SRC_TMP
++#endif
++#ifndef IPV6_PREFER_SRC_PUBLIC
++#define IPV6_PREFER_SRC_PUBLIC  ZSOCK_IPV6_PREFER_SRC_PUBLIC
++#endif
++
+ /** Either public or temporary address is selected as a default source
+  *  depending on the output interface configuration (this is the default value).
+  *  This is Linux specific option not found in the RFC.
+@@ -1176,6 +1385,11 @@ struct in6_pktinfo {
+  */
+ /** zsock_listen: The maximum backlog queue length */
+ #define ZSOCK_SOMAXCONN 128
++
++/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
++#ifndef SOMAXCONN
++#define SOMAXCONN      ZSOCK_SOMAXCONN
++#endif
+ /** @} */
+ 
+ /**
+@@ -1216,6 +1430,39 @@ struct in6_pktinfo {
+ /** Check IPv6 multicast organization local address */
+ #define ZSOCK_IN6_IS_ADDR_MC_ORGLOCAL(addr) net_ipv6_is_addr_mcast_org(addr)
+ 
++/* TEMP_POSIX_ZSOCK_NS_WORKAROUND */
++#define IN6_IS_ADDR_UNSPECIFIED(addr)  ZSOCK_IN6_IS_ADDR_UNSPECIFIED(addr)
++#ifndef IN6_IS_ADDR_LOOPBACK
++#define IN6_IS_ADDR_LOOPBACK(addr)     ZSOCK_IN6_IS_ADDR_LOOPBACK(addr)
++#endif
++#ifndef IN6_IS_ADDR_MULTICAST
++#define IN6_IS_ADDR_MULTICAST(addr)    ZSOCK_IN6_IS_ADDR_MULTICAST(addr)
++#endif
++#ifndef IN6_IS_ADDR_LINKLOCAL
++#define IN6_IS_ADDR_LINKLOCAL(addr)    ZSOCK_IN6_IS_ADDR_LINKLOCAL(addr)
++#endif
++#ifndef IN6_IS_ADDR_SITELOCAL
++#define IN6_IS_ADDR_SITELOCAL(addr)    ZSOCK_IN6_IS_ADDR_SITELOCAL(addr)
++#endif
++#ifndef IN6_IS_ADDR_V4MAPPED
++#define IN6_IS_ADDR_V4MAPPED(addr)     ZSOCK_IN6_IS_ADDR_V4MAPPED(addr)
++#endif
++#ifndef IN6_IS_ADDR_MC_GLOBAL
++#define IN6_IS_ADDR_MC_GLOBAL(addr)    ZSOCK_IN6_IS_ADDR_MC_GLOBAL(addr)
++#endif
++#ifndef IN6_IS_ADDR_MC_NODELOCAL
++#define IN6_IS_ADDR_MC_NODELOCAL(addr) ZSOCK_IN6_IS_ADDR_MC_NODELOCAL(addr)
++#endif
++#ifndef IN6_IS_ADDR_MC_LINKLOCAL
++#define IN6_IS_ADDR_MC_LINKLOCAL(addr) ZSOCK_IN6_IS_ADDR_MC_LINKLOCAL(addr)
++#endif
++#ifndef IN6_IS_ADDR_MC_SITELOCAL
++#define IN6_IS_ADDR_MC_SITELOCAL(addr) ZSOCK_IN6_IS_ADDR_MC_SITELOCAL(addr)
++#endif
++#ifndef IN6_IS_ADDR_MC_ORGLOCAL
++#define IN6_IS_ADDR_MC_ORGLOCAL(addr)  ZSOCK_IN6_IS_ADDR_MC_ORGLOCAL(addr)
++#endif
++
+ /** @} */
+ 
+ /** @cond INTERNAL_HIDDEN */
+@@ -1297,6 +1544,26 @@ struct socket_op_vtable {
+ 
+ #include <zephyr/syscalls/socket.h>
+ 
++#if defined(CONFIG_POSIX_NETWORKING)
++/* TEMP_POSIX_ZSOCK_NS_WORKAROUND: Include POSIX networking shims to provide function
++ * declarations (socket, bind, connect, …) for hybrid consumers that skip POSIX headers
++ * on Zephyr via #ifndef __ZEPHYR__. netdb.h and net/if.h are intentionally excluded
++ * because their symbols (NI_MAXHOST, IFNAMSIZ) conflict with aliases defined above.
++ * unistd.h is intentionally excluded because it pulls in pathconf.h whose _PC_* enum
++ * members conflict with picolibc _PC_* numeric macros when both are present.
++ * Removed once all hybrid consumers switch to pure POSIX includes.
++ */
++#if !defined(ZEPHYR_INCLUDE_POSIX_SYS_SOCKET_H_)
++#include <zephyr/posix/sys/socket.h>
++#endif
++#if !defined(ZEPHYR_INCLUDE_POSIX_ARPA_INET_H_)
++#include <zephyr/posix/arpa/inet.h>
++#endif
++#if !defined(ZEPHYR_INCLUDE_POSIX_POLL_H_)
++#include <zephyr/posix/poll.h>
++#endif
++#endif /* CONFIG_POSIX_NETWORKING */
++
+ /**
+  * @}
+  */

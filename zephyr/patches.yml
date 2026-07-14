@@ -711,3 +711,50 @@ patches:
       build (already listed in meson.build). Without these, native_sim resolves
       fgetpos()/fsetpos() from host glibc against picolibc FILE objects and hangs.
       Also expose the tinystdio source directory for stdio_private.h includes.
+  - path: zephyr/net-headers-zsock-namespace.patch
+    sha256sum: 0f5961fa66d4ba7ed98625df4cbf46232799f6ddf649a1dce485bfb1de9929ba
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-07
+    upstreamable: true
+    comments: |
+      Namespace POSIX networking symbols in Zephyr's own network headers to
+      zsock_/ZSOCK_ canonical names, including sockaddr_ll/can/un struct tags,
+      log_backend_net_set_ip(), and tracing_ctf.h prototypes. Unprefixed
+      POSIX-compat aliases live in net-headers-zsock-compat-aliases.patch.
+      Headers only; subsys/net and driver C code is handled in phase 2 patches.
+  - path: zephyr/net-headers-zsock-doxygen.patch
+    sha256sum: b3cc89464c764e51cc70571eeec2980563af4777c19d7c7ac18adb7422409b3c
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-14
+    upstreamable: true
+    comments: |
+      Remove POSIX cross-references from Zephyr socket.h Doxygen and document
+      zsock_* APIs with @param and @retval. Place directly after
+      net-headers-zsock-namespace.patch.
+  - path: zephyr/net-headers-zsock-compat-aliases.patch
+    sha256sum: 8df99bc44ff690fff3b6437d3da73d65017e0c4dd13098f969b51678fa96d6c2
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-09
+    upstreamable: true
+    comments: |
+      Unprefixed POSIX-compat aliases inline in net_ip.h and socket.h after
+      net-headers-zsock-namespace.patch (#define AF_INET ZSOCK_AF_INET, etc.).
+      Temporary bridge during consumer migration. Removed in phase 4.
+      All compat-alias groups tagged with TEMP_POSIX_ZSOCK_NS_WORKAROUND.
+  - path: zephyr/net-headers-zsock-alias-guards.patch
+    sha256sum: d8d8403f22daa6984687d74843ba6c300ab2aa7ff92826b2305623e2f9b654bc
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-11
+    upstreamable: true
+    comments: |
+      Set _DECLARED guards inside each compat alias block in net_ip.h and
+      socket.h so that POSIX headers included after Zephyr headers skip
+      redefining types that are already aliased (fixes hybrid build order).

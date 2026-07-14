@@ -1,0 +1,698 @@
+diff --git a/include/zephyr/net/socket.h b/include/zephyr/net/socket.h
+index 88e771a0572..f697c8186d5 100644
+--- a/include/zephyr/net/socket.h
++++ b/include/zephyr/net/socket.h
+@@ -43,7 +43,7 @@ extern "C" {
+ #endif
+
+ /**
+- * @name Options for poll()
++ * @name Options for zsock_poll()
+  * @{
+  */
+ /* ZSOCK_POLL* values alias ZVFS poll flags in fdtable.h */
+@@ -81,12 +81,11 @@ extern "C" {
+ /** @} */
+
+ /**
+- * @name Options for shutdown() function
++ * @name Options for zsock_shutdown()
+  * @{
+  */
+-/* Well-known values, e.g. from Linux man 2 shutdown:
+- * "The constants SHUT_RD, SHUT_WR, SHUT_RDWR have the value 0, 1, 2,
+- * respectively". Some software uses numeric values.
++/* ZSOCK_SHUT_* use the conventional values 0, 1, and 2 for read, write,
++ * and both directions respectively.
+  */
+ /** zsock_shutdown: Shut down for reading */
+ #define ZSOCK_SHUT_RD 0
+@@ -146,7 +145,7 @@ extern "C" {
+ #define TLS_PEER_VERIFY 5
+ /** Write-only socket option to set role for DTLS connection. This option
+  *  is irrelevant for TLS connections, as for them role is selected based on
+- *  connect()/listen() usage. By default, DTLS will assume client role.
++ *  zsock_connect()/zsock_listen() usage. By default, DTLS will assume client role.
+  *  This option accepts an integer with a TLS role, compatible with
+  *  mbedTLS values:
+  *    - 0 - client
+@@ -230,12 +229,12 @@ extern "C" {
+  *  connection ID, otherwise will contain the length of the CID value.
+  */
+ #define TLS_DTLS_PEER_CID_VALUE 17
+-/** Socket option to configure DTLS socket behavior on connect().
+- *  If set, DTLS connect() will execute the handshake with the configured peer.
++/** Socket option to configure DTLS socket behavior on zsock_connect().
++ *  If set, zsock_connect() will execute the handshake with the configured peer.
+  *  This is the default behavior.
+- *  Otherwise, DTLS connect() will only configure peer address (as with regular
++ *  Otherwise, zsock_connect() will only configure peer address (as with regular
+  *  UDP socket) and will not attempt to execute DTLS handshake. The handshake
+- *  will take place in consecutive send()/recv() call.
++ *  will take place in consecutive zsock_send()/zsock_recv() calls.
+  */
+ #define TLS_DTLS_HANDSHAKE_ON_CONNECT 18
+ /** Read-only socket option to obtain the result of the certificate verification
+@@ -308,8 +307,8 @@ struct tls_cert_verify_cb {
+ /**
+  * @brief Definition used when querying address information.
+  *
+- * A linked list of these descriptors is returned by getaddrinfo(). The struct
+- * is also passed as hints when calling the getaddrinfo() function.
++ * A linked list of these descriptors is returned by zsock_getaddrinfo(). The struct
++ * is also passed as hints when calling zsock_getaddrinfo().
+  */
+ struct zsock_addrinfo {
+ 	struct zsock_addrinfo *ai_next; /**< Pointer to next address entry */
+@@ -360,9 +359,10 @@ struct zsock_addrinfo {
+  * used to make permission assignment calls, which follow exactly the rules
+  * for other kernel objects like device drivers and IPC.
+  *
+- * @param sock file descriptor
+- * @return pointer to associated network socket object, or NULL if the
+- *         file descriptor wasn't valid or the caller had no access permission
++ * @param sock File descriptor
++ *
++ * @retval pointer Pointer to associated network socket object
++ * @retval NULL If the file descriptor wasn't valid or the caller had no access permission
+  */
+ __syscall void *zsock_get_context_object(int sock);
+
+@@ -370,39 +370,41 @@ __syscall void *zsock_get_context_object(int sock);
+  * @brief Create a network socket
+  *
+  * @details
+- * See POSIX.1-2017 article
+- * http://pubs.opengroup.org/onlinepubs/9699919799/functions/socket.html
+- * for normative description.
+- * This function is also exposed as `socket()`
+- * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+- *
+  * If CONFIG_USERSPACE is enabled, the caller will be granted access to the
+  * context object associated with the returned file descriptor.
+  * @see zsock_get_context_object()
+  *
++ * @param family Address family (e.g. ZSOCK_AF_INET)
++ * @param type Socket type (e.g. ZSOCK_SOCK_STREAM)
++ * @param proto Protocol (e.g. ZSOCK_IPPROTO_TCP) or 0
++ *
++ * @retval >=0 File descriptor on success
++ * @retval -1 On error, with @em errno set
+  */
+ __syscall int zsock_socket(int family, int type, int proto);
+
+ /**
+  * @brief Create an unnamed pair of connected sockets
+  *
+- * @details
+- * See POSIX.1-2017 article
+- * https://pubs.opengroup.org/onlinepubs/009695399/functions/socketpair.html
+- * for normative description.
+- * This function is also exposed as `socketpair()`
+- * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
++ * @param family Address family (e.g. ZSOCK_AF_UNIX)
++ * @param type Socket type (e.g. ZSOCK_SOCK_STREAM)
++ * @param proto Protocol or 0
++ * @param sv Output array of two file descriptors
++ *
++ * @retval 0 On success
++ * @retval -1 On error, with @em errno set
+  */
+ __syscall int zsock_socketpair(int family, int type, int proto, int *sv);
+
+ /**
+  * @brief Close a network socket
+  *
+- * @details
+- * Close a network socket.
+- * This function is also exposed as `close()`
+- * if @kconfig{CONFIG_POSIX_NETWORKING} is defined (in which case it
+- * may conflict with generic POSIX `close()` function).
++ * @details Close a network socket and release associated resources.
++ *
++ * @param sock Socket file descriptor
++ *
++ * @retval 0 On success
++ * @retval -1 On error, with @em errno set
+  */
+ __syscall int zsock_close(int sock);
+
+@@ -410,24 +412,26 @@ __syscall int zsock_close(int sock);
+  * @brief Shutdown socket send/receive operations
+  *
+  * @details
+- * See POSIX.1-2017 article
+- * http://pubs.opengroup.org/onlinepubs/9699919799/functions/shutdown.html
+- * for normative description, but currently this function has no effect in
+- * Zephyr and provided solely for compatibility with existing code.
+- * This function is also exposed as `shutdown()`
+- * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
++ * Currently this function has no effect in Zephyr and is provided solely for
++ * compatibility with existing code.
++ *
++ * @param sock Socket file descriptor
++ * @param how Shutdown mode (ZSOCK_SHUT_RD, ZSOCK_SHUT_WR, or ZSOCK_SHUT_RDWR)
++ *
++ * @retval 0 On success
++ * @retval -1 On error, with @em errno set
+  */
+ __syscall int zsock_shutdown(int sock, int how);
+
+ /**
+  * @brief Bind a socket to a local network address
+  *
+- * @details
+- * See POSIX.1-2017 article
+- * http://pubs.opengroup.org/onlinepubs/9699919799/functions/bind.html
+- * for normative description.
+- * This function is also exposed as `bind()`
+- * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
++ * @param sock Socket file descriptor
++ * @param addr Local address to bind
++ * @param addrlen Length of @p addr
++ *
++ * @retval 0 On success
++ * @retval -1 On error, with @em errno set
+  */
+ __syscall int zsock_bind(int sock, const struct zsock_sockaddr *addr,
+ 			 zsock_socklen_t addrlen);
+@@ -435,12 +439,12 @@ __syscall int zsock_bind(int sock, const struct zsock_sockaddr *addr,
+ /**
+  * @brief Connect a socket to a peer network address
+  *
+- * @details
+- * See POSIX.1-2017 article
+- * http://pubs.opengroup.org/onlinepubs/9699919799/functions/connect.html
+- * for normative description.
+- * This function is also exposed as `connect()`
+- * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
++ * @param sock Socket file descriptor
++ * @param addr Peer address to connect to
++ * @param addrlen Length of @p addr
++ *
++ * @retval 0 On success
++ * @retval -1 On error, with @em errno set
+  */
+ __syscall int zsock_connect(int sock, const struct zsock_sockaddr *addr,
+ 			    zsock_socklen_t addrlen);
+@@ -448,36 +452,39 @@ __syscall int zsock_connect(int sock, const struct zsock_sockaddr *addr,
+ /**
+  * @brief Set up a STREAM socket to accept peer connections
+  *
+- * @details
+- * See POSIX.1-2017 article
+- * http://pubs.opengroup.org/onlinepubs/9699919799/functions/listen.html
+- * for normative description.
+- * This function is also exposed as `listen()`
+- * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
++ * @param sock Socket file descriptor
++ * @param backlog Maximum pending connections in the accept queue
++ *
++ * @retval 0 On success
++ * @retval -1 On error, with @em errno set
+  */
+ __syscall int zsock_listen(int sock, int backlog);
+
+ /**
+  * @brief Accept a connection on listening socket
+  *
+- * @details
+- * See POSIX.1-2017 article
+- * http://pubs.opengroup.org/onlinepubs/9699919799/functions/accept.html
+- * for normative description.
+- * This function is also exposed as `accept()`
+- * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
++ * @param sock Listening socket file descriptor
++ * @param addr Optional output peer address; may be NULL
++ * @param addrlen On input length of @p addr buffer; on output actual address length.
++ *                May be NULL if @p addr is NULL
++ *
++ * @retval >=0 New connected socket file descriptor on success
++ * @retval -1 On error, with @em errno set
+  */
+ __syscall int zsock_accept(int sock, struct zsock_sockaddr *addr, zsock_socklen_t *addrlen);
+
+ /**
+  * @brief Send data to an arbitrary network address
+  *
+- * @details
+- * See POSIX.1-2017 article
+- * http://pubs.opengroup.org/onlinepubs/9699919799/functions/sendto.html
+- * for normative description.
+- * This function is also exposed as `sendto()`
+- * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
++ * @param sock Socket file descriptor
++ * @param buf Data buffer to send
++ * @param len Number of bytes to send
++ * @param flags Send flags (e.g. ZSOCK_MSG_DONTWAIT)
++ * @param dest_addr Destination address, or NULL for a connected socket
++ * @param addrlen Length of @p dest_addr
++ *
++ * @retval >=0 Number of bytes sent on success
++ * @retval -1 On error, with @em errno set
+  */
+ __syscall ssize_t zsock_sendto(int sock, const void *buf, size_t len,
+ 			       int flags, const struct zsock_sockaddr *dest_addr,
+@@ -486,12 +493,13 @@ __syscall ssize_t zsock_sendto(int sock, const void *buf, size_t len,
+ /**
+  * @brief Send data to a connected peer
+  *
+- * @details
+- * See POSIX.1-2017 article
+- * http://pubs.opengroup.org/onlinepubs/9699919799/functions/send.html
+- * for normative description.
+- * This function is also exposed as `send()`
+- * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
++ * @param sock Socket file descriptor
++ * @param buf Data buffer to send
++ * @param len Number of bytes to send
++ * @param flags Send flags (e.g. ZSOCK_MSG_DONTWAIT)
++ *
++ * @retval >=0 Number of bytes sent on success
++ * @retval -1 On error, with @em errno set
+  */
+ static inline ssize_t zsock_send(int sock, const void *buf, size_t len,
+ 				 int flags)
+@@ -500,14 +508,14 @@ static inline ssize_t zsock_send(int sock, const void *buf, size_t len,
+ }
+
+ /**
+- * @brief Send data to an arbitrary network address
++ * @brief Send a message to an arbitrary network address
+  *
+- * @details
+- * See POSIX.1-2017 article
+- * http://pubs.opengroup.org/onlinepubs/9699919799/functions/sendmsg.html
+- * for normative description.
+- * This function is also exposed as `sendmsg()`
+- * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
++ * @param sock Socket file descriptor
++ * @param msg Message header describing buffers and optional destination
++ * @param flags Send flags (e.g. ZSOCK_MSG_DONTWAIT)
++ *
++ * @retval >=0 Number of bytes sent on success
++ * @retval -1 On error, with @em errno set
+  */
+ __syscall ssize_t zsock_sendmsg(int sock, const struct zsock_msghdr *msg,
+ 				int flags);
+@@ -515,12 +523,16 @@ __syscall ssize_t zsock_sendmsg(int sock, const struct zsock_msghdr *msg,
+ /**
+  * @brief Receive data from an arbitrary network address
+  *
+- * @details
+- * See POSIX.1-2017 article
+- * http://pubs.opengroup.org/onlinepubs/9699919799/functions/recvfrom.html
+- * for normative description.
+- * This function is also exposed as `recvfrom()`
+- * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
++ * @param sock Socket file descriptor
++ * @param buf Buffer to receive into
++ * @param max_len Capacity of @p buf
++ * @param flags Receive flags (e.g. ZSOCK_MSG_PEEK, ZSOCK_MSG_DONTWAIT)
++ * @param src_addr Optional output source address; may be NULL
++ * @param addrlen On input length of @p src_addr; on output actual address length.
++ *                May be NULL if @p src_addr is NULL
++ *
++ * @retval >=0 Number of bytes received on success
++ * @retval -1 On error, with @em errno set
+  */
+ __syscall ssize_t zsock_recvfrom(int sock, void *buf, size_t max_len,
+ 				 int flags, struct zsock_sockaddr *src_addr,
+@@ -529,24 +541,25 @@ __syscall ssize_t zsock_recvfrom(int sock, void *buf, size_t max_len,
+ /**
+  * @brief Receive a message from an arbitrary network address
+  *
+- * @details
+- * See POSIX.1-2017 article
+- * http://pubs.opengroup.org/onlinepubs/9699919799/functions/recvmsg.html
+- * for normative description.
+- * This function is also exposed as `recvmsg()`
+- * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
++ * @param sock Socket file descriptor
++ * @param msg Message header describing receive buffers and optional source
++ * @param flags Receive flags (e.g. ZSOCK_MSG_PEEK, ZSOCK_MSG_DONTWAIT)
++ *
++ * @retval >=0 Number of bytes received on success
++ * @retval -1 On error, with @em errno set
+  */
+ __syscall ssize_t zsock_recvmsg(int sock, struct zsock_msghdr *msg, int flags);
+
+ /**
+  * @brief Receive data from a connected peer
+  *
+- * @details
+- * See POSIX.1-2017 article
+- * http://pubs.opengroup.org/onlinepubs/9699919799/functions/recv.html
+- * for normative description.
+- * This function is also exposed as `recv()`
+- * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
++ * @param sock Socket file descriptor
++ * @param buf Buffer to receive into
++ * @param max_len Capacity of @p buf
++ * @param flags Receive flags (e.g. ZSOCK_MSG_PEEK, ZSOCK_MSG_DONTWAIT)
++ *
++ * @retval >=0 Number of bytes received on success
++ * @retval -1 On error, with @em errno set
+  */
+ static inline ssize_t zsock_recv(int sock, void *buf, size_t max_len,
+ 				 int flags)
+@@ -558,11 +571,15 @@ static inline ssize_t zsock_recv(int sock, void *buf, size_t max_len,
+  * @brief Control blocking/non-blocking mode of a socket
+  *
+  * @details
+- * This functions allow to (only) configure a socket for blocking or
+- * non-blocking operation (O_NONBLOCK).
+- * This function is also exposed as `fcntl()`
+- * if @kconfig{CONFIG_POSIX_NETWORKING} is defined (in which case
+- * it may conflict with generic POSIX `fcntl()` function).
++ * Configure a socket for blocking or non-blocking operation (O_NONBLOCK).
++ * Applications should call this via the @c zsock_fcntl() wrapper macro.
++ *
++ * @param sock Socket file descriptor
++ * @param cmd File-control command (e.g. F_GETFL, F_SETFL)
++ * @param flags Command-specific argument (for F_SETFL, open flags including O_NONBLOCK)
++ *
++ * @retval >=0 Command-specific non-negative result on success
++ * @retval -1 On error, with @em errno set
+  */
+ __syscall int zsock_fcntl_impl(int sock, int cmd, int flags);
+
+@@ -591,16 +608,18 @@ static inline int zsock_fcntl_wrapper(int sock, int cmd, ...)
+  * @brief Control underlying socket parameters
+  *
+  * @details
+- * See POSIX.1-2017 article
+- * https://pubs.opengroup.org/onlinepubs/9699919799/functions/ioctl.html
+- * for normative description.
+- * This function enables querying or manipulating underlying socket parameters.
+- * Currently supported @p request values include `ZFD_IOCTL_FIONBIO`, and
+- * `ZFD_IOCTL_FIONREAD`, to set non-blocking mode, and query the number of
++ * Query or manipulate underlying socket parameters.
++ * Currently supported @p request values include `ZFD_IOCTL_FIONBIO` and
++ * `ZFD_IOCTL_FIONREAD` to set non-blocking mode and query the number of
+  * bytes available to read, respectively.
+- * This function is also exposed as `ioctl()`
+- * if @kconfig{CONFIG_POSIX_NETWORKING} is defined (in which case
+- * it may conflict with generic POSIX `ioctl()` function).
++ * Applications should call this via the @c zsock_ioctl() wrapper macro.
++ *
++ * @param sock Socket file descriptor
++ * @param request Ioctl request code
++ * @param ap Variadic argument list for the request
++ *
++ * @retval >=0 Request-specific non-negative result on success
++ * @retval -1 On error, with @em errno set
+  */
+ __syscall int zsock_ioctl_impl(int sock, unsigned long request, va_list ap);
+
+@@ -625,13 +644,15 @@ static inline int zsock_ioctl_wrapper(int sock, unsigned long request, ...)
+ /**
+  * @brief Efficiently poll multiple sockets for events
+  *
+- * @details
+- * See POSIX.1-2017 article
+- * http://pubs.opengroup.org/onlinepubs/9699919799/functions/poll.html
+- * for normative description.
+- * This function is also exposed as `poll()`
+- * if @kconfig{CONFIG_POSIX_NETWORKING} is defined (in which case
+- * it may conflict with generic POSIX `poll()` function).
++ * @details Poll multiple sockets for readiness and exceptional conditions.
++ *
++ * @param fds Array of poll file descriptors
++ * @param nfds Number of entries in @p fds
++ * @param timeout Timeout in milliseconds, or -1 to wait indefinitely
++ *
++ * @retval >0 Number of file descriptors with revents set
++ * @retval 0 Timeout expired with no events
++ * @retval -1 On error, with @em errno set
+  */
+ static inline int zsock_poll(struct zsock_pollfd *fds, int nfds, int timeout)
+ {
+@@ -642,14 +663,18 @@ static inline int zsock_poll(struct zsock_pollfd *fds, int nfds, int timeout)
+  * @brief Get various socket options
+  *
+  * @details
+- * See POSIX.1-2017 article
+- * http://pubs.opengroup.org/onlinepubs/9699919799/functions/getsockopt.html
+- * for normative description. In Zephyr this function supports a subset of
+- * socket options described by POSIX, but also some additional options
+- * available in Linux (some options are dummy and provided to ease porting
+- * of existing code).
+- * This function is also exposed as `getsockopt()`
+- * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
++ * In Zephyr this function supports a subset of standard socket options, but
++ * also some additional options available in Linux (some options are dummy and
++ * provided to ease porting of existing code).
++ *
++ * @param sock Socket file descriptor
++ * @param level Protocol level (e.g. ZSOCK_SOL_SOCKET)
++ * @param optname Option name
++ * @param optval Buffer to receive option value
++ * @param optlen On input capacity of @p optval; on output actual value length
++ *
++ * @retval 0 On success
++ * @retval -1 On error, with @em errno set
+  */
+ __syscall int zsock_getsockopt(int sock, int level, int optname,
+ 			       void *optval, zsock_socklen_t *optlen);
+@@ -658,14 +683,18 @@ __syscall int zsock_getsockopt(int sock, int level, int optname,
+  * @brief Set various socket options
+  *
+  * @details
+- * See POSIX.1-2017 article
+- * http://pubs.opengroup.org/onlinepubs/9699919799/functions/setsockopt.html
+- * for normative description. In Zephyr this function supports a subset of
+- * socket options described by POSIX, but also some additional options
+- * available in Linux (some options are dummy and provided to ease porting
+- * of existing code).
+- * This function is also exposed as `setsockopt()`
+- * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
++ * In Zephyr this function supports a subset of standard socket options, but
++ * also some additional options available in Linux (some options are dummy and
++ * provided to ease porting of existing code).
++ *
++ * @param sock Socket file descriptor
++ * @param level Protocol level (e.g. ZSOCK_SOL_SOCKET)
++ * @param optname Option name
++ * @param optval Option value to set
++ * @param optlen Length of @p optval
++ *
++ * @retval 0 On success
++ * @retval -1 On error, with @em errno set
+  */
+ __syscall int zsock_setsockopt(int sock, int level, int optname,
+ 			       const void *optval, zsock_socklen_t optlen);
+@@ -673,12 +702,12 @@ __syscall int zsock_setsockopt(int sock, int level, int optname,
+ /**
+  * @brief Get peer name
+  *
+- * @details
+- * See POSIX.1-2017 article
+- * http://pubs.opengroup.org/onlinepubs/9699919799/functions/getpeername.html
+- * for normative description.
+- * This function is also exposed as `getpeername()`
+- * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
++ * @param sock Socket file descriptor
++ * @param addr Output peer address
++ * @param addrlen On input length of @p addr buffer; on output actual address length
++ *
++ * @retval 0 On success
++ * @retval -1 On error, with @em errno set
+  */
+ __syscall int zsock_getpeername(int sock, struct zsock_sockaddr *addr,
+ 				zsock_socklen_t *addrlen);
+@@ -686,12 +715,12 @@ __syscall int zsock_getpeername(int sock, struct zsock_sockaddr *addr,
+ /**
+  * @brief Get socket name
+  *
+- * @details
+- * See POSIX.1-2017 article
+- * http://pubs.opengroup.org/onlinepubs/9699919799/functions/getsockname.html
+- * for normative description.
+- * This function is also exposed as `getsockname()`
+- * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
++ * @param sock Socket file descriptor
++ * @param addr Output local address
++ * @param addrlen On input length of @p addr buffer; on output actual address length
++ *
++ * @retval 0 On success
++ * @retval -1 On error, with @em errno set
+  */
+ __syscall int zsock_getsockname(int sock, struct zsock_sockaddr *addr,
+ 				zsock_socklen_t *addrlen);
+@@ -699,24 +728,23 @@ __syscall int zsock_getsockname(int sock, struct zsock_sockaddr *addr,
+ /**
+  * @brief Get local host name
+  *
+- * @details
+- * See POSIX.1-2017 article
+- * http://pubs.opengroup.org/onlinepubs/9699919799/functions/gethostname.html
+- * for normative description.
+- * This function is also exposed as `gethostname()`
+- * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
++ * @param buf Buffer to receive the host name
++ * @param len Capacity of @p buf
++ *
++ * @retval 0 On success
++ * @retval -1 On error, with @em errno set
+  */
+ __syscall int zsock_gethostname(char *buf, size_t len);
+
+ /**
+  * @brief Convert network address from internal to numeric ASCII form
+  *
+- * @details
+- * See POSIX.1-2017 article
+- * http://pubs.opengroup.org/onlinepubs/9699919799/functions/inet_ntop.html
+- * for normative description.
+- * This function is also exposed as `inet_ntop()`
+- * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
++ * @param family Address family (ZSOCK_AF_INET or ZSOCK_AF_INET6)
++ * @param src Network address in binary form
++ * @param dst Output buffer for the null-terminated ASCII address
++ * @param size Capacity of @p dst
++ *
++ * @return Pointer to @p dst on success, or NULL on error with @em errno set
+  */
+ static inline char *zsock_inet_ntop(zsock_sa_family_t family, const void *src,
+ 				    char *dst, size_t size)
+@@ -727,12 +755,13 @@ static inline char *zsock_inet_ntop(zsock_sa_family_t family, const void *src,
+ /**
+  * @brief Convert network address from numeric ASCII form to internal representation
+  *
+- * @details
+- * See POSIX.1-2017 article
+- * http://pubs.opengroup.org/onlinepubs/9699919799/functions/inet_pton.html
+- * for normative description.
+- * This function is also exposed as `inet_pton()`
+- * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
++ * @param family Address family (ZSOCK_AF_INET or ZSOCK_AF_INET6)
++ * @param src Null-terminated ASCII address
++ * @param dst Output buffer for the binary address
++ *
++ * @retval 1 Conversion succeeded
++ * @retval 0 @p src is not a valid address for @p family
++ * @retval -1 On error, with @em errno set
+  */
+ __syscall int zsock_inet_pton(zsock_sa_family_t family, const char *src, void *dst);
+
+@@ -743,13 +772,13 @@ __syscall int z_zsock_getaddrinfo_internal(const char *host,
+ 					   struct zsock_addrinfo *res);
+ /** @endcond */
+
+-/* Flags for getaddrinfo() hints. */
++/* Flags for zsock_getaddrinfo() hints. */
+
+ /**
+- * @name Flags for getaddrinfo() hints
++ * @name Flags for zsock_getaddrinfo() hints
+  * @{
+  */
+-/** Address for bind() (vs for connect()) */
++/** Address for zsock_bind() (vs for zsock_connect()) */
+ #define ZSOCK_AI_PASSIVE 0x1
+ /** Fill in ai_canonname */
+ #define ZSOCK_AI_CANONNAME 0x2
+@@ -770,12 +799,14 @@ __syscall int z_zsock_getaddrinfo_internal(const char *host,
+ /**
+  * @brief Resolve a domain name to one or more network addresses
+  *
+- * @details
+- * See POSIX.1-2017 article
+- * http://pubs.opengroup.org/onlinepubs/9699919799/functions/getaddrinfo.html
+- * for normative description.
+- * This function is also exposed as `getaddrinfo()`
+- * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
++ * @param host Host name or numeric address string; may be NULL
++ * @param service Service name or port number string; may be NULL
++ * @param hints Optional criteria for selecting addresses; may be NULL
++ * @param res On success, set to a linked list of results (free with
++ *            zsock_freeaddrinfo())
++ *
++ * @retval 0 On success
++ * @retval nonzero DNS error code on failure (see zsock_gai_strerror())
+  */
+ int zsock_getaddrinfo(const char *host, const char *service,
+ 		      const struct zsock_addrinfo *hints,
+@@ -784,29 +815,23 @@ int zsock_getaddrinfo(const char *host, const char *service,
+ /**
+  * @brief Free results returned by zsock_getaddrinfo()
+  *
+- * @details
+- * See POSIX.1-2017 article
+- * http://pubs.opengroup.org/onlinepubs/9699919799/functions/freeaddrinfo.html
+- * for normative description.
+- * This function is also exposed as `freeaddrinfo()`
+- * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
++ * @param ai Linked list returned by zsock_getaddrinfo(), or NULL
++ *
++ * @return None
+  */
+ void zsock_freeaddrinfo(struct zsock_addrinfo *ai);
+
+ /**
+  * @brief Convert zsock_getaddrinfo() error code to textual message
+  *
+- * @details
+- * See POSIX.1-2017 article
+- * http://pubs.opengroup.org/onlinepubs/9699919799/functions/gai_strerror.html
+- * for normative description.
+- * This function is also exposed as `gai_strerror()`
+- * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
++ * @param errcode Error code returned by zsock_getaddrinfo()
++ *
++ * @return Pointer to a static string describing @p errcode
+  */
+ const char *zsock_gai_strerror(int errcode);
+
+ /**
+- * @name Flags for getnameinfo()
++ * @name Flags for zsock_getnameinfo()
+  * @{
+  */
+ /** zsock_getnameinfo(): Resolve to numeric address. */
+@@ -830,12 +855,16 @@ const char *zsock_gai_strerror(int errcode);
+ /**
+  * @brief Resolve a network address to a domain name or ASCII address
+  *
+- * @details
+- * See POSIX.1-2017 article
+- * http://pubs.opengroup.org/onlinepubs/9699919799/functions/getnameinfo.html
+- * for normative description.
+- * This function is also exposed as `getnameinfo()`
+- * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
++ * @param addr Socket address to resolve
++ * @param addrlen Length of @p addr
++ * @param host Optional buffer for host name / numeric address; may be NULL
++ * @param hostlen Capacity of @p host
++ * @param serv Optional buffer for service / port string; may be NULL
++ * @param servlen Capacity of @p serv
++ * @param flags Resolution flags (e.g. ZSOCK_NI_NUMERICHOST)
++ *
++ * @retval 0 On success
++ * @retval nonzero Error code on failure
+  */
+ int zsock_getnameinfo(const struct zsock_sockaddr *addr, zsock_socklen_t addrlen,
+ 		      char *host, zsock_socklen_t hostlen,
+@@ -906,7 +935,7 @@ struct ifreq {
+
+ /**
+  * Receive timeout
+- * Applies to receive functions like recv(), but not to connect()
++ * Applies to receive functions like zsock_recv(), but not to zsock_connect()
+  */
+ #define ZSOCK_SO_RCVTIMEO 20
+ /** Send timeout */
+@@ -1142,10 +1171,10 @@ struct in6_pktinfo {
+ /** @} */
+
+ /**
+- * @name Backlog size for listen()
++ * @name Backlog size for zsock_listen()
+  * @{
+  */
+-/** listen: The maximum backlog queue length */
++/** zsock_listen: The maximum backlog queue length */
+ #define ZSOCK_SOMAXCONN 128
+ /** @} */
+
