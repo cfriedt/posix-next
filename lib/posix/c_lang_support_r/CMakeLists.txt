@@ -2,14 +2,12 @@
 
 if(NOT CONFIG_TC_PROVIDES_POSIX_C_LANG_SUPPORT_R)
 
-if(CONFIG_MINIMAL_LIBC_STRING_ERROR_TABLE)
-  set(GEN_DIR ${ZEPHYR_BINARY_DIR}/include/generated)
-  set(STRERROR_TABLE_H ${GEN_DIR}/libc/minimal/strerror_table.h)
-
-  set_source_files_properties(
-    ${CMAKE_CURRENT_LIST_DIR}/strerror_r.c
-    PROPERTIES OBJECT_DEPENDS ${STRERROR_TABLE_H}
-  )
+if(TARGET lib__libc__minimal)
+  # strerror_r.c unconditionally includes generated libc/minimal/strerror_table.h.
+  # That file is always produced by lib__libc__minimal (regardless of
+  # CONFIG_MINIMAL_LIBC_STRING_ERROR_TABLE); without this edge, parallel Ninja may
+  # compile strerror_r.c before the generator runs.
+  add_dependencies(zephyr lib__libc__minimal)
 endif()
 
 zephyr_library_sources(
