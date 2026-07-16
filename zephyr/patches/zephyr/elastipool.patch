@@ -1,80 +1,3 @@
-Author: Chris Friedt <chris@fr4.co>
-Date:   Wed Dec 17 12:10:18 2025 -0500
-
-    elastipool: add an elastic object pool implementation
-    
-    This changes adds an elastic object pool, which is a allocator of
-    fixed-size objects that can be configured to have a guaranteed minimum
-    number of objects available for allocation, and can also be configured
-    to support growing (to a user-specified size) with non-guaranteed
-    objects allocated from the heap.
-    
-    Every allocation is tracked and can be safely deallocated when no longer
-    in use.
-    
-    Elastipool was created to address the need of having a common API for
-    both static and dynamic allocation, with potentially different object
-    types that might require specialized allocators. Additionally, it
-    addresses "features" of other in-tree object allocators that can be
-    considered a hinderance in certain use cases.
-    
-    1. elastipool is a simple library
-      - does not depend on kernel primitives
-      - can be used both in kernel context and user context
-      - only depends on hash map if users require dynamic growth
-    
-    2. elastipool is not synchronized
-      - does not require any details of scheduler internals
-      - approach aligns better with traditional data structures
-      - external synchronization objects may be used, if needed, based on
-        the context
-        - `k_spinlock` in driver
-        - `sys_sem` or `k_mutex` in OS services or libraries
-        - no synchronization when only accessed by a single thread
-    
-    3. elastipool does not use a free list
-      - a (non-synchronized) bitmap is used to track fixed allocations
-      - a small tradeoff in speed for space
-      - a hash map is used to track dynamic allocations (if needed)
-    
-    4. elastipool is likely only ISR-safe when used for static allocations.
-    
-    Similarly to drivers, elastipool separates API, config, and data.
-    
-    API and configuration details are compile-time constant and selected
-    based on two input parameters.
-    
-    i) min_elements: the minimum (guaranteed) number of objects in the pool
-    ii) max_elements: the maximum possible number of objects in the pool
-    
-    The max_elements parameter must always be greater than zero, and must
-    always be greater-than or equal-to min_elements.
-    
-    If min_elements is zero, then all allocations are dynamic (from the heap).
-    
-    If min_elements is non-zero, and min_elements is equal to max_elements,
-    then all objects are guaranteed and are drawn from a statically allocated
-    pool (similar to the slab allocator).
-    
-    If max elements is greater than min_elements, then at most min_elements
-    objects are guaranteed to be available, as they are allocated statically,
-    and up to max_elements - min_elements objects may be allocated from the
-    heap.
-    
-    Heap allocation is not guaranteed and is subject to available memory
-    constraints.
-    
-    Users may effectively get a limitless number of allocations by specifying
-    a max_elements parameter of `(size_t)(-1)`. However, doing so may starve
-    the rest of the system of resources.
-    
-    Perhaps the most imminent use case for elastipool is where support is
-    needed for both dynamic and statically allocated number of kernel objects
-    such as threads, thread stacks, semaphores, mutexes, spinlocks, etc, and
-    where there may be specialized allocators required for each based on
-    allocation constraints, kernel vs userspace, and a configurable maximum
-    number of elements.
-
 diff --git a/include/zephyr/sys/elastipool.h b/include/zephyr/sys/elastipool.h
 new file mode 100644
 index 00000000000..b6048ae1916
@@ -529,7 +452,7 @@ index 51413ffc4b5..073f7e38528 100644
 --- a/lib/CMakeLists.txt
 +++ b/lib/CMakeLists.txt
 @@ -5,6 +5,7 @@ add_compile_options($<TARGET_PROPERTY:compiler,warning_shadow_variables>)
- 
+
  add_subdirectory(libc)
  add_subdirectory_ifdef(CONFIG_CPP                  cpp)
 +add_subdirectory(elastipool)
@@ -541,13 +464,13 @@ index 41800484d6b..a9a86d724b4 100644
 --- a/lib/Kconfig
 +++ b/lib/Kconfig
 @@ -9,6 +9,8 @@ source "lib/cpp/Kconfig"
- 
+
  menu "Additional libraries"
- 
+
 +source "lib/elastipool/Kconfig"
 +
  source "lib/hash/Kconfig"
- 
+
  source "lib/heap/Kconfig"
 diff --git a/lib/elastipool/CMakeLists.txt b/lib/elastipool/CMakeLists.txt
 new file mode 100644

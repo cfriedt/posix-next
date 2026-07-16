@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # posix-next documentation build configuration.
-# Reuses Zephyr's Sphinx extensions; ZEPHYR_BASE must be set to the
-# Zephyr v4.3.0 tree (e.g. the sibling zephyr/ directory in the west workspace).
+# Reuses Zephyr's Sphinx extensions; ZEPHYR_BASE must be set to the Zephyr tree
+# pinned in west.yml (e.g. the sibling zephyr/ directory in the west workspace).
 
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -71,15 +72,35 @@ todo_include_todos = False
 
 # -- Intersphinx ---------------------------------------------------------------
 # Route external :ref: targets (threads_v2, kconfig, application, …) and
-# :kconfig:option: references to the upstream Zephyr 4.3.0 docs.
+# :kconfig:option: references to the upstream Zephyr docs matching the revision
+# pinned in west.yml.
 #
 # Use a vendored objects.inv so sphinx-build does not download it on every run.
 # Python's urllib can hang indefinitely when IPv6 routes to docs.zephyrproject.org
 # are broken even though curl -4 works.
 
+
+def _zephyr_version_from_manifest() -> str:
+    """Return the Zephyr docs version (e.g. "4.4.1") pinned in west.yml.
+
+    Falls back to "latest" when the revision is not a vX.Y.Z release tag
+    (branch or SHA pins have no matching versioned docs).
+    """
+    import yaml
+
+    manifest = yaml.safe_load((POSIX_NEXT_BASE / "west.yml").read_text())
+    for prj in manifest["manifest"]["projects"]:
+        if prj.get("name") == "zephyr":
+            revision = str(prj.get("revision", ""))
+            match = re.fullmatch(r"v(\d+\.\d+\.\d+)", revision)
+            return match.group(1) if match else "latest"
+    raise RuntimeError("No 'zephyr' project found in west.yml")
+
+
+ZEPHYR_VERSION = _zephyr_version_from_manifest()
 INTERSPHINX_DIR = Path(__file__).parent / "_intersphinx"
-ZEPHYR_DOCS_BASE = "https://docs.zephyrproject.org/4.3.0/"
-ZEPHYR_OBJECTS_INV = INTERSPHINX_DIR / "zephyr-4.3.0.objects.inv"
+ZEPHYR_DOCS_BASE = f"https://docs.zephyrproject.org/{ZEPHYR_VERSION}/"
+ZEPHYR_OBJECTS_INV = INTERSPHINX_DIR / f"zephyr-{ZEPHYR_VERSION}.objects.inv"
 
 
 def _ensure_zephyr_intersphinx_inventory() -> None:
@@ -144,8 +165,8 @@ html_context = {
     "is_release": False,
     "display_gh_links": True,
     "reference_links": {
-        "Zephyr 4.3.0 docs": "https://docs.zephyrproject.org/4.3.0/",
-        "Zephyr POSIX docs": "https://docs.zephyrproject.org/4.3.0/services/portability/posix/index.html",
+        f"Zephyr {ZEPHYR_VERSION} docs": ZEPHYR_DOCS_BASE,
+        "Zephyr POSIX docs": f"{ZEPHYR_DOCS_BASE}services/portability/posix/index.html",
         "Open Group POSIX": "https://pubs.opengroup.org/onlinepubs/9699919799/",
     },
 }

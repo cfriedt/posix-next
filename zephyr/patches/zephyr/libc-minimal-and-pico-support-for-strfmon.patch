@@ -1,20 +1,10 @@
-commit d0475f3e1834d85357772088c6d39f0097ec9b20
-Author: Chris Friedt <cfriedt@tenstorrent.com>
-Date:   Thu Nov 20 13:13:50 2025 -0500
-
-    lib: minimal + picolibc: required changes to support strfmon()
-    
-    Required changes to support strfmon()
-    
-    Signed-off-by: Chris Friedt <cfriedt@tenstorrent.com>
-
 diff --git a/lib/libc/minimal/CMakeLists.txt b/lib/libc/minimal/CMakeLists.txt
-index ce5438007c9..efca233cb4b 100644
+index 29f2db74367..f61506ae658 100644
 --- a/lib/libc/minimal/CMakeLists.txt
 +++ b/lib/libc/minimal/CMakeLists.txt
 @@ -15,6 +15,7 @@ zephyr_library_compile_options($<TARGET_PROPERTY:compiler,no_builtin>)
  zephyr_library_compile_options($<TARGET_PROPERTY:compiler,prohibit_lto>)
- 
+
  zephyr_library_sources(
 +  source/locale/locale.c
    source/stdlib/atoi.c
@@ -147,24 +137,6 @@ index 00000000000..b4c5dc0c5dd
 +{
 +	return (struct lconv*)&C_lconv;
 +}
-diff --git a/lib/libc/picolibc/include/monetary.h b/lib/libc/picolibc/include/monetary.h
-new file mode 100644
-index 00000000000..ba3e494a0ba
---- /dev/null
-+++ b/lib/libc/picolibc/include/monetary.h
-@@ -0,0 +1,12 @@
-+/*
-+ * Copyright The Zephyr Project Contributors
-+ *
-+ * SPDX-License-Identifier: Apache-2.0
-+ */
-+
-+#ifndef ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_MONETARY_H_
-+#define ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_MONETARY_H_
-+
-+#include <zephyr/posix/monetary.h>
-+
-+#endif /* ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_MONETARY_H_ */
 diff --git a/lib/libc/newlib/include/monetary.h b/lib/libc/newlib/include/monetary.h
 new file mode 100644
 index 00000000000..f3a2cf4bc74
@@ -183,3 +155,21 @@ index 00000000000..f3a2cf4bc74
 +#include <zephyr/posix/monetary.h>
 +
 +#endif /* ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_MONETARY_H_ */
+diff --git a/lib/libc/picolibc/include/monetary.h b/lib/libc/picolibc/include/monetary.h
+new file mode 100644
+index 00000000000..ba3e494a0ba
+--- /dev/null
++++ b/lib/libc/picolibc/include/monetary.h
+@@ -0,0 +1,12 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_MONETARY_H_
++#define ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_MONETARY_H_
++
++#include <zephyr/posix/monetary.h>
++
++#endif /* ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_MONETARY_H_ */

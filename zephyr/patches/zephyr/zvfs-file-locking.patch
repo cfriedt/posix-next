@@ -3,17 +3,17 @@ index 52322c7c471..5403ce8afd4 100644
 --- a/include/zephyr/sys/internal/fdtable_priv.h
 +++ b/include/zephyr/sys/internal/fdtable_priv.h
 @@ -8,6 +8,7 @@
- 
+
  #include <zephyr/kernel.h>
  #include <zephyr/sys/atomic.h>
 +#include <stdio.h>
- 
+
  #ifdef __cplusplus
  extern "C" {
 @@ -28,6 +29,14 @@ struct fd_entry {
  struct fd_entry *zvfs_fd_entry_get(int fd);
  struct fd_entry *zvfs_fd_syscall_verify(int fd);
- 
+
 +bool supports_pread_pwrite(uint32_t mode);
 +ssize_t zvfs_rw_unlocked(int fd, void *buf, size_t sz, bool is_write, const size_t *from_offset);
 +
@@ -26,7 +26,7 @@ index 52322c7c471..5403ce8afd4 100644
  }
  #endif
 diff --git a/lib/libc/Kconfig b/lib/libc/Kconfig
-index abe4d75ad82..0ebd622442b 100644
+index dc2d8496ce1..e1ed14f9604 100644
 --- a/lib/libc/Kconfig
 +++ b/lib/libc/Kconfig
 @@ -105,6 +105,7 @@ config PICOLIBC
@@ -42,7 +42,7 @@ index a5236c7cfe6..64bc8e482e7 100644
 --- a/lib/libc/minimal/source/stdio/stdout_console.c
 +++ b/lib/libc/minimal/source/stdio/stdout_console.c
 @@ -190,3 +190,16 @@ int puts(const char *s)
- 
+
  	return (fputc('\n', stdout) == EOF) ? EOF : 0;
  }
 +
@@ -58,31 +58,34 @@ index a5236c7cfe6..64bc8e482e7 100644
 +
 +	return (int)n;
 +}
-diff --git a/lib/os/zvfs/CMakeLists.txt b/lib/os/zvfs/CMakeLists.txt
-index a801fd93a53..f9b34bc32e2 100644
---- a/lib/os/zvfs/CMakeLists.txt
-+++ b/lib/os/zvfs/CMakeLists.txt
-@@ -7,6 +7,7 @@ zephyr_library()
- zephyr_library_sources_ifdef(CONFIG_FDTABLE
-   zvfs_fdtable.c
-   zvfs_rw.c
-+  zvfs_file_locking.c
-   zvfs_close.c
-   zvfs_lseek.c
-   zvfs_fstat.c
 diff --git a/lib/os/zvfs/zvfs_fdtable.c b/lib/os/zvfs/zvfs_fdtable.c
-index b76cc02f8ef..30f3f33b429 100644
+index 63743b39c3c..baf9d1d1a15 100644
 --- a/lib/os/zvfs/zvfs_fdtable.c
 +++ b/lib/os/zvfs/zvfs_fdtable.c
-@@ -364,7 +364,7 @@ static ssize_t stdinout_read_vmeth(void *obj, void *buffer, size_t count)
- 
+@@ -470,7 +470,7 @@ int zvfs_rename(const char *old, const char *newp)
+ 	return 0;
+ }
+
+-#if defined(CONFIG_POSIX_DEVICE_IO)
++#if defined(CONFIG_POSIX_DEVICE_IO) || defined(CONFIG_ZVFS_RESERVE_STDIO_FDS)
+ /*
+  * fd operations for stdio/stdout/stderr
+  */
+@@ -484,7 +484,7 @@ static ssize_t stdinout_read_vmeth(void *obj, void *buffer, size_t count)
+
  static ssize_t stdinout_write_vmeth(void *obj, const void *buffer, size_t count)
  {
 -#if defined(CONFIG_NEWLIB_LIBC) || defined(CONFIG_ARCMWDT_LIBC)
 +#if defined(CONFIG_NEWLIB_LIBC) || defined(CONFIG_ARCMWDT_LIBC) || defined(CONFIG_MINIMAL_LIBC)
- 	ARG_UNUSED(obj);
- 
  	return z_impl_zephyr_write_stdout(buffer, count);
+ #else
+ 	return 0;
+@@ -503,4 +503,4 @@ static const struct fd_op_vtable stdinout_fd_op_vtable = {
+ 	.ioctl = stdinout_ioctl_vmeth,
+ };
+
+-#endif /* defined(CONFIG_POSIX_DEVICE_IO) */
++#endif /* defined(CONFIG_POSIX_DEVICE_IO) || defined(CONFIG_ZVFS_RESERVE_STDIO_FDS) */
 diff --git a/lib/os/zvfs/zvfs_file_locking.c b/lib/os/zvfs/zvfs_file_locking.c
 new file mode 100644
 index 00000000000..3ecb2071008
@@ -197,7 +200,7 @@ index c5263e99444..2cbfc877ef6 100644
 @@ -9,7 +9,7 @@
  #include <zephyr/sys/internal/fdtable_priv.h>
  #include <zephyr/internal/syscall_handler.h>
- 
+
 -static bool supports_pread_pwrite(uint32_t mode)
 +bool supports_pread_pwrite(uint32_t mode)
  {
@@ -206,7 +209,7 @@ index c5263e99444..2cbfc877ef6 100644
 @@ -19,48 +19,68 @@ static bool supports_pread_pwrite(uint32_t mode)
  	}
  }
- 
+
 -static ssize_t zvfs_rw(int fd, void *buf, size_t sz, bool is_write, const size_t *from_offset)
 +static ssize_t zvfs_rw_entry(struct fd_entry *entry, void *buf, size_t sz, bool is_write,
 +			     const size_t *from_offset)
@@ -221,7 +224,7 @@ index c5263e99444..2cbfc877ef6 100644
 -	}
 -
 -	(void)k_mutex_lock(&entry->lock, K_FOREVER);
- 
+
  	prw = supports_pread_pwrite(entry->mode);
  	if (from_offset != NULL && !prw) {
  		errno = ENOTSUP;
@@ -229,9 +232,9 @@ index c5263e99444..2cbfc877ef6 100644
 -		goto unlock;
 +		return -1;
  	}
- 
+
  	off = (from_offset == NULL) ? &entry->offset : from_offset;
- 
+
  	if (is_write) {
  		if (entry->vtable->write_offs == NULL) {
 -			res = -1;
@@ -257,7 +260,7 @@ index c5263e99444..2cbfc877ef6 100644
  	if (res > 0 && from_offset == NULL) {
  		entry->offset += res;
  	}
- 
+
 -unlock:
 +	return res;
 +}
@@ -287,5 +290,5 @@ index c5263e99444..2cbfc877ef6 100644
 +	res = zvfs_rw_entry(entry, buf, sz, is_write, from_offset);
 +
  	k_mutex_unlock(&entry->lock);
- 
+
  	return res;

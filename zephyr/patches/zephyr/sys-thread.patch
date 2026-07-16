@@ -1,11 +1,11 @@
 diff --git a/include/zephyr/kernel/thread.h b/include/zephyr/kernel/thread.h
-index 6f463082a06..4cd17384c09 100644
+index dbbc63e0861..a3b822cd140 100644
 --- a/include/zephyr/kernel/thread.h
 +++ b/include/zephyr/kernel/thread.h
-@@ -159,6 +159,11 @@ struct _thread_base {
+@@ -155,6 +155,11 @@ struct _thread_base {
         sys_slist_t cleanup;
  #endif
- 
+
 +#ifdef CONFIG_SYS_THREAD
 +	/** Node for recycling detached threads and thread stacks from the system pool */
 +	sys_dnode_t sys_thread_free_node;
@@ -265,7 +265,7 @@ index 00000000000..f2cec1fb388
 +
 +#endif /* ZEPHYR_INCLUDE_ZEPHYR_SYS_THREAD_H_ */
 diff --git a/kernel/sched.c b/kernel/sched.c
-index 015138ae24c..f661f5077da 100644
+index b572ec38e2e..2311874e2fc 100644
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
 @@ -20,6 +20,7 @@
@@ -274,12 +274,12 @@ index 015138ae24c..f661f5077da 100644
  #include <zephyr/timing/timing.h>
 +#include <zephyr/sys/thread.h>
  #include <zephyr/sys/util.h>
- 
+
  LOG_MODULE_DECLARE(os, CONFIG_KERNEL_LOG_LEVEL);
-@@ -1352,6 +1353,12 @@ static ALWAYS_INLINE void halt_thread(struct k_thread *thread, uint8_t new_state
+@@ -1401,6 +1402,12 @@ static ALWAYS_INLINE void halt_thread(struct k_thread *thread, uint8_t new_state
  		k_thread_abort_cleanup(thread);
  #endif /* CONFIG_THREAD_ABORT_NEED_CLEANUP */
- 
+
 +#if defined(CONFIG_SYS_THREAD) && defined(CONFIG_THREAD_DETACH)
 +		if (k_thread_is_detached(thread)) {
 +			sys_thread_destroy(thread);
@@ -289,17 +289,17 @@ index 015138ae24c..f661f5077da 100644
  		/* Do this "set _current to dummy" step last so that
  		 * subsystems above can rely on _current being
  		 * unchanged.  Disabled for posix as that arch
-@@ -1409,21 +1416,29 @@ void z_impl_k_thread_abort(k_tid_t thread)
+@@ -1461,21 +1468,29 @@ void z_impl_k_thread_abort(k_tid_t thread)
  }
  #endif /* !CONFIG_ARCH_HAS_THREAD_ABORT */
- 
+
 -static void z_thread_epilogue(struct k_thread *thread, void **result, bool now)
 +static int z_thread_epilogue(struct k_thread *thread, void **result)
  {
  	ARG_UNUSED(thread);
  	ARG_UNUSED(result);
 -	ARG_UNUSED(now);
- 
+
  #ifdef CONFIG_THREAD_RESULT
  	if (result != NULL) {
  		*result = (void *)atomic_get(&thread->base.result);
@@ -311,7 +311,7 @@ index 015138ae24c..f661f5077da 100644
 +
 +	return 0;
  }
- 
+
  int z_impl_k_thread_rejoin(struct k_thread *thread, void **result, k_timeout_t timeout)
  {
 +	if (thread == NULL) {
@@ -321,7 +321,7 @@ index 015138ae24c..f661f5077da 100644
  	k_spinlock_key_t key = k_spin_lock(&_sched_spinlock);
  	int ret;
  	bool do_epilogue = false;
-@@ -1451,7 +1466,7 @@ int z_impl_k_thread_rejoin(struct k_thread *thread, void **result, k_timeout_t t
+@@ -1503,7 +1518,7 @@ int z_impl_k_thread_rejoin(struct k_thread *thread, void **result, k_timeout_t t
  		SYS_PORT_TRACING_OBJ_FUNC_BLOCKING(k_thread, join, thread, timeout);
  		ret = z_swap(&_sched_spinlock, key);
  		if (ret == 0) {
@@ -329,17 +329,17 @@ index 015138ae24c..f661f5077da 100644
 +			ret = z_thread_epilogue(thread, result);
  		}
  		SYS_PORT_TRACING_OBJ_FUNC_EXIT(k_thread, join, thread, timeout, ret);
- 
-@@ -1464,7 +1479,7 @@ int z_impl_k_thread_rejoin(struct k_thread *thread, void **result, k_timeout_t t
+
+@@ -1516,7 +1531,7 @@ int z_impl_k_thread_rejoin(struct k_thread *thread, void **result, k_timeout_t t
  	k_spin_unlock(&_sched_spinlock, key);
- 
+
  	if (do_epilogue) {
 -		z_thread_epilogue(thread, result, true);
 +		ret = z_thread_epilogue(thread, result);
  	}
- 
+
  	return ret;
-@@ -1507,8 +1522,12 @@ static inline int z_vrfy_k_thread_join(struct k_thread *thread,
+@@ -1559,8 +1574,12 @@ static inline int z_vrfy_k_thread_join(struct k_thread *thread,
  				       k_timeout_t timeout)
  {
  	if (thread_obj_validate(thread)) {
@@ -352,9 +352,9 @@ index 015138ae24c..f661f5077da 100644
 +#endif
 +		return z_thread_epilogue(thread, NULL);
  	}
- 
+
  	return z_impl_k_thread_join(thread, timeout);
-@@ -1522,8 +1541,12 @@ static inline int z_vrfy_k_thread_rejoin(struct k_thread *thread, void **result,
+@@ -1574,8 +1593,12 @@ static inline int z_vrfy_k_thread_rejoin(struct k_thread *thread, void **result,
  		if (result != NULL) {
  			K_OOPS(K_SYSCALL_MEMORY_WRITE(result, sizeof(*result)));
  		}
@@ -367,7 +367,7 @@ index 015138ae24c..f661f5077da 100644
 +#endif
 +		return z_thread_epilogue(thread, result);
  	}
- 
+
  	return z_impl_k_thread_rejoin(thread, result, timeout);
 diff --git a/kernel/signal.c b/kernel/signal.c
 index ec6cd18a69c..a64f97e5f07 100644
@@ -379,43 +379,43 @@ index ec6cd18a69c..a64f97e5f07 100644
  #include <zephyr/sys/ring_buffer.h>
 +#include <zephyr/sys/thread.h>
  #include <zephyr/sys/util.h>
- 
+
  #define K_SI_QUEUE      38
 diff --git a/kernel/thread.c b/kernel/thread.c
-index 913d0982c40..53ad8fe3f01 100644
+index b2efd60f25e..6a8e600301d 100644
 --- a/kernel/thread.c
 +++ b/kernel/thread.c
-@@ -745,6 +745,10 @@ char *z_setup_new_thread(struct k_thread *new_thread,
+@@ -748,6 +748,10 @@ char *z_setup_new_thread(struct k_thread *new_thread,
  	sys_dlist_init(&new_thread->base.key_list);
  #endif
- 
+
 +#ifdef CONFIG_SYS_THREAD
 +	sys_dnode_init(&new_thread->base.sys_thread_free_node);
 +#endif
 +
  	SYS_PORT_TRACING_OBJ_FUNC(k_thread, create, new_thread);
- 
+
  	return stack_ptr;
-@@ -1166,7 +1170,7 @@ void defer_thread_cleanup(struct k_thread *thread)
+@@ -1308,7 +1312,7 @@ void defer_thread_cleanup(struct k_thread *thread)
  	 */
  	thread->stack_info.mapped.addr = NULL;
  	thread->stack_info.mapped.sz = 0;
 -#endif /* CONFIG_THREAD_STACK_MEM_MAPPED */
 +#endif /* CONFIG_THREAD_STACK_MEM_MAPPED || CONFIG_SYS_THREAD_STACK_ALLOC_ANON */
  }
- 
+
  void do_thread_cleanup(struct k_thread *thread)
-@@ -1469,6 +1473,7 @@ void z_vrfy_k_thread_exit(void *result)
+@@ -1611,6 +1615,7 @@ void z_vrfy_k_thread_exit(void *result)
  int z_impl_k_thread_detach(struct k_thread *th)
  {
  	int ret = 0;
 +	__maybe_unused bool destroy = false;
- 
+
  	if (th == NULL) {
  		return -EINVAL;
-@@ -1481,8 +1486,19 @@ int z_impl_k_thread_detach(struct k_thread *th)
+@@ -1623,8 +1628,19 @@ int z_impl_k_thread_detach(struct k_thread *th)
  		}
- 
+
  		th->base.user_options |= K_DETACHED;
 +
 +		if (IS_ENABLED(CONFIG_SYS_THREAD)) {
@@ -423,7 +423,7 @@ index 913d0982c40..53ad8fe3f01 100644
 +			destroy = z_is_thread_dead(th);
 +		}
  	}
- 
+
 +#ifdef CONFIG_SYS_THREAD
 +	if (destroy) {
 +		ret = sys_thread_destroy(th);
@@ -432,48 +432,22 @@ index 913d0982c40..53ad8fe3f01 100644
 +
  	return ret;
  }
- 
-diff --git a/lib/os/CMakeLists.txt b/lib/os/CMakeLists.txt
-index 09ef3c4e4c0..eaf6ec021a5 100644
---- a/lib/os/CMakeLists.txt
-+++ b/lib/os/CMakeLists.txt
-@@ -13,6 +13,21 @@ zephyr_sources(
-   thread_entry.c
-   )
- 
-+zephyr_sources_ifdef(CONFIG_SYS_THREAD thread.c)
-+zephyr_syscall_header_ifdef(CONFIG_SYS_THREAD ${ZEPHYR_BASE}/include/zephyr/sys/thread.h)
-+
-+if(CONFIG_SYS_THREAD)
-+  foreach(_pool CONDVAR MUTEX STACK THREAD)
-+    # Sum CONFIG_SYS_THREAD_${_pool}_MIN with any CONFIG_SYS_THREAD_${_pool}_MIN_ADD_* additions
-+    import_kconfig(CONFIG_SYS_THREAD_${_pool}_MIN_ADD_ ${DOTCONFIG} _sys_thread_${_pool}_min_add_keys)
-+    set(_sys_thread_${_pool}_min ${CONFIG_SYS_THREAD_${_pool}_MIN})
-+    foreach(_add ${_sys_thread_${_pool}_min_add_keys})
-+      math(EXPR _sys_thread_${_pool}_min "${_sys_thread_${_pool}_min} + ${${_add}}")
-+    endforeach()
-+    zephyr_compile_definitions(SYS_THREAD_${_pool}_MIN=${_sys_thread_${_pool}_min})
-+  endforeach()
-+endif()
-+
- if(CONFIG_ZVFS_OPEN_IGNORE_MIN)
-   set(final_fd_size ${CONFIG_ZVFS_OPEN_MAX})
- else()
+
 diff --git a/lib/os/Kconfig b/lib/os/Kconfig
-index ece806dcdea..f5506565c9e 100644
+index 1e97a60c90c..7c9868d093a 100644
 --- a/lib/os/Kconfig
 +++ b/lib/os/Kconfig
-@@ -150,6 +150,7 @@ config POWEROFF
+@@ -144,6 +144,7 @@ config POWEROFF
  	  Enable support for system power off.
- 
+
  rsource "Kconfig.cbprintf"
 +rsource "Kconfig.sys_thread"
  rsource "zvfs/Kconfig"
  rsource "cpu_load/Kconfig"
- 
+
 diff --git a/lib/os/Kconfig.sys_thread b/lib/os/Kconfig.sys_thread
 new file mode 100644
-index 00000000000..eb9a70d1346
+index 00000000000..11398641f57
 --- /dev/null
 +++ b/lib/os/Kconfig.sys_thread
 @@ -0,0 +1,154 @@
@@ -1771,3 +1745,29 @@ index 00000000000..2b2efd2dacd
 +    extra_configs:
 +      - CONFIG_USERSPACE=y
 +      - CONFIG_TEST_USERSPACE=y
+diff --git a/lib/os/CMakeLists.txt b/lib/os/CMakeLists.txt
+index 863d7d48ed4..c9f2a1b0a73 100644
+--- a/lib/os/CMakeLists.txt
++++ b/lib/os/CMakeLists.txt
+@@ -77,5 +77,21 @@ zephyr_library_include_directories(
+ add_subdirectory_ifdef(CONFIG_ZVFS zvfs)
+
+ zephyr_syscall_header_ifdef(CONFIG_ZVFS_FDTABLE
++  ${ZEPHYR_BASE}/include/zephyr/sys/zvfs.h
+   ${ZEPHYR_BASE}/include/zephyr/sys/fdtable.h
+ )
++
++zephyr_sources_ifdef(CONFIG_SYS_THREAD thread.c)
++zephyr_syscall_header_ifdef(CONFIG_SYS_THREAD ${ZEPHYR_BASE}/include/zephyr/sys/thread.h)
++
++if(CONFIG_SYS_THREAD)
++  foreach(_pool CONDVAR MUTEX STACK THREAD)
++    # Sum CONFIG_SYS_THREAD_${_pool}_MIN with any CONFIG_SYS_THREAD_${_pool}_MIN_ADD_* additions
++    import_kconfig(CONFIG_SYS_THREAD_${_pool}_MIN_ADD_ ${DOTCONFIG} _sys_thread_${_pool}_min_add_keys)
++    set(_sys_thread_${_pool}_min ${CONFIG_SYS_THREAD_${_pool}_MIN})
++    foreach(_add ${_sys_thread_${_pool}_min_add_keys})
++      math(EXPR _sys_thread_${_pool}_min "${_sys_thread_${_pool}_min} + ${${_add}}")
++    endforeach()
++    zephyr_compile_definitions(SYS_THREAD_${_pool}_MIN=${_sys_thread_${_pool}_min})
++  endforeach()
++endif()
