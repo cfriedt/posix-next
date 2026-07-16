@@ -1,0 +1,126 @@
+diff --git a/include/zephyr/sys/clock.h b/include/zephyr/sys/clock.h
+index d977fa4ff3f..84c6345981e 100644
+--- a/include/zephyr/sys/clock.h
++++ b/include/zephyr/sys/clock.h
+@@ -428,8 +428,6 @@ static inline bool sys_timepoint_expired(k_timepoint_t timepoint)
+ /* forward declaration as workaround for time.h */
+ struct timespec;
+
+-/* Convert a POSIX clock (cast to int) to a sys_clock identifier */
+-int sys_clock_from_clockid(int clock_id);
+ /** INTERNAL_HIDDEN @endcond */
+
+ /**
+diff --git a/lib/libc/common/CMakeLists.txt b/lib/libc/common/CMakeLists.txt
+index ed3d28fe5a6..f04fc5e99ec 100644
+--- a/lib/libc/common/CMakeLists.txt
++++ b/lib/libc/common/CMakeLists.txt
+@@ -23,3 +23,5 @@ zephyr_library_sources_ifdef(CONFIG_COMMON_LIBC_REMOVE source/stdio/remove.c)
+
+ # Prevent compiler from optimizing calloc into an infinite recursive call
+ zephyr_library_compile_options($<TARGET_PROPERTY:compiler,no_builtin_malloc>)
++
++zephyr_library_compile_definitions_ifdef(CONFIG_COMMON_LIBC_THRD -D_POSIX_C_SOURCE=200809L)
+diff --git a/lib/os/clock.c b/lib/os/clock.c
+index 2b9968b2eeb..1a902dd4445 100644
+--- a/lib/os/clock.c
++++ b/lib/os/clock.c
+@@ -50,22 +50,6 @@ static void timespec_from_ticks(uint64_t ticks, struct timespec *ts)
+ 	};
+ }
+
+-int sys_clock_from_clockid(int clock_id)
+-{
+-	switch (clock_id) {
+-#if defined(CLOCK_REALTIME) || defined(_POSIX_C_SOURCE)
+-	case (int)CLOCK_REALTIME:
+-		return SYS_CLOCK_REALTIME;
+-#endif
+-#if defined(CLOCK_MONOTONIC) || defined(_POSIX_MONOTONIC_CLOCK)
+-	case (int)CLOCK_MONOTONIC:
+-		return SYS_CLOCK_MONOTONIC;
+-#endif
+-	default:
+-		return -EINVAL;
+-	}
+-}
+-
+ int sys_clock_gettime(int clock_id, struct timespec *ts)
+ {
+ 	if (!is_valid_clock_id(clock_id)) {
+diff --git a/samples/net/ocpp/CMakeLists.txt b/samples/net/ocpp/CMakeLists.txt
+index b7e93067df3..7c6c4b54efc 100644
+--- a/samples/net/ocpp/CMakeLists.txt
++++ b/samples/net/ocpp/CMakeLists.txt
+@@ -7,3 +7,5 @@ project(ocpp)
+
+ include(${ZEPHYR_BASE}/samples/net/common/common.cmake)
+ target_sources(app PRIVATE src/main.c)
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/samples/net/sockets/socketpair/CMakeLists.txt b/samples/net/sockets/socketpair/CMakeLists.txt
+index 04318631e5c..a7f475f2c3a 100644
+--- a/samples/net/sockets/socketpair/CMakeLists.txt
++++ b/samples/net/sockets/socketpair/CMakeLists.txt
+@@ -9,3 +9,5 @@ FILE(GLOB app_sources src/*.c)
+ target_sources(app PRIVATE ${app_sources})
+
+ include(${ZEPHYR_BASE}/samples/net/common/common.cmake)
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/samples/net/wifi/shell/CMakeLists.txt b/samples/net/wifi/shell/CMakeLists.txt
+index a87adf43fd2..01af4b00ba2 100644
+--- a/samples/net/wifi/shell/CMakeLists.txt
++++ b/samples/net/wifi/shell/CMakeLists.txt
+@@ -7,3 +7,5 @@ project(wifi)
+
+ FILE(GLOB app_sources src/*.c)
+ target_sources(app PRIVATE ${app_sources})
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/subsys/net/lib/ocpp/CMakeLists.txt b/subsys/net/lib/ocpp/CMakeLists.txt
+index fe797a00bfa..5a8b90c929d 100644
+--- a/subsys/net/lib/ocpp/CMakeLists.txt
++++ b/subsys/net/lib/ocpp/CMakeLists.txt
+@@ -9,3 +9,8 @@ zephyr_library_sources(
+     ocpp_j.c
+     ocpp_wamp_rpc.c
+ )
++
++zephyr_library_compile_definitions(
++    _POSIX_C_SOURCE=200809L
++    _XOPEN_SOURCE=700
++)
+diff --git a/subsys/net/lib/ocpp/Kconfig b/subsys/net/lib/ocpp/Kconfig
+index d3b64184118..1e4a6e36e8d 100644
+--- a/subsys/net/lib/ocpp/Kconfig
++++ b/subsys/net/lib/ocpp/Kconfig
+@@ -7,6 +7,8 @@ config OCPP
+ 	depends on WEBSOCKET_CLIENT
+ 	select EXPERIMENTAL
+ 	select POSIX_C_LANG_SUPPORT_R
++	select POSIX_SYSTEM_INTERFACES
++	select POSIX_BASE_DEFINITIONS
+ 	help
+ 	  This option enables the open charge point protocol library
+
+diff --git a/tests/lib/c_lib/thrd/CMakeLists.txt b/tests/lib/c_lib/thrd/CMakeLists.txt
+index 795545f0cb9..8db0355e96d 100644
+--- a/tests/lib/c_lib/thrd/CMakeLists.txt
++++ b/tests/lib/c_lib/thrd/CMakeLists.txt
+@@ -7,3 +7,5 @@ project(c11_threads)
+ FILE(GLOB app_sources src/*.c)
+
+ target_sources(app PRIVATE ${app_sources})
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+diff --git a/tests/modules/thrift/ThriftTest/CMakeLists.txt b/tests/modules/thrift/ThriftTest/CMakeLists.txt
+index bbdeacb23e1..54acf291414 100644
+--- a/tests/modules/thrift/ThriftTest/CMakeLists.txt
++++ b/tests/modules/thrift/ThriftTest/CMakeLists.txt
+@@ -55,3 +55,5 @@ generate_inc_file_for_target(
+     ${ZEPHYR_BASE}/samples/modules/thrift/hello/qemu-key.pem
+     ${gen_dir}/qemu_key.pem.inc
+     )
++
++target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
