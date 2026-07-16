@@ -1,7 +1,26 @@
 diff --git a/lib/os/zvfs/zvfs_fs.c b/lib/os/zvfs/zvfs_fs.c
+index 02259ebf687..ec935003d1a 100644
 --- a/lib/os/zvfs/zvfs_fs.c
 +++ b/lib/os/zvfs/zvfs_fs.c
-@@ -247,6 +247,13 @@
+@@ -191,9 +191,17 @@ static int fs_ioctl_vmeth(void *obj, unsigned int request, va_list args)
+ 	case ZFD_IOCTL_LSEEK: {
+ 		off_t offset;
+ 		int whence;
++		size_t cur_offset;
+
+ 		offset = va_arg(args, off_t);
+ 		whence = va_arg(args, int);
++		cur_offset = va_arg(args, size_t);
++
++		/* reads and writes go through the fd offset, not the file position */
++		if (whence == FS_SEEK_CUR) {
++			offset += (off_t)cur_offset;
++			whence = FS_SEEK_SET;
++		}
+
+ 		rc = fs_seek(&ptr->file, offset, whence);
+ 		if (rc == 0) {
+@@ -245,6 +253,13 @@ static ssize_t fs_write_offs_vmeth(void *obj, const void *buffer, size_t count,
  {
  	struct zvfs_fs_desc *ptr = obj;
  	ssize_t rc;
@@ -15,7 +34,7 @@ diff --git a/lib/os/zvfs/zvfs_fs.c b/lib/os/zvfs/zvfs_fs.c
 
  	rc = fs_seek(&ptr->file, (off_t)offset, FS_SEEK_SET);
  	if (rc < 0) {
-@@ -254,7 +261,17 @@
+@@ -252,7 +267,17 @@ static ssize_t fs_write_offs_vmeth(void *obj, const void *buffer, size_t count,
  		return -1;
  	}
 
@@ -34,7 +53,7 @@ diff --git a/lib/os/zvfs/zvfs_fs.c b/lib/os/zvfs/zvfs_fs.c
  }
 
  static ssize_t fs_read_vmeth(void *obj, void *buffer, size_t count)
-@@ -275,6 +292,13 @@
+@@ -273,6 +298,13 @@ static ssize_t fs_read_offs_vmeth(void *obj, void *buffer, size_t count, size_t
  {
  	struct zvfs_fs_desc *ptr = obj;
  	ssize_t rc;
@@ -48,7 +67,7 @@ diff --git a/lib/os/zvfs/zvfs_fs.c b/lib/os/zvfs/zvfs_fs.c
 
  	rc = fs_seek(&ptr->file, (off_t)offset, FS_SEEK_SET);
  	if (rc < 0) {
-@@ -282,7 +306,17 @@
+@@ -280,7 +312,17 @@ static ssize_t fs_read_offs_vmeth(void *obj, void *buffer, size_t count, size_t
  		return -1;
  	}
 
@@ -68,9 +87,10 @@ diff --git a/lib/os/zvfs/zvfs_fs.c b/lib/os/zvfs/zvfs_fs.c
 
  static struct fd_op_vtable fs_fd_op_vtable = {
 diff --git a/lib/os/zvfs/zvfs_rw.c b/lib/os/zvfs/zvfs_rw.c
+index 2cbfc877ef6..8fe258c1683 100644
 --- a/lib/os/zvfs/zvfs_rw.c
 +++ b/lib/os/zvfs/zvfs_rw.c
-@@ -13,6 +13,7 @@
+@@ -13,6 +13,7 @@ bool supports_pread_pwrite(uint32_t mode)
  {
  	switch (mode & ZVFS_MODE_IFMT) {
  	case ZVFS_MODE_IFSHM:

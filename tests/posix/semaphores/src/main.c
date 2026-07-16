@@ -10,6 +10,7 @@
 #include <pthread.h>
 #include <semaphore.h>
 #include <time.h>
+#include <unistd.h>
 
 #include <zephyr/sys/timeutil.h>
 #include <zephyr/sys/util.h>
@@ -18,7 +19,7 @@
 #define WAIT_TIME_MS 100
 BUILD_ASSERT(WAIT_TIME_MS > 0, "WAIT_TIME_MS must be posistive");
 
-static void *child_func(void *p1)
+static void *child_func_sem_post(void *p1)
 {
 	sem_t *sem = (sem_t *)p1;
 
@@ -26,9 +27,17 @@ static void *child_func(void *p1)
 	return NULL;
 }
 
+static void *child_func_sem_wait(void *p1)
+{
+	sem_t *sem = (sem_t *)p1;
+
+	zassert_equal(sem_wait(sem), 0, "sem_wait failed");
+	return NULL;
+}
+
 static void semaphore_test(sem_t *sem)
 {
-	pthread_t thread1, thread2;
+	pthread_t thread1, thread2, thread3;
 	int val, ret;
 	struct timespec abstime;
 
@@ -51,7 +60,7 @@ static void semaphore_test(sem_t *sem)
 	zassert_equal(sem_trywait(sem), -1);
 	zassert_equal(errno, EAGAIN);
 
-	ret = pthread_create(&thread1, NULL, child_func, sem);
+	ret = pthread_create(&thread1, NULL, child_func_sem_post, sem);
 	zassert_equal(ret, 0, "Thread creation failed");
 
 	zassert_equal(clock_gettime(CLOCK_REALTIME, &abstime), 0, "clock_gettime failed");
@@ -70,25 +79,43 @@ static void semaphore_test(sem_t *sem)
 
 	zassert_equal(sem_destroy(sem), 0, "semaphore is not destroyed");
 
-	/* TESTPOINT: Initialize sema with 1 */
-	zassert_equal(sem_init(sem, 0, 1), 0, "sem_init failed");
-	zassert_equal(sem_getvalue(sem, &val), 0);
-	zassert_equal(val, 1);
+	/* TESTPOINT: Initialize sema with 0 and block a waiter for EBUSY */
+	zassert_equal(sem_init(sem, 0, 0), 0, "sem_init failed");
 
+	ret = pthread_create(&thread2, NULL, child_func_sem_wait, sem);
+	zassert_equal(ret, 0, "Thread creation failed");
+
+#ifndef CONFIG_SMP
+	ret = sched_yield();
+	zassert_equal(ret, 0, "yielding thread failed");
+#else
+	sleep(1);
+#endif
+
+	/* TESTPOINT: Other thread is waiting for the semaphore */
 	zassert_equal(sem_destroy(sem), -1, "acquired semaphore is destroyed");
 	zassert_equal(errno, EBUSY);
+
+	zassert_equal(sem_post(sem), 0, "sem_post failed");
+	zassert_ok(pthread_join(thread2, NULL));
+
+	zassert_equal(sem_destroy(sem), 0, "semaphore is not destroyed");
+
+	/* TESTPOINT: Initialize sema with 1 */
+	zassert_equal(sem_init(sem, 0, 1), 0, "sem_init failed");
 
 	/* TESTPOINT: take semaphore which is initialized with 1 */
 	zassert_equal(sem_trywait(sem), 0);
 
-	zassert_equal(pthread_create(&thread2, NULL, child_func, sem), 0, "Thread creation failed");
+	zassert_equal(pthread_create(&thread3, NULL, child_func_sem_post, sem), 0,
+		      "Thread creation failed");
 
-	/* TESTPOINT: Wait and acquire semaphore till thread2 gives */
+	/* TESTPOINT: Wait and acquire semaphore till thread3 gives */
 	zassert_equal(sem_wait(sem), 0, "sem_wait failed");
 
 	/* Make sure the threads are terminated */
 	zassert_ok(pthread_join(thread1, NULL));
-	zassert_ok(pthread_join(thread2, NULL));
+	zassert_ok(pthread_join(thread3, NULL));
 }
 
 ZTEST(posix_semaphores, test_semaphore)

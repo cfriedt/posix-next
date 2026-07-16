@@ -3,21 +3,21 @@ index 1b420674149..ea371bbcc7b 100644
 --- a/include/zephyr/sys/libc-hooks.h
 +++ b/include/zephyr/sys/libc-hooks.h
 @@ -40,6 +40,9 @@ __syscall int zephyr_fputc(int c, FILE * stream);
- 
+
  __syscall size_t zephyr_fwrite(const void *ZRESTRICT ptr, size_t size,
  				size_t nitems, FILE *ZRESTRICT stream);
 +
 +__syscall size_t zephyr_fread(void *ZRESTRICT ptr, size_t size, size_t nitems,
 +			      FILE *ZRESTRICT stream);
  #endif
- 
+
  #endif /* CONFIG_NEWLIB_LIBC */
 diff --git a/lib/libc/minimal/source/stdio/stdout_console.c b/lib/libc/minimal/source/stdio/stdout_console.c
 index 64bc8e482e7..159f035ffdc 100644
 --- a/lib/libc/minimal/source/stdio/stdout_console.c
 +++ b/lib/libc/minimal/source/stdio/stdout_console.c
 @@ -61,8 +61,45 @@ static size_t minimal_zvfs_stream_write(int fd, const void *ptr, size_t nbyte)
- 
+
  	return written;
  }
 +
@@ -55,7 +55,7 @@ index 64bc8e482e7..159f035ffdc 100644
 +	ARG_UNUSED(nbyte);
 +	ARG_UNUSED(stream);
  #endif
- 
+
 +	return 0;
 +}
 +
@@ -65,7 +65,7 @@ index 64bc8e482e7..159f035ffdc 100644
 @@ -175,6 +212,37 @@ size_t fwrite(const void *ZRESTRICT ptr, size_t size, size_t nitems,
  	return zephyr_fwrite(ptr, size, nitems, stream);
  }
- 
+
 +size_t z_impl_zephyr_fread(void *ZRESTRICT ptr, size_t size, size_t nitems,
 +			   FILE *ZRESTRICT stream)
 +{

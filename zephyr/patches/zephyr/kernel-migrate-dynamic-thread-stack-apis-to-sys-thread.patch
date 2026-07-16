@@ -1,5 +1,5 @@
 diff --git a/include/zephyr/kernel.h b/include/zephyr/kernel.h
-index 5490d721a5a..7466c05c203 100644
+index 8b66193ece0..8926eee841a 100644
 --- a/include/zephyr/kernel.h
 +++ b/include/zephyr/kernel.h
 @@ -23,6 +23,7 @@
@@ -46,7 +46,7 @@ index 5490d721a5a..7466c05c203 100644
 +{
 +#ifdef CONFIG_SYS_THREAD
 +	k_thread_stack_t *stack;
-+	uint32_t stack_size;
++	uint32_t stack_size = size;
 +
 +	if (sys_thread_stack_alloc(&stack, &stack_size, 0, flags) < 0) {
 +		return NULL;
@@ -84,10 +84,10 @@ index 5490d721a5a..7466c05c203 100644
  /**
   * @brief Create a thread.
 diff --git a/kernel/CMakeLists.txt b/kernel/CMakeLists.txt
-index a62b9e54785..bde8037764f 100644
+index 31929a8a4a8..29837a6d201 100644
 --- a/kernel/CMakeLists.txt
 +++ b/kernel/CMakeLists.txt
-@@ -264,12 +264,6 @@ target_sources_ifdef(
+@@ -286,12 +286,6 @@ target_sources_ifdef(
    userspace.c
    )
  
@@ -101,10 +101,10 @@ index a62b9e54785..bde8037764f 100644
    ${ZEPHYR_BASE}/kernel/include
    ${ARCH_DIR}/${ARCH}/include
 diff --git a/kernel/Kconfig b/kernel/Kconfig
-index a20cf9cf953..fdc880ab2ba 100644
+index 6f425aa5187..8cdd515f73e 100644
 --- a/kernel/Kconfig
 +++ b/kernel/Kconfig
-@@ -313,64 +313,53 @@ config USERSPACE_THREAD_MAY_RAISE_PRIORITY
+@@ -316,64 +316,53 @@ config USERSPACE_THREAD_MAY_RAISE_PRIORITY
  	  Thread can raise its own priority in userspace mode.
  
  config DYNAMIC_THREAD
