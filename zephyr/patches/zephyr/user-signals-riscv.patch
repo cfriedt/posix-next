@@ -1,26 +1,26 @@
 diff --git a/arch/riscv/Kconfig b/arch/riscv/Kconfig
-index a768151bf38..a69efb57b55 100644
+index 0cf427b6718..f31018b8744 100644
 --- a/arch/riscv/Kconfig
 +++ b/arch/riscv/Kconfig
-@@ -523,6 +523,10 @@ config RISCV_NO_MTVAL_ON_FP_TRAP
+@@ -607,6 +607,10 @@ config RISCV_NO_MTVAL_ON_FP_TRAP
  	  to contain the faulting FP instruction, requiring alternative methods
  	  to handle FP exceptions.
- 
+
 +config ARCH_SUPPORTS_USERSPACE_SIGNALS
 +       bool
 +       default y
 +
  rsource "Kconfig.isa"
- 
+
  rsource "custom/Kconfig"
 diff --git a/arch/riscv/core/CMakeLists.txt b/arch/riscv/core/CMakeLists.txt
-index dafbe63ff0b..c81b2d0f5e7 100644
+index f42b156e0e2..867b22b5003 100644
 --- a/arch/riscv/core/CMakeLists.txt
 +++ b/arch/riscv/core/CMakeLists.txt
-@@ -35,6 +35,10 @@ zephyr_library_sources_ifdef(CONFIG_ARCH_STACKWALK stacktrace.c)
+@@ -36,6 +36,10 @@ zephyr_library_sources_ifdef(CONFIG_ARCH_STACKWALK stacktrace.c)
  zephyr_linker_sources(ROM_START SORT_KEY 0x0vectors vector_table.ld)
  zephyr_library_sources_ifdef(CONFIG_LLEXT elf.c)
- 
+
 +if(CONFIG_SIGNAL AND CONFIG_USERSPACE)
 +  zephyr_library_sources(signal.c)
 +endif()
@@ -29,24 +29,24 @@ index dafbe63ff0b..c81b2d0f5e7 100644
    if(CONFIG_DYNAMIC_INTERRUPTS)
      zephyr_linker_sources(RWDATA swi_tables.ld)
 diff --git a/arch/riscv/core/isr.S b/arch/riscv/core/isr.S
-index 6eeaaa7d269..46143ced920 100644
+index 72d5dbfb23e..73220d0d5f0 100644
 --- a/arch/riscv/core/isr.S
 +++ b/arch/riscv/core/isr.S
-@@ -104,6 +104,10 @@ GDATA(_k_syscall_table)
- GTEXT(__soc_handle_all_irqs)
- #endif
- 
+@@ -106,6 +106,10 @@ GTEXT(z_riscv_custom_stack_guard_enable)
+ GTEXT(z_riscv_custom_stack_guard_disable)
+ #endif /* CONFIG_CUSTOM_STACK_GUARD */
+
 +#if defined(CONFIG_SIGNAL) && defined(CONFIG_USERSPACE)
 +GTEXT(z_sig_handle)
 +#endif
 +
  /* exports */
  GTEXT(_isr_wrapper)
- 
-@@ -578,6 +582,20 @@ valid_syscall_id:
+
+@@ -602,6 +606,20 @@ valid_syscall_id:
  	/* Update a0 (return value) on the stack */
  	sr a0, __struct_arch_esf_a0_OFFSET(sp)
- 
+
 +#ifdef CONFIG_SIGNAL
 +	li t1, K_SYSCALL_K_SIG_ACTION
 +	beq t0, t1, skip_z_sig_handle
@@ -110,7 +110,7 @@ index e02037b66c0..043b993aa81 100644
 @@ -105,6 +105,15 @@ struct arch_esf {
  typedef struct soc_esf soc_esf_t;
  #endif
- 
+
 +#if defined(CONFIG_SIGNAL) && defined(CONFIG_USERSPACE)
 +struct arch_sig_ctx {
 +	unsigned long ra;		/* return address */

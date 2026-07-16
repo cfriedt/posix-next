@@ -1,18 +1,18 @@
 diff --git a/include/zephyr/sys/clock.h b/include/zephyr/sys/clock.h
-index 34f490dc642..38c9531e38c 100644
+index f835ba895b5..e51ad882a61 100644
 --- a/include/zephyr/sys/clock.h
 +++ b/include/zephyr/sys/clock.h
-@@ -226,7 +226,7 @@ uint32_t sys_clock_tick_get_32(void);
+@@ -269,7 +269,7 @@ uint32_t sys_clock_tick_get_32(void);
   * @return the current system tick count
   *
   */
 -int64_t sys_clock_tick_get(void);
 +__syscall int64_t sys_clock_tick_get(void);
- 
+
  #ifndef CONFIG_SYS_CLOCK_EXISTS
  #define sys_clock_tick_get()    (0)
 diff --git a/kernel/CMakeLists.txt b/kernel/CMakeLists.txt
-index c29cb5e5f93..3c4ca6d1d88 100644
+index 21b8ca29936..d78023f997d 100644
 --- a/kernel/CMakeLists.txt
 +++ b/kernel/CMakeLists.txt
 @@ -56,6 +56,7 @@ zephyr_compile_definitions(SIGNAL_QUEUE_SIZE=${sigqueue_add_size})
@@ -20,32 +20,23 @@ index c29cb5e5f93..3c4ca6d1d88 100644
  zephyr_sources_ifdef(CONFIG_THREAD_CLEANUP cleanup.c)
  zephyr_sources_ifdef(CONFIG_THREAD_SPECIFIC_STORAGE tss.c)
 +zephyr_sources_ifdef(CONFIG_SYS_CLOCK_EXISTS timeout.c)
- 
+
  # kernel is a normal CMake library and not a zephyr_library because it
  # should usually not be --whole-archive'd
-@@ -181,7 +182,7 @@ set_target_properties(
-   )
- 
- target_sources_ifdef(CONFIG_REQUIRES_STACK_CANARIES   kernel PRIVATE compiler_stack_protect.c)
--target_sources_ifdef(CONFIG_SYS_CLOCK_EXISTS      kernel PRIVATE timeout.c timer.c)
-+target_sources_ifdef(CONFIG_SYS_CLOCK_EXISTS      kernel PRIVATE timer.c)
- target_sources_ifdef(CONFIG_ATOMIC_OPERATIONS_C   kernel PRIVATE atomic_c.c)
- target_sources_ifdef(CONFIG_MMU                   kernel PRIVATE mmu.c)
- target_sources_ifdef(CONFIG_POLL                  kernel PRIVATE poll.c)
 diff --git a/kernel/timeout.c b/kernel/timeout.c
-index e9e4f86a850..894e1d34977 100644
+index 205c368ebb5..1d0f01c06fe 100644
 --- a/kernel/timeout.c
 +++ b/kernel/timeout.c
-@@ -278,7 +278,7 @@ void sys_clock_announce(int32_t ticks)
- #endif /* CONFIG_TIMESLICING */
+@@ -286,7 +286,7 @@ void sys_clock_unlock(k_spinlock_key_t key)
  }
- 
+ #endif
+
 -int64_t sys_clock_tick_get(void)
 +int64_t z_impl_sys_clock_tick_get(void)
  {
  	uint64_t t = 0U;
- 
-@@ -287,6 +287,13 @@ int64_t sys_clock_tick_get(void)
+
+@@ -295,6 +295,13 @@ int64_t sys_clock_tick_get(void)
  	}
  	return t;
  }
@@ -56,6 +47,6 @@ index e9e4f86a850..894e1d34977 100644
 +}
 +#include <zephyr/syscalls/sys_clock_tick_get_mrsh.c>
 +#endif /* CONFIG_USERSPACE */
- 
+
  uint32_t sys_clock_tick_get_32(void)
  {

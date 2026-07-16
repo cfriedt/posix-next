@@ -1,8 +1,8 @@
 diff --git a/include/zephyr/sys/fdtable.h b/include/zephyr/sys/fdtable.h
-index ccb8577f604..c36b593dac0 100644
+index 1efefced17d..3df29b6c02b 100644
 --- a/include/zephyr/sys/fdtable.h
 +++ b/include/zephyr/sys/fdtable.h
-@@ -324,6 +324,9 @@ void *zvfs_test_fd_entry_kobj(int fd);
+@@ -422,6 +422,9 @@ void *zvfs_test_fd_entry_kobj(int fd);
  }
  #endif
  
@@ -55,7 +55,7 @@ index 00000000000..52322c7c471
 +#endif /* ZEPHYR_INCLUDE_SYS_INTERNAL_FDTABLE_PRIV_H_ */
 diff --git a/include/zephyr/sys/zvfs.h b/include/zephyr/sys/zvfs.h
 new file mode 100644
-index 00000000000..adfffaad3d6
+index 00000000000..844c14042db
 --- /dev/null
 +++ b/include/zephyr/sys/zvfs.h
 @@ -0,0 +1,150 @@
@@ -342,49 +342,6 @@ index 43f2fd84daf..d4e045b527e 100644
  }
  
  static __off_t zvfs_lseek_wrap(int fd, __off_t offset, int whence)
-diff --git a/lib/os/CMakeLists.txt b/lib/os/CMakeLists.txt
-index eaf6ec021a5..5928076bd61 100644
---- a/lib/os/CMakeLists.txt
-+++ b/lib/os/CMakeLists.txt
-@@ -58,7 +58,9 @@ endif()
- 
- zephyr_compile_definitions(ZVFS_OPEN_SIZE=${final_fd_size})
- 
--zephyr_sources_ifdef(CONFIG_FDTABLE fdtable.c)
-+zephyr_syscall_header_ifdef(CONFIG_FDTABLE
-+  ${ZEPHYR_BASE}/include/zephyr/sys/zvfs.h
-+)
- zephyr_syscall_header_ifdef(CONFIG_FDTABLE
-   ${ZEPHYR_BASE}/include/zephyr/sys/fdtable.h
- )
-@@ -92,4 +94,4 @@ zephyr_library_include_directories(
-   ${ZEPHYR_BASE}/arch/${ARCH}/include
- )
- 
--add_subdirectory_ifdef(CONFIG_ZVFS zvfs)
-+add_subdirectory_ifdef(CONFIG_FDTABLE zvfs)
-diff --git a/lib/os/zvfs/CMakeLists.txt b/lib/os/zvfs/CMakeLists.txt
-index 6fce6eaef65..a801fd93a53 100644
---- a/lib/os/zvfs/CMakeLists.txt
-+++ b/lib/os/zvfs/CMakeLists.txt
-@@ -4,6 +4,17 @@ zephyr_library()
- # The generic FILE-object store backs the per-libc zvfs_libc_fdopen() hooks with a
- # statically-allocated k_mem_slab (no dynamic allocation). Minimal libc encodes a
- # FILE directly as an fd and does not use the store.
-+zephyr_library_sources_ifdef(CONFIG_FDTABLE
-+  zvfs_fdtable.c
-+  zvfs_rw.c
-+  zvfs_close.c
-+  zvfs_lseek.c
-+  zvfs_fstat.c
-+  zvfs_fsync.c
-+  zvfs_ftruncate.c
-+  zvfs_fcntl.c
-+  zvfs_ioctl.c
-+)
- zephyr_library_sources_ifdef(CONFIG_ZVFS_LIBC_FILE zvfs_libc_file.c)
- zephyr_library_sources_ifdef(CONFIG_ZVFS_FS zvfs_fs.c)
- zephyr_library_sources_ifdef(CONFIG_ZVFS_EVENTFD zvfs_eventfd.c)
 diff --git a/lib/os/zvfs/zvfs_close.c b/lib/os/zvfs/zvfs_close.c
 new file mode 100644
 index 00000000000..86d1a4bbb02
@@ -443,7 +400,7 @@ index 00000000000..86d1a4bbb02
 +#endif /* CONFIG_USERSPACE */
 diff --git a/lib/os/zvfs/zvfs_fcntl.c b/lib/os/zvfs/zvfs_fcntl.c
 new file mode 100644
-index 00000000000..465629a1fc4
+index 00000000000..fb4078f4cd1
 --- /dev/null
 +++ b/lib/os/zvfs/zvfs_fcntl.c
 @@ -0,0 +1,19 @@
@@ -466,139 +423,30 @@ index 00000000000..465629a1fc4
 +	}
 +
 +	return entry->vtable->ioctl(entry->obj, cmd, args);
-+}
-diff --git a/lib/os/zvfs/zvfs_ioctl.c b/lib/os/zvfs/zvfs_ioctl.c
-new file mode 100644
-index 00000000000..00000000000
---- /dev/null
-+++ b/lib/os/zvfs/zvfs_ioctl.c
-@@ -0,0 +1,34 @@
-+/*
-+ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
-+ * SPDX-License-Identifier: Apache-2.0
-+ */
-+
-+#include <stdarg.h>
-+
-+#include <zephyr/sys/fdtable.h>
-+#include <zephyr/sys/internal/fdtable_priv.h>
-+#include <zephyr/internal/syscall_handler.h>
-+
-+int z_impl_zvfs_ioctl(int fd, unsigned long request, va_list args)
-+{
-+	struct fd_entry *entry = zvfs_fd_entry_get(fd);
-+
-+	if (entry == NULL) {
-+		return -1;
-+	}
-+
-+	return entry->vtable->ioctl(entry->obj, request, args);
-+}
-+
-+#ifdef CONFIG_USERSPACE
-+static int z_vrfy_zvfs_ioctl(int fd, unsigned long request, va_list args)
-+{
-+	if (zvfs_fd_syscall_verify(fd) == NULL) {
-+		return -1;
-+	}
-+
-+	return z_impl_zvfs_ioctl(fd, request, args);
-+}
-+
-+#include <zephyr/syscalls/zvfs_ioctl_mrsh.c>
-+#endif /* CONFIG_USERSPACE */
-diff --git a/lib/os/fdtable.c b/lib/os/zvfs/zvfs_fdtable.c
-similarity index 53%
-rename from lib/os/fdtable.c
-rename to lib/os/zvfs/zvfs_fdtable.c
-index 79a4931630c..b76cc02f8ef 100644
---- a/lib/os/fdtable.c
+diff --git a/lib/os/zvfs/zvfs_fdtable.c b/lib/os/zvfs/zvfs_fdtable.c
+index 12e04c4a004..8a41d785032 100644
+--- a/lib/os/zvfs/zvfs_fdtable.c
 +++ b/lib/os/zvfs/zvfs_fdtable.c
-@@ -1,26 +1,18 @@
- /*
-  * Copyright (c) 2018 Linaro Limited
-- * Copyright (c) 2024 Tenstorrent AI ULC
-  *
-  * SPDX-License-Identifier: Apache-2.0
-  */
+@@ -38,14 +38,13 @@ struct fd_entry {
+ 	uint32_t mode;
+ };
  
--/**
-- * @file
-- * @brief File descriptor table
-- *
-- * This file provides generic file descriptor table implementation, suitable
-- * for any I/O object implementing POSIX I/O semantics (i.e. read/write +
-- * aux operations).
-- */
--
- #include <errno.h>
-+#include <stdarg.h>
- #include <string.h>
- #include <stdio.h>
- 
- #include <zephyr/kernel.h>
- #include <zephyr/init.h>
- #include <zephyr/sys/fdtable.h>
-+#include <zephyr/sys/internal/fdtable_priv.h>
- #include <zephyr/sys/speculation.h>
- #include <zephyr/internal/syscall_handler.h>
- #include <zephyr/sys/atomic.h>
-@@ -32,16 +24,6 @@
- 
- struct stat;
- 
--struct fd_entry {
--	void *obj;
--	const struct fd_op_vtable *vtable;
--	atomic_t refcount;
--	struct k_mutex lock;
--	struct k_condvar cond;
--	size_t offset;
--	uint32_t mode;
--};
--
- #if defined(CONFIG_ZVFS_RESERVE_STDIO_FDS)
+-#if defined(CONFIG_POSIX_DEVICE_IO)
++#ifdef CONFIG_ZVFS_RESERVE_STDIO_FDS
  static const struct fd_op_vtable stdinout_fd_op_vtable;
- 
-@@ -52,25 +34,19 @@ BUILD_ASSERT(ZVFS_OPEN_SIZE > 0, "ZVFS_OPEN_SIZE must be > 0 when CONFIG_FDTABLE
+-
+-BUILD_ASSERT(ZVFS_OPEN_SIZE >= 3, "ZVFS_OPEN_SIZE >= 3 for CONFIG_POSIX_DEVICE_IO");
+-#endif /* defined(CONFIG_POSIX_DEVICE_IO) */
++BUILD_ASSERT(ZVFS_OPEN_SIZE >= 3, "ZVFS_OPEN_SIZE >= 3 to reserve stdin/stdout/stderr fds");
++#endif
  
  static struct fd_entry fdtable[ZVFS_OPEN_SIZE] = {
- #if defined(CONFIG_ZVFS_RESERVE_STDIO_FDS)
--	/*
--	 * Predefine entries for stdin/stdout/stderr.
--	 */
- 	{
--		/* STDIN */
- 		.vtable = &stdinout_fd_op_vtable,
- 		.refcount = ATOMIC_INIT(1),
- 		.lock = Z_MUTEX_INITIALIZER(fdtable[0].lock),
- 		.cond = Z_CONDVAR_INITIALIZER(fdtable[0].cond),
- 	},
- 	{
--		/* STDOUT */
- 		.vtable = &stdinout_fd_op_vtable,
- 		.refcount = ATOMIC_INIT(1),
- 		.lock = Z_MUTEX_INITIALIZER(fdtable[1].lock),
- 		.cond = Z_CONDVAR_INITIALIZER(fdtable[1].cond),
- 	},
- 	{
--		/* STDERR */
- 		.vtable = &stdinout_fd_op_vtable,
- 		.refcount = ATOMIC_INIT(1),
- 		.lock = Z_MUTEX_INITIALIZER(fdtable[2].lock),
-@@ -90,11 +66,6 @@ static int z_fd_unref(int fd)
- {
- 	atomic_val_t old_rc;
- 
--	/* Reference counter must be checked to avoid decrement refcount below
--	 * zero causing file descriptor leak. Loop statement below executes
--	 * atomic decrement if refcount value is grater than zero. Otherwise,
--	 * refcount is not going to be written.
--	 */
- 	do {
- 		old_rc = atomic_get(&fdtable[fd].refcount);
- 		if (!old_rc) {
-@@ -130,17 +101,39 @@ static int _find_fd_entry(void)
+-#if defined(CONFIG_POSIX_DEVICE_IO)
++#ifdef CONFIG_ZVFS_RESERVE_STDIO_FDS
+ 	/*
+ 	 * Predefine entries for stdin/stdout/stderr.
+ 	 */
+@@ -162,17 +161,39 @@ static int _find_fd_entry(void)
  	return -1;
  }
  
@@ -640,62 +488,7 @@ index 79a4931630c..b76cc02f8ef 100644
  		return -1;
  	}
  
-@@ -197,11 +190,11 @@ static int zvfs_fdtable_kobj_init(void)
- 		k_object_init(&fdtable[i]);
- 	}
- 
--#if defined(CONFIG_POSIX_DEVICE_IO)
-+#if defined(CONFIG_ZVFS_RESERVE_STDIO_FDS)
- 	for (int i = 0; i < 3; i++) {
- 		k_object_access_all_grant(&fdtable[i]);
- 	}
--#endif /* CONFIG_POSIX_DEVICE_IO */
-+#endif /* CONFIG_ZVFS_RESERVE_STDIO_FDS */
- 
- 	return 0;
- }
-@@ -307,7 +300,6 @@ int zvfs_reserve_fd(void)
- #if defined(CONFIG_USERSPACE)
- 		k_object_recycle(&fdtable[fd]);
- #endif
--		/* Mark entry as used, zvfs_finalize_fd() will fill it in. */
- 		(void)z_fd_ref(fd);
- 		fdtable[fd].obj = NULL;
- 		fdtable[fd].vtable = NULL;
-@@ -323,32 +315,19 @@ int zvfs_reserve_fd(void)
- 
- void zvfs_finalize_typed_fd(int fd, void *obj, const struct fd_op_vtable *vtable, uint32_t mode)
- {
--	/* Assumes fd was already bounds-checked. */
- #ifdef CONFIG_USERSPACE
--	/* descriptor context objects are inserted into the table when they
--	 * are ready for use. Mark the object as initialized and grant the
--	 * caller (and only the caller) access.
--	 *
--	 * This call is a no-op if obj is invalid or points to something
--	 * not a kernel object.
--	 */
- 	k_object_recycle(obj);
- #endif
- 	fdtable[fd].obj = obj;
- 	fdtable[fd].vtable = vtable;
- 	fdtable[fd].mode = mode;
- 
--	/* Let the object know about the lock just in case it needs it
--	 * for something. For BSD sockets, the lock is used with condition
--	 * variables to avoid keeping the lock for a long period of time.
--	 */
- 	if (vtable && vtable->ioctl) {
- 		int prev_errno = errno;
- 
- 		(void)zvfs_fdtable_call_ioctl(vtable, obj, ZFD_IOCTL_SET_LOCK,
- 					   &fdtable[fd].lock);
- 		if ((prev_errno != EOPNOTSUPP) && (errno == EOPNOTSUPP)) {
--			/* restore backed-up errno value if the backend does not support locking */
- 			errno = prev_errno;
- 		}
- 	}
-@@ -356,7 +335,6 @@ void zvfs_finalize_typed_fd(int fd, void *obj, const struct fd_op_vtable *vtable
+@@ -309,7 +330,6 @@ void zvfs_finalize_typed_fd(int fd, void *obj, const struct fd_op_vtable *vtable
  
  void zvfs_free_fd(int fd)
  {
@@ -703,286 +496,22 @@ index 79a4931630c..b76cc02f8ef 100644
  	(void)z_fd_unref(fd);
  }
  
-@@ -372,247 +350,43 @@ int zvfs_alloc_fd(void *obj, const struct fd_op_vtable *vtable)
- 	return fd;
- }
- 
--static bool supports_pread_pwrite(uint32_t mode)
--{
--	switch (mode & ZVFS_MODE_IFMT) {
--	case ZVFS_MODE_IFSHM:
--		return true;
--	default:
--		return false;
--	}
--}
--
--static ssize_t zvfs_rw(int fd, void *buf, size_t sz, bool is_write, const size_t *from_offset)
--{
--	bool prw;
--	ssize_t res;
--	const size_t *off;
--
--	if (_check_fd(fd) < 0) {
--		return -1;
--	}
--
--	(void)k_mutex_lock(&fdtable[fd].lock, K_FOREVER);
--
--	prw = supports_pread_pwrite(fdtable[fd].mode);
--	if (from_offset != NULL && !prw) {
--		/*
--		 * Seekable file types should support pread() / pwrite() and per-fd offset passing.
--		 * Otherwise, it's a bug.
--		 */
--		errno = ENOTSUP;
--		res = -1;
--		goto unlock;
--	}
--
--	/* If there is no specified from_offset, then use the current offset of the fd */
--	off = (from_offset == NULL) ? &fdtable[fd].offset : from_offset;
--
--	if (is_write) {
--		if (fdtable[fd].vtable->write_offs == NULL) {
--			res = -1;
--			errno = EIO;
--		} else {
--			res = fdtable[fd].vtable->write_offs(fdtable[fd].obj, buf, sz, *off);
--		}
--	} else {
--		if (fdtable[fd].vtable->read_offs == NULL) {
--			res = -1;
--			errno = EIO;
--		} else {
--			res = fdtable[fd].vtable->read_offs(fdtable[fd].obj, buf, sz, *off);
--		}
--	}
--	if (res > 0 && prw && from_offset == NULL) {
--		/*
--		 * only update the fd offset when from_offset is not specified
--		 * See pread() / pwrite()
--		 */
--		fdtable[fd].offset += res;
--	}
--
--unlock:
--	k_mutex_unlock(&fdtable[fd].lock);
--
--	return res;
--}
--
--ssize_t zvfs_read(int fd, void *buf, size_t sz, const size_t *from_offset)
--{
--	return zvfs_rw(fd, buf, sz, false, from_offset);
--}
--
--ssize_t zvfs_write(int fd, const void *buf, size_t sz, const size_t *from_offset)
--{
--	return zvfs_rw(fd, (void *)buf, sz, true, from_offset);
--}
--
--int zvfs_close(int fd)
--{
--	int res = 0;
--
--	if (_check_fd(fd) < 0) {
--		return -1;
--	}
--
--	(void)k_mutex_lock(&fdtable[fd].lock, K_FOREVER);
--	if (fdtable[fd].vtable->close != NULL) {
--		/* close() is optional - e.g. stdinout_fd_op_vtable */
--		if (fdtable[fd].mode & ZVFS_MODE_IFSOCK) {
--			/* Network socket needs to know socket number so pass
--			 * it via close2() call.
--			 */
--			res = fdtable[fd].vtable->close2(fdtable[fd].obj, fd);
--		} else {
--			res = fdtable[fd].vtable->close(fdtable[fd].obj);
--		}
--	}
--	k_mutex_unlock(&fdtable[fd].lock);
--
--#if defined(CONFIG_ZVFS_LIBC_FILE)
--	/* Return any C library FILE bound to this fd (via fdopen()/fopen()) to the store. */
--	zvfs_libc_file_free(zvfs_libc_file_from_fd(fd));
--#endif
--
--	zvfs_free_fd(fd);
--
--	return res;
--}
--
--int zvfs_fstat(int fd, struct stat *buf)
--{
--	if (_check_fd(fd) < 0) {
--		return -1;
--	}
--
--	return zvfs_fdtable_call_ioctl(fdtable[fd].vtable, fdtable[fd].obj, ZFD_IOCTL_STAT, buf);
--}
--
--int zvfs_fsync(int fd)
--{
--	if (_check_fd(fd) < 0) {
--		return -1;
--	}
--
--	return zvfs_fdtable_call_ioctl(fdtable[fd].vtable, fdtable[fd].obj, ZFD_IOCTL_FSYNC);
--}
--
--static inline off_t zvfs_lseek_wrap(int fd, int cmd, ...)
--{
--	off_t res;
--	va_list args;
--
--	__ASSERT_NO_MSG(fd < ARRAY_SIZE(fdtable));
--
--	(void)k_mutex_lock(&fdtable[fd].lock, K_FOREVER);
--	va_start(args, cmd);
--	res = fdtable[fd].vtable->ioctl(fdtable[fd].obj, cmd, args);
--	va_end(args);
--	if (res >= 0) {
--		switch (fdtable[fd].mode & ZVFS_MODE_IFMT) {
--		case ZVFS_MODE_IFDIR:
--		case ZVFS_MODE_IFBLK:
--		case ZVFS_MODE_IFSHM:
--		case ZVFS_MODE_IFREG:
--			fdtable[fd].offset = res;
--			break;
--		default:
--			break;
--		}
--	}
--	k_mutex_unlock(&fdtable[fd].lock);
--
--	return res;
--}
--
--off_t zvfs_lseek(int fd, off_t offset, int whence)
--{
--	if (_check_fd(fd) < 0) {
--		return -1;
--	}
--
--	return zvfs_lseek_wrap(fd, ZFD_IOCTL_LSEEK, offset, whence, fdtable[fd].offset);
--}
--
--int zvfs_fcntl(int fd, int cmd, va_list args)
--{
--	int res;
--
--	if (_check_fd(fd) < 0) {
--		return -1;
--	}
--
--	/* The rest of commands are per-fd, handled by ioctl vmethod. */
--	res = fdtable[fd].vtable->ioctl(fdtable[fd].obj, cmd, args);
--
--	return res;
--}
--
--static inline int zvfs_ftruncate_wrap(int fd, int cmd, ...)
--{
--	int res;
--	va_list args;
--
--	__ASSERT_NO_MSG(fd < ARRAY_SIZE(fdtable));
--
--	(void)k_mutex_lock(&fdtable[fd].lock, K_FOREVER);
--	va_start(args, cmd);
--	res = fdtable[fd].vtable->ioctl(fdtable[fd].obj, cmd, args);
--	va_end(args);
--	k_mutex_unlock(&fdtable[fd].lock);
--
--	return res;
--}
--
--int zvfs_ftruncate(int fd, off_t length)
--{
--	if (_check_fd(fd) < 0) {
--		return -1;
--	}
--
--	return zvfs_ftruncate_wrap(fd, ZFD_IOCTL_TRUNCATE, length);
--}
--
--int zvfs_ioctl(int fd, unsigned long request, va_list args)
--{
--	if (_check_fd(fd) < 0) {
--		return -1;
--	}
--
--	return fdtable[fd].vtable->ioctl(fdtable[fd].obj, request, args);
--}
--
--
- #if defined(CONFIG_ZVFS_RESERVE_STDIO_FDS)
--/*
-- * fd operations for stdio/stdout/stderr
-- */
--
--#if defined(CONFIG_POSIX_DEVICE_IO)
- int z_impl_zephyr_write_stdout(const char *buf, int nbytes);
--#endif /* CONFIG_POSIX_DEVICE_IO */
- 
- static ssize_t stdinout_read_vmeth(void *obj, void *buffer, size_t count)
- {
-+	ARG_UNUSED(obj);
-+	ARG_UNUSED(buffer);
-+	ARG_UNUSED(count);
-+
- 	return 0;
- }
- 
- static ssize_t stdinout_write_vmeth(void *obj, const void *buffer, size_t count)
- {
- #if defined(CONFIG_NEWLIB_LIBC) || defined(CONFIG_ARCMWDT_LIBC)
-+	ARG_UNUSED(obj);
-+
- 	return z_impl_zephyr_write_stdout(buffer, count);
- #else
-+	ARG_UNUSED(obj);
-+	ARG_UNUSED(buffer);
-+	ARG_UNUSED(count);
-+
- 	return 0;
- #endif
- }
- 
- static int stdinout_ioctl_vmeth(void *obj, unsigned int request, va_list args)
- {
-+	ARG_UNUSED(obj);
-+	ARG_UNUSED(request);
-+	ARG_UNUSED(args);
-+
- 	errno = EINVAL;
- 	return -1;
- }
- 
--
- static const struct fd_op_vtable stdinout_fd_op_vtable = {
- 	.read = stdinout_read_vmeth,
- 	.write = stdinout_write_vmeth,
 diff --git a/lib/os/zvfs/zvfs_fstat.c b/lib/os/zvfs/zvfs_fstat.c
 new file mode 100644
-index 00000000000..d8a6a8c3f25
+index 00000000000..90a156a579f
 --- /dev/null
 +++ b/lib/os/zvfs/zvfs_fstat.c
-@@ -0,0 +1,36 @@
+@@ -0,0 +1,34 @@
 +/*
 + * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
 + * SPDX-License-Identifier: Apache-2.0
 + */
 +
-+#include <sys/stat.h>
-+
 +#include <zephyr/sys/fdtable.h>
 +#include <zephyr/sys/internal/fdtable_priv.h>
 +#include <zephyr/internal/syscall_handler.h>
 +
-+int z_impl_zvfs_fstat(int fd, struct stat *buf)
++int z_impl_zvfs_fstat(int fd, struct zvfs_stat *buf)
 +{
 +	struct fd_entry *entry = zvfs_fd_entry_get(fd);
 +
@@ -994,13 +523,13 @@ index 00000000000..d8a6a8c3f25
 +}
 +
 +#ifdef CONFIG_USERSPACE
-+static int z_vrfy_zvfs_fstat(int fd, struct stat *buf)
++static int z_vrfy_zvfs_fstat(int fd, struct zvfs_stat *buf)
 +{
 +	if (zvfs_fd_syscall_verify(fd) == NULL) {
 +		return -1;
 +	}
 +
-+	K_OOPS(K_SYSCALL_MEMORY_WRITE(buf, sizeof(struct stat)));
++	K_OOPS(K_SYSCALL_MEMORY_WRITE(buf, sizeof(struct zvfs_stat)));
 +
 +	return z_impl_zvfs_fstat(fd, buf);
 +}
@@ -1099,6 +628,46 @@ index 00000000000..eff8099f46a
 +
 +#include <zephyr/syscalls/zvfs_ftruncate_mrsh.c>
 +#endif /* CONFIG_USERSPACE */
+diff --git a/lib/os/zvfs/zvfs_ioctl.c b/lib/os/zvfs/zvfs_ioctl.c
+new file mode 100644
+index 00000000000..5011a469856
+--- /dev/null
++++ b/lib/os/zvfs/zvfs_ioctl.c
+@@ -0,0 +1,34 @@
++/*
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <stdarg.h>
++
++#include <zephyr/sys/fdtable.h>
++#include <zephyr/sys/internal/fdtable_priv.h>
++#include <zephyr/internal/syscall_handler.h>
++
++int z_impl_zvfs_ioctl(int fd, unsigned long request, va_list args)
++{
++	struct fd_entry *entry = zvfs_fd_entry_get(fd);
++
++	if (entry == NULL) {
++		return -1;
++	}
++
++	return entry->vtable->ioctl(entry->obj, request, args);
++}
++
++#ifdef CONFIG_USERSPACE
++static int z_vrfy_zvfs_ioctl(int fd, unsigned long request, va_list args)
++{
++	if (zvfs_fd_syscall_verify(fd) == NULL) {
++		return -1;
++	}
++
++	return z_impl_zvfs_ioctl(fd, request, args);
++}
++
++#include <zephyr/syscalls/zvfs_ioctl_mrsh.c>
++#endif /* CONFIG_USERSPACE */
 diff --git a/lib/os/zvfs/zvfs_lseek.c b/lib/os/zvfs/zvfs_lseek.c
 new file mode 100644
 index 00000000000..d97432691ec
@@ -1167,7 +736,7 @@ index 00000000000..d97432691ec
 +#endif /* CONFIG_USERSPACE */
 diff --git a/lib/os/zvfs/zvfs_rw.c b/lib/os/zvfs/zvfs_rw.c
 new file mode 100644
-index 00000000000..30ef237e644
+index 00000000000..c5263e99444
 --- /dev/null
 +++ b/lib/os/zvfs/zvfs_rw.c
 @@ -0,0 +1,121 @@
@@ -1293,7 +862,7 @@ index 00000000000..30ef237e644
 +#include <zephyr/syscalls/zvfs_write_offset_mrsh.c>
 +#endif /* CONFIG_USERSPACE */
 diff --git a/subsys/net/lib/sockets/sockets.c b/subsys/net/lib/sockets/sockets.c
-index 6d8ea486c23..59241a71f8f 100644
+index 17f38438cef..f79c28dc39b 100644
 --- a/subsys/net/lib/sockets/sockets.c
 +++ b/subsys/net/lib/sockets/sockets.c
 @@ -9,6 +9,7 @@
@@ -1304,7 +873,7 @@ index 6d8ea486c23..59241a71f8f 100644
  
  #ifndef F_GETFL
  #define F_GETFL ZVFS_F_GETFL
-@@ -162,8 +163,6 @@ static inline int z_vrfy_zsock_socket(int family, int type, int proto)
+@@ -163,8 +164,6 @@ static inline int z_vrfy_zsock_socket(int family, int type, int proto)
  #include <zephyr/syscalls/zsock_socket_mrsh.c>
  #endif /* CONFIG_USERSPACE */
  

@@ -5,14 +5,14 @@ index e014766f634..e3b748cc714 100644
 @@ -531,6 +531,10 @@ config X86_CET_SOC_PREPARE_SHADOW_STACK_SWITCH
  	  Code should be provided via soc_prepare_shadow_stack_switch assembler
  	  macro.
- 
+
 +config ARCH_SUPPORTS_USERSPACE_SIGNALS
 +       bool
 +       default y
 +
  source "arch/x86/core/Kconfig.ia32"
  source "arch/x86/core/Kconfig.intel64"
- 
+
 diff --git a/arch/x86/core/ia32.cmake b/arch/x86/core/ia32.cmake
 index 7abc0e23012..7564ca6d2de 100644
 --- a/arch/x86/core/ia32.cmake
@@ -20,13 +20,13 @@ index 7abc0e23012..7564ca6d2de 100644
 @@ -23,6 +23,10 @@ zephyr_library_sources_ifdef(CONFIG_X86_USERSPACE	ia32/userspace.S)
  zephyr_library_sources_ifdef(CONFIG_LAZY_FPU_SHARING	ia32/float.c)
  zephyr_library_sources_ifdef(CONFIG_GDBSTUB		ia32/gdbstub.c)
- 
+
 +if(CONFIG_SIGNAL AND CONFIG_USERSPACE)
 +  zephyr_library_sources(ia32/signal.c)
 +endif()
 +
  zephyr_library_sources_ifdef(CONFIG_DEBUG_COREDUMP	ia32/coredump.c)
- 
+
  zephyr_library_sources_ifdef(
 diff --git a/arch/x86/core/ia32/signal.c b/arch/x86/core/ia32/signal.c
 new file mode 100644
@@ -85,7 +85,7 @@ index a4ad4c69fb8..02878fca1fd 100644
 @@ -22,6 +22,10 @@ GTEXT(z_x86_user_string_nlen_fixup)
  /* Imports */
  GDATA(_k_syscall_table)
- 
+
 +#if defined(CONFIG_SIGNAL)
 +GTEXT(z_sig_handle)
 +#endif
@@ -96,7 +96,7 @@ index a4ad4c69fb8..02878fca1fd 100644
 @@ -216,6 +220,33 @@ _id_ok:
  	/* Run the handler, which is some entry in _k_syscall_table */
  	call	*%ebx
- 
+
 +#if defined(CONFIG_SIGNAL)
 +	cmp	$K_SYSCALL_K_SIG_ACTION, %esi
 +	je	_skip_z_sig_handle
@@ -194,7 +194,7 @@ index d3610c300cb..67b42ec9aa2 100644
 @@ -10,6 +10,11 @@
  #include <zephyr/syscall.h>
  #include <zephyr/kernel/mm.h>
- 
+
 +/* Imports */
 +#if defined(CONFIG_SIGNAL)
 +GTEXT(z_sig_handle)
@@ -206,7 +206,7 @@ index d3610c300cb..67b42ec9aa2 100644
 @@ -70,6 +75,10 @@ z_x86_trampoline_to_user:
  z_x86_syscall_entry_stub:
  	swapgs
- 
+
 +#if defined(CONFIG_SIGNAL)
 +	movq	%rax, %gs:__x86_tss64_t_syscall_id_OFFSET
 +#endif
@@ -217,7 +217,7 @@ index d3610c300cb..67b42ec9aa2 100644
 @@ -152,6 +161,31 @@ _id_ok:
  	/* Run the marshal function, which is some entry in _k_syscall_table */
  	call	*%r10
- 
+
 +#if defined(CONFIG_SIGNAL)
 +	movq	%gs:__x86_tss64_t_syscall_id_OFFSET, %rdi
 +
@@ -251,7 +251,7 @@ index d08db0cf06b..1eb007a4dcc 100644
 --- a/arch/x86/core/offsets/ia32_offsets.c
 +++ b/arch/x86/core/offsets/ia32_offsets.c
 @@ -41,6 +41,9 @@ GEN_OFFSET_SYM(_cpu_arch_t, fpu_owner);
- 
+
  #ifdef CONFIG_USERSPACE
  GEN_OFFSET_SYM(_thread_arch_t, psp);
 +#ifdef CONFIG_SIGNAL
@@ -277,7 +277,7 @@ index 61bf0c28238..1f962ad6e97 100644
 @@ -61,4 +64,10 @@ GEN_OFFSET_SYM(x86_cpuboot_t, sp);
  GEN_OFFSET_SYM(x86_cpuboot_t, stack_size);
  GEN_ABSOLUTE_SYM(__X86_CPUBOOT_SIZEOF, sizeof(x86_cpuboot_t));
- 
+
 +#if defined(CONFIG_USERSPACE) && defined(CONFIG_SIGNAL)
 +GEN_OFFSET_STRUCT(x86_ssf, rsp);
 +GEN_OFFSET_STRUCT(x86_ssf, rdi);
@@ -292,7 +292,7 @@ index a117939b7c1..96054e352b1 100644
 @@ -19,6 +19,11 @@
  #define _thread_offset_to_psp \
  	(___thread_t_arch_OFFSET + ___thread_arch_t_psp_OFFSET)
- 
+
 +#ifdef CONFIG_SIGNAL
 +#define _thread_offset_to_sig_eax \
 +	(___thread_t_arch_OFFSET + ___thread_arch_t_sig_eax_OFFSET)
@@ -308,7 +308,7 @@ index d1acafb3fd3..946f1596738 100644
 @@ -61,6 +61,15 @@ struct _x86_syscall_stack_frame {
  	uint32_t ss;
  };
- 
+
 +#if defined(CONFIG_SIGNAL) && defined(CONFIG_USERSPACE)
 +struct arch_sig_ctx {
 +	unsigned long eip;
@@ -335,7 +335,7 @@ index b66ba31f835..970b5d8e051 100644
 +	unsigned long sig_eax;
 +#endif
  #endif
- 
+
  #if defined(CONFIG_LAZY_FPU_SHARING)
 diff --git a/include/zephyr/arch/x86/intel64/exception.h b/include/zephyr/arch/x86/intel64/exception.h
 index 7a78950334e..9cf7e5c06c0 100644
@@ -344,7 +344,7 @@ index 7a78950334e..9cf7e5c06c0 100644
 @@ -66,6 +66,13 @@ struct x86_ssf {
  	unsigned long rsp;
  };
- 
+
 +struct arch_sig_ctx {
 +	unsigned long rip;
 +	unsigned long rax;
@@ -361,7 +361,7 @@ index 809ad77222f..c066a1cf219 100644
 +++ b/include/zephyr/arch/x86/intel64/thread.h
 @@ -90,6 +90,11 @@ struct x86_tss64 {
  #endif
- 
+
  #ifdef CONFIG_USERSPACE
 +#ifdef CONFIG_SIGNAL
 +	/* Ran out of registers and need to preserve syscall id */
@@ -370,4 +370,4 @@ index 809ad77222f..c066a1cf219 100644
 +
  	/* Privilege mode stack pointer value when doing a system call */
  	char *psp;
- 
+

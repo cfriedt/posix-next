@@ -1,11 +1,11 @@
 diff --git a/include/zephyr/kernel.h b/include/zephyr/kernel.h
-index 68934a08bb6..4b3f0834c47 100644
+index aa2c85de76d..26cf28ad873 100644
 --- a/include/zephyr/kernel.h
 +++ b/include/zephyr/kernel.h
 @@ -347,6 +347,15 @@ void k_thread_foreach_unlocked_filter_by_cpu(unsigned int cpu,
   */
- #define K_SSE_REGS (BIT(7))
- 
+ #define K_SSE_REGS (BIT(15))
+
 +/**
 + * @brief Asynchronous cancellation for thread
 + *
@@ -16,9 +16,9 @@ index 68934a08bb6..4b3f0834c47 100644
 +#define K_CANCEL_ASYNC (BIT(9))
 +
  /* end - thread options */
- 
+
  #if !defined(_ASMLANGUAGE)
-@@ -6950,6 +6959,143 @@ __syscall void k_sig_current(struct k_sig_info *info, struct k_sig_action *actio
+@@ -7303,6 +7312,143 @@ __syscall void k_sig_current(struct k_sig_info *info, struct k_sig_action *actio
  __syscall void k_sig_return(void);
  /** @endcond */
  #endif
@@ -159,11 +159,11 @@ index 68934a08bb6..4b3f0834c47 100644
 + */
 +
 +#endif /* CONFIG_THREAD_CANCEL */
- 
+
  /**
   * @}
 diff --git a/include/zephyr/kernel/signal.h b/include/zephyr/kernel/signal.h
-index 2819b826295..7b6a24dfa71 100644
+index 5b71a4bf010..45e81eb3b29 100644
 --- a/include/zephyr/kernel/signal.h
 +++ b/include/zephyr/kernel/signal.h
 @@ -60,7 +60,12 @@ extern "C" {
@@ -177,14 +177,14 @@ index 2819b826295..7b6a24dfa71 100644
 +#define K_SIG_RESERVED (CONFIG_THREAD_CANCEL_SIGNAL_NUMBER + 1)
 +
 +#define K_SIG_RTMIN (CONFIG_THREAD_CANCEL_SIGNAL_NUMBER + 2)
- 
+
  /** @brief Number of supported realtime signals */
  #define K_SIG_NUM_RT MAX(SIGNAL_SET_SIZE - K_SIG_RTMIN, 0)
 diff --git a/include/zephyr/kernel/thread.h b/include/zephyr/kernel/thread.h
-index 5ab4ae4e1d5..c0fd785097b 100644
+index 3bf21068998..712695c63dc 100644
 --- a/include/zephyr/kernel/thread.h
 +++ b/include/zephyr/kernel/thread.h
-@@ -148,6 +148,11 @@ struct _thread_base {
+@@ -144,6 +144,11 @@ struct _thread_base {
         /** Thread result or return value */
         atomic_t result;
  #endif
@@ -194,16 +194,16 @@ index 5ab4ae4e1d5..c0fd785097b 100644
 +       atomic_t cancel_pending;
 +#endif
  };
- 
+
  typedef struct _thread_base _thread_base_t;
 diff --git a/kernel/Kconfig b/kernel/Kconfig
-index bd443e41313..c6ce29e5ebe 100644
+index a93b4a842b5..c0149c8390a 100644
 --- a/kernel/Kconfig
 +++ b/kernel/Kconfig
-@@ -220,6 +220,45 @@ config THREAD_RESULT
+@@ -223,6 +223,45 @@ config THREAD_RESULT
  	help
  	  Say 'Y' here to support a thread result or "return value".
- 
+
 +config THREAD_CANCEL_SIGNAL_NUMBER
 +	int "Thread cancellation signal number"
 +	def_int 32
@@ -247,13 +247,13 @@ index bd443e41313..c6ce29e5ebe 100644
  	bool "Thread custom data"
  	help
 diff --git a/kernel/include/kernel_internal.h b/kernel/include/kernel_internal.h
-index c731a27b286..edb05d00d0a 100644
+index da07ce4b297..50d94af6ec4 100644
 --- a/kernel/include/kernel_internal.h
 +++ b/kernel/include/kernel_internal.h
-@@ -269,6 +269,21 @@ void k_thread_abort_cleanup(struct k_thread *thread);
+@@ -280,6 +280,21 @@ void k_thread_abort_cleanup(struct k_thread *thread);
  void k_thread_abort_cleanup_check_reuse(struct k_thread *thread);
  #endif /* CONFIG_THREAD_ABORT_NEED_CLEANUP */
- 
+
 +#ifdef CONFIG_THREAD_CANCEL
 +FUNC_NORETURN void z_thread_cancel_actuate(void);
 +bool z_thread_cancel_try_actuate(void);
@@ -273,21 +273,21 @@ index c731a27b286..edb05d00d0a 100644
  }
  #endif
 diff --git a/kernel/signal.c b/kernel/signal.c
-index 8dfe26ac030..cc60564f61b 100644
+index 898403879b8..213692dbea8 100644
 --- a/kernel/signal.c
 +++ b/kernel/signal.c
 @@ -10,6 +10,7 @@
- 
+
  #include <zephyr/internal/syscall_handler.h>
  #include <zephyr/kernel.h>
 +#include <kernel_internal.h>
  #include <zephyr/logging/log.h>
  #include <zephyr/sys/math_extras.h>
  #include <zephyr/sys/ring_buffer.h>
-@@ -633,8 +633,14 @@ static int z_sig_set_min(const struct k_sig_set *set, bool rt)
+@@ -634,8 +635,14 @@ static int z_sig_set_min(const struct k_sig_set *set, bool rt)
  	ARRAY_FOR_EACH(set->sig, i) {
  		word = set->sig[i];
- 
+
 -		if (rt && (i == 0)) {
 -			word &= ~BIT_MASK(K_SIG_RTMIN - 1);
 +		if (rt) {
@@ -299,12 +299,12 @@ index 8dfe26ac030..cc60564f61b 100644
 +				word &= ~BIT_MASK(rtmin_bit);
 +			}
  		}
- 
+
  		if (word == 0) {
-@@ -855,6 +862,65 @@ static void z_sig_handler_term(int sig, struct k_sig_info *info, void *ucontext)
+@@ -858,6 +865,65 @@ static void z_sig_handler_term(int sig, struct k_sig_info *info, void *ucontext)
  	k_thread_abort(k_current_get());
  }
- 
+
 +#ifdef CONFIG_THREAD_CANCEL
 +FUNC_NORETURN void z_thread_cancel_actuate(void)
 +{
@@ -367,10 +367,10 @@ index 8dfe26ac030..cc60564f61b 100644
  /**
   * @brief The coredump signal handler
   *
-@@ -1007,6 +1073,11 @@ static k_sig_handler_t z_sig_resolve(int sig)
+@@ -1010,6 +1076,11 @@ static k_sig_handler_t z_sig_resolve(int sig)
  	case K_SIG_SYS:
  		return z_sig_handler_core;
- 
+
 +#ifdef CONFIG_THREAD_CANCEL
 +	case K_SIG_CANCEL:
 +		return z_sig_handler_cancel;
@@ -379,10 +379,10 @@ index 8dfe26ac030..cc60564f61b 100644
  	/* all signals that have default 'Ign' behaviour */
  	case K_SIG_CHLD:
  	case K_SIG_URG:
-@@ -1028,6 +1099,23 @@ static k_sig_handler_t z_sig_resolve(int sig)
+@@ -1031,6 +1102,23 @@ static k_sig_handler_t z_sig_resolve(int sig)
  	CODE_UNREACHABLE;
  }
- 
+
 +#if defined(CONFIG_THREAD_CANCEL)
 +__pinned_func void z_syscall_cancel_check(void)
 +{
@@ -404,21 +404,21 @@ index 8dfe26ac030..cc60564f61b 100644
  {
  	if (atomic_get(&_current->base.sig.pending) > 0) {
 diff --git a/kernel/thread.c b/kernel/thread.c
-index 4dedbc3d253..c32cdb059d1 100644
+index efd3c030dbe..d6847bc95f9 100644
 --- a/kernel/thread.c
 +++ b/kernel/thread.c
-@@ -858,6 +858,10 @@ void z_init_thread_base(struct _thread_base *thread_base, int priority,
+@@ -929,6 +929,10 @@ void z_init_thread_base(struct _thread_base *thread_base, int priority,
  	/* swap_data does not need to be initialized */
- 
+
  	z_init_thread_timeout(thread_base);
 +
 +#ifdef CONFIG_THREAD_CANCEL
 +	atomic_set(&thread_base->cancel_pending, 0);
 +#endif
  }
- 
+
  FUNC_NORETURN void k_thread_user_mode_enter(k_thread_entry_t entry,
-@@ -1267,3 +1271,188 @@ void *z_vrfy_k_thread_result_get(void)
+@@ -1409,3 +1413,188 @@ void *z_vrfy_k_thread_result_get(void)
  }
  #include <zephyr/syscalls/k_thread_result_get_mrsh.c>
  #endif
@@ -608,10 +608,10 @@ index 4dedbc3d253..c32cdb059d1 100644
 +#endif /* CONFIG_USERSPACE */
 +#endif /* CONFIG_THREAD_CANCEL */
 diff --git a/lib/os/thread_entry.c b/lib/os/thread_entry.c
-index a1541b587cc..0d0f8b1abf9 100644
+index 2ad86c62d0c..07eabc83ba5 100644
 --- a/lib/os/thread_entry.c
 +++ b/lib/os/thread_entry.c
-@@ -45,9 +45,21 @@ FUNC_NORETURN void z_thread_entry(k_thread_entry_t entry,
+@@ -57,9 +57,21 @@ FUNC_NORETURN void z_thread_entry(k_thread_entry_t entry,
  	__stack_chk_guard = stack_guard;
  	__stack_chk_guard <<= 8;
  #endif	/* CONFIG_STACK_CANARIES */
@@ -627,10 +627,10 @@ index a1541b587cc..0d0f8b1abf9 100644
 +	k_thread_exit(k_thread_result_get());
 +#else
  	entry(p1, p2, p3);
- 
+
  	k_thread_abort(k_current_get());
 +#endif
- 
+
  	/*
  	 * Compiler can't tell that k_thread_abort() won't return and issues a
 diff --git a/tests/kernel/threads/thread_apis/prj.conf b/tests/kernel/threads/thread_apis/prj.conf
@@ -651,16 +651,16 @@ index 18aeee280e2..d6bda3fa907 100644
 +++ b/tests/kernel/threads/thread_apis/src/test_threads_cancel_abort.c
 @@ -11,6 +11,7 @@
  static ZTEST_BMEM int execute_flag;
- 
+
  K_SEM_DEFINE(sync_sema, 0, 1);
 +K_SEM_DEFINE(cancel_ready, 0, 1);
  #define BLOCK_SIZE 64
- 
+
  static void thread_entry_result(void *p1, void *p2, void *p3)
 @@ -123,6 +124,264 @@ ZTEST_USER(threads_lifecycle, test_threads_abort_others)
  	zassert_true(execute_flag == 1);
  }
- 
+
 +#ifdef CONFIG_THREAD_CANCEL
 +static void thread_entry_cancel(void *p1, void *p2, void *p3)
 +{

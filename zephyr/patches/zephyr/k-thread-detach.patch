@@ -1,11 +1,11 @@
 diff --git a/include/zephyr/kernel.h b/include/zephyr/kernel.h
-index 2a2d503aacf..6762872c3a3 100644
+index efcd91f296c..b3b0e2ce762 100644
 --- a/include/zephyr/kernel.h
 +++ b/include/zephyr/kernel.h
 @@ -356,6 +356,15 @@ void k_thread_foreach_unlocked_filter_by_cpu(unsigned int cpu,
   */
  #define K_CANCEL_ASYNC (BIT(9))
- 
+
 +/**
 + * @brief Detached thread
 + *
@@ -16,12 +16,12 @@ index 2a2d503aacf..6762872c3a3 100644
 +#define K_DETACHED (BIT(8))
 +
  /* end - thread options */
- 
+
  #if !defined(_ASMLANGUAGE)
-@@ -652,6 +661,28 @@ __syscall int k_thread_join(struct k_thread *thread, k_timeout_t timeout);
+@@ -754,6 +763,28 @@ __syscall int k_thread_join(struct k_thread *thread, k_timeout_t timeout);
   */
  __syscall int k_thread_rejoin(struct k_thread *thread, void **result, k_timeout_t timeout);
- 
+
 +#if defined(CONFIG_THREAD_DETACH) || defined(__DOXYGEN__)
 +/**
 + * @brief Detach a thread.
@@ -47,27 +47,14 @@ index 2a2d503aacf..6762872c3a3 100644
  /**
   * @brief Put the current thread to sleep.
   *
-diff --git a/include/zephyr/kernel/thread.h b/include/zephyr/kernel/thread.h
-index da690b21b6e..b0d3b32e778 100644
---- a/include/zephyr/kernel/thread.h
-+++ b/include/zephyr/kernel/thread.h
-@@ -61,7 +61,7 @@ struct _thread_base {
- 	_wait_q_t *pended_on;
- 
- 	/* user facing 'thread options'; values defined in include/kernel.h */
--	uint8_t user_options;
-+	uint32_t user_options;
- 
- 	/* thread state */
- 	uint8_t thread_state;
 diff --git a/kernel/Kconfig b/kernel/Kconfig
-index eff2e9b5a07..d6ca066783c 100644
+index f923ebd61ae..25a1f824b58 100644
 --- a/kernel/Kconfig
 +++ b/kernel/Kconfig
-@@ -287,6 +287,13 @@ config THREAD_CLEANUP
+@@ -290,6 +290,13 @@ config THREAD_CLEANUP
  	  k_thread_cleanup_pop(). Cleanup routines are executed when a cancellation request is
  	  delivered to the thread at a cancellation point, not when k_thread_cancel() returns.
- 
+
 +config THREAD_DETACH
 +	bool "Detached threads"
 +	help
@@ -79,13 +66,13 @@ index eff2e9b5a07..d6ca066783c 100644
  	bool "Thread custom data"
  	help
 diff --git a/kernel/sched.c b/kernel/sched.c
-index 449d9913aeb..015138ae24c 100644
+index 33884f2bfdd..b572ec38e2e 100644
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -1430,6 +1430,11 @@ int z_impl_k_thread_rejoin(struct k_thread *thread, void **result, k_timeout_t t
- 
+@@ -1482,6 +1482,11 @@ int z_impl_k_thread_rejoin(struct k_thread *thread, void **result, k_timeout_t t
+
  	SYS_PORT_TRACING_OBJ_FUNC_ENTER(k_thread, join, thread, timeout);
- 
+
 +#ifdef CONFIG_THREAD_DETACH
 +	if (k_thread_is_detached(thread)) {
 +		ret = -EINVAL;
@@ -95,24 +82,10 @@ index 449d9913aeb..015138ae24c 100644
  		z_sched_switch_spin(thread);
  		ret = 0;
 diff --git a/kernel/thread.c b/kernel/thread.c
-index f9fda553356..4dafc01e4f5 100644
+index 1f47a7f56c1..b2efd60f25e 100644
 --- a/kernel/thread.c
 +++ b/kernel/thread.c
-@@ -843,11 +843,11 @@ k_tid_t z_vrfy_k_thread_create(struct k_thread *new_thread,
- #endif /* CONFIG_USERSPACE */
- 
- void z_init_thread_base(struct _thread_base *thread_base, int priority,
--		       uint32_t initial_state, unsigned int options)
-+		       uint32_t initial_state, uint32_t options)
- {
- 	/* k_q_node is initialized upon first insertion in a list */
- 	thread_base->pended_on = NULL;
--	thread_base->user_options = (uint8_t)options;
-+	thread_base->user_options = options;
- 	thread_base->thread_state = (uint8_t)initial_state;
- 
- 	thread_base->prio = priority;
-@@ -1390,3 +1390,89 @@ void z_vrfy_k_thread_exit(void *result)
+@@ -1606,3 +1606,89 @@ void z_vrfy_k_thread_exit(void *result)
  #include <zephyr/syscalls/k_thread_exit_mrsh.c>
  #endif /* CONFIG_USERSPACE */
  #endif /* CONFIG_THREAD_CANCEL */
