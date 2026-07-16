@@ -1,7 +1,8 @@
 diff --git a/include/zephyr/kernel.h b/include/zephyr/kernel.h
+index 8b66193ece0..1b7a67673c3 100644
 --- a/include/zephyr/kernel.h
 +++ b/include/zephyr/kernel.h
-@@ -2077,6 +2077,105 @@ static inline void *z_impl_k_timer_user_data_get(const struct k_timer *timer)
+@@ -2243,6 +2243,105 @@ static inline void *z_impl_k_timer_user_data_get(const struct k_timer *timer)
   */
  __syscall int64_t k_uptime_ticks(void);
  
@@ -107,11 +108,11 @@ diff --git a/include/zephyr/kernel.h b/include/zephyr/kernel.h
  /**
   * @brief Get system uptime.
   *
-
 diff --git a/include/zephyr/sys/clock.h b/include/zephyr/sys/clock.h
+index f835ba895b5..16183f369c1 100644
 --- a/include/zephyr/sys/clock.h
 +++ b/include/zephyr/sys/clock.h
-@@ -249,39 +249,6 @@ typedef struct {
+@@ -292,39 +292,6 @@ typedef struct {
  	uint64_t tick;
  } k_timepoint_t;
  
@@ -126,7 +127,7 @@ diff --git a/include/zephyr/sys/clock.h b/include/zephyr/sys/clock.h
 - *
 - * @param timeout Timeout value relative to current time (may also be
 - *                `K_FOREVER` or `K_NO_WAIT`).
-- * @retval Timepoint value corresponding to given timeout
+- * @return Timepoint value corresponding to given timeout
 - *
 - * @see sys_timepoint_timeout()
 - * @see sys_timepoint_expired()
@@ -142,7 +143,7 @@ diff --git a/include/zephyr/sys/clock.h b/include/zephyr/sys/clock.h
 - * `K_FOREVER` is returned.
 - *
 - * @param timepoint Timepoint for which a timeout value is wanted.
-- * @retval Corresponding timeout value.
+- * @return Corresponding timeout value.
 - *
 - * @see sys_timepoint_calc()
 - */
@@ -151,11 +152,51 @@ diff --git a/include/zephyr/sys/clock.h b/include/zephyr/sys/clock.h
  /**
   * @brief Compare two timepoint values.
   *
-
+@@ -354,19 +321,6 @@ typedef struct {
+ 	bool wait;
+ } k_timepoint_t;
+ 
+-static inline k_timepoint_t sys_timepoint_calc(k_timeout_t timeout)
+-{
+-	k_timepoint_t timepoint;
+-
+-	timepoint.wait = !K_TIMEOUT_EQ(timeout, Z_TIMEOUT_NO_WAIT);
+-	return timepoint;
+-}
+-
+-static inline k_timeout_t sys_timepoint_timeout(k_timepoint_t timepoint)
+-{
+-	return timepoint.wait ? Z_FOREVER : Z_TIMEOUT_NO_WAIT;
+-}
+-
+ static inline int sys_timepoint_cmp(k_timepoint_t a, k_timepoint_t b)
+ {
+ 	if (a.wait == b.wait) {
+@@ -377,19 +331,6 @@ static inline int sys_timepoint_cmp(k_timepoint_t a, k_timepoint_t b)
+ 
+ #endif
+ 
+-/**
+- * @brief Indicates if timepoint is expired
+- *
+- * @param timepoint Timepoint to evaluate
+- * @retval true if the timepoint is in the past, false otherwise
+- *
+- * @see sys_timepoint_calc()
+- */
+-static inline bool sys_timepoint_expired(k_timepoint_t timepoint)
+-{
+-	return K_TIMEOUT_EQ(sys_timepoint_timeout(timepoint), Z_TIMEOUT_NO_WAIT);
+-}
+-
+ /** @} */
+ 
+ /**
 diff --git a/kernel/timeout.c b/kernel/timeout.c
+index 205c368ebb5..625374fe3ba 100644
 --- a/kernel/timeout.c
 +++ b/kernel/timeout.c
-@@ -317,43 +317,6 @@ static inline int64_t z_vrfy_k_uptime_ticks(void)
+@@ -318,43 +318,6 @@ static inline int64_t z_vrfy_k_uptime_ticks(void)
  #include <zephyr/syscalls/k_uptime_ticks_mrsh.c>
  #endif /* CONFIG_USERSPACE */
  
@@ -199,8 +240,8 @@ diff --git a/kernel/timeout.c b/kernel/timeout.c
  #ifdef CONFIG_ZTEST
  void z_impl_sys_clock_tick_set(uint64_t tick)
  {
-
 diff --git a/lib/utils/timeutil.c b/lib/utils/timeutil.c
+index 73c098c49f8..ddc93d6601b 100644
 --- a/lib/utils/timeutil.c
 +++ b/lib/utils/timeutil.c
 @@ -16,6 +16,7 @@
