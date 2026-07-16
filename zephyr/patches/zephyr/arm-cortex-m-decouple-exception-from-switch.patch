@@ -1,0 +1,218 @@
+diff --git a/arch/arm/core/cortex_m/fault.c b/arch/arm/core/cortex_m/fault.c
+index f6f3a68719b..db28c71ec2f 100644
+--- a/arch/arm/core/cortex_m/fault.c
++++ b/arch/arm/core/cortex_m/fault.c
+@@ -16,6 +16,7 @@
+ #include <kernel_internal.h>
+ #include <inttypes.h>
+ #include <zephyr/arch/exception.h>
++#include <zephyr/arch/arm/arm-m-switch.h>
+ #include <zephyr/arch/common/exc_handle.h>
+ #include <zephyr/linker/linker-defs.h>
+ #include <zephyr/logging/log.h>
+diff --git a/arch/arm/core/cortex_m/isr_wrapper.c b/arch/arm/core/cortex_m/isr_wrapper.c
+index c9f6b1db21c..57ddcdd703e 100644
+--- a/arch/arm/core/cortex_m/isr_wrapper.c
++++ b/arch/arm/core/cortex_m/isr_wrapper.c
+@@ -17,6 +17,7 @@
+ #include <zephyr/irq.h>
+ #include <zephyr/pm/pm.h>
+ #include <cmsis_core.h>
++#include <zephyr/arch/arm/arm-m-switch.h>
+ 
+ /**
+  *
+diff --git a/include/zephyr/arch/arm/arm-m-switch.h b/include/zephyr/arch/arm/arm-m-switch.h
+index 9d21baa8bed..44fd367f853 100644
+--- a/include/zephyr/arch/arm/arm-m-switch.h
++++ b/include/zephyr/arch/arm/arm-m-switch.h
+@@ -206,6 +206,21 @@ static inline void arm_m_exc_tail(void)
+ #endif
+ }
+ 
++#ifdef CONFIG_USE_SWITCH
++/**
++ * @brief Kernel housekeeping when exiting an exception/interrupt (switch-based).
++ *
++ * Inline wrapper around arm_m_exc_tail(). Provided here (rather than in
++ * <zephyr/arch/arm/cortex_m/exception.h>) so that the exception header does not
++ * have to pull in the context-switch machinery and <kernel/thread.h>.
++ * See z_arm_int_exit().
++ */
++static inline void z_arm_exc_exit(void)
++{
++	arm_m_exc_tail();
++}
++#endif
++
+ /**
+  * @brief Core Cortex-M context switch routine.
+  *
+diff --git a/include/zephyr/arch/arm/asm_inline_gcc.h b/include/zephyr/arch/arm/asm_inline_gcc.h
+index 1aedaf9c662..1275e2218ff 100644
+--- a/include/zephyr/arch/arm/asm_inline_gcc.h
++++ b/include/zephyr/arch/arm/asm_inline_gcc.h
+@@ -27,6 +27,10 @@
+ #include <zephyr/arch/arm/cortex_a_r/cpu.h>
+ #endif
+ 
++#if defined(CONFIG_ARMV7_M_ARMV8_M_MAINLINE)
++#include <zephyr/arch/arm/cortex_m/cpu.h>
++#endif
++
+ #ifdef __cplusplus
+ extern "C" {
+ #endif
+diff --git a/include/zephyr/arch/arm/cortex_m/cpu.h b/include/zephyr/arch/arm/cortex_m/cpu.h
+index ab85b5be422..744d3ff9ea8 100644
+--- a/include/zephyr/arch/arm/cortex_m/cpu.h
++++ b/include/zephyr/arch/arm/cortex_m/cpu.h
+@@ -1,4 +1,5 @@
+ /*
++ * Copyright (c) 2013-2014 Wind River Systems, Inc.
+  * Copyright (c) 2015, Wind River Systems, Inc.
+  *
+  * SPDX-License-Identifier: Apache-2.0
+@@ -7,6 +8,59 @@
+ #ifndef _CORTEX_M_CPU_H
+ #define _CORTEX_M_CPU_H
+ 
++#include <zephyr/arch/arm/cortex_m/nvic.h>
++#include <zephyr/sys/util.h>
++
++/*
++ * Exception/interrupt priority constants.
++ *
++ * Factored out of <zephyr/arch/arm/cortex_m/exception.h> so that low-level
++ * headers (e.g. <zephyr/arch/arm/asm_inline_gcc.h>) can obtain
++ * _EXC_IRQ_DEFAULT_PRIO without pulling in the full exception header, which in
++ * turn drags in the Cortex-M context-switch machinery and <kernel/thread.h>.
++ * These are constant expressions and are therefore usable from assembler.
++ */
++
++/* for assembler, only works with constants */
++#define Z_EXC_PRIO(pri) (((pri) << (8 - NUM_IRQ_PRIO_BITS)) & 0xff)
++
++/*
++ * In architecture variants with non-programmable fault exceptions
++ * (e.g. Cortex-M Baseline variants), hardware ensures processor faults
++ * are given the highest interrupt priority level. SVCalls are assigned
++ * the highest configurable priority level (level 0); note, however, that
++ * this interrupt level may be shared with HW interrupts.
++ *
++ * In Cortex variants with programmable fault exception priorities we
++ * assign the highest interrupt priority level (level 0) to processor faults
++ * with configurable priority.
++ * The highest priority level may be shared with either Zero-Latency IRQs (if
++ * support for the feature is enabled) or with SVCall priority level.
++ * Regular HW IRQs are always assigned priority levels lower than the priority
++ * levels for SVCalls, Zero-Latency IRQs and processor faults.
++ *
++ * PendSV IRQ (which is used in Cortex-M variants to implement thread
++ * context-switching) is assigned the lowest IRQ priority level.
++ */
++#if defined(CONFIG_CPU_CORTEX_M_HAS_PROGRAMMABLE_FAULT_PRIOS)
++#define _EXCEPTION_RESERVED_PRIO 1
++#else
++#define _EXCEPTION_RESERVED_PRIO 0
++#endif
++
++#define _EXC_FAULT_PRIO             0
++#define _EXC_ZERO_LATENCY_IRQS_PRIO 0
++#define _EXC_SVC_PRIO               COND_CODE_1(CONFIG_ZERO_LATENCY_IRQS,		\
++				  (CONFIG_ZERO_LATENCY_LEVELS), (0))
++#define _IRQ_PRIO_OFFSET            (_EXCEPTION_RESERVED_PRIO + _EXC_SVC_PRIO)
++#define IRQ_PRIO_LOWEST             (BIT(NUM_IRQ_PRIO_BITS) - (_IRQ_PRIO_OFFSET) - 1)
++
++#define _EXC_IRQ_DEFAULT_PRIO Z_EXC_PRIO(_IRQ_PRIO_OFFSET)
++
++/* Use lowest possible priority level for PendSV */
++#define _EXC_PENDSV_PRIO      0xff
++#define _EXC_PENDSV_PRIO_MASK Z_EXC_PRIO(_EXC_PENDSV_PRIO)
++
+ #ifdef _ASMLANGUAGE
+ 
+ #define _SCS_BASE_ADDR _PPB_INT_SCS
+diff --git a/include/zephyr/arch/arm/cortex_m/exception.h b/include/zephyr/arch/arm/cortex_m/exception.h
+index eae16df6987..9316b6b2fbc 100644
+--- a/include/zephyr/arch/arm/cortex_m/exception.h
++++ b/include/zephyr/arch/arm/cortex_m/exception.h
+@@ -12,52 +12,12 @@
+ #ifndef ZEPHYR_INCLUDE_ARCH_ARM_CORTEX_M_EXCEPTION_H_
+ #define ZEPHYR_INCLUDE_ARCH_ARM_CORTEX_M_EXCEPTION_H_
+ 
+-#include <zephyr/devicetree.h>
+-
+-#include <zephyr/arch/arm/cortex_m/nvic.h>
+-#ifndef _ASMLANGUAGE
+-#include <zephyr/arch/arm/arm-m-switch.h>
+-#endif
+-
+-/* for assembler, only works with constants */
+-#define Z_EXC_PRIO(pri) (((pri) << (8 - NUM_IRQ_PRIO_BITS)) & 0xff)
+-
+ /*
+- * In architecture variants with non-programmable fault exceptions
+- * (e.g. Cortex-M Baseline variants), hardware ensures processor faults
+- * are given the highest interrupt priority level. SVCalls are assigned
+- * the highest configurable priority level (level 0); note, however, that
+- * this interrupt level may be shared with HW interrupts.
+- *
+- * In Cortex variants with programmable fault exception priorities we
+- * assign the highest interrupt priority level (level 0) to processor faults
+- * with configurable priority.
+- * The highest priority level may be shared with either Zero-Latency IRQs (if
+- * support for the feature is enabled) or with SVCall priority level.
+- * Regular HW IRQs are always assigned priority levels lower than the priority
+- * levels for SVCalls, Zero-Latency IRQs and processor faults.
+- *
+- * PendSV IRQ (which is used in Cortex-M variants to implement thread
+- * context-switching) is assigned the lowest IRQ priority level.
++ * The exception/interrupt priority constants (_EXC_IRQ_DEFAULT_PRIO, etc.) live
++ * in the lightweight cpu.h so that low-level headers can use them without
++ * pulling in the Cortex-M context-switch machinery (and <kernel/thread.h>).
+  */
+-#if defined(CONFIG_CPU_CORTEX_M_HAS_PROGRAMMABLE_FAULT_PRIOS)
+-#define _EXCEPTION_RESERVED_PRIO 1
+-#else
+-#define _EXCEPTION_RESERVED_PRIO 0
+-#endif
+-
+-#define _EXC_FAULT_PRIO             0
+-#define _EXC_ZERO_LATENCY_IRQS_PRIO 0
+-#define _EXC_SVC_PRIO               COND_CODE_1(CONFIG_ZERO_LATENCY_IRQS,		\
+-				  (CONFIG_ZERO_LATENCY_LEVELS), (0))
+-#define _IRQ_PRIO_OFFSET            (_EXCEPTION_RESERVED_PRIO + _EXC_SVC_PRIO)
+-#define IRQ_PRIO_LOWEST             (BIT(NUM_IRQ_PRIO_BITS) - (_IRQ_PRIO_OFFSET) - 1)
+-
+-#define _EXC_IRQ_DEFAULT_PRIO Z_EXC_PRIO(_IRQ_PRIO_OFFSET)
+-
+-/* Use lowest possible priority level for PendSV */
+-#define _EXC_PENDSV_PRIO      0xff
+-#define _EXC_PENDSV_PRIO_MASK Z_EXC_PRIO(_EXC_PENDSV_PRIO)
++#include <zephyr/arch/arm/cortex_m/cpu.h>
+ 
+ #ifdef _ASMLANGUAGE
+ #ifndef CONFIG_USE_SWITCH
+@@ -130,14 +90,15 @@ struct arch_esf {
+ 
+ extern uint32_t z_arm_coredump_fault_sp;
+ 
+-#ifdef CONFIG_USE_SWITCH
+-static inline void z_arm_exc_exit(void)
+-{
+-	arm_m_exc_tail();
+-}
+-#else
++#ifndef CONFIG_USE_SWITCH
+ extern void z_arm_exc_exit(void);
+ #endif
++/*
++ * For CONFIG_USE_SWITCH, z_arm_exc_exit() is provided as an inline wrapper
++ * around arm_m_exc_tail() by <zephyr/arch/arm/arm-m-switch.h>, so that this
++ * exception header does not have to include the switch machinery (and
++ * <kernel/thread.h>).
++ */
+ 
+ #ifdef __cplusplus
+ }
