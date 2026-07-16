@@ -1,8 +1,8 @@
 diff --git a/include/zephyr/sys/fdtable.h b/include/zephyr/sys/fdtable.h
-index 23736db6bc2..df09a039bfa 100644
+index a17b9a55a6f..f3e39dbab1b 100644
 --- a/include/zephyr/sys/fdtable.h
 +++ b/include/zephyr/sys/fdtable.h
-@@ -32,8 +32,13 @@
+@@ -33,8 +33,13 @@
  #define ZVFS_O_NONBLOCK 0x4000
  
  #define ZVFS_F_DUPFD 0
@@ -29,10 +29,31 @@ index cba599ac7f5..d0b8c63e6fc 100644
  
  struct fd_entry *zvfs_fd_entry_get(int fd);
 diff --git a/include/zephyr/sys/zvfs.h b/include/zephyr/sys/zvfs.h
-index c86fb41c8ad..35a5e3c4dfa 100644
+index c86fb41c8ad..7a417c2247c 100644
 --- a/include/zephyr/sys/zvfs.h
 +++ b/include/zephyr/sys/zvfs.h
-@@ -102,15 +102,17 @@ __syscall int zvfs_ftruncate(int fd, off_t length);
+@@ -24,7 +24,10 @@
+ extern "C" {
+ #endif
+ 
+-struct stat;
++struct zvfs_stat {
++	off_t size;
++	uint32_t mode;
++};
+ 
+ /**
+  * @brief Read from a file descriptor at an optional explicit offset.
+@@ -78,7 +81,7 @@ __syscall off_t zvfs_lseek(int fd, off_t offset, int whence);
+  *
+  * @return 0 on success, or -1 on error (errno is set).
+  */
+-__syscall int zvfs_fstat(int fd, struct stat *buf);
++__syscall int zvfs_fstat(int fd, struct zvfs_stat *buf);
+ 
+ /**
+  * @brief Synchronize a file descriptor to its backing store.
+@@ -102,15 +105,17 @@ __syscall int zvfs_ftruncate(int fd, off_t length);
  /**
   * @brief Dispatch a control request on a file descriptor.
   *
@@ -160,10 +181,90 @@ index fb4078f4cd1..0d6e60b422b 100644
 +#include <zephyr/syscalls/zvfs_fcntl_mrsh.c>
 +#endif /* CONFIG_USERSPACE */
 diff --git a/lib/os/zvfs/zvfs_fdtable.c b/lib/os/zvfs/zvfs_fdtable.c
-index da161110640..42633819d95 100644
+index 7cfb7a2f08b..ede594ad209 100644
 --- a/lib/os/zvfs/zvfs_fdtable.c
 +++ b/lib/os/zvfs/zvfs_fdtable.c
-@@ -172,6 +172,7 @@ static int zvfs_dup_entry_locked(struct fd_entry *src, int newfd)
+@@ -1,6 +1,6 @@
+ /*
+  * Copyright (c) 2018 Linaro Limited
+- * Copyright (c) 2024 Tenstorrent AI ULC
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
+  * Copyright (c) 2025 Antmicro
+  *
+  * SPDX-License-Identifier: Apache-2.0
+@@ -22,24 +22,11 @@
+ #include <zephyr/init.h>
+ #include <zephyr/kernel.h>
+ #include <zephyr/sys/fdtable.h>
++#include <zephyr/sys/internal/fdtable_priv.h>
+ #include <zephyr/sys/internal/kobject_internal.h>
+ #include <zephyr/sys/speculation.h>
+ #include <zephyr/internal/syscall_handler.h>
+ #include <zephyr/sys/atomic.h>
+-#include <zephyr/fs/fs.h>
+-
+-K_MEM_SLAB_DEFINE(file_desc_slab, sizeof(struct fs_file_t), ZVFS_OPEN_SIZE, 4);
+-
+-struct fd_entry {
+-	void *obj;
+-	const struct fd_op_vtable *vtable;
+-	atomic_t refcount;
+-	struct k_mutex lock;
+-	struct k_condvar cond;
+-	size_t offset;
+-	uint32_t mode;
+-};
+-
+ #ifdef CONFIG_ZVFS_RESERVE_STDIO_FDS
+ static const struct fd_op_vtable stdinout_fd_op_vtable;
+ BUILD_ASSERT(ZVFS_OPEN_SIZE >= 3, "ZVFS_OPEN_SIZE >= 3 to reserve stdin/stdout/stderr fds");
+@@ -76,45 +63,6 @@ static struct fd_entry fdtable[ZVFS_OPEN_SIZE] = {
+ #endif
+ };
+ 
+-int zvfs_open(const char *name, int flags, struct fd_op_vtable *vtable)
+-{
+-	int rc, fd;
+-	struct fs_file_t *ptr = NULL;
+-
+-	fd = zvfs_reserve_fd();
+-	if (fd < 0) {
+-		return -1;
+-	}
+-
+-	rc = k_mem_slab_alloc(&file_desc_slab, (void **)&ptr, K_NO_WAIT);
+-	if (rc < 0) {
+-		rc = -EMFILE;
+-		goto out_err;
+-	}
+-
+-	fs_file_t_init(ptr);
+-
+-	rc = fs_open(ptr, name, flags);
+-	if (rc < 0) {
+-		goto out_err;
+-	}
+-
+-	zvfs_finalize_fd(fd, ptr, vtable);
+-
+-	goto out;
+-
+-out_err:
+-	if (ptr != NULL) {
+-		k_mem_slab_free(&file_desc_slab, ptr);
+-	}
+-
+-	zvfs_free_fd(fd);
+-	errno = -rc;
+-	return -1;
+-
+-out:
+-	return fd;
+-}
+ 
+ static K_MUTEX_DEFINE(fdtable_lock);
+ 
+@@ -237,6 +185,7 @@ static int zvfs_dup_entry_locked(struct fd_entry *src, int newfd)
  	fdtable[newfd].vtable = src->vtable;
  	fdtable[newfd].mode = src->mode;
  	fdtable[newfd].offset = src->offset;
@@ -171,7 +272,7 @@ index da161110640..42633819d95 100644
  	k_mutex_init(&fdtable[newfd].lock);
  	k_condvar_init(&fdtable[newfd].cond);
  
-@@ -478,6 +479,7 @@ int zvfs_reserve_fd(void)
+@@ -480,6 +429,7 @@ int zvfs_reserve_fd(void)
  		fdtable[fd].obj = NULL;
  		fdtable[fd].vtable = NULL;
  		fdtable[fd].offset = 0;
@@ -179,3 +280,222 @@ index da161110640..42633819d95 100644
  		k_mutex_init(&fdtable[fd].lock);
  		k_condvar_init(&fdtable[fd].cond);
  	}
+@@ -538,108 +488,6 @@ int zvfs_alloc_fd(void *obj, const struct fd_op_vtable *vtable)
+ 	return fd;
+ }
+ 
+-static bool supports_pread_pwrite(uint32_t mode)
+-{
+-	switch (mode & ZVFS_MODE_IFMT) {
+-	case ZVFS_MODE_IFSHM:
+-		return true;
+-	default:
+-		return false;
+-	}
+-}
+-
+-static ssize_t zvfs_rw(int fd, void *buf, size_t sz, bool is_write, const size_t *from_offset)
+-{
+-	bool prw;
+-	ssize_t res;
+-	const size_t *off;
+-
+-	if (_check_fd(fd) < 0) {
+-		return -1;
+-	}
+-
+-	(void)k_mutex_lock(&fdtable[fd].lock, K_FOREVER);
+-
+-	prw = supports_pread_pwrite(fdtable[fd].mode);
+-	if (from_offset != NULL && !prw) {
+-		/*
+-		 * Seekable file types should support pread() / pwrite() and per-fd offset passing.
+-		 * Otherwise, it's a bug.
+-		 */
+-		errno = ENOTSUP;
+-		res = -1;
+-		goto unlock;
+-	}
+-
+-	/* If there is no specified from_offset, then use the current offset of the fd */
+-	off = (from_offset == NULL) ? &fdtable[fd].offset : from_offset;
+-
+-	if (is_write) {
+-		if (fdtable[fd].vtable->write_offs == NULL) {
+-			res = -1;
+-			errno = EIO;
+-		} else {
+-			res = fdtable[fd].vtable->write_offs(fdtable[fd].obj, buf, sz, *off);
+-		}
+-	} else {
+-		if (fdtable[fd].vtable->read_offs == NULL) {
+-			res = -1;
+-			errno = EIO;
+-		} else {
+-			res = fdtable[fd].vtable->read_offs(fdtable[fd].obj, buf, sz, *off);
+-		}
+-	}
+-	if (res > 0 && prw && from_offset == NULL) {
+-		/*
+-		 * only update the fd offset when from_offset is not specified
+-		 * See pread() / pwrite()
+-		 */
+-		fdtable[fd].offset += res;
+-	}
+-
+-unlock:
+-	k_mutex_unlock(&fdtable[fd].lock);
+-
+-	return res;
+-}
+-
+-ssize_t zvfs_read(int fd, void *buf, size_t sz, const size_t *from_offset)
+-{
+-	return zvfs_rw(fd, buf, sz, false, from_offset);
+-}
+-
+-ssize_t zvfs_write(int fd, const void *buf, size_t sz, const size_t *from_offset)
+-{
+-	return zvfs_rw(fd, (void *)buf, sz, true, from_offset);
+-}
+-
+-int zvfs_close(int fd)
+-{
+-	int res = 0;
+-
+-	if (_check_fd(fd) < 0) {
+-		return -1;
+-	}
+-
+-	(void)k_mutex_lock(&fdtable[fd].lock, K_FOREVER);
+-	if (fdtable[fd].vtable->close != NULL) {
+-		/* close() is optional - e.g. stdinout_fd_op_vtable */
+-		if (fdtable[fd].mode & ZVFS_MODE_IFSOCK) {
+-			/* Network socket needs to know socket number so pass
+-			 * it via close2() call.
+-			 */
+-			res = fdtable[fd].vtable->close2(fdtable[fd].obj, fd);
+-		} else {
+-			res = fdtable[fd].vtable->close(fdtable[fd].obj);
+-		}
+-	}
+-	k_mutex_unlock(&fdtable[fd].lock);
+-
+-	zvfs_free_fd(fd);
+-
+-	return res;
+-}
+-
+ FILE *zvfs_fdopen(int fd, const char *mode)
+ {
+ 	ARG_UNUSED(mode);
+@@ -661,109 +509,6 @@ int zvfs_fileno(FILE *file)
+ 	return (struct fd_entry *)file - fdtable;
+ }
+ 
+-int zvfs_fstat(int fd, struct zvfs_stat *buf)
+-{
+-	if (_check_fd(fd) < 0) {
+-		return -1;
+-	}
+-
+-	return zvfs_fdtable_call_ioctl(fdtable[fd].vtable, fdtable[fd].obj, ZFD_IOCTL_STAT, buf);
+-}
+-
+-int zvfs_fsync(int fd)
+-{
+-	if (_check_fd(fd) < 0) {
+-		return -1;
+-	}
+-
+-	return zvfs_fdtable_call_ioctl(fdtable[fd].vtable, fdtable[fd].obj, ZFD_IOCTL_FSYNC);
+-}
+-
+-static inline off_t zvfs_lseek_wrap(int fd, int cmd, ...)
+-{
+-	off_t res;
+-	va_list args;
+-
+-	__ASSERT_NO_MSG(fd < ARRAY_SIZE(fdtable));
+-
+-	(void)k_mutex_lock(&fdtable[fd].lock, K_FOREVER);
+-	va_start(args, cmd);
+-	res = fdtable[fd].vtable->ioctl(fdtable[fd].obj, cmd, args);
+-	va_end(args);
+-	if (res >= 0) {
+-		switch (fdtable[fd].mode & ZVFS_MODE_IFMT) {
+-		case ZVFS_MODE_IFDIR:
+-		case ZVFS_MODE_IFBLK:
+-		case ZVFS_MODE_IFSHM:
+-		case ZVFS_MODE_IFREG:
+-			fdtable[fd].offset = res;
+-			break;
+-		default:
+-			break;
+-		}
+-	}
+-	k_mutex_unlock(&fdtable[fd].lock);
+-
+-	return res;
+-}
+-
+-off_t zvfs_lseek(int fd, off_t offset, int whence)
+-{
+-	if (_check_fd(fd) < 0) {
+-		return -1;
+-	}
+-
+-	return zvfs_lseek_wrap(fd, ZFD_IOCTL_LSEEK, offset, whence, fdtable[fd].offset);
+-}
+-
+-int zvfs_fcntl(int fd, int cmd, va_list args)
+-{
+-	int res;
+-
+-	if (_check_fd(fd) < 0) {
+-		return -1;
+-	}
+-
+-	/* The rest of commands are per-fd, handled by ioctl vmethod. */
+-	res = fdtable[fd].vtable->ioctl(fdtable[fd].obj, cmd, args);
+-
+-	return res;
+-}
+-
+-static inline int zvfs_ftruncate_wrap(int fd, int cmd, ...)
+-{
+-	int res;
+-	va_list args;
+-
+-	__ASSERT_NO_MSG(fd < ARRAY_SIZE(fdtable));
+-
+-	(void)k_mutex_lock(&fdtable[fd].lock, K_FOREVER);
+-	va_start(args, cmd);
+-	res = fdtable[fd].vtable->ioctl(fdtable[fd].obj, cmd, args);
+-	va_end(args);
+-	k_mutex_unlock(&fdtable[fd].lock);
+-
+-	return res;
+-}
+-
+-int zvfs_ftruncate(int fd, off_t length)
+-{
+-	if (_check_fd(fd) < 0) {
+-		return -1;
+-	}
+-
+-	return zvfs_ftruncate_wrap(fd, ZFD_IOCTL_TRUNCATE, length);
+-}
+-
+-int zvfs_ioctl(int fd, unsigned long request, va_list args)
+-{
+-	if (_check_fd(fd) < 0) {
+-		return -1;
+-	}
+-
+-	return fdtable[fd].vtable->ioctl(fdtable[fd].obj, request, args);
+-}
+-
+ int zvfs_unlink(const char *path)
+ {
+ 	int res = fs_unlink(path);
