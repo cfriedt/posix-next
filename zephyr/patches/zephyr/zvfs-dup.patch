@@ -1,24 +1,27 @@
 diff --git a/include/zephyr/sys/internal/fdtable_priv.h b/include/zephyr/sys/internal/fdtable_priv.h
+index 5403ce8afd4..cba599ac7f5 100644
 --- a/include/zephyr/sys/internal/fdtable_priv.h
 +++ b/include/zephyr/sys/internal/fdtable_priv.h
-@@ -29,6 +29,10 @@
+@@ -29,6 +29,10 @@ struct fd_entry {
  struct fd_entry *zvfs_fd_entry_get(int fd);
  struct fd_entry *zvfs_fd_syscall_verify(int fd);
- 
+
 +int zvfs_fd_obj_refcount(void *obj);
 +
 +void zvfs_fd_offset_set(struct fd_entry *entry, size_t offset);
 +
  bool supports_pread_pwrite(uint32_t mode);
  ssize_t zvfs_rw_unlocked(int fd, void *buf, size_t sz, bool is_write, const size_t *from_offset);
- 
+
 diff --git a/include/zephyr/sys/zvfs.h b/include/zephyr/sys/zvfs.h
+index 844c14042db..9b3740747f6 100644
 --- a/include/zephyr/sys/zvfs.h
 +++ b/include/zephyr/sys/zvfs.h
-@@ -113,6 +113,26 @@
+@@ -112,6 +112,26 @@ __syscall int zvfs_ftruncate(int fd, off_t length);
+  */
  int zvfs_fcntl(int fd, int cmd, va_list args);
- 
- /**
+
++/**
 + * @brief Duplicate a file descriptor to the lowest available slot >= minfd.
 + *
 + * @param fd File descriptor to duplicate.
@@ -38,11 +41,11 @@ diff --git a/include/zephyr/sys/zvfs.h b/include/zephyr/sys/zvfs.h
 + */
 +int zvfs_dup2(int fd, int newfd);
 +
-+/**
+ /**
   * @brief Dispatch an I/O control request on a file descriptor.
   *
-  * @param fd File descriptor.
 diff --git a/lib/os/zvfs/zvfs_close.c b/lib/os/zvfs/zvfs_close.c
+index 86d1a4bbb02..3ca83cadbbd 100644
 --- a/lib/os/zvfs/zvfs_close.c
 +++ b/lib/os/zvfs/zvfs_close.c
 @@ -1,5 +1,6 @@
@@ -51,10 +54,10 @@ diff --git a/lib/os/zvfs/zvfs_close.c b/lib/os/zvfs/zvfs_close.c
 + * Copyright (c) 2024, Friedt Professional Engineering Services, Inc.
   * SPDX-License-Identifier: Apache-2.0
   */
- 
-@@ -18,7 +19,8 @@
+
+@@ -18,7 +19,8 @@ int z_impl_zvfs_close(int fd)
  	}
- 
+
  	(void)k_mutex_lock(&entry->lock, K_FOREVER);
 -	if (entry->vtable->close != NULL) {
 +	if (entry->vtable->close != NULL && entry->obj != NULL &&
@@ -63,12 +66,13 @@ diff --git a/lib/os/zvfs/zvfs_close.c b/lib/os/zvfs/zvfs_close.c
  			res = entry->vtable->close2(entry->obj, fd);
  		} else {
 diff --git a/lib/os/zvfs/zvfs_fdtable.c b/lib/os/zvfs/zvfs_fdtable.c
+index a661a44b1c5..acd559d2cd2 100644
 --- a/lib/os/zvfs/zvfs_fdtable.c
 +++ b/lib/os/zvfs/zvfs_fdtable.c
-@@ -101,6 +101,138 @@
+@@ -157,6 +157,138 @@ static int _find_fd_entry(void)
  	return -1;
  }
- 
+
 +static int _find_fd_entry_at_or_above(int minfd)
 +{
 +	int fd;
@@ -204,22 +208,11 @@ diff --git a/lib/os/zvfs/zvfs_fdtable.c b/lib/os/zvfs/zvfs_fdtable.c
  struct fd_entry *zvfs_fd_entry_get(int fd)
  {
  	if ((fd < 0) || (fd >= ARRAY_SIZE(fdtable))) {
-diff --git a/lib/os/zvfs/zvfs_rw.c b/lib/os/zvfs/zvfs_rw.c
---- a/lib/os/zvfs/zvfs_rw.c
-+++ b/lib/os/zvfs/zvfs_rw.c
-@@ -51,7 +51,7 @@
- 	}
- 
- 	if (res > 0 && from_offset == NULL) {
--		entry->offset += res;
-+		zvfs_fd_offset_set(entry, entry->offset + (size_t)res);
- 	}
- 
- 	return res;
 diff --git a/lib/os/zvfs/zvfs_lseek.c b/lib/os/zvfs/zvfs_lseek.c
+index d97432691ec..e0e156b8200 100644
 --- a/lib/os/zvfs/zvfs_lseek.c
 +++ b/lib/os/zvfs/zvfs_lseek.c
-@@ -24,7 +24,7 @@
+@@ -24,7 +24,7 @@ static inline off_t zvfs_lseek_wrap(struct fd_entry *entry, int cmd, ...)
  		case ZVFS_MODE_IFBLK:
  		case ZVFS_MODE_IFSHM:
  		case ZVFS_MODE_IFREG:
@@ -228,3 +221,16 @@ diff --git a/lib/os/zvfs/zvfs_lseek.c b/lib/os/zvfs/zvfs_lseek.c
  			break;
  		default:
  			break;
+diff --git a/lib/os/zvfs/zvfs_rw.c b/lib/os/zvfs/zvfs_rw.c
+index 8fe258c1683..16006c72e9c 100644
+--- a/lib/os/zvfs/zvfs_rw.c
++++ b/lib/os/zvfs/zvfs_rw.c
+@@ -52,7 +52,7 @@ static ssize_t zvfs_rw_entry(struct fd_entry *entry, void *buf, size_t sz, bool
+ 	}
+
+ 	if (res > 0 && from_offset == NULL) {
+-		entry->offset += res;
++		zvfs_fd_offset_set(entry, entry->offset + (size_t)res);
+ 	}
+
+ 	return res;

@@ -1,8 +1,8 @@
 diff --git a/arch/Kconfig b/arch/Kconfig
-index 4fca0c3c602..b6ddc22b1e8 100644
+index 7f99dd01fbc..a82c39f7389 100644
 --- a/arch/Kconfig
 +++ b/arch/Kconfig
-@@ -795,6 +795,11 @@ config ARCH_HAS_THREAD_PRIV_STACK_SPACE_GET
+@@ -810,6 +810,11 @@ config ARCH_HAS_THREAD_PRIV_STACK_SPACE_GET
  config ARCH_HAS_HW_SHADOW_STACK
  	bool
 
@@ -15,10 +15,10 @@ index 4fca0c3c602..b6ddc22b1e8 100644
  # Other architecture related options
  #
 diff --git a/include/zephyr/arch/arch_interface.h b/include/zephyr/arch/arch_interface.h
-index e604a3189d7..4ff6180b6ff 100644
+index 1e8c47bf77f..d9674162808 100644
 --- a/include/zephyr/arch/arch_interface.h
 +++ b/include/zephyr/arch/arch_interface.h
-@@ -1309,6 +1309,46 @@ void arch_stack_walk(stack_trace_callback_fn callback_fn, void *cookie,
+@@ -1328,6 +1328,46 @@ void arch_stack_walk(stack_trace_callback_fn callback_fn, void *cookie,
   * @}
   */
 
@@ -66,10 +66,10 @@ index e604a3189d7..4ff6180b6ff 100644
  }
  #endif /* __cplusplus */
 diff --git a/include/zephyr/kernel.h b/include/zephyr/kernel.h
-index 9191370a93c..43cd2804411 100644
+index 5d10229ab52..aa325c4d4bf 100644
 --- a/include/zephyr/kernel.h
 +++ b/include/zephyr/kernel.h
-@@ -6697,6 +6697,219 @@ void k_sys_runtime_stats_enable(void);
+@@ -7050,6 +7050,219 @@ void k_sys_runtime_stats_enable(void);
   */
  void k_sys_runtime_stats_disable(void);
 
@@ -483,7 +483,7 @@ index 00000000000..e36bd69045f
 +
 +#endif /* ZEPHYR_INCLUDE_ZEPHYR_KERNEL_SIGNAL_H_ */
 diff --git a/include/zephyr/kernel/thread.h b/include/zephyr/kernel/thread.h
-index db7713d6d40..c822f921552 100644
+index 9a137c4f0f5..adf62ec1ca1 100644
 --- a/include/zephyr/kernel/thread.h
 +++ b/include/zephyr/kernel/thread.h
 @@ -11,6 +11,10 @@
@@ -497,7 +497,7 @@ index db7713d6d40..c822f921552 100644
  #include <zephyr/kernel/stats.h>
  #include <zephyr/arch/arch_interface.h>
 
-@@ -135,6 +139,10 @@ struct _thread_base {
+@@ -131,6 +135,10 @@ struct _thread_base {
  #ifdef CONFIG_SCHED_THREAD_USAGE
  	struct k_cycle_stats  usage;   /* Track thread usage statistics */
  #endif /* CONFIG_SCHED_THREAD_USAGE */
@@ -508,7 +508,7 @@ index db7713d6d40..c822f921552 100644
  };
 
  typedef struct _thread_base _thread_base_t;
-@@ -366,5 +374,6 @@ struct k_thread {
+@@ -381,5 +389,6 @@ struct k_thread {
 
  typedef struct k_thread _thread_t;
  typedef struct k_thread *k_tid_t;
@@ -528,10 +528,10 @@ index d976c944f60..05429e19054 100644
  #include <zephyr/kernel_version.h>
  #include <zephyr/syscall.h>
 diff --git a/include/zephyr/syscall.h b/include/zephyr/syscall.h
-index 35cb36554a0..266bb0d750a 100644
+index 4ae69d1515a..44850c4408f 100644
 --- a/include/zephyr/syscall.h
 +++ b/include/zephyr/syscall.h
-@@ -121,6 +121,19 @@ static inline bool k_is_user_context(void)
+@@ -127,6 +127,19 @@ static inline bool k_is_user_context(void)
  #endif
  }
 
@@ -552,7 +552,7 @@ index 35cb36554a0..266bb0d750a 100644
  }
  #endif
 diff --git a/kernel/CMakeLists.txt b/kernel/CMakeLists.txt
-index 8906da2f627..71a40b1a3d6 100644
+index b0b037f4597..0e870ec1dc6 100644
 --- a/kernel/CMakeLists.txt
 +++ b/kernel/CMakeLists.txt
 @@ -1,5 +1,86 @@
@@ -643,10 +643,10 @@ index 8906da2f627..71a40b1a3d6 100644
  # should usually not be --whole-archive'd
 
 diff --git a/kernel/Kconfig b/kernel/Kconfig
-index 9e3be0b12ab..ba1866cc4f7 100644
+index 71e4c88436a..f198f17a007 100644
 --- a/kernel/Kconfig
 +++ b/kernel/Kconfig
-@@ -715,6 +715,61 @@ config MEM_SLAB_POINTER_VALIDATE
+@@ -738,6 +738,61 @@ config MEM_SLAB_POINTER_VALIDATE
  	  This enables additional runtime checks to validate the memory slab
  	  pointer during when allocating or freeing a memory slab.
 
@@ -708,7 +708,7 @@ index 9e3be0b12ab..ba1866cc4f7 100644
  config MEM_SLAB_TRACE_MAX_UTILIZATION
  	bool "Getting maximum slab utilization"
  	help
-@@ -800,6 +855,12 @@ config ARCH_HAS_THREAD_NAME_HOOK
+@@ -823,6 +878,12 @@ config ARCH_HAS_THREAD_NAME_HOOK
  	  The architecture provides a hook to handle thread name changes beyond
  	  just storing it in the kernel structure.
 
@@ -1823,10 +1823,10 @@ index 00000000000..ce6a97070f8
 +	}
 +}
 diff --git a/kernel/thread.c b/kernel/thread.c
-index 6d603564df9..cd972ec9751 100644
+index 6c1f944a135..a5cbd700777 100644
 --- a/kernel/thread.c
 +++ b/kernel/thread.c
-@@ -711,6 +711,28 @@ char *z_setup_new_thread(struct k_thread *new_thread,
+@@ -714,6 +714,28 @@ char *z_setup_new_thread(struct k_thread *new_thread,
  		CONFIG_SCHED_THREAD_USAGE_AUTO_ENABLE;
  #endif /* CONFIG_SCHED_THREAD_USAGE */
 
@@ -1855,7 +1855,7 @@ index 6d603564df9..cd972ec9751 100644
  	SYS_PORT_TRACING_OBJ_FUNC(k_thread, create, new_thread);
 
  	return stack_ptr;
-@@ -859,6 +881,10 @@ FUNC_NORETURN void k_thread_user_mode_enter(k_thread_entry_t entry,
+@@ -930,6 +952,10 @@ FUNC_NORETURN void k_thread_user_mode_enter(k_thread_entry_t entry,
  			     (char *)(_current->stack_info.start +
  				      _current->stack_info.size));
  #endif /* CONFIG_THREAD_LOCAL_STORAGE */
@@ -1867,12 +1867,12 @@ index 6d603564df9..cd972ec9751 100644
  #else
  	/* XXX In this case we do not reset the stack */
 diff --git a/scripts/build/gen_syscalls.py b/scripts/build/gen_syscalls.py
-index 352130caf83..09a50e939ea 100755
+index 2d5431fc6b5..e5074767f5c 100755
 --- a/scripts/build/gen_syscalls.py
 +++ b/scripts/build/gen_syscalls.py
-@@ -29,6 +29,60 @@ import argparse
- import os
- import json
+@@ -29,6 +29,60 @@ import os
+ import re
+ import sys
 
 +# Syscall lists for signal and cancellation handling in generated wrappers.
 +#
@@ -1931,116 +1931,46 @@ index 352130caf83..09a50e939ea 100755
  # Some kernel headers cannot include automated tracing without causing unintended recursion or
  # other serious issues.
  # These headers typically already have very specific tracing hooks for all relevant things
-@@ -243,22 +297,24 @@ def wrapper_defs(func_name, func_type, args, fn, userspace_only):
-     wrap += "__pinned_func\n"
-     wrap += "static inline %s %s(%s)\n" % (func_type, func_name, decl_arglist)
-     wrap += "{\n"
-+    body_indent = "\t"
-     if not userspace_only:
-         wrap += "#ifdef CONFIG_USERSPACE\n"
-+        wrap += "\tif (z_syscall_trap()) {\n"
-+        body_indent = "\t\t"
-
--    wrap += ("\t" + "uint64_t ret64;\n") if ret64 else ""
--    if not userspace_only:
--        wrap += "\t" + "if (z_syscall_trap()) {\n"
-+    if ret64:
-+        wrap += body_indent + "uint64_t ret64;\n"
-
-     valist_args = []
-     for argnum, (argtype, argname) in enumerate(args):
-         split = need_split(argtype)
--        wrap += "\t\t%s parm%d" % (union_decl(argtype, split), argnum)
-+        wrap += body_indent + "%s parm%d" % (union_decl(argtype, split), argnum)
-         if argtype != "va_list":
-             wrap += " = { .val = %s };\n" % argname
-         else:
-             # va_list objects are ... peculiar.
--            wrap += ";\n" + "\t\t" + "va_copy(parm%d.val, %s);\n" % (argnum, argname)
-+            wrap += ";\n" + body_indent + "va_copy(parm%d.val, %s);\n" % (argnum, argname)
-             valist_args.append("parm%d.val" % argnum)
-         if split:
-             mrsh_args.append("parm%d.split.lo" % argnum)
-@@ -270,34 +326,47 @@ def wrapper_defs(func_name, func_type, args, fn, userspace_only):
-         mrsh_args.append("(uintptr_t)&ret64")
-
-     if len(mrsh_args) > 6:
--        wrap += "\t\t" + "uintptr_t more[] = {\n"
--        wrap += "\t\t\t" + (",\n\t\t\t".join(mrsh_args[5:])) + "\n"
--        wrap += "\t\t" + "};\n"
-+        wrap += body_indent + "uintptr_t more[] = {\n"
-+        wrap += body_indent + "\t" + (",\n" + body_indent + "\t").join(mrsh_args[5:]) + "\n"
-+        wrap += body_indent + "};\n"
+@@ -274,6 +328,23 @@ def wrapper_defs(func_name, func_type, args, fn, userspace_only):
+         wrap += "\t\t" + "};\n"
          mrsh_args[5:] = ["(uintptr_t) &more"]
 
-+    invoke_args = mrsh_args
-+    # Save syscall arguments before the cancel check: on x86_64 the
-+    # k_thread_testcancel invoke0 path does not preserve argument registers.
++    # Deferred cancellation is actuated at cancellation-point entry, before the
++    # syscall may block. For user threads the actuation comes from invoking the
++    # K_THREAD_TESTCANCEL syscall here (the in-kernel z_syscall_cancel_check() on
++    # the direct path below is never reached from the userspace trap branch).
++    # Save the marshalled arguments first: on x86_64 the invoke0 path does not
++    # preserve argument registers.
 +    if needs_pre_cancel_check(func_name):
-+        invoke_args = []
++        saved_args = []
 +        for i, arg in enumerate(mrsh_args):
-+            wrap += body_indent + "volatile uintptr_t syscall_arg%d = %s;\n" % (i, arg)
-+            invoke_args.append("syscall_arg%d" % i)
-+        wrap += body_indent + "#ifdef CONFIG_THREAD_CANCEL\n"
-+        wrap += body_indent + "(void) arch_syscall_invoke0(K_SYSCALL_K_THREAD_TESTCANCEL);\n"
-+        wrap += body_indent + "compiler_barrier();\n"
-+        wrap += body_indent + "#endif\n"
++            wrap += "\t\t" + f"volatile uintptr_t syscall_arg{i} = {arg};\n"
++            saved_args.append(f"syscall_arg{i}")
++        mrsh_args = saved_args
++        wrap += "\t\t" + "#ifdef CONFIG_THREAD_CANCEL\n"
++        wrap += "\t\t" + "(void) arch_syscall_invoke0(K_SYSCALL_K_THREAD_TESTCANCEL);\n"
++        wrap += "\t\t" + "compiler_barrier();\n"
++        wrap += "\t\t" + "#endif\n"
 +
-     invoke = ("arch_syscall_invoke%d(%s)"
--              % (len(mrsh_args),
--                 ", ".join(mrsh_args + [syscall_id])))
-+              % (len(invoke_args),
-+                 ", ".join(invoke_args + [syscall_id])))
+     invoke_args = ", ".join(mrsh_args + [syscall_id])
+     invoke = f"arch_syscall_invoke{len(mrsh_args)}({invoke_args})"
 
-     if ret64:
--        invoke = "\t\t" + "(void) %s;\n" % invoke
--        retcode = "\t\t" + "return (%s) ret64;\n" % func_type
-+        invoke = body_indent + "(void) %s;\n" % invoke
-+        retcode = body_indent + "return (%s) ret64;\n" % func_type
-     elif func_type == "void":
--        invoke = "\t\t" + "(void) %s;\n" % invoke
--        retcode = "\t\t" + "return;\n"
-+        invoke = body_indent + "(void) %s;\n" % invoke
-+        retcode = body_indent + "return;\n"
-     elif valist_args:
--        invoke = "\t\t" + "%s invoke__retval = %s;\n" % (func_type, invoke)
--        retcode = "\t\t" + "return invoke__retval;\n"
-+        invoke = body_indent + "%s invoke__retval = %s;\n" % (func_type, invoke)
-+        retcode = body_indent + "return invoke__retval;\n"
-     else:
--        invoke = "\t\t" + "return (%s) %s;\n" % (func_type, invoke)
-+        invoke = body_indent + "return (%s) %s;\n" % (func_type, invoke)
-         retcode = ""
-
-     wrap += invoke
-     for argname in valist_args:
--        wrap += "\t\t" + "va_end(%s);\n" % argname
-+        wrap += body_indent + "va_end(%s);\n" % argname
-     wrap += retcode
-     if not userspace_only:
--        wrap += "\t" + "}\n"
-+        wrap += "\t}\n"
-         wrap += "#endif\n"
-
-         # Otherwise fall through to direct invocation of the impl func.
-@@ -306,9 +375,21 @@ def wrapper_defs(func_name, func_type, args, fn, userspace_only):
+@@ -304,9 +375,19 @@ def wrapper_defs(func_name, func_type, args, fn, userspace_only):
          # context.
          impl_arglist = ", ".join([argrec[1] for argrec in args])
-         impl_call = "z_impl_%s(%s)" % (func_name, impl_arglist)
+         impl_call = f"z_impl_{func_name}({impl_arglist})"
 +        if needs_pre_cancel_check(func_name):
-+            wrap += "\t#ifdef CONFIG_THREAD_CANCEL\n"
-+            wrap += "\tz_syscall_cancel_check();\n"
-+            wrap += "\t#endif\n"
++            wrap += "\t" + "z_syscall_cancel_check();\n"
          wrap += "\t" + "compiler_barrier();\n"
--        wrap += "\t" + "%s%s;\n" % ("return " if func_type != "void" else "",
--                                   impl_call)
+-        ret = "return " if func_type != "void" else ""
+-        wrap += "\t" + f"{ret}{impl_call};\n"
 +        if func_type == "void":
-+            wrap += "\t" + "%s;\n" % (impl_call)
++            wrap += "\t" + f"{impl_call};\n"
 +            if not is_excluded_from_signal_check(func_name):
 +                wrap += "\t" + "z_syscall_sig_check();\n"
 +            wrap += "\t" + "return;\n"
 +        else:
-+            wrap += "\t" + "%s ret = %s;\n" % (func_type, impl_call)
++            wrap += "\t" + f"{func_type} ret = {impl_call};\n"
 +            if not is_excluded_from_signal_check(func_name):
 +                wrap += "\t" + "z_syscall_sig_check();\n"
 +            wrap += "\t" + "return ret;\n"

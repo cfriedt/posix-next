@@ -13,6 +13,7 @@
 #include <fcntl.h>
 #include <pthread.h>
 #include <semaphore.h>
+#include <wait_q.h>
 
 struct nsem_obj {
 	sys_snode_t snode;
@@ -90,7 +91,7 @@ int sem_destroy(sem_t *semaphore)
 		return -1;
 	}
 
-	if (k_sem_count_get((struct k_sem *)semaphore)) {
+	if (z_waitq_head(&((struct k_sem *)semaphore)->wait_q) != NULL) {
 		errno = EBUSY;
 		return -1;
 	}
