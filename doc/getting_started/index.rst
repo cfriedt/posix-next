@@ -81,7 +81,7 @@ Expected output:
 
 .. code-block:: console
 
-   *** Booting Zephyr OS build v4.3.0 ***
+   *** Booting Zephyr OS build v4.4.1 ***
    Hello World! native_sim/native from pthread_t 0x8058400
    pthread_t returned 42
 
@@ -127,7 +127,7 @@ Expected output:
 
 .. code-block:: console
 
-   *** Booting Zephyr OS build v4.3.0 ***
+   *** Booting Zephyr OS build v4.4.1 ***
    Hello World! native_sim/native from k_thread 0x8057420
    k_thread returned 42
 
