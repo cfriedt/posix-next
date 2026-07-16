@@ -24,6 +24,11 @@
 extern "C" {
 #endif
 
+/*
+ * Toolchains (e.g. picolibc) may already define _PC_* as numeric macros via
+ * <unistd.h>. Do not reintroduce them as enum enumerators in that case.
+ */
+#ifndef _PC_LINK_MAX
 /** @brief pathconf() / fpathconf() name constants. */
 enum {
 	_PC_2_SYMLINKS,           /**< Pathname creates a symbolic link. */
@@ -48,6 +53,7 @@ enum {
 	_PC_TIMESTAMP_RESOLUTION, /**< Resolution of file timestamps in nanoseconds. */
 	_PC_VDISABLE,             /**< Terminal special characters can be disabled. */
 };
+#endif /* !_PC_LINK_MAX */
 
 
 #ifdef __cplusplus
