@@ -7,7 +7,7 @@ project(posix-next-doc LANGUAGES)
 # Paths
 # ---------------------------------------------------------------------------
 
-# ZEPHYR_BASE: path to the Zephyr v4.3.0 tree (sibling of this module in the
+# ZEPHYR_BASE: path to the Zephyr tree pinned in west.yml (sibling of this module in the
 # west workspace, or overridden by the environment variable).
 if(NOT DEFINED ENV{ZEPHYR_BASE})
   get_filename_component(ZEPHYR_BASE "${CMAKE_CURRENT_LIST_DIR}/../../../zephyr" ABSOLUTE)
