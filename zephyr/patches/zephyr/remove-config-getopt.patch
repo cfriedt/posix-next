@@ -1,0 +1,3296 @@
+diff --git a/doc/services/shell/index.rst b/doc/services/shell/index.rst
+index d4baff93025..ce226afaf51 100644
+--- a/doc/services/shell/index.rst
++++ b/doc/services/shell/index.rst
+@@ -689,57 +689,33 @@ The shell module supports the following meta keys:
+
+ This feature is activated by :kconfig:option:`CONFIG_SHELL_METAKEYS` set to ``y``.
+
+-sys_getopt Feature
+-******************
+-
+-Some shell users apart from subcommands might need to use options as well.
+-the arguments string, looking for supported options. Typically, this task
+-is accomplished by the ``getopt`` family functions.
++getopt Feature
++**************
+
+-For this purpose shell supports a variant of the getopt and getopt_long libraries from
+-the FreeBSD project called sys_getopt and sys_getopt_long. This feature is activated by:
+-:kconfig:option:`CONFIG_GETOPT` set to ``y`` and :kconfig:option:`CONFIG_GETOPT_LONG`
+-set to ``y``.
++Shell modules may parse command-line options with the reentrant helpers
++``getopt_r()``, ``getopt_long_r()``, and ``getopt_long_only_r()`` from
++``<zephyr/getopt.h>`` (enabled via :kconfig:option:`CONFIG_ZEPHYR_GETOPT` /
++:kconfig:option:`CONFIG_ZEPHYR_GETOPT_LONG`). Keep getopt state in locals
++passed to those helpers; do not use a global getopt state.
+
+-This feature can be used in thread safe as well as non thread safe manner.
+-The former is full compatible with regular getopt usage while the latter
+-a bit differs.
+-
+-An example non-thread safe usage:
++Example:
+
+ .. code-block:: c
+
+-  char *cvalue = NULL;
+-  while ((char c = sys_getopt(argc, argv, "abhc:")) != -1) {
+-        switch (c) {
+-        case 'c':
+-                cvalue = sys_getopt_optarg;
+-                break;
+-        default:
+-                break;
+-        }
+-  }
+-
+-An example thread safe usage:
++  char *optarg;
++  int opterr = 1, optind = 1, optopt;
++  int c;
+
+-.. code-block:: c
+-
+-  char *cvalue = NULL;
+-  struct sys_getopt_state *state;
+-  while ((char c = sys_getopt(argc, argv, "abhc:")) != -1) {
+-        state = sys_getopt_state_get();
++  while ((c = getopt_r(argc, argv, "abhc:", &optarg, &opterr, &optind, &optopt)) != -1) {
+         switch (c) {
+         case 'c':
+-                cvalue = state->optarg;
++                cvalue = optarg;
+                 break;
+         default:
+                 break;
+         }
+   }
+
+-Thread safe sys_getopt functionality is activated by
+-:kconfig:option:`CONFIG_SHELL_GETOPT` set to ``y``.
+-
+ Obscured Input Feature
+ **********************
+
+diff --git a/include/zephyr/shell/shell.h b/include/zephyr/shell/shell.h
+index 7348fb157cf..4b6051d418b 100644
+--- a/include/zephyr/shell/shell.h
++++ b/include/zephyr/shell/shell.h
+@@ -19,9 +19,6 @@
+ #include <zephyr/sys/util.h>
+ #include <zephyr/toolchain.h>
+
+-#if defined CONFIG_SHELL_GETOPT
+-#include <zephyr/sys/sys_getopt.h>
+-#endif
+
+ #ifdef __cplusplus
+ extern "C" {
+@@ -1017,10 +1014,6 @@ struct shell_ctx {
+ 	/*!< Logging level for a backend. */
+ 	uint32_t log_level;
+
+-#if defined CONFIG_SHELL_GETOPT
+-	/*!< getopt context for a shell backend. */
+-	struct sys_getopt_state getopt;
+-#endif
+
+ 	uint16_t cmd_buff_len; /*!< Command length.*/
+ 	uint16_t cmd_buff_pos; /*!< Command buffer cursor position.*/
+diff --git a/include/zephyr/sys/sys_getopt.h b/include/zephyr/sys/sys_getopt.h
+deleted file mode 100644
+index 7ffaf248f23..00000000000
+--- a/include/zephyr/sys/sys_getopt.h
++++ /dev/null
+@@ -1,130 +0,0 @@
+-/*
+- * Copyright (c) 2021 Nordic Semiconductor ASA
+- *
+- * SPDX-License-Identifier: Apache-2.0
+- */
+-
+-#ifndef ZEPHYR_INCLUDE_SYS_GETOPT_H_
+-#define ZEPHYR_INCLUDE_SYS_GETOPT_H_
+-
+-#ifdef __cplusplus
+-extern "C" {
+-#endif
+-
+-#include <zephyr/kernel.h>
+-
+-struct sys_getopt_state {
+-	int opterr;   /* if error message should be printed */
+-	int optind;   /* index into parent argv vector */
+-	int optopt;   /* character checked for validity */
+-	int optreset; /* reset getopt */
+-	char *optarg; /* argument associated with option */
+-
+-	char *place; /* option letter processing */
+-
+-#if CONFIG_GETOPT_LONG
+-	int nonopt_start;
+-	int nonopt_end;
+-#endif
+-};
+-
+-extern int sys_getopt_optreset; /* reset getopt */
+-extern char *sys_getopt_optarg;
+-extern int sys_getopt_opterr;
+-extern int sys_getopt_optind;
+-extern int sys_getopt_optopt;
+-
+-#define sys_getopt_no_argument       0
+-#define sys_getopt_required_argument 1
+-#define sys_getopt_optional_argument 2
+-
+-struct sys_getopt_option {
+-	/* name of long option */
+-	const char *name;
+-	/*
+-	 * one of no_argument, required_argument, and optional_argument:
+-	 * whether option takes an argument
+-	 */
+-	int has_arg;
+-	/* if not NULL, set *flag to val when option found */
+-	int *flag;
+-	/* if flag not NULL, value to set *flag to; else return value */
+-	int val;
+-};
+-
+-/* Function initializes getopt_state structure for current thread */
+-void sys_getopt_init(void);
+-
+-/* Function returns getopt_state structure for the current thread. */
+-struct sys_getopt_state *sys_getopt_state_get(void);
+-
+-/**
+- * @brief Parses the command-line arguments.
+- *
+- * @note This function is based on FreeBSD implementation but it does not
+- * support environment variable: POSIXLY_CORRECT.
+- *
+- * @param[in] nargc	   Arguments count.
+- * @param[in] nargv	   Arguments.
+- * @param[in] ostr	   String containing the legitimate option characters.
+- *
+- * @return		If an option was successfully found, function returns
+- *			the option character.
+- */
+-int sys_getopt(int nargc, char *const nargv[], const char *ostr);
+-
+-/**
+- * @brief Parses the command-line arguments.
+- *
+- * The sys_getopt_long() function works like @ref sys_getopt() except
+- * it also accepts long options, started with two dashes.
+- *
+- * @note This function is based on FreeBSD implementation but it does not
+- * support environment variable: POSIXLY_CORRECT.
+- *
+- * @param[in] nargc	   Arguments count.
+- * @param[in] nargv	   Arguments.
+- * @param[in] options	   String containing the legitimate option characters.
+- * @param[in] long_options Pointer to the first element of an array of
+- *			   @a struct sys_getopt_option.
+- * @param[in] idx	   If idx is not NULL, it points to a variable
+- *			   which is set to the index of the long option relative
+- *			   to @p long_options.
+- *
+- * @return		If an option was successfully found, function returns
+- *			the option character.
+- */
+-int sys_getopt_long(int nargc, char *const *nargv, const char *options,
+-		    const struct sys_getopt_option *long_options, int *idx);
+-
+-/**
+- * @brief Parses the command-line arguments.
+- *
+- * The sys_getopt_long_only() function works like @ref sys_getopt_long(),
+- * but '-' as well as "--" can indicate a long option. If an option that starts
+- * with '-' (not "--") doesn't match a long option, but does match a short
+- * option, it is parsed as a short option instead.
+- *
+- * @note This function is based on FreeBSD implementation but it does not
+- * support environment variable: POSIXLY_CORRECT.
+- *
+- * @param[in] nargc	   Arguments count.
+- * @param[in] nargv	   Arguments.
+- * @param[in] options	   String containing the legitimate option characters.
+- * @param[in] long_options Pointer to the first element of an array of
+- *			   @a struct sys_getopt_option.
+- * @param[in] idx	   If idx is not NULL, it points to a variable
+- *			   which is set to the index of the long option relative
+- *			   to @p long_options.
+- *
+- * @return		If an option was successfully found, function returns
+- *			the option character.
+- */
+-int sys_getopt_long_only(int nargc, char *const *nargv, const char *options,
+-			 const struct sys_getopt_option *long_options, int *idx);
+-
+-#ifdef __cplusplus
+-}
+-#endif
+-
+-#endif /* ZEPHYR_INCLUDE_SYS_GETOPT_H_ */
+diff --git a/lib/utils/CMakeLists.txt b/lib/utils/CMakeLists.txt
+index e84075a2ffe..5e9f03dc928 100644
+--- a/lib/utils/CMakeLists.txt
++++ b/lib/utils/CMakeLists.txt
+@@ -12,8 +12,6 @@ zephyr_sources(
+   bitmask.c
+   )
+
+-zephyr_library_sources_ifdef(CONFIG_GETOPT getopt/getopt.c getopt/getopt_common.c)
+-zephyr_library_sources_ifdef(CONFIG_GETOPT_LONG getopt/getopt_long.c)
+
+ zephyr_sources_ifdef(CONFIG_ONOFF onoff.c)
+
+diff --git a/lib/utils/Kconfig b/lib/utils/Kconfig
+index cccf4bb080d..d179e126a54 100644
+--- a/lib/utils/Kconfig
++++ b/lib/utils/Kconfig
+@@ -97,23 +97,6 @@ config COBS
+ 	help
+ 	  Enable consistent overhead byte stuffing
+
+-config GETOPT
+-	bool "Getopt library support"
+-	help
+-	  This option adds support of the sys_getopt API.
+-
+-config GETOPT_LONG
+-	bool "Getopt long library support"
+-	depends on GETOPT
+-	help
+-	  This option adds support of the getopt long.
+-	  Different shell backends are using their own instance of getopt to
+-	  not interfere with each other.
+-	  All not shell threads share one global instance of getopt state, hence
+-	  apart from shell this library is not thread safe. User can add support
+-	  for other threads by extending function sys_getopt_state_get in
+-	  getopt_common.c file.
+-
+ config TIMEUTIL_APPLY_SKEW
+ 	bool "Support applying clock skew corrections in conversion functions"
+ 	default y
+diff --git a/lib/utils/getopt/README b/lib/utils/getopt/README
+deleted file mode 100644
+index f67390d2637..00000000000
+--- a/lib/utils/getopt/README
++++ /dev/null
+@@ -1,60 +0,0 @@
+-SPDX-License-Identifier: BSD-3-Clause
+-
+-[GetOpt]
+-#####################
+-
+-Origin:
+-   [Lattera FreeBSD]
+-   [https://github.com/lattera/freebsd/blob/master/lib/libc/stdlib/getopt.c]
+-
+-Status:
+-   [So far Zephyr samples were using getopt implementation from: argtable3.c.]
+-
+-Purpose:
+-   [Shell users would like to parse options passed to the command handler.]
+-
+-Description:
+-   [This library is going to be used by the shell module. Some shell users
+-   are not satisfied with subcommands alone and need to use the options for
+-   commands as well. A library is needed that allows the developer to parse
+-   the arguments string, looking for supported options. Typically, this task
+-   is accomplished by the getopt function.
+-
+-   For this purpose I decided to port the getopt library available
+-   in the FreeBSD project. I had to modify it so that it could be used
+-   by all instances of the shell at the same time.
+-
+-   Originally this function was using global variables which were defining
+-   its state. In my implementation I put those variables in a structure
+-   and a pointer to that structure is passed as an additional parameter
+-   to getopt function. In proposed implementation each shell backend has its
+-   own getopt function state structure which it uses.
+-
+-   This module is intended to be used inside the shell command handler
+-   by the abstraction layer "SHELL_GETOPT". For example:
+-   while ((char c = shell_getopt(sh, argc, argv, "abhc:")) != -1) {
+-      /* some code */
+-   }
+-   ]
+-
+-Dependencies:
+-   [This package does not depend on any other component.
+-
+-   Zephyr project will only need this component if the user configures a shell
+-   module: SHELL_GETOPT.]
+-
+-URL:
+-   [https://github.com/lattera/freebsd]
+-
+-commit:
+-   [324e4c082c14aebf00f8dbee0fb7ad285393756a]
+-
+-Maintained-by:
+-   [External]
+-
+-License:
+-   [BSD 3-Clause "New" or "Revised" License]
+-
+-License Link:
+-   [BSD 3-Clause used in getopt: https://spdx.org/licenses/BSD-3-Clause.html]
+-   [Project license: https://github.com/lattera/freebsd/blob/master/COPYRIGHT]
+diff --git a/lib/utils/getopt/getopt.c b/lib/utils/getopt/getopt.c
+deleted file mode 100644
+index ceb600e10f4..00000000000
+--- a/lib/utils/getopt/getopt.c
++++ /dev/null
+@@ -1,159 +0,0 @@
+-/*	$NetBSD: getopt.c,v 1.26 2003/08/07 16:43:40 agc Exp $	*/
+-/* SPDX-License-Identifier: BSD-3-Clause */
+-/*
+- * Copyright (c) 1987, 1993, 1994
+- *	The Regents of the University of California.  All rights reserved.
+- *
+- * Redistribution and use in source and binary forms, with or without
+- * modification, are permitted provided that the following conditions
+- * are met:
+- * 1. Redistributions of source code must retain the above copyright
+- *    notice, this list of conditions and the following disclaimer.
+- * 2. Redistributions in binary form must reproduce the above copyright
+- *    notice, this list of conditions and the following disclaimer in the
+- *    documentation and/or other materials provided with the distribution.
+- * 3. Neither the name of the University nor the names of its contributors
+- *    may be used to endorse or promote products derived from this software
+- *    without specific prior written permission.
+- *
+- * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
+- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+- * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
+- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+- * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+- * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+- * SUCH DAMAGE.
+- */
+-
+-#include <string.h>
+-#include <zephyr/sys/sys_getopt.h>
+-#include "getopt_common.h"
+-
+-#include <zephyr/logging/log.h>
+-LOG_MODULE_REGISTER(sys_getopt);
+-
+-#define BADCH  ((int)'?')
+-#define BADARG ((int)':')
+-#define EMSG   ""
+-
+-void sys_getopt_init(void)
+-{
+-	struct sys_getopt_state *state;
+-
+-	state = sys_getopt_state_get();
+-
+-	state->opterr = 1;
+-	state->optind = 1;
+-	state->optopt = 0;
+-	state->optreset = 0;
+-	state->optarg = NULL;
+-
+-	state->place = ""; /* EMSG */
+-
+-#if CONFIG_GETOPT_LONG
+-	state->nonopt_start = -1; /* first non option argument (for permute) */
+-	state->nonopt_end = -1;   /* first option after non options (for permute) */
+-#endif
+-
+-	sys_getopt_opterr = 1;
+-	sys_getopt_optind = 1;
+-	sys_getopt_optopt = 0;
+-	sys_getopt_optreset = 0;
+-	sys_getopt_optarg = NULL;
+-}
+-
+-/*
+- * getopt --
+- *	Parse argc/argv argument vector.
+- */
+-int sys_getopt(int nargc, char *const nargv[], const char *ostr)
+-{
+-	struct sys_getopt_state *state;
+-	char *oli; /* option letter list index */
+-
+-	/* get getopt state of the current thread */
+-	state = sys_getopt_state_get();
+-
+-	if (state->optreset || *state->place == 0) { /* update scanning pointer */
+-		state->optreset = 0;
+-		state->place = nargv[state->optind];
+-		if (state->optind >= nargc || *state->place++ != '-') {
+-			/* Argument is absent or is not an option */
+-			state->place = EMSG;
+-			z_getopt_global_state_update(state);
+-			return -1;
+-		}
+-		state->optopt = *state->place++;
+-		if (state->optopt == '-' && *state->place == 0) {
+-			/* "--" => end of options */
+-			++state->optind;
+-			state->place = EMSG;
+-			z_getopt_global_state_update(state);
+-			return -1;
+-		}
+-		if (state->optopt == 0) {
+-			/* Solitary '-', treat as a '-' option
+-			 * if the program (eg su) is looking for it.
+-			 */
+-			state->place = EMSG;
+-			if (strchr(ostr, '-') == NULL) {
+-				z_getopt_global_state_update(state);
+-				return -1;
+-			}
+-			state->optopt = '-';
+-		}
+-	} else {
+-		state->optopt = *state->place++;
+-	}
+-
+-	/* See if option letter is one the caller wanted... */
+-	oli = strchr(ostr, state->optopt);
+-	if (state->optopt == ':' || oli == NULL) {
+-		if (*state->place == 0) {
+-			++state->optind;
+-		}
+-		if (state->opterr && *ostr != ':') {
+-			LOG_DBG("illegal option -- %c", state->optopt);
+-		}
+-		z_getopt_global_state_update(state);
+-		return BADCH;
+-	}
+-
+-	/* Does this option need an argument? */
+-	if (oli[1] != ':') {
+-		/* don't need argument */
+-		state->optarg = NULL;
+-		if (*state->place == 0) {
+-			++state->optind;
+-		}
+-	} else {
+-		/* Option-argument is either the rest of this argument or the
+-		 * entire next argument.
+-		 */
+-		if (*state->place) {
+-			state->optarg = state->place;
+-		} else if (nargc > ++state->optind) {
+-			state->optarg = nargv[state->optind];
+-		} else {
+-			/* option-argument absent */
+-			state->place = EMSG;
+-			if (*ostr == ':') {
+-				z_getopt_global_state_update(state);
+-				return BADARG;
+-			}
+-			if (state->opterr) {
+-				LOG_DBG("option requires an argument -- %c", state->optopt);
+-			}
+-			z_getopt_global_state_update(state);
+-			return BADCH;
+-		}
+-		state->place = EMSG;
+-		++state->optind;
+-	}
+-	z_getopt_global_state_update(state);
+-	return state->optopt; /* return option letter */
+-}
+diff --git a/lib/utils/getopt/getopt_common.c b/lib/utils/getopt/getopt_common.c
+deleted file mode 100644
+index a5d58e95760..00000000000
+--- a/lib/utils/getopt/getopt_common.c
++++ /dev/null
+@@ -1,78 +0,0 @@
+-/*
+- * Copyright (c) 2021 Nordic Semiconductor ASA
+- *
+- * SPDX-License-Identifier: Apache-2.0
+- */
+-#include <zephyr/kernel.h>
+-#include <zephyr/shell/shell.h>
+-#if CONFIG_SHELL_GETOPT
+-#include <zephyr/sys/iterable_sections.h>
+-#endif
+-
+-#include <zephyr/sys/sys_getopt.h>
+-
+-/* Referring  below variables is not thread safe. They reflects getopt state
+- * only when 1 thread is using getopt.
+- * When more threads are using getopt please call getopt_state_get to know
+- * getopt state for the current thread.
+- */
+-int sys_getopt_opterr = 1; /* if error message should be printed */
+-int sys_getopt_optind = 1; /* index into parent argv vector */
+-int sys_getopt_optopt;     /* character checked for validity */
+-int sys_getopt_optreset;   /* reset getopt */
+-char *sys_getopt_optarg;   /* argument associated with option */
+-
+-/* Common state for all threads that did not have own getopt state. */
+-static struct sys_getopt_state m_getopt_common_state = {
+-	.opterr = 1,
+-	.optind = 1,
+-	.optopt = 0,
+-	.optreset = 0,
+-	.optarg = NULL,
+-
+-	.place = "", /* EMSG */
+-
+-#if CONFIG_GETOPT_LONG
+-	.nonopt_start = -1, /* first non option argument (for permute) */
+-	.nonopt_end = -1,   /* first option after non options (for permute) */
+-#endif
+-};
+-
+-/* Shim function to update global variables in getopt_shim.c if user wants to
+- * still use the original non-posix compliant getopt. The shim will be deprecated
+- * and eventually removed in the future.
+- */
+-extern void z_getopt_global_state_update_shim(struct sys_getopt_state *state);
+-
+-/* This function is not thread safe. All threads using getopt are calling
+- * this function.
+- */
+-void z_getopt_global_state_update(struct sys_getopt_state *state)
+-{
+-	sys_getopt_opterr = state->opterr;
+-	sys_getopt_optind = state->optind;
+-	sys_getopt_optopt = state->optopt;
+-	sys_getopt_optreset = state->optreset;
+-	sys_getopt_optarg = state->optarg;
+-
+-	if (!IS_ENABLED(CONFIG_NATIVE_LIBC) && IS_ENABLED(CONFIG_POSIX_C_LIB_EXT)) {
+-		z_getopt_global_state_update_shim(state);
+-	}
+-}
+-
+-/* It is internal getopt API function, it shall not be called by the user. */
+-struct sys_getopt_state *sys_getopt_state_get(void)
+-{
+-#if CONFIG_SHELL_GETOPT
+-	k_tid_t tid;
+-
+-	tid = k_current_get();
+-	STRUCT_SECTION_FOREACH(shell, sh) {
+-		if (tid == sh->ctx->tid) {
+-			return &sh->ctx->getopt;
+-		}
+-	}
+-#endif
+-	/* If not a shell thread return a common pointer */
+-	return &m_getopt_common_state;
+-}
+diff --git a/lib/utils/getopt/getopt_common.h b/lib/utils/getopt/getopt_common.h
+deleted file mode 100644
+index 59d916cfd60..00000000000
+--- a/lib/utils/getopt/getopt_common.h
++++ /dev/null
+@@ -1,23 +0,0 @@
+-/*
+- * Copyright (c) 2021 Nordic Semiconductor ASA
+- *
+- * SPDX-License-Identifier: Apache-2.0
+- */
+-
+-#ifndef _GETOPT_COMMON_H__
+-#define _GETOPT_COMMON_H__
+-
+-#ifdef __cplusplus
+-extern "C" {
+-#endif
+-
+-/* This function is not thread safe. All threads using getopt are calling
+- * this function.
+- */
+-void z_getopt_global_state_update(struct sys_getopt_state *state);
+-
+-#ifdef __cplusplus
+-}
+-#endif
+-
+-#endif /* _GETOPT_COMMON_H__ */
+diff --git a/lib/utils/getopt/getopt_long.c b/lib/utils/getopt/getopt_long.c
+deleted file mode 100644
+index d03f48ba7d2..00000000000
+--- a/lib/utils/getopt/getopt_long.c
++++ /dev/null
+@@ -1,589 +0,0 @@
+-/*	$OpenBSD: getopt_long.c,v 1.22 2006/10/04 21:29:04 jmc Exp $	*/
+-/*	$NetBSD: getopt_long.c,v 1.15 2002/01/31 22:43:40 tv Exp $	*/
+-/* SPDX-License-Identifier: BSD-3-Clause */
+-
+-/*
+- * Copyright (c) 2002 Todd C. Miller <Todd.Miller@courtesan.com>
+- *
+- * Permission to use, copy, modify, and distribute this software for any
+- * purpose with or without fee is hereby granted, provided that the above
+- * copyright notice and this permission notice appear in all copies.
+- *
+- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+- * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+- * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+- * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+- * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+- * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+- *
+- * Sponsored in part by the Defense Advanced Research Projects
+- * Agency (DARPA) and Air Force Research Laboratory, Air Force
+- * Materiel Command, USAF, under agreement number F39502-99-1-0512.
+- */
+-/*
+- * Copyright (c) 2000 The NetBSD Foundation, Inc.
+- * All rights reserved.
+- *
+- * This code is derived from software contributed to The NetBSD Foundation
+- * by Dieter Baron and Thomas Klausner.
+- *
+- * Redistribution and use in source and binary forms, with or without
+- * modification, are permitted provided that the following conditions
+- * are met:
+- * 1. Redistributions of source code must retain the above copyright
+- *    notice, this list of conditions and the following disclaimer.
+- * 2. Redistributions in binary form must reproduce the above copyright
+- *    notice, this list of conditions and the following disclaimer in the
+- *    documentation and/or other materials provided with the distribution.
+- *
+- * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
+- * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+- * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FOUNDATION OR CONTRIBUTORS
+- * BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+- * POSSIBILITY OF SUCH DAMAGE.
+- */
+-
+-#include <string.h>
+-#include <zephyr/sys/sys_getopt.h>
+-#include <zephyr/sys/util.h>
+-#include "getopt_common.h"
+-
+-#include <zephyr/logging/log.h>
+-LOG_MODULE_DECLARE(sys_getopt);
+-
+-#define GNU_COMPATIBLE /* Be more compatible, configure's use us! */
+-
+-#define PRINT_ERROR ((state->opterr) && (*options != ':'))
+-
+-#define FLAG_PERMUTE  0x01 /* permute non-options to the end of argv */
+-#define FLAG_ALLARGS  0x02 /* treat non-options as args to option "-1" */
+-#define FLAG_LONGONLY 0x04 /* operate as getopt_long_only */
+-
+-/* return values */
+-#define BADCH   (int)'?'
+-#define BADARG  ((*options == ':') ? (int)':' : (int)'?')
+-#define INORDER 1
+-
+-#define EMSG ""
+-
+-#ifdef GNU_COMPATIBLE
+-#define NO_PREFIX (-1)
+-#define D_PREFIX  0
+-#define DD_PREFIX 1
+-#define W_PREFIX  2
+-#endif
+-
+-static int getopt_internal(struct sys_getopt_state *state, int nargc, char *const *nargv,
+-			   const char *options, const struct sys_getopt_option *long_options,
+-			   int *idx, int flags);
+-static int parse_long_options(struct sys_getopt_state *state, char *const *nargv,
+-			      const char *options, const struct sys_getopt_option *long_options,
+-			      int *idx, int short_too, int flags);
+-static void permute_args(int panonopt_start, int panonopt_end, int opt_end, char *const *nargv);
+-
+-/* Error messages */
+-#define RECARGCHAR "option requires an argument -- %c"
+-#define ILLOPTCHAR "illegal option -- %c" /* From P1003.2 */
+-#ifdef GNU_COMPATIBLE
+-static int dash_prefix = NO_PREFIX;
+-#define GNUOPTCHAR "invalid option -- %c"
+-
+-#define RECARGSTRING "option `%s%s' requires an argument"
+-#define AMBIG        "option `%s%.*s' is ambiguous"
+-#define NOARG        "option `%s%.*s' doesn't allow an argument"
+-#define ILLOPTSTRING "unrecognized option `%s%s'"
+-#else
+-#define RECARGSTRING "option requires an argument -- %s"
+-#define AMBIG        "ambiguous option -- %.*s"
+-#define NOARG        "option doesn't take an argument -- %.*s"
+-#define ILLOPTSTRING "unknown option -- %s"
+-#endif
+-
+-/*
+- * Exchange the block from nonopt_start to nonopt_end with the block
+- * from nonopt_end to opt_end (keeping the same order of arguments
+- * in each block).
+- */
+-static void permute_args(int panonopt_start, int panonopt_end, int opt_end, char *const *nargv)
+-{
+-	int cstart, cyclelen, ncycle, nnonopts, nopts, pos;
+-	char *swap;
+-
+-	/*
+-	 * compute lengths of blocks and number and size of cycles
+-	 */
+-	nnonopts = panonopt_end - panonopt_start;
+-	nopts = opt_end - panonopt_end;
+-	ncycle = sys_gcd(nnonopts, nopts);
+-	cyclelen = (opt_end - panonopt_start) / ncycle;
+-
+-	for (int i = 0; i < ncycle; i++) {
+-		cstart = panonopt_end + i;
+-		pos = cstart;
+-		for (int j = 0; j < cyclelen; j++) {
+-			if (pos >= panonopt_end) {
+-				pos -= nnonopts;
+-			} else {
+-				pos += nopts;
+-			}
+-			swap = nargv[pos];
+-			/* LINTED const cast */
+-			((char **)nargv)[pos] = nargv[cstart];
+-			/* LINTED const cast */
+-			((char **)nargv)[cstart] = swap;
+-		}
+-	}
+-}
+-
+-/*
+- * parse_long_options --
+- *	Parse long options in argc/argv argument vector.
+- * Returns -1 if short_too is set and the option does not match long_options.
+- */
+-static int parse_long_options(struct sys_getopt_state *state, char *const *nargv,
+-			      const char *options, const struct sys_getopt_option *long_options,
+-			      int *idx, int short_too, int flags)
+-{
+-	char *current_argv, *has_equal;
+-#ifdef GNU_COMPATIBLE
+-	char *current_dash = "";
+-#endif
+-	size_t current_argv_len;
+-	int match, exact_match, second_partial_match;
+-
+-	current_argv = state->place;
+-#ifdef GNU_COMPATIBLE
+-	if (PRINT_ERROR) {
+-		switch (dash_prefix) {
+-		case D_PREFIX:
+-			current_dash = "-";
+-			break;
+-		case DD_PREFIX:
+-			current_dash = "--";
+-			break;
+-		case W_PREFIX:
+-			current_dash = "-W ";
+-			break;
+-		default:
+-			break;
+-		}
+-	}
+-#endif
+-	match = -1;
+-	exact_match = 0;
+-	second_partial_match = 0;
+-
+-	state->optind++;
+-
+-	has_equal = strchr(current_argv, '=');
+-	if (has_equal != NULL) {
+-		/* argument found (--option=arg) */
+-		current_argv_len = has_equal - current_argv;
+-		has_equal++;
+-	} else {
+-		current_argv_len = strlen(current_argv);
+-	}
+-
+-	for (int i = 0; long_options[i].name; i++) {
+-		/* find matching long option */
+-		if (strncmp(current_argv, long_options[i].name, current_argv_len)) {
+-			continue;
+-		}
+-
+-		if (strlen(long_options[i].name) == current_argv_len) {
+-			/* exact match */
+-			match = i;
+-			exact_match = 1;
+-			break;
+-		}
+-		/*
+-		 * If this is a known short option, don't allow
+-		 * a partial match of a single character.
+-		 */
+-		if (short_too && current_argv_len == 1) {
+-			continue;
+-		}
+-
+-		if (match == -1) { /* first partial match */
+-			match = i;
+-		} else if ((flags & FLAG_LONGONLY) ||
+-			   long_options[i].has_arg != long_options[match].has_arg ||
+-			   long_options[i].flag != long_options[match].flag ||
+-			   long_options[i].val != long_options[match].val) {
+-			second_partial_match = 1;
+-		}
+-	}
+-	if (!exact_match && second_partial_match) {
+-		/* ambiguous abbreviation */
+-		if (PRINT_ERROR) {
+-			LOG_WRN(AMBIG,
+-#ifdef GNU_COMPATIBLE
+-				current_dash,
+-#endif
+-				(int)current_argv_len, current_argv);
+-		}
+-		state->optopt = 0;
+-		return BADCH;
+-	}
+-	if (match != -1) { /* option found */
+-		if (long_options[match].has_arg == sys_getopt_no_argument && has_equal) {
+-			if (PRINT_ERROR) {
+-				LOG_WRN(NOARG,
+-#ifdef GNU_COMPATIBLE
+-					current_dash,
+-#endif
+-					(int)current_argv_len, current_argv);
+-			}
+-			/*
+-			 * XXX: GNU sets optopt to val regardless of flag
+-			 */
+-			if (long_options[match].flag == NULL) {
+-				state->optopt = long_options[match].val;
+-			} else {
+-				state->optopt = 0;
+-			}
+-#ifdef GNU_COMPATIBLE
+-			return BADCH;
+-#else
+-			return BADARG;
+-#endif
+-		}
+-		if (long_options[match].has_arg == sys_getopt_required_argument ||
+-		    long_options[match].has_arg == sys_getopt_optional_argument) {
+-			if (has_equal) {
+-				state->optarg = has_equal;
+-			} else if (long_options[match].has_arg == sys_getopt_required_argument) {
+-				/*
+-				 * optional argument doesn't use next nargv
+-				 */
+-				state->optarg = nargv[state->optind++];
+-			}
+-		}
+-		if ((long_options[match].has_arg == sys_getopt_required_argument) &&
+-		    (state->optarg == NULL)) {
+-			/*
+-			 * Missing argument; leading ':' indicates no error
+-			 * should be generated.
+-			 */
+-			if (PRINT_ERROR) {
+-				LOG_WRN(RECARGSTRING,
+-#ifdef GNU_COMPATIBLE
+-					current_dash,
+-#endif
+-					current_argv);
+-			}
+-			/*
+-			 * XXX: GNU sets optopt to val regardless of flag
+-			 */
+-			if (long_options[match].flag == NULL) {
+-				state->optopt = long_options[match].val;
+-			} else {
+-				state->optopt = 0;
+-			}
+-			--state->optind;
+-			return BADARG;
+-		}
+-	} else { /* unknown option */
+-		if (short_too) {
+-			--state->optind;
+-			return -1;
+-		}
+-		if (PRINT_ERROR) {
+-			LOG_WRN(ILLOPTSTRING,
+-#ifdef GNU_COMPATIBLE
+-				current_dash,
+-#endif
+-				current_argv);
+-		}
+-		state->optopt = 0;
+-		return BADCH;
+-	}
+-	if (idx) {
+-		*idx = match;
+-	}
+-	if (long_options[match].flag) {
+-		*long_options[match].flag = long_options[match].val;
+-		return 0;
+-	} else {
+-		return long_options[match].val;
+-	}
+-}
+-
+-/*
+- * getopt_internal --
+- *	Parse argc/argv argument vector.  Called by user level routines.
+- */
+-static int getopt_internal(struct sys_getopt_state *state, int nargc, char *const *nargv,
+-			   const char *options, const struct sys_getopt_option *long_options,
+-			   int *idx, int flags)
+-{
+-	char *oli; /* option letter list index */
+-	int optchar, short_too;
+-
+-	if (options == NULL) {
+-		return -1;
+-	}
+-
+-	/*
+-	 * Disable GNU extensions if options string begins with a '+'.
+-	 */
+-#ifdef GNU_COMPATIBLE
+-	if (*options == '-') {
+-		flags |= FLAG_ALLARGS;
+-	} else if (*options == '+') {
+-		flags &= ~FLAG_PERMUTE;
+-	}
+-#else
+-	if (*options == '+') {
+-		flags &= ~FLAG_PERMUTE;
+-	} else if (*options == '-') {
+-		flags |= FLAG_ALLARGS;
+-	}
+-#endif
+-	if (*options == '+' || *options == '-') {
+-		options++;
+-	}
+-
+-	/*
+-	 * XXX Some GNU programs (like cvs) set optind to 0 instead of
+-	 * XXX using optreset.  Work around this braindamage.
+-	 */
+-	if (state->optind == 0) {
+-		state->optind = state->optreset = 1;
+-	}
+-
+-	state->optarg = NULL;
+-	if (state->optreset) {
+-		state->nonopt_start = state->nonopt_end = -1;
+-	}
+-start:
+-	if (state->optreset || !*(state->place)) { /* update scanning pointer */
+-		state->optreset = 0;
+-		if (state->optind >= nargc) { /* end of argument vector */
+-			state->place = EMSG;
+-			if (state->nonopt_end != -1) {
+-				/* do permutation, if we have to */
+-				permute_args(state->nonopt_start, state->nonopt_end, state->optind,
+-					     nargv);
+-				state->optind -= state->nonopt_end - state->nonopt_start;
+-			} else if (state->nonopt_start != -1) {
+-				/*
+-				 * If we skipped non-options, set optind
+-				 * to the first of them.
+-				 */
+-				state->optind = state->nonopt_start;
+-			}
+-			state->nonopt_start = state->nonopt_end = -1;
+-			return -1;
+-		}
+-		state->place = nargv[state->optind];
+-		if (*(state->place) != '-' ||
+-#ifdef GNU_COMPATIBLE
+-		    state->place[1] == '\0') {
+-#else
+-		    (state->place[1] == '\0' && strchr(options, '-') == NULL)) {
+-#endif
+-			state->place = EMSG; /* found non-option */
+-			if (flags & FLAG_ALLARGS) {
+-				/*
+-				 * GNU extension:
+-				 * return non-option as argument to option 1
+-				 */
+-				state->optarg = nargv[state->optind++];
+-				return INORDER;
+-			}
+-			if (!(flags & FLAG_PERMUTE)) {
+-				/*
+-				 * If no permutation wanted, stop parsing
+-				 * at first non-option.
+-				 */
+-				return -1;
+-			}
+-			/* do permutation */
+-			if (state->nonopt_start == -1) {
+-				state->nonopt_start = state->optind;
+-			} else if (state->nonopt_end != -1) {
+-				permute_args(state->nonopt_start, state->nonopt_end, state->optind,
+-					     nargv);
+-				state->nonopt_start =
+-					state->optind - (state->nonopt_end - state->nonopt_start);
+-				state->nonopt_end = -1;
+-			}
+-			state->optind++;
+-			/* process next argument */
+-			goto start;
+-		}
+-		if (state->nonopt_start != -1 && state->nonopt_end == -1) {
+-			state->nonopt_end = state->optind;
+-		}
+-
+-		/*
+-		 * If we have "-" do nothing, if "--" we are done.
+-		 */
+-		if (state->place[1] != '\0' && *++(state->place) == '-' &&
+-		    state->place[1] == '\0') {
+-			state->optind++;
+-			state->place = EMSG;
+-			/*
+-			 * We found an option (--), so if we skipped
+-			 * non-options, we have to permute.
+-			 */
+-			if (state->nonopt_end != -1) {
+-				permute_args(state->nonopt_start, state->nonopt_end, state->optind,
+-					     nargv);
+-				state->optind -= state->nonopt_end - state->nonopt_start;
+-			}
+-			state->nonopt_start = state->nonopt_end = -1;
+-			return -1;
+-		}
+-	}
+-
+-	/*
+-	 * Check long options if:
+-	 *  1) we were passed some
+-	 *  2) the arg is not just "-"
+-	 *  3) either the arg starts with -- we are sys_getopt_long_only()
+-	 */
+-	if (long_options != NULL && state->place != nargv[state->optind] &&
+-	    (*(state->place) == '-' || (flags & FLAG_LONGONLY))) {
+-		short_too = 0;
+-#ifdef GNU_COMPATIBLE
+-		dash_prefix = D_PREFIX;
+-#endif
+-		if (*(state->place) == '-') {
+-			state->place++; /* --foo long option */
+-#ifdef GNU_COMPATIBLE
+-			dash_prefix = DD_PREFIX;
+-#endif
+-		} else if (*(state->place) != ':' && strchr(options, *(state->place)) != NULL) {
+-			short_too = 1; /* could be short option too */
+-		}
+-
+-		optchar = parse_long_options(state, nargv, options, long_options, idx, short_too,
+-					     flags);
+-		if (optchar != -1) {
+-			state->place = EMSG;
+-			return optchar;
+-		}
+-	}
+-	optchar = (int)*(state->place)++;
+-	oli = strchr(options, optchar);
+-	if (optchar == (int)':' || (optchar == (int)'-' && *(state->place) != '\0') ||
+-	    oli == NULL) {
+-		/*
+-		 * If the user specified "-" and  '-' isn't listed in
+-		 * options, return -1 (non-option) as per POSIX.
+-		 * Otherwise, it is an unknown option character (or ':').
+-		 */
+-		if (optchar == (int)'-' && *(state->place) == '\0') {
+-			return -1;
+-		}
+-		if (!*(state->place)) {
+-			++state->optind;
+-		}
+-#ifdef GNU_COMPATIBLE
+-		if (PRINT_ERROR) {
+-			LOG_WRN(GNUOPTCHAR, optchar);
+-		}
+-#else
+-		if (PRINT_ERROR) {
+-			LOG_WRN(ILLOPTCHAR, optchar);
+-		}
+-#endif
+-		state->optopt = optchar;
+-		return BADCH;
+-	}
+-	if (long_options != NULL && optchar == 'W' && oli[1] == ';') {
+-		/* -W long-option */
+-		if (*(state->place)) {                   /* no space */
+-			/* NOTHING */
+-		} else if (++(state->optind) >= nargc) { /* no arg */
+-			state->place = EMSG;
+-			if (PRINT_ERROR) {
+-				LOG_WRN(RECARGCHAR, optchar);
+-			}
+-			state->optopt = optchar;
+-			return BADARG;
+-		} else if ((state->optind) < nargc) {
+-			state->place = nargv[state->optind];
+-		}
+-#ifdef GNU_COMPATIBLE
+-		dash_prefix = W_PREFIX;
+-#endif
+-		optchar = parse_long_options(state, nargv, options, long_options, idx, 0, flags);
+-		state->place = EMSG;
+-		return optchar;
+-	}
+-	if (*++oli != ':') { /* doesn't take argument */
+-		if (!*(state->place)) {
+-			++state->optind;
+-		}
+-	} else { /* takes (optional) argument */
+-		state->optarg = NULL;
+-		if (*(state->place)) { /* no white space */
+-			state->optarg = state->place;
+-		} else if (oli[1] != ':') {             /* arg not optional */
+-			if (++state->optind >= nargc) { /* no arg */
+-				state->place = EMSG;
+-				if (PRINT_ERROR) {
+-					LOG_WRN(RECARGCHAR, optchar);
+-				}
+-				state->optopt = optchar;
+-				return BADARG;
+-			}
+-			state->optarg = nargv[state->optind];
+-		}
+-		state->place = EMSG;
+-		++state->optind;
+-	}
+-	/* dump back option letter */
+-	return optchar;
+-}
+-
+-/*
+- * getopt_long --
+- *	Parse argc/argv argument vector.
+- */
+-int sys_getopt_long(int nargc, char *const *nargv, const char *options,
+-		    const struct sys_getopt_option *long_options, int *idx)
+-{
+-	struct sys_getopt_state *state;
+-	int ret;
+-
+-	/* Get state of the current thread */
+-	state = sys_getopt_state_get();
+-
+-	ret = getopt_internal(state, nargc, nargv, options, long_options, idx, FLAG_PERMUTE);
+-
+-	z_getopt_global_state_update(state);
+-
+-	return ret;
+-}
+-
+-/*
+- * getopt_long_only --
+- *	Parse argc/argv argument vector.
+- */
+-int sys_getopt_long_only(int nargc, char *const *nargv, const char *options,
+-			 const struct sys_getopt_option *long_options, int *idx)
+-{
+-	struct sys_getopt_state *state;
+-	int ret;
+-
+-	/* Get state of the current thread */
+-	state = sys_getopt_state_get();
+-
+-	ret = getopt_internal(state, nargc, nargv, options, long_options, idx,
+-			      FLAG_PERMUTE | FLAG_LONGONLY);
+-
+-	z_getopt_global_state_update(state);
+-
+-	return ret;
+-}
+diff --git a/samples/shields/npm6001_ek/src/main.c b/samples/shields/npm6001_ek/src/main.c
+index 25fdfbf26c6..5b44aac830c 100644
+--- a/samples/shields/npm6001_ek/src/main.c
++++ b/samples/shields/npm6001_ek/src/main.c
+@@ -6,6 +6,8 @@
+ #include <stdlib.h>
+
+ #include <zephyr/device.h>
++#include <getopt.h>
++#include <zephyr/getopt.h>
+ #include <zephyr/drivers/gpio.h>
+ #include <zephyr/drivers/regulator.h>
+ #include <zephyr/drivers/watchdog.h>
+@@ -13,7 +15,6 @@
+ #include <zephyr/dt-bindings/regulator/npm6001.h>
+ #include <zephyr/shell/shell.h>
+ #include <zephyr/sys/printk.h>
+-#include <zephyr/sys/sys_getopt.h>
+
+ struct regulators_map {
+ 	const char *name;
+@@ -301,12 +302,12 @@ static int cmd_gpio_configure(const struct shell *sh, size_t argc, char **argv)
+ 	gpio_pin_t pin = 0U;
+ 	gpio_flags_t flags = 0U;
+
+-	static const struct sys_getopt_option long_options[] = {
+-		{"pin", sys_getopt_required_argument, NULL, 'p'},
+-		{"direction", sys_getopt_required_argument, NULL, 'd'},
+-		{"high-drive", sys_getopt_no_argument, &high_drive, 1},
+-		{"pull-down", sys_getopt_no_argument, &pull_down, 1},
+-		{"cmos", sys_getopt_no_argument, &cmos, 1},
++	static const struct option long_options[] = {
++		{"pin", required_argument, NULL, 'p'},
++		{"direction", required_argument, NULL, 'd'},
++		{"high-drive", no_argument, &high_drive, 1},
++		{"pull-down", no_argument, &pull_down, 1},
++		{"cmos", no_argument, &cmos, 1},
+ 		{NULL, 0, NULL, 0},
+ 	};
+
+@@ -314,23 +315,28 @@ static int cmd_gpio_configure(const struct shell *sh, size_t argc, char **argv)
+ 	pull_down = 0;
+ 	cmos = 0;
+
+-	while ((opt = sys_getopt_long(argc, argv, "p:d:", long_options,
+-				      &long_index)) != -1) {
++	char *optarg = NULL;
++	int opterr = 1;
++	int optind = 1;
++	int optopt = 0;
++
++	while ((opt = getopt_long_r(argc, argv, "p:d:", long_options,
++				      &long_index, &optarg, &opterr, &optind, &optopt)) != -1) {
+ 		switch (opt) {
+ 		case 0:
+ 			/* options setting a flag, do nothing */
+ 			break;
+ 		case 'p':
+-			pin = atoi(sys_getopt_optarg);
++			pin = atoi(optarg);
+ 			break;
+ 		case 'd':
+-			if (strcmp(sys_getopt_optarg, "in") == 0) {
++			if (strcmp(optarg, "in") == 0) {
+ 				flags |= GPIO_INPUT;
+-			} else if (strcmp(sys_getopt_optarg, "out") == 0) {
++			} else if (strcmp(optarg, "out") == 0) {
+ 				flags |= GPIO_OUTPUT;
+-			} else if (strcmp(sys_getopt_optarg, "outh") == 0) {
++			} else if (strcmp(optarg, "outh") == 0) {
+ 				flags |= GPIO_OUTPUT_HIGH;
+-			} else if (strcmp(sys_getopt_optarg, "outl") == 0) {
++			} else if (strcmp(optarg, "outl") == 0) {
+ 				flags |= GPIO_OUTPUT_LOW;
+ 			}
+ 			break;
+diff --git a/samples/subsys/shell/shell_module/src/main.c b/samples/subsys/shell/shell_module/src/main.c
+index 45d45f7..e16caae 100644
+--- a/samples/subsys/shell/shell_module/src/main.c
++++ b/samples/subsys/shell/shell_module/src/main.c
+@@ -5,6 +5,7 @@
+  */
+
+ #include <zephyr/kernel.h>
++#include <zephyr/getopt.h>
+ #include <zephyr/shell/shell.h>
+ #include <zephyr/version.h>
+ #include <zephyr/logging/log.h>
+@@ -98,19 +99,21 @@ static int cmd_demo_board(const struct shell *sh, size_t argc, char **argv)
+ 	return 0;
+ }
+
+-#if defined CONFIG_SHELL_GETOPT
+-/* Thread save usage */
++#if defined(CONFIG_ZEPHYR_GETOPT)
++/* Thread-safe getopt_r usage */
+ static int cmd_demo_getopt_ts(const struct shell *sh, size_t argc,
+ 			      char **argv)
+ {
+-	struct sys_getopt_state *state;
+ 	char *cvalue = NULL;
+ 	int aflag = 0;
+ 	int bflag = 0;
+ 	int c;
++	char *optarg = NULL;
++	int opterr = 1;
++	int optind = 1;
++	int optopt = 0;
+
+-	while ((c = sys_getopt(argc, argv, "abhc:")) != -1) {
+-		state = sys_getopt_state_get();
++	while ((c = getopt_r(argc, argv, "abhc:", &optarg, &opterr, &optind, &optopt)) != -1) {
+ 		switch (c) {
+ 		case 'a':
+ 			aflag = 1;
+@@ -119,6 +121,7 @@ static int cmd_demo_getopt_ts(const struct shell *sh, size_t argc,
+ 			bflag = 1;
+ 			break;
+ 		case 'c':
++			cvalue = optarg;
+ 			break;
+ 		case 'h':
+ 			/* When getopt is active shell is not parsing
+@@ -154,11 +157,16 @@ static int cmd_demo_getopt_ts(const struct shell *sh, size_t argc,
+ static int cmd_demo_getopt(const struct shell *sh, size_t argc,
+ 			      char **argv)
+ {
++	char *cvalue = NULL;
+ 	int aflag = 0;
+ 	int bflag = 0;
+ 	int c;
++	char *optarg = NULL;
++	int opterr = 1;
++	int optind = 1;
++	int optopt = 0;
+
+-	while ((c = sys_getopt(argc, argv, "abhc:")) != -1) {
++	while ((c = getopt_r(argc, argv, "abhc:", &optarg, &opterr, &optind, &optopt)) != -1) {
+ 		switch (c) {
+ 		case 'a':
+ 			aflag = 1;
+@@ -167,7 +175,7 @@ static int cmd_demo_getopt(const struct shell *sh, size_t argc,
+ 			bflag = 1;
+ 			break;
+ 		case 'c':
+-			cvalue = sys_getopt_optarg;
++			cvalue = optarg;
+ 			break;
+ 		case 'h':
+ 			/* When getopt is active shell is not parsing
+@@ -177,17 +185,17 @@ static int cmd_demo_getopt(const struct shell *sh, size_t argc,
+ 			shell_help(sh);
+ 			return SHELL_CMD_HELP_PRINTED;
+ 		case '?':
+-			if (sys_getopt_optopt == 'c') {
++			if (optopt == 'c') {
+ 				shell_print(sh,
+ 					"Option -%c requires an argument.",
+-					sys_getopt_optopt);
+-			} else if (isprint(sys_getopt_optopt) != 0) {
++					optopt);
++			} else if (isprint(optopt) != 0) {
+ 				shell_print(sh, "Unknown option `-%c'.",
+-					    sys_getopt_optopt);
++					    optopt);
+ 			} else {
+ 				shell_print(sh,
+ 					"Unknown option character `\\x%x'.",
+-					sys_getopt_optopt);
++					optopt);
+ 			}
+ 			return 1;
+ 		default:
+@@ -200,6 +208,6 @@ static int cmd_demo_getopt(const struct shell *sh, size_t argc,
+ 	shell_print(sh, "aflag = %d, bflag = %d", aflag, bflag);
+ 	return 0;
+ }
+-
++#endif
+ static int cmd_demo_params(const struct shell *sh, size_t argc, char **argv)
+ {
+@@ -349,7 +357,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(sub_demo,
+ 	SHELL_CMD(board, NULL, "Show board name command.", cmd_demo_board),
+ 	SHELL_CMD_ARG(readline, NULL, SHELL_HELP("Read user input", "[obscured]"),
+ 		      cmd_demo_readline, 1, 1),
+-#if defined CONFIG_SHELL_GETOPT
++#if defined(CONFIG_ZEPHYR_GETOPT)
+ 	SHELL_CMD(getopt_thread_safe, NULL,
+ 		  "Cammand using getopt in thread safe way"
+ 		  " looking for: \"abhc:\".",
+
+diff --git a/scripts/utils/migrate_posix_kconfigs.py b/scripts/utils/migrate_posix_kconfigs.py
+index 79187b9748f..1f749922dc3 100644
+--- a/scripts/utils/migrate_posix_kconfigs.py
++++ b/scripts/utils/migrate_posix_kconfigs.py
+@@ -34,6 +34,8 @@ REPLACEMENTS = {
+     "FNMATCH": "POSIX_C_LIB_EXT",
+     "GETENTROPY": "POSIX_C_LIB_EXT",
+     "GETOPT": "POSIX_C_LIB_EXT",
++    "SHELL_GETOPT": "ZEPHYR_GETOPT",
++    "GETOPT_LONG": "ZEPHYR_GETOPT_LONG",
+     "MAX_PTHREAD_COUNT": "POSIX_THREAD_THREADS_MAX",
+     "MAX_PTHREAD_KEY_COUNT": "POSIX_THREAD_KEYS_MAX",
+     "MAX_TIMER_COUNT": "POSIX_TIMER_MAX",
+diff --git a/subsys/crc/Kconfig b/subsys/crc/Kconfig
+index e3531af6099..ef731373eb5 100644
+--- a/subsys/crc/Kconfig
++++ b/subsys/crc/Kconfig
+@@ -157,7 +157,8 @@ config CRC32_K_4_2_TABLE_256
+ config CRC_SHELL
+ 	bool "CRC Shell"
+ 	depends on SHELL
+-	select GETOPT
++	select POSIX_C_LIB_EXT
++	select ZEPHYR_GETOPT
+ 	help
+ 	  Enable CRC checking for memory regions from the shell.
+
+diff --git a/subsys/crc/crc_shell.c b/subsys/crc/crc_shell.c
+index 620a83e5c2d..17b8f1fd5a4 100644
+--- a/subsys/crc/crc_shell.c
++++ b/subsys/crc/crc_shell.c
+@@ -9,7 +9,7 @@
+ #include <stdint.h>
+ #include <stdlib.h>
+ #include <zephyr/kernel.h>
+-#include <zephyr/sys/sys_getopt.h>
++#include <zephyr/getopt.h>
+ #include <zephyr/shell/shell.h>
+ #include <zephyr/sys/crc.h>
+
+@@ -74,9 +74,12 @@ static int cmd_crc(const struct shell *sh, size_t argc, char **argv)
+ 	void *addr = (void *)-1;
+ 	enum crc_type type = CRC32_IEEE;
+
+-	sys_getopt_optind = 1;
++	char *optarg = NULL;
++	int opterr = 1;
++	int optind = 1;
++	int optopt = 0;
+
+-	while ((rv = sys_getopt(argc, argv, "fhlp:rs:t:")) != -1) {
++	while ((rv = getopt_r(argc, argv, "fhlp:rs:t:", &optarg, &opterr, &optind, &optopt)) != -1) {
+ 		switch (rv) {
+ 		case 'f':
+ 			first = true;
+@@ -88,9 +91,9 @@ static int cmd_crc(const struct shell *sh, size_t argc, char **argv)
+ 			last = true;
+ 			break;
+ 		case 'p':
+-			poly = (size_t)strtoul(sys_getopt_optarg, NULL, 16);
++			poly = (size_t)strtoul(optarg, NULL, 16);
+ 			if (poly == 0 && errno == EINVAL) {
+-				shell_error(sh, "invalid seed '%s'", sys_getopt_optarg);
++				shell_error(sh, "invalid seed '%s'", optarg);
+ 				return -EINVAL;
+ 			}
+ 			break;
+@@ -98,16 +101,16 @@ static int cmd_crc(const struct shell *sh, size_t argc, char **argv)
+ 			reflect = true;
+ 			break;
+ 		case 's':
+-			seed = (size_t)strtoul(sys_getopt_optarg, NULL, 16);
++			seed = (size_t)strtoul(optarg, NULL, 16);
+ 			if (seed == 0 && errno == EINVAL) {
+-				shell_error(sh, "invalid seed '%s'", sys_getopt_optarg);
++				shell_error(sh, "invalid seed '%s'", optarg);
+ 				return -EINVAL;
+ 			}
+ 			break;
+ 		case 't':
+-			type = string_to_crc_type(sys_getopt_optarg);
++			type = string_to_crc_type(optarg);
+ 			if (type == -1) {
+-				shell_error(sh, "invalid type '%s'", sys_getopt_optarg);
++				shell_error(sh, "invalid type '%s'", optarg);
+ 				return -EINVAL;
+ 			}
+ 			break;
+@@ -118,21 +121,21 @@ static int cmd_crc(const struct shell *sh, size_t argc, char **argv)
+ 		}
+ 	}
+
+-	if (sys_getopt_optind + 2 > argc) {
++	if (optind + 2 > argc) {
+ 		shell_error(sh, "'address' and 'size' arguments are mandatory");
+ 		usage(sh);
+ 		return -EINVAL;
+ 	}
+
+-	addr = (void *)strtoul(argv[sys_getopt_optind], NULL, 16);
++	addr = (void *)strtoul(argv[optind], NULL, 16);
+ 	if (addr == 0 && errno == EINVAL) {
+-		shell_error(sh, "invalid address '%s'", argv[sys_getopt_optind]);
++		shell_error(sh, "invalid address '%s'", argv[optind]);
+ 		return -EINVAL;
+ 	}
+
+-	size = (size_t)strtoul(argv[sys_getopt_optind + 1], NULL, 0);
++	size = (size_t)strtoul(argv[optind + 1], NULL, 0);
+ 	if (size == 0 && errno == EINVAL) {
+-		shell_error(sh, "invalid size '%s'", argv[sys_getopt_optind + 1]);
++		shell_error(sh, "invalid size '%s'", argv[optind + 1]);
+ 		return -EINVAL;
+ 	}
+
+diff --git a/subsys/net/l2/Kconfig b/subsys/net/l2/Kconfig
+index 88edddc39c1..086564dab85 100644
+--- a/subsys/net/l2/Kconfig
++++ b/subsys/net/l2/Kconfig
+@@ -71,6 +71,9 @@ config NET_L2_WIFI_SHELL
+ 	bool "Wi-Fi shell module"
+ 	select NET_L2_WIFI_MGMT
+ 	select NET_L2_WIFI_UTILS
++	select POSIX_C_LIB_EXT
++	select ZEPHYR_GETOPT
++	select ZEPHYR_GETOPT_LONG
+ 	help
+ 	  This can be used for controlling Wi-Fi through the console via
+ 	  exposing a shell module named "wifi".
+diff --git a/subsys/net/l2/wifi/wifi_shell.c b/subsys/net/l2/wifi/wifi_shell.c
+index b8b30e14914..c872e357b79 100644
+--- a/subsys/net/l2/wifi/wifi_shell.c
++++ b/subsys/net/l2/wifi/wifi_shell.c
+@@ -10,6 +10,7 @@
+  */
+
+ #include <zephyr/logging/log.h>
++#include <zephyr/getopt.h>
+ LOG_MODULE_REGISTER(net_wifi_shell, LOG_LEVEL_INF);
+
+ #include <zephyr/kernel.h>
+@@ -101,7 +102,7 @@ static struct net_if *get_iface(enum iface_type type, int argc, char *argv[])
+ 	int iface_index = -1;
+
+ 	/* Parse arguments manually to find -i or --iface,
+-	 * it's intentional not to use sys_getopt() here to avoid
++	 * it's intentional not to use getopt_r(, &optarg, &opterr, &optind, &optopt) here to avoid
+ 	 * permuting the arguments.
+ 	 */
+ 	for (int i = 1; i < argc; i++) {
+@@ -629,46 +630,45 @@ static int __wifi_args_to_params(const struct shell *sh, size_t argc, char *argv
+ {
+ 	int opt;
+ 	int opt_index = 0;
+-	struct sys_getopt_state *state;
+-	static const struct sys_getopt_option long_options[] = {
+-		{"ssid", sys_getopt_required_argument, 0, 's'},
+-		{"passphrase", sys_getopt_required_argument, 0, 'p'},
+-		{"key-mgmt", sys_getopt_required_argument, 0, 'k'},
+-		{"ieee-80211w", sys_getopt_required_argument, 0, 'w'},
+-		{"bssid", sys_getopt_required_argument, 0, 'm'},
+-		{"band", sys_getopt_required_argument, 0, 'b'},
+-		{"channel", sys_getopt_required_argument, 0, 'c'},
+-		{"timeout", sys_getopt_required_argument, 0, 't'},
+-		{"anon-id", sys_getopt_required_argument, 0, 'a'},
+-		{"bandwidth", sys_getopt_required_argument, 0, 'B'},
+-		{"key1-pwd", sys_getopt_required_argument, 0, 'K'},
+-		{"key2-pwd", sys_getopt_required_argument, 0, 'K'},
+-		{"wpa3-enterprise", sys_getopt_required_argument, 0, 'S'},
+-		{"TLS-cipher", sys_getopt_required_argument, 0, 'T'},
+-		{"verify-peer-cert", sys_getopt_required_argument, 0, 'A'},
+-		{"eap-version", sys_getopt_required_argument, 0, 'V'},
+-		{"eap-id1", sys_getopt_required_argument, 0, 'I'},
+-		{"eap-id2", sys_getopt_required_argument, 0, 'I'},
+-		{"eap-id3", sys_getopt_required_argument, 0, 'I'},
+-		{"eap-id4", sys_getopt_required_argument, 0, 'I'},
+-		{"eap-id5", sys_getopt_required_argument, 0, 'I'},
+-		{"eap-id6", sys_getopt_required_argument, 0, 'I'},
+-		{"eap-id7", sys_getopt_required_argument, 0, 'I'},
+-		{"eap-id8", sys_getopt_required_argument, 0, 'I'},
+-		{"eap-pwd1", sys_getopt_required_argument, 0, 'P'},
+-		{"eap-pwd2", sys_getopt_required_argument, 0, 'P'},
+-		{"eap-pwd3", sys_getopt_required_argument, 0, 'P'},
+-		{"eap-pwd4", sys_getopt_required_argument, 0, 'P'},
+-		{"eap-pwd5", sys_getopt_required_argument, 0, 'P'},
+-		{"eap-pwd6", sys_getopt_required_argument, 0, 'P'},
+-		{"eap-pwd7", sys_getopt_required_argument, 0, 'P'},
+-		{"eap-pwd8", sys_getopt_required_argument, 0, 'P'},
+-		{"ignore-broadcast-ssid", sys_getopt_required_argument, 0, 'g'},
+-		{"ieee-80211r", sys_getopt_no_argument, 0, 'R'},
+-		{"iface", sys_getopt_required_argument, 0, 'i'},
+-		{"server-cert-domain-exact", sys_getopt_required_argument, 0, 'e'},
+-		{"server-cert-domain-suffix", sys_getopt_required_argument, 0, 'x'},
+-		{"help", sys_getopt_no_argument, 0, 'h'},
++	static const struct option long_options[] = {
++		{"ssid", required_argument, 0, 's'},
++		{"passphrase", required_argument, 0, 'p'},
++		{"key-mgmt", required_argument, 0, 'k'},
++		{"ieee-80211w", required_argument, 0, 'w'},
++		{"bssid", required_argument, 0, 'm'},
++		{"band", required_argument, 0, 'b'},
++		{"channel", required_argument, 0, 'c'},
++		{"timeout", required_argument, 0, 't'},
++		{"anon-id", required_argument, 0, 'a'},
++		{"bandwidth", required_argument, 0, 'B'},
++		{"key1-pwd", required_argument, 0, 'K'},
++		{"key2-pwd", required_argument, 0, 'K'},
++		{"wpa3-enterprise", required_argument, 0, 'S'},
++		{"TLS-cipher", required_argument, 0, 'T'},
++		{"verify-peer-cert", required_argument, 0, 'A'},
++		{"eap-version", required_argument, 0, 'V'},
++		{"eap-id1", required_argument, 0, 'I'},
++		{"eap-id2", required_argument, 0, 'I'},
++		{"eap-id3", required_argument, 0, 'I'},
++		{"eap-id4", required_argument, 0, 'I'},
++		{"eap-id5", required_argument, 0, 'I'},
++		{"eap-id6", required_argument, 0, 'I'},
++		{"eap-id7", required_argument, 0, 'I'},
++		{"eap-id8", required_argument, 0, 'I'},
++		{"eap-pwd1", required_argument, 0, 'P'},
++		{"eap-pwd2", required_argument, 0, 'P'},
++		{"eap-pwd3", required_argument, 0, 'P'},
++		{"eap-pwd4", required_argument, 0, 'P'},
++		{"eap-pwd5", required_argument, 0, 'P'},
++		{"eap-pwd6", required_argument, 0, 'P'},
++		{"eap-pwd7", required_argument, 0, 'P'},
++		{"eap-pwd8", required_argument, 0, 'P'},
++		{"ignore-broadcast-ssid", required_argument, 0, 'g'},
++		{"ieee-80211r", no_argument, 0, 'R'},
++		{"iface", required_argument, 0, 'i'},
++		{"server-cert-domain-exact", required_argument, 0, 'e'},
++		{"server-cert-domain-suffix", required_argument, 0, 'x'},
++		{"help", no_argument, 0, 'h'},
+ 		{0, 0, 0, 0}};
+ 	char *endptr;
+ 	int idx = 1;
+@@ -696,12 +696,16 @@ static int __wifi_args_to_params(const struct shell *sh, size_t argc, char *argv
+ 	params->bandwidth = WIFI_FREQ_BANDWIDTH_20MHZ;
+ 	params->verify_peer_cert = false;
+
+-	while ((opt = sys_getopt_long(argc, argv, "s:p:k:e:w:b:c:m:t:a:B:K:S:T:A:V:I:P:g:Rh:i:",
+-				  long_options, &opt_index)) != -1) {
+-		state = sys_getopt_state_get();
++	char *optarg = NULL;
++	int opterr = 1;
++	int optind = 1;
++	int optopt = 0;
++
++	while ((opt = getopt_long_r(argc, argv, "s:p:k:e:w:b:c:m:t:a:B:K:S:T:A:V:I:P:g:Rh:i:",
++				  long_options, &opt_index, &optarg, &opterr, &optind, &optopt)) != -1) {
+ 		switch (opt) {
+ 		case 's':
+-			params->ssid = state->optarg;
++			params->ssid = optarg;
+ 			params->ssid_length = strlen(params->ssid);
+ 			if (params->ssid_length > WIFI_SSID_MAX_LEN) {
+ 				PR_WARNING("SSID too long (max %d characters)\n",
+@@ -710,7 +714,7 @@ static int __wifi_args_to_params(const struct shell *sh, size_t argc, char *argv
+ 			}
+ 			break;
+ 		case 'k':
+-			params->security = atoi(state->optarg);
++			params->security = atoi(optarg);
+ 			if (params->security) {
+ 				secure_connection = true;
+ 			}
+@@ -724,11 +728,11 @@ static int __wifi_args_to_params(const struct shell *sh, size_t argc, char *argv
+ 			}
+ 			break;
+ 		case 'p':
+-			params->psk = state->optarg;
++			params->psk = optarg;
+ 			params->psk_length = strlen(params->psk);
+ 			break;
+ 		case 'c':
+-			channel = strtol(state->optarg, &endptr, 10);
++			channel = strtol(optarg, &endptr, 10);
+ 			if (iface_mode == WIFI_MODE_AP && channel == 0) {
+ 				params->channel = channel;
+ 				break;
+@@ -866,21 +870,21 @@ static int __wifi_args_to_params(const struct shell *sh, size_t argc, char *argv
+ 			key_passwd_cnt++;
+ 			break;
+ 		case 'S':
+-			params->wpa3_ent_mode = atoi(state->optarg);
++			params->wpa3_ent_mode = atoi(optarg);
+ 			if (params->wpa3_ent_mode != WIFI_WPA3_ENTERPRISE_NA) {
+ 				params->mfp = WIFI_MFP_REQUIRED;
+ 			}
+ 			break;
+ 		case 'T':
+-			params->TLS_cipher = atoi(state->optarg);
++			params->TLS_cipher = atoi(optarg);
+ 			break;
+ 		case 'A':
+ 			if (iface_mode == WIFI_MODE_INFRA) {
+-				params->verify_peer_cert = !!atoi(state->optarg);
++				params->verify_peer_cert = !!atoi(optarg);
+ 			}
+ 			break;
+ 		case 'V':
+-			params->eap_ver = atoi(state->optarg);
++			params->eap_ver = atoi(optarg);
+ 			if (params->eap_ver != 0U && params->eap_ver != 1U) {
+ 				PR_WARNING("eap_ver error %d\n", params->eap_ver);
+ 				return -EINVAL;
+@@ -932,12 +936,12 @@ static int __wifi_args_to_params(const struct shell *sh, size_t argc, char *argv
+ 			/* Unused, but parsing to avoid unknown option error */
+ 			break;
+ 		case 'e':
+-			params->server_cert_domain_exact = state->optarg;
++			params->server_cert_domain_exact = optarg;
+ 			params->server_cert_domain_exact_len =
+ 					strlen(params->server_cert_domain_exact);
+ 			break;
+ 		case 'x':
+-			params->server_cert_domain_suffix = state->optarg;
++			params->server_cert_domain_suffix = optarg;
+ 			params->server_cert_domain_suffix_len =
+ 					strlen(params->server_cert_domain_suffix);
+ 			break;
+@@ -1085,41 +1089,44 @@ static int wifi_scan_args_to_params(const struct shell *sh,
+ {
+ 	int opt;
+ 	int opt_index = 0;
+-	struct sys_getopt_state *state;
+-	static const struct sys_getopt_option long_options[] = {
+-		{"type", sys_getopt_required_argument, 0, 't'},
+-		{"bands", sys_getopt_required_argument, 0, 'b'},
+-		{"dwell_time_active", sys_getopt_required_argument, 0, 'a'},
+-		{"dwell_time_passive", sys_getopt_required_argument, 0, 'p'},
+-		{"ssid", sys_getopt_required_argument, 0, 's'},
+-		{"max_bss", sys_getopt_required_argument, 0, 'm'},
+-		{"chans", sys_getopt_required_argument, 0, 'c'},
+-		{"iface", sys_getopt_required_argument, 0, 'i'},
+-		{"help", sys_getopt_no_argument, 0, 'h'},
++	static const struct option long_options[] = {
++		{"type", required_argument, 0, 't'},
++		{"bands", required_argument, 0, 'b'},
++		{"dwell_time_active", required_argument, 0, 'a'},
++		{"dwell_time_passive", required_argument, 0, 'p'},
++		{"ssid", required_argument, 0, 's'},
++		{"max_bss", required_argument, 0, 'm'},
++		{"chans", required_argument, 0, 'c'},
++		{"iface", required_argument, 0, 'i'},
++		{"help", no_argument, 0, 'h'},
+ 		{0, 0, 0, 0}};
+ 	int val;
+ 	int opt_num = 0;
+
+ 	*do_scan = true;
+
+-	while ((opt = sys_getopt_long(argc, argv, "t:b:a:p:s:m:c:i:h",
+-				  long_options, &opt_index)) != -1) {
+-		state = sys_getopt_state_get();
++	char *optarg = NULL;
++	int opterr = 1;
++	int optind = 1;
++	int optopt = 0;
++
++	while ((opt = getopt_long_r(argc, argv, "t:b:a:p:s:m:c:i:h",
++				  long_options, &opt_index, &optarg, &opterr, &optind, &optopt)) != -1) {
+ 		switch (opt) {
+ 		case 't':
+-			if (!strncasecmp(state->optarg, "passive", 7)) {
++			if (!strncasecmp(optarg, "passive", 7)) {
+ 				params->scan_type = WIFI_SCAN_TYPE_PASSIVE;
+-			} else if (!strncasecmp(state->optarg, "active", 6)) {
++			} else if (!strncasecmp(optarg, "active", 6)) {
+ 				params->scan_type = WIFI_SCAN_TYPE_ACTIVE;
+ 			} else {
+-				PR_ERROR("Invalid scan type %s\n", state->optarg);
++				PR_ERROR("Invalid scan type %s\n", optarg);
+ 				return -ENOEXEC;
+ 			}
+
+ 			opt_num++;
+ 			break;
+ 		case 'b':
+-			if (wifi_utils_parse_scan_bands(state->optarg, &params->bands)) {
++			if (wifi_utils_parse_scan_bands(optarg, &params->bands)) {
+ 				PR_ERROR("Invalid band value(s)\n");
+ 				return -ENOEXEC;
+ 			}
+@@ -1797,39 +1804,42 @@ static int twt_args_to_params(const struct shell *sh, size_t argc, char *argv[],
+ {
+ 	int opt;
+ 	int opt_index = 0;
+-	struct sys_getopt_state *state;
+ 	long value;
+ 	double twt_mantissa_scale = 0.0;
+ 	double twt_interval_scale = 0.0;
+ 	uint16_t scale = 1000;
+ 	int exponent = 0;
+-	static const struct sys_getopt_option long_options[] = {
+-		{"negotiation-type", sys_getopt_required_argument, 0, 'n'},
+-		{"setup-cmd", sys_getopt_required_argument, 0, 'c'},
+-		{"dialog-token", sys_getopt_required_argument, 0, 't'},
+-		{"flow-id", sys_getopt_required_argument, 0, 'f'},
+-		{"responder", sys_getopt_required_argument, 0, 'r'},
+-		{"trigger", sys_getopt_required_argument, 0, 'T'},
+-		{"implicit", sys_getopt_required_argument, 0, 'I'},
+-		{"announce", sys_getopt_required_argument, 0, 'a'},
+-		{"wake-interval", sys_getopt_required_argument, 0, 'w'},
+-		{"interval", sys_getopt_required_argument, 0, 'p'},
+-		{"wake-ahead-duration", sys_getopt_required_argument, 0, 'D'},
+-		{"info-disable", sys_getopt_required_argument, 0, 'd'},
+-		{"exponent", sys_getopt_required_argument, 0, 'e'},
+-		{"mantissa", sys_getopt_required_argument, 0, 'm'},
+-		{"iface", sys_getopt_required_argument, 0, 'i'},
+-		{"help", sys_getopt_no_argument, 0, 'h'},
++	static const struct option long_options[] = {
++		{"negotiation-type", required_argument, 0, 'n'},
++		{"setup-cmd", required_argument, 0, 'c'},
++		{"dialog-token", required_argument, 0, 't'},
++		{"flow-id", required_argument, 0, 'f'},
++		{"responder", required_argument, 0, 'r'},
++		{"trigger", required_argument, 0, 'T'},
++		{"implicit", required_argument, 0, 'I'},
++		{"announce", required_argument, 0, 'a'},
++		{"wake-interval", required_argument, 0, 'w'},
++		{"interval", required_argument, 0, 'p'},
++		{"wake-ahead-duration", required_argument, 0, 'D'},
++		{"info-disable", required_argument, 0, 'd'},
++		{"exponent", required_argument, 0, 'e'},
++		{"mantissa", required_argument, 0, 'm'},
++		{"iface", required_argument, 0, 'i'},
++		{"help", no_argument, 0, 'h'},
+ 		{0, 0, 0, 0}};
+
+ 	params->operation = WIFI_TWT_SETUP;
+
+-	while ((opt = sys_getopt_long(argc, argv, "n:c:t:f:r:T:I:a:t:w:p:D:d:e:m:i:h",
+-				  long_options, &opt_index)) != -1) {
+-		state = sys_getopt_state_get();
++	char *optarg = NULL;
++	int opterr = 1;
++	int optind = 1;
++	int optopt = 0;
++
++	while ((opt = getopt_long_r(argc, argv, "n:c:t:f:r:T:I:a:t:w:p:D:d:e:m:i:h",
++				  long_options, &opt_index, &optarg, &opterr, &optind, &optopt)) != -1) {
+ 		switch (opt) {
+ 		case 'n':
+-			if (!parse_number(sh, &value, state->optarg, NULL,
++			if (!parse_number(sh, &value, optarg, NULL,
+ 					  WIFI_TWT_INDIVIDUAL,
+ 					  WIFI_TWT_WAKE_TBTT)) {
+ 				return -EINVAL;
+@@ -2206,25 +2216,28 @@ static int wifi_ap_config_args_to_params(const struct shell *sh, size_t argc, ch
+ {
+ 	int opt;
+ 	int opt_index = 0;
+-	struct sys_getopt_state *state;
+-	static const struct sys_getopt_option long_options[] = {
+-		{"max_inactivity", sys_getopt_required_argument, 0, 't'},
+-		{"max_num_sta", sys_getopt_required_argument, 0, 's'},
++	static const struct option long_options[] = {
++		{"max_inactivity", required_argument, 0, 't'},
++		{"max_num_sta", required_argument, 0, 's'},
+ #if defined(CONFIG_WIFI_NM_HOSTAPD_AP)
+-		{"ht_capab", sys_getopt_required_argument, 0, 'n'},
+-		{"vht_capab", sys_getopt_required_argument, 0, 'c'},
++		{"ht_capab", required_argument, 0, 'n'},
++		{"vht_capab", required_argument, 0, 'c'},
+ #endif
+-		{"iface", sys_getopt_required_argument, 0, 'i'},
+-		{"help", sys_getopt_no_argument, 0, 'h'},
++		{"iface", required_argument, 0, 'i'},
++		{"help", no_argument, 0, 'h'},
+ 		{0, 0, 0, 0}};
+ 	long val;
+
+-	while ((opt = sys_getopt_long(argc, argv, "t:s:n:c:i:h",
+-				  long_options, &opt_index)) != -1) {
+-		state = sys_getopt_state_get();
++	char *optarg = NULL;
++	int opterr = 1;
++	int optind = 1;
++	int optopt = 0;
++
++	while ((opt = getopt_long_r(argc, argv, "t:s:n:c:i:h",
++				  long_options, &opt_index, &optarg, &opterr, &optind, &optopt)) != -1) {
+ 		switch (opt) {
+ 		case 't':
+-			if (!parse_number(sh, &val, state->optarg, "max_inactivity",
++			if (!parse_number(sh, &val, optarg, "max_inactivity",
+ 					  0, WIFI_AP_STA_MAX_INACTIVITY)) {
+ 				return -EINVAL;
+ 			}
+@@ -2333,14 +2346,19 @@ static int cmd_wifi_reg_domain(const struct shell *sh, size_t argc,
+ 	bool force = false;
+ 	bool verbose = false;
+ 	int opt_index = 0;
+-	static const struct sys_getopt_option long_options[] = {
+-		{"force", sys_getopt_no_argument, 0, 'f'},
+-		{"verbose", sys_getopt_no_argument, 0, 'v'},
+-		{"iface", sys_getopt_required_argument, 0, 'i'},
++	static const struct option long_options[] = {
++		{"force", no_argument, 0, 'f'},
++		{"verbose", no_argument, 0, 'v'},
++		{"iface", required_argument, 0, 'i'},
+ 		{NULL, 0, NULL, 0}
+ 	};
+
+-	while ((opt = sys_getopt_long(argc, argv, "fvi:", long_options, &opt_index)) != -1) {
++	char *optarg = NULL;
++	int opterr = 1;
++	int optind = 1;
++	int optopt = 0;
++
++	while ((opt = getopt_long_r(argc, argv, "fvi:", long_options, &opt_index, &optarg, &opterr, &optind, &optopt)) != -1) {
+ 		switch (opt) {
+ 		case 'f':
+ 			force = true;
+@@ -2356,25 +2374,25 @@ static int cmd_wifi_reg_domain(const struct shell *sh, size_t argc,
+ 		}
+ 	}
+
+-	if (sys_getopt_optind == argc) {
++	if (optind == argc) {
+ 		regd.chan_info = &chan_info[0];
+ 		regd.oper = WIFI_MGMT_GET;
+-	} else if (sys_getopt_optind == argc - 1) {
+-		if (strlen(argv[sys_getopt_optind]) != 2) {
++	} else if (optind == argc - 1) {
++		if (strlen(argv[optind]) != 2) {
+ 			PR_WARNING("Invalid reg domain: Length should be two letters/digits\n");
+ 			return -ENOEXEC;
+ 		}
+
+ 		/* Two letter country code with special case of 00 for WORLD */
+-		if (((argv[sys_getopt_optind][0] < 'A' || argv[sys_getopt_optind][0] > 'Z') ||
+-			(argv[sys_getopt_optind][1] < 'A' || argv[sys_getopt_optind][1] > 'Z')) &&
+-			(argv[sys_getopt_optind][0] != '0' || argv[sys_getopt_optind][1] != '0')) {
+-			PR_WARNING("Invalid reg domain %c%c\n", argv[sys_getopt_optind][0],
+-				   argv[sys_getopt_optind][1]);
++		if (((argv[optind][0] < 'A' || argv[optind][0] > 'Z') ||
++			(argv[optind][1] < 'A' || argv[optind][1] > 'Z')) &&
++			(argv[optind][0] != '0' || argv[optind][1] != '0')) {
++			PR_WARNING("Invalid reg domain %c%c\n", argv[optind][0],
++				   argv[optind][1]);
+ 			return -ENOEXEC;
+ 		}
+-		regd.country_code[0] = argv[sys_getopt_optind][0];
+-		regd.country_code[1] = argv[sys_getopt_optind][1];
++		regd.country_code[0] = argv[optind][0];
++		regd.country_code[1] = argv[optind][1];
+ 		regd.force = force;
+ 		regd.oper = WIFI_MGMT_SET;
+ 	} else {
+@@ -2703,20 +2721,23 @@ void parse_mode_args_to_params(const struct shell *sh, int argc,
+ 	int opt;
+ 	int opt_index = 0;
+ 	int opt_num = 0;
+-	struct sys_getopt_state *state;
+-	static const struct sys_getopt_option long_options[] = {
+-		{"iface", sys_getopt_required_argument, 0, 'i'},
+-		{"sta", sys_getopt_no_argument, 0, 's'},
+-		{"monitor", sys_getopt_no_argument, 0, 'm'},
+-		{"ap", sys_getopt_no_argument, 0, 'a'},
+-		{"softap", sys_getopt_no_argument, 0, 'k'},
+-		{"help", sys_getopt_no_argument, 0, 'h'},
++	static const struct option long_options[] = {
++		{"iface", required_argument, 0, 'i'},
++		{"sta", no_argument, 0, 's'},
++		{"monitor", no_argument, 0, 'm'},
++		{"ap", no_argument, 0, 'a'},
++		{"softap", no_argument, 0, 'k'},
++		{"help", no_argument, 0, 'h'},
+ 		{0, 0, 0, 0}};
+
+ 	mode->oper = WIFI_MGMT_GET;
+-	while ((opt = sys_getopt_long(argc, argv, "i:smtpakh",
+-				  long_options, &opt_index)) != -1) {
+-		state = sys_getopt_state_get();
++	char *optarg = NULL;
++	int opterr = 1;
++	int optind = 1;
++	int optopt = 0;
++
++	while ((opt = getopt_long_r(argc, argv, "i:smtpakh",
++				  long_options, &opt_index, &optarg, &opterr, &optind, &optopt)) != -1) {
+ 		switch (opt) {
+ 		case 's':
+ 			mode->mode |= WIFI_STA_MODE;
+@@ -2806,26 +2827,29 @@ int parse_channel_args_to_params(const struct shell *sh, int argc,
+ {
+ 	int opt;
+ 	int opt_index = 0;
+-	struct sys_getopt_state *state;
+-	static const struct sys_getopt_option long_options[] = {
+-		{"iface", sys_getopt_optional_argument, 0, 'i'},
+-		{"channel", sys_getopt_required_argument, 0, 'c'},
+-		{"band", sys_getopt_required_argument, 0, 'b'},
+-		{"get", sys_getopt_no_argument, 0, 'g'},
+-		{"help", sys_getopt_no_argument, 0, 'h'},
++	static const struct option long_options[] = {
++		{"iface", optional_argument, 0, 'i'},
++		{"channel", required_argument, 0, 'c'},
++		{"band", required_argument, 0, 'b'},
++		{"get", no_argument, 0, 'g'},
++		{"help", no_argument, 0, 'h'},
+ 		{0, 0, 0, 0}};
+
+ 	channel->band = WIFI_FREQ_BAND_UNKNOWN;
+
+-	while ((opt = sys_getopt_long(argc, argv, "i:c:b:gh",
+-				  long_options, &opt_index)) != -1) {
+-		state = sys_getopt_state_get();
++	char *optarg = NULL;
++	int opterr = 1;
++	int optind = 1;
++	int optopt = 0;
++
++	while ((opt = getopt_long_r(argc, argv, "i:c:b:gh",
++				  long_options, &opt_index, &optarg, &opterr, &optind, &optopt)) != -1) {
+ 		switch (opt) {
+ 		case 'c':
+-			channel->channel = (uint16_t)atoi(state->optarg);
++			channel->channel = (uint16_t)atoi(optarg);
+ 			break;
+ 		case 'b': {
+-			int b = atoi(state->optarg);
++			int b = atoi(optarg);
+
+ 			if (b == 2) {
+ 				channel->band = WIFI_FREQ_BAND_2_4_GHZ;
+@@ -2840,7 +2864,7 @@ int parse_channel_args_to_params(const struct shell *sh, int argc,
+ 			break;
+ 		}
+ 		case 'i':
+-			channel->if_index = (uint8_t)atoi(state->optarg);
++			channel->if_index = (uint8_t)atoi(optarg);
+ 			break;
+ 		case 'g':
+ 			channel->oper = WIFI_MGMT_GET;
+@@ -2943,21 +2967,24 @@ void parse_filter_args_to_params(const struct shell *sh, int argc,
+ {
+ 	int opt;
+ 	int opt_index = 0;
+-	struct sys_getopt_state *state;
+-	static const struct sys_getopt_option long_options[] = {
+-		{"iface", sys_getopt_required_argument, 0, 'i'},
+-		{"capture-len", sys_getopt_optional_argument, 0, 'b'},
+-		{"all", sys_getopt_no_argument, 0, 'a'},
+-		{"mgmt", sys_getopt_no_argument, 0, 'm'},
+-		{"ctrl", sys_getopt_no_argument, 0, 'c'},
+-		{"data", sys_getopt_no_argument, 0, 'd'},
+-		{"get", sys_getopt_no_argument, 0, 'g'},
+-		{"help", sys_getopt_no_argument, 0, 'h'},
++	static const struct option long_options[] = {
++		{"iface", required_argument, 0, 'i'},
++		{"capture-len", optional_argument, 0, 'b'},
++		{"all", no_argument, 0, 'a'},
++		{"mgmt", no_argument, 0, 'm'},
++		{"ctrl", no_argument, 0, 'c'},
++		{"data", no_argument, 0, 'd'},
++		{"get", no_argument, 0, 'g'},
++		{"help", no_argument, 0, 'h'},
+ 		{0, 0, 0, 0}};
+
+-	while ((opt = sys_getopt_long(argc, argv, "i:b:amcdgh",
+-				  long_options, &opt_index)) != -1) {
+-		state = sys_getopt_state_get();
++	char *optarg = NULL;
++	int opterr = 1;
++	int optind = 1;
++	int optopt = 0;
++
++	while ((opt = getopt_long_r(argc, argv, "i:b:amcdgh",
++				  long_options, &opt_index, &optarg, &opterr, &optind, &optopt)) != -1) {
+ 		switch (opt) {
+ 		case 'a':
+ 			filter->filter |= WIFI_PACKET_FILTER_ALL;
+@@ -3067,41 +3094,44 @@ static int parse_dpp_args_auth_init(const struct shell *sh, size_t argc, char *a
+ {
+ 	int opt;
+ 	int opt_index = 0;
+-	struct sys_getopt_state *state;
+-	static const struct sys_getopt_option long_options[] = {
+-		{"peer", sys_getopt_required_argument, 0, 'p'},
+-		{"role", sys_getopt_required_argument, 0, 'r'},
+-		{"configurator", sys_getopt_required_argument, 0, 'c'},
+-		{"mode", sys_getopt_required_argument, 0, 'm'},
+-		{"ssid", sys_getopt_required_argument, 0, 's'},
+-		{"iface", sys_getopt_required_argument, 0, 'i'},
++	static const struct option long_options[] = {
++		{"peer", required_argument, 0, 'p'},
++		{"role", required_argument, 0, 'r'},
++		{"configurator", required_argument, 0, 'c'},
++		{"mode", required_argument, 0, 'm'},
++		{"ssid", required_argument, 0, 's'},
++		{"iface", required_argument, 0, 'i'},
+ 		{0, 0, 0, 0}};
+ 	int ret = 0;
+
+-	while ((opt = sys_getopt_long(argc, argv, "p:r:c:m:s:i:",
+-				  long_options, &opt_index)) != -1) {
+-		state = sys_getopt_state_get();
++	char *optarg = NULL;
++	int opterr = 1;
++	int optind = 1;
++	int optopt = 0;
++
++	while ((opt = getopt_long_r(argc, argv, "p:r:c:m:s:i:",
++				  long_options, &opt_index, &optarg, &opterr, &optind, &optopt)) != -1) {
+ 		switch (opt) {
+ 		case 'p':
+-			params->auth_init.peer = shell_strtol(state->optarg, 10, &ret);
++			params->auth_init.peer = shell_strtol(optarg, 10, &ret);
+ 			break;
+ 		case 'r':
+-			params->auth_init.role = shell_strtol(state->optarg, 10, &ret);
++			params->auth_init.role = shell_strtol(optarg, 10, &ret);
+ 			break;
+ 		case 'c':
+-			params->auth_init.configurator = shell_strtol(state->optarg, 10, &ret);
++			params->auth_init.configurator = shell_strtol(optarg, 10, &ret);
+ 			break;
+ 		case 'm':
+-			params->auth_init.conf = shell_strtol(state->optarg, 10, &ret);
++			params->auth_init.conf = shell_strtol(optarg, 10, &ret);
+ 			break;
+ 		case 's':
+-			strncpy(params->auth_init.ssid, state->optarg, WIFI_SSID_MAX_LEN);
++			strncpy(params->auth_init.ssid, optarg, WIFI_SSID_MAX_LEN);
+ 			break;
+ 		case 'i':
+ 			/* Unused, but parsing to avoid unknown option error */
+ 			break;
+ 		default:
+-			PR_ERROR("Invalid option %c\n", state->optopt);
++			PR_ERROR("Invalid option %c\n", optopt);
+ 			return -EINVAL;
+ 		}
+
+@@ -3119,29 +3149,32 @@ static int parse_dpp_args_chirp(const struct shell *sh, size_t argc, char *argv[
+ {
+ 	int opt;
+ 	int opt_index = 0;
+-	struct sys_getopt_state *state;
+-	static const struct sys_getopt_option long_options[] = {
+-		{"own", sys_getopt_required_argument, 0, 'o'},
+-		{"freq", sys_getopt_required_argument, 0, 'f'},
+-		{"iface", sys_getopt_required_argument, 0, 'i'},
++	static const struct option long_options[] = {
++		{"own", required_argument, 0, 'o'},
++		{"freq", required_argument, 0, 'f'},
++		{"iface", required_argument, 0, 'i'},
+ 		{0, 0, 0, 0}};
+ 	int ret = 0;
+
+-	while ((opt = sys_getopt_long(argc, argv, "o:f:i:",
+-				  long_options, &opt_index)) != -1) {
+-		state = sys_getopt_state_get();
++	char *optarg = NULL;
++	int opterr = 1;
++	int optind = 1;
++	int optopt = 0;
++
++	while ((opt = getopt_long_r(argc, argv, "o:f:i:",
++				  long_options, &opt_index, &optarg, &opterr, &optind, &optopt)) != -1) {
+ 		switch (opt) {
+ 		case 'o':
+-			params->chirp.id = shell_strtol(state->optarg, 10, &ret);
++			params->chirp.id = shell_strtol(optarg, 10, &ret);
+ 			break;
+ 		case 'f':
+-			params->chirp.freq = shell_strtol(state->optarg, 10, &ret);
++			params->chirp.freq = shell_strtol(optarg, 10, &ret);
+ 			break;
+ 		case 'i':
+ 			/* Unused, but parsing to avoid unknown option error */
+ 			break;
+ 		default:
+-			PR_ERROR("Invalid option %c\n", state->optopt);
++			PR_ERROR("Invalid option %c\n", optopt);
+ 			return -EINVAL;
+ 		}
+
+@@ -3159,29 +3192,32 @@ static int parse_dpp_args_listen(const struct shell *sh, size_t argc, char *argv
+ {
+ 	int opt;
+ 	int opt_index = 0;
+-	struct sys_getopt_state *state;
+-	static const struct sys_getopt_option long_options[] = {
+-		{"role", sys_getopt_required_argument, 0, 'r'},
+-		{"freq", sys_getopt_required_argument, 0, 'f'},
+-		{"iface", sys_getopt_required_argument, 0, 'i'},
++	static const struct option long_options[] = {
++		{"role", required_argument, 0, 'r'},
++		{"freq", required_argument, 0, 'f'},
++		{"iface", required_argument, 0, 'i'},
+ 		{0, 0, 0, 0}};
+ 	int ret = 0;
+
+-	while ((opt = sys_getopt_long(argc, argv, "r:f:i:",
+-				  long_options, &opt_index)) != -1) {
+-		state = sys_getopt_state_get();
++	char *optarg = NULL;
++	int opterr = 1;
++	int optind = 1;
++	int optopt = 0;
++
++	while ((opt = getopt_long_r(argc, argv, "r:f:i:",
++				  long_options, &opt_index, &optarg, &opterr, &optind, &optopt)) != -1) {
+ 		switch (opt) {
+ 		case 'r':
+-			params->listen.role = shell_strtol(state->optarg, 10, &ret);
++			params->listen.role = shell_strtol(optarg, 10, &ret);
+ 			break;
+ 		case 'f':
+-			params->listen.freq = shell_strtol(state->optarg, 10, &ret);
++			params->listen.freq = shell_strtol(optarg, 10, &ret);
+ 			break;
+ 		case 'i':
+ 			/* Unused, but parsing to avoid unknown option error */
+ 			break;
+ 		default:
+-			PR_ERROR("Invalid option %c\n", state->optopt);
++			PR_ERROR("Invalid option %c\n", optopt);
+ 			return -EINVAL;
+ 		}
+
+@@ -3199,38 +3235,41 @@ static int parse_dpp_args_btstrap_gen(const struct shell *sh, size_t argc, char
+ {
+ 	int opt;
+ 	int opt_index = 0;
+-	struct sys_getopt_state *state;
+-	static const struct sys_getopt_option long_options[] = {
+-		{"type", sys_getopt_required_argument, 0, 't'},
+-		{"opclass", sys_getopt_required_argument, 0, 'o'},
+-		{"channel", sys_getopt_required_argument, 0, 'h'},
+-		{"mac", sys_getopt_required_argument, 0, 'a'},
+-		{"iface", sys_getopt_required_argument, 0, 'i'},
++	static const struct option long_options[] = {
++		{"type", required_argument, 0, 't'},
++		{"opclass", required_argument, 0, 'o'},
++		{"channel", required_argument, 0, 'h'},
++		{"mac", required_argument, 0, 'a'},
++		{"iface", required_argument, 0, 'i'},
+ 		{0, 0, 0, 0}};
+ 	int ret = 0;
+
+-	while ((opt = sys_getopt_long(argc, argv, "t:o:h:a:i:",
+-				  long_options, &opt_index)) != -1) {
+-		state = sys_getopt_state_get();
++	char *optarg = NULL;
++	int opterr = 1;
++	int optind = 1;
++	int optopt = 0;
++
++	while ((opt = getopt_long_r(argc, argv, "t:o:h:a:i:",
++				  long_options, &opt_index, &optarg, &opterr, &optind, &optopt)) != -1) {
+ 		switch (opt) {
+ 		case 't':
+-			params->bootstrap_gen.type = shell_strtol(state->optarg, 10, &ret);
++			params->bootstrap_gen.type = shell_strtol(optarg, 10, &ret);
+ 			break;
+ 		case 'o':
+-			params->bootstrap_gen.op_class = shell_strtol(state->optarg, 10, &ret);
++			params->bootstrap_gen.op_class = shell_strtol(optarg, 10, &ret);
+ 			break;
+ 		case 'h':
+-			params->bootstrap_gen.chan = shell_strtol(state->optarg, 10, &ret);
++			params->bootstrap_gen.chan = shell_strtol(optarg, 10, &ret);
+ 			break;
+ 		case 'a':
+ 			ret = net_bytes_from_str(params->bootstrap_gen.mac,
+-						 WIFI_MAC_ADDR_LEN, state->optarg);
++						 WIFI_MAC_ADDR_LEN, optarg);
+ 			break;
+ 		case 'i':
+ 			/* Unused, but parsing to avoid unknown option error */
+ 			break;
+ 		default:
+-			PR_ERROR("Invalid option %c\n", state->optopt);
++			PR_ERROR("Invalid option %c\n", optopt);
+ 			return -EINVAL;
+ 		}
+
+@@ -3265,34 +3304,37 @@ static int parse_dpp_args_set_config_param(const struct shell *sh, size_t argc,
+ {
+ 	int opt;
+ 	int opt_index = 0;
+-	struct sys_getopt_state *state;
+-	static const struct sys_getopt_option long_options[] = {
+-		{"configurator", sys_getopt_required_argument, 0, 'c'},
+-		{"mode", sys_getopt_required_argument, 0, 'm'},
+-		{"ssid", sys_getopt_required_argument, 0, 's'},
+-		{"iface", sys_getopt_required_argument, 0, 'i'},
++	static const struct option long_options[] = {
++		{"configurator", required_argument, 0, 'c'},
++		{"mode", required_argument, 0, 'm'},
++		{"ssid", required_argument, 0, 's'},
++		{"iface", required_argument, 0, 'i'},
+ 		{0, 0, 0, 0}};
+ 	int ret = 0;
+
+-	while ((opt = sys_getopt_long(argc, argv, "p:r:c:m:s:i:",
+-				  long_options, &opt_index)) != -1) {
+-		state = sys_getopt_state_get();
++	char *optarg = NULL;
++	int opterr = 1;
++	int optind = 1;
++	int optopt = 0;
++
++	while ((opt = getopt_long_r(argc, argv, "p:r:c:m:s:i:",
++				  long_options, &opt_index, &optarg, &opterr, &optind, &optopt)) != -1) {
+ 		switch (opt) {
+ 		case 'c':
+ 			params->configurator_set.configurator =
+-				shell_strtol(state->optarg, 10, &ret);
++				shell_strtol(optarg, 10, &ret);
+ 			break;
+ 		case 'm':
+-			params->configurator_set.conf = shell_strtol(state->optarg, 10, &ret);
++			params->configurator_set.conf = shell_strtol(optarg, 10, &ret);
+ 			break;
+ 		case 's':
+-			strncpy(params->configurator_set.ssid, state->optarg, WIFI_SSID_MAX_LEN);
++			strncpy(params->configurator_set.ssid, optarg, WIFI_SSID_MAX_LEN);
+ 			break;
+ 		case 'i':
+ 			/* Unused, but parsing to avoid unknown option error */
+ 			break;
+ 		default:
+-			PR_ERROR("Invalid option %c\n", state->optopt);
++			PR_ERROR("Invalid option %c\n", optopt);
+ 			return -EINVAL;
+ 		}
+
+@@ -3557,10 +3599,9 @@ static int cmd_wifi_dpp_ap_auth_init(const struct shell *sh, size_t argc, char *
+ {
+ 	int opt;
+ 	int opt_index = 0;
+-	struct sys_getopt_state *state;
+-	static const struct sys_getopt_option long_options[] = {
+-		{"peer", sys_getopt_required_argument, 0, 'p'},
+-		{"iface", sys_getopt_required_argument, 0, 'i'},
++	static const struct option long_options[] = {
++		{"peer", required_argument, 0, 'p'},
++		{"iface", required_argument, 0, 'i'},
+ 		{0, 0, 0, 0}};
+ 	int ret = 0;
+ 	struct net_if *iface = get_iface(IFACE_TYPE_SAP, argc, argv);
+@@ -3568,18 +3609,22 @@ static int cmd_wifi_dpp_ap_auth_init(const struct shell *sh, size_t argc, char *
+
+ 	params.action = WIFI_DPP_AUTH_INIT;
+
+-	while ((opt = sys_getopt_long(argc, argv, "p:i:",
+-				  long_options, &opt_index)) != -1) {
+-		state = sys_getopt_state_get();
++	char *optarg = NULL;
++	int opterr = 1;
++	int optind = 1;
++	int optopt = 0;
++
++	while ((opt = getopt_long_r(argc, argv, "p:i:",
++				  long_options, &opt_index, &optarg, &opterr, &optind, &optopt)) != -1) {
+ 		switch (opt) {
+ 		case 'p':
+-			params.auth_init.peer = shell_strtol(state->optarg, 10, &ret);
++			params.auth_init.peer = shell_strtol(optarg, 10, &ret);
+ 			break;
+ 		case 'i':
+ 			/* Unused, but parsing to avoid unknown option error */
+ 			break;
+ 		default:
+-			PR_ERROR("Invalid option %c\n", state->optopt);
++			PR_ERROR("Invalid option %c\n", optopt);
+ 			return -EINVAL;
+ 		}
+
+@@ -3721,28 +3766,31 @@ static int cmd_wifi_p2p_find(const struct shell *sh, size_t argc, char *argv[])
+ 	if (argc > 1) {
+ 		int opt;
+ 		int opt_index = 0;
+-		struct sys_getopt_state *state;
+-		static const struct sys_getopt_option long_options[] = {
+-			{"timeout", sys_getopt_required_argument, 0, 't'},
+-			{"type", sys_getopt_required_argument, 0, 'T'},
+-			{"iface", sys_getopt_required_argument, 0, 'i'},
+-			{"help", sys_getopt_no_argument, 0, 'h'},
++		static const struct option long_options[] = {
++			{"timeout", required_argument, 0, 't'},
++			{"type", required_argument, 0, 'T'},
++			{"iface", required_argument, 0, 'i'},
++			{"help", no_argument, 0, 'h'},
+ 			{0, 0, 0, 0}
+ 		};
+ 		long val;
+
+-		while ((opt = sys_getopt_long(argc, argv, "t:T:i:h",
+-						long_options, &opt_index)) != -1) {
+-			state = sys_getopt_state_get();
++	char *optarg = NULL;
++	int opterr = 1;
++	int optind = 1;
++	int optopt = 0;
++
++	while ((opt = getopt_long_r(argc, argv, "t:T:i:h",
++						long_options, &opt_index, &optarg, &opterr, &optind, &optopt)) != -1) {
+ 			switch (opt) {
+ 			case 't':
+-				if (!parse_number(sh, &val, state->optarg, "timeout", 0, 65535)) {
++				if (!parse_number(sh, &val, optarg, "timeout", 0, 65535)) {
+ 					return -EINVAL;
+ 				}
+ 				params.timeout = (uint16_t)val;
+ 				break;
+ 			case 'T':
+-				if (!parse_number(sh, &val, state->optarg, "type", 0, 2)) {
++				if (!parse_number(sh, &val, optarg, "type", 0, 2)) {
+ 					return -EINVAL;
+ 				}
+ 				switch (val) {
+@@ -3766,7 +3814,7 @@ static int cmd_wifi_p2p_find(const struct shell *sh, size_t argc, char *argv[])
+ 				shell_help(sh);
+ 				return -ENOEXEC;
+ 			default:
+-				PR_ERROR("Invalid option %c\n", state->optopt);
++				PR_ERROR("Invalid option %c\n", optopt);
+ 				return -EINVAL;
+ 			}
+ 		}
+@@ -3805,13 +3853,12 @@ static int cmd_wifi_p2p_connect(const struct shell *sh, size_t argc, char *argv[
+ 	const char *method_arg = NULL;
+ 	int opt;
+ 	int opt_index = 0;
+-	struct sys_getopt_state *state;
+-	static const struct sys_getopt_option long_options[] = {
+-		{"go-intent", sys_getopt_required_argument, 0, 'g'},
+-		{"freq", sys_getopt_required_argument, 0, 'f'},
+-		{"join", sys_getopt_no_argument, 0, 'j'},
+-		{"iface", sys_getopt_required_argument, 0, 'i'},
+-		{"help", sys_getopt_no_argument, 0, 'h'},
++	static const struct option long_options[] = {
++		{"go-intent", required_argument, 0, 'g'},
++		{"freq", required_argument, 0, 'f'},
++		{"join", no_argument, 0, 'j'},
++		{"iface", required_argument, 0, 'i'},
++		{"help", no_argument, 0, 'h'},
+ 		{0, 0, 0, 0}
+ 	};
+ 	long val;
+@@ -3857,17 +3904,21 @@ static int cmd_wifi_p2p_connect(const struct shell *sh, size_t argc, char *argv[
+ 	/* Set default join to false */
+ 	params.connect.join = false;
+
+-	while ((opt = sys_getopt_long(argc, argv, "g:f:ji:h", long_options, &opt_index)) != -1) {
+-		state = sys_getopt_state_get();
++	char *optarg = NULL;
++	int opterr = 1;
++	int optind = 1;
++	int optopt = 0;
++
++	while ((opt = getopt_long_r(argc, argv, "g:f:ji:h", long_options, &opt_index, &optarg, &opterr, &optind, &optopt)) != -1) {
+ 		switch (opt) {
+ 		case 'g':
+-			if (!parse_number(sh, &val, state->optarg, "go-intent", 0, 15)) {
++			if (!parse_number(sh, &val, optarg, "go-intent", 0, 15)) {
+ 				return -EINVAL;
+ 			}
+ 			params.connect.go_intent = (uint8_t)val;
+ 			break;
+ 		case 'f':
+-			if (!parse_number(sh, &val, state->optarg, "freq", 0, 6000)) {
++			if (!parse_number(sh, &val, optarg, "freq", 0, 6000)) {
+ 				return -EINVAL;
+ 			}
+ 			params.connect.freq = (unsigned int)val;
+@@ -3882,7 +3933,7 @@ static int cmd_wifi_p2p_connect(const struct shell *sh, size_t argc, char *argv[
+ 			shell_help(sh);
+ 			return -ENOEXEC;
+ 		default:
+-			PR_ERROR("Invalid option %c\n", state->optopt);
++			PR_ERROR("Invalid option %c\n", optopt);
+ 			return -EINVAL;
+ 		}
+ 	}
+@@ -3909,17 +3960,16 @@ static int cmd_wifi_p2p_group_add(const struct shell *sh, size_t argc, char *arg
+ 	struct wifi_p2p_params params = {0};
+ 	int opt;
+ 	int opt_index = 0;
+-	struct sys_getopt_state *state;
+-	static const struct sys_getopt_option long_options[] = {
+-		{"freq", sys_getopt_required_argument, 0, 'f'},
+-		{"persistent", sys_getopt_required_argument, 0, 'p'},
+-		{"ht40", sys_getopt_no_argument, 0, 'h'},
+-		{"vht", sys_getopt_no_argument, 0, 'v'},
+-		{"he", sys_getopt_no_argument, 0, 'H'},
+-		{"edmg", sys_getopt_no_argument, 0, 'e'},
+-		{"go-bssid", sys_getopt_required_argument, 0, 'b'},
+-		{"iface", sys_getopt_required_argument, 0, 'i'},
+-		{"help", sys_getopt_no_argument, 0, '?'},
++	static const struct option long_options[] = {
++		{"freq", required_argument, 0, 'f'},
++		{"persistent", required_argument, 0, 'p'},
++		{"ht40", no_argument, 0, 'h'},
++		{"vht", no_argument, 0, 'v'},
++		{"he", no_argument, 0, 'H'},
++		{"edmg", no_argument, 0, 'e'},
++		{"go-bssid", required_argument, 0, 'b'},
++		{"iface", required_argument, 0, 'i'},
++		{"help", no_argument, 0, '?'},
+ 		{0, 0, 0, 0}
+ 	};
+ 	long val;
+@@ -3936,18 +3986,22 @@ static int cmd_wifi_p2p_group_add(const struct shell *sh, size_t argc, char *arg
+ 	params.group_add.edmg = false;
+ 	params.group_add.go_bssid_length = 0;
+
+-	while ((opt = sys_getopt_long(argc, argv, "f:p:hvHeb:i:?", long_options,
+-				      &opt_index)) != -1) {
+-		state = sys_getopt_state_get();
++	char *optarg = NULL;
++	int opterr = 1;
++	int optind = 1;
++	int optopt = 0;
++
++	while ((opt = getopt_long_r(argc, argv, "f:p:hvHeb:i:?", long_options,
++				      &opt_index, &optarg, &opterr, &optind, &optopt)) != -1) {
+ 		switch (opt) {
+ 		case 'f':
+-			if (!parse_number(sh, &val, state->optarg, "freq", 0, 6000)) {
++			if (!parse_number(sh, &val, optarg, "freq", 0, 6000)) {
+ 				return -EINVAL;
+ 			}
+ 			params.group_add.freq = (int)val;
+ 			break;
+ 		case 'p':
+-			if (!parse_number(sh, &val, state->optarg, "persistent", -1, 255)) {
++			if (!parse_number(sh, &val, optarg, "persistent", -1, 255)) {
+ 				return -EINVAL;
+ 			}
+ 			params.group_add.persistent = (int)val;
+@@ -3966,7 +4020,7 @@ static int cmd_wifi_p2p_group_add(const struct shell *sh, size_t argc, char *arg
+ 			params.group_add.edmg = true;
+ 			break;
+ 		case 'b':
+-			if (sscanf(state->optarg, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx",
++			if (sscanf(optarg, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx",
+ 				   &mac_addr[0], &mac_addr[1], &mac_addr[2], &mac_addr[3],
+ 				   &mac_addr[4], &mac_addr[5]) != WIFI_MAC_ADDR_LEN) {
+ 				PR_ERROR("Invalid GO BSSID format. Use: XX:XX:XX:XX:XX:XX\n");
+@@ -3982,7 +4036,7 @@ static int cmd_wifi_p2p_group_add(const struct shell *sh, size_t argc, char *arg
+ 			shell_help(sh);
+ 			return -ENOEXEC;
+ 		default:
+-			PR_ERROR("Invalid option %c\n", state->optopt);
++			PR_ERROR("Invalid option %c\n", optopt);
+ 			return -EINVAL;
+ 		}
+ 	}
+@@ -4027,15 +4081,14 @@ static int cmd_wifi_p2p_invite(const struct shell *sh, size_t argc, char *argv[]
+ 	uint8_t mac_addr[WIFI_MAC_ADDR_LEN];
+ 	int opt;
+ 	int opt_index = 0;
+-	struct sys_getopt_state *state;
+-	static const struct sys_getopt_option long_options[] = {
+-		{"persistent", sys_getopt_required_argument, 0, 'p'},
+-		{"group", sys_getopt_required_argument, 0, 'g'},
+-		{"peer", sys_getopt_required_argument, 0, 'P'},
+-		{"freq", sys_getopt_required_argument, 0, 'f'},
+-		{"go-dev-addr", sys_getopt_required_argument, 0, 'd'},
+-		{"iface", sys_getopt_required_argument, 0, 'i'},
+-		{"help", sys_getopt_no_argument, 0, 'h'},
++	static const struct option long_options[] = {
++		{"persistent", required_argument, 0, 'p'},
++		{"group", required_argument, 0, 'g'},
++		{"peer", required_argument, 0, 'P'},
++		{"freq", required_argument, 0, 'f'},
++		{"go-dev-addr", required_argument, 0, 'd'},
++		{"iface", required_argument, 0, 'i'},
++		{"help", no_argument, 0, 'h'},
+ 		{0, 0, 0, 0}
+ 	};
+ 	long val;
+@@ -4056,12 +4109,16 @@ static int cmd_wifi_p2p_invite(const struct shell *sh, size_t argc, char *argv[]
+ 		return -EINVAL;
+ 	}
+
+-	while ((opt = sys_getopt_long(argc, argv, "p:g:P:f:d:i:h", long_options,
+-				      &opt_index)) != -1) {
+-		state = sys_getopt_state_get();
++	char *optarg = NULL;
++	int opterr = 1;
++	int optind = 1;
++	int optopt = 0;
++
++	while ((opt = getopt_long_r(argc, argv, "p:g:P:f:d:i:h", long_options,
++				      &opt_index, &optarg, &opterr, &optind, &optopt)) != -1) {
+ 		switch (opt) {
+ 		case 'p':
+-			if (!parse_number(sh, &val, state->optarg, "persistent", 0, 255)) {
++			if (!parse_number(sh, &val, optarg, "persistent", 0, 255)) {
+ 				return -EINVAL;
+ 			}
+ 			params.invite.type = WIFI_P2P_INVITE_PERSISTENT;
+@@ -4069,12 +4126,12 @@ static int cmd_wifi_p2p_invite(const struct shell *sh, size_t argc, char *argv[]
+ 			break;
+ 		case 'g':
+ 			params.invite.type = WIFI_P2P_INVITE_GROUP;
+-			strncpy(params.invite.group_ifname, state->optarg,
++			strncpy(params.invite.group_ifname, optarg,
+ 				CONFIG_NET_INTERFACE_NAME_LEN);
+ 			params.invite.group_ifname[CONFIG_NET_INTERFACE_NAME_LEN] = '\0';
+ 			break;
+ 		case 'P':
+-			if (sscanf(state->optarg, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx",
++			if (sscanf(optarg, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx",
+ 				   &mac_addr[0], &mac_addr[1], &mac_addr[2], &mac_addr[3],
+ 				   &mac_addr[4], &mac_addr[5]) != WIFI_MAC_ADDR_LEN) {
+ 				PR_ERROR("Invalid peer MAC address format\n");
+@@ -4083,13 +4140,13 @@ static int cmd_wifi_p2p_invite(const struct shell *sh, size_t argc, char *argv[]
+ 			memcpy(params.invite.peer_addr, mac_addr, WIFI_MAC_ADDR_LEN);
+ 			break;
+ 		case 'f':
+-			if (!parse_number(sh, &val, state->optarg, "freq", 0, 6000)) {
++			if (!parse_number(sh, &val, optarg, "freq", 0, 6000)) {
+ 				return -EINVAL;
+ 			}
+ 			params.invite.freq = (int)val;
+ 			break;
+ 		case 'd':
+-			if (sscanf(state->optarg, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx",
++			if (sscanf(optarg, "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx",
+ 				   &mac_addr[0], &mac_addr[1], &mac_addr[2], &mac_addr[3],
+ 				   &mac_addr[4], &mac_addr[5]) != WIFI_MAC_ADDR_LEN) {
+ 				PR_ERROR("Invalid GO device address format\n");
+@@ -4105,18 +4162,17 @@ static int cmd_wifi_p2p_invite(const struct shell *sh, size_t argc, char *argv[]
+ 			shell_help(sh);
+ 			return -ENOEXEC;
+ 		default:
+-			PR_ERROR("Invalid option %c\n", state->optopt);
++			PR_ERROR("Invalid option %c\n", optopt);
+ 			return -EINVAL;
+ 		}
+ 	}
+
+-	state = sys_getopt_state_get();
+
+ 	if (params.invite.type == WIFI_P2P_INVITE_PERSISTENT &&
+ 	    params.invite.persistent_id >= 0 &&
+ 	    params.invite.peer_addr[0] == 0 && params.invite.peer_addr[1] == 0 &&
+-	    argc > state->optind && argv[state->optind][0] != '-') {
+-		if (sscanf(argv[state->optind], "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx",
++	    argc > optind && argv[optind][0] != '-') {
++		if (sscanf(argv[optind], "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx",
+ 			   &mac_addr[0], &mac_addr[1], &mac_addr[2], &mac_addr[3],
+ 			   &mac_addr[4], &mac_addr[5]) != WIFI_MAC_ADDR_LEN) {
+ 			PR_ERROR("Invalid peer MAC address format\n");
+@@ -4234,63 +4290,66 @@ static int wifi_bgscan_args_to_params(const struct shell *sh, size_t argc, char
+ 	int err;
+ 	int opt;
+ 	int opt_index = 0;
+-	struct sys_getopt_state *state;
+-	static const struct sys_getopt_option long_options[] = {
+-		{"type", sys_getopt_required_argument, 0, 't'},
+-		{"short-interval", sys_getopt_required_argument, 0, 's'},
+-		{"rss-threshold", sys_getopt_required_argument, 0, 'r'},
+-		{"long-interval", sys_getopt_required_argument, 0, 'l'},
+-		{"btm-queries", sys_getopt_required_argument, 0, 'b'},
+-		{"iface", sys_getopt_required_argument, 0, 'i'},
++	static const struct option long_options[] = {
++		{"type", required_argument, 0, 't'},
++		{"short-interval", required_argument, 0, 's'},
++		{"rss-threshold", required_argument, 0, 'r'},
++		{"long-interval", required_argument, 0, 'l'},
++		{"btm-queries", required_argument, 0, 'b'},
++		{"iface", required_argument, 0, 'i'},
+ 		{0, 0, 0, 0}};
+ 	unsigned long uval;
+ 	long val;
+
+-	while ((opt = sys_getopt_long(argc, argv, "t:s:r:l:b:i:", long_options,
+-				      &opt_index)) != -1) {
+-		state = sys_getopt_state_get();
++	char *optarg = NULL;
++	int opterr = 1;
++	int optind = 1;
++	int optopt = 0;
++
++	while ((opt = getopt_long_r(argc, argv, "t:s:r:l:b:i:", long_options,
++				      &opt_index, &optarg, &opterr, &optind, &optopt)) != -1) {
+ 		switch (opt) {
+ 		case 't':
+-			if (strcmp("simple", state->optarg) == 0) {
++			if (strcmp("simple", optarg) == 0) {
+ 				params->type = WIFI_BGSCAN_SIMPLE;
+-			} else if (strcmp("learn", state->optarg) == 0) {
++			} else if (strcmp("learn", optarg) == 0) {
+ 				params->type = WIFI_BGSCAN_LEARN;
+-			} else if (strcmp("none", state->optarg) == 0) {
++			} else if (strcmp("none", optarg) == 0) {
+ 				params->type = WIFI_BGSCAN_NONE;
+ 			} else {
+-				PR_ERROR("Invalid type %s\n", state->optarg);
++				PR_ERROR("Invalid type %s\n", optarg);
+ 				shell_help(sh);
+ 				return SHELL_CMD_HELP_PRINTED;
+ 			}
+ 			break;
+ 		case 's':
+-			uval = shell_strtoul(state->optarg, 10, &err);
++			uval = shell_strtoul(optarg, 10, &err);
+ 			if (err < 0) {
+-				PR_ERROR("Invalid short interval %s\n", state->optarg);
++				PR_ERROR("Invalid short interval %s\n", optarg);
+ 				return err;
+ 			}
+ 			params->short_interval = uval;
+ 			break;
+ 		case 'l':
+-			uval = shell_strtoul(state->optarg, 10, &err);
++			uval = shell_strtoul(optarg, 10, &err);
+ 			if (err < 0) {
+-				PR_ERROR("Invalid long interval %s\n", state->optarg);
++				PR_ERROR("Invalid long interval %s\n", optarg);
+ 				return err;
+ 			}
+ 			params->long_interval = uval;
+ 			break;
+ 		case 'b':
+-			uval = shell_strtoul(state->optarg, 10, &err);
++			uval = shell_strtoul(optarg, 10, &err);
+ 			if (err < 0) {
+-				PR_ERROR("Invalid BTM queries %s\n", state->optarg);
++				PR_ERROR("Invalid BTM queries %s\n", optarg);
+ 				return err;
+ 			}
+ 			params->btm_queries = uval;
+ 			break;
+ 		case 'r':
+-			val = shell_strtol(state->optarg, 10, &err);
++			val = shell_strtol(optarg, 10, &err);
+ 			if (err < 0) {
+-				PR_ERROR("Invalid RSSI threshold %s\n", state->optarg);
++				PR_ERROR("Invalid RSSI threshold %s\n", optarg);
+ 				return err;
+ 			}
+ 			params->rssi_threshold = val;
+@@ -4340,19 +4399,22 @@ static int wifi_config_args_to_params(const struct shell *sh, size_t argc, char
+ {
+ 	int opt;
+ 	int opt_index = 0;
+-	struct sys_getopt_state *state;
+-	static const struct sys_getopt_option long_options[] = {
+-		{"okc", sys_getopt_required_argument, 0, 'o'},
+-		{"iface", sys_getopt_required_argument, 0, 'i'},
++	static const struct option long_options[] = {
++		{"okc", required_argument, 0, 'o'},
++		{"iface", required_argument, 0, 'i'},
+ 		{0, 0, 0, 0}};
+ 	long val;
+
+-	while ((opt = sys_getopt_long(argc, argv, "o:i:",
+-				  long_options, &opt_index)) != -1) {
+-		state = sys_getopt_state_get();
++	char *optarg = NULL;
++	int opterr = 1;
++	int optind = 1;
++	int optopt = 0;
++
++	while ((opt = getopt_long_r(argc, argv, "o:i:",
++				  long_options, &opt_index, &optarg, &opterr, &optind, &optopt)) != -1) {
+ 		switch (opt) {
+ 		case 'o':
+-			if (!parse_number(sh, &val, state->optarg, "okc", 0, 1)) {
++			if (!parse_number(sh, &val, optarg, "okc", 0, 1)) {
+ 				return -EINVAL;
+ 			}
+ 			params->okc = val;
+diff --git a/subsys/net/lib/shell/wg_shell.c b/subsys/net/lib/shell/wg_shell.c
+index 7b36f2e490a..4e13aa00e9e 100644
+--- a/subsys/net/lib/shell/wg_shell.c
++++ b/subsys/net/lib/shell/wg_shell.c
+@@ -5,12 +5,12 @@
+  */
+
+ #include <zephyr/logging/log.h>
++#include <zephyr/getopt.h>
+ LOG_MODULE_DECLARE(net_shell);
+
+ #include <getopt.h>
+ #include <zephyr/sys/base64.h>
+
+-#include <zephyr/sys/sys_getopt.h>
+ #include <zephyr/net/virtual.h>
+ #include <zephyr/net/virtual_mgmt.h>
+ #include <zephyr/net/wireguard.h>
+@@ -315,38 +315,41 @@ static int parse_peer_add_args_to_params(const struct shell *sh,
+ 					 size_t public_key_len,
+ 					 struct net_sockaddr **paddr)
+ {
+-	struct sys_getopt_state *state;
+ 	int option_index = 1;
+ 	int opt;
+ 	int ret;
+
+-	static const struct sys_getopt_option long_options[] = {
+-		{ "public-key", sys_getopt_required_argument, 0, 'k' },
+-		{ "allowed-ips", sys_getopt_required_argument, 0, 'a' },
+-		{ "endpoint", sys_getopt_required_argument, 0, 'e' },
+-		{ "keepalive", sys_getopt_required_argument, 0, 't' },
+-		{ "help", sys_getopt_no_argument, 0, 'h' },
++	static const struct option long_options[] = {
++		{ "public-key", required_argument, 0, 'k' },
++		{ "allowed-ips", required_argument, 0, 'a' },
++		{ "endpoint", required_argument, 0, 'e' },
++		{ "keepalive", required_argument, 0, 't' },
++		{ "help", no_argument, 0, 'h' },
+ 		{ 0, 0, 0, 0 }
+ 	};
+
+-	while ((opt = sys_getopt_long(argc, argv, "k:a:e:t:h", long_options,
+-				      &option_index)) != -1) {
+-		state = sys_getopt_state_get();
++	char *optarg = NULL;
++	int opterr = 1;
++	int optind = 1;
++	int optopt = 0;
++
++	while ((opt = getopt_long_r(argc, argv, "k:a:e:t:h", long_options,
++				      &option_index, &optarg, &opterr, &optind, &optopt)) != -1) {
+ 		switch (opt) {
+ 		case 'k':
+-			strncpy(public_key, state->optarg, public_key_len - 1U);
++			strncpy(public_key, optarg, public_key_len - 1U);
+ 			break;
+ 		case 'a':
+-			ret = parse_allowed_ip_addr(sh, state->optarg, peer);
++			ret = parse_allowed_ip_addr(sh, optarg, peer);
+ 			if (ret < 0) {
+ 				return ret;
+ 			}
+ 			break;
+ 		case 'e':
+-			if (!net_ipaddr_parse(state->optarg, strlen(state->optarg),
++			if (!net_ipaddr_parse(optarg, strlen(optarg),
+ 					      *paddr)) {
+ 				LOG_ERR("Cannot parse peer IP address \"%s\"",
+-					state->optarg);
++					optarg);
+ 				return -EINVAL;
+ 			}
+
+@@ -362,10 +365,10 @@ static int parse_peer_add_args_to_params(const struct shell *sh,
+ 			int err = 0;
+ 			int keepalive;
+
+-			keepalive = shell_strtol(state->optarg, 10, &err);
++			keepalive = shell_strtol(optarg, 10, &err);
+ 			if (err != 0) {
+ 				PR_WARNING("Invalid keepalive time \"%s\" (%d)\n",
+-					   state->optarg, err);
++					   optarg, err);
+ 				return -EINVAL;
+ 			}
+
+@@ -377,7 +380,7 @@ static int parse_peer_add_args_to_params(const struct shell *sh,
+ 			shell_help(sh);
+ 			return SHELL_CMD_HELP_PRINTED;
+ 		default:
+-			PR_ERROR("Invalid option %c\n", state->optopt);
++			PR_ERROR("Invalid option %c\n", optopt);
+ 			shell_help(sh);
+ 			return SHELL_CMD_HELP_PRINTED;
+ 		}
+@@ -438,26 +441,29 @@ static int cmd_wg_add(const struct shell *sh, size_t argc, char *argv[])
+ static int parse_peer_del_args_to_params(const struct shell *sh, int argc,
+ 					 char *argv[], int *id)
+ {
+-	struct sys_getopt_state *state;
+ 	int option_index = 0;
+ 	int opt;
+
+-	static const struct sys_getopt_option long_options[] = {
+-		{ "id", sys_getopt_required_argument, 0, 'i' },
+-		{ "help", sys_getopt_no_argument, 0, 'h' },
++	static const struct option long_options[] = {
++		{ "id", required_argument, 0, 'i' },
++		{ "help", no_argument, 0, 'h' },
+ 		{ 0, 0, 0, 0 }
+ 	};
+
+-	while ((opt = sys_getopt_long(argc, argv, "i:h", long_options, &option_index)) != -1) {
+-		state = sys_getopt_state_get();
++	char *optarg = NULL;
++	int opterr = 1;
++	int optind = 1;
++	int optopt = 0;
++
++	while ((opt = getopt_long_r(argc, argv, "i:h", long_options, &option_index, &optarg, &opterr, &optind, &optopt)) != -1) {
+ 		switch (opt) {
+ 		case 'i': {
+ 			int err = 0;
+ 			int tmp_id;
+
+-			tmp_id = shell_strtol(state->optarg, 10, &err);
++			tmp_id = shell_strtol(optarg, 10, &err);
+ 			if (err != 0) {
+-				PR_WARNING("Invalid id \"%s\" (%d)\n", state->optarg, err);
++				PR_WARNING("Invalid id \"%s\" (%d)\n", optarg, err);
+ 				return -EINVAL;
+ 			}
+
+@@ -653,34 +659,37 @@ static int parse_setup_args_to_params(const struct shell *sh,
+ 				      size_t private_key_len,
+ 				      struct net_if **vpn_iface)
+ {
+-	struct sys_getopt_state *state;
+ 	struct net_if *iface;
+ 	int option_index = 1;
+ 	int iface_idx;
+ 	int opt;
+ 	int ret;
+
+-	static const struct sys_getopt_option long_options[] = {
+-		{ "private-key", sys_getopt_required_argument, 0, 'k' },
+-		{ "iface", sys_getopt_required_argument, 0, 'i' },
+-		{ "help", sys_getopt_no_argument, 0, 'h' },
++	static const struct option long_options[] = {
++		{ "private-key", required_argument, 0, 'k' },
++		{ "iface", required_argument, 0, 'i' },
++		{ "help", no_argument, 0, 'h' },
+ 		{ 0, 0, 0, 0 }
+ 	};
+
+-	while ((opt = sys_getopt_long(argc, argv, "k:i:h",
+-				      long_options, &option_index)) != -1) {
+-		state = sys_getopt_state_get();
++	char *optarg = NULL;
++	int opterr = 1;
++	int optind = 1;
++	int optopt = 0;
++
++	while ((opt = getopt_long_r(argc, argv, "k:i:h",
++				      long_options, &option_index, &optarg, &opterr, &optind, &optopt)) != -1) {
+
+ 		switch (opt) {
+ 		case 'k':
+-			strncpy(private_key, state->optarg, private_key_len);
++			strncpy(private_key, optarg, private_key_len);
+ 			break;
+ 		case 'i':
+ 			ret = 0;
+-			iface_idx = shell_strtol(state->optarg, 10, &ret);
++			iface_idx = shell_strtol(optarg, 10, &ret);
+ 			if (ret < 0 || iface_idx == 0) {
+ 				PR_ERROR("Invalid interface index \"%s\"\n",
+-					 state->optarg);
++					 optarg);
+ 				return ret;
+ 			}
+
+@@ -702,7 +711,7 @@ static int parse_setup_args_to_params(const struct shell *sh,
+ 			shell_help(sh);
+ 			return SHELL_CMD_HELP_PRINTED;
+ 		default:
+-			PR_ERROR("Invalid option %c\n", state->optopt);
++			PR_ERROR("Invalid option %c\n", optopt);
+ 			shell_help(sh);
+ 			return SHELL_CMD_HELP_PRINTED;
+ 		}
+diff --git a/subsys/net/lib/wifi_credentials/Kconfig b/subsys/net/lib/wifi_credentials/Kconfig
+index 0d53c2b1136..ef5ea5a4950 100644
+--- a/subsys/net/lib/wifi_credentials/Kconfig
++++ b/subsys/net/lib/wifi_credentials/Kconfig
+@@ -58,6 +58,9 @@ config WIFI_CREDENTIALS_SHELL
+ 	default y
+ 	depends on SHELL
+ 	depends on !WIFI_CREDENTIALS_BACKEND_NONE
++	select POSIX_C_LIB_EXT
++	select ZEPHYR_GETOPT
++	select ZEPHYR_GETOPT_LONG
+
+ config WIFI_CREDENTIALS_CONNECT_STORED
+ 	bool "Add command to connect to stored networks directly."
+diff --git a/subsys/net/lib/wifi_credentials/wifi_credentials_shell.c b/subsys/net/lib/wifi_credentials/wifi_credentials_shell.c
+index 27b4bf082b6..3336da295bc 100644
+--- a/subsys/net/lib/wifi_credentials/wifi_credentials_shell.c
++++ b/subsys/net/lib/wifi_credentials/wifi_credentials_shell.c
+@@ -8,6 +8,8 @@
+ #define _POSIX_C_SOURCE 200809L /* For strnlen() */
+
+ #include <zephyr/kernel.h>
++#include <getopt.h>
++#include <zephyr/getopt.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <zephyr/shell/shell.h>
+@@ -117,19 +119,18 @@ static int cmd_add_network(const struct shell *sh, size_t argc, char *argv[])
+ {
+ 	int opt;
+ 	int opt_index = 0;
+-	struct sys_getopt_state *state;
+-	static const struct sys_getopt_option long_options[] = {
+-		{"ssid", sys_getopt_required_argument, 0, 's'},
+-		{"passphrase", sys_getopt_required_argument, 0, 'p'},
+-		{"key-mgmt", sys_getopt_required_argument, 0, 'k'},
+-		{"ieee-80211w", sys_getopt_required_argument, 0, 'w'},
+-		{"bssid", sys_getopt_required_argument, 0, 'm'},
+-		{"band", sys_getopt_required_argument, 0, 'b'},
+-		{"channel", sys_getopt_required_argument, 0, 'c'},
+-		{"timeout", sys_getopt_required_argument, 0, 't'},
+-		{"identity", sys_getopt_required_argument, 0, 'a'},
+-		{"key-passwd", sys_getopt_required_argument, 0, 'K'},
+-		{"help", sys_getopt_no_argument, 0, 'h'},		 {0, 0, 0, 0}};
++	static const struct option long_options[] = {
++		{"ssid", required_argument, 0, 's'},
++		{"passphrase", required_argument, 0, 'p'},
++		{"key-mgmt", required_argument, 0, 'k'},
++		{"ieee-80211w", required_argument, 0, 'w'},
++		{"bssid", required_argument, 0, 'm'},
++		{"band", required_argument, 0, 'b'},
++		{"channel", required_argument, 0, 'c'},
++		{"timeout", required_argument, 0, 't'},
++		{"identity", required_argument, 0, 'a'},
++		{"key-passwd", required_argument, 0, 'K'},
++		{"help", no_argument, 0, 'h'},		 {0, 0, 0, 0}};
+ 	char *endptr;
+ 	bool secure_connection = false;
+ 	uint8_t band;
+@@ -143,27 +144,31 @@ static int cmd_add_network(const struct shell *sh, size_t argc, char *argv[])
+ 	long channel;
+ 	long mfp = WIFI_MFP_OPTIONAL;
+
+-	while ((opt = sys_getopt_long(argc, argv, "s:p:k:w:b:c:m:t:a:K:h",
+-				      long_options, &opt_index)) != -1) {
+-		state = sys_getopt_state_get();
++	char *optarg = NULL;
++	int opterr = 1;
++	int optind = 1;
++	int optopt = 0;
++
++	while ((opt = getopt_long_r(argc, argv, "s:p:k:w:b:c:m:t:a:K:h",
++				      long_options, &opt_index, &optarg, &opterr, &optind, &optopt)) != -1) {
+ 		switch (opt) {
+ 		case 's':
+-			creds.header.ssid_len = strlen(state->optarg);
++			creds.header.ssid_len = strlen(optarg);
+ 			if (creds.header.ssid_len > WIFI_SSID_MAX_LEN) {
+ 				shell_warn(sh, "SSID too long (max %d characters)\n",
+ 					   WIFI_SSID_MAX_LEN);
+ 				return -EINVAL;
+ 			}
+-			memcpy(creds.header.ssid, state->optarg, creds.header.ssid_len);
++			memcpy(creds.header.ssid, optarg, creds.header.ssid_len);
+ 			break;
+ 		case 'k':
+-			creds.header.type = atoi(state->optarg);
++			creds.header.type = atoi(optarg);
+ 			if (creds.header.type) {
+ 				secure_connection = true;
+ 			}
+ 			break;
+ 		case 'p':
+-			creds.password_len = strlen(state->optarg);
++			creds.password_len = strlen(optarg);
+ 			if (creds.password_len < WIFI_PSK_MIN_LEN) {
+ 				shell_warn(sh, "Passphrase should be minimum %d characters\n",
+ 					   WIFI_PSK_MIN_LEN);
+diff --git a/subsys/net/lib/wireguard/Kconfig b/subsys/net/lib/wireguard/Kconfig
+index 531a243ce57..f177c75ac31 100644
+--- a/subsys/net/lib/wireguard/Kconfig
++++ b/subsys/net/lib/wireguard/Kconfig
+@@ -50,8 +50,9 @@ config WIREGUARD_CRYPTO
+ config WIREGUARD_SHELL
+ 	bool
+ 	depends on NET_SHELL
+-	select GETOPT_LONG
+-	select SHELL_GETOPT
++	select POSIX_C_LIB_EXT
++	select ZEPHYR_GETOPT
++	select ZEPHYR_GETOPT_LONG
+ 	select POSIX_C_LIB_EXT
+ 	default y
+
+diff --git a/subsys/shell/Kconfig b/subsys/shell/Kconfig
+index ce13fb8c4f8..3e228ea95a2 100644
+--- a/subsys/shell/Kconfig
++++ b/subsys/shell/Kconfig
+@@ -188,14 +188,6 @@ config SHELL_VT100_COLORS
+ 	help
+ 	  If enabled VT100 colors are used in shell (e.g. print errors in red).
+
+-config SHELL_GETOPT
+-	bool "Threadsafe getopt support in shell"
+-	select GETOPT
+-	help
+-	  This config creates a separate getopt_state for the shell instance.
+-	  It ensures that using getopt with shell is thread safe.
+-	  When more threads are using sys_getopt please call sys_getopt_state_get to
+-	  get getopt state of the shell thread.
+
+ config SHELL_METAKEYS
+ 	bool "Metakeys"
+diff --git a/subsys/shell/modules/Kconfig b/subsys/shell/modules/Kconfig
+index 5a8f6e1f79e..99dd963940c 100644
+--- a/subsys/shell/modules/Kconfig
++++ b/subsys/shell/modules/Kconfig
+@@ -29,7 +29,8 @@ config DATE_SHELL
+ config DEVMEM_SHELL
+ 	bool "Devmem shell"
+ 	default y if !SHELL_MINIMAL
+-	select GETOPT
++	select POSIX_C_LIB_EXT
++	select ZEPHYR_GETOPT
+ 	help
+ 	  This shell command provides read/write access to physical memory.
+
+diff --git a/subsys/shell/modules/devmem_service.c b/subsys/shell/modules/devmem_service.c
+index 4655a4f8626..8687353032a 100644
+--- a/subsys/shell/modules/devmem_service.c
++++ b/subsys/shell/modules/devmem_service.c
+@@ -10,8 +10,8 @@
+ #define _POSIX_C_SOURCE 200809L
+
+ #include <stdlib.h>
+-#include <zephyr/sys/sys_getopt.h>
+ #include <zephyr/device.h>
++#include <zephyr/getopt.h>
+ #include <zephyr/shell/shell.h>
+ #include <zephyr/sys/byteorder.h>
+ #include <zephyr/sys/util.h>
+@@ -106,29 +106,31 @@ static int cmd_dump(const struct shell *sh, size_t argc, char **argv)
+ 	size_t width = 32;
+ 	mem_addr_t addr = -1;
+
+-	sys_getopt_optind = 1;
+-	sys_getopt_init();
++	char *optarg = NULL;
++	int opterr = 1;
++	int optind = 1;
++	int optopt = 0;
+
+-	while ((rv = sys_getopt(argc, argv, "a:s:w:")) != -1) {
++	while ((rv = getopt_r(argc, argv, "a:s:w:", &optarg, &opterr, &optind, &optopt)) != -1) {
+ 		switch (rv) {
+ 		case 'a':
+-			addr = (mem_addr_t)shell_strtoul(sys_getopt_optarg, 16, &err);
++			addr = (mem_addr_t)shell_strtoul(optarg, 16, &err);
+ 			if (err != 0) {
+-				shell_error(sh, "invalid addr '%s'", sys_getopt_optarg);
++				shell_error(sh, "invalid addr '%s'", optarg);
+ 				return -EINVAL;
+ 			}
+ 			break;
+ 		case 's':
+-			size = (size_t)shell_strtoul(sys_getopt_optarg, 0, &err);
++			size = (size_t)shell_strtoul(optarg, 0, &err);
+ 			if (err != 0) {
+-				shell_error(sh, "invalid size '%s'", sys_getopt_optarg);
++				shell_error(sh, "invalid size '%s'", optarg);
+ 				return -EINVAL;
+ 			}
+ 			break;
+ 		case 'w':
+-			width = (size_t)shell_strtoul(sys_getopt_optarg, 0, &err);
++			width = (size_t)shell_strtoul(optarg, 0, &err);
+ 			if (err != 0) {
+-				shell_error(sh, "invalid width '%s'", sys_getopt_optarg);
++				shell_error(sh, "invalid width '%s'", optarg);
+ 				return -EINVAL;
+ 			}
+ 			break;
+diff --git a/subsys/shell/modules/kernel_service/uptime.c b/subsys/shell/modules/kernel_service/uptime.c
+index c4257be1fe4..c00f4f16071 100644
+--- a/subsys/shell/modules/kernel_service/uptime.c
++++ b/subsys/shell/modules/kernel_service/uptime.c
+@@ -26,7 +26,7 @@ static int cmd_kernel_uptime(const struct shell *sh, size_t argc, char **argv)
+ 		return 0;
+ 	}
+
+-	/* No need to enable the sys_getopt and sys_getopt_long for just one option. */
++	/* No need to enable the getopt and getopt_long for just one option. */
+ 	if (strcmp("-p", argv[1]) && strcmp("--pretty", argv[1]) != 0) {
+ 		shell_error(sh, "Unsupported option: %s", argv[1]);
+ 		return -EIO;
+diff --git a/subsys/shell/shell.c b/subsys/shell/shell.c
+index b86806a18c1..850cf772ac2 100644
+--- a/subsys/shell/shell.c
++++ b/subsys/shell/shell.c
+@@ -553,9 +553,6 @@ static int exec_cmd(const struct shell *sh, size_t argc, const char **argv,
+ 	}
+
+ 	if (!ret_val) {
+-#if CONFIG_SHELL_GETOPT
+-		sys_getopt_init();
+-#endif
+
+ 		z_flag_cmd_ctx_set(sh, true);
+ 		/* Unlock thread mutex in case command would like to borrow
+diff --git a/subsys/testsuite/ztest/Kconfig b/subsys/testsuite/ztest/Kconfig
+index 131423ee2c5..206f1ecad42 100644
+--- a/subsys/testsuite/ztest/Kconfig
++++ b/subsys/testsuite/ztest/Kconfig
+@@ -27,6 +27,9 @@ config ZTEST_SHELL
+ 	bool "Ztest with shell support"
+ 	select SHELL
+ 	select SHELL_THREAD_PRIORITY_OVERRIDE
++	select POSIX_C_LIB_EXT
++	select ZEPHYR_GETOPT
++	select ZEPHYR_GETOPT_LONG
+ 	help
+ 	  Enable shell to manage test execution and selection.
+
+diff --git a/subsys/testsuite/ztest/src/ztest.c b/subsys/testsuite/ztest/src/ztest.c
+index d5599e0fd60..ccf256be881 100644
+--- a/subsys/testsuite/ztest/src/ztest.c
++++ b/subsys/testsuite/ztest/src/ztest.c
+@@ -6,6 +6,8 @@
+
+ #include <stdlib.h>
+ #include <zephyr/ztest.h>
++#include <getopt.h>
++#include <zephyr/getopt.h>
+
+ #include <zephyr/app_memory/app_memdomain.h>
+ #ifdef CONFIG_USERSPACE
+@@ -1252,11 +1254,10 @@ static int cmd_runall(const struct shell *sh, size_t argc, char **argv)
+ static int cmd_shuffle(const struct shell *sh, size_t argc, char **argv)
+ {
+
+-	struct sys_getopt_state *state;
+ 	int opt;
+-	static struct sys_getopt_option long_options[] = {
+-		{"suite_iter", sys_getopt_required_argument, 0, 's'},
+-		{"case_iter", sys_getopt_required_argument, 0, 'c'},
++	static struct option long_options[] = {
++		{"suite_iter", required_argument, 0, 's'},
++		{"case_iter", required_argument, 0, 'c'},
+ 		{0, 0, 0, 0}};
+ 	int opt_index = 0;
+ 	int val;
+@@ -1265,11 +1266,15 @@ static int cmd_shuffle(const struct shell *sh, size_t argc, char **argv)
+ 	int suite_iter = 1;
+ 	int case_iter = 1;
+
+-	while ((opt = sys_getopt_long(argc, argv, "s:c:", long_options, &opt_index)) != -1) {
+-		state = sys_getopt_state_get();
++	char *optarg = NULL;
++	int opterr = 1;
++	int optind = 1;
++	int optopt = 0;
++
++	while ((opt = getopt_long_r(argc, argv, "s:c:", long_options, &opt_index, &optarg, &opterr, &optind, &optopt)) != -1) {
+ 		switch (opt) {
+ 		case 's':
+-			val = atoi(state->optarg);
++			val = atoi(optarg);
+ 			if (val < 1) {
+ 				shell_error(sh, "Invalid number of suite iterations");
+ 				return -ENOEXEC;
+@@ -1301,10 +1306,9 @@ static int cmd_shuffle(const struct shell *sh, size_t argc, char **argv)
+
+ static int cmd_run_suite(const struct shell *sh, size_t argc, char **argv)
+ {
+-	struct sys_getopt_state *state;
+ 	int opt;
+-	static struct sys_getopt_option long_options[] = {
+-		{"repeat_iter", sys_getopt_required_argument, NULL, 'r'},
++	static struct option long_options[] = {
++		{"repeat_iter", required_argument, NULL, 'r'},
+ 		{NULL, 0, NULL, 0}};
+ 	int opt_index = 0;
+ 	int val;
+@@ -1312,11 +1316,15 @@ static int cmd_run_suite(const struct shell *sh, size_t argc, char **argv)
+ 	void *param = NULL;
+ 	int repeat_iter = 1;
+
+-	while ((opt = sys_getopt_long(argc, argv, "r:p:", long_options, &opt_index)) != -1) {
+-		state = sys_getopt_state_get();
++	char *optarg = NULL;
++	int opterr = 1;
++	int optind = 1;
++	int optopt = 0;
++
++	while ((opt = getopt_long_r(argc, argv, "r:p:", long_options, &opt_index, &optarg, &opterr, &optind, &optopt)) != -1) {
+ 		switch (opt) {
+ 		case 'r':
+-			val = atoi(state->optarg);
++			val = atoi(optarg);
+ 			if (val < 1) {
+ 				shell_fprintf(sh, SHELL_ERROR,
+ 					"Invalid number of suite interations\n");
