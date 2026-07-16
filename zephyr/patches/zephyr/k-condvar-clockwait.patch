@@ -1,35 +1,18 @@
 diff --git a/include/zephyr/kernel.h b/include/zephyr/kernel.h
-index 070ddeae679..b9614f393b2 100644
+index 7d07e2820ea..b068854eec3 100644
 --- a/include/zephyr/kernel.h
 +++ b/include/zephyr/kernel.h
-@@ -3525,13 +3525,24 @@ struct k_condvar {
+@@ -3737,6 +3737,9 @@ struct k_condvar {
  #ifdef CONFIG_OBJ_CORE_CONDVAR
  	struct k_obj_core  obj_core;
  #endif
-+
 +#ifdef CONFIG_CONDVAR_OPTIONS
 +	uint32_t options;
 +#endif
- };
- 
--#define Z_CONDVAR_INITIALIZER(obj)                                             \
-+/** @cond INTERNAL_HIDDEN */
-+
-+#define Z_CONDVAR_INITIALIZER_EXT(obj, opts)                                             \
- 	{                                                                      \
--		.wait_q = Z_WAIT_Q_INIT(&obj.wait_q),                          \
-+		.wait_q = Z_WAIT_Q_INIT(&(obj).wait_q),                        \
-+		COND_CODE_1(CONFIG_CONDVAR_OPTIONS, (.options = (opts),), ()) \
- 	}
- 
-+#define Z_CONDVAR_INITIALIZER(obj) Z_CONDVAR_INITIALIZER_EXT((obj), SYS_CLOCK_REALTIME)
-+
-+/** INTERNAL_HIDDEN @endcond */
-+
  /**
-  * @defgroup condvar_apis Condition Variables APIs
-  * @ingroup kernel_apis
-@@ -3546,6 +3557,70 @@ struct k_condvar {
+  * INTERNAL_HIDDEN @endcond
+  */
+@@ -3767,6 +3770,70 @@ struct k_condvar {
   */
  __syscall int k_condvar_init(struct k_condvar *condvar);
  
@@ -100,7 +83,7 @@ index 070ddeae679..b9614f393b2 100644
  /**
   * @brief Signals one thread that is pending on the condition variable
   *
-@@ -3596,6 +3671,23 @@ __syscall int k_condvar_wait(struct k_condvar *condvar, struct k_mutex *mutex,
+@@ -3817,6 +3884,23 @@ __syscall int k_condvar_wait(struct k_condvar *condvar, struct k_mutex *mutex,
  #define K_CONDVAR_DEFINE(name)                                                 \
  	STRUCT_SECTION_ITERABLE(k_condvar, name) =                             \
  		Z_CONDVAR_INITIALIZER(name)
@@ -125,10 +108,10 @@ index 070ddeae679..b9614f393b2 100644
   * @}
   */
 diff --git a/include/zephyr/sys/clock.h b/include/zephyr/sys/clock.h
-index 34f490dc642..b46de7fe835 100644
+index 84c6345981e..f835ba895b5 100644
 --- a/include/zephyr/sys/clock.h
 +++ b/include/zephyr/sys/clock.h
-@@ -373,6 +373,13 @@ static inline bool sys_timepoint_expired(k_timepoint_t timepoint)
+@@ -416,6 +416,13 @@ static inline bool sys_timepoint_expired(k_timepoint_t timepoint)
   */
  #define SYS_CLOCK_MONOTONIC 4
  
@@ -143,10 +126,10 @@ index 34f490dc642..b46de7fe835 100644
   * @brief The flag used for specifying absolute timeouts
   *
 diff --git a/kernel/Kconfig b/kernel/Kconfig
-index 61225ca0bf4..7f89e4cb2e8 100644
+index e5871c98e23..47c6ad822eb 100644
 --- a/kernel/Kconfig
 +++ b/kernel/Kconfig
-@@ -779,6 +779,12 @@ endmenu
+@@ -802,6 +802,12 @@ endmenu
  
  menu "Other Kernel Object Options"
  
@@ -160,7 +143,7 @@ index 61225ca0bf4..7f89e4cb2e8 100644
  	bool "Support optional mutex features"
  	help
 diff --git a/kernel/condvar.c b/kernel/condvar.c
-index 42590839c86..860f191f3a3 100644
+index 640fd8ad2b6..c2b5896a96a 100644
 --- a/kernel/condvar.c
 +++ b/kernel/condvar.c
 @@ -6,6 +6,8 @@
@@ -183,7 +166,25 @@ index 42590839c86..860f191f3a3 100644
  	k_object_init(condvar);
  
  #ifdef CONFIG_OBJ_CORE_CONDVAR
-@@ -161,3 +167,93 @@ static int init_condvar_obj_core_list(void)
+@@ -129,9 +135,14 @@ int z_impl_k_condvar_wait(struct k_condvar *condvar, struct k_mutex *mutex,
+ 	k_mutex_unlock(mutex);
+ 
+ 	ret = z_pend_curr(&lock, key, &condvar->wait_q, timeout);
+-	if (ret == 0) {
+-		k_mutex_lock(mutex, K_FOREVER);
+-	}
++
++	/* Always re-acquire the mutex before returning, even on timeout.
++	 * This matches POSIX semantics: the mutex must be locked by the
++	 * calling thread when pthread_cond_wait() returns, regardless of
++	 * whether it was signaled or timed out.
++	 * From https://github.com/zephyrproject-rtos/zephyr/pull/107937
++	 */
++	k_mutex_lock(mutex, K_FOREVER);
+ 
+ 	SYS_PORT_TRACING_OBJ_FUNC_EXIT(k_condvar, wait, condvar, timeout, ret);
+ 
+@@ -169,3 +180,93 @@ static int init_condvar_obj_core_list(void)
  SYS_INIT(init_condvar_obj_core_list, PRE_KERNEL_1,
  	 CONFIG_KERNEL_INIT_PRIORITY_OBJECTS);
  #endif /* CONFIG_OBJ_CORE_CONDVAR */
@@ -277,23 +278,3 @@ index 42590839c86..860f191f3a3 100644
 +#include <zephyr/syscalls/k_condvar_timedwait_mrsh.c>
 +#endif /* CONFIG_USERSPACE */
 +#endif /* CONFIG_CONDVAR_OPTIONS */
-diff --git a/lib/os/fdtable.c b/lib/os/fdtable.c
-index 26667e33d78..d1ce548e0c9 100644
---- a/lib/os/fdtable.c
-+++ b/lib/os/fdtable.c
-@@ -167,9 +167,14 @@ bool fdtable_fd_is_initialized(int fd)
- #endif
- 
- 	ref_cond = (struct k_condvar)Z_CONDVAR_INITIALIZER(fdtable[fd].cond);
--	if (memcmp(&ref_cond, &fdtable[fd].cond, sizeof(ref_cond)) != 0) {
-+	if (memcmp(&ref_cond.wait_q, &fdtable[fd].cond.wait_q, sizeof(ref_cond.wait_q)) != 0) {
- 		return false;
- 	}
-+#ifdef CONFIG_CONDVAR_OPTIONS
-+	if (ref_cond.options != fdtable[fd].cond.options) {
-+		return false;
-+	}
-+#endif
- 
- 	return true;
- }

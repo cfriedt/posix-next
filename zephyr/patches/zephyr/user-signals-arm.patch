@@ -1,24 +1,24 @@
 diff --git a/arch/arm/Kconfig b/arch/arm/Kconfig
-index 7b6b292b5c1..22b8a982b0f 100644
+index f13ad5eb159..a8e420bd160 100644
 --- a/arch/arm/Kconfig
 +++ b/arch/arm/Kconfig
-@@ -190,4 +190,8 @@ config HAS_SWO
- 	help
- 	  When enabled, indicates that SoC has an SWO output
- 
+@@ -234,4 +234,8 @@ config ARM_VECTOR_TABLE_ITCM
+
+ endchoice
+
 +config ARCH_SUPPORTS_USERSPACE_SIGNALS
 +	bool
 +	default y
 +
  endmenu
 diff --git a/arch/arm/core/CMakeLists.txt b/arch/arm/core/CMakeLists.txt
-index f0035033832..9a44c8c8d2f 100644
+index 9989495140d..2bb55798b8a 100644
 --- a/arch/arm/core/CMakeLists.txt
 +++ b/arch/arm/core/CMakeLists.txt
-@@ -36,6 +36,10 @@ zephyr_linker_sources(ROM_START SORT_KEY 0x0vectors vector_table.ld)
+@@ -48,6 +48,10 @@ zephyr_linker_sources(ROM_START SORT_KEY 0x0vectors vector_table.ld)
  zephyr_linker_sources(ROM_START SORT_KEY 0x1vectors cortex_m/vector_table_pad.ld)
  endif()
- 
+
 +if(CONFIG_SIGNAL AND CONFIG_USERSPACE)
 +  zephyr_library_sources(signal.c)
 +endif()
@@ -26,28 +26,6 @@ index f0035033832..9a44c8c8d2f 100644
  if(CONFIG_GEN_SW_ISR_TABLE)
    if(CONFIG_DYNAMIC_INTERRUPTS)
      zephyr_linker_sources(RWDATA swi_tables.ld)
-diff --git a/arch/arm/core/cortex_m/swap_helper.S b/arch/arm/core/cortex_m/swap_helper.S
-index 162208e04c6..646d2a99e77 100644
---- a/arch/arm/core/cortex_m/swap_helper.S
-+++ b/arch/arm/core/cortex_m/swap_helper.S
-@@ -577,7 +577,7 @@ SECTION_FUNC(TEXT, z_arm_svc)
-     adds r1, r1, #_thread_offset_to_priv_stack_start
-     ldr r1, [r1] /* bottom of priv stack */
-     ldr r3, =CONFIG_PRIVILEGED_STACK_SIZE
--    subs r3, #(_EXC_HW_SAVED_BASIC_SF_SIZE+8) /* 8 for original sp and pc */
-+    subs r3, #(_EXC_HW_SAVED_BASIC_SF_SIZE+16) /* original sp, lr, and pc, and r0 */
-     add r1, r3
-     mov ip, r1
- #elif defined(CONFIG_ARMV7_M_ARMV8_M_MAINLINE)
-@@ -594,7 +594,7 @@ SECTION_FUNC(TEXT, z_arm_svc)
- #else
-     mov r8, #_EXC_HW_SAVED_BASIC_SF_SIZE
- #endif
--    sub ip, #8 /* z_arm_do_syscall will use this to get original sp and pc */
-+    sub ip, #16 /* original sp, lr, and pc, and r0 */
-     sub ip, r8 /* 32 for basic sf + 72 for the optional esf */
- #endif
- 
 diff --git a/arch/arm/core/signal.c b/arch/arm/core/signal.c
 new file mode 100644
 index 00000000000..c5df22156d0
@@ -83,12 +61,12 @@ index 00000000000..c5df22156d0
 +	*psf = *backup;
 +}
 diff --git a/arch/arm/core/userspace.S b/arch/arm/core/userspace.S
-index 92795625a1d..342f46276a6 100644
+index 4a0b2ac3d34..c0897c5b8fa 100644
 --- a/arch/arm/core/userspace.S
 +++ b/arch/arm/core/userspace.S
-@@ -32,6 +32,10 @@ GDATA(_kernel)
- /* Imports */
- GDATA(_k_syscall_table)
+@@ -47,6 +47,10 @@ GDATA(_k_syscall_table)
+ # define UNLOCK(unused)
+ #endif
  
 +#if defined(CONFIG_SIGNAL)
 +GTEXT(z_sig_handle)
@@ -97,7 +75,7 @@ index 92795625a1d..342f46276a6 100644
  /**
   *
   * User space entry function
-@@ -365,6 +369,7 @@ dispatch_syscall:
+@@ -389,6 +393,7 @@ dispatch_syscall:
      lsls r6, #2
      add r0, r6
      ldr r0, [r0]	/* load table address */
@@ -105,7 +83,7 @@ index 92795625a1d..342f46276a6 100644
      /* swap ip and r0, restore r1 from lr */
      mov r1, ip
      mov ip, r0
-@@ -405,6 +410,7 @@ dispatch_syscall:
+@@ -429,6 +434,7 @@ dispatch_syscall:
      lsl r6, #2
      add ip, r6
      ldr ip, [ip]	/* load table address */
@@ -113,7 +91,7 @@ index 92795625a1d..342f46276a6 100644
  
      /* execute function from dispatch table */
      blx ip
-@@ -413,6 +419,42 @@ dispatch_syscall:
+@@ -437,6 +443,43 @@ dispatch_syscall:
      ldr lr, [sp,#16]
  #endif
  
@@ -153,10 +131,11 @@ index 92795625a1d..342f46276a6 100644
 +
 +.L_skip_k_sig_handle:
 +#endif
++
+     LOCK(ip)
  
  #if defined(CONFIG_BUILTIN_STACK_GUARD)
-     /*
-@@ -451,14 +493,14 @@ dispatch_syscall:
+@@ -478,14 +521,14 @@ dispatch_syscall:
      /* set stack back to unprivileged stack */
      mov ip, r0
      mov r0, sp
@@ -173,37 +152,66 @@ index 92795625a1d..342f46276a6 100644
      msr PSP, ip
  #endif
  
+@@ -608,7 +651,6 @@ z_syscall_exit_race2:
+ 
+     bx ip
+ 
+-
+ /*
+  * size_t arch_user_string_nlen(const char *s, size_t maxsize, int *err_arg)
+  */
+diff --git a/arch/arm/core/cortex_m/svc.S b/arch/arm/core/cortex_m/svc.S
+index d3fc748fa70..2649e84d904 100644
+--- a/arch/arm/core/cortex_m/svc.S
++++ b/arch/arm/core/cortex_m/svc.S
+@@ -264,7 +264,7 @@ SECTION_FUNC(TEXT, z_arm_svc)
+     adds r1, r1, #_thread_offset_to_priv_stack_start
+     ldr r1, [r1] /* bottom of priv stack */
+     ldr r3, =CONFIG_PRIVILEGED_STACK_SIZE
+-    subs r3, #(_EXC_HW_SAVED_BASIC_SF_SIZE+8) /* 8 for original sp and pc */
++    subs r3, #(_EXC_HW_SAVED_BASIC_SF_SIZE+16) /* original sp, lr, r0, and pc */
+     add r1, r3
+     mov ip, r1
+ #elif defined(CONFIG_ARMV7_M_ARMV8_M_MAINLINE)
+@@ -281,7 +281,7 @@ SECTION_FUNC(TEXT, z_arm_svc)
+ #else
+     mov r8, #_EXC_HW_SAVED_BASIC_SF_SIZE
+ #endif
+-    sub ip, #8 /* z_arm_do_syscall will use this to get original sp and pc */
++    sub ip, #16 /* z_arm_do_syscall reserved area: original sp, lr, r0, and pc */
+     sub ip, r8 /* 32 for basic sf + 72 for the optional esf */
+ #endif
+ 
 diff --git a/arch/arm64/core/CMakeLists.txt b/arch/arm64/core/CMakeLists.txt
-index 436918ccb47..ef09f933939 100644
+index d93cf61d88a..18068450228 100644
 --- a/arch/arm64/core/CMakeLists.txt
 +++ b/arch/arm64/core/CMakeLists.txt
-@@ -45,6 +45,10 @@ if((CONFIG_MP_MAX_NUM_CPUS GREATER 1) OR (CONFIG_SMP))
+@@ -46,6 +46,10 @@ if((CONFIG_MP_MAX_NUM_CPUS GREATER 1) OR (CONFIG_SMP))
    zephyr_library_sources(smp.c)
  endif()
- 
+
 +if(CONFIG_SIGNAL AND CONFIG_USERSPACE)
 +  zephyr_library_sources(signal.c)
 +endif()
 +
  zephyr_cc_option_ifdef(CONFIG_USERSPACE -mno-outline-atomics)
  zephyr_cc_option_ifdef(CONFIG_FRAME_POINTER -mno-omit-leaf-frame-pointer)
- 
+
 diff --git a/arch/arm64/core/Kconfig b/arch/arm64/core/Kconfig
-index 45076daa77b..cf67e615ca4 100644
+index 61021a9e35b..e90f6e0f667 100644
 --- a/arch/arm64/core/Kconfig
 +++ b/arch/arm64/core/Kconfig
-@@ -145,6 +145,7 @@ config WAIT_AT_RESET_VECTOR
- 
+@@ -170,12 +170,17 @@ config WAIT_AT_RESET_VECTOR
+
  config ARM64_SAFE_EXCEPTION_STACK
  	bool "To enable the safe exception stack"
 +	default y if SIGNAL && USERSPACE
  	help
  	  The safe exception stack is used for checking whether the kernel stack
  	  overflows during the exception happens from EL1. This stack is not
-@@ -166,6 +167,10 @@ config ARCH_HAS_STACKWALK
- 	  Internal config to indicate that the arch_stack_walk() API is implemented
- 	  and it can be enabled.
- 
+ 	  used for user stack overflow checking, because kernel stack support
+ 	  the checking work.
+
 +config ARCH_SUPPORTS_USERSPACE_SIGNALS
 +	bool
 +	default y
@@ -264,13 +272,13 @@ index 00000000000..985be299ecb
 +	esf->x0 = backup->x0;
 +}
 diff --git a/arch/arm64/core/userspace.S b/arch/arm64/core/userspace.S
-index 968d2a436bc..7d5c73751fb 100644
+index d82b96e3d2a..6413794418b 100644
 --- a/arch/arm64/core/userspace.S
 +++ b/arch/arm64/core/userspace.S
 @@ -14,6 +14,10 @@
- 
+
  _ASM_FILE_PROLOGUE
- 
+
 +#if defined(CONFIG_SIGNAL)
 +GTEXT(z_sig_handle)
 +#endif
@@ -278,10 +286,10 @@ index 968d2a436bc..7d5c73751fb 100644
  /*
   * size_t arch_user_string_nlen(const char *s, size_t maxsize, int *err_arg)
   */
-@@ -124,5 +128,23 @@ valid_syscall_id:
+@@ -136,6 +140,24 @@ valid_syscall_id:
  	/* Save the return value into the ESF */
  	str	x0, [sp, ___esf_t_x0_x1_OFFSET]
- 
+
 +#ifdef CONFIG_SIGNAL
 +	ldr	x0, =K_SYSCALL_K_SIG_ACTION
 +	cmp	x0, x8
@@ -301,6 +309,7 @@ index 968d2a436bc..7d5c73751fb 100644
 +#endif
 +
  	/* Return from exception */
+ 	.cfi_endproc
  	b	z_arm64_exit_exc
 diff --git a/include/zephyr/arch/arm/exception.h b/include/zephyr/arch/arm/exception.h
 index cc20225e483..446d3ce910a 100644
@@ -309,7 +318,7 @@ index cc20225e483..446d3ce910a 100644
 @@ -23,4 +23,23 @@
  #error Unknown ARM architecture
  #endif /* CONFIG_CPU_CORTEX_M */
- 
+
 +#ifndef _ASMLANGUAGE
 +
 +#ifdef __cplusplus
@@ -337,7 +346,7 @@ index a1348f608e3..18d213deb8e 100644
 @@ -55,6 +55,18 @@ struct arch_esf {
  #endif
  } __aligned(16);
- 
+
 +struct arch_sig_ctx {
 +#ifdef CONFIG_FRAME_POINTER
 +	unsigned long fp; /* user frame pointer */
