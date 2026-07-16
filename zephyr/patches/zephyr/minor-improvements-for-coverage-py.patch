@@ -1,5 +1,5 @@
 diff --git a/scripts/pylib/twister/twisterlib/coverage.py b/scripts/pylib/twister/twisterlib/coverage.py
-index ed3413fa9b8..b66a66860ae 100644
+index 4670580c038..620bb163741 100644
 --- a/scripts/pylib/twister/twisterlib/coverage.py
 +++ b/scripts/pylib/twister/twisterlib/coverage.py
 @@ -56,8 +56,10 @@ class CoverageTool:
@@ -13,20 +13,7 @@ index ed3413fa9b8..b66a66860ae 100644
                  if re.search("GCOV_COVERAGE_DUMP_START", line):
                      capture_data = True
                      capture_complete = False
-@@ -79,7 +81,11 @@ class CoverageTool:
-                         continue
-                 else:
-                     continue
--                hex_bytes = bytes.fromhex(hex_dump)
-+                try:
-+                    hex_bytes = bytes.fromhex(hex_dump)
-+                except ValueError:
-+                    logger.error(f"{file_name}:{lineno}: Unable to convert hex data: {line}")
-+                    continue
-                 extracted_coverage_info[file_name].append(hex_bytes)
-         if not capture_data:
-             capture_complete = True
-@@ -159,6 +165,8 @@ class CoverageTool:
+@@ -159,6 +161,8 @@ class CoverageTool:
          build_dirs = None
          if not self.coverage_capture and self.coverage_report and self.coverage_per_instance:
              build_dirs = [instance.build_dir for instance in self.instances.values()]
@@ -35,7 +22,7 @@ index ed3413fa9b8..b66a66860ae 100644
          reports = {}
          with open(os.path.join(outdir, "coverage.log"), "a") as coveragelog:
              ret, reports = self._generate(outdir, coveragelog, build_dirs)
-@@ -187,9 +195,15 @@ class CoverageTool:
+@@ -187,9 +191,15 @@ class CoverageTool:
                      )
                  }
                  for r in self.output_formats.split(','):
@@ -51,7 +38,22 @@ index ed3413fa9b8..b66a66860ae 100644
          logger.debug(f"All coverage data processed: {coverage_completed}")
          return coverage_completed, reports
  
-@@ -465,12 +479,21 @@ class Gcovr(CoverageTool):
+@@ -361,7 +371,13 @@ class Gcovr(CoverageTool):
+         self.version = self.get_version()
+         # Different ifdef-ed implementations of the same function should not be
+         # in conflict treated by GCOVR as separate objects for coverage statistics.
+-        self.options = ["-v", "--merge-mode-functions=separate"]
++        #
++        # NOTE: --merge-mode-functions=separate crashes gcovr 8.6's JSON writer with
++        # a KeyError when a merged function has a per-line execution count but no
++        # matching start/end position info (FunctionCoverage.serialize does
++        # self.start[lineno] unconditionally). Use merge-use-line-min, which collapses
++        # such functions to their lowest line number instead of aborting the report.
++        self.options = ["-v", "--merge-mode-functions=merge-use-line-min"]
+ 
+ 
+     def get_version(self):
+@@ -465,12 +481,21 @@ class Gcovr(CoverageTool):
                      logger.debug(f"Coverage merge no files in: {dir_}")
                      continue
                  files += files_
@@ -75,7 +77,7 @@ index ed3413fa9b8..b66a66860ae 100644
  
          if not files:
              logger.warning(f"No coverage files to compose report for {outdir}")
-@@ -480,6 +503,8 @@ class Gcovr(CoverageTool):
+@@ -480,6 +505,8 @@ class Gcovr(CoverageTool):
          os.makedirs(subdir, exist_ok=True)
  
          tracefiles = self._interleave_list("--add-tracefile", files)
@@ -84,7 +86,7 @@ index ed3413fa9b8..b66a66860ae 100644
  
          # Convert command line argument (comma-separated list) to gcovr flags
          report_options = {
-@@ -492,7 +517,7 @@ class Gcovr(CoverageTool):
+@@ -492,7 +519,7 @@ class Gcovr(CoverageTool):
              "sonarqube": ["--sonarqube", os.path.join(subdir, "coverage.sonarqube.xml")]
          }
          gcovr_options = self._flatten_list(
@@ -93,7 +95,16 @@ index ed3413fa9b8..b66a66860ae 100644
          )
  
          cmd = ["gcovr", "-r", self.base_dir] + self.options + gcovr_options + tracefiles
-@@ -604,6 +629,12 @@ def run_coverage_tool(options, outdir, is_system_gcov, instances,
+@@ -563,7 +590,7 @@ def choose_gcov_tool(options, is_system_gcov):
+         zephyr_sdk_gcov_tool = os.path.join(
+             os.environ.get("ZEPHYR_SDK_INSTALL_DIR", default=""),
+             "gnu/x86_64-zephyr-elf/bin/x86_64-zephyr-elf-gcov")
+-        if os.environ.get("ZEPHYR_TOOLCHAIN_VARIANT").endswith("/llvm"):
++        if (os.environ.get("ZEPHYR_TOOLCHAIN_VARIANT") or "").endswith("/llvm"):
+             llvm_path = os.environ.get("LLVM_TOOLCHAIN_PATH")
+             if llvm_path is not None:
+                 llvm_path = os.path.join(llvm_path, "bin")
+@@ -604,6 +631,12 @@ def run_coverage_tool(options, outdir, is_system_gcov, instances,
      # Apply output format default
      if options.coverage_formats is not None:
          coverage_tool.output_formats = options.coverage_formats

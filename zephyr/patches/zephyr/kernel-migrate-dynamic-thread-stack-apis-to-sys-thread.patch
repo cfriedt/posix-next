@@ -1,5 +1,5 @@
 diff --git a/include/zephyr/kernel.h b/include/zephyr/kernel.h
-index b78d94e2414..52b9792d34b 100644
+index e00afde4e3e..49b98d1975f 100644
 --- a/include/zephyr/kernel.h
 +++ b/include/zephyr/kernel.h
 @@ -23,6 +23,7 @@
@@ -7,10 +7,10 @@ index b78d94e2414..52b9792d34b 100644
  #include <zephyr/sys/iterable_sections.h>
  #include <zephyr/sys/ring_buffer.h>
 +#include <zephyr/sys/thread.h>
- 
+
  #ifdef __cplusplus
  extern "C" {
-@@ -362,15 +363,15 @@ void k_thread_foreach_unlocked_filter_by_cpu(unsigned int cpu,
+@@ -371,15 +372,15 @@ void k_thread_foreach_unlocked_filter_by_cpu(unsigned int cpu,
  /**
   * @brief Dynamically allocate a thread stack.
   *
@@ -33,7 +33,7 @@ index b78d94e2414..52b9792d34b 100644
   *
   * @param size Stack size in bytes.
   * @param flags Stack creation flags, or 0.
-@@ -381,9 +382,19 @@ void k_thread_foreach_unlocked_filter_by_cpu(unsigned int cpu,
+@@ -390,9 +391,26 @@ void k_thread_foreach_unlocked_filter_by_cpu(unsigned int cpu,
   * Relevant stack creation flags include:
   * - @ref K_USER allocate a userspace thread (requires @kconfig{CONFIG_USERSPACE})
   *
@@ -45,17 +45,24 @@ index b78d94e2414..52b9792d34b 100644
 +static inline k_thread_stack_t *k_thread_stack_alloc(size_t size, uint32_t flags)
 +{
 +#ifdef CONFIG_SYS_THREAD
-+	return sys_thread_stack_alloc(size, (uint32_t)flags);
++	k_thread_stack_t *stack;
++	uint32_t stack_size = size;
++
++	if (sys_thread_stack_alloc(&stack, &stack_size, 0, flags) < 0) {
++		return NULL;
++	}
++
++	return stack;
 +#else
 +	ARG_UNUSED(size);
 +	ARG_UNUSED(flags);
 +	return NULL;
 +#endif
 +}
- 
+
  /**
   * @brief Free a dynamically allocated thread stack.
-@@ -395,9 +406,18 @@ __syscall k_thread_stack_t *k_thread_stack_alloc(size_t size, uint32_t flags);
+@@ -404,9 +422,18 @@ __syscall k_thread_stack_t *k_thread_stack_alloc(size_t size, uint32_t flags);
   * @retval -EINVAL if @p stack is invalid.
   * @retval -ENOSYS if dynamic thread stack allocation is disabled
   *
@@ -73,17 +80,17 @@ index b78d94e2414..52b9792d34b 100644
 +	return -ENOSYS;
 +#endif
 +}
- 
+
  /**
   * @brief Create a thread.
 diff --git a/kernel/CMakeLists.txt b/kernel/CMakeLists.txt
-index 7e113c3cfde..3c4ca6d1d88 100644
+index d78023f997d..2e1c2bf6b52 100644
 --- a/kernel/CMakeLists.txt
 +++ b/kernel/CMakeLists.txt
-@@ -238,12 +238,6 @@ target_sources_ifdef(
+@@ -260,12 +260,6 @@ target_sources_ifdef(
    userspace.c
    )
- 
+
 -if(${CONFIG_DYNAMIC_THREAD})
 -  target_sources(kernel PRIVATE dynamic.c)
 -else()
@@ -94,12 +101,12 @@ index 7e113c3cfde..3c4ca6d1d88 100644
    ${ZEPHYR_BASE}/kernel/include
    ${ARCH_DIR}/${ARCH}/include
 diff --git a/kernel/Kconfig b/kernel/Kconfig
-index 61225ca0bf4..02ec8c1893a 100644
+index 47c6ad822eb..3056cc57a78 100644
 --- a/kernel/Kconfig
 +++ b/kernel/Kconfig
-@@ -313,64 +313,53 @@ config USERSPACE_THREAD_MAY_RAISE_PRIORITY
+@@ -316,64 +316,53 @@ config USERSPACE_THREAD_MAY_RAISE_PRIORITY
  	  Thread can raise its own priority in userspace mode.
- 
+
  config DYNAMIC_THREAD
 -	bool "Support for dynamic threads [EXPERIMENTAL]"
 -	select EXPERIMENTAL
@@ -111,9 +118,9 @@ index 61225ca0bf4..02ec8c1893a 100644
  	help
  	  Enable support for dynamic threads and stacks.
 +	  This option is deprecated. Use CONFIG_SYS_THREAD instead.
- 
+
  if DYNAMIC_THREAD
- 
+
  config DYNAMIC_THREAD_STACK_SIZE
 -	int "Size of each pre-allocated thread stack"
 -	default 4096 if X86 || COVERAGE_GCOV
@@ -124,7 +131,7 @@ index 61225ca0bf4..02ec8c1893a 100644
  	help
 -	  Default stack size (in bytes) for dynamic threads.
 +	  This option is deprecated. Use CONFIG_SYS_THREAD_STACK_SIZE instead.
- 
+
  config DYNAMIC_THREAD_ALLOC
 -	bool "Support heap-allocated thread objects and stacks"
 +	bool "Support heap-allocated thread objects and stacks [DEPRECATED]"
@@ -138,7 +145,7 @@ index 61225ca0bf4..02ec8c1893a 100644
 +	  This option is Deprecated. Use CONFIG_SYS_THREAD in conjunction with
 +	  CONFIG_SYS_THREAD_THREAD_MAX instead. Heap-based allocation also requires an appropriately
 +	  sized kernel heap (See CONFIG_HEAP_MEM_POOL_SIZE).
- 
+
  config DYNAMIC_THREAD_POOL_SIZE
 -	int "Number of statically pre-allocated threads"
 +	int "Number of statically pre-allocated threads [DEPRECATED]"
@@ -152,7 +159,7 @@ index 61225ca0bf4..02ec8c1893a 100644
 -	  situations where malloc is not permitted.
 +	  This option is deprecated. Use CONFIG_SYS_THREAD in conjunction with
 +	  CONFIG_SYS_THREAD_THREAD_MIN instead.
- 
+
  choice DYNAMIC_THREAD_PREFER
 -	prompt "Preferred dynamic thread allocator"
 +	prompt "Preferred dynamic thread allocator [DEPRECATED]"
@@ -162,7 +169,7 @@ index 61225ca0bf4..02ec8c1893a 100644
 -	  CONFIG_DYNAMIC_THREAD_POOL_SIZE > 0, then the user may
 -	  specify the order in which allocation is attempted.
 +	  This option is deprecated. Please use CONFIG_SYS_THREAD instead.
- 
+
  config DYNAMIC_THREAD_PREFER_ALLOC
 -	bool "Prefer heap-based allocation"
 +	bool "Prefer heap-based allocation [DEPRECATED]"
@@ -172,7 +179,7 @@ index 61225ca0bf4..02ec8c1893a 100644
 -	  Select this option to attempt a heap-based allocation
 -	  prior to any pool-based allocation.
 +	  This option is deprecated. Please use CONFIG_SYS_THREAD instead.
- 
+
  config DYNAMIC_THREAD_PREFER_POOL
 -	bool "Prefer pool-based allocation"
 +	bool "Prefer pool-based allocation [DEPRECATED]"
@@ -181,9 +188,9 @@ index 61225ca0bf4..02ec8c1893a 100644
 -	  Select this option to attempt a pool-based allocation
 -	  prior to any heap-based allocation.
 +	  This option is deprecated. Please use CONFIG_SYS_THREAD instead.
- 
+
  endchoice # DYNAMIC_THREAD_PREFER
- 
+
 diff --git a/kernel/dynamic.c b/kernel/dynamic.c
 deleted file mode 100644
 index 987efdf1b6d..00000000000
@@ -428,7 +435,7 @@ index 92a5f6a29eb..894a62467da 100644
 -CONFIG_DYNAMIC_THREAD_ALLOC=y
  CONFIG_ZTEST_STACK_SIZE=4096
  CONFIG_MAIN_STACK_SIZE=4096
- 
+
 -CONFIG_HW_STACK_PROTECTION=n
 -CONFIG_TEST_HW_STACK_PROTECTION=n
 -
@@ -441,12 +448,12 @@ index cb6fba523cd..caee2fc0f49 100644
 --- a/tests/kernel/threads/dynamic_thread_stack/src/main.c
 +++ b/tests/kernel/threads/dynamic_thread_stack/src/main.c
 @@ -9,19 +9,19 @@
- 
+
  #define TIMEOUT_MS 500
- 
+
 -#define POOL_SIZE 28672
 +#define POOL_SIZE 49152
- 
+
  #ifdef CONFIG_USERSPACE
 -#define STACK_OBJ_SIZE K_THREAD_STACK_LEN(CONFIG_DYNAMIC_THREAD_STACK_SIZE)
 +#define STACK_OBJ_SIZE K_THREAD_STACK_LEN(CONFIG_SYS_THREAD_STACK_SIZE)
@@ -454,52 +461,52 @@ index cb6fba523cd..caee2fc0f49 100644
 -#define STACK_OBJ_SIZE K_KERNEL_STACK_LEN(CONFIG_DYNAMIC_THREAD_STACK_SIZE)
 +#define STACK_OBJ_SIZE K_KERNEL_STACK_LEN(CONFIG_SYS_THREAD_STACK_SIZE)
  #endif
- 
+
 -#define MAX_HEAP_STACKS (POOL_SIZE / STACK_OBJ_SIZE)
 +#define MAX_HEAP_STACKS MIN((POOL_SIZE / STACK_OBJ_SIZE), CONFIG_SYS_THREAD_STACK_MAX)
- 
+
  K_HEAP_DEFINE(stack_heap, POOL_SIZE);
- 
+
 -ZTEST_DMEM bool tflag[MAX(CONFIG_DYNAMIC_THREAD_POOL_SIZE, MAX_HEAP_STACKS)];
 +ZTEST_DMEM bool tflag[MAX_HEAP_STACKS + 1];
- 
+
  static void func(void *arg1, void *arg2, void *arg3)
  {
 @@ -46,80 +46,70 @@ ZTEST_USER(dynamic_thread_stack, test_dynamic_thread_stack_userspace_dyn_obj)
  		ztest_test_skip();
  	}
- 
+
 -	if (!IS_ENABLED(CONFIG_DYNAMIC_THREAD_PREFER_ALLOC)) {
 +	if (!IS_ENABLED(CONFIG_DYNAMIC_OBJECTS)) {
  		ztest_test_skip();
  	}
- 
+
 -	if (!IS_ENABLED(CONFIG_DYNAMIC_THREAD_ALLOC)) {
 +	if (CONFIG_SYS_THREAD_STACK_MAX == 0) {
  		ztest_test_skip();
  	}
- 
+
 -	stack = k_thread_stack_alloc(CONFIG_DYNAMIC_THREAD_STACK_SIZE, K_USER);
 +	stack = k_thread_stack_alloc(CONFIG_SYS_THREAD_STACK_SIZE, K_USER);
  	zassert_not_null(stack);
- 
+
  	th = k_object_alloc(K_OBJ_THREAD);
  	zassert_not_null(th);
- 
+
 -	tid = k_thread_create(th, stack, CONFIG_DYNAMIC_THREAD_STACK_SIZE, func,
 -			      &tflag[0], NULL, NULL, 0,
 -			      K_USER | K_INHERIT_PERMS, K_NO_WAIT);
 +	tid = k_thread_create(th, stack, CONFIG_SYS_THREAD_STACK_SIZE, func, &tflag[0], NULL, NULL,
 +			      0, K_USER | K_INHERIT_PERMS, K_NO_WAIT);
- 
+
  	zassert_not_null(tid);
- 
+
  	zassert_ok(k_thread_join(tid, K_MSEC(TIMEOUT_MS)));
  	zassert_true(tflag[0]);
 -	zassert_ok(k_thread_stack_free(stack));
 +	/* With CONFIG_SYS_THREAD, pool-allocated stacks are freed automatically */
  }
- 
+
  /** @brief Exercise the pool-based thread stack allocator */
  ZTEST(dynamic_thread_stack, test_dynamic_thread_stack_pool)
  {
@@ -513,17 +520,17 @@ index cb6fba523cd..caee2fc0f49 100644
 +	static k_tid_t tid[SYS_THREAD_STACK_MIN];
 +	static struct k_thread th[SYS_THREAD_STACK_MIN];
 +	static k_thread_stack_t *stack[SYS_THREAD_STACK_MIN];
- 
+
  	/* allocate all thread stacks from the pool */
 -	for (size_t i = 0; i < CONFIG_DYNAMIC_THREAD_POOL_SIZE; ++i) {
 -		stack[i] = k_thread_stack_alloc(CONFIG_DYNAMIC_THREAD_STACK_SIZE,
 +	for (size_t i = 0; i < SYS_THREAD_STACK_MIN; ++i) {
 +		stack[i] = k_thread_stack_alloc(CONFIG_SYS_THREAD_STACK_SIZE,
  						IS_ENABLED(CONFIG_USERSPACE) ? K_USER : 0);
- 
+
  		zassert_not_null(stack[i]);
  	}
- 
+
 -	if (IS_ENABLED(CONFIG_DYNAMIC_THREAD_ALLOC)) {
 -		/* ensure 1 thread can be allocated from the heap when the pool is depleted */
 -		zassert_ok(k_thread_stack_free(
@@ -541,7 +548,7 @@ index cb6fba523cd..caee2fc0f49 100644
 +			      k_thread_stack_alloc(CONFIG_SYS_THREAD_STACK_SIZE,
 +						   IS_ENABLED(CONFIG_USERSPACE) ? K_USER : 0));
  	}
- 
+
  	/* spawn our threads */
 -	for (size_t i = 0; i < CONFIG_DYNAMIC_THREAD_POOL_SIZE; ++i) {
 +	for (size_t i = 0; i < SYS_THREAD_STACK_MIN; ++i) {
@@ -554,26 +561,26 @@ index cb6fba523cd..caee2fc0f49 100644
 +					 &tflag[i], NULL, NULL, 0, K_USER | K_INHERIT_PERMS,
 +					 K_NO_WAIT);
  	}
- 
+
  	/* join all threads and check that flags have been set */
 -	for (size_t i = 0; i < CONFIG_DYNAMIC_THREAD_POOL_SIZE; ++i) {
 +	for (size_t i = 0; i < SYS_THREAD_STACK_MIN; ++i) {
  		zassert_ok(k_thread_join(tid[i], K_MSEC(TIMEOUT_MS)));
  		zassert_true(tflag[i]);
  	}
- 
+
 -	/* clean up stacks allocated from the pool */
 -	for (size_t i = 0; i < CONFIG_DYNAMIC_THREAD_POOL_SIZE; ++i) {
 -		zassert_ok(k_thread_stack_free(stack[i]));
 -	}
 +	/* With CONFIG_SYS_THREAD, pool-allocated stacks are freed automatically */
  }
- 
+
  /** @brief Exercise the heap-based thread stack allocator */
 @@ -130,17 +120,13 @@ ZTEST(dynamic_thread_stack, test_dynamic_thread_stack_alloc)
  	static struct k_thread th[MAX_HEAP_STACKS];
  	static k_thread_stack_t *stack[MAX_HEAP_STACKS];
- 
+
 -	if (!IS_ENABLED(CONFIG_DYNAMIC_THREAD_PREFER_ALLOC)) {
 -		ztest_test_skip();
 -	}
@@ -582,7 +589,7 @@ index cb6fba523cd..caee2fc0f49 100644
 +	if (CONFIG_SYS_THREAD_STACK_MAX == SYS_THREAD_STACK_MIN) {
  		ztest_test_skip();
  	}
- 
+
  	/* allocate all thread stacks from the heap */
  	for (N = 0; N < MAX_HEAP_STACKS; ++N) {
 -		stack[N] = k_thread_stack_alloc(CONFIG_DYNAMIC_THREAD_STACK_SIZE,
@@ -602,24 +609,24 @@ index cb6fba523cd..caee2fc0f49 100644
 +					 &tflag[i], NULL, NULL, 0, K_USER | K_INHERIT_PERMS,
 +					 K_NO_WAIT);
  	}
- 
+
  	/* join all threads and check that flags have been set */
 @@ -162,10 +147,7 @@ ZTEST(dynamic_thread_stack, test_dynamic_thread_stack_alloc)
  		zassert_true(tflag[i]);
  	}
- 
+
 -	/* clean up stacks allocated from the heap */
 -	for (size_t i = 0; i < N; ++i) {
 -		zassert_ok(k_thread_stack_free(stack[i]));
 -	}
 +	/* With CONFIG_SYS_THREAD, pool-allocated stacks are freed automatically */
  }
- 
+
  K_SEM_DEFINE(perm_sem, 0, 1);
 @@ -217,35 +199,30 @@ ZTEST(dynamic_thread_stack, test_dynamic_thread_stack_permission)
  	static struct k_thread th[2];
  	static k_thread_stack_t *stack[2];
- 
+
 -	if (!IS_ENABLED(CONFIG_DYNAMIC_THREAD_PREFER_ALLOC)) {
 -		ztest_test_skip();
 -	}
@@ -628,28 +635,28 @@ index cb6fba523cd..caee2fc0f49 100644
 +	if (!IS_ENABLED(CONFIG_USERSPACE)) {
  		ztest_test_skip();
  	}
- 
+
 -	if (!IS_ENABLED(CONFIG_USERSPACE)) {
 +	if (CONFIG_SYS_THREAD_STACK_MAX == 0) {
  		ztest_test_skip();
  	}
- 
+
 -	stack[0] = k_thread_stack_alloc(CONFIG_DYNAMIC_THREAD_STACK_SIZE, K_USER);
 +	stack[0] = k_thread_stack_alloc(CONFIG_SYS_THREAD_STACK_SIZE, K_USER);
  	zassert_not_null(stack[0]);
- 
+
 -	stack[1] = k_thread_stack_alloc(CONFIG_DYNAMIC_THREAD_STACK_SIZE, K_USER);
 +	stack[1] = k_thread_stack_alloc(CONFIG_SYS_THREAD_STACK_SIZE, K_USER);
  	zassert_not_null(stack[1]);
- 
+
  	k_thread_access_grant(k_current_get(), &perm_sem);
- 
+
  	/* First thread inherit permissions */
 -	tid[0] = k_thread_create(&th[0], stack[0], CONFIG_DYNAMIC_THREAD_STACK_SIZE, perm_func,
 +	tid[0] = k_thread_create(&th[0], stack[0], CONFIG_SYS_THREAD_STACK_SIZE, perm_func,
  				 &perm_sem, NULL, NULL, 0, K_USER | K_INHERIT_PERMS, K_NO_WAIT);
  	zassert_not_null(tid[0]);
- 
+
  	/* Second thread will have access to specific kobjects only */
 -	tid[1] = k_thread_create(&th[1], stack[1], CONFIG_DYNAMIC_THREAD_STACK_SIZE,
 -				 perm_func_violator, &perm_sem, stack[0], NULL, 0, K_USER,
@@ -662,13 +669,13 @@ index cb6fba523cd..caee2fc0f49 100644
 @@ -260,9 +237,7 @@ ZTEST(dynamic_thread_stack, test_dynamic_thread_stack_permission)
  	k_sem_give(&perm_sem);
  	zassert_ok(k_thread_join(tid[0], K_MSEC(TIMEOUT_MS)));
- 
+
 -	/* clean up stacks allocated from the heap */
 -	zassert_ok(k_thread_stack_free(stack[0]));
 -	zassert_ok(k_thread_stack_free(stack[1]));
 +	/* With CONFIG_SYS_THREAD, pool-allocated stacks are freed automatically */
  }
- 
+
  static void *dynamic_thread_stack_setup(void)
 diff --git a/tests/kernel/threads/dynamic_thread_stack/testcase.yaml b/tests/kernel/threads/dynamic_thread_stack/testcase.yaml
 index 85516540630..da38efcc4ba 100644
@@ -794,23 +801,3 @@ index 85516540630..da38efcc4ba 100644
 +      - CONFIG_SYS_THREAD_STACK_MAX=4
 +      - CONFIG_TEST_USERSPACE=y
        - CONFIG_USERSPACE=y
-diff --git a/include/zephyr/kernel.h b/include/zephyr/kernel.h
-index 2db8cc3364c..a6649d3f92a 100644
---- a/include/zephyr/kernel.h
-+++ b/include/zephyr/kernel.h
-@@ -397,7 +397,14 @@ void k_thread_foreach_unlocked_filter_by_cpu(unsigned int cpu,
- static inline k_thread_stack_t *k_thread_stack_alloc(size_t size, uint32_t flags)
- {
- #ifdef CONFIG_SYS_THREAD
--	return sys_thread_stack_alloc(size, (uint32_t)flags);
-+	k_thread_stack_t *stack;
-+	uint32_t stack_size;
-+
-+	if (sys_thread_stack_alloc(&stack, &stack_size, 0, flags) < 0) {
-+		return NULL;
-+	}
-+
-+	return stack;
- #else
- 	ARG_UNUSED(size);
- 	ARG_UNUSED(flags);
