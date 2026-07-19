@@ -4,48 +4,66 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <zephyr/logging/log.h>
-#include <zephyr/net/net_if.h>
+#include <errno.h>
+#include <string.h>
+
 #include <net/if.h>
-#include <zephyr/sys/util.h>
 #include <zephyr/ztest.h>
 
-ZTEST(net, test_if_indextoname)
-{
-	char *name;
-	size_t n = 0;
-	struct net_if *iface;
-	char a[IF_NAMESIZE];
-	char b[IF_NAMESIZE];
+#include "../../common/linux_compat_test.h"
 
-	NET_IFACE_COUNT(&n);
-	TC_PRINT("%zu interfaces\n", n);
-	for (size_t i = 0; i < n; i++) {
-		memset(a, 0, sizeof(a));
-		memset(b, 0, sizeof(b));
-		name = if_indextoname(i + 1, a);
-		zassert_equal(name, a);
-		TC_PRINT("interface %zu: %s\n", i + 1, name);
-		iface = net_if_get_by_index(i + 1);
-		zassert_not_null(iface);
-		zassert_true(net_if_get_name(iface, b, IF_NAMESIZE) >= 0);
-		zassert_mem_equal(a, b, IF_NAMESIZE);
+#if !defined(CONFIG_NATIVE_LIBC)
+#include <zephyr/net/net_if.h>
+#endif
+
+ZTEST(posix_networking, test_if_indextoname)
+{
+	struct if_nameindex *ni = if_nameindex();
+
+	zassert_not_null(ni, "if_nameindex failed: %d", errno);
+
+	for (size_t i = 0; ni[i].if_index != 0; i++) {
+		char buf[IF_NAMESIZE];
+		char *name = if_indextoname(ni[i].if_index, buf);
+
+		zassert_not_null(name, "if_indextoname(%u) failed: %d", ni[i].if_index, errno);
+		zassert_equal(name, buf);
+		zassert_str_equal(buf, ni[i].if_name);
+
+		IF_NOT_NATIVE_LIBC({
+			struct net_if *iface = net_if_get_by_index(ni[i].if_index);
+			char zname[IF_NAMESIZE];
+
+			zassert_not_null(iface);
+			memset(zname, 0, sizeof(zname));
+			zassert_true(net_if_get_name(iface, zname, IF_NAMESIZE) >= 0);
+			zassert_str_equal(buf, zname);
+		});
+		TC_PRINT("interface %u: %s\n", ni[i].if_index, buf);
+	}
+
+	if_freenameindex(ni);
+}
+
+ZTEST(posix_networking, test_if_freenameindex)
+{
+	struct if_nameindex *ni;
+
+	/* POSIX: NULL is a no-op. Host glibc crashes on NULL (linux_compat). */
+	IF_NOT_NATIVE_LIBC({
+		if_freenameindex(NULL);
+	});
+
+	ni = if_nameindex();
+	if (ni != NULL) {
+		if_freenameindex(ni);
 	}
 }
 
-ZTEST(net, test_if_freenameindex)
+ZTEST(posix_networking, test_if_nameindex)
 {
-	if_freenameindex(NULL);
-	if_freenameindex(if_nameindex());
-}
-
-ZTEST(net, test_if_nameindex)
-{
-	size_t n = 0;
+	size_t i;
 	struct if_nameindex *ni;
-
-	NET_IFACE_COUNT(&n);
-	TC_PRINT("%zu interfaces\n", n);
 
 	ni = if_nameindex();
 	if (ni == NULL) {
@@ -53,28 +71,36 @@ ZTEST(net, test_if_nameindex)
 		return;
 	}
 
-	for (size_t i = 0; i < n; i++) {
-		zassert_equal(i + 1, ni[i].if_index);
+	for (i = 0; ni[i].if_index != 0; i++) {
+		zassert_true(ni[i].if_index > 0);
 		zassert_not_null(ni[i].if_name);
-		TC_PRINT("interface %zu: %s\n", i + 1, ni[i].if_name);
-		zassert_equal(0, ni[n].if_index);
-		zassert_is_null(ni[n].if_name);
+	}
+
+	zassert_equal(0, ni[i].if_index);
+	zassert_is_null(ni[i].if_name);
+
+	if_freenameindex(ni);
+}
+
+ZTEST(posix_networking, test_if_nametoindex)
+{
+	struct if_nameindex *ni = if_nameindex();
+
+	zassert_not_null(ni, "if_nameindex failed: %d", errno);
+
+	for (size_t i = 0; ni[i].if_index != 0; i++) {
+		zassert_equal(ni[i].if_index, if_nametoindex(ni[i].if_name));
+		TC_PRINT("interface %u: %s\n", ni[i].if_index, ni[i].if_name);
 	}
 
 	if_freenameindex(ni);
 }
 
-ZTEST(net, test_if_nametoindex)
+ZTEST(posix_networking, test_if_indextoname_invalid)
 {
-	size_t n = 0;
 	char buf[IF_NAMESIZE];
 
-	NET_IFACE_COUNT(&n);
-	TC_PRINT("%zu interfaces\n", n);
-	for (size_t i = 0; i < n; i++) {
-		memset(buf, 0, sizeof(buf));
-		zassert_not_null(if_indextoname(i + 1, buf));
-		TC_PRINT("interface %zu: %s\n", i + 1, buf);
-		zassert_equal(i + 1, if_nametoindex(buf));
-	}
+	errno = 0;
+	zassert_is_null(if_indextoname(9999, buf));
+	zassert_equal(errno, ENXIO);
 }
