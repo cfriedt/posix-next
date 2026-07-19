@@ -19,6 +19,107 @@ patches:
     comments: |
       Companion to deprecate-config-posix-api-v4.4.1; regenerated for Zephyr v4.4.1
       (replaces do-not-define--POSIX-C-SOURCE-and--XOPEN-SOURCE-globally.patch).
+  - path: zephyr/libc-posix-net-header-shims.patch
+    sha256sum: 6a60dce0d9e6470857fa9629a48fbb2d3fc71b3d006b522e07b7a4bf54b13a01
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-19
+    upstreamable: true
+    comments: |
+      Add picolibc and newlib <sys/uio.h>, <sys/un.h>, and <netpacket/packet.h>
+      shim headers that forward to the out-of-tree posix-next headers, so the new
+      POSIX networking headers resolve for these libcs (mirrors the existing
+      <sys/socket.h> / <netinet/in.h> shims).
+  - path: zephyr/net-compat-non-posix-constants.patch
+    sha256sum: 9f2a0b5341a0d3eff0d1e458a6d94471c43e0272f7c4f4a5752a83fff2d73675
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-19
+    upstreamable: true
+    comments: |
+      Repurpose the network namespace compatibility mode to provide only the
+      non-POSIX, system-dependent unprefixed names (AF_PACKET, IPPROTO_IGMP,
+      SO_PRIORITY, CAN_RAW, TLS_*, PACKET_*, sockaddr_ll, ...). All POSIX symbols
+      are removed from net_compat.h -- the posix-next headers own those -- so
+      compat mode no longer collides with a conforming <sys/socket.h> or
+      <netinet/in.h>. Because it no longer defines POSIX symbols, the Kconfig
+      option drops its "depends on !NET_TEST || POSIX_API" guard (now simply
+      default y, help updated) and net_ip.h's struct net_addr no longer needs
+      the compat-mode member rename (in6_addr/in_addr used unconditionally).
+  - path: zephyr/net-sockaddr-in6-match-posix-layout.patch
+    sha256sum: d96cc4cbbae1cd4a1fb5c359565c7b4bf96e50b7a3280896d7735c43c8df2179
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-21
+    upstreamable: true
+    comments: |
+      Make net_sockaddr_in6 match the POSIX sockaddr_in6 layout: widen sin6_scope_id to
+      uint32_t and add sin6_flowinfo at the end (rather than before sin6_addr as in the
+      POSIX spec) so sin6_addr keeps offset 4 -- the same offset as net_sockaddr_in.sin_addr,
+      which zsock_getnameinfo relies on, and which lets the POSIX<->native sockaddr_in6
+      conversion take the zero-copy fast path. This grows sizeof(net_sockaddr_in6) from 24
+      to 28 bytes, so two in-tree consumers that hard-coded the old size are updated to
+      track it: the dns_sd test's expected length uses sizeof(struct net_sockaddr_in6)
+      instead of the literal 24, and the MQTT-SN UDP transport's
+      CONFIG_MQTT_SN_LIB_MAX_ADDR_SIZE IPv6 default goes 24 -> 28 so its
+      BUILD_ASSERT(>= sizeof(net_sockaddr_in6)) still holds.
+  - path: zephyr/net-subsys-native-and-sockatmark.patch
+    sha256sum: 528ece8eeeeaa305926e2d645d61df461ac4a3b0d20039d515d42a2bbf67267c
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-19
+    upstreamable: true
+    comments: |
+      Add zsock_sockatmark(): declare the __syscall in net/socket.h and implement it in
+      sockets.c (a stub that fails with ENOSYS). Also switch the FTP client to
+      net_socklen_t.
+  - path: zephyr/tests-net-socket-service-posix-bind-casts.patch
+    sha256sum: 93e6ba3f9117e21e5d30b7d85f21d73dc4ff7a4dd7a41088728bcb651e544963
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-19
+    upstreamable: true
+    comments: |
+      net.socket.service sets CONFIG_POSIX_API (for eventfd), so bind()/connect()
+      resolve to the POSIX wrappers taking (struct sockaddr *). Call zsock_bind()/
+      zsock_connect() directly -- the native APIs taking (struct net_sockaddr *) --
+      and keep the (struct net_sockaddr *) casts, avoiding the mismatched prototype
+      when passing net_sockaddr_in6/net_sockaddr_in addresses.
+  - path: hostap/hostap-net-headers.patch
+    sha256sum: 1095516b9abf7915fdd563266f3eb8e518ed805c3eb7c1694bb1fe1a795224a3
+    module: hostap
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-19
+    upstreamable: true
+    comments: |
+      hostap: use native net_sockaddr_ll and include <net/if.h> / <netinet/in.h> for
+      IF_NAMESIZE and struct sockaddr_in/sockaddr_in6/in_addr/in6_addr. In the common
+      includes.h, replace the CONFIG_POSIX_API-gated block with an unconditional pull
+      of the unprefixed POSIX headers on Zephyr (<netinet/in.h>, <sys/socket.h>,
+      <sys/select.h>, <arpa/inet.h>, <netpacket/packet.h>, <unistd.h>) instead of the
+      net_compat-backed <zephyr/net/socket.h>, so hostap gets the standardized names
+      from the posix-next headers rather than net_compat, which now provides only the
+      non-POSIX extensions. Drop the blanket "#define signal(a, b) (void)(b)" shim: its
+      only call sites (eloop.c SIGSEGV/SIGALRM) are already compiled out on Zephyr, and
+      it shadowed the real POSIX_SIGNALS signal().
+  - path: zephyr/hostap-wifi-posix-profile.patch
+    sha256sum: 9a00d4901cb5a6bfd383ff1c73bfd941908746f9e10e76aafd8ce92b1e6938d7
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-20
+    upstreamable: true
+    comments: |
+      modules/hostap: WIFI_NM_WPA_SUPPLICANT selected the deprecated POSIX_API. Replace
+      it with the concrete profile pieces it pulled in (POSIX_SYSTEM_INTERFACES,
+      POSIX_BASE_DEFINITIONS, POSIX_AEP_REALTIME_MINIMAL, POSIX_DEVICE_IO, POSIX_FD_MGMT,
+      POSIX_MULTI_PROCESS) plus XSI, which XSI_SINGLE_PROCESS depends on.
   - path: zephyr/move-posix-impl-and-tests-out-of-tree.patch
     sha256sum: b3e097da42bd0cb1c259001615f47e82dfc0a6f238b41df33c63719df55cc60e
     module: zephyr
@@ -28,6 +129,35 @@ patches:
     upstreamable: true
     comments: |
       Move in-tree POSIX impl/tests out of zephyr lib/posix for v4.4.1.
+  - path: zephyr/samples-net-posix-api.patch
+    sha256sum: 79e0ba7fe6673b3fc46d5eef67ced1364f6324af6ea007a5b2eae38fdd088680
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-19
+    upstreamable: true
+    comments: |
+      Migrate samples/net to the POSIX networking APIs: include the POSIX headers and
+      use POSIX socket types/constants, replacing net_sin()/net_sin6() with the POSIX
+      posix_sin() helpers from <zephyr/posix/net/conversion.h>. Must be applied after
+      move-posix-impl-and-tests-out-of-tree.patch, which switches these samples to the
+      short-form POSIX includes this patch builds on.
+  - path: zephyr/net-samples-tests-drop-config-posix-api.patch
+    sha256sum: 4e36f01ae39c9d409ebfa33f8ab013be594424474e47e6a886baa826cd30b483
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-21
+    upstreamable: true
+    comments: |
+      Drop the deprecated CONFIG_POSIX_API from the net samples and tests that still
+      selected it, so they no longer emit the "Deprecated symbol POSIX_API is enabled"
+      warning. Where the config already selected the POSIX_AEP_CHOICE_PSE53 profile
+      (mqtt_sn_publisher, coap_download, coap_upload, echo_server's ws-console overlay)
+      the redundant CONFIG_POSIX_API is simply removed; elsewhere (wireguard, prometheus,
+      ethernet/dsa, http_server, dumb_http_server_mt, tests/net/all, tests/bsim echo)
+      it is replaced with CONFIG_POSIX_AEP_CHOICE_PSE53, matching the profile every
+      other net sample uses.
   - path: zephyr/wifi-credentials-backend-psa-use-tf-psa-crypto.patch
     sha256sum: 6268a76689eda649e6d972f294b209b86ed21cbde9bf643c40cf9adac5b2cee4
     module: zephyr
