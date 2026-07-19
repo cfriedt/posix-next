@@ -117,10 +117,7 @@ runs:
       with:
         path: ${{ inputs.base-path }}/.west-workspace-cache.tar.zst
         # Hash both layouts: checkout is at repo root (west.yml), re-home runs before this step.
-        key: west-projects-${{ hashFiles(format('{0}/west.yml', inputs.app-path), 'west.yml') }}
-        restore-keys: |
-          west-projects-${{ hashFiles(format('{0}/west.yml', inputs.app-path), 'west.yml') }}
-          west-projects-
+        key: west-projects-v2-${{ hashFiles(format('{0}/west.yml', inputs.app-path), 'west.yml') }}
 
     - name: Extract west workspace
       if: >-
@@ -167,7 +164,7 @@ runs:
           echo "### West project cache"
           echo "- cache-hit: \`${{ steps.west-projects-cache.outputs.cache-hit }}\`"
           echo "- cache-matched-key: \`${{ steps.west-projects-cache.outputs.cache-matched-key }}\`"
-          echo "- primary key: \`west-projects-\` + \`west.yml\` hash (manifest tarball; restore-keys fall back across branches on default)"
+          echo "- primary key: \`west-projects-v2-\` + \`west.yml\` hash (manifest tarball; exact-match only, no cross-revision fallback)"
         } >> "$GITHUB_STEP_SUMMARY"
 
     - name: Save west workspace tarball
