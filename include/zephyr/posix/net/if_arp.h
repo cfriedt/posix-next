@@ -14,8 +14,6 @@
  * Zephyr already defines reuse the Zephyr value (@c NET_ARPHRD_ETHER,
  * @c NET_ARPHRD_PPP); every identifier is guarded so an application may
  * define its own before including this header.
- *
- * @ingroup posix_option_group_networking
  */
 
 #ifndef ZEPHYR_INCLUDE_POSIX_NET_IF_ARP_H_

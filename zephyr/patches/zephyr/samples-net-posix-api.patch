@@ -1,0 +1,1069 @@
+diff --git a/samples/net/cellular_modem/src/main.c b/samples/net/cellular_modem/src/main.c
+index c3faa6a2630..d63700a4eb4 100644
+--- a/samples/net/cellular_modem/src/main.c
++++ b/samples/net/cellular_modem/src/main.c
+@@ -15,6 +15,7 @@
+ #include <zephyr/net/dns_resolve.h>
+ #include <zephyr/pm/device.h>
+ #include <zephyr/pm/device_runtime.h>
++#include <zephyr/posix/net/conversion.h>
+ #include <string.h>
+ 
+ #include <poll.h>
+@@ -495,12 +496,12 @@ int main(void)
+ 
+ 		switch (sample_test_dns_addrinfo.ai_addr.sa_family) {
+ 		case AF_INET:
+-			src = &net_sin(&sample_test_dns_addrinfo.ai_addr)->sin_addr;
+-			port = &net_sin(&sample_test_dns_addrinfo.ai_addr)->sin_port;
++			src = &posix_sin(&sample_test_dns_addrinfo.ai_addr)->sin_addr;
++			port = &posix_sin(&sample_test_dns_addrinfo.ai_addr)->sin_port;
+ 			break;
+ 		case AF_INET6:
+-			src = &net_sin6(&sample_test_dns_addrinfo.ai_addr)->sin6_addr;
+-			port = &net_sin6(&sample_test_dns_addrinfo.ai_addr)->sin6_port;
++			src = &posix_sin6(&sample_test_dns_addrinfo.ai_addr)->sin6_addr;
++			port = &posix_sin6(&sample_test_dns_addrinfo.ai_addr)->sin6_port;
+ 			break;
+ 		default:
+ 			printk("Unsupported address family\n");
+diff --git a/samples/net/cloud/mqtt_azure/src/main.c b/samples/net/cloud/mqtt_azure/src/main.c
+index ba257aa7a5b..79a128d26f1 100644
+--- a/samples/net/cloud/mqtt_azure/src/main.c
++++ b/samples/net/cloud/mqtt_azure/src/main.c
+@@ -17,6 +17,7 @@ LOG_MODULE_REGISTER(mqtt_azure, LOG_LEVEL_DBG);
+ #include <zephyr/net/net_if.h>
+ #include <zephyr/net/socket.h>
+ #include <zephyr/net/mqtt.h>
++#include <zephyr/posix/net/conversion.h>
+ 
+ #include <zephyr/sys/printk.h>
+ #include <zephyr/random/random.h>
+@@ -132,8 +133,7 @@ static void broker_init(void)
+ 	broker4->sin_port = htons(SERVER_PORT);
+ 
+ #if defined(CONFIG_DNS_RESOLVER)
+-	net_ipaddr_copy(&broker4->sin_addr,
+-			&net_sin(haddr->ai_addr)->sin_addr);
++	broker4->sin_addr = posix_sin(haddr->ai_addr)->sin_addr;
+ #else
+ 	inet_pton(AF_INET, SERVER_ADDR, &broker4->sin_addr);
+ #endif
+diff --git a/samples/net/cloud/tagoio_http_post/src/sockets.c b/samples/net/cloud/tagoio_http_post/src/sockets.c
+index b602738f91f..3ef4c1508cd 100644
+--- a/samples/net/cloud/tagoio_http_post/src/sockets.c
++++ b/samples/net/cloud/tagoio_http_post/src/sockets.c
+@@ -19,6 +19,7 @@ LOG_MODULE_DECLARE(tagoio_http_post, CONFIG_TAGOIO_HTTP_POST_LOG_LEVEL);
+ #include <zephyr/net/dns_resolve.h>
+ #include <zephyr/net/tls_credentials.h>
+ #include <zephyr/net/http/client.h>
++#include <zephyr/posix/net/conversion.h>
+ 
+ #include "sockets.h"
+ 
+@@ -74,7 +75,7 @@ int tagoio_connect(struct tagoio_context *ctx)
+ 	LOG_DBG("%s address: %s",
+ 		(addr->ai_family == AF_INET ? "IPv4" : "IPv6"),
+ 		net_addr_ntop(addr->ai_family,
+-			      &net_sin(addr->ai_addr)->sin_addr,
++			      &posix_sin(addr->ai_addr)->sin_addr,
+ 			      hr_addr, sizeof(hr_addr)));
+ 
+ 	ctx->sock = socket(hints.ai_family,
+diff --git a/samples/net/mdns_responder/src/service.c b/samples/net/mdns_responder/src/service.c
+index c2d3366188c..cd0a097659c 100644
+--- a/samples/net/mdns_responder/src/service.c
++++ b/samples/net/mdns_responder/src/service.c
+@@ -7,6 +7,7 @@
+ #include <errno.h>
+ #include <zephyr/net/dns_sd.h>
+ #include <zephyr/net/socket.h>
++#include <zephyr/posix/net/conversion.h>
+ #include <netinet/in.h>
+ #include <sys/socket.h>
+ #include <unistd.h>
+@@ -68,11 +69,11 @@ static int echo_service(const struct sockaddr *server_addr)
+ 	}
+ 
+ 	if (server_addr->sa_family == AF_INET6) {
+-		addrp = &net_sin6((server_addr))->sin6_addr;
+-		portp = &net_sin6(server_addr)->sin6_port;
++		addrp = &posix_sin6((void *)server_addr)->sin6_addr;
++		portp = &posix_sin6((void *)server_addr)->sin6_port;
+ 	} else {
+-		addrp = &net_sin(server_addr)->sin_addr;
+-		portp = &net_sin(server_addr)->sin_port;
++		addrp = &posix_sin((void *)server_addr)->sin_addr;
++		portp = &posix_sin((void *)server_addr)->sin_port;
+ 	}
+ 
+ 	inet_ntop(server_addr->sa_family, addrp, addrstr, sizeof(addrstr));
+@@ -166,13 +167,13 @@ void service(void)
+ #endif
+ 
+ 	if (IS_ENABLED(CONFIG_NET_IPV6)) {
+-		net_sin6(net_sad(&server_addr))->sin6_family = AF_INET6;
+-		net_sin6(net_sad(&server_addr))->sin6_addr = in6addr_any;
+-		net_sin6(net_sad(&server_addr))->sin6_port = sys_cpu_to_be16(DEFAULT_PORT);
++		posix_sin6(&server_addr)->sin6_family = AF_INET6;
++		posix_sin6(&server_addr)->sin6_addr = in6addr_any;
++		posix_sin6(&server_addr)->sin6_port = sys_cpu_to_be16(DEFAULT_PORT);
+ 	} else if (IS_ENABLED(CONFIG_NET_IPV4)) {
+-		net_sin(net_sad(&server_addr))->sin_family = AF_INET;
+-		net_sin(net_sad(&server_addr))->sin_addr.s_addr = htonl(INADDR_ANY);
+-		net_sin(net_sad(&server_addr))->sin_port = sys_cpu_to_be16(DEFAULT_PORT);
++		posix_sin(&server_addr)->sin_family = AF_INET;
++		posix_sin(&server_addr)->sin_addr.s_addr = htonl(INADDR_ANY);
++		posix_sin(&server_addr)->sin_port = sys_cpu_to_be16(DEFAULT_PORT);
+ 	} else {
+ 		__ASSERT(false, "Neither IPv6 nor IPv4 are enabled");
+ 	}
+diff --git a/samples/net/mqtt_sn_publisher/src/udp.c b/samples/net/mqtt_sn_publisher/src/udp.c
+index 980e7fbf5b5..8d1506a1e70 100644
+--- a/samples/net/mqtt_sn_publisher/src/udp.c
++++ b/samples/net/mqtt_sn_publisher/src/udp.c
+@@ -136,13 +136,13 @@ static void process_thread(void)
+ 
+ 	LOG_DBG("Parsing Broadcast Address " CONFIG_NET_SAMPLE_MQTT_SN_BROADCAST_ADDRESS);
+ 	success = net_ipaddr_parse(CONFIG_NET_SAMPLE_MQTT_SN_BROADCAST_ADDRESS,
+-				   strlen(CONFIG_NET_SAMPLE_MQTT_SN_BROADCAST_ADDRESS), &bcaddr);
++				   strlen(CONFIG_NET_SAMPLE_MQTT_SN_BROADCAST_ADDRESS), (struct net_sockaddr *)&bcaddr);
+ 	__ASSERT(success, "net_ipaddr_parse() failed");
+ 
+ 	LOG_INF("Waiting for connection...");
+ 	LOG_HEXDUMP_DBG(&bcaddr, sizeof(bcaddr), " broadcast address");
+ 
+-	err = mqtt_sn_transport_udp_init(&tp, &bcaddr, sizeof((bcaddr)));
++	err = mqtt_sn_transport_udp_init(&tp, (struct net_sockaddr *)&bcaddr, sizeof((bcaddr)));
+ 	__ASSERT(err == 0, "mqtt_sn_transport_udp_init() failed %d", err);
+ 
+ 	err = mqtt_sn_client_init(&mqtt_client, &client_id, &tp.tp, evt_cb, tx_buf, sizeof(tx_buf),
+@@ -154,7 +154,7 @@ static void process_thread(void)
+ 		struct sockaddr gwaddr = {0};
+ 
+ 		LOG_DBG("Parsing Gateway address %s", SAMPLE_GW_ADDRESS);
+-		success = net_ipaddr_parse(SAMPLE_GW_ADDRESS, strlen(SAMPLE_GW_ADDRESS), &gwaddr);
++		success = net_ipaddr_parse(SAMPLE_GW_ADDRESS, strlen(SAMPLE_GW_ADDRESS), (struct net_sockaddr *)&gwaddr);
+ 		__ASSERT(success, "net_ipaddr_parse() failed");
+ 		struct mqtt_sn_data gwaddr_data = {.data = (uint8_t *)&gwaddr,
+ 						   .size = sizeof(gwaddr)};
+diff --git a/samples/net/ocpp/src/main.c b/samples/net/ocpp/src/main.c
+index 8ab8f86d3cb..20644b29d38 100644
+--- a/samples/net/ocpp/src/main.c
++++ b/samples/net/ocpp/src/main.c
+@@ -21,6 +21,7 @@
+ #include <zephyr/net/net_mgmt.h>
+ #include <zephyr/net/sntp.h>
+ #include <zephyr/net/ocpp.h>
++#include <zephyr/posix/net/conversion.h>
+ #include <zephyr/random/random.h>
+ #include <zephyr/zbus/zbus.h>
+ 
+@@ -60,9 +61,9 @@ static int dns_query(const char *host, uint16_t port, int family, int socktype,
+ 	/* Free the allocated memory */
+ 	freeaddrinfo(res);
+ 	/* Store the port */
+-	net_sin(addr)->sin_port = htons(port);
++	posix_sin(addr)->sin_port = htons(port);
+ 	/* Print the found address */
+-	inet_ntop(addr->sa_family, &net_sin(addr)->sin_addr, addr_str, sizeof(addr_str));
++	inet_ntop(addr->sa_family, &posix_sin(addr)->sin_addr, addr_str, sizeof(addr_str));
+ 	LOG_INF("%s -> %s", host, addr_str);
+ 
+ 	return 0;
+@@ -72,19 +73,24 @@ static int ocpp_get_time_from_sntp(void)
+ {
+ 	struct sntp_ctx ctx;
+ 	struct sntp_time stime;
+-	struct sockaddr addr;
++	struct sockaddr_storage addr;
+ 	socklen_t addrlen;
++	struct sockaddr_storage zaddr;
++	size_t zaddrlen = sizeof(zaddr);
++	struct net_sockaddr *zsa;
+ 	struct timespec tv;
+ 	int ret;
+ 
+ 	ret = dns_query(CONFIG_NET_SAMPLE_SNTP_SERVER, CONFIG_NET_SAMPLE_SNTP_SERVER_PORT,
+-				   AF_INET, SOCK_DGRAM, &addr, &addrlen);
++				   AF_INET, SOCK_DGRAM, (struct sockaddr *)&addr, &addrlen);
+ 	if (ret != 0) {
+ 		LOG_ERR("Failed to lookup SNTP server (%d)", ret);
+ 		return ret;
+ 	}
+ 
+-	ret = sntp_init(&ctx, &addr, addrlen);
++	zsa = posix_sockaddr_to_zephyr((struct sockaddr *)&addr, addrlen, (struct net_sockaddr *)&zaddr, &zaddrlen);
++
++	ret = sntp_init(&ctx, zsa, zaddrlen);
+ 	if (ret < 0) {
+ 		LOG_ERR("Failed to init SNTP IPv4 ctx: %d", ret);
+ 		return ret;
+diff --git a/samples/net/sockets/coap_client/src/coap-client.c b/samples/net/sockets/coap_client/src/coap-client.c
+index ea87242ef15..b6c9a04d833 100644
+--- a/samples/net/sockets/coap_client/src/coap-client.c
++++ b/samples/net/sockets/coap_client/src/coap-client.c
+@@ -15,6 +15,7 @@ LOG_MODULE_REGISTER(net_coap_client_sample, LOG_LEVEL_DBG);
+ #include <poll.h>
+ #include <sys/socket.h>
+ #include <arpa/inet.h>
++#include <netinet/in.h>
+ #include <unistd.h>
+ #include <zephyr/net/socket.h>
+ #include <zephyr/net/net_mgmt.h>
+@@ -423,7 +424,7 @@ end:
+ 
+ static int obs_notification_cb(const struct coap_packet *response,
+ 			       struct coap_reply *reply,
+-			       const struct sockaddr *from)
++			       const struct net_sockaddr *from)
+ {
+ 	uint16_t id = coap_header_get_id(response);
+ 	uint8_t type = coap_header_get_type(response);
+diff --git a/samples/net/sockets/coap_download/src/main.c b/samples/net/sockets/coap_download/src/main.c
+index de85be42e57..d60fb2a03f4 100644
+--- a/samples/net/sockets/coap_download/src/main.c
++++ b/samples/net/sockets/coap_download/src/main.c
+@@ -16,6 +16,7 @@
+ #include <zephyr/net/net_mgmt.h>
+ #include <zephyr/net/socket.h>
+ #include <zephyr/net/coap_client.h>
++#include <zephyr/posix/net/conversion.h>
+ #include <inttypes.h>
+ #include <errno.h>
+ LOG_MODULE_REGISTER(coap_download, LOG_LEVEL_INF);
+@@ -80,7 +81,12 @@ static void do_coap_download(struct sockaddr *sa)
+ 
+ 	start_time = k_uptime_get();
+ 
+-	ret = coap_client_req(&client, sockfd, sa, &request, NULL);
++	struct net_sockaddr_in6 zsa_buf;
++	size_t zsa_len = sizeof(zsa_buf);
++	struct net_sockaddr *zsa =
++		posix_sockaddr_to_zephyr(sa, sizeof(struct sockaddr_in6), (struct net_sockaddr *)&zsa_buf, &zsa_len);
++
++	ret = coap_client_req(&client, sockfd, zsa, &request, NULL);
+ 	if (ret) {
+ 		LOG_ERR("Failed to send CoAP request, err %d", ret);
+ 		return;
+@@ -107,7 +113,7 @@ int main(void)
+ 	k_sem_take(&net_connected_sem, K_FOREVER);
+ 	LOG_INF("Network L4 is connected");
+ 
+-	struct sockaddr sa;
++	struct sockaddr_storage sa;
+ 
+ #if defined(CONFIG_NET_IPV4)
+ 	struct sockaddr_in *addr4 = (struct sockaddr_in *)&sa;
+@@ -116,7 +122,7 @@ int main(void)
+ 	addr4->sin_port = htons(CONFIG_NET_SAMPLE_COAP_SERVER_PORT);
+ 	inet_pton(AF_INET, CONFIG_NET_CONFIG_PEER_IPV4_ADDR, &addr4->sin_addr);
+ 
+-	do_coap_download(&sa);
++	do_coap_download((struct sockaddr *)&sa);
+ #endif
+ 
+ #if defined(CONFIG_NET_IPV6)
+@@ -126,7 +132,7 @@ int main(void)
+ 	addr6->sin6_port = htons(CONFIG_NET_SAMPLE_COAP_SERVER_PORT);
+ 	inet_pton(AF_INET6, CONFIG_NET_CONFIG_PEER_IPV6_ADDR, &addr6->sin6_addr);
+ 
+-	do_coap_download(&sa);
++	do_coap_download((struct sockaddr *)&sa);
+ #endif
+ 
+ 	return 0;
+diff --git a/samples/net/sockets/coap_server/src/core.c b/samples/net/sockets/coap_server/src/core.c
+index 9c6a4db5ffd..4a7254d2190 100644
+--- a/samples/net/sockets/coap_server/src/core.c
++++ b/samples/net/sockets/coap_server/src/core.c
+@@ -14,7 +14,7 @@ LOG_MODULE_DECLARE(net_coap_service_sample);
+ 
+ static int core_get(struct coap_resource *resource,
+ 		    struct coap_packet *request,
+-		    struct sockaddr *addr, socklen_t addr_len)
++		    struct net_sockaddr *addr, net_socklen_t addr_len)
+ {
+ 	static const char dummy_str[] = "Just a test\n";
+ 	uint8_t data[CONFIG_COAP_SERVER_MESSAGE_SIZE];
+diff --git a/samples/net/sockets/coap_server/src/large.c b/samples/net/sockets/coap_server/src/large.c
+index 8656a5b53b1..3bd3b1ecafa 100644
+--- a/samples/net/sockets/coap_server/src/large.c
++++ b/samples/net/sockets/coap_server/src/large.c
+@@ -15,7 +15,7 @@ LOG_MODULE_DECLARE(net_coap_service_sample);
+ 
+ static int large_get(struct coap_resource *resource,
+ 		     struct coap_packet *request,
+-		     struct sockaddr *addr, socklen_t addr_len)
++		     struct net_sockaddr *addr, net_socklen_t addr_len)
+ 
+ {
+ 	uint8_t data[CONFIG_COAP_SERVER_MESSAGE_SIZE];
+@@ -94,7 +94,7 @@ static int large_get(struct coap_resource *resource,
+ 
+ static int large_update_put(struct coap_resource *resource,
+ 			    struct coap_packet *request,
+-			    struct sockaddr *addr, socklen_t addr_len)
++			    struct net_sockaddr *addr, net_socklen_t addr_len)
+ {
+ 	uint8_t data[CONFIG_COAP_SERVER_MESSAGE_SIZE];
+ 	static struct coap_block_context ctx;
+@@ -174,7 +174,7 @@ static int large_update_put(struct coap_resource *resource,
+ 
+ static int large_create_post(struct coap_resource *resource,
+ 			     struct coap_packet *request,
+-			     struct sockaddr *addr, socklen_t addr_len)
++			     struct net_sockaddr *addr, net_socklen_t addr_len)
+ {
+ 	uint8_t data[CONFIG_COAP_SERVER_MESSAGE_SIZE];
+ 	static struct coap_block_context ctx;
+diff --git a/samples/net/sockets/coap_server/src/location_query.c b/samples/net/sockets/coap_server/src/location_query.c
+index bce4eb67b86..68339642d04 100644
+--- a/samples/net/sockets/coap_server/src/location_query.c
++++ b/samples/net/sockets/coap_server/src/location_query.c
+@@ -13,7 +13,7 @@ LOG_MODULE_DECLARE(net_coap_service_sample);
+ 
+ static int location_query_post(struct coap_resource *resource,
+ 			       struct coap_packet *request,
+-			       struct sockaddr *addr, socklen_t addr_len)
++			       struct net_sockaddr *addr, net_socklen_t addr_len)
+ {
+ 	static const char *const location_query[] = { "first=1",
+ 						      "second=2",
+diff --git a/samples/net/sockets/coap_server/src/main.c b/samples/net/sockets/coap_server/src/main.c
+index 64db9d128cd..58166b09e10 100644
+--- a/samples/net/sockets/coap_server/src/main.c
++++ b/samples/net/sockets/coap_server/src/main.c
+@@ -109,11 +109,11 @@ static int setup_dtls(void)
+ 
+ static int join_coap_multicast_group(uint16_t port)
+ {
+-	static struct in6_addr my_addr = MY_IP6ADDR;
+-	struct sockaddr_in6 mcast_addr = {
+-		.sin6_family = AF_INET6,
++	static struct net_in6_addr my_addr = MY_IP6ADDR;
++	struct net_sockaddr_in6 mcast_addr = {
++		.sin6_family = NET_AF_INET6,
+ 		.sin6_addr = ALL_NODES_LOCAL_COAP_MCAST,
+-		.sin6_port = htons(port) };
++		.sin6_port = net_htons(port) };
+ 	struct net_if_addr *ifaddr;
+ 	struct net_if *iface;
+ 	int ret;
+@@ -125,7 +125,7 @@ static int join_coap_multicast_group(uint16_t port)
+ 	}
+ 
+ #if defined(CONFIG_NET_CONFIG_SETTINGS)
+-	if (net_addr_pton(AF_INET6,
++	if (net_addr_pton(NET_AF_INET6,
+ 			  CONFIG_NET_CONFIG_MY_IPV6_ADDR,
+ 			  &my_addr) < 0) {
+ 		LOG_ERR("Invalid IPv6 address %s",
+diff --git a/samples/net/sockets/coap_server/src/observer.c b/samples/net/sockets/coap_server/src/observer.c
+index 421ed2289c4..8c813283f28 100644
+--- a/samples/net/sockets/coap_server/src/observer.c
++++ b/samples/net/sockets/coap_server/src/observer.c
+@@ -18,8 +18,8 @@ static void update_counter(struct k_work *work);
+ K_WORK_DELAYABLE_DEFINE(obs_work, update_counter);
+ 
+ static int send_notification_packet(struct coap_resource *resource,
+-				    const struct sockaddr *addr,
+-				    socklen_t addr_len,
++				    const struct net_sockaddr *addr,
++				    net_socklen_t addr_len,
+ 				    uint16_t age, uint16_t id,
+ 				    const uint8_t *token, uint8_t tkl,
+ 				    bool is_response)
+@@ -87,7 +87,7 @@ static int send_notification_packet(struct coap_resource *resource,
+ 
+ static int obs_get(struct coap_resource *resource,
+ 		   struct coap_packet *request,
+-		   struct sockaddr *addr, socklen_t addr_len)
++		   struct net_sockaddr *addr, net_socklen_t addr_len)
+ {
+ 	uint8_t token[COAP_TOKEN_MAX_LEN];
+ 	uint16_t id;
+diff --git a/samples/net/sockets/coap_server/src/query.c b/samples/net/sockets/coap_server/src/query.c
+index 95272189d9c..a8574060909 100644
+--- a/samples/net/sockets/coap_server/src/query.c
++++ b/samples/net/sockets/coap_server/src/query.c
+@@ -13,7 +13,7 @@ LOG_MODULE_DECLARE(net_coap_service_sample);
+ 
+ static int query_get(struct coap_resource *resource,
+ 		     struct coap_packet *request,
+-		     struct sockaddr *addr, socklen_t addr_len)
++		     struct net_sockaddr *addr, net_socklen_t addr_len)
+ {
+ 	uint8_t data[CONFIG_COAP_SERVER_MESSAGE_SIZE];
+ 	struct coap_option options[4];
+diff --git a/samples/net/sockets/coap_server/src/separate.c b/samples/net/sockets/coap_server/src/separate.c
+index 7a5b1737cba..889981cf0b1 100644
+--- a/samples/net/sockets/coap_server/src/separate.c
++++ b/samples/net/sockets/coap_server/src/separate.c
+@@ -13,7 +13,7 @@ LOG_MODULE_DECLARE(net_coap_service_sample);
+ 
+ static int separate_get(struct coap_resource *resource,
+ 			struct coap_packet *request,
+-			struct sockaddr *addr, socklen_t addr_len)
++			struct net_sockaddr *addr, net_socklen_t addr_len)
+ {
+ 	uint8_t data[CONFIG_COAP_SERVER_MESSAGE_SIZE];
+ 	struct coap_packet response;
+diff --git a/samples/net/sockets/coap_server/src/test.c b/samples/net/sockets/coap_server/src/test.c
+index 52885b31a5d..bc496bfd65b 100644
+--- a/samples/net/sockets/coap_server/src/test.c
++++ b/samples/net/sockets/coap_server/src/test.c
+@@ -15,7 +15,7 @@ LOG_MODULE_DECLARE(net_coap_service_sample);
+ 
+ static int piggyback_get(struct coap_resource *resource,
+ 			 struct coap_packet *request,
+-			 struct sockaddr *addr, socklen_t addr_len)
++			 struct net_sockaddr *addr, net_socklen_t addr_len)
+ {
+ 	uint8_t data[CONFIG_COAP_SERVER_MESSAGE_SIZE];
+ 	struct coap_packet response;
+@@ -80,7 +80,7 @@ static int piggyback_get(struct coap_resource *resource,
+ 
+ static int test_del(struct coap_resource *resource,
+ 		    struct coap_packet *request,
+-		    struct sockaddr *addr, socklen_t addr_len)
++		    struct net_sockaddr *addr, net_socklen_t addr_len)
+ {
+ 	uint8_t data[CONFIG_COAP_SERVER_MESSAGE_SIZE];
+ 	struct coap_packet response;
+@@ -120,7 +120,7 @@ static int test_del(struct coap_resource *resource,
+ 
+ static int test_put(struct coap_resource *resource,
+ 		    struct coap_packet *request,
+-		    struct sockaddr *addr, socklen_t addr_len)
++		    struct net_sockaddr *addr, net_socklen_t addr_len)
+ {
+ 	uint8_t data[CONFIG_COAP_SERVER_MESSAGE_SIZE];
+ 	struct coap_packet response;
+@@ -167,7 +167,7 @@ static int test_put(struct coap_resource *resource,
+ 
+ static int test_post(struct coap_resource *resource,
+ 		     struct coap_packet *request,
+-		     struct sockaddr *addr, socklen_t addr_len)
++		     struct net_sockaddr *addr, net_socklen_t addr_len)
+ {
+ 	static const char * const location_path[] = { "location1",
+ 						      "location2",
+diff --git a/samples/net/sockets/coap_upload/src/main.c b/samples/net/sockets/coap_upload/src/main.c
+index 3fdb68f819c..a77b70f36a1 100644
+--- a/samples/net/sockets/coap_upload/src/main.c
++++ b/samples/net/sockets/coap_upload/src/main.c
+@@ -217,7 +217,7 @@ int main(void)
+ 		return ret;
+ 	}
+ 
+-	struct sockaddr sa;
++	struct sockaddr_storage sa;
+ 
+ #if defined(CONFIG_NET_IPV4)
+ 	struct sockaddr_in *addr4 = (struct sockaddr_in *)&sa;
+@@ -226,7 +226,7 @@ int main(void)
+ 	addr4->sin_port = htons(CONFIG_NET_SAMPLE_COAP_SERVER_PORT);
+ 	inet_pton(AF_INET, CONFIG_NET_CONFIG_PEER_IPV4_ADDR, &addr4->sin_addr);
+ 
+-	coap_upload(&client, &sa, sizeof(struct sockaddr_in));
++	coap_upload(&client, (struct sockaddr *)&sa, sizeof(struct sockaddr_in));
+ #endif
+ 
+ #if defined(CONFIG_NET_IPV6)
+@@ -236,7 +236,7 @@ int main(void)
+ 	addr6->sin6_port = htons(CONFIG_NET_SAMPLE_COAP_SERVER_PORT);
+ 	inet_pton(AF_INET6, CONFIG_NET_CONFIG_PEER_IPV6_ADDR, &addr6->sin6_addr);
+ 
+-	coap_upload(&client, &sa, sizeof(struct sockaddr_in6));
++	coap_upload(&client, (struct sockaddr *)&sa, sizeof(struct sockaddr_in6));
+ #endif
+ 
+ 	return 0;
+diff --git a/samples/net/sockets/echo_client/src/echo-client.c b/samples/net/sockets/echo_client/src/echo-client.c
+index 66379811ca7..48698eeb2be 100644
+--- a/samples/net/sockets/echo_client/src/echo-client.c
++++ b/samples/net/sockets/echo_client/src/echo-client.c
+@@ -26,6 +26,8 @@ LOG_MODULE_REGISTER(net_echo_client_sample, LOG_LEVEL_DBG);
+ 
+ #include <sys/eventfd.h>
+ #include <arpa/inet.h>
++#include <netinet/in.h>
++#include <sys/socket.h>
+ #include <poll.h>
+ #include <zephyr/misc/lorem_ipsum.h>
+ #include <zephyr/net/socket.h>
+@@ -220,7 +222,7 @@ static int check_our_ipv6_sockets(int sock,
+ 		return -errno;
+ 	}
+ 
+-	if (!net_ipv6_addr_cmp(deprecated_addr, &addr.sin6_addr)) {
++	if (memcmp(deprecated_addr, &addr.sin6_addr, sizeof(struct in6_addr)) != 0) {
+ 		return -ENOENT;
+ 	}
+ 
+@@ -253,7 +255,7 @@ static void ipv6_event_handler(struct net_mgmt_event_callback *cb,
+ 
+ 		memcpy(&added_addr, cb->info, sizeof(struct in6_addr));
+ 
+-		ifaddr = net_if_ipv6_addr_lookup(&added_addr, &iface);
++		ifaddr = net_if_ipv6_addr_lookup((struct net_in6_addr *)&added_addr, &iface);
+ 		if (ifaddr == NULL) {
+ 			return;
+ 		}
+diff --git a/samples/net/sockets/echo_client/src/tcp.c b/samples/net/sockets/echo_client/src/tcp.c
+index cce83890447..2cfd89ad35c 100644
+--- a/samples/net/sockets/echo_client/src/tcp.c
++++ b/samples/net/sockets/echo_client/src/tcp.c
+@@ -16,6 +16,7 @@ LOG_MODULE_DECLARE(net_echo_client_sample, LOG_LEVEL_DBG);
+ 
+ #include <sys/socket.h>
+ #include <arpa/inet.h>
++#include <netinet/in.h>
+ #include <unistd.h>
+ #include <zephyr/net/socket.h>
+ #include <zephyr/net/tls_credentials.h>
+diff --git a/samples/net/sockets/echo_client/src/udp.c b/samples/net/sockets/echo_client/src/udp.c
+index c9ed99388d1..97861e7aadc 100644
+--- a/samples/net/sockets/echo_client/src/udp.c
++++ b/samples/net/sockets/echo_client/src/udp.c
+@@ -16,6 +16,7 @@ LOG_MODULE_DECLARE(net_echo_client_sample, LOG_LEVEL_DBG);
+ 
+ #include <sys/socket.h>
+ #include <arpa/inet.h>
++#include <netinet/in.h>
+ #include <unistd.h>
+ #include <zephyr/net/socket.h>
+ #include <zephyr/net/tls_credentials.h>
+diff --git a/samples/net/sockets/echo_server/src/tcp.c b/samples/net/sockets/echo_server/src/tcp.c
+index 9a33dd05de1..baedc2ea0d2 100644
+--- a/samples/net/sockets/echo_server/src/tcp.c
++++ b/samples/net/sockets/echo_server/src/tcp.c
+@@ -14,6 +14,8 @@ LOG_MODULE_DECLARE(net_echo_server_sample, LOG_LEVEL_DBG);
+ #include <errno.h>
+ #include <stdio.h>
+ #include <sys/socket.h>
++#include <netinet/in.h>
++#include <arpa/inet.h>
+ #include <unistd.h>
+ 
+ #include <zephyr/net/socket.h>
+diff --git a/samples/net/sockets/echo_server/src/udp.c b/samples/net/sockets/echo_server/src/udp.c
+index b6900d1a6f9..d5e2b10df41 100644
+--- a/samples/net/sockets/echo_server/src/udp.c
++++ b/samples/net/sockets/echo_server/src/udp.c
+@@ -15,6 +15,8 @@ LOG_MODULE_DECLARE(net_echo_server_sample, LOG_LEVEL_DBG);
+ #include <stdio.h>
+ 
+ #include <sys/socket.h>
++#include <netinet/in.h>
++#include <arpa/inet.h>
+ #include <unistd.h>
+ #include <zephyr/net/socket.h>
+ #include <zephyr/net/tls_credentials.h>
+diff --git a/samples/net/sockets/echo_service/src/main.c b/samples/net/sockets/echo_service/src/main.c
+index bf694542d58..8e18ac8c3bd 100644
+--- a/samples/net/sockets/echo_service/src/main.c
++++ b/samples/net/sockets/echo_service/src/main.c
+@@ -19,6 +19,7 @@ LOG_MODULE_REGISTER(net_echo_server_svc_sample, LOG_LEVEL_DBG);
+ #include <unistd.h>
+ #include <poll.h>
+ #include <arpa/inet.h>
++#include <netinet/in.h>
+ #include <sys/socket.h>
+ #include <zephyr/net/socket_service.h>
+ 
+diff --git a/samples/net/sockets/http_client/src/main.c b/samples/net/sockets/http_client/src/main.c
+index 8ceb9b87055..b99caa923c8 100644
+--- a/samples/net/sockets/http_client/src/main.c
++++ b/samples/net/sockets/http_client/src/main.c
+@@ -18,6 +18,7 @@ LOG_MODULE_REGISTER(net_http_client_sample, LOG_LEVEL_DBG);
+ #include <zephyr/net/socket.h>
+ #include <zephyr/net/tls_credentials.h>
+ #include <zephyr/net/http/client.h>
++#include <zephyr/posix/net/conversion.h>
+ 
+ #include "ca_certificate.h"
+ 
+@@ -50,13 +51,13 @@ static int setup_socket(sa_family_t family, const char *server, int port,
+ 	memset(addr, 0, addr_len);
+ 
+ 	if (family == AF_INET) {
+-		net_sin(addr)->sin_family = AF_INET;
+-		net_sin(addr)->sin_port = htons(port);
+-		inet_pton(family, server, &net_sin(addr)->sin_addr);
++		posix_sin(addr)->sin_family = AF_INET;
++		posix_sin(addr)->sin_port = htons(port);
++		inet_pton(family, server, &posix_sin(addr)->sin_addr);
+ 	} else {
+-		net_sin6(addr)->sin6_family = AF_INET6;
+-		net_sin6(addr)->sin6_port = htons(port);
+-		inet_pton(family, server, &net_sin6(addr)->sin6_addr);
++		posix_sin6(addr)->sin6_family = AF_INET6;
++		posix_sin6(addr)->sin6_port = htons(port);
++		inet_pton(family, server, &posix_sin6(addr)->sin6_addr);
+ 	}
+ 
+ 	if (IS_ENABLED(CONFIG_NET_SOCKETS_SOCKOPT_TLS)) {
+diff --git a/samples/net/sockets/net_mgmt/src/main.c b/samples/net/sockets/net_mgmt/src/main.c
+index b1350bb94f1..5b629cfbdc6 100644
+--- a/samples/net/sockets/net_mgmt/src/main.c
++++ b/samples/net/sockets/net_mgmt/src/main.c
+@@ -4,6 +4,7 @@
+  * SPDX-License-Identifier: Apache-2.0
+  */
+ 
++#include <netinet/in.h>
+ #include <zephyr/logging/log.h>
+ LOG_MODULE_REGISTER(net_mgmt_sock_sample, LOG_LEVEL_DBG);
+ 
+@@ -33,7 +34,7 @@ static void trigger_events(void *p1, void *p2, void *p3)
+ 	int operation = 0;
+ 	struct net_if_addr *ifaddr_v6;
+ 	struct net_if *iface;
+-	struct in6_addr addr_v6;
++	struct net_in6_addr addr_v6;
+ 	int ret;
+ 
+ 	iface = net_if_get_default();
+diff --git a/samples/net/sockets/packet/src/packet.c b/samples/net/sockets/packet/src/packet.c
+index 9274f08740c..4491da0b084 100644
+--- a/samples/net/sockets/packet/src/packet.c
++++ b/samples/net/sockets/packet/src/packet.c
+@@ -12,6 +12,7 @@ LOG_MODULE_REGISTER(net_pkt_sock_sample, LOG_LEVEL_DBG);
+ #include <stdio.h>
+ #include <netinet/in.h>
+ #include <sys/socket.h>
++#include <netpacket/packet.h>
+ #include <arpa/inet.h>
+ #include <unistd.h>
+ #include <netdb.h>
+diff --git a/samples/net/sockets/sntp_client/src/main.c b/samples/net/sockets/sntp_client/src/main.c
+index 5e3f4985bef..07870704c41 100644
+--- a/samples/net/sockets/sntp_client/src/main.c
++++ b/samples/net/sockets/sntp_client/src/main.c
+@@ -16,6 +16,7 @@ LOG_MODULE_REGISTER(net_sntp_client_sample, LOG_LEVEL_DBG);
+ #include <zephyr/net/socket.h>
+ #include <zephyr/net/socket_service.h>
+ #include <zephyr/net/sntp.h>
++#include <zephyr/posix/net/conversion.h>
+ #include <arpa/inet.h>
+ #include <netdb.h>
+ 
+@@ -49,9 +50,9 @@ int dns_query(const char *host, uint16_t port, int family, int socktype, struct
+ 	/* Free the allocated memory */
+ 	freeaddrinfo(res);
+ 	/* Store the port */
+-	net_sin(addr)->sin_port = htons(port);
++	posix_sin(addr)->sin_port = htons(port);
+ 	/* Print the found address */
+-	inet_ntop(addr->sa_family, &net_sin(addr)->sin_addr, addr_str, sizeof(addr_str));
++	inet_ntop(addr->sa_family, &posix_sin(addr)->sin_addr, addr_str, sizeof(addr_str));
+ 	LOG_INF("%s -> %s", host, addr_str);
+ 	return 0;
+ }
+@@ -82,19 +83,24 @@ static void do_sntp(int family)
+ 	char *family_str = family == AF_INET ? "IPv4" : "IPv6";
+ 	struct sntp_time s_time;
+ 	struct sntp_ctx ctx;
+-	struct sockaddr addr;
++	struct sockaddr_storage addr;
+ 	socklen_t addrlen;
++	struct sockaddr_storage zaddr;
++	size_t zaddrlen = sizeof(zaddr);
++	struct net_sockaddr *zsa;
+ 	int rv;
+ 
+ 	/* Get SNTP server */
+ 	rv = dns_query(CONFIG_NET_SAMPLE_SNTP_SERVER_ADDRESS, CONFIG_NET_SAMPLE_SNTP_SERVER_PORT,
+-				   family, SOCK_DGRAM, &addr, &addrlen);
++				   family, SOCK_DGRAM, (struct sockaddr *)&addr, &addrlen);
+ 	if (rv != 0) {
+ 		LOG_ERR("Failed to lookup %s SNTP server (%d)", family_str, rv);
+ 		return;
+ 	}
+ 
+-	rv = sntp_init(&ctx, &addr, addrlen);
++	zsa = posix_sockaddr_to_zephyr((struct sockaddr *)&addr, addrlen, (struct net_sockaddr *)&zaddr, &zaddrlen);
++
++	rv = sntp_init(&ctx, zsa, zaddrlen);
+ 	if (rv < 0) {
+ 		LOG_ERR("Failed to init SNTP %s ctx: %d", family_str, rv);
+ 		goto end;
+@@ -111,7 +117,7 @@ static void do_sntp(int family)
+ 
+ 	sntp_close(&ctx);
+ 
+-	rv = sntp_init_async(&ctx, &addr, addrlen, &service_sntp_async);
++	rv = sntp_init_async(&ctx, zsa, zaddrlen, &service_sntp_async);
+ 	if (rv < 0) {
+ 		LOG_ERR("Failed to initialise SNTP context (%d)", rv);
+ 		goto end;
+diff --git a/samples/net/sockets/txtime/src/main.c b/samples/net/sockets/txtime/src/main.c
+index 3f1c7325ef3..98c68de46a9 100644
+--- a/samples/net/sockets/txtime/src/main.c
++++ b/samples/net/sockets/txtime/src/main.c
+@@ -4,6 +4,7 @@
+  * SPDX-License-Identifier: Apache-2.0
+  */
+ 
++#include <netpacket/packet.h>
+ #include <sys/socket.h>
+ #include <netinet/in.h>
+ #include <arpa/inet.h>
+@@ -26,9 +27,17 @@ LOG_MODULE_REGISTER(net_txtime_sample, LOG_LEVEL_DBG);
+ #include <zephyr/net/socket.h>
+ #include <zephyr/net/ethernet.h>
+ #include <zephyr/net/ethernet_mgmt.h>
++#include <zephyr/posix/net/conversion.h>
+ 
+ #include "net_sample_common.h"
+ 
++#ifndef CMSG_SPACE
++#define CMSG_SPACE(len) (ROUND_UP(sizeof(struct cmsghdr), sizeof(size_t)) + ROUND_UP(len, sizeof(size_t)))
++#endif
++#ifndef CMSG_LEN
++#define CMSG_LEN(len) (ROUND_UP(sizeof(struct cmsghdr), sizeof(size_t)) + (len))
++#endif
++
+ #define APP_BANNER "Run SO_TXTIME client"
+ 
+ #define DHCPV4_MASK (NET_EVENT_IPV4_DHCP_BOUND | \
+@@ -49,7 +58,7 @@ static struct net_mgmt_event_callback dhcpv4_cb;
+ 
+ struct app_data {
+ 	const struct device *clk;
+-	struct sockaddr peer;
++	struct sockaddr_storage peer;
+ 	socklen_t peer_addr_len;
+ 	int sock;
+ };
+@@ -223,19 +232,24 @@ static void tx(void *p1, void *p2, void *p3)
+ static int get_local_ipv6(struct net_if *iface, struct sockaddr *peer,
+ 			  struct sockaddr *local, socklen_t *addrlen)
+ {
+-	const struct in6_addr *addr;
++	const struct net_in6_addr *addr;
++	struct net_sockaddr_in6 zpeer;
++	size_t zpeerlen = sizeof(zpeer);
++	struct net_sockaddr *zsa;
+ 
+ 	if (peer->sa_family != AF_INET6) {
+ 		return 0;
+ 	}
+ 
+-	addr = net_if_ipv6_select_src_addr(iface, &net_sin6(peer)->sin6_addr);
++	zsa = posix_sockaddr_to_zephyr(peer, sizeof(struct sockaddr_in6), (struct net_sockaddr *)&zpeer,
++				       &zpeerlen);
++	addr = net_if_ipv6_select_src_addr(iface, &net_sin6(zsa)->sin6_addr);
+ 	if (!addr) {
+ 		LOG_ERR("Cannot get local %s address", "IPv6");
+ 		return -EINVAL;
+ 	}
+ 
+-	memcpy(&net_sin6(local)->sin6_addr, addr, sizeof(*addr));
++	memcpy(&posix_sin6(local)->sin6_addr, addr, sizeof(*addr));
+ 	local->sa_family = AF_INET6;
+ 	*addrlen = sizeof(struct sockaddr_in6);
+ 
+@@ -245,19 +259,24 @@ static int get_local_ipv6(struct net_if *iface, struct sockaddr *peer,
+ static int get_local_ipv4(struct net_if *iface, struct sockaddr *peer,
+ 			  struct sockaddr *local, socklen_t *addrlen)
+ {
+-	const struct in_addr *addr;
++	const struct net_in_addr *addr;
++	struct net_sockaddr_in zpeer;
++	size_t zpeerlen = sizeof(zpeer);
++	struct net_sockaddr *zsa;
+ 
+ 	if (peer->sa_family != AF_INET) {
+ 		return 0;
+ 	}
+ 
+-	addr = net_if_ipv4_select_src_addr(iface, &net_sin(peer)->sin_addr);
++	zsa = posix_sockaddr_to_zephyr(peer, sizeof(struct sockaddr_in), (struct net_sockaddr *)&zpeer,
++				       &zpeerlen);
++	addr = net_if_ipv4_select_src_addr(iface, &net_sin(zsa)->sin_addr);
+ 	if (!addr) {
+ 		LOG_ERR("Cannot get local %s address", "IPv4");
+ 		return -EINVAL;
+ 	}
+ 
+-	memcpy(&net_sin(local)->sin_addr, addr, sizeof(*addr));
++	memcpy(&posix_sin(local)->sin_addr, addr, sizeof(*addr));
+ 	local->sa_family = AF_INET;
+ 	*addrlen = sizeof(struct sockaddr_in);
+ 
+@@ -266,7 +285,7 @@ static int get_local_ipv4(struct net_if *iface, struct sockaddr *peer,
+ 
+ static int create_socket(struct net_if *iface, struct sockaddr *peer)
+ {
+-	struct sockaddr local;
++	struct sockaddr_storage local;
+ 	socklen_t addrlen;
+ 	int optval;
+ 	uint8_t priority;
+@@ -305,21 +324,21 @@ static int create_socket(struct net_if *iface, struct sockaddr *peer)
+ 
+ 		if (IS_ENABLED(CONFIG_NET_IPV6) &&
+ 		    peer->sa_family == AF_INET6) {
+-			ret = get_local_ipv6(iface, peer, &local, &addrlen);
++			ret = get_local_ipv6(iface, peer, (struct sockaddr *)&local, &addrlen);
+ 			if (ret < 0) {
+ 				return ret;
+ 			}
+ 
+-			net_addr_ntop(AF_INET6, &net_sin6(&local)->sin6_addr,
++			net_addr_ntop(AF_INET6, &posix_sin6(&local)->sin6_addr,
+ 				      addr_str, sizeof(addr_str));
+ 		} else if (IS_ENABLED(CONFIG_NET_IPV4) &&
+ 			   peer->sa_family == AF_INET) {
+-			ret = get_local_ipv4(iface, peer, &local, &addrlen);
++			ret = get_local_ipv4(iface, peer, (struct sockaddr *)&local, &addrlen);
+ 			if (ret < 0) {
+ 				return ret;
+ 			}
+ 
+-			net_addr_ntop(AF_INET, &net_sin(&local)->sin_addr,
++			net_addr_ntop(AF_INET, &posix_sin(&local)->sin_addr,
+ 				      addr_str, sizeof(addr_str));
+ 		} else {
+ 			LOG_ERR("Invalid socket family %d", peer->sa_family);
+@@ -329,7 +348,7 @@ static int create_socket(struct net_if *iface, struct sockaddr *peer)
+ 		LOG_DBG("Binding to %s", addr_str);
+ 	}
+ 
+-	ret = bind(sock, &local, addrlen);
++	ret = bind(sock, (struct sockaddr *)&local, addrlen);
+ 	if (ret < 0) {
+ 		LOG_ERR("Cannot bind socket (%d)", -errno);
+ 		return -errno;
+@@ -356,38 +375,43 @@ static int create_socket(struct net_if *iface, struct sockaddr *peer)
+ static int get_peer_address(struct net_if **iface, char *addr_str,
+ 			    int addr_str_len)
+ {
++	struct sockaddr_storage zbuf;
++	size_t zlen = sizeof(zbuf);
++	struct net_sockaddr *zsa;
+ 	int ret;
+ 
++	/* net_ipaddr_parse() fills a native net_sockaddr; the POSIX peer buffer is
++	 * large enough to receive it.
++	 */
+ 	ret = net_ipaddr_parse(CONFIG_NET_SAMPLE_PEER,
+ 			       strlen(CONFIG_NET_SAMPLE_PEER),
+-			       &peer_data.peer);
++			       (struct net_sockaddr *)&peer_data.peer);
+ 	if (!ret) {
+ 		LOG_ERR("Cannot parse '%s'", CONFIG_NET_SAMPLE_PEER);
+ 		return -EINVAL;
+ 	}
+ 
+-	if (net_sin(&peer_data.peer)->sin_port == 0) {
+-		net_sin(&peer_data.peer)->sin_port = htons(4242);
++	if (posix_sin(&peer_data.peer)->sin_port == 0) {
++		posix_sin(&peer_data.peer)->sin_port = htons(4242);
+ 	}
+ 
++	zsa = posix_sockaddr_to_zephyr((struct sockaddr *)&peer_data.peer,
++				      sizeof(peer_data.peer), (struct net_sockaddr *)&zbuf, &zlen);
++
+ 	if (IS_ENABLED(CONFIG_NET_IPV6) &&
+-					peer_data.peer.sa_family == AF_INET6) {
+-		*iface = net_if_ipv6_select_src_iface(
+-					&net_sin6(&peer_data.peer)->sin6_addr);
++					peer_data.peer.ss_family == AF_INET6) {
++		*iface = net_if_ipv6_select_src_iface(&net_sin6(zsa)->sin6_addr);
+ 
+-		net_addr_ntop(peer_data.peer.sa_family,
+-			      &net_sin6(&peer_data.peer)->sin6_addr, addr_str,
+-			      addr_str_len);
++		net_addr_ntop(peer_data.peer.ss_family, &net_sin6(zsa)->sin6_addr,
++			      addr_str, addr_str_len);
+ 		peer_data.peer_addr_len = sizeof(struct sockaddr_in6);
+ 
+ 	} else if (IS_ENABLED(CONFIG_NET_IPV4) &&
+-					peer_data.peer.sa_family == AF_INET) {
+-		*iface = net_if_ipv4_select_src_iface(
+-					&net_sin(&peer_data.peer)->sin_addr);
++					peer_data.peer.ss_family == AF_INET) {
++		*iface = net_if_ipv4_select_src_iface(&net_sin(zsa)->sin_addr);
+ 
+-		net_addr_ntop(peer_data.peer.sa_family,
+-			      &net_sin(&peer_data.peer)->sin_addr, addr_str,
+-			      addr_str_len);
++		net_addr_ntop(peer_data.peer.ss_family, &net_sin(zsa)->sin_addr,
++			      addr_str, addr_str_len);
+ 		peer_data.peer_addr_len = sizeof(struct sockaddr_in);
+ 	}
+ 
+@@ -615,7 +639,7 @@ int main(void)
+ 		LOG_INF("Socket SO_TXTIME sample to %s port %d using "
+ 			"interface %d (%p) and PTP clock %p",
+ 			addr_str,
+-			ntohs(net_sin(&peer_data.peer)->sin_port),
++			ntohs(posix_sin(&peer_data.peer)->sin_port),
+ 			if_index, iface, peer_data.clk);
+ 	}
+ 
+@@ -625,7 +649,7 @@ int main(void)
+ 			if_index, iface, peer_data.clk);
+ 	}
+ 
+-	peer_data.sock = create_socket(iface, &peer_data.peer);
++	peer_data.sock = create_socket(iface, (struct sockaddr *)&peer_data.peer);
+ 	if (peer_data.sock < 0) {
+ 		LOG_ERR("Cannot create socket (%d)", peer_data.sock);
+ 		return 0;
+diff --git a/samples/net/sockets/websocket_client/src/main.c b/samples/net/sockets/websocket_client/src/main.c
+index 2da46ed79a8..efe72c33006 100644
+--- a/samples/net/sockets/websocket_client/src/main.c
++++ b/samples/net/sockets/websocket_client/src/main.c
+@@ -16,6 +16,7 @@ LOG_MODULE_REGISTER(net_websocket_client_sample, LOG_LEVEL_DBG);
+ #include <unistd.h>
+ #include <zephyr/net/tls_credentials.h>
+ #include <zephyr/net/websocket.h>
++#include <zephyr/posix/net/conversion.h>
+ #include <zephyr/random/random.h>
+ #include <zephyr/shell/shell.h>
+ 
+@@ -61,13 +62,13 @@ static int setup_socket(sa_family_t family, const char *server, int port,
+ 	memset(addr, 0, addr_len);
+ 
+ 	if (family == AF_INET) {
+-		net_sin(addr)->sin_family = AF_INET;
+-		net_sin(addr)->sin_port = htons(port);
+-		inet_pton(family, server, &net_sin(addr)->sin_addr);
++		posix_sin(addr)->sin_family = AF_INET;
++		posix_sin(addr)->sin_port = htons(port);
++		inet_pton(family, server, &posix_sin(addr)->sin_addr);
+ 	} else {
+-		net_sin6(addr)->sin6_family = AF_INET6;
+-		net_sin6(addr)->sin6_port = htons(port);
+-		inet_pton(family, server, &net_sin6(addr)->sin6_addr);
++		posix_sin6(addr)->sin6_family = AF_INET6;
++		posix_sin6(addr)->sin6_port = htons(port);
++		inet_pton(family, server, &posix_sin6(addr)->sin6_addr);
+ 	}
+ 
+ 	if (IS_ENABLED(CONFIG_NET_SOCKETS_SOCKOPT_TLS)) {
+diff --git a/samples/net/tftp_client/src/tftp-client.c b/samples/net/tftp_client/src/tftp-client.c
+index 13229dd686c..bd8b9870804 100644
+--- a/samples/net/tftp_client/src/tftp-client.c
++++ b/samples/net/tftp_client/src/tftp-client.c
+@@ -15,6 +15,7 @@ LOG_MODULE_REGISTER(LOG_MODULE_NAME);
+ #endif
+ #include <netdb.h>
+ #include <zephyr/net/tftp.h>
++#include <zephyr/posix/net/conversion.h>
+ #define APP_BANNER		"Run TFTP client"
+ #define TFTP_SAMPLE_DATA	"Lorem ipsum dolor sit amet, consectetur adipiscing elit"
+ 
+@@ -39,7 +40,9 @@ static void tftp_event_callback(const struct tftp_evt *evt)
+ 
+ static int tftp_init(const char *hostname)
+ {
+-	struct sockaddr remote_addr;
++	struct sockaddr_storage zaddr;
++	size_t zaddrlen = sizeof(zaddr);
++	struct net_sockaddr *zsa;
+ 	struct addrinfo *res, hints = {0};
+ 	int ret;
+ 
+@@ -53,11 +56,11 @@ static int tftp_init(const char *hostname)
+ 		return -ENOENT;
+ 	}
+ 
+-	memcpy(&remote_addr, res->ai_addr, sizeof(remote_addr));
++	/* Convert the POSIX sockaddr to the native form used by the TFTP client */
++	zsa = posix_sockaddr_to_zephyr(res->ai_addr, res->ai_addrlen, (struct net_sockaddr *)&zaddr, &zaddrlen);
++	memcpy(&client.server, zsa, zaddrlen);
+ 	freeaddrinfo(res);
+ 
+-	/* Save sockaddr into TFTP client handler */
+-	memcpy(&client.server, &remote_addr, sizeof(client.server));
+ 	/* Register TFTP client callback */
+ 	client.callback = tftp_event_callback;
+ 
+diff --git a/samples/net/wireguard/src/main.c b/samples/net/wireguard/src/main.c
+index e68bbd02f33..2a6f5ebb496 100644
+--- a/samples/net/wireguard/src/main.c
++++ b/samples/net/wireguard/src/main.c
+@@ -14,6 +14,7 @@ LOG_MODULE_REGISTER(vpn_sample, LOG_LEVEL_DBG);
+ #include <unistd.h>
+ #include <poll.h>
+ #include <arpa/inet.h>
++#include <netinet/in.h>
+ #include <sys/socket.h>
+ #include <zephyr/net/socket_service.h>
+ 
+diff --git a/samples/net/wireguard/src/wg.c b/samples/net/wireguard/src/wg.c
+index 17246cc6bb3..10e432cae9e 100644
+--- a/samples/net/wireguard/src/wg.c
++++ b/samples/net/wireguard/src/wg.c
+@@ -12,6 +12,7 @@ LOG_MODULE_DECLARE(vpn_sample, LOG_LEVEL_DBG);
+ #include <sys/socket.h>
+ #include <unistd.h>
+ #include <arpa/inet.h>
++#include <netinet/in.h>
+ #include <zephyr/net/virtual.h>
+ #include <zephyr/net/virtual_mgmt.h>
+ #include <zephyr/net/wireguard.h>
+@@ -52,8 +53,8 @@ static int setup_iface(struct net_if *iface,
+ {
+ 	struct virtual_interface_req_params params = { 0 };
+ 	struct wireguard_peer_config peer_config = { 0 };
+-	struct sockaddr_storage addr = { 0 };
+-	struct sockaddr *paddr = (struct sockaddr *)&addr;
++	struct net_sockaddr_storage addr = { 0 };
++	struct net_sockaddr *paddr = (struct net_sockaddr *)&addr;
+ 	struct net_if *peer_iface = NULL;
+ 	uint8_t mask_len = 0;
+ 	uint8_t private_key[NET_VIRTUAL_MAX_PUBLIC_KEY_LEN];
+@@ -95,14 +96,14 @@ static int setup_iface(struct net_if *iface,
+ 			  my_addr, sizeof(my_addr));
+ 
+ 		if (paddr->sa_family == AF_INET) {
+-			struct sockaddr_in *addr4 = (struct sockaddr_in *)paddr;
+-			struct sockaddr_in mask;
++			struct net_sockaddr_in *addr4 = (struct net_sockaddr_in *)paddr;
++			struct net_sockaddr_in mask;
+ 
+ 			ifaddr = net_if_ipv4_addr_add(iface, &addr4->sin_addr,
+ 						      NET_ADDR_MANUAL, 0);
+ 
+ 			ret = net_mask_len_to_netmask(AF_INET, mask_len,
+-						      (struct sockaddr *)&mask);
++						      (struct net_sockaddr *)&mask);
+ 			if (ret < 0) {
+ 				LOG_ERR("Invalid network mask length (%d)", ret);
+ 				return ret;
+@@ -113,8 +114,8 @@ static int setup_iface(struct net_if *iface,
+ 								 &mask.sin_addr);
+ 
+ 		} else if (paddr->sa_family == AF_INET6) {
+-			struct sockaddr_in6 *addr6 = (struct sockaddr_in6 *)paddr;
+-			struct in6_addr netaddr6;
++			struct net_sockaddr_in6 *addr6 = (struct net_sockaddr_in6 *)paddr;
++			struct net_in6_addr netaddr6;
+ 
+ 			ifaddr = net_if_ipv6_addr_add(iface, &addr6->sin6_addr,
+ 						      NET_ADDR_MANUAL, 0);
+@@ -163,7 +164,7 @@ static int setup_iface(struct net_if *iface,
+ 			}
+ 
+ 			if (paddr->sa_family == AF_INET) {
+-				struct sockaddr_in *addr4 = (struct sockaddr_in *)paddr;
++				struct net_sockaddr_in *addr4 = (struct net_sockaddr_in *)paddr;
+ 
+ 				memcpy(&peer_config.allowed_ip[i].addr.in_addr,
+ 				       &addr4->sin_addr,
+@@ -174,7 +175,7 @@ static int setup_iface(struct net_if *iface,
+ 				found = true;
+ 
+ 			} else if (addr.ss_family == AF_INET6) {
+-				struct sockaddr_in6 *addr6 = (struct sockaddr_in6 *)paddr;
++				struct net_sockaddr_in6 *addr6 = (struct net_sockaddr_in6 *)paddr;
+ 
+ 				memcpy(&peer_config.allowed_ip[i].addr.in6_addr,
+ 				       &addr6->sin6_addr,
