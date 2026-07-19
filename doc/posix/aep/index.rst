@@ -172,7 +172,7 @@ are listed below, for reference, in terms that agree with the current POSIX-1 st
          :widths: 50, 10, 50
 
           :ref:`POSIX_MULTI_PROCESS <posix_option_group_multi_process>`,, :kconfig:option:`CONFIG_POSIX_MULTI_PROCESS` :ref:`†<posix_undefined_behaviour>`
-          :ref:`POSIX_NETWORKING <posix_option_group_networking>`,, :kconfig:option:`CONFIG_POSIX_NETWORKING`
+          :ref:`POSIX_NETWORKING <posix_option_group_networking>`,yes, :kconfig:option:`CONFIG_POSIX_NETWORKING` :ref:`†<posix_undefined_behaviour>`
           :ref:`POSIX_PIPE <posix_option_group_pipe>`,,
           :ref:`POSIX_SIGNAL_JUMP <posix_option_group_signal_jump>`,,
 
