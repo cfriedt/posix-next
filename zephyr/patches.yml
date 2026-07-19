@@ -719,3 +719,28 @@ patches:
     upstreamable: true
     comments: |
       Forward-declare struct zvfs_pollfd in tracing_ctf.h to break fdtable→kernel→tracing include cycle.
+  - path: zephyr/net-sockets-guard-null-thread-name-log.patch
+    sha256sum: cab4af8cfcfc4bffcd65c723882a6a92ea0a4d33b2cf149524441e6477987c74
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-19
+    upstreamable: true
+    comments: |
+      net: sockets: guard the NULL thread name in get_sock_vtable()'s invalid-access
+      NET_DBG. k_thread_name_get() returns NULL when CONFIG_THREAD_NAME=n, and the
+      deferred-logging cbprintf string packaging strlen()s the %s argument, so an
+      invalid socket access (e.g. recvfrom() on a stale fd) crashes with a NULL
+      dereference. Pass a "?" placeholder instead.
+  - path: zephyr/samples-net-can-propagate-socket-errors.patch
+    sha256sum: 3f7bff68c0e3d40d7a6a5dd2d85d7a2f202cb10e1867c48d2753e7988858b485
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-19
+    upstreamable: true
+    comments: |
+      samples: net: sockets: can: return the real (negative) error from setup_socket()
+      instead of overwriting it with -errno. When a failed socket()/bind()/setsockopt()
+      leaves errno at 0, -errno is 0, which the caller reads as a valid fd (0) and then
+      calls recvfrom() on it, tripping the get_sock_vtable() crash above.
