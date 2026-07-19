@@ -1343,3 +1343,117 @@ patches:
       buffer and ignored the caller's size, so undersized destination buffers
       succeeded (truncated) from user mode where kernel mode fails. Clamp the
       format width to the caller's size so both modes agree.
+  - path: hostap/hostap-net-headers.patch
+    sha256sum: 1095516b9abf7915fdd563266f3eb8e518ed805c3eb7c1694bb1fe1a795224a3
+    module: hostap
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-19
+    upstreamable: true
+    comments: |
+      hostap: use native net_sockaddr_ll and include <net/if.h> / <netinet/in.h> for
+      IF_NAMESIZE and struct sockaddr_in/sockaddr_in6/in_addr/in6_addr. In the common
+      includes.h, replace the CONFIG_POSIX_API-gated block with an unconditional pull
+      of the unprefixed POSIX headers on Zephyr (<netinet/in.h>, <sys/socket.h>,
+      <sys/select.h>, <arpa/inet.h>, <netpacket/packet.h>, <unistd.h>) instead of the
+      net_compat-backed <zephyr/net/socket.h>, so hostap gets the standardized names
+      from the posix-next headers rather than net_compat, which now provides only the
+      non-POSIX extensions. Drop the blanket "#define signal(a, b) (void)(b)" shim: its
+      only call sites (eloop.c SIGSEGV/SIGALRM) are already compiled out on Zephyr, and
+      it shadowed the real POSIX_SIGNALS signal().
+  - path: zephyr/libc-posix-net-header-shims.patch
+    sha256sum: bbc923255aab30056a2f6058de33fb9aaa57b0123781aeb29bda2da4493a3e75
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-19
+    upstreamable: true
+    comments: |
+      Rebased onto v4.5.0-rc1 + zephyr#120028, which already carry the <netpacket/packet.h> shims; only
+      <sys/uio.h> and <sys/un.h> remain here.
+      Add picolibc and newlib <sys/uio.h>, <sys/un.h>, and <netpacket/packet.h>
+      shim headers that forward to the out-of-tree posix-next headers, so the new
+      POSIX networking headers resolve for these libcs (mirrors the existing
+      <sys/socket.h> / <netinet/in.h> shims).
+  - path: zephyr/net-compat-non-posix-constants.patch
+    sha256sum: b5d92fab453ab620df7ee3d96d7f6ad46ed8a22c57173a59769a2cf911bf70bb
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-19
+    upstreamable: true
+    comments: |
+      Rebased onto v4.5.0-rc1: the packet_mreq, SOL_PACKET and PACKET_* spellings upstream added stay,
+      as non-POSIX names; the compat mode's NET_TEST guard (now spelled with POSIX_NETWORKING) still goes.
+      Repurpose the network namespace compatibility mode to provide only the
+      non-POSIX, system-dependent unprefixed names (AF_PACKET, IPPROTO_IGMP,
+      SO_PRIORITY, CAN_RAW, TLS_*, PACKET_*, sockaddr_ll, ...). All POSIX symbols
+      are removed from net_compat.h -- the posix-next headers own those -- so
+      compat mode no longer collides with a conforming <sys/socket.h> or
+      <netinet/in.h>. Because it no longer defines POSIX symbols, the Kconfig
+      option drops its "depends on !NET_TEST || POSIX_API" guard (now simply
+      default y, help updated) and net_ip.h's struct net_addr no longer needs
+      the compat-mode member rename (in6_addr/in_addr used unconditionally).
+  - path: zephyr/net-sockaddr-in6-match-posix-layout.patch
+    sha256sum: 0362c9405e4399d33adbef2f4531f650d121a5b9ebd1e81ddbd7011d260928f4
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-21
+    upstreamable: true
+    comments: |
+      Make net_sockaddr_in6 match the POSIX sockaddr_in6 layout: widen sin6_scope_id to
+      uint32_t and add sin6_flowinfo at the end (rather than before sin6_addr as in the
+      POSIX spec) so sin6_addr keeps offset 4 -- the same offset as net_sockaddr_in.sin_addr,
+      which zsock_getnameinfo relies on, and which lets the POSIX<->native sockaddr_in6
+      conversion take the zero-copy fast path. This grows sizeof(net_sockaddr_in6) from 24
+      to 28 bytes, so two in-tree consumers that hard-coded the old size are updated to
+      track it: the dns_sd test's expected length uses sizeof(struct net_sockaddr_in6)
+      instead of the literal 24, and the MQTT-SN UDP transport's
+      CONFIG_MQTT_SN_LIB_MAX_ADDR_SIZE IPv6 default goes 24 -> 28 so its
+      BUILD_ASSERT(>= sizeof(net_sockaddr_in6)) still holds.
+  - path: zephyr/net-subsys-native-and-sockatmark.patch
+    sha256sum: 4ef339a437a14724584802ce5f313a82ec59b4415ef250960f3f8bcda7f9e556
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-19
+    upstreamable: true
+    comments: |
+      Add zsock_sockatmark(): declare the __syscall in net/socket.h and implement it in
+      sockets.c (a stub that fails with ENOSYS). Also switch the FTP client to
+      net_socklen_t.
+  - path: zephyr/samples-net-posix-api.patch
+    sha256sum: 31370b9647c59222ec892d97126e998aa46d69258c655882e02d177a8a642fa0
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-19
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/move-posix-impl-and-tests-out-of-tree.patch
+    comments: |
+      Rebased onto v4.5.0-rc1 + zephyr#120028: the samples already use the short-form POSIX includes;
+      the cellular modem sample keeps upstream's native net_sin() on its dns_resolve storage, the CoAP
+      server keeps upstream's guarded address setup, and the TFTP client converts the resolved POSIX
+      sockaddr before storing it in upstream's server_addr.
+      Migrate samples/net to the POSIX networking APIs: include the POSIX headers and
+      use POSIX socket types/constants, replacing net_sin()/net_sin6() with the POSIX
+      posix_sin() helpers from <zephyr/posix/net/conversion.h>. Must be applied after
+      move-posix-impl-and-tests-out-of-tree.patch, which switches these samples to the
+      short-form POSIX includes this patch builds on.
+  - path: zephyr/tests-net-socket-service-posix-bind-casts.patch
+    sha256sum: 1f03984bee7900a667d089b3b4abaad692dc6f9f9b87991faacde9695b5e9c0a
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-19
+    upstreamable: true
+    comments: |
+      net.socket.service sets CONFIG_POSIX_API (for eventfd), so bind()/connect()
+      resolve to the POSIX wrappers taking (struct sockaddr *). Call zsock_bind()/
+      zsock_connect() directly -- the native APIs taking (struct net_sockaddr *) --
+      and keep the (struct net_sockaddr *) casts, avoiding the mismatched prototype
+      when passing net_sockaddr_in6/net_sockaddr_in addresses.
