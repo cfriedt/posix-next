@@ -8,43 +8,52 @@
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <sys/socket.h>
 #include <zephyr/sys/util.h>
 #include <zephyr/ztest.h>
 
-ZTEST(net, test_inet_addr)
+ZTEST(posix_networking, test_inet_addr)
 {
 	in_addr_t ret;
-	static const struct parm {
+	static const struct parm_fail {
 		const char *in;
-		int out;
-	} parms[] = {
-	/* expect failure */
-#ifndef CONFIG_NATIVE_LIBC
-		{NULL, (uint32_t)-1}, /* this value will segfault using the host libc */
+	} fail_parms[] = {
+#ifndef CONFIG_ARCH_POSIX
+		{NULL},
 #endif
-		{".", (uint32_t)-1},
-		{"..", (uint32_t)-1},
-		{"...", (uint32_t)-1},
-		{"-1.-2.-3.-4", (uint32_t)-1},
-		{"256.65536.4294967296.18446744073709551616", (uint32_t)-1},
-		{"a.b.c.d", (uint32_t)-1},
-		{"0.0.0.1234", (uint32_t)-1},
-		{"0.0.0.12a", (uint32_t)-1},
-		{" 1.2.3.4", (uint32_t)-1},
-
-		/* expect success */
-		{"0.0.0.0", htonl(0)},
-		{"000.00.0.0", htonl(0)},
-		{"127.0.0.1", htonl(0x7f000001)},
-		{"1.2.3.4", htonl(0x01020304)},
-		{"1.2.3.4    ", htonl(0x01020304)},
-		{"0.0.0.123 a", htonl(0x0000007b)},
-		{"255.255.255.255", htonl(0xffffffffU)},
+		{"."},
+		{".."},
+		{"..."},
+		{"-1.-2.-3.-4"},
+		{"256.65536.4294967296.18446744073709551616"},
+		{"a.b.c.d"},
+		{"0.0.0.1234"},
+		{"0.0.0.12a"},
+		{" 1.2.3.4"},
+	};
+	static const struct parm_ok {
+		const char *in;
+		const char *canonical;
+	} ok_parms[] = {
+		{"0.0.0.0", "0.0.0.0"},
+		{"000.00.0.0", "0.0.0.0"},
+		{"127.0.0.1", "127.0.0.1"},
+		{"1.2.3.4", "1.2.3.4"},
+		{"1.2.3.4    ", "1.2.3.4"},
+		{"0.0.0.123 a", "0.0.0.123"},
+		{"255.255.255.255", "255.255.255.255"},
 	};
 
-	ARRAY_FOR_EACH_PTR(parms, p) {
+	ARRAY_FOR_EACH_PTR(fail_parms, p) {
 		ret = inet_addr(p->in);
-		zexpect_equal(ret, p->out, "inet_addr(%s) failed. expect: %d actual: %d", p->in,
-			      p->out, ret);
+		zexpect_equal(ret, (in_addr_t)-1, "inet_addr(%s) should fail", p->in);
+	}
+
+	ARRAY_FOR_EACH_PTR(ok_parms, p) {
+		struct in_addr expected;
+
+		zassert_equal(1, inet_pton(AF_INET, p->canonical, &expected));
+		ret = inet_addr(p->in);
+		zexpect_equal(ret, expected.s_addr, "inet_addr(%s) failed", p->in);
 	}
 }
