@@ -1,0 +1,70 @@
+diff --git a/tests/net/socket/service/src/main.c b/tests/net/socket/service/src/main.c
+--- a/tests/net/socket/service/src/main.c
++++ b/tests/net/socket/service/src/main.c
+@@ -95,10 +95,10 @@ void run_test_service(const struct net_socket_service_desc *udp_service,
+ 	ret = net_socket_service_register(tcp_service, sock, ARRAY_SIZE(sock), NULL);
+ 	zassert_equal(ret, 0, "Cannot register tcp service (%d)", ret);
+ 
+-	ret = bind(s_sock_udp, (struct net_sockaddr *)&s_addr, sizeof(s_addr));
++	ret = zsock_bind(s_sock_udp, (struct net_sockaddr *)&s_addr, sizeof(s_addr));
+ 	zassert_equal(ret, 0, "bind failed");
+ 
+-	ret = connect(c_sock_udp, (struct net_sockaddr *)&s_addr, sizeof(s_addr));
++	ret = zsock_connect(c_sock_udp, (struct net_sockaddr *)&s_addr, sizeof(s_addr));
+ 	zassert_equal(ret, 0, "connect failed");
+ 
+ 	/* Send pkt for s_sock_udp and poll with timeout of 10 */
+@@ -113,12 +113,12 @@ void run_test_service(const struct net_socket_service_desc *udp_service,
+ 	len = recv(s_sock_udp, BUF_AND_SIZE(buf), 0);
+ 	zassert_equal(len, STRLEN(TEST_STR_SMALL), "invalid recv len");
+ 
+-	ret = bind(s_sock_tcp, (struct net_sockaddr *)&s_addr, sizeof(s_addr));
++	ret = zsock_bind(s_sock_tcp, (struct net_sockaddr *)&s_addr, sizeof(s_addr));
+ 	zassert_equal(ret, 0, "bind failed (%d)", -errno);
+ 	ret = listen(s_sock_tcp, 0);
+ 	zassert_equal(ret, 0, "");
+ 
+-	ret = connect(c_sock_tcp, (const struct net_sockaddr *)&s_addr,
++	ret = zsock_connect(c_sock_tcp, (const struct net_sockaddr *)&s_addr,
+ 		      sizeof(s_addr));
+ 	zassert_equal(ret, 0, "");
+ 
+@@ -450,10 +450,10 @@ ZTEST(net_socket_service, test_close_from_callback)
+ 	prepare_sock_udp_v6(MY_IPV6_ADDR, ANY_PORT, &c_sock, &c_addr);
+ 	prepare_sock_udp_v6(MY_IPV6_ADDR, RECONFIG_CLOSE_PORT, &s_sock, &s_addr);
+ 
+-	ret = bind(s_sock, (struct net_sockaddr *)&s_addr, sizeof(s_addr));
++	ret = zsock_bind(s_sock, (struct net_sockaddr *)&s_addr, sizeof(s_addr));
+ 	zassert_equal(ret, 0, "bind failed (%d)", -errno);
+ 
+-	len = sendto(c_sock, BUF_AND_SIZE(TEST_STR_SMALL), 0, (struct net_sockaddr *)&s_addr,
++	len = zsock_sendto(c_sock, BUF_AND_SIZE(TEST_STR_SMALL), 0, (struct net_sockaddr *)&s_addr,
+ 		     sizeof(s_addr));
+ 	zassert_equal(len, STRLEN(TEST_STR_SMALL), "invalid send len");
+ 
+@@ -499,10 +499,10 @@ ZTEST(net_socket_service, test_close_multiple_from_callback)
+ 	for (int i = 0; i < ARRAY_SIZE(s_sock); i++) {
+ 		prepare_sock_udp_v6(MY_IPV6_ADDR, RECONFIG_MULTI_PORT + i, &s_sock[i], &s_addr[i]);
+ 
+-		ret = bind(s_sock[i], (struct net_sockaddr *)&s_addr[i], sizeof(s_addr[i]));
++		ret = zsock_bind(s_sock[i], (struct net_sockaddr *)&s_addr[i], sizeof(s_addr[i]));
+ 		zassert_equal(ret, 0, "bind %d failed (%d)", i, -errno);
+ 
+-		len = sendto(c_sock, BUF_AND_SIZE(TEST_STR_SMALL), 0,
++		len = zsock_sendto(c_sock, BUF_AND_SIZE(TEST_STR_SMALL), 0,
+ 			     (struct net_sockaddr *)&s_addr[i], sizeof(s_addr[i]));
+ 		zassert_equal(len, STRLEN(TEST_STR_SMALL), "invalid send len");
+ 	}
+@@ -554,10 +554,10 @@ ZTEST(net_socket_service, test_reconfigure_events_from_callback)
+ 	prepare_sock_udp_v6(MY_IPV6_ADDR, ANY_PORT, &c_sock, &c_addr);
+ 	prepare_sock_udp_v6(MY_IPV6_ADDR, RECONFIG_EVENTS_PORT, &s_sock, &s_addr);
+ 
+-	ret = bind(s_sock, (struct net_sockaddr *)&s_addr, sizeof(s_addr));
++	ret = zsock_bind(s_sock, (struct net_sockaddr *)&s_addr, sizeof(s_addr));
+ 	zassert_equal(ret, 0, "bind failed (%d)", -errno);
+ 
+-	len = sendto(c_sock, BUF_AND_SIZE(TEST_STR_SMALL), 0, (struct net_sockaddr *)&s_addr,
++	len = zsock_sendto(c_sock, BUF_AND_SIZE(TEST_STR_SMALL), 0, (struct net_sockaddr *)&s_addr,
+ 		     sizeof(s_addr));
+ 	zassert_equal(len, STRLEN(TEST_STR_SMALL), "invalid send len");
+ 
