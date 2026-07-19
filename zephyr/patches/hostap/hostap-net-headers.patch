@@ -1,0 +1,97 @@
+diff --git a/src/ap/ap_config.h b/src/ap/ap_config.h
+index 5974250af..4297e0a94 100644
+--- a/src/ap/ap_config.h
++++ b/src/ap/ap_config.h
+@@ -9,6 +9,7 @@
+ #ifndef HOSTAPD_CONFIG_H
+ #define HOSTAPD_CONFIG_H
+ 
++#include <net/if.h>
+ #include "common/defs.h"
+ #include "utils/list.h"
+ #include "ip_addr.h"
+diff --git a/src/ap/hostapd.h b/src/ap/hostapd.h
+index c766ac12d..8f4fd3794 100644
+--- a/src/ap/hostapd.h
++++ b/src/ap/hostapd.h
+@@ -10,6 +10,7 @@
+ #define HOSTAPD_H
+ 
+ #ifdef CONFIG_SQLITE
++#include <net/if.h>
+ #include <sqlite3.h>
+ #endif /* CONFIG_SQLITE */
+ 
+diff --git a/src/l2_packet/l2_packet_zephyr.c b/src/l2_packet/l2_packet_zephyr.c
+index 542149d27..e12cfa205 100644
+--- a/src/l2_packet/l2_packet_zephyr.c
++++ b/src/l2_packet/l2_packet_zephyr.c
+@@ -54,7 +54,7 @@ int l2_packet_send(struct l2_packet_data *l2, const u8 *dst_addr, u16 proto,
+ 				   strerror(errno));
+ 		}
+ 	} else {
+-		struct sockaddr_ll ll;
++		struct net_sockaddr_ll ll;
+ 
+ 		os_memset(&ll, 0, sizeof(ll));
+ 		ll.sll_family = AF_PACKET;
+@@ -78,7 +78,7 @@ static void l2_packet_receive(int sock, void *eloop_ctx, void *sock_ctx)
+ 	struct l2_packet_data *l2 = eloop_ctx;
+ 	u8 buf[2300];
+ 	int res;
+-	struct sockaddr_ll ll;
++	struct net_sockaddr_ll ll;
+ 	socklen_t fromlen;
+ 	const struct ieee802_1x_hdr *hdr;
+ 
+@@ -110,7 +110,7 @@ l2_packet_init(const char *ifname, const u8 *own_addr, unsigned short protocol,
+ 	       void *rx_callback_ctx, int l2_hdr)
+ {
+ 	struct l2_packet_data *l2;
+-	struct sockaddr_ll ll;
++	struct net_sockaddr_ll ll;
+ 	int ret = 0;
+ 	struct net_linkaddr *link_addr = NULL;
+ 	struct net_if *iface;
+diff --git a/src/utils/includes.h b/src/utils/includes.h
+index 91784ecae..d7e6e5053 100644
+--- a/src/utils/includes.h
++++ b/src/utils/includes.h
+@@ -47,19 +47,13 @@
+ 
+ #if defined(__ZEPHYR__)
+ #include <strings.h>
+-#if defined(CONFIG_POSIX_API)
+-#include <zephyr/posix/arpa/inet.h>
+-#include <zephyr/posix/sys/select.h>
+-#include <zephyr/posix/sys/socket.h>
+-#include <zephyr/posix/unistd.h>
+-#else /* defined(CONFIG_POSIX_API) */
+-#include <zephyr/net/socket.h>
+-#include <zephyr/net/socket_select.h>
+-#include <zephyr/net/net_ip.h>
+-#endif /* defined(CONFIG_POSIX_API) */
++#include <arpa/inet.h>
++#include <netinet/in.h>
++#include <netpacket/packet.h>
++#include <sys/select.h>
++#include <sys/socket.h>
++#include <unistd.h>
+ #include <zephyr/shell/shell.h>
+-
+-#define signal(a, b) (void)(b)
+ #endif /* defined(__ZEPHYR__) */
+ 
+ #endif /* INCLUDES_H */
+diff --git a/wpa_supplicant/wpa_supplicant_i.h b/wpa_supplicant/wpa_supplicant_i.h
+index 5e24bea4c..a067bc659 100644
+--- a/wpa_supplicant/wpa_supplicant_i.h
++++ b/wpa_supplicant/wpa_supplicant_i.h
+@@ -9,6 +9,7 @@
+ #ifndef WPA_SUPPLICANT_I_H
+ #define WPA_SUPPLICANT_I_H
+ 
++#include <netinet/in.h>
+ #include "utils/bitfield.h"
+ #include "utils/list.h"
+ #include "common/defs.h"
