@@ -1259,6 +1259,24 @@ patches:
       Add zsock_sockatmark(): declare the __syscall in net/socket.h and implement it in
       sockets.c (a stub that fails with ENOSYS). Also switch the FTP client to
       net_socklen_t.
+  - path: zephyr/net-sockets-getaddrinfo-literal-nonstatic.patch
+    sha256sum: 204aba13edc272bca88dbd16b77307e7c97c1a0b96055ac8705a88524a892eab
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-10
+    upstreamable: true
+    comments: |
+      POSIX getaddrinfo() owns its result array (allocated with calloc(), freed
+      with free()) so a user-mode process never faults taking the kernel heap
+      lock, and hands it to the network stack to fill. Reusing zsock_getaddrinfo()
+      is not possible because it k_calloc()s the result itself; the caller instead
+      drives the same two steps directly. The DNS step is already the public
+      z_zsock_getaddrinfo_internal() syscall, but the literal-address fast path
+      (net_ipaddr_parse for e.g. "127.0.0.1" when no resolver is configured) is a
+      file-static helper. Drop its static qualifier so the POSIX wrapper can call
+      it; it stays undeclared in any public header, forward-declared at its single
+      call site.
   - path: zephyr/samples-net-posix-api.patch
     sha256sum: 79e0ba7fe6673b3fc46d5eef67ced1364f6324af6ea007a5b2eae38fdd088680
     module: zephyr
