@@ -1,15 +1,11 @@
 /*
- * Copyright (c) 2019 Linaro Limited
- *
+ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
  * SPDX-License-Identifier: Apache-2.0
  */
 
 /**
  * @file
  * @brief POSIX socket API (<sys/socket.h>)
- *
- * Provides the BSD socket interface: creating sockets, binding, connecting,
- * sending, receiving, and socket options.
  *
  * @see <a href="https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/sys_socket.h.html">
  *      POSIX.1-2017 &lt;sys/socket.h&gt;</a>
@@ -20,150 +16,299 @@
 #ifndef ZEPHYR_INCLUDE_POSIX_SYS_SOCKET_H_
 #define ZEPHYR_INCLUDE_POSIX_SYS_SOCKET_H_
 
+#include <stddef.h>
 #include <sys/types.h>
+
+#include <zephyr/net/net_ip.h>
 #include <zephyr/net/socket.h>
-
-/* Temporary workaround required to build with Zephyr 4.4+ */
-#define ZEPHYR_INCLUDE_NET_COMPAT_MODE_SYMBOLS
-#include <zephyr/net/net_compat.h>
-#undef ZEPHYR_INCLUDE_NET_COMPAT_MODE_SYMBOLS
-
-/** @brief Shut down the read half of the connection.  @ingroup posix_option_group_networking*/
-#define SHUT_RD   ZSOCK_SHUT_RD
-/** @brief Shut down the write half of the connection.  @ingroup posix_option_group_networking*/
-#define SHUT_WR   ZSOCK_SHUT_WR
-/** @brief Shut down both halves of the connection.  @ingroup posix_option_group_networking*/
-#define SHUT_RDWR ZSOCK_SHUT_RDWR
-
-/** @brief Peek at incoming data without removing it from the queue.  @ingroup posix_option_group_networking*/
-#define MSG_PEEK     ZSOCK_MSG_PEEK
-/** @brief Return the real length of the datagram even if it was truncated.  @ingroup posix_option_group_networking*/
-#define MSG_TRUNC    ZSOCK_MSG_TRUNC
-/** @brief Enable non-blocking operation for this call only.  @ingroup posix_option_group_networking*/
-#define MSG_DONTWAIT ZSOCK_MSG_DONTWAIT
-/** @brief Block until all requested data has been received.  @ingroup posix_option_group_networking*/
-#define MSG_WAITALL  ZSOCK_MSG_WAITALL
+#include <zephyr/sys/util.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#if !defined(_SOCKLEN_T_DECLARED) && !defined(__socklen_t_defined)
-/** @brief Type for socket address length values.  @ingroup posix_option_group_networking*/
-/* Temporary workaround required to build with Zephyr 4.4+ */
-#ifndef socklen_t
-typedef uint32_t socklen_t;
-#endif
+#if !(defined(_SOCKLEN_T_DECLARED) || defined(__socklen_t_defined)) || defined(__DOXYGEN__)
+/** @brief Type for socket address length values. */
+typedef net_socklen_t socklen_t;
 #define _SOCKLEN_T_DECLARED
 #define __socklen_t_defined
 #endif
 
+#if !(defined(_SA_FAMILY_T_DECLARED) || defined(__sa_family_t_defined)) || defined(__DOXYGEN__)
+/** @brief Socket address family type. */
+typedef net_sa_family_t sa_family_t;
+#define _SA_FAMILY_T_DECLARED
+#define __sa_family_t_defined
+#endif
+
+#if !(defined(_SOCKADDR_DECLARED) || defined(__sockaddr_defined)) || defined(__DOXYGEN__)
+/** @brief Generic socket address. */
+struct sockaddr {
+	sa_family_t sa_family; /**< Address family. */
+	char sa_data[14];        /**< Address payload. */
+};
+#define _SOCKADDR_DECLARED
+#define __sockaddr_defined
+#endif
+
+#if !(defined(_SOCKADDR_STORAGE_DECLARED) || defined(__sockaddr_storage_defined)) || defined(__DOXYGEN__)
+/** @brief Protocol-independent socket address storage. */
+struct sockaddr_storage {
+	sa_family_t ss_family; /**< Address family. */
+	char __ss_padding[128 - sizeof(sa_family_t)];
+};
+#define _SOCKADDR_STORAGE_DECLARED
+#define __sockaddr_storage_defined
+#endif
+
+/* slightly out of order w.r.t. the specification */
+#if !defined(_IOVEC_DECLARED) && !defined(__iovec_defined)
+struct iovec {
+	void  *iov_base;
+	size_t iov_len;
+};
+#define _IOVEC_DECLARED
+#define __iovec_defined
+#endif
+
+#if !(defined(_MSGHDR_DECLARED) || defined(__msghdr_defined)) || defined(__DOXYGEN__)
+/** @brief Message header for sendmsg() and recvmsg(). */
+struct msghdr {
+	void         *msg_name;       /**< Optional socket address. */
+	socklen_t     msg_namelen;    /**< Size of socket address. */
+	struct iovec *msg_iov;        /**< Scatter/gather array. */
+	size_t        msg_iovlen;     /**< Number of elements in msg_iov. */
+	void         *msg_control;    /**< Ancillary data. */
+	size_t        msg_controllen; /**< Ancillary data buffer length. */
+	int           msg_flags;      /**< Flags on received message. */
+};
+#define _MSGHDR_DECLARED
+#define __msghdr_defined
+#endif
+
+#if !(defined(_CMSGHDR_DECLARED) || defined(__cmsghdr_defined)) || defined(__DOXYGEN__)
+/** @brief Ancillary data object header. */
+struct cmsghdr {
+	socklen_t cmsg_len;   /**< Number of bytes, including header. */
+	int       cmsg_level; /**< Originating protocol. */
+	int       cmsg_type;  /**< Protocol-specific type. */
+};
+#define _CMSGHDR_DECLARED
+#define __cmsghdr_defined
+#endif
+
+/** @brief Access rights (file descriptors) in ancillary data. */
+#define SCM_RIGHTS 1
+
+
+/** @brief Pointer to ancillary data payload. */
+#define CMSG_DATA(cmsg) ((unsigned char *)(cmsg) + ROUND_UP(sizeof(struct cmsghdr), sizeof(size_t)))
+
+/** @brief Next ancillary data object in a message. */
+#define CMSG_NXTHDR(mhdr, cmsg)                                                        \
+	(((cmsg) == NULL) ? CMSG_FIRSTHDR(mhdr) :                                        \
+	 (((unsigned char *)(cmsg) + ROUND_UP((cmsg)->cmsg_len, sizeof(size_t)) +                     \
+	   ROUND_UP(sizeof(struct cmsghdr), sizeof(size_t)) >                                         \
+	   (unsigned char *)((mhdr)->msg_control) + (mhdr)->msg_controllen) ?            \
+	  NULL :                                                                         \
+	  (struct cmsghdr *)((unsigned char *)(cmsg) + ROUND_UP((cmsg)->cmsg_len, sizeof(size_t)))))
+
+/** @brief First ancillary data object in a message. */
+#define CMSG_FIRSTHDR(mhdr)                                                            \
+	(((mhdr)->msg_controllen >= sizeof(struct cmsghdr) ?                           \
+	  (struct cmsghdr *)((mhdr)->msg_control) : NULL))
+
+#if !(defined(_LINGER_DECLARED) || defined(__linger_defined)) || defined(__DOXYGEN__)
 /** @brief Socket linger option structure. */
 struct linger {
-	int l_onoff;  /**< Non-zero to enable linger. */
-	int l_linger; /**< Linger timeout in seconds. */
+	int l_onoff;  /**< Indicates whether linger option is enabled. */
+	int l_linger; /**< Linger time, in seconds. */
 };
+#define _LINGER_DECLARED
+#define __linger_defined
+#endif
+
+/** @brief Datagram socket. */
+#define SOCK_DGRAM NET_SOCK_DGRAM
+/** @brief Raw socket. */
+#define SOCK_RAW NET_SOCK_RAW
+/** @brief Sequenced-packet socket. */
+#define SOCK_SEQPACKET 5
+/** @brief Stream socket. */
+#define SOCK_STREAM NET_SOCK_STREAM
+
+/** @brief Socket-level option level for setsockopt() and getsockopt(). */
+#define SOL_SOCKET ZSOCK_SOL_SOCKET
+
+/** @brief Socket is accepting connections. */
+#define SO_ACCEPTCONN ZSOCK_SO_ACCEPTCONN
+/** @brief Permit sending broadcast datagrams. */
+#define SO_BROADCAST ZSOCK_SO_BROADCAST
+/** @brief Record debugging information (ignored; for compatibility). */
+#define SO_DEBUG ZSOCK_SO_DEBUG
+/** @brief Bypass routing when sending (ignored; for compatibility). */
+#define SO_DONTROUTE ZSOCK_SO_DONTROUTE
+/** @brief Socket error status. */
+#define SO_ERROR ZSOCK_SO_ERROR
+/** @brief Keep connections alive. */
+#define SO_KEEPALIVE ZSOCK_SO_KEEPALIVE
+/** @brief Linger on close. */
+#define SO_LINGER ZSOCK_SO_LINGER
+/** @brief Deliver out-of-band data inline (ignored; for compatibility). */
+#define SO_OOBINLINE ZSOCK_SO_OOBINLINE
+/** @brief Receive buffer size. */
+#define SO_RCVBUF ZSOCK_SO_RCVBUF
+/** @brief Receive low watermark. */
+#define SO_RCVLOWAT ZSOCK_SO_RCVLOWAT
+/** @brief Receive timeout. */
+#define SO_RCVTIMEO ZSOCK_SO_RCVTIMEO
+/** @brief Allow local address reuse. */
+#define SO_REUSEADDR ZSOCK_SO_REUSEADDR
+/** @brief Send buffer size. */
+#define SO_SNDBUF ZSOCK_SO_SNDBUF
+/** @brief Send low watermark. */
+#define SO_SNDLOWAT ZSOCK_SO_SNDLOWAT
+/** @brief Send timeout. */
+#define SO_SNDTIMEO ZSOCK_SO_SNDTIMEO
+/** @brief Socket type. */
+#define SO_TYPE ZSOCK_SO_TYPE
+
+/** @brief Maximum pending connection queue length for listen(). */
+#define SOMAXCONN ZSOCK_SOMAXCONN
+
+/** @brief Control data was truncated. */
+#define MSG_CTRUNC ZSOCK_MSG_CTRUNC
+/** @brief Send without using routing tables. */
+#define MSG_DONTROUTE 0x04
+/** @brief Terminates a record (if supported by the protocol). */
+#define MSG_EOR 0x80
+/** @brief Out-of-band data. */
+#define MSG_OOB 0x01
+/** @brief No SIGPIPE on send to a disconnected stream socket. */
+#define MSG_NOSIGNAL 0x4000
+/** @brief Peek at incoming data without consuming it. */
+#define MSG_PEEK ZSOCK_MSG_PEEK
+/** @brief Datagram was truncated. */
+#define MSG_TRUNC ZSOCK_MSG_TRUNC
+/** @brief Wait for a full request. */
+#define MSG_WAITALL ZSOCK_MSG_WAITALL
+
+/** @brief Unspecified address family. */
+#define AF_UNSPEC NET_AF_UNSPEC
+/** @brief Internet domain sockets for use with IPv4 addresses. */
+#define AF_INET NET_AF_INET
+/** @brief Internet domain sockets for use with IPv6 addresses. */
+#define AF_INET6 NET_AF_INET6
+/** @brief UNIX domain sockets. */
+#define AF_UNIX NET_AF_UNIX
+
+/** @brief Disables further receive operations. */
+#define SHUT_RD ZSOCK_SHUT_RD
+/** @brief Disables further send operations. */
+#define SHUT_WR ZSOCK_SHUT_WR
+/** @brief Disables further send and receive operations. */
+#define SHUT_RDWR ZSOCK_SHUT_RDWR
 
 /**
  * @brief Accept a new connection on a listening socket.
- * @ingroup posix_option_group_networking
  * @param sock    Listening socket file descriptor.
- * @param addr    Output: address of the connecting peer, or NULL.
+ * @param addr    Output: address of the connecting peer, or @c NULL.
  * @param addrlen Input: size of @p addr; output: actual address size.
- * @return New socket file descriptor on success, or -1 on failure.
+ * @return New socket file descriptor on success, or -1 with errno set on failure.
+ * @ingroup posix_option_group_networking
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/accept.html
  */
 int accept(int sock, struct sockaddr *addr, socklen_t *addrlen);
 
 /**
  * @brief Assign a local address to a socket.
- * @ingroup posix_option_group_networking
  * @param sock    Socket file descriptor.
  * @param addr    Local address to bind.
  * @param addrlen Size of @p addr in bytes.
  * @return 0 on success, or -1 with errno set on failure.
+ * @ingroup posix_option_group_networking
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/bind.html
  */
 int bind(int sock, const struct sockaddr *addr, socklen_t addrlen);
 
 /**
  * @brief Initiate a connection on a socket.
- * @ingroup posix_option_group_networking
  * @param sock    Socket file descriptor.
  * @param addr    Remote address to connect to.
  * @param addrlen Size of @p addr in bytes.
  * @return 0 on success, or -1 with errno set on failure.
+ * @ingroup posix_option_group_networking
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/connect.html
  */
 int connect(int sock, const struct sockaddr *addr, socklen_t addrlen);
 
 /**
  * @brief Get the address of the peer connected to a socket.
- * @ingroup posix_option_group_networking
  * @param sock    Socket file descriptor.
  * @param addr    Output: peer address.
  * @param addrlen Input: size of @p addr; output: actual size.
  * @return 0 on success, or -1 with errno set on failure.
+ * @ingroup posix_option_group_networking
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/getpeername.html
  */
 int getpeername(int sock, struct sockaddr *addr, socklen_t *addrlen);
 
 /**
  * @brief Get the local address bound to a socket.
- * @ingroup posix_option_group_networking
  * @param sock    Socket file descriptor.
  * @param addr    Output: local address.
  * @param addrlen Input: size of @p addr; output: actual size.
  * @return 0 on success, or -1 with errno set on failure.
+ * @ingroup posix_option_group_networking
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/getsockname.html
  */
 int getsockname(int sock, struct sockaddr *addr, socklen_t *addrlen);
 
 /**
  * @brief Get socket options.
- * @ingroup posix_option_group_networking
  * @param sock    Socket file descriptor.
- * @param level   Protocol level (SOL_SOCKET, IPPROTO_TCP, etc.).
- * @param optname Option name (SO_REUSEADDR, SO_KEEPALIVE, etc.).
+ * @param level   Protocol level (@ref SOL_SOCKET, @ref IPPROTO_TCP, etc.).
+ * @param optname Option name (@ref SO_REUSEADDR, @ref SO_KEEPALIVE, etc.).
  * @param optval  Output: option value.
  * @param optlen  Input: size of @p optval; output: actual size.
  * @return 0 on success, or -1 with errno set on failure.
+ * @ingroup posix_option_group_networking
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/getsockopt.html
  */
 int getsockopt(int sock, int level, int optname, void *optval, socklen_t *optlen);
 
 /**
  * @brief Mark a socket as passive (ready to accept connections).
- * @ingroup posix_option_group_networking
  * @param sock    Socket file descriptor.
  * @param backlog Maximum number of pending connections to queue.
  * @return 0 on success, or -1 with errno set on failure.
+ * @ingroup posix_option_group_networking
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/listen.html
  */
 int listen(int sock, int backlog);
 
 /**
  * @brief Receive data from a connected socket.
- * @ingroup posix_option_group_networking
  * @param sock    Socket file descriptor.
  * @param buf     Buffer to receive data into.
  * @param max_len Maximum number of bytes to receive.
- * @param flags   MSG_* flags (MSG_PEEK, MSG_DONTWAIT, etc.).
- * @return Number of bytes received, 0 on connection closed, or -1 on failure.
+ * @param flags   @c MSG_\* flags (@ref MSG_PEEK, @ref MSG_WAITALL, etc.).
+ * @return Number of bytes received, 0 on connection closed, or -1 with errno set on failure.
+ * @ingroup posix_option_group_networking
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/recv.html
  */
 ssize_t recv(int sock, void *buf, size_t max_len, int flags);
 
 /**
  * @brief Receive data and the sender's address from a socket.
- * @ingroup posix_option_group_networking
  * @param sock     Socket file descriptor.
  * @param buf      Buffer to receive data into.
  * @param max_len  Maximum number of bytes to receive.
  * @param flags    MSG_* flags.
- * @param src_addr Output: sender's address, or NULL.
+ * @param src_addr Output: sender's address, or @c NULL.
  * @param addrlen  Input: size of @p src_addr; output: actual size.
- * @return Number of bytes received on success, or -1 on failure.
+ * @return Number of bytes received on success, or -1 with errno set on failure.
+ * @ingroup posix_option_group_networking
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/recvfrom.html
  */
 ssize_t recvfrom(int sock, void *buf, size_t max_len, int flags, struct sockaddr *src_addr,
@@ -171,48 +316,48 @@ ssize_t recvfrom(int sock, void *buf, size_t max_len, int flags, struct sockaddr
 
 /**
  * @brief Receive a message (with scatter-gather I/O and ancillary data).
- * @ingroup posix_option_group_networking
  * @param sock Socket file descriptor.
  * @param msg  Message header specifying I/O vectors and address buffer.
  * @param flags MSG_* flags.
- * @return Number of bytes received on success, or -1 on failure.
+ * @return Number of bytes received on success, or -1 with errno set on failure.
+ * @ingroup posix_option_group_networking
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/recvmsg.html
  */
 ssize_t recvmsg(int sock, struct msghdr *msg, int flags);
 
 /**
  * @brief Send data on a connected socket.
- * @ingroup posix_option_group_networking
  * @param sock Socket file descriptor.
  * @param buf  Data to send.
  * @param len  Number of bytes to send.
- * @param flags MSG_* flags (MSG_DONTWAIT, MSG_NOSIGNAL, etc.).
- * @return Number of bytes sent on success, or -1 on failure.
+ * @param flags @c MSG_\* flags (@ref MSG_OOB, @ref MSG_NOSIGNAL, etc.).
+ * @return Number of bytes sent on success, or -1 with errno set on failure.
+ * @ingroup posix_option_group_networking
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/send.html
  */
 ssize_t send(int sock, const void *buf, size_t len, int flags);
 
 /**
  * @brief Send a message (with scatter-gather I/O and ancillary data).
- * @ingroup posix_option_group_networking
  * @param sock    Socket file descriptor.
  * @param message Message header specifying I/O vectors and destination.
  * @param flags   MSG_* flags.
- * @return Number of bytes sent on success, or -1 on failure.
+ * @return Number of bytes sent on success, or -1 with errno set on failure.
+ * @ingroup posix_option_group_networking
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/sendmsg.html
  */
 ssize_t sendmsg(int sock, const struct msghdr *message, int flags);
 
 /**
  * @brief Send data to a specific destination address.
- * @ingroup posix_option_group_networking
  * @param sock      Socket file descriptor.
  * @param buf       Data to send.
  * @param len       Number of bytes to send.
  * @param flags     MSG_* flags.
  * @param dest_addr Destination address.
  * @param addrlen   Size of @p dest_addr in bytes.
- * @return Number of bytes sent on success, or -1 on failure.
+ * @return Number of bytes sent on success, or -1 with errno set on failure.
+ * @ingroup posix_option_group_networking
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/sendto.html
  */
 ssize_t sendto(int sock, const void *buf, size_t len, int flags, const struct sockaddr *dest_addr,
@@ -220,62 +365,61 @@ ssize_t sendto(int sock, const void *buf, size_t len, int flags, const struct so
 
 /**
  * @brief Set socket options.
- * @ingroup posix_option_group_networking
  * @param sock    Socket file descriptor.
- * @param level   Protocol level (SOL_SOCKET, IPPROTO_TCP, etc.).
+ * @param level   Protocol level (@ref SOL_SOCKET, @ref IPPROTO_TCP, etc.).
  * @param optname Option name.
  * @param optval  Pointer to the new option value.
  * @param optlen  Size of @p optval in bytes.
  * @return 0 on success, or -1 with errno set on failure.
+ * @ingroup posix_option_group_networking
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/setsockopt.html
  */
 int setsockopt(int sock, int level, int optname, const void *optval, socklen_t optlen);
 
 /**
  * @brief Shut down part or all of a full-duplex connection.
- * @ingroup posix_option_group_networking
  * @param sock Socket file descriptor.
- * @param how  SHUT_RD, SHUT_WR, or SHUT_RDWR.
+ * @param how  @ref SHUT_RD, @ref SHUT_WR, or @ref SHUT_RDWR.
  * @return 0 on success, or -1 with errno set on failure.
+ * @ingroup posix_option_group_networking
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/shutdown.html
  */
 int shutdown(int sock, int how);
 
 /**
  * @brief Determine whether a socket is at the out-of-band mark.
- * @ingroup posix_option_group_networking
  * @param s Socket file descriptor.
- * @return 1 if at the mark, 0 if not, or -1 on failure.
+ * @return 1 if at the mark, 0 if not, or -1 with errno set on failure.
+ * @ingroup posix_option_group_networking
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/sockatmark.html
  */
 int sockatmark(int s);
 
 /**
  * @brief Create a new socket.
+ * @param family Protocol family (@ref AF_INET, @ref AF_INET6, @ref AF_UNIX, etc.).
+ * @param type   Socket type (@ref SOCK_STREAM, @ref SOCK_DGRAM, @ref SOCK_RAW, etc.).
+ * @param proto  Protocol number (@ref IPPROTO_TCP, @ref IPPROTO_UDP, 0 for default).
+ * @return New socket file descriptor on success, or -1 with errno set on failure.
  * @ingroup posix_option_group_networking
- * @param family Protocol family (AF_INET, AF_INET6, AF_UNIX, etc.).
- * @param type   Socket type (SOCK_STREAM, SOCK_DGRAM, SOCK_RAW, etc.).
- * @param proto  Protocol number (IPPROTO_TCP, IPPROTO_UDP, 0 for default).
- * @return New socket file descriptor on success, or -1 on failure.
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/socket.html
  */
 int socket(int family, int type, int proto);
 
 /**
  * @brief Create a pair of connected sockets.
- * @ingroup posix_option_group_networking
- * @param family Protocol family (typically AF_UNIX).
+ * @param family Protocol family (typically @ref AF_UNIX).
  * @param type   Socket type.
  * @param proto  Protocol.
  * @param sv     Output: two-element array receiving the socket descriptors.
  * @return 0 on success, or -1 with errno set on failure.
+ * @ingroup posix_option_group_networking
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/socketpair.html
  */
 int socketpair(int family, int type, int proto, int sv[2]);
-
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif	/* ZEPHYR_INCLUDE_POSIX_SYS_SOCKET_H_ */
+#endif /* ZEPHYR_INCLUDE_POSIX_SYS_SOCKET_H_ */
