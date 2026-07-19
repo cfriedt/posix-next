@@ -1,0 +1,32 @@
+diff --git a/tests/net/socket/service/src/main.c b/tests/net/socket/service/src/main.c
+index 659a0cfb1d8..0d5bce481ac 100644
+--- a/tests/net/socket/service/src/main.c
++++ b/tests/net/socket/service/src/main.c
+@@ -100,10 +100,10 @@ void run_test_service(const struct net_socket_service_desc *udp_service,
+ 	ret = net_socket_service_register(tcp_service, sock, ARRAY_SIZE(sock), NULL);
+ 	zassert_equal(ret, 0, "Cannot register tcp service (%d)", ret);
+ 
+-	ret = bind(s_sock_udp, (struct net_sockaddr *)&s_addr, sizeof(s_addr));
++	ret = zsock_bind(s_sock_udp, (struct net_sockaddr *)&s_addr, sizeof(s_addr));
+ 	zassert_equal(ret, 0, "bind failed");
+ 
+-	ret = connect(c_sock_udp, (struct net_sockaddr *)&s_addr, sizeof(s_addr));
++	ret = zsock_connect(c_sock_udp, (struct net_sockaddr *)&s_addr, sizeof(s_addr));
+ 	zassert_equal(ret, 0, "connect failed");
+ 
+ 	/* Send pkt for s_sock_udp and poll with timeout of 10 */
+@@ -118,12 +118,12 @@ void run_test_service(const struct net_socket_service_desc *udp_service,
+ 	len = recv(s_sock_udp, BUF_AND_SIZE(buf), 0);
+ 	zassert_equal(len, STRLEN(TEST_STR_SMALL), "invalid recv len");
+ 
+-	ret = bind(s_sock_tcp, (struct net_sockaddr *)&s_addr, sizeof(s_addr));
++	ret = zsock_bind(s_sock_tcp, (struct net_sockaddr *)&s_addr, sizeof(s_addr));
+ 	zassert_equal(ret, 0, "bind failed (%d)", -errno);
+ 	ret = listen(s_sock_tcp, 0);
+ 	zassert_equal(ret, 0, "");
+ 
+-	ret = connect(c_sock_tcp, (const struct net_sockaddr *)&s_addr,
++	ret = zsock_connect(c_sock_tcp, (const struct net_sockaddr *)&s_addr,
+ 		      sizeof(s_addr));
+ 	zassert_equal(ret, 0, "");
+ 
