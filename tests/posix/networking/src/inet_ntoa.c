@@ -9,7 +9,7 @@
 
 #include <zephyr/ztest.h>
 
-ZTEST(net, test_inet_ntoa)
+ZTEST(posix_networking, test_inet_ntoa)
 {
 	struct in_addr in;
 
