@@ -6,4 +6,8 @@
 
 #include <zephyr/ztest.h>
 
-ZTEST_SUITE(net, NULL, NULL, NULL, NULL, NULL);
+void *test_fs_setup(void);
+void test_fs_teardown(void *arg);
+void test_netdb_cleanup(void *arg);
+
+ZTEST_SUITE(posix_networking, NULL, test_fs_setup, NULL, test_netdb_cleanup, test_fs_teardown);
