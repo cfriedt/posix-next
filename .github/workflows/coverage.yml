@@ -52,7 +52,7 @@ jobs:
           GITHUB_EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
-          git fetch origin main automation/coverage-json 2>/dev/null || git fetch origin main
+          git fetch origin main
           main_sha=$(git rev-parse origin/main)
           echo "main_sha=${main_sha}" >> "$GITHUB_OUTPUT"
           echo "skip_nightly=false" >> "$GITHUB_OUTPUT"
@@ -62,27 +62,24 @@ jobs:
             exit 0
           fi
 
-          prov="doc/metrics/coverage-provenance.json"
-          last=""
+          owner="${GITHUB_REPOSITORY%%/*}"
+          repo="${GITHUB_REPOSITORY#*/}"
+          last=$(curl -sSf --max-time 30 \
+            "https://api.codecov.io/api/v2/github/${owner}/repos/${repo}/commits/?branch=main" \
+            | jq -r '.results[0].commitid // empty') || last=""
 
-          if [ -f "$prov" ]; then
-            last=$(jq -r '.commit // empty' "$prov")
-            echo "Provenance on main checkout: commit=${last:-<empty>}"
-          elif git cat-file -e "origin/automation/coverage-json:${prov}" 2>/dev/null; then
-            last=$(git show "origin/automation/coverage-json:${prov}" | jq -r '.commit // empty')
-            echo "Provenance from automation/coverage-json: commit=${last:-<empty>}"
-          else
-            echo "No coverage provenance found; scheduled nightly will run"
+          if [ -z "$last" ]; then
+            echo "Could not determine last Codecov commit; scheduled nightly will run"
             exit 0
           fi
 
-          if [ -n "$last" ] && [ "$last" = "$main_sha" ]; then
+          if [ "$last" = "$main_sha" ]; then
             echo "skip_nightly=true" >> "$GITHUB_OUTPUT"
-            echo "Scheduled nightly skipped: main unchanged since last coverage snapshot (${main_sha})"
+            echo "Scheduled nightly skipped: main unchanged since last Codecov upload (${main_sha})"
             exit 0
           fi
 
-          echo "Scheduled nightly will run (main=${main_sha}, last coverage=${last:-<none>})"
+          echo "Scheduled nightly will run (main=${main_sha}, last Codecov commit=${last})"
 
       - name: Plan nightly shards
         id: plan
@@ -590,7 +587,7 @@ jobs:
           github.event_name != 'pull_request' &&
           needs.coverage-nightly-prep.outputs.skip_nightly == 'true'
         run: |
-          echo "Scheduled nightly skipped — main unchanged since last coverage snapshot"
+          echo "Scheduled nightly skipped — main unchanged since last Codecov upload"
           echo "main: ${{ needs.coverage-nightly-prep.outputs.main_sha }}"
 
       - name: Check coverage pipeline
