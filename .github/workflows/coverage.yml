@@ -44,46 +44,42 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          fetch-depth: 0
+          sparse-checkout: .github
 
       - name: Check if scheduled nightly should run
         id: skip
         shell: bash
         env:
-          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          git fetch origin main automation/coverage-json 2>/dev/null || git fetch origin main
-          main_sha=$(git rev-parse origin/main)
+          main_sha=$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" \
+            --jq .commit.sha)
           echo "main_sha=${main_sha}" >> "$GITHUB_OUTPUT"
           echo "skip_nightly=false" >> "$GITHUB_OUTPUT"
 
-          if [ "${GITHUB_EVENT_NAME:-}" != "schedule" ]; then
+          if [ "${GITHUB_EVENT_NAME}" != "schedule" ]; then
             echo "Not a scheduled run; nightly coverage enabled (main=${main_sha})"
             exit 0
           fi
 
-          prov="doc/metrics/coverage-provenance.json"
-          last=""
+          last_sha=""
+          last_conclusion=""
+          read -r last_sha last_conclusion < <(gh run list -R "${GITHUB_REPOSITORY}" \
+            --workflow "${GITHUB_WORKFLOW}" --branch main --status completed \
+            --limit 1 --json headSha,conclusion \
+            --jq '.[] | "\(.headSha) \(.conclusion)"') || true
 
-          if [ -f "$prov" ]; then
-            last=$(jq -r '.commit // empty' "$prov")
-            echo "Provenance on main checkout: commit=${last:-<empty>}"
-          elif git cat-file -e "origin/automation/coverage-json:${prov}" 2>/dev/null; then
-            last=$(git show "origin/automation/coverage-json:${prov}" | jq -r '.commit // empty')
-            echo "Provenance from automation/coverage-json: commit=${last:-<empty>}"
+          if [ -z "$last_sha" ]; then
+            echo "No completed run on main; scheduled nightly will run"
+          elif [ "$last_sha" != "$main_sha" ]; then
+            echo "Scheduled nightly will run (main=${main_sha}, last run=${last_sha})"
+          elif [ "$last_conclusion" != "success" ]; then
+            echo "Scheduled nightly will run: last run at ${main_sha} concluded ${last_conclusion}"
           else
-            echo "No coverage provenance found; scheduled nightly will run"
-            exit 0
-          fi
-
-          if [ -n "$last" ] && [ "$last" = "$main_sha" ]; then
             echo "skip_nightly=true" >> "$GITHUB_OUTPUT"
-            echo "Scheduled nightly skipped: main unchanged since last coverage snapshot (${main_sha})"
-            exit 0
+            echo "Scheduled nightly skipped: main unchanged since the last successful run (${main_sha})"
           fi
-
-          echo "Scheduled nightly will run (main=${main_sha}, last coverage=${last:-<none>})"
 
       - name: Plan nightly shards
         id: plan
@@ -558,7 +554,7 @@ jobs:
           github.event_name != 'pull_request' &&
           needs.coverage-nightly-prep.outputs.skip_nightly == 'true'
         run: |
-          echo "Scheduled nightly skipped — main unchanged since last coverage snapshot"
+          echo "Scheduled nightly skipped — main unchanged since the last successful run"
           echo "main: ${{ needs.coverage-nightly-prep.outputs.main_sha }}"
 
       - name: Check coverage pipeline
