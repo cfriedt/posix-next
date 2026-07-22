@@ -6,6 +6,10 @@ project(posix_signals)
 
 target_sources(app PRIVATE
   src/main.c
+  src/test_default_action.c
+  src/test_generate.c
+  src/test_sigaction.c
+  src/test_wait.c
   ../common/test_sigmask_common.c
 )
 

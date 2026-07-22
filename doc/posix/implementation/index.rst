@@ -181,6 +181,52 @@ This 1:1 design means:
   :ref:`POSIX subprofiles <posix_aep>` such as ``CONFIG_POSIX_AEP_CHOICE_PSE51``.
   
 
+.. _posix_implementation_signals:
+
+Signal Implementation Details
+=============================
+
+The :ref:`POSIX_SIGNALS <posix_option_group_signals>` option group is implemented on top of the
+kernel signal API (``k_sig_*``). Signals are delivered to a thread on its return from a system
+call, so a thread that never enters the kernel never runs a signal handler.
+
+``abort()``, ``raise()``, and ``signal()`` are the three functions of the option group that ISO C
+also requires, so they must work in a freestanding-plus-ISO-C environment where
+:kconfig:option:`CONFIG_POSIX_SIGNALS` is not selected. They are implemented once, in the common
+C library behind :kconfig:option:`CONFIG_COMMON_LIBC_SIGNAL`, and behave identically whichever
+standard they are reached through: the calling thread is the same thread in ISO C, POSIX, and the
+kernel. When the option group is linked, weak references pick up its signal number table and its
+delivery shim, so ``signal()`` makes the same kernel registration :c:func:`sigaction` makes and a
+disposition installed through either is visible to the other. Without it, only the six signal
+numbers ISO C defines (``SIGABRT``, ``SIGFPE``, ``SIGILL``, ``SIGINT``, ``SIGSEGV``, and
+``SIGTERM``) are reachable, and those coincide with the kernel's numbering, so handlers take
+delivery directly.
+
+Note that only the six ISO C signal numbers can be assumed: a C library is free to number every
+other signal however it likes, and the numbering shipped with a given toolchain need not match
+the Linux-aligned numbering used by the kernel and the POSIX option group.
+
+Zephyr does not support processes, which shapes the implementation in several ways:
+
+No processes
+   Zephyr has a single process, so a ``pid_t`` is either the value returned by :c:func:`getpid`,
+   which names the calling thread, or the ``pthread_t`` of a specific thread. Sending a signal to
+   a process group is not supported and fails with ``ESRCH``.
+
+Dispositions are per-thread
+   POSIX associates a signal action with the process, but the kernel action database is keyed by
+   (signal, thread), so an action installed by one thread is not in force for another. A thread
+   that needs to catch a signal must install the action itself.
+
+Kernel threads block all signals by default
+   A kernel thread must opt in to signal delivery, with :c:func:`sigprocmask` or
+   ``pthread_sigmask()``, before any signal can be delivered to it. User-mode threads start with
+   no signals blocked, in line with the POSIX specification.
+
+Faults are not signals
+   A CPU exception or kernel error is reported through the fatal error path rather than by
+   generating ``SIGILL``, ``SIGFPE``, ``SIGSEGV``, or ``SIGBUS`` for the offending thread.
+
 Elastipool: Elastic Object Pools
 =================================
 
