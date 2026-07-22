@@ -310,6 +310,12 @@ patches:
     upstreamable: true
     comments: |
       Add the k_signal API for inter-thread signaling.
+
+      Includes the SIGNAL_ACTION_DB_SIZE_MIN_* Kconfig contributor mechanism, a per-thread
+      count of signals delivered to a handler readable via k_sig_delivered(), a user_data
+      pointer carried with each k_sig_action (retrievable during handling via k_sig_current(),
+      for layers that interpose their own handler), and a system-wide alarm armed via
+      k_sig_alarm() that queues K_SIG_ALRM to the calling thread on expiry.
   - path: zephyr/k-thread-result.patch
     sha256sum: b7ade7382096b2c5b3cb7cab04807da536a81457a8a9b1796ad54489e790bacc
     module: zephyr
@@ -874,3 +880,27 @@ patches:
       instead of overwriting it with -errno. When a failed socket()/bind()/setsockopt()
       leaves errno at 0, -errno is 0, which the caller reads as a valid fd (0) and then
       calls recvfrom() on it, tripping the get_sock_vtable() crash above.
+  - path: zephyr/libc-isoc-signal-handling.patch
+    sha256sum: 426373171e549e556991c17c56a1bd20b1a909fdeaa2f041dc816f60075cbea7
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-22
+    upstreamable: true
+    comments: |
+      libc: common: implement the ISO C <signal.h> functions in terms of the kernel
+      k_sig_* API, behind COMMON_LIBC_SIGNAL. signal() and raise() were previously a
+      stub returning EINVAL and a declaration with no definition, and abort() panicked
+      the system rather than raising SIGABRT.
+
+      Both are shared with POSIX rather than overridden by it: the calling thread is the
+      same thread in ISO C, POSIX, and the kernel, and signal handling must behave the
+      same regardless of which standard the handler was installed through. When the POSIX
+      layer is linked, weak references pick up its signal number table
+      (z_sig_from_posix()) and its delivery shim (z_sig_shim()), making signal()'s kernel
+      registration identical to sigaction()'s; otherwise only the six ISO C signal
+      numbers are reachable, and those coincide with the kernel's, so handlers take
+      delivery directly.
+
+      Also reduces the minimal libc <signal.h> to what ISO C requires; the POSIX
+      additions already come from <zephyr/posix/posix_signal.h>, which it includes.
