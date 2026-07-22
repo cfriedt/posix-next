@@ -1,5 +1,4 @@
 common:
-  filter: not CONFIG_NATIVE_LIBC
   tags:
     - posix_signals
   # 1 tier0 platform per supported architecture
@@ -16,9 +15,19 @@ common:
     - qemu_arc/qemu_arc_hs5x
 tests:
   portability.posix.signals:
+    filter: not CONFIG_NATIVE_LIBC
     integration_platforms:
       - qemu_riscv64
+  portability.posix.signals.userspace:
+    integration_platforms:
+      - qemu_riscv64
+    filter: (not CONFIG_NATIVE_LIBC) and CONFIG_ARCH_SUPPORTS_USERSPACE_SIGNALS
+    tags: userspace
+    extra_configs:
+      - CONFIG_TEST_USERSPACE=y
+      - CONFIG_USERSPACE=y
   portability.posix.signals.minimal:
+    filter: not CONFIG_NATIVE_LIBC
     integration_platforms:
       - qemu_riscv64
     extra_configs:
@@ -26,19 +35,20 @@ tests:
   portability.posix.signals.newlib:
     integration_platforms:
       - qemu_riscv64
-    filter: TOOLCHAIN_HAS_NEWLIB == 1
+    filter: (not CONFIG_NATIVE_LIBC) and TOOLCHAIN_HAS_NEWLIB == 1
     extra_configs:
       - CONFIG_NEWLIB_LIBC=y
   portability.posix.signals.picolibc:
     integration_platforms:
       - qemu_riscv64
     tags: picolibc
-    filter: CONFIG_PICOLIBC_SUPPORTED
+    filter: (not CONFIG_NATIVE_LIBC) and CONFIG_PICOLIBC_SUPPORTED
     extra_configs:
       - CONFIG_PICOLIBC=y
   portability.posix.signals.big_nsig:
     # Large SIGNAL_SET_SIZE grows k_sig_ctx and pushes callee_saved past the
     # ARM64 stp/ldp immediate offset limit in arch/arm64/core/switch.S.
+    filter: not CONFIG_NATIVE_LIBC
     platform_allow:
       - qemu_riscv64
     integration_platforms:
@@ -48,6 +58,10 @@ tests:
       - CONFIG_SIGNAL_SET_SIZE=1058
   portability.posix.signals.linux_compat:
     tags: native
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
     filter: CONFIG_NATIVE_LIBC
     extra_configs:
       - CONFIG_POSIX_TEST_LINUX_COMPAT=y
+      - CONFIG_NATIVE_SIM_SLOWDOWN_TO_REAL_TIME=y
