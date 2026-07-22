@@ -30,6 +30,17 @@
 
 #define POSIX_OBJ_INITIALIZER (-1)
 
+/*
+ * Zephyr is effectively single-process; this is the constant PID reported by
+ * getpid() and recognized by kill(). Shared here so that POSIX_SIGNALS does
+ * not depend on POSIX_MULTI_PROCESS for the getpid() symbol.
+ *
+ * PID 0 indicates another namespace to some POSIX systems (and is used by the
+ * scheduler in others), PID 1 is usually init, and negative PIDs may address
+ * process groups via kill(), so an arbitrary value >= 2 is used.
+ */
+#define POSIX_THIS_PID 42
+
 struct posix_condattr {
 	/* leaves room for CLOCK_REALTIME (1, default) and CLOCK_MONOTONIC (4) */
 	unsigned char clock: 3;
