@@ -5,6 +5,7 @@
  */
 
 #include <pthread.h>
+#include <threads.h>
 #include <sched.h>
 #include <signal.h>
 #include <unistd.h>
@@ -22,7 +23,6 @@
 #define N_THR_E    3
 #define N_THR_T    3
 #define BOUNCES    64
-#define ONE_SECOND 1
 
 #define PTHREAD_CANCEL_INVALID -1
 #define PTHREAD_INVALID        ((pthread_t)(-1))
@@ -189,7 +189,12 @@ static void *thread_top_term(void *p1)
 		printk("Cancelling thread %d\n", id);
 		zassert_ok(pthread_cancel(self), "Thread %d could not be cancelled\n", id);
 	}
-	sleep(ONE_SECOND);
+	/*
+	 * ISO C, so no POSIX Option Group is required and it is safe on host
+	 * libc threads. Unlike sleep(), thrd_sleep() is not a cancellation
+	 * point, so cancelled threads sleep the full duration; keep it short.
+	 */
+	thrd_sleep(&(struct timespec){.tv_nsec = 100 * NSEC_PER_MSEC}, NULL);
 	printk("Exiting thread %d\n", id);
 	pthread_exit(p1);
 	return NULL;
