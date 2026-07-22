@@ -1,0 +1,367 @@
+diff --git a/lib/libc/Kconfig b/lib/libc/Kconfig
+index e1ed14f9604..601637a70fc 100644
+--- a/lib/libc/Kconfig
++++ b/lib/libc/Kconfig
+@@ -89,6 +89,7 @@ config MINIMAL_LIBC
+ 	depends on MINIMAL_LIBC_SUPPORTED
+ 	imply COMPILER_FREESTANDING
+ 	select COMMON_LIBC_ABORT
++	select COMMON_LIBC_SIGNAL if SIGNAL
+ 	select POSIX_C_LIB_EXT
+ 	imply COMMON_LIBC_MALLOC
+ 	imply COMMON_LIBC_CALLOC
+@@ -101,6 +102,7 @@ config MINIMAL_LIBC
+ config PICOLIBC
+ 	bool "Picolibc library"
+ 	select COMMON_LIBC_ABORT
++	select COMMON_LIBC_SIGNAL if SIGNAL
+ 	imply THREAD_LOCAL_STORAGE if ARCH_HAS_THREAD_LOCAL_STORAGE && TOOLCHAIN_SUPPORTS_THREAD_LOCAL_STORAGE
+ 	select LIBC_ERRNO if THREAD_LOCAL_STORAGE
+ 	select NEED_LIBC_MEM_PARTITION
+@@ -119,6 +121,7 @@ config PICOLIBC
+ config NEWLIB_LIBC
+ 	bool "Newlib C library"
+ 	select COMMON_LIBC_ABORT
++	select COMMON_LIBC_SIGNAL if SIGNAL
+ 	depends on NEWLIB_LIBC_SUPPORTED
+ 	select NEED_LIBC_MEM_PARTITION
+ 	select TC_PROVIDES_POSIX_C_LANG_SUPPORT_R
+diff --git a/lib/libc/common/CMakeLists.txt b/lib/libc/common/CMakeLists.txt
+index 28d4360a633..16140d8dcbf 100644
+--- a/lib/libc/common/CMakeLists.txt
++++ b/lib/libc/common/CMakeLists.txt
+@@ -10,6 +10,10 @@ zephyr_library_sources_ifdef(CONFIG_COMMON_LIBC_LOCALTIME source/time/localtime.
+ zephyr_library_sources_ifdef(CONFIG_COMMON_LIBC_CTIME source/time/ctime.c)
+ zephyr_library_sources_ifdef(CONFIG_COMMON_LIBC_TIME source/time/time.c)
+ zephyr_library_sources_ifdef(CONFIG_COMMON_LIBC_MALLOC source/stdlib/malloc.c)
++zephyr_library_sources_ifdef(CONFIG_COMMON_LIBC_SIGNAL
++    source/signal/raise.c
++    source/signal/signal.c
++    )
+ zephyr_library_sources_ifdef(CONFIG_COMMON_LIBC_THRD
+     source/thrd/cnd.c
+     source/thrd/mtx.c
+diff --git a/lib/libc/common/Kconfig b/lib/libc/common/Kconfig
+index 28fb68c7e59..d28f77d9bb5 100644
+--- a/lib/libc/common/Kconfig
++++ b/lib/libc/common/Kconfig
+@@ -114,6 +114,14 @@ config COMMON_LIBC_STRNLEN
+ 	help
+ 	  This option is deprecated. Please use POSIX_C_LIB_EXT instead.
+
++config COMMON_LIBC_SIGNAL
++	bool
++	help
++	  Common implementation of the ISO C <signal.h> functions signal() and raise(), and of the
++	  SIGABRT behaviour of abort(), in terms of the kernel k_sig_* API. Selected by each C
++	  library that relies on it; without it those functions come from the C library, where they
++	  have no way to reach Zephyr threads.
++
+ config COMMON_LIBC_THRD
+ 	bool "C11 <threads.h> API support"
+ 	depends on SYS_THREAD
+diff --git a/lib/libc/common/source/signal/raise.c b/lib/libc/common/source/signal/raise.c
+new file mode 100644
+index 00000000000..bed2a3ac615
+--- /dev/null
++++ b/lib/libc/common/source/signal/raise.c
+@@ -0,0 +1,36 @@
++/*
++ * SPDX-License-Identifier: Apache-2.0
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++ */
++
++#include "sig_isoc.h"
++
++#include <errno.h>
++#include <signal.h>
++
++#include <zephyr/kernel.h>
++#include <zephyr/kernel/signal.h>
++
++int raise(int sig)
++{
++	int ret;
++	int ksig;
++
++	ksig = (z_sig_from_posix != NULL) ? z_sig_from_posix(sig) : z_isoc_sig_to_k(sig);
++	if (ksig <= 0) {
++		errno = EINVAL;
++		return -1;
++	}
++
++	/*
++	 * ISO C requires the handler to have finished before raise() returns; the generated
++	 * k_sig_queue() wrapper drains pending signals before returning here.
++	 */
++	ret = k_sig_queue(k_current_get(), ksig, (union k_sig_val){0});
++	if (ret < 0) {
++		errno = -ret;
++		return -1;
++	}
++
++	return 0;
++}
+diff --git a/lib/libc/common/source/signal/sig_isoc.h b/lib/libc/common/source/signal/sig_isoc.h
+new file mode 100644
+index 00000000000..9bf24b8ed8d
+--- /dev/null
++++ b/lib/libc/common/source/signal/sig_isoc.h
+@@ -0,0 +1,66 @@
++/*
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_COMMON_SOURCE_SIGNAL_SIG_ISOC_H_
++#define ZEPHYR_LIB_LIBC_COMMON_SOURCE_SIGNAL_SIG_ISOC_H_
++
++#include <signal.h>
++
++#include <zephyr/kernel.h>
++#include <zephyr/kernel/signal.h>
++#include <zephyr/toolchain.h>
++
++/*
++ * The ISO C dispositions must be representable as kernel dispositions, since signal() hands
++ * them straight to k_sig_action() and hands k_sig_action()'s output straight back to the caller.
++ */
++BUILD_ASSERT((void *)SIG_DFL == K_SIG_DFL, "SIG_DFL does not match K_SIG_DFL");
++BUILD_ASSERT((void *)SIG_IGN == K_SIG_IGN, "SIG_IGN does not match K_SIG_IGN");
++BUILD_ASSERT((void *)SIG_ERR == K_SIG_ERR, "SIG_ERR does not match K_SIG_ERR");
++
++/**
++ * @brief Convert a C library signal number to a kernel signal number
++ *
++ * Only the six signals required by ISO C are translated. A C library is free to number signals
++ * however it likes, and the ones Zephyr ships with disagree: picolibc and newlib inherit Cygwin's
++ * numbering, where SIGUSR1 is 30, while the kernel and the POSIX option group follow Linux, where
++ * it is 10. Translating the rest needs the full table that the POSIX signals option group owns,
++ * so signal() defers to it by being weak, and raise() picks the full table up through a weak
++ * reference to z_sig_from_posix() when the POSIX layer is linked.
++ *
++ * @param sig C library signal number
++ * @return the corresponding kernel signal number, or -1 if @p sig is not an ISO C signal number
++ */
++static inline int z_isoc_sig_to_k(int sig)
++{
++	switch (sig) {
++	case SIGABRT:
++		return K_SIG_ABRT;
++	case SIGFPE:
++		return K_SIG_FPE;
++	case SIGILL:
++		return K_SIG_ILL;
++	case SIGINT:
++		return K_SIG_INT;
++	case SIGSEGV:
++		return K_SIG_SEGV;
++	case SIGTERM:
++		return K_SIG_TERM;
++	default:
++		return -1;
++	}
++}
++
++/*
++ * Provided by the POSIX signals option group when it is linked; resolve to NULL otherwise.
++ * z_sig_from_posix() maps a C library signal number to a kernel signal number using the full
++ * table the POSIX layer owns. z_sig_shim() is the handler the POSIX layer registers with the
++ * kernel: it recovers the application handler from the action's user_data and invokes it with
++ * the C library's signal number.
++ */
++int z_sig_from_posix(int sig) __attribute__((__weak__));
++void z_sig_shim(int sig, struct k_sig_info *info, void *context) __attribute__((__weak__));
++
++#endif /* ZEPHYR_LIB_LIBC_COMMON_SOURCE_SIGNAL_SIG_ISOC_H_ */
+diff --git a/lib/libc/common/source/signal/signal.c b/lib/libc/common/source/signal/signal.c
+index 0f383180bc6..2e1584f33ab 100644
+--- a/lib/libc/common/source/signal/signal.c
++++ b/lib/libc/common/source/signal/signal.c
+@@ -3,13 +3,57 @@
+  * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
+  */
+
++#include "sig_isoc.h"
++
+ #include <errno.h>
+ #include <signal.h>
+
+-void (*signal(int signum, void (*handler)(int)))(int)
++#include <zephyr/kernel.h>
++#include <zephyr/kernel/signal.h>
++
++void (*signal(int sig, void (*func)(int)))(int)
+ {
+-	ARG_UNUSED(signum);
+-	ARG_UNUSED(handler);
+-	errno = EINVAL;
+-	return SIG_ERR;
++	int ret;
++	int ksig;
++	struct k_sig_action oact;
++	struct k_sig_action act = {0};
++
++	ksig = (z_sig_from_posix != NULL) ? z_sig_from_posix(sig) : z_isoc_sig_to_k(sig);
++	if (ksig <= 0) {
++		errno = EINVAL;
++		return SIG_ERR;
++	}
++
++	if ((func == SIG_DFL) || (func == SIG_IGN)) {
++		act.handler = (func == SIG_IGN) ? K_SIG_IGN : K_SIG_DFL;
++	} else if (z_sig_shim != NULL) {
++		/*
++		 * The identical registration sigaction() makes for a plain handler, so a
++		 * disposition installed through either function is visible to the other.
++		 */
++		act.handler = z_sig_shim;
++		act.user_data = (void *)func;
++	} else {
++		/*
++		 * Without the POSIX layer only the six ISO C signal numbers are reachable, and
++		 * those coincide with the kernel's, so the handler can take delivery directly; it
++		 * ignores the trailing arguments the kernel passes.
++		 */
++		act.handler = (k_sig_handler_t)func;
++	}
++
++	/* ISO C dispositions carry no mask */
++	k_sig_emptyset(&act.mask);
++
++	ret = k_sig_action(ksig, &act, &oact);
++	if (ret < 0) {
++		errno = -ret;
++		return SIG_ERR;
++	}
++
++	if ((z_sig_shim != NULL) && (oact.handler == z_sig_shim)) {
++		return (void (*)(int))oact.user_data;
++	}
++
++	return (void (*)(int))oact.handler;
+ }
+diff --git a/lib/libc/common/source/stdlib/abort.c b/lib/libc/common/source/stdlib/abort.c
+index 3b17be4a638..7441611fad1 100644
+--- a/lib/libc/common/source/stdlib/abort.c
++++ b/lib/libc/common/source/stdlib/abort.c
+@@ -7,8 +7,48 @@
+ #include <stdlib.h>
+ #include <zephyr/kernel.h>
+
++#ifdef CONFIG_COMMON_LIBC_SIGNAL
++
++#include <signal.h>
++#include <zephyr/kernel/signal.h>
++
++/*
++ * ISO C says abort() raises SIGABRT. POSIX adds that SIGABRT must not be blocked when abort() is
++ * called, and that abort() must terminate the caller even when SIGABRT is caught or ignored.
++ */
++static void abort_sigabrt(void)
++{
++	struct k_sig_set set;
++	struct k_sig_action dfl = {
++		.handler = K_SIG_DFL,
++		.flags = 0,
++	};
++
++	k_sig_emptyset(&dfl.mask);
++	k_sig_emptyset(&set);
++	(void)k_sig_addset(&set, K_SIG_ABRT);
++	(void)k_sig_mask(K_SIG_UNBLOCK, &set, NULL);
++
++	(void)raise(SIGABRT);
++
++	/*
++	 * Still here, so SIGABRT was ignored or a handler caught it and returned. Restore the
++	 * default disposition, which terminates the calling thread, and raise it once more.
++	 */
++	(void)k_sig_action(K_SIG_ABRT, &dfl, NULL);
++	(void)raise(SIGABRT);
++}
++
++#else
++
++#define abort_sigabrt() do { } while (false)
++
++#endif /* CONFIG_COMMON_LIBC_SIGNAL */
++
+ FUNC_NORETURN void abort(void)
+ {
++	abort_sigabrt();
++
+ 	printk("abort()\n");
+ 	k_panic();
+ 	CODE_UNREACHABLE;
+diff --git a/lib/libc/minimal/include/signal.h b/lib/libc/minimal/include/signal.h
+index c2767d234b0..99bfb3aab65 100644
+--- a/lib/libc/minimal/include/signal.h
++++ b/lib/libc/minimal/include/signal.h
+@@ -1,7 +1,7 @@
+ /*
+  * Copyright (c) 2024 Synopsys
+- * Copyright (c) 2025 Tenstorrent AI ULC
+  *
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
+  * SPDX-License-Identifier: Apache-2.0
+  */
+
+@@ -12,6 +12,16 @@
+ extern "C" {
+ #endif
+
++/*
++ * Only what ISO C (7.14 "Signal handling <signal.h>") requires is declared here.
++ * POSIX additions live in <zephyr/posix/posix_signal.h>, included below, which expands to
++ * nothing unless _POSIX_C_SOURCE is defined.
++ */
++
++#define SIG_DFL ((void (*)(int))0)
++#define SIG_ERR ((void (*)(int))-1)
++#define SIG_IGN ((void (*)(int))1)
++
+ #define SIGABRT 6
+ #define SIGFPE  8
+ #define SIGILL  4
+@@ -19,19 +29,9 @@ extern "C" {
+ #define SIGSEGV 11
+ #define SIGTERM 15
+
+-#define SIG_DFL ((sighandler_t)0)
+-#define SIG_IGN ((sighandler_t)1)
+-#define SIG_ERR ((sighandler_t)(-1))
+-
+ typedef long sig_atomic_t;
+
+-#if !defined(_SIGHANDLER_T_DECLARED) && !defined(__sighandler_t_defined)
+-typedef void (*sighandler_t)(int sig);
+-#define _SIGHANDLER_T_DECLARED
+-#define __sighandler_t_defined
+-#endif
+-
+-sighandler_t signal(int sig, sighandler_t handler);
++void (*signal(int sig, void (*func)(int)))(int);
+ int raise(int sig);
+
+ #ifdef __cplusplus
+diff --git a/lib/libc/picolibc/include/signal.h b/lib/libc/picolibc/include/signal.h
+index 2d73f69d5ec..98c2a6cb7ce 100644
+--- a/lib/libc/picolibc/include/signal.h
++++ b/lib/libc/picolibc/include/signal.h
+@@ -33,6 +33,15 @@ typedef __pid_t pid_t;
+ #endif
+
+ #if defined(_POSIX_THREADS) || defined(__DOXYGEN__)
++
++/* POSIX requires <signal.h> to declare pthread_t when _POSIX_THREADS is defined */
++#if !(defined(_PTHREAD_T_DECLARED) && defined(__pthread_t_defined)) || defined(__DOXYGEN__)
++typedef __uint32_t pthread_t;
++#define _PTHREAD_T_DECLARED
++#define __pthread_t_defined
++#endif
++
++int pthread_kill(pthread_t thread, int sig);
+ int pthread_sigmask(int how, const sigset_t *ZRESTRICT set, sigset_t *ZRESTRICT oset);
+ #endif
+
