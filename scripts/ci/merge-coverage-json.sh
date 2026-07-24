@@ -5,6 +5,14 @@
 
 # Merge pre-filtered gcovr JSON traces into one output file.
 # Uses hierarchical batching so large local Twister runs do not OOM gcovr.
+#
+# Function "pos" fields are stripped from the inputs first: traces from the
+# host toolchain lack pos while SDK-gcc traces carry it, and gcovr 8.6's
+# --merge-mode-functions=merge-use-line-min rekeys counts without rekeying
+# start/end when only one side has pos, crashing serialization with a
+# KeyError for functions defined at config-dependent line numbers
+# (e.g. #ifdef'd duplicates in sem.c, mutex.h, net_pkt.h). Nothing
+# downstream consumes pos.
 
 set -euo pipefail
 
@@ -148,7 +156,22 @@ merge_many() {
   rm -rf "$tmpdir"
 }
 
-merge_many "$output" "${tracefiles[@]}"
+strip_dir=$(mktemp -d "${TMPDIR:-/tmp}/merge-coverage-strip.XXXXXX")
+trap 'rm -rf "$strip_dir"' EXIT
+
+stripped=()
+i=0
+for f in "${tracefiles[@]}"; do
+  s="${strip_dir}/trace-${i}.json"
+  if ! jq -c 'del(.files[]?.functions[]?.pos)' "$f" > "$s"; then
+    echo "merge-coverage-json: failed to strip pos from $f" >&2
+    exit 1
+  fi
+  stripped+=("$s")
+  i=$((i + 1))
+done
+
+merge_many "$output" "${stripped[@]}"
 
 if [ "$(jq '.files | length' "$output")" -eq 0 ]; then
   echo "merge-coverage-json: merge is empty ($output)" >&2
