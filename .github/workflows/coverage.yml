@@ -194,32 +194,25 @@ jobs:
           "$diagnose" --non-empty-out "$non_empty_traces" twister-out
 
           if [ -s "$non_empty_traces" ]; then
-            # shellcheck source=gcovr-config-args.sh
-            source "${{ github.workspace }}/${{ env.MANIFEST_PATH }}/scripts/ci/gcovr-config-args.sh"
+            scripts="${{ github.workspace }}/${{ env.MANIFEST_PATH }}/scripts/ci"
+            mapfile -t traces < "$non_empty_traces"
+            # merge through merge-coverage-json.sh, never raw gcovr
+            # --add-tracefile: it strips the function "pos" fields that
+            # make gcovr 8.6 crash when host and SDK traces are merged
+            "$scripts/merge-coverage-json.sh" \
+              --workspace "${{ github.workspace }}" \
+              --output "${{ github.workspace }}/twister-out/coverage-full.json" \
+              --ci-config "$CI_CONFIG" \
+              --filter-scope workspace \
+              -- "${traces[@]}"
+            "$scripts/filter-coverage-json.sh" --scope posix --ci-config "$CI_CONFIG" \
+              twister-out/coverage-full.json twister-out/coverage-posix.json
             gcovr_args=()
             while IFS= read -r a; do gcovr_args+=("$a"); done \
               < <(jq -r '.coverage_report.gcovr_args[]? // empty' "$CI_CONFIG")
-            workspace_filter_args=()
-            gcovr_load_filter_args workspace_filter_args workspace "$CI_CONFIG"
-            posix_filter_args=()
-            gcovr_load_filter_args posix_filter_args posix "$CI_CONFIG"
-            trace_args=()
-            while IFS= read -r f; do trace_args+=(--add-tracefile "$f"); done \
-              < "$non_empty_traces"
             gcovr -r "${{ github.workspace }}" \
               "${gcovr_args[@]}" \
-              "${trace_args[@]}" \
-              "${workspace_filter_args[@]}" \
-              --json twister-out/coverage-full.json
-            gcovr -r "${{ github.workspace }}" \
-              "${gcovr_args[@]}" \
-              --add-tracefile twister-out/coverage-full.json \
-              "${posix_filter_args[@]}" \
-              --json twister-out/coverage-posix.json
-            gcovr -r "${{ github.workspace }}" \
-              "${gcovr_args[@]}" \
-              --add-tracefile twister-out/coverage-full.json \
-              "${posix_filter_args[@]}" \
+              --add-tracefile twister-out/coverage-posix.json \
               --xml-pretty -o twister-out/coverage-posix.xml
             line_hits=$(jq '[.files[]?.lines[]?.count // empty | select(. > 0)] | length' twister-out/coverage-full.json)
             posix_hits=$(jq '[.files[]?.lines[]?.count // empty | select(. > 0)] | length' twister-out/coverage-posix.json)

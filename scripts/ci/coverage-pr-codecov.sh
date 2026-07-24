@@ -39,25 +39,22 @@ non_empty_traces="${RUNNER_TEMP:-/tmp}/non-empty-coverage-traces.txt"
 "$diagnose" --non-empty-out "$non_empty_traces" twister-out
 
 if [ -s "$non_empty_traces" ]; then
+  mapfile -t traces < "$non_empty_traces"
+  # merge through merge-coverage-json.sh, never raw gcovr --add-tracefile:
+  # it strips the function "pos" fields that make gcovr 8.6 crash when
+  # host and SDK traces are merged
+  "$POSIX_NEXT_PATH/scripts/ci/merge-coverage-json.sh" \
+    --workspace "$WORKSPACE_PATH" \
+    --output "$WORKSPACE_PATH/twister-out/coverage.json" \
+    --ci-config "$CI_CONFIG" \
+    --filter-scope posix \
+    -- "${traces[@]}"
   gcovr_args=()
   while IFS= read -r a; do gcovr_args+=("$a"); done \
     < <(jq -r '.coverage_report.gcovr_args[]? // empty' "$CI_CONFIG")
-  trace_args=()
-  while IFS= read -r f; do trace_args+=(--add-tracefile "$f"); done \
-    < "$non_empty_traces"
-  # shellcheck source=gcovr-config-args.sh
-  source "$POSIX_NEXT_PATH/scripts/ci/gcovr-config-args.sh"
-  posix_filter_args=()
-  gcovr_load_filter_args posix_filter_args posix "$CI_CONFIG"
   gcovr -r "$WORKSPACE_PATH" \
     "${gcovr_args[@]}" \
-    "${trace_args[@]}" \
-    "${posix_filter_args[@]}" \
-    --json twister-out/coverage.json
-  gcovr -r "$WORKSPACE_PATH" \
-    "${gcovr_args[@]}" \
-    "${trace_args[@]}" \
-    "${posix_filter_args[@]}" \
+    --add-tracefile twister-out/coverage.json \
     --xml-pretty -o twister-out/coverage.xml
   line_hits=$(jq '[.files[]?.lines[]?.count // empty | select(. > 0)] | length' twister-out/coverage.json)
   echo "PR coverage merge: ${line_hits} line hits"
