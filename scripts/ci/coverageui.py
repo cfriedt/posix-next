@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import errno
+from bisect import bisect_right
 import hashlib
 import json
 import mimetypes
@@ -1086,6 +1087,8 @@ class CoverageContainer:
         self.function_index: Dict[str, List[Dict[str, Any]]] = {}
         self.file_functions: Dict[str, List[Dict[str, Any]]] = {}
         self.directory_agg: Dict[str, Dict[str, int]] = {}
+        self._range_cache: Dict[str, List[Tuple[str, int, int]]] = {}
+        self._line_owner_cache: Dict[Tuple[str, int], Optional[str]] = {}
 
         self.option_group_symbols: Dict[str, Dict[str, Any]] = self._load_manifest(
             framework_config_path
@@ -1163,29 +1166,67 @@ class CoverageContainer:
         return out
 
     def _function_ranges(self, path: str) -> List[Tuple[str, int, int]]:
-        funcs = sorted(self.file_functions.get(path, []), key=lambda f: f["lineno"])
-        named = [
-            fn
-            for fn in funcs
-            if fn["name"] and not str(fn["name"]).startswith("<unknown")
-        ]
+        """Function ranges for *path*, keyed by definition line.
+
+        gcov function records in merged twister JSON are unreliable: bodies get
+        attributed to the wrong function and public definitions are relocated to
+        their header prototype line. Merge gcov's records with functions parsed
+        from the actual source so every definition bounds its neighbours' ranges.
+        """
+        cached = self._range_cache.get(path)
+        if cached is not None:
+            return cached
+
+        by_name: Dict[str, int] = {}
+        for fn in self.file_functions.get(path, []):
+            name = str(fn["name"] or "")
+            lineno = int(fn["lineno"] or 0)
+            if not name or name.startswith("<unknown") or lineno <= 0:
+                continue
+            if name not in by_name or lineno < by_name[name]:
+                by_name[name] = lineno
+        if path.endswith(".c") and self._is_local_posix(path):
+            for fn in self._parse_c_source_functions(path):
+                name = str(fn["name"])
+                lineno = int(fn["lineno"])
+                if name not in by_name or lineno < by_name[name]:
+                    by_name[name] = lineno
+
+        named = sorted(by_name.items(), key=lambda kv: kv[1])
         ranges: List[Tuple[str, int, int]] = []
-        for idx, fn in enumerate(named):
-            start = int(fn["lineno"])
-            end = int(named[idx + 1]["lineno"]) - 1 if idx + 1 < len(named) else 10**9
-            ranges.append((str(fn["name"]), start, end))
+        for idx, (name, start) in enumerate(named):
+            end = named[idx + 1][1] - 1 if idx + 1 < len(named) else 10**9
+            ranges.append((name, start, end))
+        self._range_cache[path] = ranges
         return ranges
 
+    def _line_owner(self, path: str, lnum: int) -> Optional[str]:
+        """Name of the function whose range contains (path, lnum), if known."""
+        key = (path, lnum)
+        if key in self._line_owner_cache:
+            return self._line_owner_cache[key]
+        owner: Optional[str] = None
+        ranges = self._function_ranges(path)
+        if ranges:
+            starts = [r[1] for r in ranges]
+            idx = bisect_right(starts, lnum) - 1
+            if idx >= 0:
+                name, start, end = ranges[idx]
+                if start <= lnum <= end:
+                    owner = name
+        self._line_owner_cache[key] = owner
+        return owner
+
     def _line_belongs_to_symbol(
-        self, path: str, lnum: int, symbol: str, function_name: str
+        self, path: str, lnum: int, symbol: str, line: Dict[str, Any]
     ) -> bool:
-        if function_name == symbol:
-            return True
-        if function_name.startswith("<unknown"):
-            for name, start, end in self._function_ranges(path):
-                if name == symbol and start <= lnum <= end:
-                    return True
-        return False
+        owner = self._line_owner(path, lnum)
+        if owner is not None:
+            return owner == symbol
+        names = line.get("function_names")
+        if names:
+            return symbol in names
+        return str(line.get("function_name") or "") == symbol
 
     def _symbol_line_branch_totals(
         self, symbol: str, prefer_path: Optional[str] = None
@@ -1196,8 +1237,7 @@ class CoverageContainer:
         for (path, lnum), line in self.line_map.items():
             if prefer_path and path != prefer_path:
                 continue
-            fn = str(line.get("function_name") or "")
-            if not self._line_belongs_to_symbol(path, lnum, symbol, fn):
+            if not self._line_belongs_to_symbol(path, lnum, symbol, line):
                 continue
             key = (path, lnum)
             if key in seen:
@@ -1223,14 +1263,15 @@ class CoverageContainer:
         if not symbol_list:
             return 0, 0, 0, 0
 
+        symbol_set = set(symbol_list)
         line_hit = line_total = branch_hit = branch_total = 0
         seen_lines: set[Tuple[str, int]] = set()
         for (path, lnum), line in self.line_map.items():
-            fn = str(line.get("function_name") or "")
-            if not any(
-                self._line_belongs_to_symbol(path, lnum, symbol, fn)
-                for symbol in symbol_list
-            ):
+            owner = self._line_owner(path, lnum)
+            if owner is not None:
+                if owner not in symbol_set:
+                    continue
+            elif not (line.get("function_names") or set()) & symbol_set:
                 continue
             key = (path, lnum)
             if key in seen_lines:
@@ -1277,14 +1318,53 @@ class CoverageContainer:
         return None
 
     @staticmethod
-    def _extract_line_counts(file_obj: Dict[str, Any]) -> Tuple[int, int]:
+    def _canonical_file_lines(file_obj: Dict[str, Any]) -> Dict[int, Dict[str, Any]]:
+        """Merge gcovr line records into one entry per source line.
+
+        Merged twister/gcovr JSON can carry several records for the same line
+        (one per gcov function group, sometimes with no function_name); taking
+        any single record under- or over-counts. Keep the max count, the richest
+        branch list, and the union of function names for symbol attribution.
+        """
+        merged: Dict[int, Dict[str, Any]] = {}
+        for line in file_obj.get("lines", []) or []:
+            lnum = int(line.get("line_number", 0))
+            if lnum <= 0:
+                continue
+            names: set[str] = set()
+            fn = line.get("function_name")
+            if fn:
+                names.add(str(fn))
+            cur = merged.get(lnum)
+            if cur is None:
+                entry = dict(line)
+                entry["function_names"] = names
+                merged[lnum] = entry
+                continue
+            cur["function_names"] |= names
+            cur["gcovr/excluded"] = bool(cur.get("gcovr/excluded")) and bool(
+                line.get("gcovr/excluded")
+            )
+            cur["count"] = max(int(cur.get("count") or 0), int(line.get("count") or 0))
+            old_branches = cur.get("branches") or []
+            new_branches = line.get("branches") or []
+            if len(new_branches) > len(old_branches) or (
+                len(new_branches) == len(old_branches)
+                and sum(int(b.get("count") or 0) for b in new_branches)
+                > sum(int(b.get("count") or 0) for b in old_branches)
+            ):
+                cur["branches"] = new_branches
+        return merged
+
+    @classmethod
+    def _extract_line_counts(cls, file_obj: Dict[str, Any]) -> Tuple[int, int]:
         if "line_covered" in file_obj and "line_total" in file_obj:
             return int(file_obj.get("line_covered", 0)), int(
                 file_obj.get("line_total", 0)
             )
         covered = 0
         total = 0
-        for line in file_obj.get("lines", []) or []:
+        for line in cls._canonical_file_lines(file_obj).values():
             if line.get("gcovr/excluded"):
                 continue
             total += 1
@@ -1304,15 +1384,15 @@ class CoverageContainer:
             covered += 1 if int(func.get("execution_count", 0)) > 0 else 0
         return covered, total
 
-    @staticmethod
-    def _extract_branch_counts(file_obj: Dict[str, Any]) -> Tuple[int, int]:
+    @classmethod
+    def _extract_branch_counts(cls, file_obj: Dict[str, Any]) -> Tuple[int, int]:
         if "branch_covered" in file_obj and "branch_total" in file_obj:
             return int(file_obj.get("branch_covered", 0)), int(
                 file_obj.get("branch_total", 0)
             )
         covered = 0
         total = 0
-        for line in file_obj.get("lines", []) or []:
+        for line in cls._canonical_file_lines(file_obj).values():
             if line.get("gcovr/excluded"):
                 continue
             for branch in line.get("branches", []) or []:
@@ -1381,10 +1461,7 @@ class CoverageContainer:
             )
             self._add_directory_totals(rel_path, self.file_totals[rel_path])
 
-            for line in file_obj.get("lines", []) or []:
-                line_num = int(line.get("line_number", 0))
-                if line_num <= 0:
-                    continue
+            for line_num, line in self._canonical_file_lines(file_obj).items():
                 self.line_map[(rel_path, line_num)] = line
 
             for func in file_obj.get("functions", []) or []:
@@ -1856,6 +1933,11 @@ class CoverageContainer:
                 continue
             candidates = self.function_index.get(symbol, [])
             local = [c for c in candidates if self._is_local_posix(c["path"])]
+            # A .c definition is the implementation; a header entry is usually a
+            # prototype line gcov mis-attributed the function record to.
+            local_c = [c for c in local if not c["path"].endswith(".h")]
+            if local_c:
+                local = local_c
             libc = [c for c in candidates if self._is_zephyr_libc_common(c["path"])]
 
             state: Dict[str, Any] = {
