@@ -1,0 +1,581 @@
+diff --git a/lib/libc/common/source/time/asctime.c b/lib/libc/common/source/time/asctime.c
+index 610d00fcca5..eb0fffec957 100644
+--- a/lib/libc/common/source/time/asctime.c
++++ b/lib/libc/common/source/time/asctime.c
+@@ -9,6 +9,11 @@
+ 
+ #include <time.h>
+ 
++/* POSIX, declared in <posix_time.h>; prototyped here so that the ISO C
++ * asctime() implementation does not depend on POSIX headers.
++ */
++char *asctime_r(const struct tm *ZRESTRICT tp, char *ZRESTRICT buf);
++
+ #define DATE_STRING_BUF_SZ  26U
+ 
+ char *asctime(const struct tm *tp)
+diff --git a/lib/libc/minimal/CMakeLists.txt b/lib/libc/minimal/CMakeLists.txt
+index 4fd82e731df..d79dfed683f 100644
+--- a/lib/libc/minimal/CMakeLists.txt
++++ b/lib/libc/minimal/CMakeLists.txt
+@@ -22,6 +22,7 @@ zephyr_library_sources(
+   source/stdlib/strtoll.c
+   source/stdlib/strtoull.c
+   source/stdlib/bsearch.c
++  source/stdlib/atexit.c
+   source/stdlib/exit.c
+   source/stdlib/qsort.c
+   source/string/strerror.c
+@@ -30,6 +31,8 @@ zephyr_library_sources(
+   source/string/strspn.c
+   source/stdio/stdout_console.c
+   source/stdio/fgetc.c
++  source/stdio/stream_state.c
++  source/stdio/tmpfile.c
+   source/stdio/fgets.c
+   source/stdio/fseek.c
+   source/stdio/sprintf.c
+@@ -51,6 +54,8 @@ if(CONFIG_MINIMAL_LIBC_TIME)
+   zephyr_library_sources(source/time/gmtime.c)
+ endif()
+ 
++zephyr_library_sources(source/time/clock.c)
++
+ zephyr_library_sources_ifdef(CONFIG_MINIMAL_LIBC_RAND source/stdlib/rand.c)
+ 
+ add_custom_command(
+diff --git a/lib/libc/minimal/include/stdlib.h b/lib/libc/minimal/include/stdlib.h
+index 5749f75eb43..ee589d8b45d 100644
+--- a/lib/libc/minimal/include/stdlib.h
++++ b/lib/libc/minimal/include/stdlib.h
+@@ -43,11 +43,9 @@ void qsort(void *base, size_t nmemb, size_t size,
+ 
+ #define EXIT_SUCCESS 0
+ #define EXIT_FAILURE 1
++int atexit(void (*func)(void));
+ FUNC_NORETURN void _exit(int status);
+-FUNC_NORETURN static inline void exit(int status)
+-{
+-	_exit(status);
+-}
++FUNC_NORETURN void exit(int status);
+ FUNC_NORETURN void abort(void);
+ 
+ #ifdef CONFIG_MINIMAL_LIBC_RAND
+diff --git a/lib/libc/minimal/include/time.h b/lib/libc/minimal/include/time.h
+index 98814672a4c..e53e71d0215 100644
+--- a/lib/libc/minimal/include/time.h
++++ b/lib/libc/minimal/include/time.h
+@@ -43,6 +43,8 @@ typedef _TIME_T_ time_t;
+ typedef _SUSECONDS_T_ suseconds_t;
+ #endif
+ 
++#define CLOCKS_PER_SEC 1000000
++
+ #if !defined(__clock_t_defined)
+ #define __clock_t_defined
+ typedef _CLOCK_T_ clock_t;
+@@ -58,16 +60,22 @@ typedef _CLOCK_T_ clock_t;
+  * results are always expressed as UTC.
+  */
+ struct tm *gmtime(const time_t *timep);
+-struct tm *gmtime_r(const time_t *ZRESTRICT timep,
+-		    struct tm *ZRESTRICT result);
+ char *asctime(const struct tm *timeptr);
+ struct tm *localtime(const time_t *timer);
+ char *ctime(const time_t *clock);
+-char *asctime_r(const struct tm *ZRESTRICT tp, char *ZRESTRICT buf);
+-char *ctime_r(const time_t *clock, char *buf);
++
++/*
++ * gmtime_r() and localtime_r() entered ISO C in C23; asctime_r() and
++ * ctime_r() remain POSIX-only and are declared in <posix_time.h>.
++ */
++#if defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 202311L)
++struct tm *gmtime_r(const time_t *ZRESTRICT timep,
++		    struct tm *ZRESTRICT result);
+ struct tm *localtime_r(const time_t *ZRESTRICT timer, struct tm *ZRESTRICT result);
++#endif
+ 
+ time_t time(time_t *tloc);
++clock_t clock(void);
+ 
+ #ifdef __cplusplus
+ }
+diff --git a/lib/libc/minimal/source/stdio/fgetc.c b/lib/libc/minimal/source/stdio/fgetc.c
+index 7f3da7d2bb5..eed7b75f8aa 100644
+--- a/lib/libc/minimal/source/stdio/fgetc.c
++++ b/lib/libc/minimal/source/stdio/fgetc.c
+@@ -10,6 +10,8 @@
+ #include <zephyr/sys/zvfs_libc.h>
+ #endif
+ 
++#include "stream_state.h"
++
+ int fgetc(FILE *stream)
+ {
+ #if defined(CONFIG_ZVFS)
+@@ -26,8 +28,14 @@ int fgetc(FILE *stream)
+ 		return EOF;
+ 	}
+ 
++	ret = minimal_stdio_pop_ungetc(fd);
++	if (ret >= 0) {
++		return ret;
++	}
++
+ 	ret = zvfs_read(fd, &ch, 1);
+ 	if (ret != 1) {
++		minimal_stdio_set_flags(fd, (ret == 0) ? MINIMAL_STDIO_EOF : MINIMAL_STDIO_ERROR);
+ 		return EOF;
+ 	}
+ 
+diff --git a/lib/libc/minimal/source/stdio/fseek.c b/lib/libc/minimal/source/stdio/fseek.c
+index 4d4620e4f7b..c4bc21bafd9 100644
+--- a/lib/libc/minimal/source/stdio/fseek.c
++++ b/lib/libc/minimal/source/stdio/fseek.c
+@@ -11,6 +11,8 @@
+ #include <zephyr/sys/zvfs_libc.h>
+ #endif
+ 
++#include "stream_state.h"
++
+ static int minimal_stream_fd(FILE *stream)
+ {
+ #if defined(CONFIG_ZVFS)
+@@ -30,7 +32,11 @@ static int minimal_stream_fd(FILE *stream)
+ 
+ void clearerr(FILE *stream)
+ {
+-	ARG_UNUSED(stream);
++	int fd = minimal_stream_fd(stream);
++
++	if (fd >= 0) {
++		minimal_stdio_clear_state(fd);
++	}
+ }
+ 
+ int fseek(FILE *stream, long offset, int whence)
+@@ -50,8 +56,12 @@ int fseek(FILE *stream, long offset, int whence)
+ 	}
+ 
+ 	pos = zvfs_lseek(fd, offset, whence);
++	if (pos != (off_t)-1) {
++		minimal_stdio_clear_state(fd);
++		return 0;
++	}
+ 
+-	return (pos == (off_t)-1) ? -1 : 0;
++	return -1;
+ #else
+ 	ARG_UNUSED(offset);
+ 	ARG_UNUSED(whence);
+diff --git a/lib/libc/minimal/source/stdio/stdout_console.c b/lib/libc/minimal/source/stdio/stdout_console.c
+index 159f035ffdc..5866c3eb07c 100644
+--- a/lib/libc/minimal/source/stdio/stdout_console.c
++++ b/lib/libc/minimal/source/stdio/stdout_console.c
+@@ -14,6 +14,8 @@
+ #if defined(CONFIG_ZVFS)
+ #include <zephyr/sys/zvfs.h>
+ #include <zephyr/sys/zvfs_libc.h>
++
++#include "stream_state.h"
+ #endif
+ 
+ static int _stdout_hook_default(int c)
+@@ -84,20 +86,33 @@ static size_t minimal_zvfs_stream_read(int fd, void *ptr, size_t nbyte)
+ static size_t minimal_stream_read(void *ptr, size_t nbyte, FILE *stream)
+ {
+ #if defined(CONFIG_ZVFS)
++	size_t nread = 0;
++	unsigned char *dst = ptr;
+ 	int fd = zvfs_libc_fileno(stream);
+ 
+-	if (fd < 3) {
++	if (fd < 3 || nbyte == 0) {
+ 		return 0;
+ 	}
+ 
+-	return minimal_zvfs_stream_read(fd, ptr, nbyte);
++	int c = minimal_stdio_pop_ungetc(fd);
++
++	if (c >= 0) {
++		dst[nread++] = (unsigned char)c;
++	}
++
++	nread += minimal_zvfs_stream_read(fd, &dst[nread], nbyte - nread);
++	if (nread == 0) {
++		minimal_stdio_set_flags(fd, MINIMAL_STDIO_EOF);
++	}
++
++	return nread;
+ #else
+ 	ARG_UNUSED(ptr);
+ 	ARG_UNUSED(nbyte);
+ 	ARG_UNUSED(stream);
+-#endif
+ 
+ 	return 0;
++#endif
+ }
+ 
+ static size_t minimal_stream_write(const void *ptr, size_t nbyte, FILE *stream)
+diff --git a/lib/libc/minimal/source/stdio/stream_state.c b/lib/libc/minimal/source/stdio/stream_state.c
+new file mode 100644
+index 00000000000..f79222d931e
+--- /dev/null
++++ b/lib/libc/minimal/source/stdio/stream_state.c
+@@ -0,0 +1,164 @@
++/*
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <stdio.h>
++
++#include <zephyr/logging/log.h>
++#include <zephyr/sys/util.h>
++#include <zephyr/toolchain.h>
++
++#include "stream_state.h"
++
++#if defined(CONFIG_ZVFS)
++#include <zephyr/sys/zvfs.h>
++#include <zephyr/sys/zvfs_libc.h>
++
++/* ZVFS_OPEN_SIZE is a global compile definition when CONFIG_ZVFS=y */
++#define MINIMAL_STDIO_NSTREAMS ZVFS_OPEN_SIZE
++
++static struct {
++	short ungetc_char; /* character + 1; 0 means none pending */
++	unsigned char flags;
++} stream_state[MINIMAL_STDIO_NSTREAMS];
++
++static bool stream_state_valid(int fd)
++{
++	return (fd >= 0) && (fd < MINIMAL_STDIO_NSTREAMS);
++}
++
++void minimal_stdio_set_flags(int fd, unsigned char flags)
++{
++	if (stream_state_valid(fd)) {
++		stream_state[fd].flags |= flags;
++	}
++}
++
++void minimal_stdio_clear_state(int fd)
++{
++	if (stream_state_valid(fd)) {
++		stream_state[fd].flags = 0;
++		stream_state[fd].ungetc_char = 0;
++	}
++}
++
++int minimal_stdio_push_ungetc(int fd, int c)
++{
++	if (!stream_state_valid(fd) || (c == EOF) || (stream_state[fd].ungetc_char != 0)) {
++		return EOF;
++	}
++
++	stream_state[fd].ungetc_char = (short)((c & 0xff) + 1);
++	stream_state[fd].flags &= (unsigned char)~MINIMAL_STDIO_EOF;
++
++	return c & 0xff;
++}
++
++int minimal_stdio_pop_ungetc(int fd)
++{
++	int c;
++
++	if (!stream_state_valid(fd) || (stream_state[fd].ungetc_char == 0)) {
++		return -1;
++	}
++
++	c = stream_state[fd].ungetc_char - 1;
++	stream_state[fd].ungetc_char = 0;
++
++	return c;
++}
++
++static int stream_state_fd(FILE *stream)
++{
++	if (stream == NULL) {
++		return -1;
++	}
++
++	return zvfs_libc_fileno(stream);
++}
++
++static int stream_state_flags(FILE *stream, unsigned char flags)
++{
++	int fd = stream_state_fd(stream);
++
++	if (!stream_state_valid(fd)) {
++		return 0;
++	}
++
++	return (stream_state[fd].flags & flags) != 0;
++}
++
++int feof(FILE *stream)
++{
++	return stream_state_flags(stream, MINIMAL_STDIO_EOF);
++}
++
++int ferror(FILE *stream)
++{
++	return stream_state_flags(stream, MINIMAL_STDIO_ERROR);
++}
++
++int ungetc(int c, FILE *stream)
++{
++	int fd = stream_state_fd(stream);
++
++	if (fd < 3) {
++		return EOF;
++	}
++
++	return minimal_stdio_push_ungetc(fd, c);
++}
++#else /* CONFIG_ZVFS */
++LOG_MODULE_REGISTER(minimal_libc_stream, CONFIG_LOG_DEFAULT_LEVEL);
++
++void minimal_stdio_set_flags(int fd, unsigned char flags)
++{
++	ARG_UNUSED(fd);
++	ARG_UNUSED(flags);
++}
++
++void minimal_stdio_clear_state(int fd)
++{
++	ARG_UNUSED(fd);
++}
++
++int minimal_stdio_push_ungetc(int fd, int c)
++{
++	ARG_UNUSED(fd);
++	ARG_UNUSED(c);
++
++	return EOF;
++}
++
++int minimal_stdio_pop_ungetc(int fd)
++{
++	ARG_UNUSED(fd);
++
++	return -1;
++}
++
++int feof(FILE *stream)
++{
++	ARG_UNUSED(stream);
++
++	return 0;
++}
++
++int ferror(FILE *stream)
++{
++	ARG_UNUSED(stream);
++
++	return 0;
++}
++
++int ungetc(int c, FILE *stream)
++{
++	ARG_UNUSED(c);
++	ARG_UNUSED(stream);
++
++	LOG_WRN_ONCE("ungetc() requires CONFIG_ZVFS");
++
++	return EOF;
++}
++#endif /* CONFIG_ZVFS */
+diff --git a/lib/libc/minimal/source/stdio/stream_state.h b/lib/libc/minimal/source/stdio/stream_state.h
+new file mode 100644
+index 00000000000..4eefe6b6a77
+--- /dev/null
++++ b/lib/libc/minimal/source/stdio/stream_state.h
+@@ -0,0 +1,24 @@
++/*
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_MINIMAL_SOURCE_STDIO_STREAM_STATE_H_
++#define ZEPHYR_LIB_LIBC_MINIMAL_SOURCE_STDIO_STREAM_STATE_H_
++
++/*
++ * Per-stream end-of-file / error flags and single-character ungetc()
++ * push-back for the minimal libc's unbuffered, file-descriptor-backed
++ * FILE streams.
++ */
++
++#define MINIMAL_STDIO_EOF   0x01
++#define MINIMAL_STDIO_ERROR 0x02
++
++void minimal_stdio_set_flags(int fd, unsigned char flags);
++void minimal_stdio_clear_state(int fd);
++int minimal_stdio_push_ungetc(int fd, int c);
++/* returns the pushed-back character, or -1 when none is pending */
++int minimal_stdio_pop_ungetc(int fd);
++
++#endif /* ZEPHYR_LIB_LIBC_MINIMAL_SOURCE_STDIO_STREAM_STATE_H_ */
+diff --git a/lib/libc/minimal/source/stdio/tmpfile.c b/lib/libc/minimal/source/stdio/tmpfile.c
+new file mode 100644
+index 00000000000..51f9c503b56
+--- /dev/null
++++ b/lib/libc/minimal/source/stdio/tmpfile.c
+@@ -0,0 +1,66 @@
++/*
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <stdio.h>
++
++#include <zephyr/logging/log.h>
++#include <zephyr/sys/util.h>
++#include <zephyr/toolchain.h>
++
++LOG_MODULE_REGISTER(minimal_libc_tmpfile, CONFIG_LOG_DEFAULT_LEVEL);
++
++#if defined(CONFIG_ZVFS)
++#include <zephyr/sys/fdtable.h>
++#include <zephyr/sys/zvfs.h>
++#include <zephyr/sys/zvfs_fs.h>
++#include <zephyr/sys/zvfs_libc.h>
++#endif
++
++char *tmpnam(char *s)
++{
++	static char name[L_tmpnam];
++	static unsigned int counter;
++	char *buf = (s == NULL) ? name : s;
++
++	if (counter >= TMP_MAX) {
++		return NULL;
++	}
++
++	(void)snprintf(buf, L_tmpnam, "/tmp/tmp_%04u", counter++);
++
++	return buf;
++}
++
++FILE *tmpfile(void)
++{
++#if defined(CONFIG_ZVFS)
++	char name[L_tmpnam];
++	FILE *fp;
++	int fd;
++
++	if (tmpnam(name) == NULL) {
++		return NULL;
++	}
++
++	fd = zvfs_open(name, ZVFS_O_RDWR | ZVFS_O_CREAT | ZVFS_O_TRUNC, 0600);
++	if (fd < 0) {
++		return NULL;
++	}
++
++	fp = zvfs_libc_fdopen(fd, "wb+");
++	if (fp == NULL) {
++		(void)zvfs_close(fd);
++	}
++
++	/*
++	 * Deviation from ISO C: the file is not automatically removed when
++	 * it is closed or on normal program termination.
++	 */
++	return fp;
++#else
++	LOG_WRN_ONCE("tmpfile() requires CONFIG_ZVFS");
++	return NULL;
++#endif
++}
+diff --git a/lib/libc/minimal/source/stdlib/atexit.c b/lib/libc/minimal/source/stdlib/atexit.c
+new file mode 100644
+index 00000000000..09c8bc61654
+--- /dev/null
++++ b/lib/libc/minimal/source/stdlib/atexit.c
+@@ -0,0 +1,46 @@
++/*
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <stdlib.h>
++
++#include <zephyr/spinlock.h>
++#include <zephyr/toolchain.h>
++
++/* ISO C requires support for at least 32 registrations; embedded targets
++ * rarely use more than a few, and each slot costs a function pointer.
++ */
++#define ATEXIT_MAX 8
++
++static struct k_spinlock atexit_lock;
++static void (*atexit_handlers[ATEXIT_MAX])(void);
++static int atexit_count;
++
++int atexit(void (*func)(void))
++{
++	int ret = -1;
++	k_spinlock_key_t key;
++
++	if (func == NULL) {
++		return -1;
++	}
++
++	key = k_spin_lock(&atexit_lock);
++	if (atexit_count < ATEXIT_MAX) {
++		atexit_handlers[atexit_count++] = func;
++		ret = 0;
++	}
++	k_spin_unlock(&atexit_lock, key);
++
++	return ret;
++}
++
++FUNC_NORETURN void exit(int status)
++{
++	for (int i = atexit_count - 1; i >= 0; i--) {
++		atexit_handlers[i]();
++	}
++
++	_exit(status);
++}
+diff --git a/lib/libc/minimal/source/time/clock.c b/lib/libc/minimal/source/time/clock.c
+new file mode 100644
+index 00000000000..749022bdaa4
+--- /dev/null
++++ b/lib/libc/minimal/source/time/clock.c
+@@ -0,0 +1,15 @@
++/*
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <time.h>
++
++#include <zephyr/kernel.h>
++#include <zephyr/sys/time_units.h>
++
++clock_t clock(void)
++{
++	/* CLOCKS_PER_SEC is 1000000: processor time in microseconds */
++	return (clock_t)k_ticks_to_us_floor64(k_uptime_ticks());
++}
+diff --git a/lib/libc/minimal/source/time/gmtime.c b/lib/libc/minimal/source/time/gmtime.c
+index 8df80d7c7c8..52564ba2776 100644
+--- a/lib/libc/minimal/source/time/gmtime.c
++++ b/lib/libc/minimal/source/time/gmtime.c
+@@ -8,6 +8,9 @@
+ #include <zephyr/sys/libc-hooks.h>
+ 
+ #ifdef CONFIG_MINIMAL_LIBC_NON_REENTRANT_FUNCTIONS
++/* ISO C only from C23 (see <time.h>); prototyped here for older standards */
++struct tm *gmtime_r(const time_t *ZRESTRICT timep, struct tm *ZRESTRICT result);
++
+ static Z_LIBC_DATA struct tm gmtime_result;
+ 
+ struct tm *gmtime(const time_t *timep)

@@ -1151,3 +1151,23 @@ patches:
 
       Also reduces the minimal libc <signal.h> to what ISO C requires; the POSIX
       additions already come from <zephyr/posix/posix_signal.h>, which it includes.
+  - path: zephyr/minimal-libc-iso-c-stdio-stdlib-time-units.patch
+    sha256sum: 70fc9db12748e6d9cd1e5d4140316a861435d773556a6fbf854e0531587d8aa2
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-25
+    upstreamable: true
+    comments: |
+      Implement the remaining ISO C units in the minimal libc so that the
+      symbols always link: feof(), ferror(), ungetc() (per-stream EOF/error
+      flags and single-character push-back for the unbuffered fd-backed FILE
+      streams), a real clearerr(), tmpfile(), tmpnam(), atexit() (run by
+      exit()), and clock() (CLOCKS_PER_SEC = 1000000, microseconds of uptime).
+      Functions that require CONFIG_ZVFS fail visibly with LOG_WRN_ONCE naming
+      the missing option when it is not enabled.
+
+      Also align <time.h> with ISO C: gmtime_r()/localtime_r() are visible only
+      for C23 and newer; asctime_r()/ctime_r() are POSIX-only and now live
+      solely in <posix_time.h> (their in-tree ISO C callers carry local
+      prototypes).
