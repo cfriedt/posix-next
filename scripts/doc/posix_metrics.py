@@ -41,6 +41,12 @@ try:
 except ImportError:  # pragma: no cover - doc builds always have PyYAML
     yaml = None
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "ci"))
+try:
+    import jsonball
+except ImportError:  # pragma: no cover
+    jsonball = None
+
 TWISTER_SUMMARY_SCHEMA_VERSION = 1
 
 _CFUNC_RE = re.compile(r":c:func:`(\w+)`")
@@ -136,9 +142,19 @@ def _load_yaml(path: Path) -> dict:
 
 
 def _load_json(path: Path) -> dict | None:
+    """Load JSON from ``path``, or from a ``<path>.sh`` jsonball beside it."""
     try:
         with path.open() as f:
             return json.load(f)
+    except ValueError:
+        return None
+    except OSError:
+        pass
+    ball = path.with_name(path.name + ".sh")
+    if jsonball is None or not ball.is_file():
+        return None
+    try:
+        return jsonball.load(ball)
     except (OSError, ValueError):
         return None
 
