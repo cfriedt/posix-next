@@ -15,6 +15,7 @@ HTML_DIR="$BUILD_DIR/html"
 SERVE=0
 STRICT=0
 LIVE=0
+REFRESH=1
 
 usage() {
 	cat <<'EOF'
@@ -27,6 +28,8 @@ Options:
   -s, --serve   Start a local HTTP server after a successful build
   --strict      Treat Sphinx warnings as errors (-W --keep-going, same as CI)
   --live        Run sphinx-autobuild (html-live) instead of a one-shot build
+  --no-refresh  Do not regenerate doc/metrics/twister-summary.json.sh from
+                local <workspace>/twister-out* results before building
 
 Environment:
   ZEPHYR_BASE          Zephyr tree (auto-sourced from the west workspace when unset)
@@ -64,6 +67,10 @@ while [[ $# -gt 0 ]]; do
 		LIVE=1
 		shift
 		;;
+	--no-refresh)
+		REFRESH=0
+		shift
+		;;
 	*)
 		echo "docs.sh: unknown option: $1" >&2
 		usage >&2
@@ -93,6 +100,42 @@ export SPHINXOPTS_EXTRA="${SPHINXOPTS_EXTRA:-}"
 
 if [[ "$STRICT" -eq 1 ]]; then
 	export SPHINXOPTS="$SPHINXOPTS -W --keep-going"
+fi
+
+# Regenerate the twister summary badge metadata from local twister results,
+# mirroring the twister-summary-publish CI job. Retry directories
+# (twister-out.N) are listed before the final twister-out: the summarizer
+# merges last-wins per (suite, platform).
+refresh_twister_summary() {
+	local workspace inputs=()
+
+	workspace="$($REALPATH "$POSIX_NEXT_PATH"/../../..)"
+	for f in "$workspace"/twister-out.*/twister.json "$workspace"/twister-out/twister.json; do
+		[[ -f "$f" ]] && inputs+=("$f")
+	done
+	if [[ ${#inputs[@]} -eq 0 ]]; then
+		echo "docs.sh: no $workspace/twister-out*/twister.json;" \
+			"keeping committed twister summary"
+		return 0
+	fi
+
+	local tmp
+	tmp="$(mktemp -d)"
+	# shellcheck disable=SC2064
+	trap "rm -rf '$tmp'" RETURN
+
+	python3 "$SCRIPT_PATH/twister-summarize.py" \
+		--output "$tmp/twister-summary.json" \
+		--commit "$(git -C "$POSIX_NEXT_PATH" rev-parse HEAD)" \
+		--profile local \
+		"${inputs[@]}"
+	python3 "$SCRIPT_PATH/jsonball.py" pack "$tmp/twister-summary.json" \
+		-o "$DOC_DIR/metrics/twister-summary.json.sh"
+	echo "docs.sh: refreshed doc/metrics/twister-summary.json.sh (local; do not commit)"
+}
+
+if [[ "$REFRESH" -eq 1 ]]; then
+	refresh_twister_summary
 fi
 
 if [[ "$LIVE" -eq 1 ]]; then
