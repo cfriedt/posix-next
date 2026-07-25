@@ -28,6 +28,26 @@ nightly coverage job is skipped.
 Use Codecov for browsing source coverage; use the committed JSON for offline
 diffs or tooling.
 
+Twister results
+---------------
+
+The `Twister <https://github.com/cfriedt/posix-next/actions/workflows/twister.yml>`__
+workflow's scheduled runs commit an abridged results summary when outcomes
+change (via the ``automation/twister-summary`` bot PR):
+
+- ``twister-summary.json`` — per Option Group, per twister scenario variant
+  (``base``, ``minimal``, ``linux_compat``, ...): aggregate status, instance
+  counts, and platforms, plus provenance (commit, run URL, timestamp). It is
+  produced by ``scripts/ci/twister-summarize.py`` from the per-shard
+  ``twister.json`` reports.
+
+At documentation build time, ``scripts/doc/posix_metrics.py`` combines this
+summary with ``coverage-posix.json``, the Option Group tables, and the curated
+``doc/*.yaml`` metadata to render the badges on the
+:ref:`Option Group pages <posix_option_groups>` (via the ``posix_badges``
+Sphinx extension). Missing or stale snapshots degrade to absent badges; doc
+builds never require fresh CI data.
+
 .. raw:: html
 
    <p>
