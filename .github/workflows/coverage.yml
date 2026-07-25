@@ -461,16 +461,25 @@ jobs:
           set -euo pipefail
           dest="${{ github.workspace }}/doc/metrics"
           changed=0
-          for f in coverage-full.json coverage-posix.json coverage-provenance.json; do
+          # gcovr snapshots are stored as jsonball shellballs; compare the
+          # new payload sha256 against the ball's embedded PN_SHA256
+          for f in coverage-full.json coverage-posix.json; do
             if [ ! -f "coverage-json-snapshot/$f" ]; then
               echo "Missing coverage-json-snapshot/$f" >&2
               exit 1
             fi
-            if [ ! -f "$dest/$f" ] || ! cmp -s "coverage-json-snapshot/$f" "$dest/$f"; then
+            new_sha=$(sha256sum "coverage-json-snapshot/$f" | cut -d' ' -f1)
+            old_sha=$(sed -n 's/^PN_SHA256="\(.*\)"$/\1/p' "$dest/$f.sh" 2>/dev/null || true)
+            if [ "$new_sha" != "$old_sha" ]; then
               echo "Changed: $f"
               changed=1
             fi
           done
+          if [ ! -f "$dest/coverage-provenance.json" ] || \
+             ! cmp -s coverage-json-snapshot/coverage-provenance.json "$dest/coverage-provenance.json"; then
+            echo "Changed: coverage-provenance.json"
+            changed=1
+          fi
           if [ "$changed" -eq 0 ]; then
             echo "coverage_changed=false" >> "$GITHUB_OUTPUT"
             echo "Coverage JSON unchanged; skipping publish PR"
@@ -478,7 +487,11 @@ jobs:
           fi
           echo "coverage_changed=true" >> "$GITHUB_OUTPUT"
           mkdir -p "$dest"
-          cp -a coverage-json-snapshot/. "$dest/"
+          python3 scripts/ci/jsonball.py pack coverage-json-snapshot/coverage-full.json \
+            -o "$dest/coverage-full.json.sh"
+          python3 scripts/ci/jsonball.py pack coverage-json-snapshot/coverage-posix.json \
+            -o "$dest/coverage-posix.json.sh"
+          cp coverage-json-snapshot/coverage-provenance.json "$dest/"
 
       - name: Create or update coverage JSON PR
         if: steps.changes.outputs.coverage_changed == 'true'
@@ -488,8 +501,8 @@ jobs:
           branch: automation/coverage-json
           sign-commits: true
           add-paths: |
-            doc/metrics/coverage-full.json
-            doc/metrics/coverage-posix.json
+            doc/metrics/coverage-full.json.sh
+            doc/metrics/coverage-posix.json.sh
             doc/metrics/coverage-provenance.json
           title: "doc: refresh nightly coverage JSON snapshots"
           commit-message: "doc: refresh nightly coverage JSON snapshots"
