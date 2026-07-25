@@ -270,20 +270,23 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          dest=doc/metrics/twister-summary.json
+          dest=doc/metrics/twister-summary.json.sh
           # Ignore provenance-only churn (timestamp/run URL/commit) so an
-          # unchanged result set does not open a no-op PR.
+          # unchanged result set does not open a no-op PR. The committed
+          # snapshot is a jsonball shellball; unpack it for the comparison.
           norm() {
             jq -S 'del(.provenance.created_at, .provenance.workflow_run_url,
-                       .provenance.commit, .provenance.commit_short)' "$1"
+                       .provenance.commit, .provenance.commit_short)'
           }
-          if [ -f "$dest" ] && diff <(norm "$dest") <(norm "${RUNNER_TEMP}/twister-summary.json") >/dev/null; then
+          if [ -f "$dest" ] && \
+             diff <(python3 scripts/ci/jsonball.py unpack "$dest" | norm) \
+                  <(norm < "${RUNNER_TEMP}/twister-summary.json") >/dev/null; then
             echo "summary_changed=false" >> "$GITHUB_OUTPUT"
             echo "Twister summary unchanged; skipping publish PR"
             exit 0
           fi
           echo "summary_changed=true" >> "$GITHUB_OUTPUT"
-          cp "${RUNNER_TEMP}/twister-summary.json" "$dest"
+          python3 scripts/ci/jsonball.py pack "${RUNNER_TEMP}/twister-summary.json" -o "$dest"
 
       - name: Create or update twister summary PR
         if: steps.changes.outputs.summary_changed == 'true'
@@ -293,7 +296,7 @@ jobs:
           branch: automation/twister-summary
           sign-commits: true
           add-paths: |
-            doc/metrics/twister-summary.json
+            doc/metrics/twister-summary.json.sh
           title: "doc: refresh nightly twister summary"
           commit-message: "doc: refresh nightly twister summary"
           body: |
