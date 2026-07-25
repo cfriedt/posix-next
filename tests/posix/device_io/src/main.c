@@ -277,4 +277,144 @@ ZTEST_USER(posix_device_io, test_perror)
 	perror("posix_device_io");
 }
 
+/* open TEST_FILE, write msg, rewind; skip the running test when unsupported */
+static FILE *iso_c_prepare_file(const char *msg)
+{
+	FILE *fp;
+
+	cleanup_test_file();
+	fp = fopen(TEST_FILE, "w+");
+	if (fp == NULL) {
+		TC_PRINT("fopen() not supported in this configuration (errno=%d)\n", errno);
+		ztest_test_skip();
+		return NULL;
+	}
+	if (msg != NULL) {
+		zassert_true(fputs(msg, fp) >= 0, "fputs() failed, errno=%d", errno);
+		zassert_ok(fflush(fp));
+		zassert_ok(fseek(fp, 0, SEEK_SET));
+	}
+	return fp;
+}
+
+static void iso_c_close_file(FILE *fp)
+{
+	zassert_ok(fclose(fp));
+	cleanup_test_file();
+}
+
+ZTEST_USER(posix_device_io, test_stdin)
+{
+	zassert_not_null(stdin);
+}
+
+ZTEST_USER(posix_device_io, test_stdout)
+{
+	zassert_not_null(stdout);
+}
+
+ZTEST_USER(posix_device_io, test_stderr)
+{
+	zassert_not_null(stderr);
+}
+
+ZTEST_USER(posix_device_io, test_printf)
+{
+	zassert_true(printf("%s", "") >= 0);
+}
+
+ZTEST_USER(posix_device_io, test_fprintf)
+{
+	zassert_true(fprintf(stdout, "%s", "") >= 0);
+}
+
+ZTEST_USER(posix_device_io, test_fputs)
+{
+	zassert_true(fputs("", stdout) >= 0);
+}
+
+ZTEST_USER(posix_device_io, test_putchar)
+{
+	zassert_equal(putchar('\n'), '\n');
+}
+
+ZTEST_USER(posix_device_io, test_puts)
+{
+	zassert_true(puts("") >= 0);
+}
+
+ZTEST_USER(posix_device_io, test_fflush)
+{
+	zassert_ok(fflush(stdout));
+}
+
+ZTEST(posix_device_io, test_fputc)
+{
+	FILE *fp = iso_c_prepare_file(NULL);
+
+	zassert_equal(fputc('!', fp), '!');
+	iso_c_close_file(fp);
+}
+
+ZTEST(posix_device_io, test_fgetc)
+{
+	FILE *fp = iso_c_prepare_file("x");
+
+	zassert_equal(fgetc(fp), 'x');
+	iso_c_close_file(fp);
+}
+
+ZTEST(posix_device_io, test_fgets)
+{
+	static const char msg[] = "iso c\n";
+	char buf[16] = {0};
+	FILE *fp = iso_c_prepare_file(msg);
+
+	zassert_not_null(fgets(buf, sizeof(buf), fp));
+	zassert_mem_equal(buf, msg, strlen(msg));
+	iso_c_close_file(fp);
+}
+
+ZTEST(posix_device_io, test_ungetc)
+{
+	FILE *fp = iso_c_prepare_file("x");
+
+	zassert_equal(fgetc(fp), 'x');
+	zassert_equal(ungetc('x', fp), 'x');
+	zassert_equal(fgetc(fp), 'x');
+	iso_c_close_file(fp);
+}
+
+ZTEST(posix_device_io, test_feof)
+{
+	FILE *fp = iso_c_prepare_file("x");
+
+	zassert_equal(feof(fp), 0);
+	zassert_equal(fgetc(fp), 'x');
+	zassert_equal(fgetc(fp), EOF);
+	zassert_true(feof(fp) != 0);
+	iso_c_close_file(fp);
+}
+
+ZTEST(posix_device_io, test_ferror)
+{
+	FILE *fp = iso_c_prepare_file("x");
+
+	zassert_equal(ferror(fp), 0);
+	iso_c_close_file(fp);
+}
+
+ZTEST(posix_device_io, test_clearerr)
+{
+	FILE *fp = iso_c_prepare_file("x");
+
+	zassert_equal(fgetc(fp), 'x');
+	zassert_equal(fgetc(fp), EOF);
+	zassert_true(feof(fp) != 0);
+	clearerr(fp);
+	zassert_equal(feof(fp), 0);
+	zassert_equal(ferror(fp), 0);
+	iso_c_close_file(fp);
+}
+
 ZTEST_SUITE(posix_device_io, NULL, test_mount, NULL, NULL, test_unmount);
