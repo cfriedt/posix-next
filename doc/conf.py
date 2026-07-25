@@ -53,6 +53,8 @@ extensions = [
     "zephyr.doxytooltip",   # hover tooltips on Doxygen symbols
     # POSIX symbol search page (local extension)
     "posix_symbols",
+    # Option Group badges from checked-in metrics (local extension)
+    "posix_badges",
     # Quality-of-life
     "sphinx_copybutton",
     "sphinx_tabs.tabs",
