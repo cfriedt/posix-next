@@ -1,0 +1,115 @@
+# SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
+# SPDX-License-Identifier: Apache-2.0
+#
+# Alias map between the different namespaces that refer to POSIX Option
+# Groups. The canonical key is the RST page stem under
+# doc/posix/option_groups/ (minus .rst), except where `rst:` overrides it.
+#
+# Consumed by scripts/doc/posix_metrics.py at doc-build time. The checked-in
+# doc/metrics/twister-summary.json records raw twister group tokens; this
+# file resolves them, so the snapshot never needs regenerating when doc
+# pages move.
+
+# Canonical key -> per-namespace overrides. Keys not listed are identity in
+# every namespace.
+groups:
+  threads_ext:
+    rst: posix_threads_ext
+  file_system_r:
+    # No dedicated twister suite; readdir_r (the whole option group) is
+    # exercised by the file_system suite in all of its scenario variants
+    # (CONFIG_POSIX_FILE_SYSTEM_R=y in its prj.conf).
+    twister: file_system
+  # The XSI umbrella groups bundle POSIX Options and carry no API table of
+  # their own; their implementation-completeness badges aggregate over the
+  # constituents listed on each group's page (Options first, then Option
+  # Groups; constituents without an API table contribute nothing).
+  xsi_realtime:
+    aggregate: [fsync, memlock, memlock_range, message_passing,
+                priority_scheduling, shared_memory_objects, synchronized_io]
+  xsi_realtime_threads:
+    aggregate: [thread_priority_scheduling, thread_prio_inherit,
+                thread_prio_protect]
+  xsi_advanced_realtime:
+    aggregate: [clock_selection, cputime, monotonic_clock, spawn,
+                sporadic_server]
+  xsi_advanced_realtime_threads:
+    aggregate: [thread_cputime]
+
+# Twister suite group token (portability.posix.<token>...) -> canonical key.
+# Tokens not listed map to themselves. A null value means the suite has no
+# Option Group page and is ignored for badges.
+twister_tokens:
+  muti_process: multi_process  # typo in upstream suite name
+  posix_realtime_signals: realtime_signals
+  posix_system_database: system_database
+  posix_system_database_r: system_database_r
+  eventfd: null                # no Option Group page
+  xsi_streams: null            # POSIX Option page (doc/posix/options/), not an Option Group
+
+# POSIX Option (doc/posix/options/ page stem) -> badge data aggregation.
+# Options generally have no twister suite of their own; their interfaces are
+# exercised by Option Group suites.
+#   scenarios: Option Group keys whose suites test this Option's interfaces;
+#     the Option's scenario badges merge across them (failed wins).
+#     Unlisted Options fall back to a twister token matching the stem.
+#   coverage: Option Group keys whose implementations together make up
+#     exactly this Option's interfaces; their .codecov.yml components supply
+#     coverage when the Option has no component of its own.
+options:
+  cputime:
+    scenarios: [xsi_advanced_realtime]
+  fsync:
+    scenarios: [xsi_realtime]
+  message_passing:
+    scenarios: [xsi_realtime]
+  priority_scheduling:
+    scenarios: [xsi_realtime]
+  shared_memory_objects:
+    scenarios: [device_io, xsi_realtime]
+  synchronized_io:
+    scenarios: [xsi_realtime]
+  thread_attr_stackaddr:
+    scenarios: [xsi_threads_ext]
+  thread_attr_stacksize:
+    scenarios: [xsi_threads_ext]
+  thread_cputime:
+    scenarios: [xsi_advanced_realtime_threads]
+  thread_prio_inherit:
+    scenarios: [xsi_realtime_threads]
+  thread_prio_protect:
+    scenarios: [xsi_realtime_threads]
+  thread_priority_scheduling:
+    scenarios: [threads_base, xsi_realtime, xsi_realtime_threads]
+  thread_safe_functions:
+    # _POSIX_THREAD_SAFE_FUNCTIONS is exactly the union of these groups
+    # (see posix_features.h)
+    scenarios: [c_lang_support_r, file_locking, file_system_r, system_database_r]
+    coverage: [c_lang_support_r, file_locking, file_system_r, system_database_r]
+  timeouts:
+    scenarios: [rw_locks, semaphores, threads_base, xsi_realtime]
+
+# lib/posix/options/<dir> -> canonical key, for per-group coverage
+# attribution. Dirs not listed map to themselves. A null value means the
+# code implements a POSIX Option (doc/posix/options/) or is shared plumbing,
+# and is excluded from Option Group coverage badges.
+option_dirs:
+  asynchronous_io: null        # _POSIX_ASYNCHRONOUS_IO Option
+  fsync: null                  # _POSIX_FSYNC Option
+  memlock: null                # _POSIX_MEMLOCK Option
+  memlock_range: null          # _POSIX_MEMLOCK_RANGE Option
+  message_passing: null        # _POSIX_MESSAGE_PASSING Option
+  priority_scheduling: null    # _POSIX_PRIORITY_SCHEDULING Option
+  shared: null                 # shared plumbing
+  shared_memory_objects: null  # _POSIX_SHARED_MEMORY_OBJECTS Option
+  synchronized_io: null        # _POSIX_SYNCHRONIZED_IO Option
+  thread_priority_scheduling: null  # _POSIX_THREAD_PRIORITY_SCHEDULING Option
+  xsi: null                    # shared XSI plumbing
+  xsi_streams: null            # POSIX Option page, not an Option Group
+
+# Directories directly under lib/posix/ (outside options/) that implement
+# an Option Group; attributed to the same canonical keys for coverage.
+lib_dirs:
+  c_lang_support_r: c_lang_support_r
+  c_lib_ext: c_lib_ext
+  eventfd: null                # no Option Group page
