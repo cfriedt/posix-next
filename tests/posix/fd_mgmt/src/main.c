@@ -379,4 +379,51 @@ ZTEST(posix_fd_mgmt, test_fseek_ftell_rewind)
 	cleanup_test_file();
 }
 
+ZTEST(posix_fd_mgmt, test_fgetpos)
+{
+	FILE *fp;
+	fpos_t pos;
+
+	cleanup_test_file();
+	fp = fopen(TEST_FILE, "w+");
+	if (fp == NULL) {
+		TC_PRINT("fopen() not supported in this configuration (errno=%d)\n", errno);
+		ztest_test_skip();
+	}
+
+	zassert_true(fputs("0123", fp) >= 0);
+	zassert_ok(fflush(fp));
+	zassert_ok(fseek(fp, 2, SEEK_SET));
+
+	zassert_ok(fgetpos(fp, &pos), "fgetpos() failed, errno=%d", errno);
+
+	zassert_ok(fclose(fp));
+	cleanup_test_file();
+}
+
+ZTEST(posix_fd_mgmt, test_fsetpos)
+{
+	FILE *fp;
+	fpos_t pos;
+
+	cleanup_test_file();
+	fp = fopen(TEST_FILE, "w+");
+	if (fp == NULL) {
+		TC_PRINT("fopen() not supported in this configuration (errno=%d)\n", errno);
+		ztest_test_skip();
+	}
+
+	zassert_true(fputs("0123", fp) >= 0);
+	zassert_ok(fflush(fp));
+	zassert_ok(fseek(fp, 2, SEEK_SET));
+	zassert_ok(fgetpos(fp, &pos));
+	zassert_equal(fgetc(fp), '2');
+
+	zassert_ok(fsetpos(fp, &pos), "fsetpos() failed, errno=%d", errno);
+	zassert_equal(fgetc(fp), '2');
+
+	zassert_ok(fclose(fp));
+	cleanup_test_file();
+}
+
 ZTEST_SUITE(posix_fd_mgmt, NULL, test_mount, NULL, NULL, test_unmount);
