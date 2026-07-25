@@ -16,6 +16,10 @@ on:
     - cron: '0 2 * * 0'
   workflow_dispatch:
 
+permissions:
+  contents: read
+  actions: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
@@ -196,12 +200,109 @@ jobs:
             --subset ${{ matrix.shard }}/${{ needs.twister-nightly-prep.outputs.shard_total }}
           ccache --show-stats
 
+      - name: Upload twister results
+        if: always() && !cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: twister-json-shard-${{ matrix.shard }}
+          path: |
+            ${{ github.workspace }}/twister-out/twister.json
+            ${{ github.workspace }}/twister-out.*/twister.json
+          if-no-files-found: ignore
+
       - name: Save workspace ccache
         if: always() && !cancelled() && matrix.shard == 1
         uses: ./.github/actions/save-workspace-ccache
         with:
           cache-primary-key: ${{ steps.workspace.outputs.ccache-primary-key }}
           save: true
+
+  twister-summary-publish:
+    if: >-
+      always() && !cancelled() &&
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') &&
+      needs.twister-nightly.result != 'cancelled' &&
+      needs.twister-nightly.result != 'skipped'
+    needs: [twister-nightly-prep, twister-nightly]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Download twister shard results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: twister-json-shard-*
+          path: ${{ runner.temp }}/twister-shards
+
+      - name: Summarize twister results
+        id: summarize
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Sort so twister-out.N retry backups precede the final twister-out
+          # ('.' < '/'): the summarizer merges last-wins per (suite, platform).
+          mapfile -t inputs < <(find "${RUNNER_TEMP}/twister-shards" -name twister.json | sort)
+          if [ "${#inputs[@]}" -eq 0 ]; then
+            echo "No twister.json artifacts found; skipping summary"
+            echo "has_summary=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          python3 scripts/ci/twister-summarize.py \
+            --output "${RUNNER_TEMP}/twister-summary.json" \
+            --commit "$(git rev-parse HEAD)" \
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            --profile twister_nightly \
+            --shards-expected "${{ needs.twister-nightly-prep.outputs.shard_total }}" \
+            "${inputs[@]}"
+          echo "has_summary=true" >> "$GITHUB_OUTPUT"
+
+      - name: Check for twister summary changes
+        id: changes
+        if: steps.summarize.outputs.has_summary == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          dest=doc/metrics/twister-summary.json
+          # Ignore provenance-only churn (timestamp/run URL/commit) so an
+          # unchanged result set does not open a no-op PR.
+          norm() {
+            jq -S 'del(.provenance.created_at, .provenance.workflow_run_url,
+                       .provenance.commit, .provenance.commit_short)' "$1"
+          }
+          if [ -f "$dest" ] && diff <(norm "$dest") <(norm "${RUNNER_TEMP}/twister-summary.json") >/dev/null; then
+            echo "summary_changed=false" >> "$GITHUB_OUTPUT"
+            echo "Twister summary unchanged; skipping publish PR"
+            exit 0
+          fi
+          echo "summary_changed=true" >> "$GITHUB_OUTPUT"
+          cp "${RUNNER_TEMP}/twister-summary.json" "$dest"
+
+      - name: Create or update twister summary PR
+        if: steps.changes.outputs.summary_changed == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: automation/twister-summary
+          sign-commits: true
+          add-paths: |
+            doc/metrics/twister-summary.json
+          title: "doc: refresh nightly twister summary"
+          commit-message: "doc: refresh nightly twister summary"
+          body: |
+            Update the committed twister results summary from the Twister
+            workflow (GitHub Actions run ${{ github.run_id }}).
+
+            This snapshot drives the POSIX Option Group badges in the docs.
+          labels: |
+            automation
+            twister
 
   twister-nightly-status:
     if: >-
