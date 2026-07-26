@@ -5,12 +5,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "posix_clock.h"
-
 #include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
 
+#include <zephyr/sys/timeutil.h>
 #include <zephyr/ztest.h>
 
 ZTEST(xsi_single_process, test_gettimeofday)
@@ -34,6 +33,6 @@ ZTEST(xsi_single_process, test_gettimeofday)
 	 * gettimeofday is same or more than obtained
 	 * from clock_gettime
 	 */
-	tv_to_ts(&tv, &ts);
-	zassert_true(tp_ge(&rts, &ts));
+	ts = (struct timespec){.tv_sec = tv.tv_sec, .tv_nsec = tv.tv_usec * NSEC_PER_USEC};
+	zassert_true(timespec_compare(&rts, &ts) >= 0);
 }
