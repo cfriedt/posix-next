@@ -6,7 +6,6 @@ zephyr_library_property(ALLOW_EMPTY TRUE)
 
 zephyr_library_include_directories(
   ${CMAKE_CURRENT_SOURCE_DIR}/../shared
-  ${CMAKE_CURRENT_SOURCE_DIR}/../timers
   ${ZEPHYR_BASE}/kernel/include
   ${ARCH_DIR}/${ARCH}/include
 )
