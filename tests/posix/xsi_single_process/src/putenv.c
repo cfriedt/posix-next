@@ -8,11 +8,14 @@
 
 #include <zephyr/ztest.h>
 
+#include "../../common/linux_compat_test.h"
+
 ZTEST(xsi_single_process, test_putenv)
 {
 	char buf[64];
 
-	{
+	/* the host libc dereferences NULL and accepts (removes) '='-less strings */
+	IF_NOT_NATIVE_LIBC({
 		/* degenerate cases */
 		static const char *const cases[] = {
 			NULL, "", "=", "abc", "42", "=abc",
@@ -42,7 +45,7 @@ ZTEST(xsi_single_process, test_putenv)
 			zexpect_equal(-1, putenv(s), "putenv(%s) unexpectedly succeeded", s);
 			zexpect_not_equal(0, errno, "putenv(%s) did not set errno", s);
 		}
-	}
+	})
 
 	{
 		/* valid cases */
