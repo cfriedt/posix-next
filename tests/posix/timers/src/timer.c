@@ -4,12 +4,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include <errno.h>
 #include <signal.h>
 #include <time.h>
 #include <unistd.h>
 
 #include <zephyr/ztest.h>
 #include <zephyr/logging/log.h>
+
+#include "../../common/linux_compat_test.h"
+
+#define INVALID_TIMERID ((timer_t)-1)
 
 #define SECS_TO_SLEEP  2
 #define DURATION_SECS  1
@@ -22,7 +27,7 @@
 LOG_MODULE_REGISTER(timer_test);
 
 static int exp_count;
-static timer_t timerid = -1;
+static timer_t timerid = INVALID_TIMERID;
 
 void handler(union sigval val)
 {
@@ -43,7 +48,6 @@ static void sig_handler(int signo, siginfo_t *info, void *ctx)
 
 static void install_sig_handler(void)
 {
-	struct k_sig_set mask;
 	struct sigaction act = {
 		.sa_flags = SA_SIGINFO,
 		.sa_sigaction = sig_handler,
@@ -55,11 +59,40 @@ static void install_sig_handler(void)
 	/*
 	 * Zephyr kernel threads block all signals by default, and some libc
 	 * sigset_t types are too small for realtime signal numbers; unblock
-	 * through the kernel API, as the realtime_signals suite does.
+	 * through the kernel API there (as the realtime_signals suite does).
 	 */
-	zassert_ok(k_sig_emptyset(&mask));
-	zassert_ok(k_sig_addset(&mask, TEST_SIGNAL_VAL));
-	zassert_ok(k_sig_mask(K_SIG_UNBLOCK, &mask, NULL));
+	if (IS_ENABLED(CONFIG_NATIVE_LIBC) || k_is_user_context()) {
+		sigset_t set;
+
+		zassert_ok(sigemptyset(&set));
+		zassert_ok(sigaddset(&set, TEST_SIGNAL_VAL));
+		zassert_ok(pthread_sigmask(SIG_UNBLOCK, &set, NULL));
+	} else {
+		struct k_sig_set mask;
+
+		zassert_ok(k_sig_emptyset(&mask));
+		zassert_ok(k_sig_addset(&mask, TEST_SIGNAL_VAL));
+		zassert_ok(k_sig_mask(K_SIG_UNBLOCK, &mask, NULL));
+	}
+}
+
+static void test_sleep_ms(int ms)
+{
+	if (IS_ENABLED(CONFIG_NATIVE_LIBC)) {
+		/*
+		 * host libc timers fire in real time, which simulated time may
+		 * lag, and signal delivery interrupts the sleep
+		 */
+		struct timespec rem = {
+			.tv_sec = ms / MSEC_PER_SEC,
+			.tv_nsec = (ms % MSEC_PER_SEC) * NSEC_PER_MSEC,
+		};
+
+		while ((nanosleep(&rem, &rem) == -1) && (errno == EINTR)) {
+		}
+	} else {
+		k_sleep(K_MSEC(ms));
+	}
 }
 
 void test_timer(clockid_t clock_id, int sigev_notify)
@@ -97,7 +130,7 @@ void test_timer(clockid_t clock_id, int sigev_notify)
 		(int)value.it_value.tv_nsec);
 
 	zassert_ok(clock_gettime(clock_id, &ts));
-	k_sleep(K_SECONDS(SECS_TO_SLEEP));
+	test_sleep_ms(SECS_TO_SLEEP * MSEC_PER_SEC);
 	zassert_ok(clock_gettime(clock_id, &te));
 
 	if (te.tv_nsec >= ts.tv_nsec) {
@@ -151,6 +184,9 @@ ZTEST(posix_timers, test_timer_overrun)
 	struct sigevent sig = {0};
 	struct itimerspec value;
 
+	/* overrun accounting for SIGEV_NONE timers is unspecified with the host libc */
+	posix_test_skip_if_native_libc();
+
 	sig.sigev_notify = SIGEV_NONE;
 
 	zassert_ok(timer_create(CLOCK_REALTIME, &sig, &timerid));
@@ -185,8 +221,7 @@ ZTEST(posix_timers, test_one_shot__SIGEV_SIGNAL)
 	value.it_value.tv_sec = 0;
 	value.it_value.tv_nsec = 100 * NSEC_PER_MSEC;
 	zassert_ok(timer_settime(timerid, 0, &value, NULL));
-	k_sleep(K_MSEC(300));
-
+	test_sleep_ms(300);
 	zassert_equal(exp_count, 1, "Number of expiry is incorrect");
 }
 
@@ -194,9 +229,9 @@ static void after(void *arg)
 {
 	ARG_UNUSED(arg);
 
-	if (timerid != -1) {
+	if (timerid != INVALID_TIMERID) {
 		(void)timer_delete(timerid);
-		timerid = -1;
+		timerid = INVALID_TIMERID;
 		/* Give cancelled SIGEV_THREAD worker time to be recycled */
 		k_sleep(K_MSEC(2 * CONFIG_SYS_THREAD_RECYCLER_DELAY_MS));
 	}

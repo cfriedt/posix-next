@@ -11,6 +11,8 @@
 #include <zephyr/sys_clock.h>
 #include <zephyr/ztest.h>
 
+#include "../../common/linux_compat_test.h"
+
 #define SELECT_NANOSLEEP       1
 #define SELECT_CLOCK_NANOSLEEP 0
 
@@ -25,24 +27,30 @@ static void common_errors(int selection, clockid_t clock_id, int flags)
 	struct timespec req = {};
 
 	/*
-	 * invalid parameters
+	 * invalid parameters (undefined behaviour with the host libc, which
+	 * dereferences the request unconditionally)
 	 */
-	zassert_equal(select_nanosleep(selection, clock_id, flags, NULL, NULL), -1);
-	zassert_equal(errno, EFAULT);
+	IF_NOT_NATIVE_LIBC({
+		zassert_equal(select_nanosleep(selection, clock_id, flags, NULL, NULL), -1);
+		zassert_equal(errno, EFAULT);
 
-	/* NULL request */
-	errno = 0;
-	zassert_equal(select_nanosleep(selection, clock_id, flags, NULL, &rem), -1);
-	zassert_equal(errno, EFAULT);
-	/* Expect rem to be the same when function returns */
-	zassert_equal(rem.tv_sec, 0, "actual: %d expected: %d", (int)rem.tv_sec, 0);
-	zassert_equal(rem.tv_nsec, 0, "actual: %d expected: %d", (int)rem.tv_nsec, 0);
+		/* NULL request */
+		errno = 0;
+		zassert_equal(select_nanosleep(selection, clock_id, flags, NULL, &rem), -1);
+		zassert_equal(errno, EFAULT);
+		/* Expect rem to be the same when function returns */
+		zassert_equal(rem.tv_sec, 0, "actual: %d expected: %d", (int)rem.tv_sec, 0);
+		zassert_equal(rem.tv_nsec, 0, "actual: %d expected: %d", (int)rem.tv_nsec, 0);
+	})
 
 	/* negative times */
-	errno = 0;
-	req = (struct timespec){.tv_sec = -1, .tv_nsec = 0};
-	zassert_equal(select_nanosleep(selection, clock_id, flags, &req, NULL), -1);
-	zassert_equal(errno, EINVAL);
+	if (!IS_ENABLED(CONFIG_NATIVE_LIBC) || (flags & TIMER_ABSTIME) == 0) {
+		/* with the host libc, a negative absolute time-point is simply in the past */
+		errno = 0;
+		req = (struct timespec){.tv_sec = -1, .tv_nsec = 0};
+		zassert_equal(select_nanosleep(selection, clock_id, flags, &req, NULL), -1);
+		zassert_equal(errno, EINVAL);
+	}
 
 	errno = 0;
 	req = (struct timespec){.tv_sec = 0, .tv_nsec = -1};
@@ -87,8 +95,11 @@ static void common_errors(int selection, clockid_t clock_id, int flags)
 	req = (struct timespec){.tv_sec = 0, .tv_nsec = 1};
 	zassert_equal(select_nanosleep(selection, clock_id, flags, &req, &req), 0);
 	zassert_equal(errno, 0);
-	zassert_equal(req.tv_sec, 0, "actual: %d expected: %d", (int)req.tv_sec, 0);
-	zassert_equal(req.tv_nsec, 0, "actual: %d expected: %d", (int)req.tv_nsec, 0);
+	/* the host libc leaves rem untouched on success */
+	IF_NOT_NATIVE_LIBC({
+		zassert_equal(req.tv_sec, 0, "actual: %d expected: %d", (int)req.tv_sec, 0);
+		zassert_equal(req.tv_nsec, 0, "actual: %d expected: %d", (int)req.tv_nsec, 0);
+	})
 }
 
 ZTEST(posix_timers, test_nanosleep_errors_errno)
