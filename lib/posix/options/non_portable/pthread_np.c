@@ -6,7 +6,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "posix_clock.h"
 #include "posix_internal.h"
 
 #include <pthread.h>
@@ -14,6 +13,7 @@
 
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/sys/timeutil.h>
 
 LOG_MODULE_REGISTER(posix_non_portable, CONFIG_POSIX_NON_PORTABLE_LOG_LEVEL);
 
