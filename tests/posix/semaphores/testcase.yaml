@@ -1,26 +1,33 @@
 common:
-  filter: not CONFIG_NATIVE_LIBC
   tags:
     - posix_semaphores
   # 1 tier0 platform per supported architecture
   platform_key:
     - arch
     - simulation
-  integration_platforms:
-    - qemu_x86_64
   min_flash: 64
   min_ram: 32
 tests:
-  portability.posix.semaphores: {}
+  portability.posix.semaphores:
+    filter: not CONFIG_NATIVE_LIBC
   portability.posix.semaphores.minimal:
+    filter: not CONFIG_NATIVE_LIBC
     extra_configs:
       - CONFIG_MINIMAL_LIBC=y
   portability.posix.semaphores.newlib:
-    filter: TOOLCHAIN_HAS_NEWLIB == 1
+    filter: (not CONFIG_NATIVE_LIBC) and (TOOLCHAIN_HAS_NEWLIB == 1)
     extra_configs:
       - CONFIG_NEWLIB_LIBC=y
   portability.posix.semaphores.picolibc:
     tags: picolibc
-    filter: CONFIG_PICOLIBC_SUPPORTED
+    filter: (not CONFIG_NATIVE_LIBC) and CONFIG_PICOLIBC_SUPPORTED
     extra_configs:
       - CONFIG_PICOLIBC=y
+  portability.posix.semaphores.linux_compat:
+    tags: native
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    filter: CONFIG_NATIVE_LIBC
+    extra_configs:
+      - CONFIG_POSIX_TEST_LINUX_COMPAT=y
