@@ -5,7 +5,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "posix_clock.h"
 #include "posix_internal.h"
 
 #include <pthread.h>
@@ -15,6 +14,7 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/elastipool.h>
 #include <zephyr/sys/sem.h>
+#include <zephyr/sys/timeutil.h>
 
 #define CONCURRENT_READER_LIMIT  (CONFIG_POSIX_THREAD_THREADS_MAX + 1)
 
@@ -30,8 +30,8 @@ struct posix_rwlockattr {
 	bool pshared: 1;
 };
 
-static uint32_t read_lock_acquire(struct posix_rwlock *rwl, uint32_t timeout);
-static uint32_t write_lock_acquire(struct posix_rwlock *rwl, uint32_t timeout);
+static uint32_t read_lock_acquire(struct posix_rwlock *rwl, k_timeout_t timeout);
+static uint32_t write_lock_acquire(struct posix_rwlock *rwl, k_timeout_t timeout);
 
 LOG_MODULE_REGISTER(pthread_rwlock, CONFIG_PTHREAD_RWLOCK_LOG_LEVEL);
 
@@ -118,7 +118,7 @@ int pthread_rwlock_rdlock(pthread_rwlock_t *rwlock)
 		return EINVAL;
 	}
 
-	return read_lock_acquire(rwl, SYS_FOREVER_MS);
+	return read_lock_acquire(rwl, K_FOREVER);
 }
 
 /**
@@ -145,7 +145,8 @@ int pthread_rwlock_timedrdlock(pthread_rwlock_t *rwlock,
 		return EINVAL;
 	}
 
-	if (read_lock_acquire(rwl, timespec_to_timeoutms(CLOCK_REALTIME, abstime)) != 0U) {
+	/* TODO(clock-settime-reactive-waits): the CLOCK_REALTIME offset is baked in here */
+	if (read_lock_acquire(rwl, timespec_abs_to_timeout(SYS_CLOCK_REALTIME, abstime)) != 0U) {
 		ret = ETIMEDOUT;
 	}
 
@@ -169,7 +170,7 @@ int pthread_rwlock_tryrdlock(pthread_rwlock_t *rwlock)
 		return EINVAL;
 	}
 
-	return read_lock_acquire(rwl, 0);
+	return read_lock_acquire(rwl, K_NO_WAIT);
 }
 
 /**
@@ -189,7 +190,7 @@ int pthread_rwlock_wrlock(pthread_rwlock_t *rwlock)
 		return EINVAL;
 	}
 
-	return write_lock_acquire(rwl, SYS_FOREVER_MS);
+	return write_lock_acquire(rwl, K_FOREVER);
 }
 
 /**
@@ -216,7 +217,8 @@ int pthread_rwlock_timedwrlock(pthread_rwlock_t *rwlock,
 		return EINVAL;
 	}
 
-	if (write_lock_acquire(rwl, timespec_to_timeoutms(CLOCK_REALTIME, abstime)) != 0U) {
+	/* TODO(clock-settime-reactive-waits): the CLOCK_REALTIME offset is baked in here */
+	if (write_lock_acquire(rwl, timespec_abs_to_timeout(SYS_CLOCK_REALTIME, abstime)) != 0U) {
 		ret = ETIMEDOUT;
 	}
 
@@ -240,7 +242,7 @@ int pthread_rwlock_trywrlock(pthread_rwlock_t *rwlock)
 		return EINVAL;
 	}
 
-	return write_lock_acquire(rwl, 0);
+	return write_lock_acquire(rwl, K_NO_WAIT);
 }
 
 /**
@@ -275,11 +277,11 @@ int pthread_rwlock_unlock(pthread_rwlock_t *rwlock)
 	return 0;
 }
 
-static uint32_t read_lock_acquire(struct posix_rwlock *rwl, uint32_t timeout)
+static uint32_t read_lock_acquire(struct posix_rwlock *rwl, k_timeout_t timeout)
 {
 	uint32_t ret = 0U;
 
-	if (sys_sem_take(&rwl->wr_sem, SYS_TIMEOUT_MS(timeout)) == 0) {
+	if (sys_sem_take(&rwl->wr_sem, timeout) == 0) {
 		(void)sys_sem_take(&rwl->reader_active, K_NO_WAIT);
 		(void)sys_sem_take(&rwl->rd_sem, K_NO_WAIT);
 		(void)sys_sem_give(&rwl->wr_sem);
@@ -290,27 +292,15 @@ static uint32_t read_lock_acquire(struct posix_rwlock *rwl, uint32_t timeout)
 	return ret;
 }
 
-static uint32_t write_lock_acquire(struct posix_rwlock *rwl, uint32_t timeout)
+static uint32_t write_lock_acquire(struct posix_rwlock *rwl, k_timeout_t timeout)
 {
 	uint32_t ret = 0U;
-	int64_t elapsed_time, st_time = k_uptime_get();
-	k_timeout_t k_timeout;
-
-	k_timeout = SYS_TIMEOUT_MS(timeout);
+	k_timepoint_t end = sys_timepoint_calc(timeout);
 
 	/* waiting for release of write lock */
-	if (sys_sem_take(&rwl->wr_sem, k_timeout) == 0) {
-		/* update remaining timeout time for 2nd sem */
-		if (timeout != SYS_FOREVER_MS) {
-			elapsed_time = k_uptime_get() - st_time;
-			timeout = timeout <= elapsed_time ? 0 :
-				  timeout - elapsed_time;
-		}
-
-		k_timeout = SYS_TIMEOUT_MS(timeout);
-
+	if (sys_sem_take(&rwl->wr_sem, timeout) == 0) {
 		/* waiting for reader to complete operation */
-		if (sys_sem_take(&rwl->reader_active, k_timeout) == 0) {
+		if (sys_sem_take(&rwl->reader_active, sys_timepoint_timeout(end)) == 0) {
 			rwl->wr_owner = k_current_get();
 		} else {
 			(void)sys_sem_give(&rwl->wr_sem);

@@ -6,7 +6,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "posix_clock.h"
 #include "posix_internal.h"
 
 #include <limits.h>
