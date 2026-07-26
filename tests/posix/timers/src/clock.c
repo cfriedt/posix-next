@@ -13,6 +13,8 @@
 #include <zephyr/ztest.h>
 #include <zephyr/logging/log.h>
 
+#include "../../common/linux_compat_test.h"
+
 #define SLEEP_SECONDS 1
 #define CLOCK_INVALID -1
 
@@ -42,12 +44,14 @@ ZTEST(posix_timers, test_clock_gettime)
 	zassert_equal(clock_gettime(CLOCK_INVALID, &ts), -1);
 	zassert_equal(errno, EINVAL);
 
-	if (false) {
-		/* undefined behaviour */
-		errno = 0;
-		zassert_equal(clock_gettime(clocks[0], NULL), -1);
-		zassert_equal(errno, EINVAL);
-	}
+	IF_NOT_NATIVE_LIBC({
+		if (false) {
+			/* undefined behaviour */
+			errno = 0;
+			zassert_equal(clock_gettime(clocks[0], NULL), -1);
+			zassert_equal(errno, EINVAL);
+		}
+	})
 
 	/* verify that we can call clock_gettime() on supported clocks */
 	ARRAY_FOR_EACH(clocks, i) {
@@ -65,17 +69,22 @@ ZTEST(posix_timers, test_clock_settime)
 
 	BUILD_ASSERT(ARRAY_SIZE(settable) == ARRAY_SIZE(clocks));
 
+	/* setting CLOCK_REALTIME would modify the host clock (and requires privileges) */
+	posix_test_skip_if_native_libc();
+
 	/* ensure argument validation is performed */
 	errno = 0;
 	zassert_equal(clock_settime(CLOCK_INVALID, &ts), -1);
 	zassert_equal(errno, EINVAL);
 
-	if (false) {
-		/* undefined behaviour */
-		errno = 0;
-		zassert_equal(clock_settime(CLOCK_REALTIME, NULL), -1);
-		zassert_equal(errno, EINVAL);
-	}
+	IF_NOT_NATIVE_LIBC({
+		if (false) {
+			/* undefined behaviour */
+			errno = 0;
+			zassert_equal(clock_settime(CLOCK_REALTIME, NULL), -1);
+			zassert_equal(errno, EINVAL);
+		}
+	})
 
 	/* verify nanoseconds */
 	errno = 0;
@@ -132,7 +141,15 @@ ZTEST(posix_timers, test_realtime)
 	(void)clock_gettime(CLOCK_REALTIME, &then);
 	for (int i = 0; i < CONFIG_TEST_CLOCK_RT_ITERATIONS; ++i) {
 
-		zassert_ok(k_usleep(USEC_PER_MSEC * CONFIG_TEST_CLOCK_RT_SLEEP_MS));
+		if (IS_ENABLED(CONFIG_NATIVE_LIBC)) {
+			/*
+			 * Simulated time may lag real time, in which case k_usleep() would
+			 * complete without any real time elapsing on the host clock.
+			 */
+			zassert_ok(usleep(USEC_PER_MSEC * CONFIG_TEST_CLOCK_RT_SLEEP_MS));
+		} else {
+			zassert_ok(k_usleep(USEC_PER_MSEC * CONFIG_TEST_CLOCK_RT_SLEEP_MS));
+		}
 		(void)clock_gettime(CLOCK_REALTIME, &now);
 
 		/* Make the delta milliseconds. */

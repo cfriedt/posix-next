@@ -8,6 +8,8 @@
 
 #include <zephyr/ztest.h>
 
+#include "../../common/linux_compat_test.h"
+
 struct waker_work {
 	k_tid_t tid;
 	struct k_work_delayable dwork;
@@ -28,6 +30,12 @@ ZTEST(posix_timers, test_usleep)
 {
 	uint32_t then;
 	uint32_t now;
+
+	/*
+	 * With the host libc, usleep() accepts >= 1s and cannot be interrupted
+	 * via k_wakeup(); the checks below are Zephyr-specific.
+	 */
+	posix_test_skip_if_native_libc();
 
 	/* test usleep works for small values */
 	/* Note: k_usleep(), an implementation detail, is a cancellation point */

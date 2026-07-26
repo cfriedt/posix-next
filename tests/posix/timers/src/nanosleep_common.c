@@ -29,7 +29,42 @@ int select_nanosleep(int selection, clockid_t clock_id, int flags, const struct 
 	if (selection == SELECT_NANOSLEEP) {
 		return nanosleep(rqtp, rmtp);
 	}
+
+	if (IS_ENABLED(CONFIG_NATIVE_LIBC)) {
+		/* the host libc returns the error number instead of setting errno */
+		int ret = clock_nanosleep(clock_id, flags, rqtp, rmtp);
+
+		if (ret != 0) {
+			errno = ret;
+			return -1;
+		}
+
+		return 0;
+	}
+
 	return clock_nanosleep(clock_id, flags, rqtp, rmtp);
+}
+
+/*
+ * With the host libc, sleeps happen in host time while the cycle counter tracks simulated
+ * time, so time-points must be sampled from the same clock the sleep is measured against.
+ */
+static uint64_t timepoint_ns(int selection, clockid_t clock_id)
+{
+#if defined(CONFIG_NATIVE_LIBC)
+	struct timespec tp;
+	const clockid_t meas_clock =
+		(selection == SELECT_CLOCK_NANOSLEEP) ? clock_id : CLOCK_MONOTONIC;
+
+	zassert_ok(clock_gettime(meas_clock, &tp));
+
+	return (uint64_t)tp.tv_sec * NSEC_PER_SEC + tp.tv_nsec;
+#else
+	ARG_UNUSED(selection);
+	ARG_UNUSED(clock_id);
+
+	return cycle_get_64();
+#endif
 }
 
 /**
@@ -60,9 +95,9 @@ void common_lower_bound_check(int selection, clockid_t clock_id, int flags, cons
 	struct timespec req = {s, ns};
 
 	errno = 0;
-	then = cycle_get_64();
+	then = timepoint_ns(selection, clock_id);
 	r = select_nanosleep(selection, clock_id, flags, &req, &rem);
-	now = cycle_get_64();
+	now = timepoint_ns(selection, clock_id);
 
 	zassert_equal(r, 0, "actual: %d expected: %d", r, 0);
 	zassert_equal(errno, 0, "actual: %d expected: %d", errno, 0);
@@ -74,11 +109,19 @@ void common_lower_bound_check(int selection, clockid_t clock_id, int flags, cons
 	switch (selection) {
 	case SELECT_NANOSLEEP:
 		/* exp_ns and actual_ns are relative (i.e. durations) */
-		actual_ns = k_cyc_to_ns_ceil64(now + then);
+		if (IS_ENABLED(CONFIG_NATIVE_LIBC)) {
+			actual_ns = now - then;
+		} else {
+			actual_ns = k_cyc_to_ns_ceil64(now + then);
+		}
 		break;
 	case SELECT_CLOCK_NANOSLEEP:
 		/* exp_ns and actual_ns are absolute (i.e. time-points) */
-		actual_ns = k_cyc_to_ns_ceil64(now);
+		if (IS_ENABLED(CONFIG_NATIVE_LIBC)) {
+			actual_ns = now;
+		} else {
+			actual_ns = k_cyc_to_ns_ceil64(now);
+		}
 		break;
 	default:
 		zassert_unreachable();
