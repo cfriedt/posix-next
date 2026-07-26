@@ -12,6 +12,8 @@
 #include <zephyr/sys/util.h>
 #include <zephyr/ztest.h>
 
+#include "../../common/linux_compat_test.h"
+
 static struct timespec sleep_timeout_abstime;
 
 static inline void timespec_add_ms(struct timespec *ts, uint32_t ms)
@@ -40,12 +42,18 @@ ZTEST(posix_non_portable, test_pthread_getname_np)
 		ztest_test_skip();
 	}
 
+	/* keep the thread alive so that the name can be set and read back */
+	clock_gettime(CLOCK_REALTIME, &sleep_timeout_abstime);
+	timespec_add_ms(&sleep_timeout_abstime, 200);
+
 	zassert_ok(pthread_create(&th, NULL, timedjoin_thread, NULL));
 
+#if !defined(CONFIG_NATIVE_LIBC)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wnonnull"
 	zassert_equal(pthread_getname_np(th, NULL, sizeof(thr_name_buf)), EFAULT);
 #pragma GCC diagnostic pop
+#endif
 
 	zassert_ok(pthread_setname_np(th, thr_name));
 	zassert_equal(pthread_getname_np(th, thr_name_buf, strlen(thr_name) / 2), ERANGE);
@@ -62,6 +70,10 @@ ZTEST(posix_non_portable, test_pthread_setname_np)
 	if (CONFIG_SYS_THREAD_STACK_MAX == 0) {
 		ztest_test_skip();
 	}
+
+	/* keep the thread alive so that the name can be set */
+	clock_gettime(CLOCK_REALTIME, &sleep_timeout_abstime);
+	timespec_add_ms(&sleep_timeout_abstime, 200);
 
 	zassert_ok(pthread_create(&th, NULL, timedjoin_thread, NULL));
 	zassert_ok(pthread_setname_np(th, "np_setname"));
@@ -97,19 +109,23 @@ ZTEST(posix_non_portable, test_pthread_timedjoin_np)
 	pthread_t th = {0};
 	struct timespec done;
 	struct timespec not_done;
-	struct timespec invalid[] = {
-		{.tv_nsec = -1},
-		{.tv_nsec = NSEC_PER_SEC},
-	};
 	int sleep_duration_ms = 200;
 
 	if (CONFIG_SYS_THREAD_STACK_MAX == 0) {
 		ztest_test_skip();
 	}
 
-	for (size_t i = 0; i < ARRAY_SIZE(invalid); ++i) {
-		zassert_equal(pthread_timedjoin_np(th, &result, &invalid[i]), EINVAL);
-	}
+	/* the host libc does not validate the timespec of an unstarted (zeroed) thread id */
+	IF_NOT_NATIVE_LIBC({
+		struct timespec invalid[] = {
+			{.tv_nsec = -1},
+			{.tv_nsec = NSEC_PER_SEC},
+		};
+
+		for (size_t i = 0; i < ARRAY_SIZE(invalid); ++i) {
+			zassert_equal(pthread_timedjoin_np(th, &result, &invalid[i]), EINVAL);
+		}
+	})
 
 	clock_gettime(CLOCK_REALTIME, &sleep_timeout_abstime);
 	done = not_done = sleep_timeout_abstime;
