@@ -11,18 +11,20 @@
 #include <dirent.h>
 #include "test_fs.h"
 
+#include "../../common/linux_compat_test.h"
+
 #define FILL_SIZE 128
 
 #define TEST_FILE_SIZE     80
 #define TEST_DIR_FILE_SIZE 1000
 
-#define TEST_EMPTY_FILE FATFS_MNTP "/empty.dat"
+#define TEST_EMPTY_FILE TEST_MNTP "/empty.dat"
 
 static void create_file(const char *filename, uint32_t size)
 {
 	int fh;
 
-	fh = open(filename, O_CREAT | O_WRONLY, 0440);
+	fh = open(filename, O_CREAT | O_WRONLY, 0660);
 	zassert(fh >= 0, "Failed creating test file");
 
 	uint8_t filling[FILL_SIZE];
@@ -41,7 +43,7 @@ static void before_fn(void *unused)
 {
 	ARG_UNUSED(unused);
 
-	zassert_ok(mkdir(TEST_DIR, 0070));
+	zassert_ok(mkdir(TEST_DIR, 0770));
 
 	create_file(TEST_FILE, TEST_FILE_SIZE);
 	create_file(TEST_DIR_FILE, TEST_DIR_FILE_SIZE);
@@ -54,7 +56,8 @@ static void after_fn(void *unused)
 
 	zassert_ok(unlink(TEST_FILE));
 	zassert_ok(unlink(TEST_DIR_FILE));
-	zassert_ok(unlink(TEST_DIR));
+	zassert_ok(rmdir(TEST_DIR));
+	zassert_ok(unlink(TEST_EMPTY_FILE));
 }
 
 ZTEST_SUITE(posix_fs_stat_test, NULL, test_mount, before_fn, after_fn, test_unmount);
@@ -70,11 +73,11 @@ ZTEST(posix_fs_stat_test, test_fs_stat_file)
 
 	zassert_equal(0, stat(TEST_FILE, &buf));
 	zassert_equal(TEST_FILE_SIZE, buf.st_size);
-	zassert_equal(S_IFREG, buf.st_mode);
+	zassert_equal(S_IFREG, buf.st_mode & S_IFMT);
 
 	zassert_equal(0, stat(TEST_DIR_FILE, &buf));
 	zassert_equal(TEST_DIR_FILE_SIZE, buf.st_size);
-	zassert_equal(S_IFREG, buf.st_mode);
+	zassert_equal(S_IFREG, buf.st_mode & S_IFMT);
 
 	zassert_not_equal(0, stat(TEST_ROOT "foo.txt", &buf));
 	zassert_not_equal(0, stat("", &buf));
@@ -82,7 +85,7 @@ ZTEST(posix_fs_stat_test, test_fs_stat_file)
 	zassert_equal(0, stat(TEST_EMPTY_FILE, &buf));
 
 	zassert_equal(0, buf.st_size);
-	zassert_equal(S_IFREG, buf.st_mode);
+	zassert_equal(S_IFREG, buf.st_mode & S_IFMT);
 }
 
 /**
@@ -97,8 +100,9 @@ ZTEST(posix_fs_stat_test, test_fs_stat_dir)
 
 	zassert_equal(0, stat(TEST_DIR, &buf));
 
-	zassert_equal(0, buf.st_size);
-	zassert_equal(S_IFDIR, buf.st_mode);
+	/* on the host filesystem, directories have a non-zero size */
+	IF_NOT_NATIVE_LIBC({ zassert_equal(0, buf.st_size); })
+	zassert_equal(S_IFDIR, buf.st_mode & S_IFMT);
 
 	zassert_equal(0, stat(TEST_ROOT, &buf));
 }
@@ -119,19 +123,19 @@ ZTEST(posix_fs_stat_test, test_fs_fstat_file)
 	zassert_not_equal(-1, test_file_fd);
 	zassert_equal(0, fstat(test_file_fd, &buf));
 	zassert_equal(TEST_FILE_SIZE, buf.st_size);
-	zassert_equal(S_IFREG, buf.st_mode);
+	zassert_equal(S_IFREG, buf.st_mode & S_IFMT);
 	close(test_file_fd);
 
 	zassert_not_equal(-1, dir_file_fd);
 	zassert_equal(0, fstat(dir_file_fd, &buf));
 	zassert_equal(TEST_DIR_FILE_SIZE, buf.st_size);
-	zassert_equal(S_IFREG, buf.st_mode);
+	zassert_equal(S_IFREG, buf.st_mode & S_IFMT);
 	close(dir_file_fd);
 
 	zassert_not_equal(-1, empty_file_fd);
 	zassert_equal(0, fstat(empty_file_fd, &buf));
 	zassert_equal(0, buf.st_size);
-	zassert_equal(S_IFREG, buf.st_mode);
+	zassert_equal(S_IFREG, buf.st_mode & S_IFMT);
 	close(empty_file_fd);
 }
 
@@ -155,7 +159,8 @@ ZTEST(posix_fs_stat_test, test_fs_fstat_dir)
 	}
 
 	zassert_equal(0, fstat(fd, &buf));
-	zassert_equal(0, buf.st_size);
-	zassert_equal(S_IFDIR, buf.st_mode);
+	/* on the host filesystem, directories have a non-zero size */
+	IF_NOT_NATIVE_LIBC({ zassert_equal(0, buf.st_size); })
+	zassert_equal(S_IFDIR, buf.st_mode & S_IFMT);
 	close(fd);
 }

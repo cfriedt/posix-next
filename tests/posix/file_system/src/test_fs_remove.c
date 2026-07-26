@@ -13,7 +13,7 @@
 
 #include "test_fs.h"
 
-#define REMOVE_FILE FATFS_MNTP "/remove.txt"
+#define REMOVE_FILE TEST_MNTP "/remove.txt"
 
 ZTEST(posix_fs_test, test_remove)
 {
