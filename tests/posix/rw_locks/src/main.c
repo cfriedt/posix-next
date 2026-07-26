@@ -11,6 +11,8 @@
 #include <zephyr/sys/util.h>
 #include <zephyr/ztest.h>
 
+#include "../../common/linux_compat_test.h"
+
 #define N_THR SYS_THREAD_THREAD_MIN
 
 LOG_MODULE_REGISTER(posix_rwlock_test);
@@ -58,14 +60,17 @@ ZTEST(posix_rw_locks, test_rw_lock)
 	time.tv_sec = 1;
 	time.tv_nsec = 0;
 
-	zassert_equal(pthread_rwlock_destroy(&rwlock), EINVAL);
-	zassert_equal(pthread_rwlock_rdlock(&rwlock), EINVAL);
-	zassert_equal(pthread_rwlock_wrlock(&rwlock), EINVAL);
-	zassert_equal(pthread_rwlock_trywrlock(&rwlock), EINVAL);
-	zassert_equal(pthread_rwlock_tryrdlock(&rwlock), EINVAL);
-	zassert_equal(pthread_rwlock_timedwrlock(&rwlock, &time), EINVAL);
-	zassert_equal(pthread_rwlock_timedrdlock(&rwlock, &time), EINVAL);
-	zassert_equal(pthread_rwlock_unlock(&rwlock), EINVAL);
+	/* degenerate cases (operations on an uninitialized rwlock) */
+	IF_NOT_NATIVE_LIBC({
+		zassert_equal(pthread_rwlock_destroy(&rwlock), EINVAL);
+		zassert_equal(pthread_rwlock_rdlock(&rwlock), EINVAL);
+		zassert_equal(pthread_rwlock_wrlock(&rwlock), EINVAL);
+		zassert_equal(pthread_rwlock_trywrlock(&rwlock), EINVAL);
+		zassert_equal(pthread_rwlock_tryrdlock(&rwlock), EINVAL);
+		zassert_equal(pthread_rwlock_timedwrlock(&rwlock, &time), EINVAL);
+		zassert_equal(pthread_rwlock_timedrdlock(&rwlock, &time), EINVAL);
+		zassert_equal(pthread_rwlock_unlock(&rwlock), EINVAL);
+	})
 
 	zassert_ok(pthread_rwlock_init(&rwlock, NULL), "Failed to create rwlock");
 	LOG_DBG("main acquire WR lock and 3 threads acquire RD lock");
