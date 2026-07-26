@@ -11,6 +11,10 @@
 #include <zephyr/ztest.h>
 #include <zephyr/logging/log.h>
 
+#include "../../common/linux_compat_test.h"
+
+#define INVALID_TIMERID ((timer_t)-1)
+
 #define SECS_TO_SLEEP  2
 #define DURATION_SECS  1
 #define DURATION_NSECS 0
@@ -22,7 +26,7 @@
 LOG_MODULE_REGISTER(timer_test);
 
 static int exp_count;
-static timer_t timerid = -1;
+static timer_t timerid = INVALID_TIMERID;
 
 void handler(union sigval val)
 {
@@ -61,7 +65,12 @@ void test_timer(clockid_t clock_id, int sigev_notify)
 		(int)value.it_value.tv_nsec);
 
 	zassert_ok(clock_gettime(clock_id, &ts));
-	k_sleep(K_SECONDS(SECS_TO_SLEEP));
+	if (IS_ENABLED(CONFIG_NATIVE_LIBC)) {
+		/* host libc timers fire in real time, which simulated time may lag */
+		zassert_equal(sleep(SECS_TO_SLEEP), 0);
+	} else {
+		k_sleep(K_SECONDS(SECS_TO_SLEEP));
+	}
 	zassert_ok(clock_gettime(clock_id, &te));
 
 	if (te.tv_nsec >= ts.tv_nsec) {
@@ -84,6 +93,9 @@ void test_timer(clockid_t clock_id, int sigev_notify)
 
 ZTEST(posix_timers, test_CLOCK_REALTIME__SIGEV_SIGNAL)
 {
+	/* sigev_notify_function is only called for SIGEV_SIGNAL on Zephyr */
+	posix_test_skip_if_native_libc();
+
 	test_timer(CLOCK_REALTIME, SIGEV_SIGNAL);
 }
 
@@ -94,6 +106,9 @@ ZTEST(posix_timers, test_CLOCK_REALTIME__SIGEV_THREAD)
 
 ZTEST(posix_timers, test_CLOCK_MONOTONIC__SIGEV_SIGNAL)
 {
+	/* sigev_notify_function is only called for SIGEV_SIGNAL on Zephyr */
+	posix_test_skip_if_native_libc();
+
 #if defined(_POSIX_MONOTONIC_CLOCK)
 	test_timer(CLOCK_MONOTONIC, SIGEV_SIGNAL);
 #else
@@ -115,6 +130,9 @@ ZTEST(posix_timers, test_timer_overrun)
 	struct sigevent sig = {0};
 	struct itimerspec value;
 
+	/* overrun accounting for SIGEV_NONE timers is unspecified with the host libc */
+	posix_test_skip_if_native_libc();
+
 	sig.sigev_notify = SIGEV_NONE;
 
 	zassert_ok(timer_create(CLOCK_REALTIME, &sig, &timerid));
@@ -134,6 +152,9 @@ ZTEST(posix_timers, test_one_shot__SIGEV_SIGNAL)
 {
 	struct sigevent sig = {0};
 	struct itimerspec value;
+
+	/* sigev_notify_function is only called for SIGEV_SIGNAL on Zephyr */
+	posix_test_skip_if_native_libc();
 
 	exp_count = 0;
 	sig.sigev_notify = SIGEV_SIGNAL;
@@ -157,9 +178,9 @@ static void after(void *arg)
 {
 	ARG_UNUSED(arg);
 
-	if (timerid != -1) {
+	if (timerid != INVALID_TIMERID) {
 		(void)timer_delete(timerid);
-		timerid = -1;
+		timerid = INVALID_TIMERID;
 		/* Give cancelled SIGEV_THREAD worker time to be recycled */
 		k_sleep(K_MSEC(2 * CONFIG_SYS_THREAD_RECYCLER_DELAY_MS));
 	}
