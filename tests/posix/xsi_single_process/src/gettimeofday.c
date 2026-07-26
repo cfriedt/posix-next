@@ -12,18 +12,22 @@
 #include <zephyr/sys/timeutil.h>
 #include <zephyr/ztest.h>
 
+#include "../../common/linux_compat_test.h"
+
 ZTEST(xsi_single_process, test_gettimeofday)
 {
 	struct timeval tv;
 	struct timespec ts;
 	struct timespec rts;
 
-	if (false) {
-		/* undefined behaviour */
-		errno = 0;
-		zassert_equal(gettimeofday(NULL, NULL), -1);
-		zassert_equal(errno, EINVAL);
-	}
+	IF_NOT_NATIVE_LIBC({
+		if (false) {
+			/* undefined behaviour */
+			errno = 0;
+			zassert_equal(gettimeofday(NULL, NULL), -1);
+			zassert_equal(errno, EINVAL);
+		}
+	})
 
 	/* Validate gettimeofday API */
 	zassert_ok(gettimeofday(&tv, NULL));
