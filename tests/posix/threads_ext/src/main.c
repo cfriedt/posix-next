@@ -9,6 +9,8 @@
 #include <zephyr/sys/util.h>
 #include <zephyr/ztest.h>
 
+#include "../../common/linux_compat_test.h"
+
 void test_mutex_common(int type);
 
 #define BIOS_FOOD           0xB105F00D
@@ -17,14 +19,14 @@ void test_mutex_common(int type);
 
 static bool attr_valid;
 static pthread_attr_t attr;
-static const pthread_attr_t uninit_attr;
+__maybe_unused static const pthread_attr_t uninit_attr;
 
 ZTEST(posix_threads_ext, test_pthread_attr_getguardsize)
 {
 	size_t guardsize;
 
 	/* degenerate cases */
-	{
+	IF_NOT_NATIVE_LIBC({
 		if (false) {
 			/* undefined behaviour */
 			zassert_equal(pthread_attr_getguardsize(NULL, NULL), EINVAL);
@@ -32,7 +34,7 @@ ZTEST(posix_threads_ext, test_pthread_attr_getguardsize)
 			zassert_equal(pthread_attr_getguardsize(&uninit_attr, &guardsize), EINVAL);
 		}
 		zassert_equal(pthread_attr_getguardsize(&attr, NULL), EINVAL);
-	}
+	})
 
 	guardsize = BIOS_FOOD;
 	zassert_ok(pthread_attr_getguardsize(&attr, &guardsize));
@@ -71,7 +73,7 @@ ZTEST(posix_threads_ext, test_pthread_mutexattr_gettype)
 	pthread_mutexattr_t attr;
 
 	/* degenerate cases */
-	{
+	IF_NOT_NATIVE_LIBC({
 		if (false) {
 			/* undefined behaviour */
 			zassert_equal(EINVAL, pthread_mutexattr_gettype(&attr, &type));
@@ -79,7 +81,7 @@ ZTEST(posix_threads_ext, test_pthread_mutexattr_gettype)
 		zassert_equal(EINVAL, pthread_mutexattr_gettype(NULL, NULL));
 		zassert_equal(EINVAL, pthread_mutexattr_gettype(NULL, &type));
 		zassert_equal(EINVAL, pthread_mutexattr_gettype(&attr, NULL));
-	}
+	})
 
 	zassert_ok(pthread_mutexattr_init(&attr));
 	zassert_ok(pthread_mutexattr_gettype(&attr, &type));
@@ -93,7 +95,7 @@ ZTEST(posix_threads_ext, test_pthread_mutexattr_settype)
 	pthread_mutexattr_t attr;
 
 	/* degenerate cases */
-	{
+	IF_NOT_NATIVE_LIBC({
 		if (false) {
 			/* undefined behaviour */
 			zassert_equal(EINVAL,
@@ -102,7 +104,7 @@ ZTEST(posix_threads_ext, test_pthread_mutexattr_settype)
 		zassert_equal(EINVAL, pthread_mutexattr_settype(NULL, 42));
 		zassert_equal(EINVAL, pthread_mutexattr_settype(NULL, PTHREAD_MUTEX_NORMAL));
 		zassert_equal(EINVAL, pthread_mutexattr_settype(&attr, 42));
-	}
+	})
 
 	zassert_ok(pthread_mutexattr_init(&attr));
 
@@ -124,8 +126,11 @@ ZTEST(posix_threads_ext, test_pthread_mutexattr_settype)
 
 	zassert_ok(pthread_mutexattr_destroy(&attr));
 
-	test_mutex_common(PTHREAD_MUTEX_NORMAL);
-	test_mutex_common(PTHREAD_MUTEX_RECURSIVE);
+	/* the behavioral test threads use Zephyr kernel APIs (k_msleep()) */
+	IF_NOT_NATIVE_LIBC({
+		test_mutex_common(PTHREAD_MUTEX_NORMAL);
+		test_mutex_common(PTHREAD_MUTEX_RECURSIVE);
+	})
 }
 
 static void before(void *arg)
