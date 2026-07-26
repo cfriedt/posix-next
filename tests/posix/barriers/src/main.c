@@ -10,6 +10,8 @@
 #include <zephyr/sys/util.h>
 #include <zephyr/ztest.h>
 
+#include "../../common/linux_compat_test.h"
+
 #define N_THR 3
 
 static pthread_barrier_t barrier;
@@ -48,8 +50,11 @@ ZTEST(posix_barriers, test_pthread_barrierattr_init)
 	zassert_equal(ret, 0, "pthread_barrierattr_getpshared failed");
 	zassert_equal(pshared, PTHREAD_PROCESS_SHARED, "pshared attribute not retrieved correctly");
 
-	ret = pthread_barrierattr_setpshared(&attr, 42);
-	zassert_equal(ret, -EINVAL, "pthread_barrierattr_setpshared did not return EINVAL");
+	/* degenerate cases */
+	IF_NOT_NATIVE_LIBC({
+		ret = pthread_barrierattr_setpshared(&attr, 42);
+		zassert_equal(ret, -EINVAL, "pthread_barrierattr_setpshared did not return EINVAL");
+	})
 
 	ret = pthread_barrierattr_destroy(&attr);
 	zassert_equal(ret, 0, "pthread_barrierattr_destroy failed");
