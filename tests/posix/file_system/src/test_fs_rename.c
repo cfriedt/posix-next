@@ -13,8 +13,8 @@
 
 #include "test_fs.h"
 
-#define RENAME_OLD FATFS_MNTP "/rename1.txt"
-#define RENAME_NEW FATFS_MNTP "/rename2.txt"
+#define RENAME_OLD TEST_MNTP "/rename1.txt"
+#define RENAME_NEW TEST_MNTP "/rename2.txt"
 
 ZTEST(posix_fs_test, test_rename)
 {
