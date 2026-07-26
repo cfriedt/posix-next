@@ -41,10 +41,6 @@ if(NEED_ENV_COMMON)
   zephyr_library_sources(env_common.c)
 endif()
 
-if(NOT CONFIG_TC_PROVIDES_POSIX_TIMERS)
-  zephyr_library_sources_ifdef(CONFIG_POSIX_TIMERS timespec_to_timeout.c)
-endif()
-
 if(CONFIG_SIGNAL AND NOT CONFIG_NATIVE_LIBC)
   zephyr_library_sources(z_sig_set.c)
 endif()
