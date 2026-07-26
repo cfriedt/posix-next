@@ -9,13 +9,22 @@
 #include <unistd.h>
 #include "test_fs.h"
 
-#define THE_FILE FATFS_MNTP"/the_file.txt"
+#define THE_FILE TEST_MNTP"/the_file.txt"
+
+/* Zephyr returns EACCES for reads/writes that conflict with the open mode; Linux EBADF */
+static bool bad_access_errno(void)
+{
+	return (errno == EACCES) || (errno == EBADF);
+}
 
 static int test_file_open_flags(void)
 {
 	int fd = 0;
 	int data = 0;
 	int ret;
+
+	/* the host filesystem persists between runs */
+	(void)unlink(THE_FILE);
 
 	/* 1 Check opening non-existent without O_CREAT */
 	TC_PRINT("Open of non-existent file, flags = 0\n");
@@ -60,7 +69,7 @@ static int test_file_open_flags(void)
 
 	/* 2 Create file for read only, attempt to read, attempt to write */
 	TC_PRINT("Open on non-existent file, flags = O_CREAT | O_WRONLY\n");
-	fd = open(THE_FILE, O_CREAT | O_WRONLY, 0440);
+	fd = open(THE_FILE, O_CREAT | O_WRONLY, 0660);
 	if (fd < 0) {
 		TC_PRINT("Expected success; fd = %d, errno = %d\n", fd, errno);
 		return TC_FAIL;
@@ -68,7 +77,7 @@ static int test_file_open_flags(void)
 
 	TC_PRINT("Attempt read file opened with flags = O_CREAT | O_WRONLY\n");
 	ret = read(fd, &data, sizeof(data));
-	if (ret > 0 || errno != EACCES) {
+	if (ret > 0 || !bad_access_errno()) {
 		TC_PRINT("Expected fail, ret = %d, errno = %d\n", ret, errno);
 		close(fd);
 		return TC_FAIL;
@@ -76,7 +85,7 @@ static int test_file_open_flags(void)
 
 	TC_PRINT("Attempt write file opened with flags = O_CREAT | O_WRONLY\n");
 	ret = write(fd, &data, sizeof(data));
-	if (ret <= 0 || errno != EACCES) {
+	if (ret <= 0) {
 		TC_PRINT("Expected success, ret = %d, errno = %d\n", ret,
 			 errno);
 		close(fd);
@@ -106,7 +115,7 @@ static int test_file_open_flags(void)
 
 	TC_PRINT("Attempt write file opened with flags = 0\n");
 	ret = write(fd, &data, sizeof(data));
-	if (ret >= 0 || errno != EACCES) {
+	if (ret >= 0 || !bad_access_errno()) {
 		TC_PRINT("Expected fail, ret = %d, errno = %d\n", ret, errno);
 		close(fd);
 		return TC_FAIL;
@@ -135,7 +144,7 @@ static int test_file_open_flags(void)
 
 	TC_PRINT("Attempt write file opened with flags = O_RDONLY\n");
 	ret = write(fd, &data, sizeof(data));
-	if (ret >= 0 || errno != EACCES) {
+	if (ret >= 0 || !bad_access_errno()) {
 		TC_PRINT("Expected fail, ret = %d, errno = %d\n", ret, errno);
 		close(fd);
 		return TC_FAIL;
@@ -155,7 +164,7 @@ static int test_file_open_flags(void)
 
 	TC_PRINT("Attempt read file opened with flags = O_WRONLY\n");
 	ret = read(fd, &data, sizeof(data));
-	if (ret >= 0 || errno != EACCES) {
+	if (ret >= 0 || !bad_access_errno()) {
 		TC_PRINT("Expected fail, ret = %d, errno = %d\n", ret, errno);
 		close(fd);
 		return TC_FAIL;
@@ -183,7 +192,7 @@ static int test_file_open_flags(void)
 
 	TC_PRINT("Attempt read file opened with flags = O_APPEND | O_WRONLY\n");
 	ret = read(fd, &data, sizeof(data));
-	if (ret >= 0 || errno != EACCES) {
+	if (ret >= 0 || !bad_access_errno()) {
 		TC_PRINT("Expected fail, ret = %d, errno = %d\n", ret, errno);
 		close(fd);
 		return TC_FAIL;
@@ -236,7 +245,7 @@ static int test_file_open_flags(void)
 	TC_PRINT("Attempt write to file opened with O_APPEND | O_RDWR\n");
 	/* Clean start */
 	unlink(THE_FILE);
-	fd = open(THE_FILE, O_CREAT | O_WRONLY, 0440);
+	fd = open(THE_FILE, O_CREAT | O_WRONLY, 0660);
 	if (fd < 0) {
 		TC_PRINT("Expected success, fd = %d, errno = %d\n", fd, errno);
 		return TC_FAIL;
@@ -278,6 +287,8 @@ static int test_file_open_flags(void)
 
 	close(fd);
 	/* end 8 */
+
+	(void)unlink(THE_FILE);
 
 	return TC_PASS;
 }
