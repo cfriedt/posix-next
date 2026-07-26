@@ -7,13 +7,10 @@
 #include <errno.h>
 #include <limits.h>
 
-#ifndef _POSIX_REALTIME_SIGNALS
-#define _POSIX_REALTIME_SIGNALS 200809L
-#endif
 #include <signal.h>
-#include <zephyr/posix/sys/select.h>
 #include <pthread.h>
 #include <string.h>
+#include <unistd.h>
 
 #if !defined(CONFIG_NATIVE_LIBC)
 #undef sigemptyset
@@ -27,6 +24,8 @@
 #include <zephyr/kernel/signal.h>
 #include <zephyr/sys/util.h>
 #include <zephyr/ztest.h>
+
+#include "../../common/linux_compat_test.h"
 
 #ifdef CONFIG_USERSPACE
 int pthread_kill(pthread_t thread, int sig);
@@ -48,6 +47,34 @@ BUILD_ASSERT(SIGQUEUE_MAX > 0);
 BUILD_ASSERT(SIGQUEUE_MAX >= SIGNAL_QUEUE_SIZE);
 
 static ZTEST_BMEM bool rt_sigset_usable;
+/* number of real-time signals that actually fit in sigset_t (and below SIGRTMAX) */
+static ZTEST_BMEM int rt_nsigs;
+
+/*
+ * On Zephyr, signals are per-thread and the thread id doubles as the pid argument for
+ * sigqueue(). With the host libc, a process-directed signal may be delivered to any of
+ * the simulator's host threads (with terminating default action), so queue directly to
+ * the test thread instead.
+ */
+static int queue_rt_signal(pthread_t target, int signo, union sigval value)
+{
+#if defined(CONFIG_NATIVE_LIBC)
+	/* glibc only declares pthread_sigqueue() with _GNU_SOURCE, which this test
+	 * does not define (it builds with _POSIX_C_SOURCE=200809L)
+	 */
+	extern int pthread_sigqueue(pthread_t thread, int sig, const union sigval value);
+	int ret = pthread_sigqueue(target, signo, value);
+
+	if (ret != 0) {
+		errno = ret;
+		return -1;
+	}
+
+	return 0;
+#else
+	return sigqueue((pid_t)target, signo, value);
+#endif
+}
 
 static void skip_if_rt_sigset_too_small(void)
 {
@@ -74,10 +101,11 @@ static void do_queue(struct k_work *work)
 	struct sigqueue_work *sq_work = CONTAINER_OF(
 		CONTAINER_OF(work, struct k_work_delayable, work), struct sigqueue_work, dwork);
 
-	zassert_ok(sigqueue((pid_t)sq_work->target, SIGRTMIN, (union sigval){0}));
+	zassert_ok(queue_rt_signal(sq_work->target, SIGRTMIN, (union sigval){0}));
 }
 
-static void queue_signal_after_ms(pthread_t target, int delay_ms)
+/* unused with the host libc, where blocking in a host call stalls the k_work queue */
+__maybe_unused static void queue_signal_after_ms(pthread_t target, int delay_ms)
 {
 	(void)k_work_cancel_delayable(&sigq_work.dwork);
 	sigq_work.target = target;
@@ -119,8 +147,18 @@ static void block_rt_signals(void)
 {
 	sigset_t mask;
 
+	if (IS_ENABLED(CONFIG_NATIVE_LIBC)) {
+		/*
+		 * With the host libc, the real-time signals themselves must be blocked so
+		 * that they remain pending for sigtimedwait()/sigwaitinfo() instead of
+		 * being delivered with their default (terminating) action.
+		 */
+		zassert_ok(pthread_sigmask(SIG_BLOCK, &rt_sigset, NULL));
+		return;
+	}
+
 	sigfillset(&mask);
-	for (int i = 0; i < RTSIG_MAX; ++i) {
+	for (int i = 0; i < rt_nsigs; ++i) {
 		zassert_ok(sigdelset(&mask, (SIGRTMIN + i)));
 	}
 
@@ -145,7 +183,7 @@ static void test_sigqueue(void)
 		zassert_not_ok(sigqueue(-1, SIGUSR1, (union sigval){0}));
 		zassert_equal(errno, ESRCH, "errno was %d instead of ESRCH (%d)", errno, ESRCH);
 
-		zassert_not_ok(sigqueue((pid_t)pthread_self(), -1, (union sigval){0}));
+		zassert_not_ok(queue_rt_signal(pthread_self(), -1, (union sigval){0}));
 #if defined(CONFIG_NATIVE_LIBC)
 		zassert_true(errno == EINVAL || errno == ESRCH,
 			     "errno was %d, expected EINVAL or ESRCH", errno);
@@ -157,13 +195,16 @@ static void test_sigqueue(void)
 	block_rt_signals();
 
 	for (int i = 0; i < SIGNAL_QUEUE_SIZE; ++i) {
-		zassert_ok(
-			sigqueue((pid_t)pthread_self(), SIGRTMIN, (union sigval){.sival_int = i}),
-			"failed to queue the %d-th signal", i);
+		zassert_ok(queue_rt_signal(pthread_self(), SIGRTMIN,
+					   (union sigval){.sival_int = i}),
+			   "failed to queue the %d-th signal", i);
 	}
 
-	zassert_not_ok(sigqueue((pid_t)pthread_self(), SIGRTMIN, (union sigval){0}));
-	zassert_equal(errno, EAGAIN);
+	/* the host queue depth is governed by RLIMIT_SIGPENDING, not SIGQUEUE_MAX */
+	IF_NOT_NATIVE_LIBC({
+		zassert_not_ok(sigqueue((pid_t)pthread_self(), SIGRTMIN, (union sigval){0}));
+		zassert_equal(errno, EAGAIN);
+	})
 
 	for (int i = 0; i < SIGNAL_QUEUE_SIZE; ++i) {
 		int actual;
@@ -179,12 +220,12 @@ static void test_sigqueue(void)
 		zassert_equal(info.si_value.sival_int, i);
 	}
 
-	for (int i = RTSIG_MAX - 1; i >= 0; --i) {
-		zassert_ok(sigqueue((pid_t)pthread_self(), (SIGRTMIN + i), (union sigval){0}),
+	for (int i = rt_nsigs - 1; i >= 0; --i) {
+		zassert_ok(queue_rt_signal(pthread_self(), (SIGRTMIN + i), (union sigval){0}),
 			   "unable to queue signal %d", (SIGRTMIN + i));
 	}
 
-	for (int i = 0; i < RTSIG_MAX; ++i) {
+	for (int i = 0; i < rt_nsigs; ++i) {
 		int actual = sigtimedwait(&set, NULL, &timeout);
 
 		zassert_equal((SIGRTMIN + i), actual,
@@ -197,16 +238,12 @@ static void test_sigtimedwait(void)
 {
 	sigset_t set = rt_sigset;
 	siginfo_t info;
-	pid_t self = (pid_t)pthread_self();
+	pthread_t self = pthread_self();
 	uint32_t begin_ms, delta_ms, end_ms;
 	struct timespec timeout = {0};
 	struct timespec wait_100ms = {
 		.tv_sec = 0,
 		.tv_nsec = 100 * NSEC_PER_MSEC,
-	};
-	struct timespec wait_300ms = {
-		.tv_sec = 0,
-		.tv_nsec = 300 * NSEC_PER_MSEC,
 	};
 
 	const struct stw_args_exp {
@@ -230,45 +267,58 @@ static void test_sigtimedwait(void)
 	ARRAY_FOR_EACH_PTR(harness, a) {
 		errno = 0;
 		if (a->expected_errno == 0) {
-			zassert_ok(sigqueue(self, SIGRTMIN, (union sigval){0}));
+			zassert_ok(queue_rt_signal(self, SIGRTMIN, (union sigval){0}));
 			zassert_equal(SIGRTMIN, sigtimedwait(a->set, a->info, a->timeout));
 			if (a->info != NULL) {
 				zassert_equal(a->info->si_signo, SIGRTMIN);
 			}
 		} else {
 			zassert_equal(-1, sigtimedwait(a->set, a->info, a->timeout));
-			zassert_equal(errno, a->expected_errno);
+			if (IS_ENABLED(CONFIG_NATIVE_LIBC)) {
+				/* the host libc reports EFAULT for a NULL set */
+				zassert_true(errno == a->expected_errno || errno == EFAULT,
+					     "errno was %d", errno);
+			} else {
+				zassert_equal(errno, a->expected_errno);
+			}
 		}
 	}
 
-	begin_ms = k_uptime_get_32();
+	begin_ms = now_ms();
 	zassert_equal(-1, sigtimedwait(&set, NULL, &timeout));
 	zassert_equal(errno, EAGAIN);
-	end_ms = k_uptime_get_32();
+	end_ms = now_ms();
 	delta_ms = end_ms - begin_ms;
 	zassert_true(delta_ms < 50);
 
-	begin_ms = k_uptime_get_32();
+	begin_ms = now_ms();
 	zassert_equal(-1, sigtimedwait(&set, NULL, &wait_100ms));
 	zassert_equal(errno, EAGAIN);
-	end_ms = k_uptime_get_32();
+	end_ms = now_ms();
 	delta_ms = end_ms - begin_ms;
 	zassert_true(delta_ms >= 100);
 
-	begin_ms = k_uptime_get_32();
-	queue_signal_after_ms(pthread_self(), 100);
-	zassert_equal(SIGRTMIN, sigtimedwait(&set, NULL, &wait_300ms));
-	end_ms = k_uptime_get_32();
-	delta_ms = end_ms - begin_ms;
-	zassert_true(delta_ms >= 100);
-	zassert_true(delta_ms < 200);
+	/* k_work items cannot make progress while the test thread blocks in the host libc */
+	IF_NOT_NATIVE_LIBC({
+		struct timespec wait_300ms = {
+			.tv_sec = 0,
+			.tv_nsec = 300 * NSEC_PER_MSEC,
+		};
+
+		begin_ms = now_ms();
+		queue_signal_after_ms(pthread_self(), 100);
+		zassert_equal(SIGRTMIN, sigtimedwait(&set, NULL, &wait_300ms));
+		end_ms = now_ms();
+		delta_ms = end_ms - begin_ms;
+		zassert_true(delta_ms >= 100);
+		zassert_true(delta_ms < 200);
+	})
 }
 
 static void test_sigwaitinfo(void)
 {
 	sigset_t set = rt_sigset;
 	siginfo_t info;
-	uint32_t begin_ms, delta_ms, end_ms;
 
 	const struct swi_args_exp {
 		const sigset_t *set;
@@ -286,8 +336,8 @@ static void test_sigwaitinfo(void)
 	ARRAY_FOR_EACH_PTR(harness, a) {
 		errno = 0;
 		if (a->expected_errno == 0) {
-			zassert_ok(sigqueue((pid_t)pthread_self(), SIGRTMIN,
-					    (union sigval){.sival_int = 42}));
+			zassert_ok(queue_rt_signal(pthread_self(), SIGRTMIN,
+						   (union sigval){.sival_int = 42}));
 			zassert_equal(SIGRTMIN, sigwaitinfo(a->set, a->info));
 			if (a->info != NULL) {
 				zassert_equal(a->info->si_signo, SIGRTMIN);
@@ -295,17 +345,28 @@ static void test_sigwaitinfo(void)
 			}
 		} else {
 			zassert_equal(-1, sigwaitinfo(a->set, a->info));
-			zassert_equal(errno, a->expected_errno);
+			if (IS_ENABLED(CONFIG_NATIVE_LIBC)) {
+				/* the host libc reports EFAULT for a NULL set */
+				zassert_true(errno == a->expected_errno || errno == EFAULT,
+					     "errno was %d", errno);
+			} else {
+				zassert_equal(errno, a->expected_errno);
+			}
 		}
 	}
 
-	begin_ms = k_uptime_get_32();
-	queue_signal_after_ms(pthread_self(), 100);
-	zassert_equal(SIGRTMIN, sigwaitinfo(&set, NULL));
-	end_ms = k_uptime_get_32();
-	delta_ms = end_ms - begin_ms;
-	zassert_true(delta_ms >= 100);
-	zassert_true(delta_ms < 200);
+	/* k_work items cannot make progress while the test thread blocks in the host libc */
+	IF_NOT_NATIVE_LIBC({
+		uint32_t begin_ms, delta_ms, end_ms;
+
+		begin_ms = now_ms();
+		queue_signal_after_ms(pthread_self(), 100);
+		zassert_equal(SIGRTMIN, sigwaitinfo(&set, NULL));
+		end_ms = now_ms();
+		delta_ms = end_ms - begin_ms;
+		zassert_true(delta_ms >= 100);
+		zassert_true(delta_ms < 200);
+	})
 }
 
 static ZTEST_BMEM volatile bool rt_handler_called;
@@ -407,16 +468,21 @@ static void *setup(void)
 	}
 
 	rt_sigset_usable = true;
+	rt_nsigs = 0;
 	sigemptyset(&rt_sigset);
 	for (int i = 0; i < RTSIG_MAX; ++i) {
 		const int signo = SIGRTMIN + i;
 
+		if (signo > SIGRTMAX) {
+			break;
+		}
 		if ((signo - 1) >= SIGSET_NLONGS * BITS_PER_LONG) {
 			break;
 		}
 		if (sigaddset(&rt_sigset, signo) != 0) {
 			break;
 		}
+		++rt_nsigs;
 	}
 
 	return NULL;
