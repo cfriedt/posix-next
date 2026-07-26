@@ -5,8 +5,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "posix_clock.h"
-
 #include <errno.h>
 #include <fcntl.h>
 #include <mqueue.h>
@@ -19,6 +17,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/sys/atomic.h>
 #include <zephyr/sys/math_extras.h>
+#include <zephyr/sys/timeutil.h>
 
 #define SIGEV_MASK (SIGEV_NONE | SIGEV_SIGNAL | SIGEV_THREAD)
 
@@ -274,7 +273,7 @@ int mq_timedsend(mqd_t mqdes, const char *msg_ptr, size_t msg_len,
 	}
 
 	return send_message(mqd, msg_ptr, msg_len,
-			    K_MSEC(timespec_to_timeoutms(CLOCK_REALTIME, abstime)));
+			    sys_timepoint_timeout(timespec_abs_rt_to_timepoint(abstime)));
 }
 
 /**
@@ -310,7 +309,7 @@ int mq_timedreceive(mqd_t mqdes, char *msg_ptr, size_t msg_len,
 	}
 
 	return receive_message(mqd, msg_ptr, msg_len,
-			       K_MSEC(timespec_to_timeoutms(CLOCK_REALTIME, abstime)));
+			       sys_timepoint_timeout(timespec_abs_rt_to_timepoint(abstime)));
 }
 
 /**

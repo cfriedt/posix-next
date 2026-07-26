@@ -5,13 +5,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/* for tp_ge(), tp_diff() */
-#include "posix_clock.h"
-
 #include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
 
+#include <zephyr/sys/timeutil.h>
 #include <zephyr/ztest.h>
 #include <zephyr/logging/log.h>
 
@@ -62,7 +60,7 @@ ZTEST(posix_timers, test_clock_gettime)
 
 ZTEST(posix_timers, test_clock_settime)
 {
-	int64_t diff_ns;
+	struct timespec diff;
 	struct timespec ts = {0};
 
 	BUILD_ASSERT(ARRAY_SIZE(settable) == ARRAY_SIZE(clocks));
@@ -103,13 +101,16 @@ ZTEST(posix_timers, test_clock_settime)
 		/* read-back the time */
 		zassert_ok(clock_gettime(clocks[i], &ts));
 		/* dt should be >= 0, but definitely <= 1s */
-		diff_ns = tp_diff(&ts, &ref_ts);
-		zassert_true(diff_ns >= 0 && diff_ns <= NSEC_PER_SEC);
+		diff = ts;
+		zassert_true(timespec_sub(&diff, &ref_ts));
+		zassert_true(timespec_compare(&diff, &SYS_TIMESPEC(0, 0)) >= 0);
+		zassert_true(timespec_compare(&diff, &SYS_TIMESPEC(1, 0)) <= 0);
 	}
 }
 
 ZTEST(posix_timers, test_realtime)
 {
+	struct timespec diff;
 	struct timespec then, now;
 	/*
 	 * For calculating cumulative moving average
@@ -135,7 +136,9 @@ ZTEST(posix_timers, test_realtime)
 		(void)clock_gettime(CLOCK_REALTIME, &now);
 
 		/* Make the delta milliseconds. */
-		x_i = tp_diff(&now, &then) / NSEC_PER_MSEC;
+		diff = now;
+		(void)timespec_sub(&diff, &then);
+		x_i = (int64_t)diff.tv_sec * MSEC_PER_SEC + diff.tv_nsec / NSEC_PER_MSEC;
 		then = now;
 
 		if (x_i < lo_wm) {
@@ -198,7 +201,7 @@ ZTEST(posix_timers, test_clock_getres)
 			continue;
 		}
 		if (arg->res != NULL) {
-			zassert_true(tp_ge(arg->res, &one_ns));
+			zassert_true(timespec_compare(arg->res, &one_ns) >= 0);
 		}
 	}
 }
