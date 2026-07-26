@@ -5,11 +5,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "posix_clock.h"
-
 #include <errno.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/atomic.h>
+#include <zephyr/sys/timeutil.h>
 #include <fcntl.h>
 #include <pthread.h>
 #include <semaphore.h>
@@ -167,7 +166,7 @@ int sem_timedwait(sem_t *semaphore, struct timespec *abstime)
 		return -1;
 	}
 
-	k_timeout_t to = K_MSEC(timespec_to_timeoutms(CLOCK_REALTIME, abstime));
+	k_timeout_t to = sys_timepoint_timeout(timespec_abs_rt_to_timepoint(abstime));
 
 	if (k_sem_take((struct k_sem *)semaphore, to)) {
 		errno = ETIMEDOUT;
