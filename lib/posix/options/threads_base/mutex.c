@@ -5,7 +5,6 @@
  */
 
 #include "posix_internal.h"
-#include "posix_clock.h"
 
 #include <pthread.h>
 
