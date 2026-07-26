@@ -12,6 +12,8 @@
 #include <zephyr/sys/util.h>
 #include <zephyr/ztest.h>
 
+#include "../../common/linux_compat_test.h"
+
 #define SELECT_NANOSLEEP       1
 #define SELECT_CLOCK_NANOSLEEP 0
 
@@ -107,8 +109,11 @@ ZTEST(posix_clock_selection, test_pthread_condattr_setclock)
 	zassert_ok(pthread_condattr_getclock(&att, &clock_id), "pthread_condattr_setclock failed");
 	zassert_equal(clock_id, CLOCK_MONOTONIC, "clock attribute not set correctly");
 
-	zassert_equal(pthread_condattr_setclock(&att, 42), -EINVAL,
-		      "pthread_condattr_setclock did not return EINVAL");
+	/* degenerate cases */
+	IF_NOT_NATIVE_LIBC({
+		zassert_equal(pthread_condattr_setclock(&att, 42), -EINVAL,
+			      "pthread_condattr_setclock did not return EINVAL");
+	})
 
 	zassert_ok(pthread_condattr_destroy(&att));
 }
