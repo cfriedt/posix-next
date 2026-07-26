@@ -6,10 +6,5 @@ project(posix_non_portable)
 
 target_sources(app PRIVATE src/main.c)
 
-target_include_directories(app PRIVATE
-  ${ZEPHYR_POSIX_NEXT_MODULE_DIR}/lib/posix/options/timers
-  ${ZEPHYR_POSIX_NEXT_MODULE_DIR}/lib/posix/options/shared
-)
-
 target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
 target_compile_options(app PRIVATE -D_GNU_SOURCE)
