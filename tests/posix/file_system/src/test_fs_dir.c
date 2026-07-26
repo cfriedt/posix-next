@@ -11,6 +11,8 @@
 #include <dirent.h>
 #include "test_fs.h"
 
+#include "../../common/linux_compat_test.h"
+
 extern int test_file_write(void);
 extern int test_file_close(void);
 extern int file;
@@ -22,7 +24,7 @@ static int test_mkdir(void)
 	TC_PRINT("\nmkdir tests:\n");
 
 	/* Verify fs_mkdir() */
-	res = mkdir(TEST_DIR, S_IRWXG);
+	res = mkdir(TEST_DIR, 0770);
 	if (res) {
 		TC_PRINT("Error creating dir[%d]\n", res);
 		return res;
@@ -59,7 +61,11 @@ static struct dirent *readdir_wrap(DIR *dirp, bool thread_safe)
 		static struct dirent entry;
 		struct dirent *result = NULL;
 
+#pragma GCC diagnostic push
+/* glibc deprecates readdir_r(), which is exactly what POSIX_FILE_SYSTEM_R tests */
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 		zassert_ok(readdir_r(dirp, &entry, &result));
+#pragma GCC diagnostic pop
 
 		return result;
 	} else {
@@ -109,7 +115,7 @@ static void after_fn(void *unused)
 	ARG_UNUSED(unused);
 
 	unlink(TEST_DIR_FILE);
-	unlink(TEST_DIR);
+	rmdir(TEST_DIR);
 }
 
 /* FIXME: restructure tests as per #46897 */
@@ -161,21 +167,20 @@ ZTEST(posix_fs_dir_test, test_fs_readdir_threadsafe)
  */
 ZTEST(posix_fs_dir_test, test_fs_rmdir)
 {
-#define IRWXG	0070
 	/* Create and remove empty directory */
-	zassert_ok(mkdir(TEST_DIR, IRWXG), "Error creating dir: %d", errno);
+	zassert_ok(mkdir(TEST_DIR, 0770), "Error creating dir: %d", errno);
 	zassert_ok(rmdir(TEST_DIR), "Error removing dir: %d\n", errno);
 
 	/* Create directory and open a file in the directory
 	 * now removing the directory will fail, test will
 	 * fail in removal of non empty directory
 	 */
-	zassert_ok(mkdir(TEST_DIR, IRWXG), "Error creating dir: %d", errno);
-	zassert_not_equal(open(TEST_DIR_FILE, O_CREAT | O_RDWR), -1,
+	zassert_ok(mkdir(TEST_DIR, 0770), "Error creating dir: %d", errno);
+	zassert_not_equal(open(TEST_DIR_FILE, O_CREAT | O_RDWR, 0660), -1,
 			  "Error creating file: %d", errno);
 	zassert_not_ok(rmdir(TEST_DIR), "Error Non empty dir removed");
 	zassert_not_ok(rmdir(""), "Error Invalid path removed");
-	zassert_not_ok(rmdir(NULL), "Error Invalid path removed");
+	IF_NOT_NATIVE_LIBC({ zassert_not_ok(rmdir(NULL), "Error Invalid path removed"); })
 	zassert_not_ok(rmdir("TEST_DIR."), "Error Invalid path removed");
 	zassert_not_ok(rmdir(TEST_FILE), "Error file removed");
 }
