@@ -16,6 +16,8 @@
 #include <zephyr/sys/util.h>
 #include <zephyr/ztest.h>
 
+#include "../../common/linux_compat_test.h"
+
 #define WAIT_TIME_MS 100
 BUILD_ASSERT(WAIT_TIME_MS > 0, "WAIT_TIME_MS must be posistive");
 
@@ -44,9 +46,11 @@ static void semaphore_test(sem_t *sem)
 	/* TESTPOINT: Check if sema value is less than
 	 * CONFIG_POSIX_SEM_VALUE_MAX
 	 */
-	zassert_equal(sem_init(sem, 0, (CONFIG_POSIX_SEM_VALUE_MAX + 1)), -1,
-		      "value larger than %d\n", CONFIG_POSIX_SEM_VALUE_MAX);
-	zassert_equal(errno, EINVAL);
+	IF_NOT_NATIVE_LIBC({
+		zassert_equal(sem_init(sem, 0, (CONFIG_POSIX_SEM_VALUE_MAX + 1)), -1,
+			      "value larger than %d\n", CONFIG_POSIX_SEM_VALUE_MAX);
+		zassert_equal(errno, EINVAL);
+	})
 
 	zassert_equal(sem_init(sem, 0, 0), 0, "sem_init failed");
 
@@ -93,8 +97,10 @@ static void semaphore_test(sem_t *sem)
 #endif
 
 	/* TESTPOINT: Other thread is waiting for the semaphore */
-	zassert_equal(sem_destroy(sem), -1, "acquired semaphore is destroyed");
-	zassert_equal(errno, EBUSY);
+	IF_NOT_NATIVE_LIBC({
+		zassert_equal(sem_destroy(sem), -1, "acquired semaphore is destroyed");
+		zassert_equal(errno, EBUSY);
+	})
 
 	zassert_equal(sem_post(sem), 0, "sem_post failed");
 	zassert_ok(pthread_join(thread2, NULL));
@@ -122,20 +128,25 @@ ZTEST(posix_semaphores, test_semaphore)
 {
 	sem_t sema;
 
-	/* TESTPOINT: Call sem_post with invalid kobject */
-	zassert_equal(sem_post(NULL), -1,
-		      "sem_post of"
-		      " invalid semaphore object didn't fail");
-	zassert_equal(errno, EINVAL);
+	/* degenerate cases */
+	IF_NOT_NATIVE_LIBC({
+		/* TESTPOINT: Call sem_post with invalid kobject */
+		zassert_equal(sem_post(NULL), -1,
+			      "sem_post of"
+			      " invalid semaphore object didn't fail");
+		zassert_equal(errno, EINVAL);
 
-	/* TESTPOINT: sem_destroy with invalid kobject */
-	zassert_equal(sem_destroy(NULL), -1,
-		      "invalid"
-		      " semaphore is destroyed");
-	zassert_equal(errno, EINVAL);
+		/* TESTPOINT: sem_destroy with invalid kobject */
+		zassert_equal(sem_destroy(NULL), -1,
+			      "invalid"
+			      " semaphore is destroyed");
+		zassert_equal(errno, EINVAL);
+	})
 
 	semaphore_test(&sema);
 }
+
+#ifndef CONFIG_NATIVE_LIBC
 
 int nsem_get_ref_count(sem_t *sem);
 size_t nsem_get_list_len(void);
@@ -171,8 +182,14 @@ static void *nsem_close_func(void *p)
 	return NULL;
 }
 
+#endif /* CONFIG_NATIVE_LIBC */
+
 ZTEST(posix_semaphores, test_named_semaphore)
 {
+#ifdef CONFIG_NATIVE_LIBC
+	/* relies on Zephyr-internal named semaphore accounting */
+	ztest_test_skip();
+#else
 	pthread_t thread1, thread2;
 	sem_t *sem1, *sem2, *different_sem1;
 
@@ -339,6 +356,7 @@ ZTEST(posix_semaphores, test_named_semaphore)
 	sem_unlink("nsem");
 	sem_close(sem1);
 	zassert_equal(nsem_get_list_len(), 0);
+#endif /* CONFIG_NATIVE_LIBC */
 }
 
 ZTEST_SUITE(posix_semaphores, NULL, NULL, NULL, NULL, NULL);
