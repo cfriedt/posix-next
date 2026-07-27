@@ -111,6 +111,13 @@ void notify_function_basic(union sigval val)
 	*executed = true;
 }
 
+static void wait_for_notification(void)
+{
+	for (int i = 0; (i < 100) && !notification_executed; i++) {
+		usleep(10 * USEC_PER_MSEC);
+	}
+}
+
 ZTEST(xsi_realtime, test_mqueue_notify_basic)
 {
 	mqd_t mqd;
@@ -120,8 +127,6 @@ ZTEST(xsi_realtime, test_mqueue_notify_basic)
 	};
 	struct sigevent not = {
 		.sigev_notify = SIGEV_NONE,
-		.sigev_value.sival_ptr = (void *)&notification_executed,
-		.sigev_notify_function = notify_function_basic,
 	};
 	int32_t mode = 0777;
 	int flags = O_RDWR | O_CREAT;
@@ -129,13 +134,20 @@ ZTEST(xsi_realtime, test_mqueue_notify_basic)
 	notification_executed = false;
 	memset(rec_data, 0, MESSAGE_SIZE);
 
+	/* not an error if the queue does not exist yet */
+	(void)mq_unlink(queue);
+
 	mqd = mq_open(queue, flags, mode, &attrs);
 
 	zassert_ok(mq_notify(mqd, &not), "Unable to set notification.");
 
+	/* SIGEV_NONE: the event consumes the registration; nothing is delivered */
 	zassert_ok(mq_send(mqd, send_data, MESSAGE_SIZE, 0), "Unable to send message");
 
-	zassert_true(notification_executed, "Notification not triggered.");
+	zassert_ok(mq_notify(mqd, &not), "registration was not consumed by the event");
+	zassert_ok(mq_notify(mqd, NULL), "Unable to remove notification");
+
+	zassert_equal(mq_receive(mqd, rec_data, MESSAGE_SIZE, 0), MESSAGE_SIZE);
 
 	zassert_ok(mq_close(mqd), "Unable to close message queue descriptor.");
 	zassert_ok(mq_unlink(queue), "Unable to unlink queue");
@@ -144,7 +156,7 @@ ZTEST(xsi_realtime, test_mqueue_notify_basic)
 void notify_function_thread(union sigval val)
 {
 	mqd_t mqd;
-	pthread_t sender = (pthread_t)val.sival_int;
+	pthread_t sender = (pthread_t)(uintptr_t)val.sival_ptr;
 
 	zassert_not_equal(sender, pthread_self(),
 			  "Notification function should be executed from different thread.");
@@ -169,7 +181,7 @@ ZTEST(xsi_realtime, test_mqueue_notify_thread)
 	};
 	struct sigevent not = {
 		.sigev_notify = SIGEV_THREAD,
-		.sigev_value.sival_int = (int)pthread_self(),
+		.sigev_value.sival_ptr = (void *)(uintptr_t)pthread_self(),
 		.sigev_notify_function = notify_function_thread,
 	};
 	int32_t mode = 0777;
@@ -184,9 +196,13 @@ ZTEST(xsi_realtime, test_mqueue_notify_thread)
 
 	zassert_ok(mq_send(mqd, send_data, MESSAGE_SIZE, 0), "Unable to send message");
 
-	usleep(USEC_PER_MSEC * 100U);
+	wait_for_notification();
 
 	zassert_true(notification_executed, "Notification not triggered.");
+
+	/* the registration was consumed when the notification fired */
+	zassert_ok(mq_notify(mqd, &not), "registration was not consumed by the event");
+	zassert_ok(mq_notify(mqd, NULL), "Unable to remove notification");
 
 	zassert_ok(mq_close(mqd), "Unable to close message queue descriptor.");
 	zassert_ok(mq_unlink(queue), "Unable to unlink queue");
@@ -200,7 +216,7 @@ ZTEST(xsi_realtime, test_mqueue_notify_non_empty_queue)
 		.mq_maxmsg = MESG_COUNT_PERMQ,
 	};
 	struct sigevent not = {
-		.sigev_notify = SIGEV_NONE,
+		.sigev_notify = SIGEV_THREAD,
 		.sigev_value.sival_ptr = (void *)&notification_executed,
 		.sigev_notify_function = notify_function_basic,
 	};
@@ -210,22 +226,29 @@ ZTEST(xsi_realtime, test_mqueue_notify_non_empty_queue)
 	notification_executed = false;
 	memset(rec_data, 0, MESSAGE_SIZE);
 
+	/* not an error if the queue does not exist yet */
+	(void)mq_unlink(queue);
+
 	mqd = mq_open(queue, flags, mode, &attrs);
 
 	zassert_ok(mq_send(mqd, send_data, MESSAGE_SIZE, 0), "Unable to send message");
 
 	zassert_ok(mq_notify(mqd, &not), "Unable to set notification.");
 
+	/* the queue was not empty when the message arrived: no notification */
+	usleep(50 * USEC_PER_MSEC);
 	zassert_false(notification_executed, "Notification shouldn't be processed.");
 
-	mq_receive(mqd, rec_data, MESSAGE_SIZE, 0);
+	zassert_equal(mq_receive(mqd, rec_data, MESSAGE_SIZE, 0), MESSAGE_SIZE);
 	zassert_false(strcmp(rec_data, send_data), "Error in data reception. exp: %s act: %s",
 		      send_data, rec_data);
 
 	memset(rec_data, 0, MESSAGE_SIZE);
 
+	/* empty -> non-empty: the notification fires exactly once */
 	zassert_ok(mq_send(mqd, send_data, MESSAGE_SIZE, 0), "Unable to send message");
 
+	wait_for_notification();
 	zassert_true(notification_executed, "Notification not triggered.");
 
 	zassert_ok(mq_close(mqd), "Unable to close message queue descriptor.");
@@ -240,9 +263,7 @@ ZTEST(xsi_realtime, test_mqueue_notify_errors)
 		.mq_maxmsg = MESG_COUNT_PERMQ,
 	};
 	struct sigevent not = {
-		.sigev_notify = SIGEV_SIGNAL,
-		.sigev_value.sival_ptr = (void *)&notification_executed,
-		.sigev_notify_function = notify_function_basic,
+		.sigev_notify = SIGEV_NONE,
 	};
 	int32_t mode = 0777;
 	int flags = O_RDWR | O_CREAT;
@@ -250,13 +271,17 @@ ZTEST(xsi_realtime, test_mqueue_notify_errors)
 	zassert_not_ok(mq_notify(NULL, NULL), "Should return -1 and set errno to EBADF.");
 	zassert_equal(errno, EBADF);
 
+	/* not an error if the queue does not exist yet */
+	(void)mq_unlink(queue);
+
 	mqd = mq_open(queue, flags, mode, &attrs);
 
-	zassert_not_ok(mq_notify(mqd, NULL), "Should return -1 and set errno to EINVAL.");
-	zassert_equal(errno, EINVAL);
+	/* removing a non-existent registration is a no-op */
+	zassert_ok(mq_notify(mqd, NULL));
 
-	zassert_not_ok(mq_notify(mqd, &not), "SIGEV_SIGNAL not supported should return -1.");
-	zassert_equal(errno, ENOSYS);
+	not.sigev_notify = 4242;
+	zassert_not_ok(mq_notify(mqd, &not), "invalid sigev_notify values are rejected");
+	zassert_equal(errno, EINVAL);
 
 	not.sigev_notify = SIGEV_NONE;
 
@@ -268,6 +293,7 @@ ZTEST(xsi_realtime, test_mqueue_notify_errors)
 	zassert_equal(errno, EBUSY);
 
 	zassert_ok(mq_notify(mqd, NULL), "Unable to remove notification from the message queue.");
+	zassert_ok(mq_notify(mqd, NULL), "removing twice is still a no-op");
 
 	zassert_ok(mq_close(mqd), "Unable to close message queue descriptor.");
 	zassert_ok(mq_unlink(queue), "Unable to unlink queue");

@@ -19,7 +19,12 @@
 #include <zephyr/sys/math_extras.h>
 #include <zephyr/sys/timeutil.h>
 
-#define SIGEV_MASK (SIGEV_NONE | SIGEV_SIGNAL | SIGEV_THREAD)
+/* snapshot handed to the SIGEV_THREAD notification thread; owns no queue reference */
+struct mq_notify_job {
+	void (*func)(union sigval value);
+	union sigval value;
+	pthread_attr_t attr;
+};
 
 typedef struct mqueue_object {
 	sys_snode_t snode;
@@ -28,7 +33,9 @@ typedef struct mqueue_object {
 	struct k_msgq queue;
 	atomic_t ref_count;
 	char *name;
-	struct sigevent not;
+	struct sigevent not;              /* registered when sigev_notify != 0 */
+	struct mqueue_desc *notify_mqd;   /* descriptor used to register */
+	struct mq_notify_job *job;        /* non-NULL only when SIGEV_THREAD registered */
 } mqueue_object;
 
 typedef struct mqueue_desc {
@@ -204,6 +211,11 @@ int mq_close(mqd_t mqdes)
 		return -1;
 	}
 
+	/* a notification registered through this descriptor is removed */
+	if (mqd->mqueue->notify_mqd == mqd) {
+		remove_notification(mqd->mqueue);
+	}
+
 	atomic_dec(&mqd->mqueue->ref_count);
 
 	/* remove mq if marked for unlink */
@@ -376,6 +388,7 @@ int mq_setattr(mqd_t mqdes, const struct mq_attr *mqstat,
 int mq_notify(mqd_t mqdes, const struct sigevent *notification)
 {
 	mqueue_desc *mqd = (mqueue_desc *)mqdes;
+	struct mq_notify_job *job = NULL;
 
 	if (mqd == NULL) {
 		errno = EBADF;
@@ -385,33 +398,58 @@ int mq_notify(mqd_t mqdes, const struct sigevent *notification)
 	mqueue_object *msg_queue = mqd->mqueue;
 
 	if (notification == NULL) {
-		if ((msg_queue->not.sigev_notify & SIGEV_MASK) == 0) {
-			errno = EINVAL;
-			return -1;
-		}
+		/* removing a non-existent registration is a harmless no-op */
 		remove_notification(msg_queue);
 		return 0;
 	}
 
-	if ((msg_queue->not.sigev_notify & SIGEV_MASK) != 0) {
-		errno = EBUSY;
-		return -1;
-	}
-	if (notification->sigev_notify == SIGEV_SIGNAL) {
+	switch (notification->sigev_notify) {
+	case SIGEV_NONE:
+		break;
+	case SIGEV_SIGNAL:
 		errno = ENOSYS;
 		return -1;
-	}
-	if (notification->sigev_notify_attributes != NULL) {
-		int ret = pthread_attr_setdetachstate(notification->sigev_notify_attributes,
-						      PTHREAD_CREATE_DETACHED);
-		if (ret != 0) {
-			errno = ret;
+	case SIGEV_THREAD:
+		if (notification->sigev_notify_function == NULL) {
+			errno = EINVAL;
 			return -1;
 		}
+		job = k_malloc(sizeof(*job));
+		if (job == NULL) {
+			errno = ENOMEM;
+			return -1;
+		}
+		job->func = notification->sigev_notify_function;
+		job->value = notification->sigev_value;
+		/*
+		 * The notification thread is never joinable: force the detach
+		 * state on a private copy of the caller's attributes.
+		 */
+		if (notification->sigev_notify_attributes != NULL) {
+			job->attr = *(pthread_attr_t *)notification->sigev_notify_attributes;
+		} else {
+			(void)pthread_attr_init(&job->attr);
+		}
+		(void)pthread_attr_setdetachstate(&job->attr, PTHREAD_CREATE_DETACHED);
+		break;
+	default:
+		errno = EINVAL;
+		return -1;
 	}
 
 	k_sem_take(&mq_sem, K_FOREVER);
-	memcpy(&msg_queue->not, notification, sizeof(struct sigevent));
+	if (msg_queue->not.sigev_notify != 0) {
+		k_sem_give(&mq_sem);
+		if (job != NULL) {
+			(void)pthread_attr_destroy(&job->attr);
+			k_free(job);
+		}
+		errno = EBUSY;
+		return -1;
+	}
+	msg_queue->not = *notification;
+	msg_queue->notify_mqd = mqd;
+	msg_queue->job = job;
 	k_sem_give(&mq_sem);
 
 	return 0;
@@ -419,18 +457,15 @@ int mq_notify(mqd_t mqdes, const struct sigevent *notification)
 
 static void *mq_notify_thread(void *arg)
 {
-	mqueue_object *mqueue = (mqueue_object *)arg;
-	struct sigevent *sevp = &mqueue->not;
+	struct mq_notify_job *job = arg;
+	void (*func)(union sigval) = job->func;
+	union sigval value = job->value;
 
-	pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
+	(void)pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
+	(void)pthread_attr_destroy(&job->attr);
+	k_free(job);
 
-	if (sevp->sigev_notify_attributes == NULL) {
-		pthread_detach(pthread_self());
-	}
-
-	sevp->sigev_notify_function(sevp->sigev_value);
-
-	remove_notification(mqueue);
+	func(value);
 
 	return NULL;
 }
@@ -474,28 +509,47 @@ static int32_t send_message(mqueue_desc *mqd, const char *msg_ptr, size_t msg_le
 		return ret;
 	}
 
-	uint32_t msgq_num = k_msgq_num_used_get(&mqd->mqueue->queue);
+	uint32_t used_before = k_msgq_num_used_get(&mqd->mqueue->queue);
 
 	if (k_msgq_put(&mqd->mqueue->queue, (void *)msg_ptr, timeout) != 0) {
 		errno = K_TIMEOUT_EQ(timeout, K_NO_WAIT) ? EAGAIN : ETIMEDOUT;
 		return ret;
 	}
 
-	if (k_msgq_num_used_get(&mqd->mqueue->queue) - msgq_num > 0) {
-		struct sigevent *sevp = &mqd->mqueue->not;
+	/*
+	 * The notification fires when a message arrives on a previously empty
+	 * queue and no thread is blocked in mq_receive(); a blocked receiver
+	 * takes the message directly, leaving the used count at 0. The pre-put
+	 * sample is taken outside the lock, so a sender racing a receiver at
+	 * the 0/1 boundary may see or miss the transition.
+	 */
+	if ((used_before == 0) && (k_msgq_num_used_get(&mqd->mqueue->queue) > 0)) {
+		mqueue_object *mq = mqd->mqueue;
+		struct sigevent sev = {0};
+		struct mq_notify_job *job = NULL;
 
-		if (sevp->sigev_notify == SIGEV_NONE) {
-			sevp->sigev_notify_function(sevp->sigev_value);
-		} else if (sevp->sigev_notify == SIGEV_THREAD) {
+		k_sem_take(&mq_sem, K_FOREVER);
+		if (mq->not.sigev_notify != 0) {
+			/*
+			 * The event consumes the registration before anything
+			 * is delivered; for SIGEV_NONE nothing is delivered at
+			 * all.
+			 */
+			sev = mq->not;
+			job = mq->job;
+			mq->job = NULL;
+			mq->notify_mqd = NULL;
+			(void)memset(&mq->not, 0, sizeof(mq->not));
+		}
+		k_sem_give(&mq_sem);
+
+		if (sev.sigev_notify == SIGEV_THREAD) {
 			pthread_t th;
 
-			ret = pthread_create(&th,
-					     sevp->sigev_notify_attributes,
-					     mq_notify_thread,
-					     mqd->mqueue);
-			if (ret != 0) {
-				errno = ret;
-				return -1;
+			if (pthread_create(&th, &job->attr, mq_notify_thread, job) != 0) {
+				/* the notification is lost; the send still succeeded */
+				(void)pthread_attr_destroy(&job->attr);
+				k_free(job);
 			}
 		}
 	}
@@ -538,6 +592,9 @@ static void remove_mq(mqueue_object *msg_queue)
 		sys_slist_find_and_remove(&mq_list, (sys_snode_t *) msg_queue);
 		k_sem_give(&mq_sem);
 
+		/* free a registration that never fired */
+		remove_notification(msg_queue);
+
 		/* Free mq buffer and pbject */
 		k_free(msg_queue->mem_buffer);
 		k_free(msg_queue->mem_obj);
@@ -546,7 +603,17 @@ static void remove_mq(mqueue_object *msg_queue)
 
 static void remove_notification(mqueue_object *msg_queue)
 {
+	struct mq_notify_job *job;
+
 	k_sem_take(&mq_sem, K_FOREVER);
-	memset(&msg_queue->not, 0, sizeof(struct sigevent));
+	job = msg_queue->job;
+	msg_queue->job = NULL;
+	msg_queue->notify_mqd = NULL;
+	(void)memset(&msg_queue->not, 0, sizeof(msg_queue->not));
 	k_sem_give(&mq_sem);
+
+	if (job != NULL) {
+		(void)pthread_attr_destroy(&job->attr);
+		k_free(job);
+	}
 }
