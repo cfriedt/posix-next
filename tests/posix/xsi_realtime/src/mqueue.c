@@ -255,6 +255,79 @@ ZTEST(xsi_realtime, test_mqueue_notify_non_empty_queue)
 	zassert_ok(mq_unlink(queue), "Unable to unlink queue");
 }
 
+static bool signal_notification_received;
+static void *signal_notification_value;
+
+static void mq_signal_handler(int signo, siginfo_t *info, void *ctx)
+{
+	ARG_UNUSED(ctx);
+
+	zassert_equal(signo, SIGUSR1);
+	signal_notification_value = info->si_value.sival_ptr;
+	signal_notification_received = true;
+}
+
+ZTEST(xsi_realtime, test_mqueue_notify_signal)
+{
+	static int sentinel;
+	mqd_t mqd;
+	sigset_t set;
+	struct mq_attr attrs = {
+		.mq_msgsize = MESSAGE_SIZE,
+		.mq_maxmsg = MESG_COUNT_PERMQ,
+	};
+	struct sigevent not = {
+		.sigev_notify = SIGEV_SIGNAL,
+		.sigev_signo = SIGUSR1,
+		.sigev_value.sival_ptr = &sentinel,
+	};
+	struct sigaction act = {
+		.sa_flags = SA_SIGINFO,
+		.sa_sigaction = mq_signal_handler,
+	};
+	int32_t mode = 0777;
+	int flags = O_RDWR | O_CREAT;
+
+	signal_notification_received = false;
+	signal_notification_value = NULL;
+	memset(rec_data, 0, MESSAGE_SIZE);
+
+	zassert_ok(sigemptyset(&act.sa_mask));
+	zassert_ok(sigaction(SIGUSR1, &act, NULL));
+	/* Zephyr kernel threads block all signals by default */
+	zassert_ok(sigemptyset(&set));
+	zassert_ok(sigaddset(&set, SIGUSR1));
+	zassert_ok(pthread_sigmask(SIG_UNBLOCK, &set, NULL));
+
+	/* not an error if the queue does not exist yet */
+	(void)mq_unlink(queue);
+
+	mqd = mq_open(queue, flags, mode, &attrs);
+
+	zassert_ok(mq_notify(mqd, &not), "Unable to set notification.");
+
+	zassert_ok(mq_send(mqd, send_data, MESSAGE_SIZE, 0), "Unable to send message");
+
+	/* delivery is asynchronous (at the latest on a sleep boundary) */
+	for (int i = 0; (i < 100) && !signal_notification_received; i++) {
+		usleep(10 * USEC_PER_MSEC);
+	}
+	zassert_true(signal_notification_received, "Notification signal not delivered.");
+	zassert_equal_ptr(signal_notification_value, &sentinel,
+			  "sigev_value did not round-trip through delivery");
+
+	/* the registration was consumed when the notification fired */
+	zassert_ok(mq_notify(mqd, &not), "registration was not consumed by the event");
+	zassert_ok(mq_notify(mqd, NULL), "Unable to remove notification");
+
+	zassert_equal(mq_receive(mqd, rec_data, MESSAGE_SIZE, 0), MESSAGE_SIZE);
+
+	zassert_ok(mq_close(mqd), "Unable to close message queue descriptor.");
+	zassert_ok(mq_unlink(queue), "Unable to unlink queue");
+
+	(void)signal(SIGUSR1, SIG_DFL);
+}
+
 ZTEST(xsi_realtime, test_mqueue_notify_errors)
 {
 	mqd_t mqd;

@@ -19,6 +19,8 @@
 #include <zephyr/sys/math_extras.h>
 #include <zephyr/sys/timeutil.h>
 
+#include "posix_internal.h"
+
 /* snapshot handed to the SIGEV_THREAD notification thread; owns no queue reference */
 struct mq_notify_job {
 	void (*func)(union sigval value);
@@ -36,6 +38,10 @@ typedef struct mqueue_object {
 	struct sigevent not;              /* registered when sigev_notify != 0 */
 	struct mqueue_desc *notify_mqd;   /* descriptor used to register */
 	struct mq_notify_job *job;        /* non-NULL only when SIGEV_THREAD registered */
+#ifdef CONFIG_SIGNAL
+	k_tid_t notify_tid;               /* SIGEV_SIGNAL target (registering thread) */
+	int notify_ksigno;                /* pre-mapped kernel signal number */
+#endif
 } mqueue_object;
 
 typedef struct mqueue_desc {
@@ -389,6 +395,7 @@ int mq_notify(mqd_t mqdes, const struct sigevent *notification)
 {
 	mqueue_desc *mqd = (mqueue_desc *)mqdes;
 	struct mq_notify_job *job = NULL;
+	int ksigno = -1;
 
 	if (mqd == NULL) {
 		errno = EBADF;
@@ -407,8 +414,17 @@ int mq_notify(mqd_t mqdes, const struct sigevent *notification)
 	case SIGEV_NONE:
 		break;
 	case SIGEV_SIGNAL:
+#ifdef CONFIG_SIGNAL
+		ksigno = z_sig_from_posix(notification->sigev_signo);
+		if (ksigno < 0) {
+			errno = EINVAL;
+			return -1;
+		}
+		break;
+#else
 		errno = ENOSYS;
 		return -1;
+#endif
 	case SIGEV_THREAD:
 		if (notification->sigev_notify_function == NULL) {
 			errno = EINVAL;
@@ -450,7 +466,14 @@ int mq_notify(mqd_t mqdes, const struct sigevent *notification)
 	msg_queue->not = *notification;
 	msg_queue->notify_mqd = mqd;
 	msg_queue->job = job;
+#ifdef CONFIG_SIGNAL
+	/* the single process is represented by the registering thread */
+	msg_queue->notify_tid = k_current_get();
+	msg_queue->notify_ksigno = ksigno;
+#endif
 	k_sem_give(&mq_sem);
+
+	ARG_UNUSED(ksigno);
 
 	return 0;
 }
@@ -527,6 +550,10 @@ static int32_t send_message(mqueue_desc *mqd, const char *msg_ptr, size_t msg_le
 		mqueue_object *mq = mqd->mqueue;
 		struct sigevent sev = {0};
 		struct mq_notify_job *job = NULL;
+#ifdef CONFIG_SIGNAL
+		k_tid_t tid = NULL;
+		int ksigno = -1;
+#endif
 
 		k_sem_take(&mq_sem, K_FOREVER);
 		if (mq->not.sigev_notify != 0) {
@@ -539,6 +566,10 @@ static int32_t send_message(mqueue_desc *mqd, const char *msg_ptr, size_t msg_le
 			job = mq->job;
 			mq->job = NULL;
 			mq->notify_mqd = NULL;
+#ifdef CONFIG_SIGNAL
+			tid = mq->notify_tid;
+			ksigno = mq->notify_ksigno;
+#endif
 			(void)memset(&mq->not, 0, sizeof(mq->not));
 		}
 		k_sem_give(&mq_sem);
@@ -552,6 +583,13 @@ static int32_t send_message(mqueue_desc *mqd, const char *msg_ptr, size_t msg_le
 				k_free(job);
 			}
 		}
+#ifdef CONFIG_SIGNAL
+		if (sev.sigev_notify == SIGEV_SIGNAL) {
+			(void)k_sig_queue(tid, ksigno, (union k_sig_val){
+				.sival_ptr = sev.sigev_value.sival_ptr,
+			});
+		}
+#endif
 	}
 
 	return 0;
