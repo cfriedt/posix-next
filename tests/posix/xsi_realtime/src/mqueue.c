@@ -8,6 +8,7 @@
 #include <fcntl.h>
 #include <mqueue.h>
 #include <pthread.h>
+#include <signal.h>
 #include <unistd.h>
 
 #include <zephyr/sys/util.h>
@@ -17,7 +18,7 @@
 #define MESSAGE_SIZE     16
 #define MESG_COUNT_PERMQ 4
 
-static char queue[16] = "server";
+static char queue[16] = "/server";
 
 static char send_data[MESSAGE_SIZE] = "timed data send";
 
@@ -74,6 +75,9 @@ ZTEST(xsi_realtime, test_mqueue)
 
 	attrs.mq_msgsize = MESSAGE_SIZE;
 	attrs.mq_maxmsg = MESG_COUNT_PERMQ;
+
+	/* not an error if the queue does not exist yet */
+	(void)mq_unlink(queue);
 
 	mqd = mq_open(queue, flags, mode, &attrs);
 
@@ -189,6 +193,9 @@ ZTEST(xsi_realtime, test_mqueue_notify_thread)
 
 	notification_executed = false;
 	memset(rec_data, 0, MESSAGE_SIZE);
+
+	/* not an error if the queue does not exist yet */
+	(void)mq_unlink(queue);
 
 	mqd = mq_open(queue, flags, mode, &attrs);
 
@@ -341,7 +348,7 @@ ZTEST(xsi_realtime, test_mqueue_notify_errors)
 	int32_t mode = 0777;
 	int flags = O_RDWR | O_CREAT;
 
-	zassert_not_ok(mq_notify(NULL, NULL), "Should return -1 and set errno to EBADF.");
+	zassert_not_ok(mq_notify((mqd_t)0, NULL), "Should return -1 and set errno to EBADF.");
 	zassert_equal(errno, EBADF);
 
 	/* not an error if the queue does not exist yet */
@@ -374,8 +381,8 @@ ZTEST(xsi_realtime, test_mqueue_notify_errors)
 
 ZTEST(xsi_realtime, test_mqueue_open_and_unlink_multiple)
 {
-	const char *q1 = "q1";
-	const char *q2 = "q2";
+	const char *q1 = "/q1";
+	const char *q2 = "/q2";
 
 	mqd_t mqd1, mqd2;
 	struct mq_attr attrs = {
@@ -385,6 +392,10 @@ ZTEST(xsi_realtime, test_mqueue_open_and_unlink_multiple)
 
 	int32_t mode = 0600;
 	int flags = O_RDWR | O_CREAT;
+
+	/* not an error if the queues do not exist yet */
+	(void)mq_unlink(q1);
+	(void)mq_unlink(q2);
 
 	mqd1 = mq_open(q1, flags, mode, &attrs);
 

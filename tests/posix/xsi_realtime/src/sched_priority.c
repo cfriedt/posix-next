@@ -50,6 +50,13 @@ ZTEST(xsi_realtime, test_sched_get_priority_max)
 
 ZTEST(xsi_realtime, test_sched_policy_and_priority_limits)
 {
+	if (IS_ENABLED(CONFIG_POSIX_TEST_LINUX_COMPAT)) {
+		/* priority ranges and policy availability below encode Zephyr's
+		 * scheduler model (e.g. SCHED_OTHER pmin == pmax == 0 on Linux)
+		 */
+		ztest_test_skip();
+	}
+
 	int pmin = -1;
 	int pmax = -1;
 	struct sched_param param;

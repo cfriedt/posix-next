@@ -11,11 +11,17 @@
 #include <sys/socket.h>
 
 #include <zephyr/kernel.h>
+#ifndef CONFIG_POSIX_TEST_LINUX_COMPAT
 #include <zephyr/sys/fdtable.h>
+#endif
 
 #include <zephyr/ztest.h>
 
+#ifdef CONFIG_POSIX_TEST_LINUX_COMPAT
+#define _page_size sysconf(_SC_PAGESIZE)
+#else
 #define _page_size COND_CODE_1(CONFIG_MMU, (CONFIG_MMU_PAGE_SIZE), (CONFIG_POSIX_PAGE_SIZE))
+#endif
 
 #define SHM_SIZE 8
 
@@ -32,8 +38,12 @@
 #define CREATE_FLAGS  VALID_FLAGS
 #define OPEN_FLAGS    (VALID_FLAGS & ~O_CREAT)
 
+#ifdef CONFIG_POSIX_TEST_LINUX_COMPAT
+#define N 4
+#else
 /* account for stdin, stdout, stderr */
 #define N (ZVFS_OPEN_SIZE - 3)
+#endif
 
 /* we need to have at least 2 shared memory objects */
 BUILD_ASSERT(N >= 2, "ZVFS_OPEN_SIZE must be > 4");
@@ -44,8 +54,10 @@ ZTEST(xsi_realtime, test_shm_open)
 	int fd[N];
 	struct stat st;
 
-	{
-		/* degenerate error cases */
+	if (!IS_ENABLED(CONFIG_POSIX_TEST_LINUX_COMPAT)) {
+		/* degenerate error cases; the host accepts several of
+		 * these (mode 0, names without a leading '/', ...)
+		 */
 		zassert_not_ok(shm_open(NULL, INVALID_FLAGS, INVALID_MODE));
 		zassert_not_ok(shm_open(NULL, INVALID_FLAGS, VALID_MODE));
 		zassert_not_ok(shm_open(NULL, VALID_FLAGS, INVALID_MODE));
@@ -58,6 +70,9 @@ ZTEST(xsi_realtime, test_shm_open)
 		zassert_not_ok(shm_open(VALID_SHM_PATH, VALID_FLAGS, INVALID_MODE));
 	}
 
+	/* not an error if the object does not exist yet */
+	(void)shm_unlink(VALID_SHM_PATH);
+
 	/* open / close 1 file descriptor referring to VALID_SHM_PATH */
 	fd[0] = shm_open(VALID_SHM_PATH, VALID_FLAGS, VALID_MODE);
 	zassert_true(fd[0] >= 0, "shm_open(%s, %x, %04o) failed: %d", VALID_SHM_PATH, VALID_FLAGS,
@@ -66,7 +81,10 @@ ZTEST(xsi_realtime, test_shm_open)
 	/* should have size 0 and be a shared memory object */
 	zassert_ok(fstat(fd[0], &st));
 	zassert_equal(st.st_size, 0);
-	zassert_true(S_TYPEISSHM(&st));
+	if (!IS_ENABLED(CONFIG_POSIX_TEST_LINUX_COMPAT)) {
+		/* glibc defines S_TYPEISSHM() as 0 */
+		zassert_true(S_TYPEISSHM(&st));
+	}
 
 	/* technically, the order of close / shm_unlink can be reversed too */
 	zassert_ok(close(fd[0]));
@@ -90,13 +108,18 @@ ZTEST(xsi_realtime, test_shm_unlink)
 {
 	int fd;
 
-	{
-		/* degenerate error cases */
+	if (!IS_ENABLED(CONFIG_POSIX_TEST_LINUX_COMPAT)) {
+		/* degenerate error cases; the host accepts several of
+		 * these (mode 0, names without a leading '/', ...)
+		 */
 		zassert_not_ok(shm_unlink(NULL));
 		zassert_not_ok(shm_unlink(INVALID_SHM_PATH));
 		zassert_not_ok(shm_unlink(EMPTY_SHM_PATH));
 		zassert_not_ok(shm_unlink(TOO_SHORT_SHM_PATH));
 	}
+
+	/* not an error if the object does not exist yet */
+	(void)shm_unlink(VALID_SHM_PATH);
 
 	/* open / close 1 file descriptor referring to VALID_SHM_PATH */
 	fd = shm_open(VALID_SHM_PATH, VALID_FLAGS, VALID_MODE);
@@ -113,6 +136,9 @@ ZTEST(xsi_realtime, test_shm_read_write)
 {
 	int fd[N];
 
+	/* not an error if the object does not exist yet */
+	(void)shm_unlink(VALID_SHM_PATH);
+
 	for (size_t i = 0; i < N; ++i) {
 		char cbuf = 0xff;
 
@@ -120,12 +146,15 @@ ZTEST(xsi_realtime, test_shm_read_write)
 		zassert_true(fd[i] >= 0, "shm_open(%s, %x, %04o) failed: %d", VALID_SHM_PATH,
 			     VALID_FLAGS, VALID_MODE, errno);
 		if (i == 0) {
-			/* size 0 on create / zero characters written */
-			zassert_equal(write(fd[0], "", 1), 0,
-				      "write() should fail on newly create shm fd with size 0");
-			/* size 0 on create / zero characters read */
-			zassert_equal(read(fd[0], &cbuf, 1), 0,
-				      "read() should fail on newly create shm fd with size 0");
+			if (!IS_ENABLED(CONFIG_POSIX_TEST_LINUX_COMPAT)) {
+				/* on the host (tmpfs), write() extends the file */
+				/* size 0 on create / zero characters written */
+				zassert_equal(write(fd[0], "", 1), 0,
+					      "write() should fail on newly create shm fd with size 0");
+				/* size 0 on create / zero characters read */
+				zassert_equal(read(fd[0], &cbuf, 1), 0,
+					      "read() should fail on newly create shm fd with size 0");
+			}
 
 			BUILD_ASSERT(SHM_SIZE >= 1);
 			zassert_ok(ftruncate(fd[0], SHM_SIZE));
@@ -155,9 +184,12 @@ ZTEST(xsi_realtime, test_shm_mmap)
 	int fd[N];
 	void *addr[N];
 
-	if (!IS_ENABLED(CONFIG_MMU)) {
+	if (!IS_ENABLED(CONFIG_MMU) && !IS_ENABLED(CONFIG_POSIX_TEST_LINUX_COMPAT)) {
 		ztest_test_skip();
 	}
+
+	/* not an error if the object does not exist yet */
+	(void)shm_unlink(VALID_SHM_PATH);
 
 	for (size_t i = 0; i < N; ++i) {
 		fd[i] = shm_open(VALID_SHM_PATH, i == 0 ? CREATE_FLAGS : OPEN_FLAGS, VALID_MODE);
@@ -193,7 +225,9 @@ ZTEST(xsi_realtime, test_shm_mmap)
 		 * virtual mappings. When that behaviour changes, remove the break below and adjust
 		 * shm.c accordingly.
 		 */
-		break;
+		if (!IS_ENABLED(CONFIG_POSIX_TEST_LINUX_COMPAT)) {
+			break;
+		}
 	}
 
 	zassert_ok(shm_unlink(VALID_SHM_PATH));

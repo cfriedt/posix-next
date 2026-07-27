@@ -6,12 +6,36 @@
 
 #include <string.h>
 #include <fcntl.h>
-#include <ff.h>
-#include <zephyr/fs/fs.h>
 #include <unistd.h>
 #include <zephyr/ztest.h>
 
 static const char test_str[] = "Hello World!";
+
+#if defined(CONFIG_NATIVE_LIBC)
+
+#include <errno.h>
+#include <sys/stat.h>
+
+#define TEST_MNTP "/tmp/posix_xsi_realtime_test"
+#define TEST_FILE TEST_MNTP "/testfile.txt"
+
+static void test_mount(void)
+{
+	if (mkdir(TEST_MNTP, 0770) != 0) {
+		zassert_equal(errno, EEXIST, "mkdir(%s) failed: %d", TEST_MNTP, errno);
+	}
+}
+
+void test_unmount(void)
+{
+	(void)unlink(TEST_FILE);
+	(void)rmdir(TEST_MNTP);
+}
+
+#else
+
+#include <ff.h>
+#include <zephyr/fs/fs.h>
 
 #define FATFS_MNTP "/RAM:"
 #define TEST_FILE  FATFS_MNTP "/testfile.txt"
@@ -39,6 +63,8 @@ void test_unmount(void)
 	res = fs_unmount(&fatfs_mnt);
 	zassert_ok(res, "Error unmounting fs [%d]", res);
 }
+
+#endif
 
 static int file_open(void)
 {
