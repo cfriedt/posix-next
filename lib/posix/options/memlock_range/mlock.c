@@ -21,8 +21,11 @@ int mlock(const void *addr, size_t len)
 		return 0;
 	}
 
-	errno = ENOTSUP;
-	return -1;
+	/* without demand paging, all memory is always resident */
+	ARG_UNUSED(addr);
+	ARG_UNUSED(len);
+
+	return 0;
 }
 
 int munlock(const void *addr, size_t len)
@@ -35,6 +38,9 @@ int munlock(const void *addr, size_t len)
 		return 0;
 	}
 
-	errno = ENOTSUP;
-	return -1;
+	/* without demand paging, all memory is always resident */
+	ARG_UNUSED(addr);
+	ARG_UNUSED(len);
+
+	return 0;
 }
