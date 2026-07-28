@@ -1216,3 +1216,37 @@ patches:
       baking in the realtime offset - defeating both the single-coherent-
       conversion rule and clock_settime() re-targeting. k_timer_start()
       remains the native tick-domain API.
+  - path: zephyr/sys-timer.patch
+    sha256sum: 2b445089ac54750d6e194e5e110495cc8dbbc1f90eb2bea2872df7ddc3f51ddc
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-28
+    upstreamable: true
+    comments: |
+      lib: os: add sys_timer, an OS-managed pool of kernel timers
+
+      Adds CONFIG_SYS_TIMER: sys_timer_create() and sys_timer_delete()
+      syscalls allocate, initialize, and release k_timer objects from an
+      OS-owned elastipool, with semantics shaped after POSIX
+      timer_create()/timer_delete(). Creation binds the timer to a clock
+      (SYS_CLOCK_MONOTONIC or SYS_CLOCK_REALTIME), optionally arms it
+      atomically (native create-and-go; POSIX passes NULL and arms later via
+      k_timer_settime()), grants the calling user thread access to the object,
+      and reports pool exhaustion as -EAGAIN. Deletion stops the timer,
+      revokes user access, and returns the object to the pool; stale or
+      foreign handles are rejected (-EINVAL kernel-side, syscall oops in user
+      mode).
+
+      Pool sizing follows the distributed-minimum idiom established by
+      SYS_THREAD: CONFIG_SYS_TIMER_MIN plus all CONFIG_SYS_TIMER_MIN_ADD_*
+      contributions are summed by CMake into the un-prefixed SYS_TIMER_MIN
+      compile definition and statically allocated (guaranteed);
+      CONFIG_SYS_TIMER_MAX (default INT_MAX, effectively unlimited) caps the
+      heap-backed remainder, and setting it equal to the accumulated minimum
+      prohibits dynamic allocation entirely. Dynamic objects are allocated
+      with k_object_alloc() when CONFIG_DYNAMIC_OBJECTS is available.
+
+      Includes the tests/lib/sys_timer ztest suite (default, static-only, and
+      userspace variants, including revoked-handle fault coverage) and
+      complete Doxygen. Groundwork for POSIX timer_create()/timer_delete().
