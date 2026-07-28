@@ -1250,3 +1250,73 @@ patches:
       Includes the tests/lib/sys_timer ztest suite (default, static-only, and
       userspace variants, including revoked-handle fault coverage) and
       complete Doxygen. Groundwork for POSIX timer_create()/timer_delete().
+  - path: zephyr/k-timer-signal.patch
+    sha256sum: 51eef37dab8cd8d98ebc1933a779fe81249597d60a718aa304bfb2c122246df1
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-28
+    upstreamable: true
+    comments: |
+      kernel: timer: generate signals on timer expiry with overrun accounting
+
+      Adds CONFIG_TIMER_SIGNAL (default y with SIGNAL and TIMER_CLOCK): a
+      kernel timer may generate a thread-targeted signal on each expiry,
+      carrying a user value with the new public si_code K_SI_TIMER (K_SI_QUEUE
+      is also now public). Notification is attached at pool-allocation time
+      via sys_timer_create(); sys_timer_delete() detaches it and purges
+      queued-but-undelivered instances so no kernel reference to the timer
+      outlives deletion. Unlike expiry functions (interrupt context), signal
+      delivery runs in the target thread's context - the robust path for
+      userspace consumers. Expiry functions and signals may coexist; with
+      CONFIG_TIMER_SIGNAL=n the timer code is unchanged.
+
+      Generation follows the POSIX one-pending model: an atomic per-timer
+      latch admits a single queued instance; expiries while pending are
+      overruns. The overrun is computed lazily at delivery from the exact
+      scheduled-expiry grid - floor((delivery - generation)/period) - so
+      expiries coalesced by late or tickless wakeups are counted correctly,
+      and k_timer_overrun() reads it non-destructively. Disarming stamps a
+      freeze time so idle time does not inflate the count. Queue-full drops
+      are best-effort (retried next period), counted per timer, and reported
+      with a zero-overhead-by-default LOG_DBG_RATELIMIT message.
+
+      Lock ordering is structural: the expiry path holds timer lock then
+      k_sig_lock; the delivery-side hooks called from kernel/signal.c use
+      atomics only and are incapable of taking the timer lock.
+
+      Also fixes a pre-existing k_sig_timedwait() bug exposed by the new
+      tests: a stale fifo-ready poll raise (raised at generation but never
+      consumed, or consumed by an unrelated wake-up) caused an immediate
+      spurious -EAGAIN, and a raise for another thread combined with an
+      expiring deadline could trip an internal assertion. The wait now keeps
+      waiting until its deadline on a stale raise and reports a clean -EAGAIN
+      timeout otherwise; sigwait-style acceptance also propagates si_code.
+      This is the bug the POSIX layer's sigwait chunked-polling workarounds
+      exist for (see lib/posix options signals/rtsig), which can be simplified
+      in a follow-up.
+
+      Includes the tests/kernel/timer/timer_signal ztest suite (delivery via
+      handler and sigwait, one-pending, overrun latch/coalescing/freeze,
+      thread-targeted delivery, delete-purges, queue-full recovery,
+      expiry-function coexistence, userspace positive and fault-injection
+      negative cases) and kernel timing documentation.
+
+      Also adds function notification: sys_timer_create() callers may pass a
+      notification function (with stack size and priority) instead of a
+      signal target; a single kernel dispatcher thread accepts the expiries
+      through the reserved top-of-set K_SIG_SYS_TIMER signal and spawns one
+      detached system-pool thread per notification (requires SYS_THREAD and
+      THREAD_DETACH; ENOTSUP otherwise). Notification threads for timers
+      created by user threads run in user mode, in the creator's memory
+      domain, inheriting the creator's object permissions at dispatch time
+      (via a new kernel-mode-only sys_thread_create_paused()). k_sig_info
+      gains the generating-timer identity (the Linux si_timerid analog),
+      populated at every delivery. This is the substrate for POSIX
+      SIGEV_THREAD, which needs no per-timer allocation in the POSIX layer.
+
+      Also fixes a k_sig_timedwait() wake-up starvation: a k_poll signal
+      raise notifies only the first registered poller, so a perpetual waiter
+      (such as the dispatcher) could consume - and never hand back - another
+      thread's wake-up. A waiter that observes a foreign raise now re-raises
+      it, notifying the next waiter in line, before yielding.

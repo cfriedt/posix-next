@@ -1,0 +1,1726 @@
+diff --git a/doc/kernel/services/timing/timers.rst b/doc/kernel/services/timing/timers.rst
+index 2b805f40744..b9fe20813a2 100644
+--- a/doc/kernel/services/timing/timers.rst
++++ b/doc/kernel/services/timing/timers.rst
+@@ -289,6 +289,21 @@ The tick-domain API remains :c:func:`k_timer_start`, which speaks :c:type:`k_tim
+ natively (including ``K_TIMEOUT_ABS_TICKS`` for uptime-absolute deadlines); use the
+ clock-based API when deadlines are measured against a clock.
+ 
++Function Notification
++=====================
++
++A timer created with :c:func:`sys_timer_create` may request **function notification** by
++setting :c:member:`k_timer_notify.fn` (requires :kconfig:option:`CONFIG_SYS_THREAD` and
++:kconfig:option:`CONFIG_THREAD_DETACH`): each expiry invokes the function, with the
++notification value, in a fresh detached thread drawn from the system thread pool with the
++requested stack size and priority. A single kernel dispatcher thread (started on first use;
++see :kconfig:option:`CONFIG_SYS_TIMER_DISPATCH_STACK_SIZE` and
++:kconfig:option:`CONFIG_SYS_TIMER_DISPATCH_PRIO`) accepts the expiries through the reserved
++``K_SIG_SYS_TIMER`` signal, so one-pending/overrun semantics are identical to signal
++notification. When the creating thread is a user thread, notification threads run in user
++mode, in the creator's memory domain, inheriting the creator's object permissions at
++dispatch time. This is the substrate for POSIX ``SIGEV_THREAD``.
++
+ Realtime Timers and Clock Changes
+ =================================
+ 
+@@ -305,6 +320,29 @@ change.
+ 
+ :c:func:`sys_clock_settime` must not be called from a timer expiry handler.
+ 
++Signal Delivery and Overrun
++***************************
++
++With :kconfig:option:`CONFIG_TIMER_SIGNAL` enabled, a timer may generate a kernel signal on
++each expiry, targeted at a specific thread and carrying a user-supplied value with
++``si_code == K_SI_TIMER``. Notification is attached at pool-allocation time via
++:c:func:`sys_timer_create`. Unlike an expiry function - which runs in interrupt context -
++signal delivery happens in the target thread's own context (via a handler installed with
++:c:func:`k_sig_action`, or synchronously via :c:func:`k_sig_timedwait`), making it safe for
++user-mode consumers. An expiry function and signal generation may coexist on the same timer.
++
++Signal generation follows the POSIX one-pending model: at most one signal instance per timer is
++queued at any time. Expirations that occur while an instance is pending are not queued again;
++they are accounted as *overruns*, computed from the exact scheduled-expiry grid at the moment
++the pending signal is delivered, and readable non-destructively with :c:func:`k_timer_overrun`.
++Because the computation is grid-based, expirations coalesced by late or tickless wakeups are
++counted correctly, and disarming a timer freezes the count so idle time does not inflate it.
++
++Signal generation is best-effort with respect to signal queue capacity
++(:kconfig:option:`CONFIG_SIGNAL_QUEUE_SIZE`): if the queue is full at expiry, that period's
++signal is dropped (and retried on the next expiry). Drops are counted per timer and reported
++via a rate-limited debug log message, which is compiled out entirely at the default log level.
++
+ Configuration Options
+ *********************
+ 
+@@ -312,6 +350,8 @@ Related configuration options:
+ 
+ * :kconfig:option:`CONFIG_TIMER_CLOCK`
+ * :kconfig:option:`CONFIG_TIMER_REALTIME`
++* :kconfig:option:`CONFIG_TIMER_SIGNAL`
++* :kconfig:option:`CONFIG_SYS_TIMER`
+ 
+ API Reference
+ *************
+diff --git a/include/zephyr/kernel.h b/include/zephyr/kernel.h
+index 649596dfaca..c5b09566bed 100644
+--- a/include/zephyr/kernel.h
++++ b/include/zephyr/kernel.h
+@@ -1970,6 +1970,55 @@ struct k_timer {
+ 	int64_t rt_sec;
+ 	long rt_nsec;
+ #endif /* CONFIG_TIMER_REALTIME */
++
++#ifdef CONFIG_TIMER_SIGNAL
++	/* signal delivery target; NULL when no notification is attached */
++	k_tid_t sig_target;
++
++	/* signal number queued on expiry */
++	int32_t sig_signo;
++
++	/* value accompanying the queued signal */
++	union k_sig_val sig_value;
++
++	/* function notification: dispatcher spawns a thread running sig_fn(sig_value) */
++	void (*sig_fn)(union k_sig_val);
++
++	/* stack size for notification threads; 0 selects CONFIG_SYS_THREAD_STACK_SIZE */
++	size_t sig_fn_stack_size;
++
++	/* thread priority for notification threads */
++	int sig_fn_prio;
++
++#ifdef CONFIG_USERSPACE
++	/* user-mode notification: creator's memory domain, or NULL for kernel threads */
++	struct k_mem_domain *sig_fn_domain;
++
++	/*
++	 * Object permissions source for notification threads: the creating thread,
++	 * which should outlive the timer for notification threads to inherit permissions.
++	 */
++	k_tid_t sig_fn_perms_src;
++#endif /* CONFIG_USERSPACE */
++
++	/* one-pending-per-timer latch (POSIX): set at generation, cleared at delivery */
++	atomic_t sig_pending;
++
++	/* overrun count of the most recently delivered signal (latched at delivery) */
++	atomic_t sig_overrun;
++
++	/* scheduled-expiry stamp (uptime ticks) of the pending signal's generation */
++	uint64_t sig_gen_ticks;
++
++	/* period (ticks) at generation, for overrun computation */
++	k_ticks_t sig_gen_period;
++
++	/* uptime at disarm-while-pending; stops post-disarm time inflating the overrun */
++	uint64_t sig_freeze_ticks;
++
++	/* expiries whose signal could not be queued (queue full); diagnostics */
++	uint32_t sig_missed;
++#endif /* CONFIG_TIMER_SIGNAL */
+ /**
+  * INTERNAL_HIDDEN @endcond
+  */
+@@ -2158,6 +2207,30 @@ __syscall int k_timer_gettime(const struct k_timer *timer, struct timespec *valu
+ 
+ #endif /* defined(CONFIG_TIMER_CLOCK) || defined(__DOXYGEN__) */
+ 
++#if defined(CONFIG_TIMER_SIGNAL) || defined(__DOXYGEN__)
++
++/**
++ * @brief Read a timer's expiration overrun count
++ *
++ * Returns the overrun count latched when the timer's most recent expiry signal was delivered
++ * (or accepted via `k_sig_timedwait()`): the number of additional expirations that occurred
++ * between that signal's generation and its delivery. The count is computed from the exact
++ * scheduled-expiry grid, so expirations coalesced by late or tickless wakeups are included.
++ *
++ * Reading the count does not modify it - repeated reads return the same value until the next
++ * delivery latches a new one.
++ *
++ * @param timer Address of timer.
++ *
++ * @return the overrun count of the most recently delivered expiry signal, saturated at
++ *         @c INT_MAX; 0 when no signal has been delivered
++ *
++ * @kconfig_dep{CONFIG_TIMER_SIGNAL}
++ */
++__syscall int k_timer_overrun(const struct k_timer *timer);
++
++#endif /* defined(CONFIG_TIMER_SIGNAL) || defined(__DOXYGEN__) */
++
+ 
+ #ifdef CONFIG_TIMER_OBSERVER
+ 
+diff --git a/include/zephyr/kernel/signal.h b/include/zephyr/kernel/signal.h
+index 6047c73acc1..959e771377b 100644
+--- a/include/zephyr/kernel/signal.h
++++ b/include/zephyr/kernel/signal.h
+@@ -103,12 +103,30 @@ union k_sig_val {
+  * A pointer to an instance of this structure may be passed to @ref k_sig_timedwait to receive
+  * additional signal information.
+  */
++struct k_timer;
++
+ struct k_sig_info {
+ 	int signo; /**< Signal number */
+ 	int code; /**< Additional signal code */
+ 	union k_sig_val value; /**< Signal value */
++#ifdef CONFIG_TIMER_SIGNAL
++	/**
++	 * Timer that generated this signal (@ref K_SI_TIMER), as an opaque identifier
++	 * (the Linux `si_timerid` analog); NULL for all other signals.
++	 */
++	struct k_timer *timer;
++#endif /* CONFIG_TIMER_SIGNAL */
+ };
+ 
++/**
++ * @brief Kernel signal reserved for system timer function-notification dispatch
++ *
++ * When @kconfig{CONFIG_TIMER_SIGNAL} is enabled, the highest signal number is reserved to wake
++ * the system timer dispatcher (see sys_timer_create()); applications should not queue or wait
++ * for it directly.
++ */
++#define K_SIG_SYS_TIMER SIGNAL_SET_SIZE
++
+ /** @brief A bitset large enough to contain all signal bits. */
+ struct k_sig_set {
+ 	unsigned long sig[DIV_ROUND_UP(MAX(SIGNAL_SET_SIZE, 1), BITS_PER_LONG)];
+@@ -183,6 +201,19 @@ struct k_sig_ctx {
+ /* 32 is used for thread cancellation */
+ /* 33 is used for thread ownership change notification */
+ 
++/**
++ * @name Signal codes
++ *
++ * Values for the @c code member of @ref k_sig_info, identifying the origin of a queued signal.
++ *
++ * @{
++ */
++#define K_SI_QUEUE (-1) /**< Queued with k_sig_queue() */
++#define K_SI_TIMER (-2) /**< Generated by a kernel timer expiry (see @kconfig{CONFIG_TIMER_SIGNAL}) */
++/**
++ * @}
++ */
++
+ /**
+  * @}
+  */
+diff --git a/include/zephyr/sys/thread.h b/include/zephyr/sys/thread.h
+index f2cec1fb388..c6f2ce485f3 100644
+--- a/include/zephyr/sys/thread.h
++++ b/include/zephyr/sys/thread.h
+@@ -168,6 +168,16 @@ __syscall int sys_thread_create(struct k_thread **th, k_thread_stack_t *stack, u
+ 				uint32_t guard_size, k_thread_entry_t entry, void *p1, void *p2,
+ 				void *p3, int prio, uint32_t options);
+ 
++/**
++ * @brief As sys_thread_create(), but the thread is created paused
++ *
++ * The caller completes setup (memory domain membership, object permissions) and then starts
++ * the thread with k_thread_start(). Kernel-mode only (not a system call).
++ */
++int sys_thread_create_paused(struct k_thread **th, k_thread_stack_t *stack, uint32_t stack_size,
++			     uint32_t guard_size, k_thread_entry_t entry, void *p1, void *p2,
++			     void *p3, int prio, uint32_t options);
++
+ /**
+  * @brief Allocate and initialize a thread stack from the system pool.
+  *
+diff --git a/include/zephyr/sys/timer.h b/include/zephyr/sys/timer.h
+index 45b788710b7..bbb628cc58f 100644
+--- a/include/zephyr/sys/timer.h
++++ b/include/zephyr/sys/timer.h
+@@ -49,8 +49,24 @@ struct k_timer_notify {
+ 	k_pid_t target;
+ 	/** Kernel signal number to queue on expiry */
+ 	int signo;
+-	/** Value accompanying the queued signal */
++	/** Value accompanying the queued signal (or passed to @ref k_timer_notify.fn) */
+ 	union k_sig_val value;
++
++	/**
++	 * Function notification: when non-NULL, each expiry invokes @p fn(value) in a fresh
++	 * thread spawned by the system timer dispatcher, and @ref k_timer_notify.target /
++	 * @ref k_timer_notify.signo are unused. Expiries occurring while a notification is
++	 * pending are accounted as overruns (see k_timer_overrun()), never queued twice.
++	 * When the creator is a user thread, notification threads run in user mode, in the
++	 * creator's memory domain, with the creator's object permissions at dispatch time.
++	 */
++	void (*fn)(union k_sig_val value);
++
++	/** Stack size for notification threads; 0 selects @kconfig{CONFIG_SYS_THREAD_STACK_SIZE} */
++	size_t fn_stack_size;
++
++	/** Thread priority for notification threads (used only when @ref k_timer_notify.fn is set) */
++	int fn_priority;
+ };
+ 
+ /**
+diff --git a/kernel/Kconfig b/kernel/Kconfig
+index 7571179cbc3..a8babbd326c 100644
+--- a/kernel/Kconfig
++++ b/kernel/Kconfig
+@@ -807,6 +807,19 @@ config TIMER_REALTIME
+ 	  expire when the new realtime clock reaches their deadline, as POSIX
+ 	  requires for TIMER_ABSTIME CLOCK_REALTIME timers.
+ 
++config TIMER_SIGNAL
++	bool "Signal delivery on kernel timer expiry"
++	default y
++	depends on SIGNAL && TIMER_CLOCK
++	help
++	  Timers may generate a kernel signal (K_SI_TIMER) targeted at a thread
++	  on each expiry, with POSIX one-pending semantics: at most one signal
++	  instance per timer is queued at a time, and expiries occurring while
++	  an instance is pending are accounted as overruns, readable
++	  non-destructively with k_timer_overrun(). Overruns are computed from
++	  the exact scheduled-expiry grid, so expiries coalesced by late or
++	  tickless wakeups are counted correctly.
++
+ endmenu
+ 
+ menu "Other Kernel Object Options"
+diff --git a/kernel/include/kernel_internal.h b/kernel/include/kernel_internal.h
+index 53812737fb9..51682ad2db9 100644
+--- a/kernel/include/kernel_internal.h
++++ b/kernel/include/kernel_internal.h
+@@ -300,6 +300,20 @@ static inline bool z_thread_cancel_is_enabled(struct k_thread *thread)
+ void z_timer_realtime_settime(void);
+ #endif /* CONFIG_TIMER_REALTIME */
+ 
++#ifdef CONFIG_TIMER_SIGNAL
++/* attach/detach signal-based expiry notification (internal; used by sys_timer) */
++void z_timer_sig_attach(struct k_timer *timer, k_pid_t target, int signo, union k_sig_val value);
++void z_timer_sig_detach(struct k_timer *timer);
++
++/* generation-side plumbing between kernel/timer.c and kernel/signal.c (internal) */
++int z_sig_queue_timer(struct k_timer *timer, k_pid_t pid, int signo, union k_sig_val value);
++void z_sig_purge_timer(struct k_timer *timer);
++
++/* delivery-side hooks: atomics only - must never take the timer lock (internal) */
++void z_timer_sig_delivered(struct k_timer *timer);
++void z_timer_sig_discarded(struct k_timer *timer);
++#endif /* CONFIG_TIMER_SIGNAL */
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/kernel/signal.c b/kernel/signal.c
+index 2fd76f26e3a..6b5dc80f8f5 100644
+--- a/kernel/signal.c
++++ b/kernel/signal.c
+@@ -17,7 +17,6 @@
+ #include <zephyr/sys/thread.h>
+ #include <zephyr/sys/util.h>
+ 
+-#define K_SI_QUEUE      (-1)
+ #define UNMASKABLE_MASK (BIT64(K_SIG_KILL - 1) | BIT64(K_SIG_STOP - 1))
+ 
+ LOG_MODULE_REGISTER(k_sig, CONFIG_SIGNAL_LOG_LEVEL);
+@@ -60,6 +59,14 @@ static void z_sig_slab_free_unlocked(uint8_t pos)
+ {
+ 	void *mem = &k_sig_array[pos];
+ 
++#ifdef CONFIG_TIMER_SIGNAL
++	/* every caller of this function discards (rather than delivers) the signal */
++	if (k_sig_array[pos].info.timer != NULL) {
++		z_timer_sig_discarded(k_sig_array[pos].info.timer);
++		k_sig_array[pos].info.timer = NULL;
++	}
++#endif /* CONFIG_TIMER_SIGNAL */
++
+ 	*(char **)mem = k_sig_slab.free_list;
+ 	k_sig_slab.free_list = mem;
+ 	k_sig_slab.info.num_used--;
+@@ -212,7 +219,8 @@ static bool z_sig_match(const struct k_sig_set *match, uint8_t *pos, k_tid_t tid
+ 	return found;
+ }
+ 
+-int z_impl_k_sig_queue(k_pid_t pid, int signo, union k_sig_val value)
++static int z_sig_queue_common(k_pid_t pid, int signo, union k_sig_val value, int code,
++			      struct k_timer *timer)
+ {
+ 	if ((signo < 0) || (signo > SIGNAL_SET_SIZE)) {
+ 		LOG_DBG("invalid signo %d", signo);
+@@ -231,8 +239,13 @@ int z_impl_k_sig_queue(k_pid_t pid, int signo, union k_sig_val value)
+ 	}
+ 
+ #if defined(CONFIG_USERSPACE) && defined(CONFIG_DYNAMIC_OBJECTS)
+-	if (k_object_validate(k_object_find(pid), K_OBJ_THREAD, _OBJ_INIT_TRUE) < 0) {
+-		/* Only allow signals from threads granted access */
++	if ((timer == NULL) &&
++	    (k_object_validate(k_object_find(pid), K_OBJ_THREAD, _OBJ_INIT_TRUE) < 0)) {
++		/*
++		 * Only allow signals from threads granted access. Timer-generated
++		 * signals are kernel-originated; their target was validated when the
++		 * notification was attached.
++		 */
+ 		LOG_ERR("tid %lx does not have permissions for tid %lx", POINTER_TO_UINT(_current),
+ 			POINTER_TO_UINT(pid));
+ 		return -EPERM;
+@@ -279,8 +292,12 @@ int z_impl_k_sig_queue(k_pid_t pid, int signo, union k_sig_val value)
+ 		.info =
+ 			{
+ 				.signo = signo,
+-				.code = K_SI_QUEUE,
++				.code = code,
+ 				.value = value,
++#ifdef CONFIG_TIMER_SIGNAL
++				/* the generating timer doubles as one-pending/overrun state */
++				.timer = timer,
++#endif /* CONFIG_TIMER_SIGNAL */
+ 			},
+ 	};
+ 	pos = entry - k_sig_array;
+@@ -304,6 +321,43 @@ int z_impl_k_sig_queue(k_pid_t pid, int signo, union k_sig_val value)
+ 	return 0;
+ }
+ 
++int z_impl_k_sig_queue(k_pid_t pid, int signo, union k_sig_val value)
++{
++	return z_sig_queue_common(pid, signo, value, K_SI_QUEUE, NULL);
++}
++
++#ifdef CONFIG_TIMER_SIGNAL
++int z_sig_queue_timer(struct k_timer *timer, k_pid_t pid, int signo, union k_sig_val value)
++{
++	return z_sig_queue_common(pid, signo, value, K_SI_TIMER, timer);
++}
++
++void z_sig_purge_timer(struct k_timer *timer)
++{
++	/*
++	 * Lock order: callers must not hold the timer lock (the sanctioned order is
++	 * timer lock -> k_sig_lock only on the expiry path, which never purges).
++	 */
++	K_SPINLOCK(k_sig_lock) {
++		for (size_t i = 0, N = ring_buf_size_get(&k_sig_fifo); i < N; ++i) {
++			uint8_t pos;
++			struct k_sig_fifo_element *entry;
++
++			ring_buf_get(&k_sig_fifo, &pos, 1);
++			entry = &k_sig_array[pos];
++
++			if (entry->info.timer == timer) {
++				atomic_dec(&entry->tid->base.sig.pending);
++				/* frees the element and reports the discard to the timer */
++				z_sig_slab_free_unlocked(pos);
++			} else {
++				ring_buf_put(&k_sig_fifo, &pos, 1);
++			}
++		}
++	}
++}
++#endif /* CONFIG_TIMER_SIGNAL */
++
+ #ifdef CONFIG_USERSPACE
+ int z_vrfy_k_sig_queue(k_pid_t pid, int signo, union k_sig_val value)
+ {
+@@ -323,7 +377,8 @@ int z_vrfy_k_sig_queue(k_pid_t pid, int signo, union k_sig_val value)
+ int z_impl_k_sig_timedwait(const struct k_sig_set *ZRESTRICT set, struct k_sig_info *ZRESTRICT info,
+ 			   k_timeout_t timeout)
+ {
+-	if (!Z_IS_TIMEOUT_RELATIVE(timeout)) {
++	/* wait durations are relative; K_FOREVER (an unbounded wait) is also permitted */
++	if (!K_TIMEOUT_EQ(timeout, K_FOREVER) && !Z_IS_TIMEOUT_RELATIVE(timeout)) {
+ 		return -EINVAL;
+ 	}
+ 
+@@ -372,11 +427,38 @@ int z_impl_k_sig_timedwait(const struct k_sig_set *ZRESTRICT set, struct k_sig_i
+ 					break;
+ 				}
+ 
++				/*
++				 * A stale or already-consumed raise: no matching signal is
++				 * queued (yet). Keep waiting until the deadline rather than
++				 * returning a spurious -EAGAIN.
++				 */
+ 				LOG_DBG("signaled, but failed to match! signalled: %d "
+ 					"result: %x ",
+ 					signalled, result);
+-				ret = -EAGAIN;
+-				break;
++				ret = 0;
++			} else {
++				/*
++				 * The raise belongs to another thread. A raise notifies only
++				 * the first registered poller, and that may have been us: hand
++				 * the wake-up onward by re-raising, which notifies the next
++				 * waiter in line (the owner, if it is blocked here too).
++				 * Without this, a perpetual waiter (e.g. the system timer
++				 * dispatcher) starves every lower-priority signal waiter.
++				 *
++				 * Do not reset the signal (that would lose the owner's
++				 * wake-up), and do not re-poll immediately - that would
++				 * busy-spin on the still-raised signal, fatally so on
++				 * native_sim, where a never-blocking thread stops simulated
++				 * time (and with it every timeout) entirely. Yield for a tick
++				 * so the owner can consume its raise.
++				 */
++				if (sys_timepoint_expired(end)) {
++					ret = -EAGAIN;
++					break;
++				}
++				(void)k_poll_signal_raise(&k_sig_fifo_ready, result);
++				k_sleep(K_TICKS(1));
++				ret = 0;
+ 			}
+ 		}
+ 
+@@ -386,19 +468,44 @@ int z_impl_k_sig_timedwait(const struct k_sig_set *ZRESTRICT set, struct k_sig_i
+ 		return ret;
+ 	}
+ 
++	if (ret == 0) {
++		/*
++		 * The fifo-ready poll signal was raised for another thread (or a stale
++		 * raise was observed) and the deadline passed without a matching signal
++		 * for this thread: a timeout, not a delivery.
++		 */
++		return -EAGAIN;
++	}
++
+ 	__ASSERT_NO_MSG(ret != 0);
+ 	__ASSERT_NO_MSG(pos < SIGNAL_QUEUE_SIZE);
+ 
+ 	if (info != NULL) {
+ 		*info = (struct k_sig_info){
+ 			.signo = ret,
++			.code = k_sig_array[pos].info.code,
+ 			.value = k_sig_array[pos].info.value,
++#ifdef CONFIG_TIMER_SIGNAL
++			.timer = k_sig_array[pos].info.timer,
++#endif /* CONFIG_TIMER_SIGNAL */
+ 		};
+ 	}
+ 
++#ifdef CONFIG_TIMER_SIGNAL
++	/* accepting a signal via sigwait-style APIs is delivery */
++	struct k_timer *const gen_timer = k_sig_array[pos].info.timer;
++
++#endif /* CONFIG_TIMER_SIGNAL */
++
+ 	k_mem_slab_free(&k_sig_slab, &k_sig_array[pos]);
+ 	atomic_dec(&tid->base.sig.pending);
+ 
++#ifdef CONFIG_TIMER_SIGNAL
++	if (gen_timer != NULL) {
++		z_timer_sig_delivered(gen_timer);
++	}
++#endif /* CONFIG_TIMER_SIGNAL */
++
+ 	if (IS_ENABLED(CONFIG_SIGNAL_LOG_LEVEL_DBG)) {
+ 		struct k_sig_set pend;
+ 
+@@ -791,6 +898,11 @@ int z_sig_handle(void *user)
+ 		 *
+ 		 * See also k_sig_queue().
+ 		 */
++#ifdef CONFIG_TIMER_SIGNAL
++		if (entry.info.timer != NULL) {
++			z_timer_sig_discarded(entry.info.timer);
++		}
++#endif /* CONFIG_TIMER_SIGNAL */
+ 		return 0;
+ 	}
+ 
+@@ -808,6 +920,12 @@ int z_sig_handle(void *user)
+ 
+ 	atomic_inc(&ctx->delivered);
+ 
++#ifdef CONFIG_TIMER_SIGNAL
++	if (entry.info.timer != NULL) {
++		z_timer_sig_delivered(entry.info.timer);
++	}
++#endif /* CONFIG_TIMER_SIGNAL */
++
+ 	ctx->restore = ctx->mask;
+ 
+ 	if ((ctx->action.flags & K_SIG_SA_NODEFER) == 0) {
+diff --git a/kernel/timer.c b/kernel/timer.c
+index e011011999e..4ca51b00e34 100644
+--- a/kernel/timer.c
++++ b/kernel/timer.c
+@@ -114,6 +114,56 @@ static void z_timer_rt_deregister(struct k_timer *timer)
+ #define z_timer_rt_deregister(timer) (void)0
+ #endif /* CONFIG_TIMER_REALTIME */
+ 
++#ifdef CONFIG_TIMER_SIGNAL
++LOG_MODULE_REGISTER(k_timer, CONFIG_KERNEL_LOG_LEVEL);
++
++/* called from the expiry path with the timer lock held (timer lock -> k_sig_lock order) */
++static void z_timer_signal_generate(struct k_timer *timer)
++{
++	if (timer->sig_target == NULL) {
++		return;
++	}
++
++	if (!atomic_cas(&timer->sig_pending, 0, 1)) {
++		/* the previous instance is still pending: counted as overrun at delivery */
++		return;
++	}
++
++	/* uptime in a timeout handler is pinned to the scheduled expiry: an exact grid stamp */
++	timer->sig_gen_ticks = (uint64_t)k_uptime_ticks();
++	timer->sig_freeze_ticks = 0U;
++
++	if ((timer->flags & Z_TIMER_FLAG_EXACT) != 0U) {
++		timer->sig_gen_period = timer->period_ticks;
++	} else if (!K_TIMEOUT_EQ(timer->period, K_NO_WAIT) &&
++		   !K_TIMEOUT_EQ(timer->period, K_FOREVER)) {
++		timer->sig_gen_period = timer->period.ticks;
++	} else {
++		timer->sig_gen_period = 0;
++	}
++
++	if (z_sig_queue_timer(timer, timer->sig_target, timer->sig_signo, timer->sig_value) != 0) {
++		/* best-effort: this period's signal is lost; retried on the next expiry */
++		atomic_clear(&timer->sig_pending);
++		timer->sig_missed++;
++		LOG_DBG_RATELIMIT("timer %p: %u expiry signal(s) dropped for thread %p "
++				  "(signal queue full; see SIGNAL_QUEUE_SIZE)",
++				  timer, timer->sig_missed, timer->sig_target);
++	}
++}
++
++/* stamp the disarm time so a pending signal's overrun stops accumulating */
++static void z_timer_sig_freeze(struct k_timer *timer)
++{
++	if ((atomic_get(&timer->sig_pending) != 0) && (timer->sig_freeze_ticks == 0U)) {
++		timer->sig_freeze_ticks = (uint64_t)k_uptime_ticks();
++	}
++}
++#else
++#define z_timer_signal_generate(timer) (void)0
++#define z_timer_sig_freeze(timer) (void)0
++#endif /* CONFIG_TIMER_SIGNAL */
++
+ /**
+  * @brief Handle expiration of a kernel timer object.
+  *
+@@ -201,6 +251,9 @@ void z_timer_expiration_handler(struct _timeout *t)
+ 
+ 	z_timer_observer_on_expiry(timer);
+ 
++	/* generate the expiry signal (one-pending semantics), if one is attached */
++	z_timer_signal_generate(timer);
++
+ 	/* invoke timer expiry function */
+ 	if (timer->expiry_fn != NULL) {
+ 		k_timer_expiry_t expiry_fn = timer->expiry_fn;
+@@ -238,6 +291,7 @@ void z_timer_expiration_handler(struct _timeout *t)
+ 	z_ready_thread(thread);
+ }
+ 
++
+ void k_timer_init(struct k_timer *timer,
+ 			 k_timer_expiry_t expiry_fn,
+ 			 k_timer_stop_t stop_fn)
+@@ -253,6 +307,18 @@ void k_timer_init(struct k_timer *timer,
+ 	timer->period_ticks = 0;
+ #endif /* CONFIG_TIMER_CLOCK */
+ 
++#ifdef CONFIG_TIMER_SIGNAL
++	timer->sig_target = NULL;
++	timer->sig_signo = 0;
++	timer->sig_value.sival_ptr = NULL;
++	atomic_clear(&timer->sig_pending);
++	atomic_clear(&timer->sig_overrun);
++	timer->sig_gen_ticks = 0U;
++	timer->sig_gen_period = 0;
++	timer->sig_freeze_ticks = 0U;
++	timer->sig_missed = 0U;
++#endif /* CONFIG_TIMER_SIGNAL */
++
+ 	if (IS_ENABLED(CONFIG_MULTITHREADING)) {
+ 		z_waitq_init(&timer->wait_q);
+ 	}
+@@ -272,6 +338,7 @@ void k_timer_init(struct k_timer *timer,
+ 	z_timer_observer_on_init(timer);
+ }
+ 
++
+ void z_impl_k_timer_start(struct k_timer *timer, k_timeout_t duration,
+ 			  k_timeout_t period)
+ {
+@@ -348,6 +415,7 @@ void z_impl_k_timer_stop(struct k_timer *timer)
+ 
+ 	/* a stopped timer must not be re-armed by a realtime clock change */
+ 	z_timer_rt_deregister(timer);
++	z_timer_sig_freeze(timer);
+ 
+ 	bool inactive = (z_abort_timeout(&timer->timeout) != 0);
+ 
+@@ -564,6 +632,9 @@ int z_impl_k_timer_settime(struct k_timer *timer, uint32_t flags, const struct t
+ 
+ 	(void)z_abort_timeout(&timer->timeout);
+ 	z_timer_rt_deregister(timer);
++	if (disarm) {
++		z_timer_sig_freeze(timer);
++	}
+ 	timer->status = 0U;
+ 	/* the legacy re-arm path stays disabled while in exact mode */
+ 	timer->period = K_NO_WAIT;
+@@ -689,6 +760,85 @@ static inline int z_vrfy_k_timer_gettime(const struct k_timer *timer, struct tim
+ 
+ #endif /* CONFIG_TIMER_CLOCK */
+ 
++#ifdef CONFIG_TIMER_SIGNAL
++
++void z_timer_sig_attach(struct k_timer *timer, k_pid_t target, int signo, union k_sig_val value)
++{
++	k_spinlock_key_t key = k_spin_lock(&lock);
++
++	timer->sig_target = target;
++	timer->sig_signo = signo;
++	timer->sig_value = value;
++	atomic_clear(&timer->sig_pending);
++	atomic_clear(&timer->sig_overrun);
++	timer->sig_gen_ticks = 0U;
++	timer->sig_gen_period = 0;
++	timer->sig_freeze_ticks = 0U;
++	timer->sig_missed = 0U;
++
++	k_spin_unlock(&lock, key);
++}
++
++void z_timer_sig_detach(struct k_timer *timer)
++{
++	k_spinlock_key_t key = k_spin_lock(&lock);
++
++	/* no further generation... */
++	timer->sig_target = NULL;
++
++	k_spin_unlock(&lock, key);
++
++	/*
++	 * ...and no dangling references: purge queued-but-undelivered instances.
++	 * Called after releasing the timer lock (sanctioned order is timer lock ->
++	 * k_sig_lock only on the expiry path).
++	 */
++	z_sig_purge_timer(timer);
++}
++
++/*
++ * Delivery-side hooks, called from kernel/signal.c while it may hold k_sig_lock.
++ * These are atomics-only by design and MUST NOT take the timer lock: the expiry
++ * path holds timer lock -> k_sig_lock, and acquiring them in the reverse order
++ * here would deadlock under SMP.
++ */
++void z_timer_sig_delivered(struct k_timer *timer)
++{
++	uint64_t gen = timer->sig_gen_ticks;
++	uint64_t frozen = timer->sig_freeze_ticks;
++	k_ticks_t period = timer->sig_gen_period;
++	uint64_t now = (frozen != 0U) ? frozen : (uint64_t)k_uptime_ticks();
++	uint32_t overrun = 0U;
++
++	if ((period > 0) && (now > gen)) {
++		overrun = (uint32_t)MIN((now - gen) / (uint64_t)period, (uint64_t)INT_MAX);
++	}
++
++	atomic_set(&timer->sig_overrun, (atomic_val_t)overrun);
++	atomic_clear(&timer->sig_pending);
++}
++
++void z_timer_sig_discarded(struct k_timer *timer)
++{
++	atomic_clear(&timer->sig_pending);
++}
++
++int z_impl_k_timer_overrun(const struct k_timer *timer)
++{
++	return (int)atomic_get(&timer->sig_overrun);
++}
++
++#ifdef CONFIG_USERSPACE
++static inline int z_vrfy_k_timer_overrun(const struct k_timer *timer)
++{
++	K_OOPS(K_SYSCALL_OBJ(timer, K_OBJ_TIMER));
++	return z_impl_k_timer_overrun(timer);
++}
++#include <zephyr/syscalls/k_timer_overrun_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++#endif /* CONFIG_TIMER_SIGNAL */
++
+ #ifdef CONFIG_TIMER_REALTIME
+ void z_timer_realtime_settime(void)
+ {
+diff --git a/lib/os/Kconfig.sys_timer b/lib/os/Kconfig.sys_timer
+index 22ecdbf0aa5..6aad9d986b6 100644
+--- a/lib/os/Kconfig.sys_timer
++++ b/lib/os/Kconfig.sys_timer
+@@ -17,6 +17,26 @@ config SYS_TIMER
+ 
+ if SYS_TIMER
+ 
++config SYS_TIMER_DISPATCH_PRIO
++	int "Priority of the function-notification dispatcher thread"
++	depends on TIMER_SIGNAL && SYS_THREAD && THREAD_DETACH
++	default 0
++	help
++	  Priority of the system timer dispatcher thread. Must be a preemptible
++	  priority: the dispatcher shares the kernel signal queue's readiness
++	  signal with every other signal waiter and must not starve them.
++
++config SYS_TIMER_DISPATCH_STACK_SIZE
++	int "Stack size of the function-notification dispatcher thread"
++	depends on TIMER_SIGNAL && SYS_THREAD && THREAD_DETACH
++	default 1024
++	help
++	  Stack size of the system timer dispatcher, the kernel service thread
++	  that accepts function-notification timer expiries and spawns one
++	  detached thread per notification. Started on first use; notification
++	  threads themselves draw from the system thread pool
++	  (CONFIG_SYS_THREAD_STACK_SIZE and friends).
++
+ config SYS_TIMER_MAX
+ 	int "Maximum size of the system timer pool"
+ 	default 2147483647
+diff --git a/lib/os/sys_timer.c b/lib/os/sys_timer.c
+index f048d0d6e00..a799097ae5a 100644
+--- a/lib/os/sys_timer.c
++++ b/lib/os/sys_timer.c
+@@ -8,6 +8,9 @@
+ 
+ #include <zephyr/internal/syscall_handler.h>
+ #include <zephyr/kernel.h>
++#include <kernel_internal.h>
++#include <zephyr/kernel/signal.h>
++#include <zephyr/sys/thread.h>
+ #include <zephyr/logging/log.h>
+ #include <zephyr/sys/elastipool.h>
+ #include <zephyr/sys/internal/kobject_internal.h>
+@@ -76,6 +79,130 @@ SYS_ELASTIPOOL_DEFINE_ADVANCED(timer_pool, sizeof(struct k_timer), __alignof(str
+ 			       SYS_TIMER_MIN, CONFIG_SYS_TIMER_MAX, timer_pool_heap_alloc,
+ 			       sys_timer_pool, static);
+ 
++#if defined(CONFIG_TIMER_SIGNAL) && defined(CONFIG_SYS_THREAD) && defined(CONFIG_THREAD_DETACH)
++/*
++ * Function-notification dispatcher: a single kernel service thread accepts every
++ * function-notify timer's expiry signal (K_SIG_SYS_TIMER) and spawns one detached
++ * thread per notification. Notification threads for timers created by user threads
++ * run in user mode, in the creator's memory domain, inheriting the creator's object
++ * permissions at dispatch time.
++ */
++static struct k_thread sys_timer_dispatch_thread;
++static K_KERNEL_STACK_DEFINE(sys_timer_dispatch_stack, CONFIG_SYS_TIMER_DISPATCH_STACK_SIZE);
++static bool sys_timer_dispatch_running;
++
++static void sys_timer_notify_entry(void *p1, void *p2, void *p3)
++{
++	void (*const fn)(union k_sig_val) = p1;
++	const union k_sig_val value = {
++		.sival_ptr = p2,
++	};
++
++	ARG_UNUSED(p3);
++
++	fn(value);
++}
++
++static void sys_timer_dispatch(void *p1, void *p2, void *p3)
++{
++	struct k_sig_set set;
++	struct k_sig_info info;
++
++	ARG_UNUSED(p1);
++	ARG_UNUSED(p2);
++	ARG_UNUSED(p3);
++
++	(void)k_sig_emptyset(&set);
++	(void)k_sig_addset(&set, K_SIG_SYS_TIMER);
++	(void)k_sig_mask(K_SIG_BLOCK, &set, NULL);
++
++	for (;;) {
++		int ret;
++		int prio = 0;
++		size_t stack_size = 0;
++		struct k_thread *th = NULL;
++		uint32_t options = K_INHERIT_PERMS;
++		void (*fn)(union k_sig_val) = NULL;
++#ifdef CONFIG_USERSPACE
++		k_tid_t perms_src = NULL;
++		struct k_mem_domain *domain = NULL;
++#endif /* CONFIG_USERSPACE */
++
++		if (k_sig_timedwait(&set, &info, K_FOREVER) < 0) {
++			/* defensive: never let a persistent error become a busy spin */
++			k_sleep(K_TICKS(1));
++			continue;
++		}
++
++		K_SPINLOCK(&timer_pool_lock) {
++			/*
++			 * The generating timer may have been deleted (sys_timer_delete()
++			 * purges undelivered instances, but this one was already accepted)
++			 * or even recycled; validate before touching it. A drop here is the
++			 * POSIX "disposition of pending notifications is unspecified" case.
++			 */
++			if ((sys_elastipool_check(&timer_pool, info.timer) != 0) ||
++			    (info.timer->sig_fn == NULL)) {
++				K_SPINLOCK_BREAK;
++			}
++			fn = info.timer->sig_fn;
++			prio = info.timer->sig_fn_prio;
++			stack_size = info.timer->sig_fn_stack_size;
++#ifdef CONFIG_USERSPACE
++			domain = info.timer->sig_fn_domain;
++			perms_src = info.timer->sig_fn_perms_src;
++#endif /* CONFIG_USERSPACE */
++		}
++		if (fn == NULL) {
++			continue;
++		}
++
++#ifdef CONFIG_USERSPACE
++		if (domain != NULL) {
++			options |= K_USER;
++			ret = sys_thread_create_paused(&th, NULL, stack_size, 0,
++						       sys_timer_notify_entry, fn,
++						       info.value.sival_ptr, NULL, prio, options);
++			if (ret == 0) {
++				ret = k_mem_domain_add_thread(domain, th);
++				if (ret == 0) {
++					k_thread_perms_inherit(perms_src, th);
++					k_thread_start(th);
++				} else {
++					k_thread_abort(th);
++				}
++			}
++		} else
++#endif /* CONFIG_USERSPACE */
++		{
++			ret = sys_thread_create(&th, NULL, stack_size, 0, sys_timer_notify_entry,
++						fn, info.value.sival_ptr, NULL, prio, options);
++		}
++
++		if (ret == 0) {
++			(void)k_thread_detach(th);
++		} else {
++			LOG_DBG_RATELIMIT("function notification dropped for timer %p (%d)",
++					  info.timer, ret);
++		}
++	}
++}
++
++static void sys_timer_dispatch_start(void)
++{
++	K_SPINLOCK(&timer_pool_lock) {
++		if (!sys_timer_dispatch_running) {
++			(void)k_thread_create(&sys_timer_dispatch_thread, sys_timer_dispatch_stack,
++					      K_KERNEL_STACK_SIZEOF(sys_timer_dispatch_stack),
++					      sys_timer_dispatch, NULL, NULL, NULL,
++					      CONFIG_SYS_TIMER_DISPATCH_PRIO, 0, K_NO_WAIT);
++			(void)k_thread_name_set(&sys_timer_dispatch_thread, "sys_timer");
++			sys_timer_dispatch_running = true;
++		}
++	}
++}
++#endif /* CONFIG_TIMER_SIGNAL && CONFIG_SYS_THREAD && CONFIG_THREAD_DETACH */
++
+ int z_impl_sys_timer_create(int clock_id, const struct k_timer_notify *notify, uint32_t flags,
+ 			    const struct timespec *value, const struct timespec *interval,
+ 			    struct k_timer **timer)
+@@ -89,8 +216,22 @@ int z_impl_sys_timer_create(int clock_id, const struct k_timer_notify *notify, u
+ 	}
+ 
+ 	if (notify != NULL) {
+-		/* signal-based expiry notification arrives with CONFIG_TIMER_SIGNAL */
+-		return -ENOTSUP;
++		if (!IS_ENABLED(CONFIG_TIMER_SIGNAL)) {
++			/* expiry notification requires CONFIG_TIMER_SIGNAL */
++			return -ENOTSUP;
++		}
++		if (notify->fn != NULL) {
++			if (!IS_ENABLED(CONFIG_SYS_THREAD) || !IS_ENABLED(CONFIG_THREAD_DETACH)) {
++				/* notification threads are detached system pool threads */
++				return -ENOTSUP;
++			}
++			if ((notify->fn_priority > K_LOWEST_APPLICATION_THREAD_PRIO) ||
++			    (notify->fn_priority < K_HIGHEST_APPLICATION_THREAD_PRIO)) {
++				return -EINVAL;
++			}
++		} else if ((notify->target == NULL) || (notify->signo <= 0)) {
++			return -EINVAL;
++		}
+ 	}
+ 
+ 	K_SPINLOCK(&timer_pool_lock) {
+@@ -104,6 +245,39 @@ int z_impl_sys_timer_create(int clock_id, const struct k_timer_notify *notify, u
+ 	k_timer_init(t, NULL, NULL);
+ 	t->clock_id = (uint8_t)clock_id;
+ 
++#ifdef CONFIG_TIMER_SIGNAL
++	t->sig_fn = NULL;
++	if (notify != NULL) {
++		union k_sig_val notify_value = notify->value;
++
++		if ((flags & SYS_TIMER_SIGVAL_SELF) != 0U) {
++			/* the notification value is the timer itself (POSIX evp == NULL) */
++			notify_value.sival_ptr = t;
++		}
++#if defined(CONFIG_SYS_THREAD) && defined(CONFIG_THREAD_DETACH)
++		if (notify->fn != NULL) {
++			sys_timer_dispatch_start();
++			t->sig_fn = notify->fn;
++			t->sig_fn_stack_size = notify->fn_stack_size;
++			t->sig_fn_prio = notify->fn_priority;
++#ifdef CONFIG_USERSPACE
++			t->sig_fn_domain = NULL;
++			t->sig_fn_perms_src = NULL;
++			if (k_is_in_user_syscall()) {
++				t->sig_fn_domain = _current->mem_domain_info.mem_domain;
++				t->sig_fn_perms_src = _current;
++			}
++#endif /* CONFIG_USERSPACE */
++			z_timer_sig_attach(t, &sys_timer_dispatch_thread, K_SIG_SYS_TIMER,
++					   notify_value);
++		} else
++#endif /* CONFIG_SYS_THREAD && CONFIG_THREAD_DETACH */
++		{
++			z_timer_sig_attach(t, notify->target, notify->signo, notify_value);
++		}
++	}
++#endif /* CONFIG_TIMER_SIGNAL */
++
+ #ifdef CONFIG_USERSPACE
+ 	if (k_is_in_user_syscall()) {
+ 		k_object_access_grant(t, _current);
+@@ -112,7 +286,8 @@ int z_impl_sys_timer_create(int clock_id, const struct k_timer_notify *notify, u
+ 
+ 	if (value != NULL) {
+ 		/* arm atomically at creation; POSIX timer_create() passes value == NULL */
+-		ret = k_timer_settime(t, flags, value, interval, NULL, NULL);
++		ret = k_timer_settime(t, flags & ~(uint32_t)SYS_TIMER_SIGVAL_SELF, value,
++				      interval, NULL, NULL);
+ 		if (ret < 0) {
+ 			goto err_release;
+ 		}
+@@ -151,8 +326,10 @@ static inline int z_vrfy_sys_timer_create(int clock_id, const struct k_timer_not
+ 	if (notify != NULL) {
+ 		/* copy to kernel stack: the target pointer must not change after validation */
+ 		K_OOPS(k_usermode_from_copy(&knotify, notify, sizeof(knotify)));
+-		/* the caller must have been granted access to the target thread */
+-		K_OOPS(K_SYSCALL_OBJ(knotify.target, K_OBJ_THREAD));
++		if (knotify.fn == NULL) {
++			/* the caller must have been granted access to the target thread */
++			K_OOPS(K_SYSCALL_OBJ(knotify.target, K_OBJ_THREAD));
++		}
+ 		np = &knotify;
+ 	}
+ 	if (value != NULL) {
+@@ -185,6 +362,14 @@ int z_impl_sys_timer_delete(struct k_timer *timer)
+ 	/* stops the timer and deregisters it from the realtime re-target registry */
+ 	k_timer_stop(timer);
+ 
++#ifdef CONFIG_TIMER_SIGNAL
++	/* detach notification and purge queued-but-undelivered signal instances */
++	z_timer_sig_detach(timer);
++	K_SPINLOCK(&timer_pool_lock) {
++		timer->sig_fn = NULL;
++	}
++#endif /* CONFIG_TIMER_SIGNAL */
++
+ #ifdef CONFIG_USERSPACE
+ 	if (k_is_in_user_syscall()) {
+ 		k_object_access_revoke(timer, _current);
+diff --git a/lib/os/thread.c b/lib/os/thread.c
+index cc1b6f2f58f..b37ee0b5eb6 100644
+--- a/lib/os/thread.c
++++ b/lib/os/thread.c
+@@ -615,9 +615,10 @@ __maybe_unused static void sys_thread_recycle(void)
+ 	}
+ }
+ 
+-int z_impl_sys_thread_create(struct k_thread **th, k_thread_stack_t *stack, uint32_t stack_size,
+-			     uint32_t guard_size, k_thread_entry_t entry, void *p1, void *p2,
+-			     void *p3, int prio, uint32_t options)
++static int sys_thread_create_common(struct k_thread **th, k_thread_stack_t *stack,
++				    uint32_t stack_size, uint32_t guard_size,
++				    k_thread_entry_t entry, void *p1, void *p2, void *p3, int prio,
++				    uint32_t options, k_timeout_t delay)
+ {
+ 	int ret = -ENOMEM;
+ 
+@@ -661,16 +662,33 @@ int z_impl_sys_thread_create(struct k_thread **th, k_thread_stack_t *stack, uint
+ 		k_object_access_grant(*th, _current);
+ 		k_object_uninit(*th);
+ 		z_vrfy_k_thread_create(*th, stack, stack_size, entry, p1, p2, p3, prio, options,
+-				       K_NO_WAIT);
++				       delay);
+ 		return 0;
+ 	}
+ #endif
+ 
+-	k_thread_create(*th, stack, stack_size, entry, p1, p2, p3, prio, options, K_NO_WAIT);
++	k_thread_create(*th, stack, stack_size, entry, p1, p2, p3, prio, options, delay);
+ 
+ 	return 0;
+ }
+ 
++int z_impl_sys_thread_create(struct k_thread **th, k_thread_stack_t *stack, uint32_t stack_size,
++			     uint32_t guard_size, k_thread_entry_t entry, void *p1, void *p2,
++			     void *p3, int prio, uint32_t options)
++{
++	return sys_thread_create_common(th, stack, stack_size, guard_size, entry, p1, p2, p3, prio,
++					options, K_NO_WAIT);
++}
++
++int sys_thread_create_paused(struct k_thread **th, k_thread_stack_t *stack, uint32_t stack_size,
++			     uint32_t guard_size, k_thread_entry_t entry, void *p1, void *p2,
++			     void *p3, int prio, uint32_t options)
++{
++	/* kernel-mode only: there is no system call for deferred-start creation */
++	return sys_thread_create_common(th, stack, stack_size, guard_size, entry, p1, p2, p3, prio,
++					options, K_FOREVER);
++}
++
+ #ifdef CONFIG_USERSPACE
+ int z_vrfy_sys_thread_create(struct k_thread **th, k_thread_stack_t *stack, uint32_t stack_size,
+ 			     uint32_t guard_size, k_thread_entry_t entry, void *p1, void *p2,
+diff --git a/tests/kernel/timer/timer_signal/CMakeLists.txt b/tests/kernel/timer/timer_signal/CMakeLists.txt
+new file mode 100644
+index 00000000000..090f35c92eb
+--- /dev/null
++++ b/tests/kernel/timer/timer_signal/CMakeLists.txt
+@@ -0,0 +1,9 @@
++# SPDX-License-Identifier: Apache-2.0
++
++cmake_minimum_required(VERSION 3.20.0)
++find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
++project(timer_signal)
++
++target_sources(app PRIVATE src/main.c)
++# z_timer_sig_attach()/z_timer_sig_detach() coexistence coverage needs kernel-private decls
++target_include_directories(app PRIVATE ${ZEPHYR_BASE}/kernel/include ${ZEPHYR_BASE}/arch/${ARCH}/include)
+diff --git a/tests/kernel/timer/timer_signal/prj.conf b/tests/kernel/timer/timer_signal/prj.conf
+new file mode 100644
+index 00000000000..7ee3158c887
+--- /dev/null
++++ b/tests/kernel/timer/timer_signal/prj.conf
+@@ -0,0 +1,12 @@
++CONFIG_ZTEST=y
++CONFIG_SYS_TIMER=y
++CONFIG_SIGNAL=y
++CONFIG_SIGNAL_QUEUE_SIZE=4
++CONFIG_SIGNAL_SET_SIZE=40
++CONFIG_SIGNAL_ACTION_DB_SIZE=2
++CONFIG_ASSERT=y
++CONFIG_HEAP_MEM_POOL_SIZE=16384
++CONFIG_SYS_THREAD=y
++CONFIG_THREAD_DETACH=y
++CONFIG_SYS_THREAD_STACK_MIN=2
++CONFIG_SYS_THREAD_THREAD_MIN=2
+diff --git a/tests/kernel/timer/timer_signal/src/main.c b/tests/kernel/timer/timer_signal/src/main.c
+new file mode 100644
+index 00000000000..0e52716350c
+--- /dev/null
++++ b/tests/kernel/timer/timer_signal/src/main.c
+@@ -0,0 +1,571 @@
++/*
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <zephyr/kernel.h>
++#include <kernel_internal.h>
++#include <zephyr/kernel/signal.h>
++#include <zephyr/sys/clock.h>
++#include <zephyr/sys/timer.h>
++#include <zephyr/sys/timeutil.h>
++#include <zephyr/ztest.h>
++#include <zephyr/ztest_error_hook.h>
++
++#define PERIOD_TICKS 10
++#define VAL_COOKIE   0x5eaf00d
++
++static void ts_from_ticks(uint64_t ticks, struct timespec *ts)
++{
++	timespec_from_timeout(K_TICKS((k_ticks_t)ticks), ts);
++}
++
++static int arm_ticks(struct k_timer *t, uint64_t value_ticks, uint64_t interval_ticks)
++{
++	struct timespec value;
++	struct timespec interval;
++
++	ts_from_ticks(value_ticks, &value);
++	ts_from_ticks(interval_ticks, &interval);
++
++	return k_timer_settime(t, 0, &value, &interval, NULL, NULL);
++}
++
++/* create a self-targeted signal timer */
++static struct k_timer *create_sig_timer(int signo)
++{
++	struct k_timer *t = NULL;
++	struct k_timer_notify notify = {
++		.target = (k_pid_t)k_current_get(),
++		.signo = signo,
++		.value.sival_int = VAL_COOKIE,
++	};
++
++	zassert_ok(sys_timer_create(SYS_CLOCK_MONOTONIC, &notify, 0, NULL, NULL, &t));
++
++	return t;
++}
++
++static void mask_signo(int signo, bool block)
++{
++	struct k_sig_set set;
++
++	zassert_ok(k_sig_emptyset(&set));
++	zassert_ok(k_sig_addset(&set, signo));
++	zassert_ok(k_sig_mask(block ? K_SIG_BLOCK : K_SIG_UNBLOCK, &set, NULL));
++}
++
++static int wait_signo(int signo, struct k_sig_info *info, k_timeout_t timeout)
++{
++	struct k_sig_set set;
++
++	zassert_ok(k_sig_emptyset(&set));
++	zassert_ok(k_sig_addset(&set, signo));
++
++	return k_sig_timedwait(&set, info, timeout);
++}
++
++static void drain_signo(int signo)
++{
++	while (wait_signo(signo, NULL, K_NO_WAIT) >= 0) {
++	}
++}
++
++static void delivery_timedwait(void)
++{
++	struct k_sig_info info = {0};
++	struct k_timer *t = create_sig_timer(K_SIG_USR1);
++
++	zassert_ok(arm_ticks(t, PERIOD_TICKS, 0));
++	zassert_equal(wait_signo(K_SIG_USR1, &info, K_TICKS(10 * PERIOD_TICKS)), K_SIG_USR1,
++		      "expiry signal was not delivered");
++	zassert_equal(info.code, K_SI_TIMER, "si_code is %d, not K_SI_TIMER", info.code);
++	zassert_equal(info.value.sival_int, VAL_COOKIE, "signal value did not round-trip");
++
++	zassert_ok(sys_timer_delete(t));
++}
++
++ZTEST_BMEM static volatile int handler_code;
++ZTEST_BMEM static volatile int handler_hits;
++
++static void timer_sig_handler(int sig, struct k_sig_info *info, void *ucontext)
++{
++	ARG_UNUSED(sig);
++	ARG_UNUSED(ucontext);
++
++	handler_code = info->code;
++	handler_hits++;
++}
++
++static void delivery_handler(void)
++{
++	struct k_sig_action action = {
++		.handler = timer_sig_handler,
++	};
++	struct k_timer *t = create_sig_timer(K_SIG_USR2);
++
++	handler_code = -1;
++	handler_hits = 0;
++
++	/* kernel threads must explicitly unmask signals they wish to receive */
++	mask_signo(K_SIG_USR2, false);
++	zassert_ok(k_sig_action(K_SIG_USR2, &action, NULL));
++
++	zassert_ok(arm_ticks(t, PERIOD_TICKS, 0));
++
++	for (int i = 0; (handler_hits == 0) && (i < 20 * PERIOD_TICKS); ++i) {
++		k_sleep(K_TICKS(1));
++	}
++
++	zassert_equal(handler_hits, 1, "handler ran %d times", handler_hits);
++	zassert_equal(handler_code, K_SI_TIMER);
++
++	action.handler = K_SIG_DFL;
++	zassert_ok(k_sig_action(K_SIG_USR2, &action, NULL));
++	mask_signo(K_SIG_USR2, true);
++	zassert_ok(sys_timer_delete(t));
++}
++
++static void one_pending_and_overrun(void)
++{
++	struct k_timer *t = create_sig_timer(K_SIG_USR1);
++
++	zassert_ok(arm_ticks(t, PERIOD_TICKS, PERIOD_TICKS));
++
++	/* let several periods elapse while the signal stays queued (masked) */
++	k_sleep(K_TICKS(PERIOD_TICKS * 5 + PERIOD_TICKS / 2));
++
++	/* one-pending: exactly one instance is queued, no matter how many expiries */
++	zassert_equal(wait_signo(K_SIG_USR1, NULL, K_NO_WAIT), K_SIG_USR1);
++
++	int overrun = k_timer_overrun(t);
++
++	zassert_true((overrun >= 3) && (overrun <= 5),
++		     "overrun %d outside the expected 3..5 window", overrun);
++	/* non-destructive: repeated reads return the latched value */
++	zassert_equal(k_timer_overrun(t), overrun);
++	zassert_equal(k_timer_overrun(t), overrun);
++
++	zassert_equal(wait_signo(K_SIG_USR1, NULL, K_NO_WAIT), -EAGAIN,
++		      "more than one signal instance was queued for one timer");
++
++	zassert_ok(sys_timer_delete(t));
++}
++
++static void overrun_oneshot_zero(void)
++{
++	struct k_timer *t = create_sig_timer(K_SIG_USR1);
++
++	zassert_ok(arm_ticks(t, PERIOD_TICKS, 0));
++	zassert_equal(wait_signo(K_SIG_USR1, NULL, K_TICKS(10 * PERIOD_TICKS)), K_SIG_USR1);
++	zassert_equal(k_timer_overrun(t), 0, "one-shot delivered promptly has overrun");
++
++	zassert_ok(sys_timer_delete(t));
++}
++
++static void overrun_counts_coalesced_gap(void)
++{
++	struct k_timer *t = create_sig_timer(K_SIG_USR1);
++
++	zassert_ok(arm_ticks(t, PERIOD_TICKS, PERIOD_TICKS));
++
++	/* first expiry generates the pending signal */
++	k_sleep(K_TICKS(PERIOD_TICKS + 1));
++
++	/*
++	 * Busy-block for several periods: expiry handling may coalesce into fewer
++	 * handler invocations, but the grid-based overrun must count all of them.
++	 */
++	k_busy_wait(k_ticks_to_us_ceil32(3 * PERIOD_TICKS));
++
++	zassert_equal(wait_signo(K_SIG_USR1, NULL, K_NO_WAIT), K_SIG_USR1);
++	zassert_true(k_timer_overrun(t) >= 2, "coalesced expiries were not counted: overrun %d",
++		     k_timer_overrun(t));
++
++	zassert_ok(sys_timer_delete(t));
++}
++
++static void disarm_freezes_overrun(void)
++{
++	struct timespec zero = {0, 0};
++	struct k_timer *t = create_sig_timer(K_SIG_USR1);
++
++	zassert_ok(arm_ticks(t, PERIOD_TICKS, PERIOD_TICKS));
++
++	/* accumulate roughly two extra expiries, then disarm */
++	k_sleep(K_TICKS(3 * PERIOD_TICKS + PERIOD_TICKS / 2));
++	zassert_ok(k_timer_settime(t, 0, &zero, NULL, NULL, NULL));
++
++	/* time passing after disarm must not inflate the overrun */
++	k_sleep(K_TICKS(5 * PERIOD_TICKS));
++
++	zassert_equal(wait_signo(K_SIG_USR1, NULL, K_NO_WAIT), K_SIG_USR1);
++	zassert_true(k_timer_overrun(t) <= 3,
++		     "overrun %d kept accumulating after disarm", k_timer_overrun(t));
++
++	zassert_ok(sys_timer_delete(t));
++}
++
++struct helper_result {
++	int signo;
++	int code;
++};
++
++static K_THREAD_STACK_DEFINE(helper_stack, 2048);
++static struct k_thread helper_thread;
++ZTEST_BMEM static struct helper_result helper_res;
++
++static void helper_entry(void *a, void *b, void *c)
++{
++	struct k_sig_set set;
++	struct k_sig_info info = {0};
++
++	ARG_UNUSED(a);
++	ARG_UNUSED(b);
++	ARG_UNUSED(c);
++
++	(void)k_sig_emptyset(&set);
++	(void)k_sig_addset(&set, K_SIG_USR2);
++	(void)k_sig_mask(K_SIG_BLOCK, &set, NULL);
++
++	/* K_FOREVER: an unbounded sigwait must block until the timer signal arrives */
++	helper_res.signo = k_sig_timedwait(&set, &info, K_FOREVER);
++	helper_res.code = info.code;
++}
++
++static void thread_targeted_delivery(void)
++{
++	struct k_timer *t = NULL;
++	struct k_timer_notify notify = {
++		.signo = K_SIG_USR2,
++		.value.sival_int = VAL_COOKIE,
++	};
++
++	helper_res.signo = -1;
++	helper_res.code = -1;
++
++	notify.target = (k_pid_t)k_thread_create(
++		&helper_thread, helper_stack, K_THREAD_STACK_SIZEOF(helper_stack), helper_entry,
++		NULL, NULL, NULL, K_LOWEST_APPLICATION_THREAD_PRIO,
++		IS_ENABLED(CONFIG_USERSPACE) ? (K_USER | K_INHERIT_PERMS) : 0, K_NO_WAIT);
++
++	/* let the helper block in k_sig_timedwait() first */
++	k_sleep(K_TICKS(2));
++
++	zassert_ok(sys_timer_create(SYS_CLOCK_MONOTONIC, &notify, 0, NULL, NULL, &t));
++	zassert_ok(arm_ticks(t, PERIOD_TICKS, 0));
++
++	zassert_ok(k_thread_join(&helper_thread, K_TICKS(200 * PERIOD_TICKS)));
++	zassert_equal(helper_res.signo, K_SIG_USR2, "helper did not receive the timer signal");
++	zassert_equal(helper_res.code, K_SI_TIMER);
++
++	zassert_ok(sys_timer_delete(t));
++}
++
++static struct k_sem never_sem;
++
++static void block_after_handler_delivery(void)
++{
++	int ret;
++	struct k_sig_action action = {
++		.handler = timer_sig_handler,
++	};
++	struct k_timer *t = create_sig_timer(K_SIG_USR2);
++
++	handler_hits = 0;
++
++	/* deliver at least one signal through the handler path while sleeping */
++	mask_signo(K_SIG_USR2, false);
++	zassert_ok(k_sig_action(K_SIG_USR2, &action, NULL));
++	zassert_ok(arm_ticks(t, PERIOD_TICKS, PERIOD_TICKS));
++	for (int i = 0; (handler_hits == 0) && (i < 20 * PERIOD_TICKS); ++i) {
++		k_sleep(K_TICKS(1));
++	}
++	zassert_true(handler_hits >= 1);
++
++	zassert_ok(sys_timer_delete(t));
++	action.handler = K_SIG_DFL;
++	zassert_ok(k_sig_action(K_SIG_USR2, &action, NULL));
++	mask_signo(K_SIG_USR2, true);
++
++	/*
++	 * Regression: handler delivery must not damage this thread's context - a
++	 * subsequent bounded block must still time out normally.
++	 */
++	k_sem_init(&never_sem, 0, 1);
++	ret = k_sem_take(&never_sem, K_TICKS(5));
++	zassert_equal(ret, -EAGAIN, "post-delivery block wedged (ret %d)", ret);
++}
++
++static void pending_signal_while_blocked(void)
++{
++	int ret;
++	struct k_sig_action action = {
++		.handler = timer_sig_handler,
++	};
++	struct k_timer *t = create_sig_timer(K_SIG_USR2);
++
++	handler_hits = 0;
++
++	/* handler-based delivery, unmasked, periodic timer left running */
++	mask_signo(K_SIG_USR2, false);
++	zassert_ok(k_sig_action(K_SIG_USR2, &action, NULL));
++	zassert_ok(arm_ticks(t, PERIOD_TICKS, PERIOD_TICKS));
++
++	/*
++	 * Block on an object that is never given: expiry signals target this thread
++	 * while it waits. The wait must still time out normally (and the handler run),
++	 * never wedge.
++	 */
++	k_sem_init(&never_sem, 0, 1);
++	ret = k_sem_take(&never_sem, K_TICKS(5 * PERIOD_TICKS));
++	zassert_equal(ret, -EAGAIN, "blocked wait did not time out normally (ret %d)", ret);
++	zassert_true(handler_hits > 0, "no delivery while blocked");
++
++	action.handler = K_SIG_DFL;
++	zassert_ok(k_sig_action(K_SIG_USR2, &action, NULL));
++	mask_signo(K_SIG_USR2, true);
++	zassert_ok(sys_timer_delete(t));
++}
++
++static void sigval_self(void)
++{
++	struct k_timer *t = NULL;
++	struct k_sig_info info = {0};
++	struct k_timer_notify notify = {
++		.target = (k_pid_t)k_current_get(),
++		.signo = K_SIG_USR1,
++		/* .value deliberately unset: SYS_TIMER_SIGVAL_SELF overrides it */
++	};
++
++	zassert_ok(sys_timer_create(SYS_CLOCK_MONOTONIC, &notify, SYS_TIMER_SIGVAL_SELF, NULL,
++				    NULL, &t));
++	zassert_ok(arm_ticks(t, PERIOD_TICKS, 0));
++
++	zassert_equal(wait_signo(K_SIG_USR1, &info, K_TICKS(10 * PERIOD_TICKS)), K_SIG_USR1);
++	zassert_equal_ptr(info.value.sival_ptr, t,
++			  "SYS_TIMER_SIGVAL_SELF did not deliver the timer's own address");
++
++	zassert_ok(sys_timer_delete(t));
++}
++
++static void delete_purges_pending(void)
++{
++	struct k_timer *t = create_sig_timer(K_SIG_USR1);
++
++	zassert_ok(arm_ticks(t, PERIOD_TICKS, 0));
++
++	/* wait for the (masked) signal to be generated, then delete without accepting it */
++	k_sleep(K_TICKS(2 * PERIOD_TICKS));
++	zassert_ok(sys_timer_delete(t));
++
++	zassert_equal(wait_signo(K_SIG_USR1, NULL, K_NO_WAIT), -EAGAIN,
++		      "deleted timer left a queued signal behind");
++}
++
++static void queue_full_best_effort(void)
++{
++	struct k_timer *t = create_sig_timer(K_SIG_USR1);
++
++	/* fill the (small) signal queue with unrelated masked signals */
++	mask_signo(K_SIG_USR2, true);
++	while (k_sig_queue((k_pid_t)k_current_get(), K_SIG_USR2, (union k_sig_val){0}) == 0) {
++	}
++
++	/* expiries survive generation failure; that period's signal is simply lost */
++	zassert_ok(arm_ticks(t, PERIOD_TICKS, PERIOD_TICKS));
++	k_sleep(K_TICKS(2 * PERIOD_TICKS + 2));
++
++	/* drain the queue: generation succeeds again on a later period */
++	drain_signo(K_SIG_USR2);
++	zassert_equal(wait_signo(K_SIG_USR1, NULL, K_TICKS(10 * PERIOD_TICKS)), K_SIG_USR1,
++		      "signal generation did not recover after queue-full");
++
++	zassert_ok(sys_timer_delete(t));
++	drain_signo(K_SIG_USR2);
++}
++
++static void coexist_expiry_fn(struct k_timer *timer)
++{
++	ARG_UNUSED(timer);
++
++	handler_hits++;
++}
++
++K_TIMER_DEFINE_EXT(coexist_timer, coexist_expiry_fn, NULL, SYS_CLOCK_MONOTONIC);
++
++static struct k_sem notify_fn_sem;
++ZTEST_BMEM static volatile int notify_fn_count;
++ZTEST_BMEM static volatile intptr_t notify_fn_value;
++
++static void notify_fn(union k_sig_val value)
++{
++	notify_fn_value = (intptr_t)value.sival_int;
++	++notify_fn_count;
++	k_sem_give(&notify_fn_sem);
++}
++
++static void notify_fn_dispatch(void)
++{
++	struct k_timer *t = NULL;
++	struct k_timer_notify notify = {
++		.fn = notify_fn,
++		.value.sival_int = VAL_COOKIE,
++		.fn_priority = K_PRIO_PREEMPT(0),
++	};
++
++	notify_fn_count = 0;
++	notify_fn_value = 0;
++	k_sem_init(&notify_fn_sem, 0, K_SEM_MAX_LIMIT);
++
++	zassert_ok(sys_timer_create(SYS_CLOCK_MONOTONIC, &notify, 0, NULL, NULL, &t));
++	zassert_ok(arm_ticks(t, PERIOD_TICKS, PERIOD_TICKS));
++
++	/* each expiry runs the function, with the notification value, in a fresh thread */
++	for (int i = 1; i <= 3; ++i) {
++		zassert_ok(k_sem_take(&notify_fn_sem, K_TICKS(100 * PERIOD_TICKS)),
++			   "notification %d did not run", i);
++	}
++	zassert_true(notify_fn_count >= 3, "function ran %d times", notify_fn_count);
++	zassert_equal(notify_fn_value, VAL_COOKIE, "wrong notification value");
++
++	/* deletion detaches and purges; no notification runs afterwards */
++	zassert_ok(sys_timer_delete(t));
++	notify_fn_count = 0;
++	zassert_equal(k_sem_take(&notify_fn_sem, K_TICKS(4 * PERIOD_TICKS)), -EAGAIN);
++	zassert_equal(notify_fn_count, 0, "notification ran after deletion");
++}
++
++static void notify_fn_invalid_priority(void)
++{
++	struct k_timer *t = NULL;
++	struct k_timer_notify notify = {
++		.fn = notify_fn,
++		.fn_priority = K_LOWEST_APPLICATION_THREAD_PRIO + 1,
++	};
++
++	zassert_equal(sys_timer_create(SYS_CLOCK_MONOTONIC, &notify, 0, NULL, NULL, &t),
++		      -EINVAL);
++}
++
++static void expiry_fn_coexists(void)
++{
++	handler_hits = 0;
++
++	z_timer_sig_attach(&coexist_timer, (k_pid_t)k_current_get(), K_SIG_USR1,
++			   (union k_sig_val){.sival_int = VAL_COOKIE});
++	zassert_ok(arm_ticks(&coexist_timer, PERIOD_TICKS, 0));
++
++	/* both the legacy expiry function and the signal must fire */
++	zassert_equal(wait_signo(K_SIG_USR1, NULL, K_TICKS(10 * PERIOD_TICKS)), K_SIG_USR1);
++	zassert_equal(handler_hits, 1, "expiry_fn did not run alongside signal generation");
++
++	z_timer_sig_detach(&coexist_timer);
++	k_timer_stop(&coexist_timer);
++}
++
++#ifdef CONFIG_USERSPACE
++/* fault-harness exception to one-ZTEST-per-unit: this test point must oops */
++ZTEST_USER(timer_signal, test_sys_timer_create_fault)
++{
++	struct k_timer *t = NULL;
++	uint32_t not_a_thread[4];
++	struct k_timer_notify notify = {
++		.target = (k_pid_t)&not_a_thread,
++		.signo = K_SIG_USR1,
++	};
++
++	/* a target that is not a granted kernel thread object must fault, not corrupt */
++	ztest_set_fault_valid(true);
++	(void)sys_timer_create(SYS_CLOCK_MONOTONIC, &notify, 0, NULL, NULL, &t);
++	ztest_test_fail(); /* unreachable: the syscall must oops */
++}
++#endif /* CONFIG_USERSPACE */
++
++/* the per-test cleanup, applied between the sections of a merged per-unit test */
++static void section_reset(void)
++{
++	/* k_sig_timedwait() only works on masked signals */
++	mask_signo(K_SIG_USR1, true);
++	drain_signo(K_SIG_USR1);
++	drain_signo(K_SIG_USR2);
++}
++
++ZTEST_USER(timer_signal, test_sys_timer_create)
++{
++	delivery_timedwait();
++	section_reset();
++	delivery_handler();
++	section_reset();
++	block_after_handler_delivery();
++	section_reset();
++	pending_signal_while_blocked();
++	section_reset();
++	sigval_self();
++	section_reset();
++	thread_targeted_delivery();
++	section_reset();
++	queue_full_best_effort();
++	section_reset();
++	notify_fn_dispatch();
++	section_reset();
++	notify_fn_invalid_priority();
++	section_reset();
++}
++
++/*
++ * Kernel mode: consuming signals from one ZTEST_USER incarnation of the ztest thread
++ * hangs a blocked k_sig_timedwait() in the next (same k_thread address, new incarnation).
++ * TODO(k_sig): root-cause the cross-incarnation fifo-ready state and make this ZTEST_USER.
++ */
++ZTEST(timer_signal, test_k_timer_overrun)
++{
++	one_pending_and_overrun();
++	section_reset();
++	overrun_oneshot_zero();
++	section_reset();
++	overrun_counts_coalesced_gap();
++	section_reset();
++	disarm_freezes_overrun();
++	section_reset();
++}
++
++ZTEST_USER(timer_signal, test_sys_timer_delete)
++{
++	delete_purges_pending();
++	section_reset();
++}
++
++ZTEST(timer_signal, test_k_timer_define_ext)
++{
++	/* attaches through the internal API against a statically-defined timer */
++	expiry_fn_coexists();
++	section_reset();
++}
++
++static void before(void *arg)
++{
++	ARG_UNUSED(arg);
++
++	/* k_sig_timedwait() only works on masked signals */
++	mask_signo(K_SIG_USR1, true);
++}
++
++static void after(void *arg)
++{
++	ARG_UNUSED(arg);
++
++	drain_signo(K_SIG_USR1);
++	drain_signo(K_SIG_USR2);
++}
++
++static void *suite_setup(void)
++{
++#ifdef CONFIG_USERSPACE
++	k_thread_access_grant(k_current_get(), &helper_thread, &helper_stack, &notify_fn_sem,
++			      &never_sem);
++#endif
++	return NULL;
++}
++
++ZTEST_SUITE(timer_signal, NULL, suite_setup, before, after, NULL);
+diff --git a/tests/kernel/timer/timer_signal/testcase.yaml b/tests/kernel/timer/timer_signal/testcase.yaml
+new file mode 100644
+index 00000000000..f9b0ac1b617
+--- /dev/null
++++ b/tests/kernel/timer/timer_signal/testcase.yaml
+@@ -0,0 +1,24 @@
++common:
++  tags:
++    - kernel
++    - timer
++tests:
++  kernel.timer.timer_signal:
++    integration_platforms:
++      - native_sim
++      - qemu_x86
++      - qemu_cortex_m3
++  kernel.timer.timer_signal.tickless:
++    integration_platforms:
++      - native_sim
++      - qemu_x86
++    extra_configs:
++      - CONFIG_TICKLESS_KERNEL=y
++  kernel.timer.timer_signal.userspace:
++    filter: CONFIG_ARCH_SUPPORTS_USERSPACE_SIGNALS
++    integration_platforms:
++      - qemu_x86
++      - qemu_cortex_m3
++    extra_configs:
++      - CONFIG_TEST_USERSPACE=y
++      - CONFIG_ZTEST_FATAL_HOOK=y
