@@ -470,7 +470,7 @@ patches:
     comments: |
       Provide a function to convert absolute timespec values to k_timepoint_t.
   - path: zephyr/k-condvar-clockwait.patch
-    sha256sum: ff6a2d22b1d836bd531345eff62a77d7498470d6b4f9f70f0d32688e50bd7bc8
+    sha256sum: f33ea88b02277830760f4446290dc63467558e16d4881f9a4a2842aa43651caa
     module: zephyr
     author: Chris Friedt
     email: chris@fr4.co
@@ -478,10 +478,13 @@ patches:
     upstreamable: true
     comments: |
       Support timespec-based absolute timeouts for condition variables. These functions are used
-      to support standard threading APIs such as C11, C++11, and POSIX. Moving the
-      absolute-to-relative conversion into the kernel ensures that there are fewer race conditions
-      and sources of error which are common when multiple timepoint conversion happens in several
-      places.
+      to support standard threading APIs such as C11, C++11, and POSIX. Moving the conversion
+      into the kernel ensures that there are fewer race conditions and sources of error which are
+      common when multiple timepoint conversions happen in several places: the deadline is
+      converted exactly once, with timespec_abs_to_timeout(), to an absolute kernel timeout
+      (CONDVAR_OPTIONS selects TIMEOUT_64BIT), so no "now" sample intervenes between conversion
+      and pend and an already-past deadline pends and expires immediately. Invalid timespec
+      input reports -EINVAL like every other failure mode.
   - path: zephyr/kernel-init-tls-current-pointer.patch
     sha256sum: 2166399a2130b399d758b08dbd1cec10853335b76eba4b2bc91b9656cfc5ed4d
     module: zephyr
