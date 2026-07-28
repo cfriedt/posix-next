@@ -1,0 +1,26 @@
+diff --git a/newlib/libc/include/signal.h b/newlib/libc/include/signal.h
+index 5f774b77f..646beb9ff 100644
+--- a/newlib/libc/include/signal.h
++++ b/newlib/libc/include/signal.h
+@@ -142,6 +142,11 @@ typedef struct sigaltstack {
+                         /*  interest occurs. */
+ #define SIGEV_THREAD 3  /* A notification function shall be called to */
+                         /*   perform notification. */
++#if __GNU_VISIBLE || defined(__ZEPHYR__)
++#define SIGEV_THREAD_ID 4 /* A queued signal shall be delivered to the */
++                          /*   thread named by sigev_notify_thread_id */
++                          /*   (Linux-compatible extension). */
++#endif
+ 
+ /*  Signal Generation and Delivery, P1003.1b-1993, p. 63
+     NOTE: P1003.1c/D10, p. 34 adds sigev_notify_function and
+@@ -154,6 +159,9 @@ struct sigevent {
+   void           (*sigev_notify_function)( union sigval );
+                                                /* Notification function */
+   void            *sigev_notify_attributes;    /* Notification Attributes */
++  __pid_t          sigev_notify_thread_id;     /* Target thread for */
++                                               /*   SIGEV_THREAD_ID */
++                                               /*   (Linux-compatible extension) */
+ };
+ #endif /* defined(_POSIX_REALTIME_SIGNALS) || __POSIX_VISIBLE >= 199309 */
+ 
