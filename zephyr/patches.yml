@@ -1071,3 +1071,124 @@ patches:
       Includes the tests/lib/sys_timer ztest suite (default, static-only, and
       userspace variants, including revoked-handle fault coverage) and
       complete Doxygen. Groundwork for POSIX timer_create()/timer_delete().
+  - path: zephyr/k-timer-signal.patch
+    sha256sum: c9e08101ecd855112c10143eb838bc6de8bde2e693f35ffcddc19b087fb0b3f5
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-28
+    upstreamable: true
+    comments: |
+      kernel: timer: generate signals on timer expiry with overrun accounting
+
+      Adds CONFIG_TIMER_SIGNAL (default y with SIGNAL and TIMER_CLOCK): a
+      kernel timer may generate a thread-targeted signal on each expiry,
+      carrying a user value with the new public si_code K_SI_TIMER (K_SI_QUEUE
+      is also now public). Notification is attached at pool-allocation time
+      via sys_timer_create(); sys_timer_delete() detaches it and purges
+      queued-but-undelivered instances so no kernel reference to the timer
+      outlives deletion. Unlike expiry functions (interrupt context), signal
+      delivery runs in the target thread's context - the robust path for
+      userspace consumers. Expiry functions and signals may coexist; with
+      CONFIG_TIMER_SIGNAL=n the timer code is unchanged.
+
+      Generation follows the POSIX one-pending model: an atomic per-timer
+      latch admits a single queued instance; expiries while pending are
+      overruns. The overrun is computed lazily at delivery from the exact
+      scheduled-expiry grid - floor((delivery - generation)/period) - so
+      expiries coalesced by late or tickless wakeups are counted correctly,
+      and k_timer_overrun() reads it non-destructively. Disarming stamps a
+      freeze time so idle time does not inflate the count. Queue-full drops
+      are best-effort (retried next period), counted per timer, and reported
+      with a zero-overhead-by-default LOG_DBG_RATELIMIT message.
+
+      Lock ordering is structural: the expiry path holds timer lock then
+      k_sig_lock; the delivery-side hooks called from kernel/signal.c use
+      atomics only and are incapable of taking the timer lock.
+
+      Also fixes a pre-existing k_sig_timedwait() bug exposed by the new
+      tests: a stale fifo-ready poll raise (raised at generation but never
+      consumed, or consumed by an unrelated wake-up) caused an immediate
+      spurious -EAGAIN, and a raise for another thread combined with an
+      expiring deadline could trip an internal assertion. The wait now keeps
+      waiting until its deadline on a stale raise and reports a clean -EAGAIN
+      timeout otherwise; sigwait-style acceptance also propagates si_code.
+      This is the bug the POSIX layer's sigwait chunked-polling workarounds
+      exist for (see lib/posix options signals/rtsig), which can be simplified
+      in a follow-up.
+
+      Includes the tests/kernel/timer/timer_signal ztest suite (delivery via
+      handler and sigwait, one-pending, overrun latch/coalescing/freeze,
+      thread-targeted delivery, delete-purges, queue-full recovery,
+      expiry-function coexistence, userspace positive and fault-injection
+      negative cases) and kernel timing documentation.
+
+      Also adds function notification: sys_timer_create() callers may pass a
+      notification function (with stack size and priority) instead of a
+      signal target; a single kernel dispatcher thread accepts the expiries
+      through the reserved top-of-set K_SIG_SYS_TIMER signal and spawns one
+      detached system-pool thread per notification (requires SYS_THREAD and
+      THREAD_DETACH; ENOTSUP otherwise). Notification threads for timers
+      created by user threads run in user mode, in the creator's memory
+      domain, inheriting the creator's object permissions at dispatch time
+      (via a new kernel-mode-only sys_thread_create_paused()). k_sig_info
+      gains the generating-timer identity (the Linux si_timerid analog),
+      populated at every delivery. This is the substrate for POSIX
+      SIGEV_THREAD, which needs no per-timer allocation in the POSIX layer.
+
+      Also fixes a k_sig_timedwait() wake-up starvation: a k_poll signal
+      raise notifies only the first registered poller, so a perpetual waiter
+      (such as the dispatcher) could consume - and never hand back - another
+      thread's wake-up. A waiter that observes a foreign raise now re-raises
+      it, notifying the next waiter in line, before yielding.
+  - path: zephyr/k-sleep-absolute-timeout-remainder.patch
+    sha256sum: 5a8357a67ccd2541619441b6f131a93ef1e8b402d47108a30485d9043534bff6
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-28
+    upstreamable: true
+    comments: |
+      kernel: timeout: report the decoded expiry for absolute timeouts
+
+      z_add_timeout() returns the absolute expiry tick of the scheduled
+      timeout, which z_tick_sleep() records to compute the time remaining
+      when a sleep is cut short by k_wakeup(). For absolute timeouts the
+      raw encoded value (Z_TICK_ABS, a negative number) was returned
+      instead of the decoded expiry, so k_sleep() with an absolute timeout
+      reported a garbage remainder - typically 0, indistinguishable from
+      normal expiry - when woken early.
+
+      Return the decoded absolute expiry, matching what the relative branch
+      reports, and add a regression case to the kernel sleep testsuite
+      covering the woken-early remainder and re-arming against the same
+      absolute deadline.
+  - path: zephyr/sys-clock-nanosleep-absolute-arming.patch
+    sha256sum: 7d8e22f5fe04cf093e137f6222812d0655a518195608b52f6d8ca8f211a3a4a5
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-28
+    upstreamable: true
+    comments: |
+      lib: os: clock: arm absolute nanosleep deadlines as absolute timeouts
+
+      The SYS_TIMER_ABSTIME path of sys_clock_nanosleep() converted the
+      absolute deadline to a relative duration by sampling "now", then
+      converted that duration back through a timepoint and slept in a
+      re-derived-relative retry loop: every conversion re-samples the
+      clock and adds scheduling-latency skew, and the retry loop re-arms
+      short relative sleeps rather than holding one deadline.
+
+      When CONFIG_TIMEOUT_64BIT is available (the default), convert the
+      deadline once with timespec_abs_to_timeout() - a single coherent
+      conversion, no "now" sample - and k_sleep() on the absolute timeout;
+      a premature k_wakeup() re-arms against the same absolute deadline.
+      Deadlines too distant for tick conversion (over ~584 years) and
+      32-bit-timeout configurations retain the relative fallback.
+
+      Depends on k-sleep-absolute-timeout-remainder.patch for the woken-
+      early remainder of an absolute-timeout k_sleep(). Covered by the
+      POSIX clock_nanosleep() testsuite (absolute-deadline accuracy on
+      both clocks and premature-wake-up re-arming were added to it in the
+      posix module).
