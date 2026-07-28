@@ -140,6 +140,51 @@ static void test_pthread_rwlockattr_pshared_common(bool set, int pshared)
 	zassert_ok(pthread_rwlockattr_destroy(&attr));
 }
 
+typedef int (*rwlock_timedlock_fn)(pthread_rwlock_t *, const struct timespec *);
+
+static void *rwlock_past_deadline_fn(void *arg)
+{
+	int64_t start;
+	struct timespec past = {0};
+	rwlock_timedlock_fn timedlock = (rwlock_timedlock_fn)arg;
+
+	/* an already-past absolute deadline times out without blocking */
+	start = k_uptime_get();
+	zassert_equal(timedlock(&rwlock, &past), ETIMEDOUT);
+	zassert_true(k_uptime_get() - start < 100, "past deadline blocked");
+
+	return NULL;
+}
+
+static void rwlock_timedlock_past_deadline(rwlock_timedlock_fn timedlock)
+{
+	pthread_t th;
+
+	if (IS_ENABLED(CONFIG_NATIVE_LIBC)) {
+		/* measured against simulated time; covered by the host's own testing */
+		ztest_test_skip();
+	}
+
+	zassert_ok(pthread_rwlock_init(&rwlock, NULL));
+	zassert_ok(pthread_rwlock_trywrlock(&rwlock));
+
+	zassert_ok(pthread_create(&th, NULL, rwlock_past_deadline_fn, timedlock));
+	zassert_ok(pthread_join(th, NULL));
+
+	zassert_ok(pthread_rwlock_unlock(&rwlock));
+	zassert_ok(pthread_rwlock_destroy(&rwlock));
+}
+
+ZTEST(posix_rw_locks, test_pthread_rwlock_timedrdlock)
+{
+	rwlock_timedlock_past_deadline(pthread_rwlock_timedrdlock);
+}
+
+ZTEST(posix_rw_locks, test_pthread_rwlock_timedwrlock)
+{
+	rwlock_timedlock_past_deadline(pthread_rwlock_timedwrlock);
+}
+
 ZTEST(posix_rw_locks, test_pthread_rwlockattr_getpshared)
 {
 	test_pthread_rwlockattr_pshared_common(false, 0);
