@@ -124,7 +124,7 @@
 #define STREAM_MAX                    _POSIX_STREAM_MAX
 #define SYMLOOP_MAX                   _POSIX_SYMLOOP_MAX
 #define TIMER_MAX \
-	COND_CODE_1(CONFIG_POSIX_TIMERS, (CONFIG_POSIX_TIMER_MAX), (0))
+	COND_CODE_1(CONFIG_POSIX_TIMERS, (CONFIG_SYS_TIMER_MAX), (0))
 #define TTY_NAME_MAX                  _POSIX_TTY_NAME_MAX
 #define TZNAME_MAX                    _POSIX_TZNAME_MAX
 

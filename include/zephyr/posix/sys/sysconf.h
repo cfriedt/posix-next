@@ -334,7 +334,7 @@ enum {
 #define __z_posix_sysconf_SC_STREAM_MAX                   _POSIX_STREAM_MAX
 #define __z_posix_sysconf_SC_SYMLOOP_MAX                  _POSIX_SYMLOOP_MAX
 #define __z_posix_sysconf_SC_TIMER_MAX                                                             \
-	COND_CODE_1(CONFIG_POSIX_TIMERS, (CONFIG_POSIX_TIMER_MAX), (0))
+	COND_CODE_1(CONFIG_POSIX_TIMERS, (CONFIG_SYS_TIMER_MAX), (0))
 #define __z_posix_sysconf_SC_TTY_NAME_MAX                 _POSIX_TTY_NAME_MAX
 #define __z_posix_sysconf_SC_TZNAME_MAX                   _POSIX_TZNAME_MAX
 

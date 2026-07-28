@@ -256,7 +256,7 @@ long sysconf(int name)
 	case _SC_SYMLOOP_MAX:
 		return _POSIX_SYMLOOP_MAX;
 	case _SC_TIMER_MAX:
-		return COND_CODE_1(CONFIG_POSIX_TIMERS, (CONFIG_POSIX_TIMER_MAX), (0));
+		return COND_CODE_1(CONFIG_POSIX_TIMERS, (CONFIG_SYS_TIMER_MAX), (0));
 	case _SC_TTY_NAME_MAX:
 		return _POSIX_TTY_NAME_MAX;
 	case _SC_TZNAME_MAX:
