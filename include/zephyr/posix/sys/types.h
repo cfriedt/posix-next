@@ -175,6 +175,12 @@ struct timespec {
 #endif
 #endif
 
+#if !defined(_TIMER_T_DECLARED) && !defined(__timer_t_defined)
+typedef unsigned long timer_t;
+#define _TIMER_T_DECLARED
+#define __timer_t_defined
+#endif
+
 /* TODO: trace_attr_t, trace_event_id_t, trace_event_set_t, trace_id_t */
 
 #if !defined(_UID_T_DECLARED) && !defined(__uid_t_defined)
