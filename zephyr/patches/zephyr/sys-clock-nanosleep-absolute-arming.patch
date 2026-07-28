@@ -1,0 +1,43 @@
+diff --git a/lib/os/clock.c b/lib/os/clock.c
+index fa593467c6f..ff5e70309ba 100644
+--- a/lib/os/clock.c
++++ b/lib/os/clock.c
+@@ -159,8 +159,37 @@ int z_impl_sys_clock_nanosleep(int clock_id, int flags, const struct timespec *r
+ 		return -EINVAL;
+ 	}
+ 
++#ifdef CONFIG_TIMEOUT_64BIT
++	if (abstime && ((sizeof(rqtp->tv_sec) != sizeof(int64_t)) ||
++			likely(rqtp->tv_sec < (time_t)(UINT64_MAX / NSEC_PER_SEC)))) {
++		/*
++		 * One coherent conversion to an absolute kernel timeout: no "now" sample
++		 * between deadline computation and arming, so no scheduling-latency skew,
++		 * and a premature wake-up (k_wakeup()) re-arms against the same absolute
++		 * deadline rather than a re-derived relative one.
++		 *
++		 * TODO(clock-settime-reactive-waits): a SYS_CLOCK_REALTIME deadline bakes
++		 * in the realtime offset sampled in the conversion; a later
++		 * sys_clock_settime() does not re-target this sleep.
++		 */
++		const k_timeout_t abs_timeout = timespec_abs_to_timeout((uint32_t)clock_id, rqtp);
++
++		while (k_sleep(abs_timeout) != 0) {
++		}
++
++		if (update_rmtp) {
++			*rmtp = (struct timespec){0, 0};
++		}
++
++		return 0;
++	}
++#endif /* CONFIG_TIMEOUT_64BIT */
++
+ 	if (abstime) {
+-		/* convert absolute time to relative time duration */
++		/*
++		 * Deadline too distant for direct tick conversion (or 32-bit timeouts):
++		 * fall back to converting the absolute time to a relative duration.
++		 */
+ 		(void)sys_clock_gettime(clock_id, &duration);
+ 		(void)timespec_negate(&duration);
+ 		(void)timespec_add(&duration, rqtp);
