@@ -1171,3 +1171,48 @@ patches:
       for C23 and newer; asctime_r()/ctime_r() are POSIX-only and now live
       solely in <posix_time.h> (their in-tree ISO C callers carry local
       prototypes).
+  - path: zephyr/k-timer-clock.patch
+    sha256sum: 257bc7fd1198c3a66c0485d5cf6b306d4a01adb642c2a1a51358b8de9e7f5c84
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-28
+    upstreamable: true
+    comments: |
+      kernel: timer: add clock-based, tick-exact timer arming
+
+      Adds CONFIG_TIMER_CLOCK: k_timer_settime() and k_timer_gettime() arm and
+      query kernel timers with timespec values measured against a per-timer
+      clock (SYS_CLOCK_MONOTONIC or SYS_CLOCK_REALTIME, bound with the new
+      K_TIMER_DEFINE_EXT()/Z_TIMER_INITIALIZER_EXT()). Arming always uses
+      absolute timeouts derived from kernel-maintained scheduled-expiry state,
+      so at most one clock conversion happens per arming operation and periodic
+      expiry advances on a drift-free tick grid, skipping ahead (not replaying)
+      when wakeups are late or coalesced under tickless operation. Relative
+      durations have "at least" semantics, without k_timer_start()'s historical
+      one-tick-early behavior, which is preserved unchanged for legacy users.
+
+      Adds CONFIG_TIMER_REALTIME: armed absolute SYS_CLOCK_REALTIME timers are
+      re-targeted when sys_clock_settime() moves the wall clock (forward jumps
+      past a deadline fire immediately; backward jumps defer), as POSIX
+      requires of TIMER_ABSTIME CLOCK_REALTIME timers. Re-targeting applies to
+      the initial expiry only; after the first expiry a periodic timer
+      continues on the monotonic grid, matching Linux. Lock ordering is
+      timer lock then rt-offset lock, never reversed; the settime hook runs
+      after the offset lock is released.
+
+      Both syscalls verify K_OBJ_TIMER kernel objects, so stale or foreign
+      handles fault in user mode instead of corrupting memory. Includes the
+      tests/kernel/timer/timer_clock ztest suite (default, tickless, SMP with
+      spinlock validation, and userspace variants) and kernel timing
+      documentation for clock-based arming and the conversion-variance rule.
+
+      This is groundwork for mapping POSIX timers ~1:1 onto kernel timers.
+
+      k_timer_settime()/k_timer_gettime() deliberately take struct timespec
+      rather than k_timeout_t: k_timeout_t is uptime-domain (its absolute
+      form is a monotonic tick count), so a SYS_CLOCK_REALTIME wall-clock
+      deadline cannot cross the boundary through it without the caller
+      baking in the realtime offset - defeating both the single-coherent-
+      conversion rule and clock_settime() re-targeting. k_timer_start()
+      remains the native tick-domain API.
