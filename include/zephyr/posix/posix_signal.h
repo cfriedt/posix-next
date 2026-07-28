@@ -155,6 +155,8 @@ struct sigevent {
 	union sigval sigev_value;  /**< Value passed to notification function or signal. */
 	int sigev_notify;          /**< Notification type: SIGEV_NONE, SIGEV_SIGNAL, SIGEV_THREAD. */
 	int sigev_signo;           /**< Signal number for SIGEV_SIGNAL notifications. */
+	/** Thread ID associated with SIGEV_THREAD_ID (Linux-compatible extension) */
+	pid_t sigev_notify_thread_id;
 };
 #define _SIGEVENT_DECLARED
 #define __sigevent_defined
@@ -166,6 +168,10 @@ struct sigevent {
 #define SIGEV_SIGNAL 2
 /** @brief Call a function in a new thread on event completion. */
 #define SIGEV_THREAD 3
+#if defined(_GNU_SOURCE) || defined(__ZEPHYR__) || defined(__DOXYGEN__)
+/** @brief Send a signal to a specific thread on event completion (Linux-compatible extension). */
+#define SIGEV_THREAD_ID 4
+#endif
 
 /* Signal constants are defined below */
 
