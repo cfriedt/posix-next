@@ -18,3 +18,4 @@ Enable this option with :kconfig:option:`CONFIG_POSIX_MESSAGE_PASSING`.
     :c:func:`mq_setattr`,yes
     :c:func:`mq_unlink`,yes
 
+
