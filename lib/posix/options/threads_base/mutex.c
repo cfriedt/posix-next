@@ -103,7 +103,7 @@ int pthread_mutex_timedlock(pthread_mutex_t *m,
 		return EINVAL;
 	}
 
-	ret = pthread_mutex_lock_common(m, sys_timepoint_timeout(timespec_abs_rt_to_timepoint(abstime)));
+	ret = pthread_mutex_lock_common(m, timespec_abs_to_timeout(SYS_CLOCK_REALTIME, abstime));
 
 	if ((ret == EAGAIN) || (ret == EBUSY)) {
 		ret = ETIMEDOUT;
