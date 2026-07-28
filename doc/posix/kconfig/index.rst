@@ -41,6 +41,5 @@ implementation of the POSIX API.
 * :kconfig:option:`CONFIG_SYS_THREAD_STACK_SIZE`
 * :kconfig:option:`CONFIG_SYS_THREAD_THREAD_MAX`
 * :kconfig:option:`CONFIG_SYS_THREAD_THREAD_MIN`
-* :kconfig:option:`CONFIG_TIMER_CREATE_WAIT`
 * :kconfig:option:`CONFIG_THREAD_STACK_INFO`
 * :kconfig:option:`CONFIG_ZVFS_EVENTFD_MAX`
