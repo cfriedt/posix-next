@@ -1,0 +1,92 @@
+diff --git a/lib/libc/newlib/include/signal.h b/lib/libc/newlib/include/signal.h
+--- a/lib/libc/newlib/include/signal.h
++++ b/lib/libc/newlib/include/signal.h
+@@ -7,7 +7,15 @@
+ #ifndef ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_SIGNAL_H_
+ #define ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_SIGNAL_H_
+
++/*
++ * Newlib declares struct sigevent without the sigev_notify_thread_id member and guards it
++ * with nothing an override can hook into. Newlib from the toolchain (the Zephyr SDK default)
++ * uses prebuilt headers, which no module patch can reach. Move the newlib declaration aside
++ * and provide the Zephyr one below, carrying the SIGEV_THREAD_ID Linux-compatible extension.
++ */
++#define sigevent __newlib_sigevent
+ #include_next <signal.h>
++#undef sigevent
+
+ #if defined(_POSIX_C_SOURCE) || defined(__DOXYGEN__)
+
+@@ -48,4 +56,26 @@
+
+ #endif /* defined(_POSIX_C_SOURCE) || defined(__DOXYGEN__) */
+
++
++/*
++ * Replacement for the newlib declaration renamed above. Field order matches newlib's, so only
++ * the Linux-compatible extension is added, and the guard matches newlib's, so no struct
++ * sigevent exists in configurations where newlib would not have declared one.
++ */
++#if defined(_POSIX_REALTIME_SIGNALS) || __POSIX_VISIBLE >= 199309
++struct sigevent {
++	int sigev_notify;                            /* Notification type */
++	int sigev_signo;                             /* Signal number */
++	union sigval sigev_value;                    /* Signal value */
++	void (*sigev_notify_function)(union sigval); /* Notification function */
++	void *sigev_notify_attributes;               /* Notification attributes */
++	__pid_t sigev_notify_thread_id;              /* Target thread for SIGEV_THREAD_ID */
++};
++
++#if __GNU_VISIBLE || defined(__ZEPHYR__)
++/* A queued signal shall be delivered to the thread named by sigev_notify_thread_id */
++#define SIGEV_THREAD_ID 4
++#endif
++#endif /* defined(_POSIX_REALTIME_SIGNALS) || __POSIX_VISIBLE >= 199309 */
++
+ #endif /* ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_SIGNAL_H_ */
+diff --git a/lib/libc/picolibc/include/signal.h b/lib/libc/picolibc/include/signal.h
+--- a/lib/libc/picolibc/include/signal.h
++++ b/lib/libc/picolibc/include/signal.h
+@@ -7,7 +7,15 @@
+ #ifndef ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SIGNAL_H_
+ #define ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SIGNAL_H_
+
++/*
++ * Picolibc declares struct sigevent without the sigev_notify_thread_id member and guards it
++ * with nothing an override can hook into. Picolibc from the toolchain (the Zephyr SDK default)
++ * uses prebuilt headers, which no module patch can reach. Move the picolibc declaration aside
++ * and provide the Zephyr one below, carrying the SIGEV_THREAD_ID Linux-compatible extension.
++ */
++#define sigevent __picolibc_sigevent
+ #include_next <signal.h>
++#undef sigevent
+
+ #include <zephyr/toolchain.h>
+
+@@ -70,4 +78,26 @@
+
+ #endif /* defined(_POSIX_C_SOURCE) || defined(__DOXYGEN__) */
+
++
++/*
++ * Replacement for the picolibc declaration renamed above. Field order matches picolibc's, so only
++ * the Linux-compatible extension is added, and the guard matches picolibc's, so no struct
++ * sigevent exists in configurations where picolibc would not have declared one.
++ */
++#if defined(_POSIX_REALTIME_SIGNALS) || __POSIX_VISIBLE >= 199309
++struct sigevent {
++	int sigev_notify;                            /* Notification type */
++	int sigev_signo;                             /* Signal number */
++	union sigval sigev_value;                    /* Signal value */
++	void (*sigev_notify_function)(union sigval); /* Notification function */
++	void *sigev_notify_attributes;               /* Notification attributes */
++	__pid_t sigev_notify_thread_id;              /* Target thread for SIGEV_THREAD_ID */
++};
++
++#if __GNU_VISIBLE || defined(__ZEPHYR__)
++/* A queued signal shall be delivered to the thread named by sigev_notify_thread_id */
++#define SIGEV_THREAD_ID 4
++#endif
++#endif /* defined(_POSIX_REALTIME_SIGNALS) || __POSIX_VISIBLE >= 199309 */
++
+ #endif /* ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SIGNAL_H_ */
