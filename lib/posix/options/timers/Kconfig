@@ -1,14 +1,24 @@
-# Copyright (c) 2018 Intel Corporation
-# Copyright (c) 2024 Tenstorrent AI ULC
-#
+# SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
 # SPDX-License-Identifier: Apache-2.0
 
 menuconfig POSIX_TIMERS
 	bool "POSIX high-resolution timers"
+	select SYS_TIMER
+	select TIMER_REALTIME
 	help
 	  Select 'y' here and Zephyr will provide implementations of clock_getres(), clock_gettime(),
 	  clock_settime(), nanosleep(), timer_create(), timer_delete(), timer_getoverrun(),
 	  timer_settime(), and timer_gettime().
+
+	  Timer objects are allocated from the OS-managed system timer pool (CONFIG_SYS_TIMER).
+	  Applications and libraries reserve guaranteed, statically-allocated timers by defining
+	  int symbols named CONFIG_SYS_TIMER_MIN_ADD_<NAME>; CONFIG_SYS_TIMER_MAX (default INT_MAX)
+	  caps dynamic allocation, and setting it equal to the accumulated minimum prohibits
+	  dynamic allocation entirely.
+
+	  When the kernel signal subsystem (CONFIG_SIGNAL) is unavailable, a reduced mode remains:
+	  SIGEV_NONE timers are fully functional, while SIGEV_SIGNAL, SIGEV_THREAD, and
+	  SIGEV_THREAD_ID report ENOTSUP from timer_create().
 
 if POSIX_TIMERS
 
@@ -36,18 +46,20 @@ config POSIX_THREAD_CPUTIME
 	  May be enabled directly or via
 	  :kconfig:option:`CONFIG_XSI_ADVANCED_REALTIME_THREADS`.
 
+config POSIX_TIMER_MAX
+	def_int SYS_TIMER_MAX
+	help
+	  Maximum number of POSIX timers per process, derived from the system
+	  timer pool bound. Not user configurable: size the pool with
+	  CONFIG_SYS_TIMER_MAX and reserve guaranteed capacity with the
+	  distributed CONFIG_SYS_TIMER_MIN_ADD_<NAME> minimums.
+
 config POSIX_DELAYTIMER_MAX
 	int "Maximum count returned my timer_getoverrun() in POSIX application"
 	default 32
 	help
 	  This controls the maximum number of times a timer can overrun before
 	  timer_getoverrun() in POSIX compliant application.
-
-config POSIX_TIMER_MAX
-	int "Maximum number of POSIX timers per process"
-	default 32
-	help
-	  Maximum simultaneously active timer_t in a POSIX application.
 
 config POSIX_TIMEOUTS
 	bool "Support for some blocking POSIX services"
@@ -56,21 +68,24 @@ config POSIX_TIMEOUTS
 	  mq_timedsend(), mq_timedreceive(), pthread_cond_timedwait(), pthread_mutex_timedlock(),
 	  pthread_rwlock_timedrdlock(), pthread_rwlock_timedwrlock(), and sem_timedwait().
 
-config TIMER_CREATE_WAIT
-	int "Time to wait for timer availability (in msec) in POSIX application"
-	default 100
-	range 0 1000
-	help
-	  This controls how long to wait for resources to come available to create
-	  a new timer in POSIX compliant application
-
 config SIGNAL_QUEUE_SIZE_ADD_POSIX_TIMERS
-	def_int 32
+	def_int 4
 	depends on SIGNAL
 	help
-	  Signal queue slots for timer_create() SIGEV_SIGNAL expirations; each
-	  expiry queues one signal until the target thread drains them at a
-	  syscall boundary.
+	  Signal queue slots for timer expiry signals. With the one-pending-per-timer
+	  kernel semantics (CONFIG_TIMER_SIGNAL), at most one slot is occupied per
+	  timer at any time, so this value bounds the number of timers with
+	  simultaneously-pending expiry signals rather than a per-expiry backlog.
+
+config SIGNAL_SET_SIZE_MIN_POSIX_TIMERS
+	def_int 42
+	depends on SIGNAL
+	help
+	  Ensure the kernel signal set extends one past the highest POSIX-reachable
+	  signal (SIGRTMAX = 33 + 8 by default), so that the top-of-set K_SIG_SYS_TIMER
+	  slot used by the kernel timer dispatcher (SIGEV_THREAD) is never reachable
+	  through the POSIX signal APIs. If CONFIG_POSIX_RTSIG_MAX is raised,
+	  CONFIG_SIGNAL_SET_SIZE must be raised accordingly.
 
 module = TIMER
 module-str = POSIX Timers
