@@ -1284,3 +1284,24 @@ patches:
       sigevent in either libc, and <time.h> merely forward-declares it,
       so the replacement is the single definition every translation unit
       sees.
+  - path: zephyr/k-condvar-clockwait-absolute-timeout.patch
+    sha256sum: 4d653ed6a970aff92e4f0cdf3ce289f46384c318e308a742163ac8f728e3640e
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-29
+    upstreamable: true
+    comments: |
+      kernel: condvar: convert clockwait deadlines exactly once
+
+      k_condvar_clockwait() converted its absolute deadline to a timepoint,
+      returned early if already expired, and re-derived a relative timeout
+      from a second "now" sample before pending - decaying the deadline by
+      the scheduling latency between the two samples.
+
+      Convert exactly once with timespec_abs_to_timeout() and pend on the
+      absolute kernel timeout (CONDVAR_OPTIONS now selects TIMEOUT_64BIT,
+      which absolute timeouts are gated on); an already-past deadline pends
+      and expires immediately. Also report -EINVAL for an invalid timespec -
+      the positive EINVAL previously returned was negated by the POSIX layer
+      into a -22 return from pthread_cond_timedwait().
