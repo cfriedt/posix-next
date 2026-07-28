@@ -1320,3 +1320,42 @@ patches:
       (such as the dispatcher) could consume - and never hand back - another
       thread's wake-up. A waiter that observes a foreign raise now re-raises
       it, notifying the next waiter in line, before yielding.
+  - path: picolibc/sigevent-thread-id.patch
+    sha256sum: 19396d9b15bd730091b03a8a0c9ac1cedf86ba67c9268584cabff89f7c29d6cc
+    module: picolibc
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-28
+    upstreamable: true
+    comments: |
+      Add the Linux-compatible SIGEV_THREAD_ID sigevent extension: a
+      sigev_notify_thread_id member on struct sigevent and, under
+      __GNU_VISIBLE, the SIGEV_THREAD_ID notification constant. This lets
+      POSIX timer implementations deliver expiry signals to a specific
+      thread (and implement SIGEV_THREAD on top of thread-directed
+      delivery, as glibc does).
+  - path: zephyr/libc-sigevent-thread-id.patch
+    sha256sum: 141a0d7202a43d5cb2a866e459e01c8c44fb55c7f964cea22f4ae5869fbc5bc9
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-03
+    upstreamable: true
+    comments: |
+      lib: libc: declare sigevent with sigev_notify_thread_id
+
+      The companion picolibc patch only reaches builds selecting
+      CONFIG_PICOLIBC_USE_MODULE. Picolibc and newlib from the toolchain
+      are the Zephyr SDK default, and those prebuilt headers declare
+      struct sigevent without sigev_notify_thread_id and without an
+      override guard, so anything using the Linux-compatible
+      SIGEV_THREAD_ID extension fails to compile - taking every
+      non-minimal-libc scenario of tests/posix/asynchronous_io with it.
+
+      Rename the libc declaration aside across #include_next and declare
+      the Zephyr struct sigevent in each shim, keeping the libc field
+      order, appending sigev_notify_thread_id, and reusing the libc's own
+      visibility guard. Only <signal.h> and <time.h> mention struct
+      sigevent in either libc, and <time.h> merely forward-declares it,
+      so the replacement is the single definition every translation unit
+      sees.
