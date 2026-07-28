@@ -138,8 +138,26 @@ ZTEST(posix_non_portable, test_pthread_timedjoin_np)
 	ret = pthread_timedjoin_np(th, &result, &not_done);
 	zassert_equal(ret, ETIMEDOUT, "pthread_timedjoin_np failed with error %d", ret);
 
+	/* an already-past absolute deadline times out without blocking */
+	IF_NOT_NATIVE_LIBC({
+		const struct timespec past = {0};
+		const int64_t start = k_uptime_get();
+
+		ret = pthread_timedjoin_np(th, &result, &past);
+		zassert_equal(ret, ETIMEDOUT, "pthread_timedjoin_np failed with error %d", ret);
+		zassert_true(k_uptime_get() - start < sleep_duration_ms / 2,
+			     "past deadline blocked");
+	})
+
 	ret = pthread_timedjoin_np(th, &result, &done);
 	zassert_ok(ret, "pthread_timedjoin_np failed with error %d", ret);
+
+	/* as on Linux, a NULL abstime blocks indefinitely, like pthread_join() */
+	IF_NOT_NATIVE_LIBC({
+		zassert_ok(pthread_create(&th, NULL, timedjoin_thread, NULL));
+		ret = pthread_timedjoin_np(th, &result, NULL);
+		zassert_ok(ret, "pthread_timedjoin_np failed with error %d", ret);
+	})
 }
 
 ZTEST_SUITE(posix_non_portable, NULL, NULL, NULL, NULL, NULL);
