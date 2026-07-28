@@ -25,6 +25,7 @@
 #include <zephyr/sys/elastipool.h>
 #include <zephyr/sys/slist.h>
 #include <zephyr/sys/sem.h>
+#include <zephyr/sys/timer.h>
 #include <zephyr/sys/util.h>
 #include <zephyr/toolchain.h>
 
@@ -302,5 +303,65 @@ static inline sigset_t *z_sig_set_to_posix(const struct k_sig_set *kset, sigset_
 struct timeval;
 struct timespec;
 bool timeval_to_timespec(const struct timeval *tv, struct timespec *ts);
+
+/*
+ * Shared sigevent dispatch (timers, mq_notify)
+ */
+
+/*
+ * Internal signal number used to wake SIGEV_THREAD helper threads: one past the highest
+ * kernel signal reachable through the POSIX signal APIs (SIGRTMAX), so applications can
+ * neither send, mask, nor wait on it. Requires SIGNAL_SET_SIZE to cover it (see
+ * SIGNAL_SET_SIZE_MIN_POSIX_TIMERS and the BUILD_ASSERT in sigev.c).
+ *
+ * TODO(k_process): signal dispositions and this reservation become per-process state.
+ */
+#ifdef CONFIG_POSIX_RTSIG_MAX
+#define POSIX_SIG_TIMER (K_SIG_RTMIN + CONFIG_POSIX_RTSIG_MAX)
+#else
+#define POSIX_SIG_TIMER K_SIG_RTMIN
+#endif
+
+/* persistent SIGEV_THREAD helper context (one per SIGEV_THREAD timer) */
+struct posix_sigev_thread {
+	/* the user's notification function */
+	void (*fn)(union sigval);
+	/* the helper thread */
+	pthread_t tid;
+	/* the creating thread; the helper grants it access to itself (userspace) */
+	k_tid_t creator;
+	/* ready/exit handshake; the helper's very last touch of this context */
+	struct sys_sem done;
+	/* set (with the wake signal queued) to make the helper exit */
+	volatile bool exiting;
+};
+
+/*
+ * Validate a sigevent for dispatch. @p thread_via_signal selects the SIGEV_THREAD transport:
+ * true for the persistent signal-woken helper (timers), false for one-shot threads (mq).
+ *
+ * @retval 0 valid; -EINVAL malformed; -ENOTSUP valid but unsupported in this configuration
+ */
+int posix_sigev_validate(const struct sigevent *evp, bool thread_via_signal);
+
+/* start/stop the persistent helper for a SIGEV_THREAD timer */
+int posix_sigev_thread_start(struct posix_sigev_thread *ctx, const struct sigevent *evp);
+void posix_sigev_thread_stop(struct posix_sigev_thread *ctx);
+
+/*
+ * One-shot dispatch of a validated sigevent (mq_notify send-side): SIGEV_NONE does nothing;
+ * SIGEV_SIGNAL / SIGEV_THREAD_ID queue a signal; SIGEV_THREAD spawns a detached one-shot
+ * thread running the notification function.
+ */
+int posix_sigev_notify_now(const struct sigevent *evp, k_tid_t default_target);
+
+#ifdef CONFIG_SYS_TIMER
+/*
+ * Map a validated sigevent to a kernel timer notification. For SIGEV_THREAD, @p ctx must be
+ * a started helper. Returns 1 when @p out was populated, 0 for SIGEV_NONE, negative on error.
+ */
+int posix_sigev_to_notify(const struct sigevent *evp, const struct posix_sigev_thread *ctx,
+			  struct k_timer_notify *out);
+#endif /* CONFIG_SYS_TIMER */
 
 #endif
