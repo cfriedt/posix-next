@@ -439,3 +439,72 @@ Then set it in your ``prj.conf`` or ``testcase.yaml``:
    CONFIG_SYS_THREAD_MUTEX_MIN_ADD_MYLIB=3
 
 The build system automatically discovers all ``_MIN_ADD_*`` symbols and includes them in the sum.
+
+POSIX Timers
+============
+
+POSIX timers map ~1:1 onto kernel timers: ``timer_t`` handles are :c:struct:`k_timer` objects
+allocated from the OS-managed system timer pool (:kconfig:option:`CONFIG_SYS_TIMER`), armed at
+full tick resolution with the clock-based kernel timer APIs
+(:kconfig:option:`CONFIG_TIMER_CLOCK`), and validated as kernel objects in user mode - a stale
+or foreign ``timer_t`` faults instead of corrupting memory.
+
+**Allocation.** Applications and libraries reserve guaranteed, statically-allocated timers by
+defining int Kconfig symbols named ``CONFIG_SYS_TIMER_MIN_ADD_<NAME>``; the build system sums
+them with :kconfig:option:`CONFIG_SYS_TIMER_MIN`. Up to
+:kconfig:option:`CONFIG_SYS_TIMER_MAX` (default ``INT_MAX``) timers in total may be created,
+the excess allocated dynamically without guarantees; setting the maximum equal to the
+accumulated minimum prohibits dynamic allocation entirely. :c:func:`timer_create` reports pool
+exhaustion as ``EAGAIN``.
+
+**Expiry notification** is signal-based (never a callback in interrupt context, so it is
+robust for user-mode callers) with POSIX one-pending semantics: at most one expiry signal per
+timer is queued at a time, further expiries are accounted as overruns, and
+:c:func:`timer_getoverrun` reads the count latched at the most recent delivery,
+non-destructively, computed from the exact scheduled-expiry grid (expiries coalesced by
+tickless wakeups are counted correctly). ``SIGEV_THREAD`` maps onto the kernel's
+function-notification dispatch (see :c:member:`k_timer_notify.fn`): each expiry runs the
+notification function in a fresh detached thread, as POSIX specifies, spawned by a single
+kernel dispatcher woken through a reserved signal number just past ``SIGRTMAX`` that
+applications can neither send, mask, nor wait on. ``sigev_notify_attributes`` are translated
+at :c:func:`timer_create` time - stack size and priority are honored, the detach state is
+always detached - and the caller may destroy the attribute object afterwards; no
+per-timer allocation is made by the POSIX layer. :c:func:`timer_getoverrun` is valid
+inside the notification function. The Linux-compatible ``SIGEV_THREAD_ID`` extension is
+available under ``_GNU_SOURCE`` (the ``sigev_notify_thread_id`` member carries a
+``pthread_t`` value). A ``NULL`` ``evp`` behaves as POSIX specifies: ``SIGEV_SIGNAL`` with
+``SIGALRM`` and the timer ID as the value.
+
+**Clocks.** ``TIMER_ABSTIME`` deadlines are honored on both ``CLOCK_MONOTONIC`` and
+``CLOCK_REALTIME``; with :kconfig:option:`CONFIG_TIMER_REALTIME` (selected by
+:kconfig:option:`CONFIG_POSIX_TIMERS`), armed absolute ``CLOCK_REALTIME`` timers are
+re-targeted when :c:func:`clock_settime` moves the wall clock - a forward jump past the
+deadline fires the timer immediately, a backward jump defers it. Re-targeting applies to the
+initial expiry only; afterwards a periodic timer's interval continues on the monotonic grid,
+matching Linux.
+
+**Reduced mode.** When signal-based expiry notification
+(:kconfig:option:`CONFIG_TIMER_SIGNAL`) is unavailable, ``SIGEV_NONE`` timers remain fully
+functional as time sources, while ``SIGEV_SIGNAL``, ``SIGEV_THREAD``, and
+``SIGEV_THREAD_ID`` report ``ENOTSUP`` from :c:func:`timer_create` (``SIGEV_THREAD``
+additionally requires the system thread pool, :kconfig:option:`CONFIG_SYS_THREAD` with
+:kconfig:option:`CONFIG_THREAD_DETACH`). All AEP profiles select the signal subsystem.
+
+Migration from earlier releases: :kconfig:option:`CONFIG_POSIX_TIMER_MAX` (still reported by
+``TIMER_MAX`` and ``sysconf(_SC_TIMER_MAX)``) is no longer user configurable - it is derived
+from :kconfig:option:`CONFIG_SYS_TIMER_MAX`, which bounds the pool; guaranteed capacity moved
+to the distributed ``CONFIG_SYS_TIMER_MIN_ADD_<NAME>`` minimum, and
+``CONFIG_TIMER_CREATE_WAIT`` was removed because :c:func:`timer_create` no longer blocks.
+
+
+Message Queue Notification
+==========================
+
+:c:func:`mq_notify` supports ``SIGEV_NONE``, ``SIGEV_SIGNAL``, ``SIGEV_THREAD``, and (under
+``_GNU_SOURCE``) the Linux-compatible ``SIGEV_THREAD_ID``, dispatched through the same
+sigevent machinery as POSIX timers. The registration stores a copy of the caller's
+``struct sigevent`` (caller-owned attributes are never modified), fires exactly once when the
+queue transitions from empty to non-empty, and is consumed before dispatch. ``SIGEV_SIGNAL``
+targets the registering thread until Zephyr gains process support. The delivered ``si_code``
+is ``SI_QUEUE`` rather than ``SI_MESGQ``, a documented limitation until the kernel records a
+message-queue-specific code.
