@@ -35,6 +35,5 @@ implementation of the POSIX API.
 * :kconfig:option:`CONFIG_POSIX_SEM_NAMELEN_MAX`
 * :kconfig:option:`CONFIG_POSIX_SEM_NSEMS_MAX`
 * :kconfig:option:`CONFIG_POSIX_SEM_VALUE_MAX`
-* :kconfig:option:`CONFIG_TIMER_CREATE_WAIT`
 * :kconfig:option:`CONFIG_THREAD_STACK_INFO`
 * :kconfig:option:`CONFIG_ZVFS_EVENTFD_MAX`
