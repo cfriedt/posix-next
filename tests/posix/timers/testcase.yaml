@@ -10,12 +10,21 @@ common:
 tests:
   portability.posix.timers:
     filter: not CONFIG_NATIVE_LIBC
+  portability.posix.timers.userspace:
+    filter: (not CONFIG_NATIVE_LIBC) and CONFIG_ARCH_SUPPORTS_USERSPACE_SIGNALS
+    tags: userspace
+    extra_configs:
+      - CONFIG_TEST_USERSPACE=y
+      - CONFIG_USERSPACE=y
+  portability.posix.timers.static_only:
+    filter: not CONFIG_NATIVE_LIBC
+    extra_configs:
+      # equal to the accumulated SYS_TIMER_MIN (SYS_TIMER_MIN_ADD_TEST=2): no dynamic timers
+      - CONFIG_SYS_TIMER_MAX=2
   portability.posix.timers.minimal:
     filter: not CONFIG_NATIVE_LIBC
     extra_configs:
       - CONFIG_MINIMAL_LIBC=y
-      # SIGEV_THREAD helper contexts are heap-allocated
-      - CONFIG_COMMON_LIBC_MALLOC_ARENA_SIZE=1024
   portability.posix.timers.newlib:
     filter: (not CONFIG_NATIVE_LIBC) and (TOOLCHAIN_HAS_NEWLIB == 1)
     extra_configs:
@@ -34,3 +43,7 @@ tests:
     extra_configs:
       - CONFIG_POSIX_TEST_LINUX_COMPAT=y
       - CONFIG_NATIVE_SIM_SLOWDOWN_TO_REAL_TIME=y
+  portability.posix.timers.signal_less:
+    filter: not CONFIG_NATIVE_LIBC
+    extra_args:
+      - CONF_FILE=prj_signal_less.conf
