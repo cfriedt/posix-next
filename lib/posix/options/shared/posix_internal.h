@@ -277,6 +277,18 @@ struct k_sig_set *z_sig_set_from_posix_slow(const sigset_t *set, struct k_sig_se
 sigset_t *z_sig_set_to_posix_slow(const struct k_sig_set *kset, sigset_t *buf);
 int z_sig_from_posix(int sig);
 int z_sig_to_posix(int sig);
+/* kernel si_code values differ from the libc's SI_* constants */
+static inline int z_si_code_to_posix(int code)
+{
+	switch (code) {
+	case K_SI_QUEUE:
+		return SI_QUEUE;
+	case K_SI_TIMER:
+		return SI_TIMER;
+	default:
+		return code;
+	}
+}
 
 static inline struct k_sig_set *z_sig_set_from_posix(const sigset_t *set, struct k_sig_set *buf)
 {
