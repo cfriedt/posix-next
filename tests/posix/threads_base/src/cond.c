@@ -125,6 +125,34 @@ static void test_cond_signal_static_init_pthread_cond_t(void)
 
 ZTEST_THREADS_BASE(test_cond_signal_static_init_pthread_cond_t);
 
+static void test_cond_timedwait_past_deadline(void)
+{
+	int ret;
+	int64_t start;
+	pthread_cond_t cv;
+	pthread_mutex_t mtx;
+	struct timespec past = {0};
+
+	posix_test_skip_if_native_libc();
+
+	zassert_ok(pthread_mutex_init(&mtx, NULL));
+	zassert_ok(pthread_cond_init(&cv, NULL));
+	zassert_ok(pthread_mutex_lock(&mtx));
+
+	/* an already-past absolute deadline times out without blocking */
+	start = k_uptime_get();
+	ret = pthread_cond_timedwait(&cv, &mtx, &past);
+	zassert_equal(ret, ETIMEDOUT, "expected ETIMEDOUT, got %d", ret);
+	zassert_true(k_uptime_get() - start < TIMEDWAIT_TIMEOUT_DELAY_MS,
+		     "past deadline blocked");
+
+	/* the mutex is re-acquired on the timeout path */
+	zassert_ok(pthread_mutex_unlock(&mtx));
+	zassert_ok(pthread_cond_destroy(&cv));
+	zassert_ok(pthread_mutex_destroy(&mtx));
+}
+ZTEST_THREADS_BASE(test_cond_timedwait_past_deadline);
+
 static ZTEST_BMEM pthread_mutex_t cond_wait_mtx;
 static ZTEST_BMEM pthread_cond_t cond_wait_cv;
 static ZTEST_BMEM bool cond_wait_done;

@@ -104,7 +104,13 @@ int pthread_mutex_lock(pthread_mutex_t *m)
 int pthread_mutex_timedlock(pthread_mutex_t *m,
 			    const struct timespec *abstime)
 {
-	return pthread_mutex_lock_common(m, sys_timepoint_timeout(timespec_abs_rt_to_timepoint(abstime)));
+	/*
+	 * One coherent conversion to an absolute kernel timeout; no "now" sample.
+	 *
+	 * TODO(clock-settime-reactive-waits): the CLOCK_REALTIME offset is baked in
+	 * here; a later clock_settime() does not re-target blocked waiters.
+	 */
+	return pthread_mutex_lock_common(m, timespec_abs_to_timeout(SYS_CLOCK_REALTIME, abstime));
 }
 
 int pthread_mutex_trylock(pthread_mutex_t *m)
