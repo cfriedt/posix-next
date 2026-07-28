@@ -151,6 +151,22 @@ static void *test_mutex_timedlock_fn(void *arg)
 	return NULL;
 }
 
+static void *test_mutex_timedlock_past_fn(void *arg)
+{
+	int ret;
+	int64_t start;
+	struct timespec past = {0};
+	pthread_mutex_t *mtx = (pthread_mutex_t *)arg;
+
+	/* an already-past absolute deadline times out without blocking */
+	start = k_uptime_get();
+	ret = pthread_mutex_timedlock(mtx, &past);
+	zassert_true(k_uptime_get() - start < TIMEDLOCK_TIMEOUT_DELAY_MS,
+		     "past deadline blocked");
+
+	return INT_TO_POINTER(ret);
+}
+
 static void test_mutex_timedlock(void)
 {
 	void *ret;
@@ -176,6 +192,14 @@ static void test_mutex_timedlock(void)
 	zassert_ok(pthread_join(th, &ret));
 	/* ensure lock is successful, in spite of delay  */
 	zassert_ok(POINTER_TO_INT(ret));
+
+	/* an already-past absolute deadline times out without blocking */
+	zassert_ok(pthread_mutex_lock(&mutex));
+	zassert_ok(pthread_create(&th, NULL, test_mutex_timedlock_past_fn, &mutex));
+	zassert_ok(pthread_join(th, &ret));
+	zassert_equal(POINTER_TO_INT(ret), ETIMEDOUT, "expected ETIMEDOUT, got %d",
+		      (int)POINTER_TO_INT(ret));
+	zassert_ok(pthread_mutex_unlock(&mutex));
 
 	zassert_ok(pthread_mutex_destroy(&mutex));
 }

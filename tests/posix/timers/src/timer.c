@@ -45,6 +45,7 @@ static void test_sleep_ms(int ms);
  * captures deliveries and accept_sig() consumes them from a counter.
  */
 static volatile int lc_count;
+static int lc_taken;
 static siginfo_t lc_info;
 
 static void lc_capture(int signo, siginfo_t *info, void *ctx)
@@ -81,21 +82,28 @@ static int accept_sig(int signo, siginfo_t *info, int timeout_ms)
 	zassert_ok(sigaddset(&set, signo));
 
 #ifdef CONFIG_NATIVE_LIBC
-	{
-		const int start = lc_count;
-
-		for (int elapsed = 0; elapsed <= timeout_ms; elapsed += 5) {
-			if (lc_count != start) {
-				if (info != NULL) {
-					*info = lc_info;
-				}
-				return lc_info.si_signo;
+	/*
+	 * Consume deliveries against a taken-counter rather than a per-call baseline: an
+	 * immediately-expiring timer (e.g. a past TIMER_ABSTIME deadline) can run the handler
+	 * on the arming call's syscall-exit path, i.e. before this function is entered, and a
+	 * baseline snapshot would wait forever for a count change that already happened.
+	 * Like sigtimedwait(), an already-pending delivery satisfies the call.
+	 */
+	for (int elapsed = 0;; elapsed += 5) {
+		if (lc_count != lc_taken) {
+			++lc_taken;
+			if (info != NULL) {
+				*info = lc_info;
 			}
-			test_sleep_ms(5);
+			return lc_info.si_signo;
 		}
-		errno = EAGAIN;
-		return -1;
+		if (elapsed >= timeout_ms) {
+			break;
+		}
+		test_sleep_ms(5);
 	}
+	errno = EAGAIN;
+	return -1;
 #endif /* CONFIG_NATIVE_LIBC */
 
 	return sigtimedwait(&set, info, &timeout);
@@ -510,7 +518,11 @@ static void section_reset(void)
 		timerid = INVALID_TIMERID;
 	}
 
-	if (!IS_ENABLED(CONFIG_NATIVE_LIBC) && IS_ENABLED(CONFIG_TIMER_SIGNAL)) {
+	if (IS_ENABLED(CONFIG_NATIVE_LIBC)) {
+		/* let an in-flight delivery from the deleted timer land before consuming */
+		test_sleep_ms(5);
+		drain_sig(TEST_SIGNAL_VAL);
+	} else if (IS_ENABLED(CONFIG_TIMER_SIGNAL)) {
 		drain_sig(TEST_SIGNAL_VAL);
 		drain_sig(SIGALRM);
 	}
@@ -612,7 +624,11 @@ static void after(void *arg)
 		timerid = INVALID_TIMERID;
 	}
 
-	if (!IS_ENABLED(CONFIG_NATIVE_LIBC) && IS_ENABLED(CONFIG_TIMER_SIGNAL)) {
+	if (IS_ENABLED(CONFIG_NATIVE_LIBC)) {
+		/* let an in-flight delivery from the deleted timer land before consuming */
+		test_sleep_ms(5);
+		drain_sig(TEST_SIGNAL_VAL);
+	} else if (IS_ENABLED(CONFIG_TIMER_SIGNAL)) {
 		drain_sig(TEST_SIGNAL_VAL);
 		drain_sig(SIGALRM);
 	}
