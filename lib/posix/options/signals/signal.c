@@ -151,7 +151,7 @@ static void kinfo_to_siginfo(siginfo_t *dst, const struct k_sig_info *src, int s
 {
 	*dst = (siginfo_t){0};
 	dst->si_signo = signo;
-	dst->si_code = src->code;
+	dst->si_code = z_si_code_to_posix(src->code);
 	dst->si_value.sival_ptr = src->value.sival_ptr;
 }
 
