@@ -1,7 +1,5 @@
 /*
- * Copyright (c) 2023, Meta
- * Copyright (c) 2025 Tenstorrent AI ULC
- *
+ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
  * SPDX-License-Identifier: Apache-2.0
  */
 
