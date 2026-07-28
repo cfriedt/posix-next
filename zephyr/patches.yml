@@ -1064,3 +1064,25 @@ patches:
       thread-targeted delivery, delete-purges, queue-full recovery,
       expiry-function coexistence, userspace positive and fault-injection
       negative cases) and kernel timing documentation.
+  - path: zephyr/k-sleep-absolute-timeout-remainder.patch
+    sha256sum: 5a8357a67ccd2541619441b6f131a93ef1e8b402d47108a30485d9043534bff6
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-28
+    upstreamable: true
+    comments: |
+      kernel: timeout: report the decoded expiry for absolute timeouts
+
+      z_add_timeout() returns the absolute expiry tick of the scheduled
+      timeout, which z_tick_sleep() records to compute the time remaining
+      when a sleep is cut short by k_wakeup(). For absolute timeouts the
+      raw encoded value (Z_TICK_ABS, a negative number) was returned
+      instead of the decoded expiry, so k_sleep() with an absolute timeout
+      reported a garbage remainder - typically 0, indistinguishable from
+      normal expiry - when woken early.
+
+      Return the decoded absolute expiry, matching what the relative branch
+      reports, and add a regression case to the kernel sleep testsuite
+      covering the woken-early remainder and re-arming against the same
+      absolute deadline.
