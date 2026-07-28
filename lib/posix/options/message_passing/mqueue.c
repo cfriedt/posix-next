@@ -5,6 +5,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include "posix_internal.h"
+
 #include <errno.h>
 #include <fcntl.h>
 #include <mqueue.h>
@@ -19,8 +21,6 @@
 #include <zephyr/sys/math_extras.h>
 #include <zephyr/sys/timeutil.h>
 
-#define SIGEV_MASK (SIGEV_NONE | SIGEV_SIGNAL | SIGEV_THREAD)
-
 typedef struct mqueue_object {
 	sys_snode_t snode;
 	char *mem_buffer;
@@ -28,7 +28,11 @@ typedef struct mqueue_object {
 	struct k_msgq queue;
 	atomic_t ref_count;
 	char *name;
-	struct sigevent not;
+	/* mq_notify() registration; a copy, never a reference to caller memory */
+	bool notification_armed;
+	struct sigevent notification;
+	/* registering thread: SIGEV_SIGNAL target. TODO(k_process): process-directed */
+	k_tid_t notifier;
 } mqueue_object;
 
 typedef struct mqueue_desc {
@@ -49,7 +53,6 @@ static int32_t receive_message(mqueue_desc *mqd, char *msg_ptr, size_t msg_len,
 			   k_timeout_t timeout);
 static void remove_notification(mqueue_object *msg_queue);
 static void remove_mq(mqueue_object *msg_queue);
-static void *mq_notify_thread(void *arg);
 
 /**
  * @brief Open a message queue.
@@ -385,7 +388,7 @@ int mq_notify(mqd_t mqdes, const struct sigevent *notification)
 	mqueue_object *msg_queue = mqd->mqueue;
 
 	if (notification == NULL) {
-		if ((msg_queue->not.sigev_notify & SIGEV_MASK) == 0) {
+		if (!msg_queue->notification_armed) {
 			errno = EINVAL;
 			return -1;
 		}
@@ -393,46 +396,25 @@ int mq_notify(mqd_t mqdes, const struct sigevent *notification)
 		return 0;
 	}
 
-	if ((msg_queue->not.sigev_notify & SIGEV_MASK) != 0) {
+	if (msg_queue->notification_armed) {
 		errno = EBUSY;
 		return -1;
 	}
-	if (notification->sigev_notify == SIGEV_SIGNAL) {
-		errno = ENOSYS;
+
+	int ret = posix_sigev_validate(notification, false);
+
+	if (ret < 0) {
+		errno = -ret;
 		return -1;
-	}
-	if (notification->sigev_notify_attributes != NULL) {
-		int ret = pthread_attr_setdetachstate(notification->sigev_notify_attributes,
-						      PTHREAD_CREATE_DETACHED);
-		if (ret != 0) {
-			errno = ret;
-			return -1;
-		}
 	}
 
 	k_sem_take(&mq_sem, K_FOREVER);
-	memcpy(&msg_queue->not, notification, sizeof(struct sigevent));
+	msg_queue->notification = *notification;
+	msg_queue->notifier = k_current_get();
+	msg_queue->notification_armed = true;
 	k_sem_give(&mq_sem);
 
 	return 0;
-}
-
-static void *mq_notify_thread(void *arg)
-{
-	mqueue_object *mqueue = (mqueue_object *)arg;
-	struct sigevent *sevp = &mqueue->not;
-
-	pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
-
-	if (sevp->sigev_notify_attributes == NULL) {
-		pthread_detach(pthread_self());
-	}
-
-	sevp->sigev_notify_function(sevp->sigev_value);
-
-	remove_notification(mqueue);
-
-	return NULL;
 }
 
 /* Internal functions */
@@ -481,23 +463,13 @@ static int32_t send_message(mqueue_desc *mqd, const char *msg_ptr, size_t msg_le
 		return ret;
 	}
 
-	if (k_msgq_num_used_get(&mqd->mqueue->queue) - msgq_num > 0) {
-		struct sigevent *sevp = &mqd->mqueue->not;
+	/* the registered notification fires once, when the queue goes empty -> non-empty */
+	if ((msgq_num == 0U) && mqd->mqueue->notification_armed) {
+		struct sigevent notification = mqd->mqueue->notification;
+		k_tid_t const notifier = mqd->mqueue->notifier;
 
-		if (sevp->sigev_notify == SIGEV_NONE) {
-			sevp->sigev_notify_function(sevp->sigev_value);
-		} else if (sevp->sigev_notify == SIGEV_THREAD) {
-			pthread_t th;
-
-			ret = pthread_create(&th,
-					     sevp->sigev_notify_attributes,
-					     mq_notify_thread,
-					     mqd->mqueue);
-			if (ret != 0) {
-				errno = ret;
-				return -1;
-			}
-		}
+		remove_notification(mqd->mqueue);
+		(void)posix_sigev_notify_now(&notification, notifier);
 	}
 
 	return 0;
@@ -547,6 +519,8 @@ static void remove_mq(mqueue_object *msg_queue)
 static void remove_notification(mqueue_object *msg_queue)
 {
 	k_sem_take(&mq_sem, K_FOREVER);
-	memset(&msg_queue->not, 0, sizeof(struct sigevent));
+	msg_queue->notification_armed = false;
+	memset(&msg_queue->notification, 0, sizeof(struct sigevent));
+	msg_queue->notifier = NULL;
 	k_sem_give(&mq_sem);
 }
