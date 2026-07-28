@@ -216,6 +216,21 @@ static void test_pthread_cond_timedwait(void)
 		zassert_ok(pthread_mutex_unlock(&cond_wait_mtx));
 	})
 
+	/* an already-past absolute deadline times out without blocking, mutex re-acquired */
+	IF_NOT_NATIVE_LIBC({
+		int rc;
+		int64_t start;
+		const struct timespec past = {0};
+
+		zassert_ok(pthread_mutex_lock(&cond_wait_mtx));
+		start = k_uptime_get();
+		rc = pthread_cond_timedwait(&cond_wait_cv, &cond_wait_mtx, &past);
+		zassert_equal(rc, ETIMEDOUT, "expected ETIMEDOUT, got %d", rc);
+		zassert_true(k_uptime_get() - start < TIMEDWAIT_TIMEOUT_DELAY_MS,
+			     "past deadline blocked");
+		zassert_ok(pthread_mutex_unlock(&cond_wait_mtx));
+	})
+
 	zassert_ok(pthread_cond_destroy(&cond_wait_cv));
 	zassert_ok(pthread_mutex_destroy(&cond_wait_mtx));
 }
