@@ -995,3 +995,54 @@ patches:
       Includes the tests/lib/sys_timer ztest suite (default, static-only, and
       userspace variants, including revoked-handle fault coverage) and
       complete Doxygen. Groundwork for POSIX timer_create()/timer_delete().
+  - path: zephyr/k-timer-signal.patch
+    sha256sum: 201089f1aaaa6a4029758e3e0dcd4f003641ed59f7494f06501afc3570a3b3d9
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-28
+    upstreamable: true
+    comments: |
+      kernel: timer: generate signals on timer expiry with overrun accounting
+
+      Adds CONFIG_TIMER_SIGNAL (default y with SIGNAL and TIMER_CLOCK): a
+      kernel timer may generate a thread-targeted signal on each expiry,
+      carrying a user value with the new public si_code K_SI_TIMER (K_SI_QUEUE
+      is also now public). Notification is attached at pool-allocation time
+      via sys_timer_create(); sys_timer_delete() detaches it and purges
+      queued-but-undelivered instances so no kernel reference to the timer
+      outlives deletion. Unlike expiry functions (interrupt context), signal
+      delivery runs in the target thread's context - the robust path for
+      userspace consumers. Expiry functions and signals may coexist; with
+      CONFIG_TIMER_SIGNAL=n the timer code is unchanged.
+
+      Generation follows the POSIX one-pending model: an atomic per-timer
+      latch admits a single queued instance; expiries while pending are
+      overruns. The overrun is computed lazily at delivery from the exact
+      scheduled-expiry grid - floor((delivery - generation)/period) - so
+      expiries coalesced by late or tickless wakeups are counted correctly,
+      and k_timer_overrun() reads it non-destructively. Disarming stamps a
+      freeze time so idle time does not inflate the count. Queue-full drops
+      are best-effort (retried next period), counted per timer, and reported
+      with a zero-overhead-by-default LOG_DBG_RATELIMIT message.
+
+      Lock ordering is structural: the expiry path holds timer lock then
+      k_sig_lock; the delivery-side hooks called from kernel/signal.c use
+      atomics only and are incapable of taking the timer lock.
+
+      Also fixes a pre-existing k_sig_timedwait() bug exposed by the new
+      tests: a stale fifo-ready poll raise (raised at generation but never
+      consumed, or consumed by an unrelated wake-up) caused an immediate
+      spurious -EAGAIN, and a raise for another thread combined with an
+      expiring deadline could trip an internal assertion. The wait now keeps
+      waiting until its deadline on a stale raise and reports a clean -EAGAIN
+      timeout otherwise; sigwait-style acceptance also propagates si_code.
+      This is the bug the POSIX layer's sigwait chunked-polling workarounds
+      exist for (see lib/posix options signals/rtsig), which can be simplified
+      in a follow-up.
+
+      Includes the tests/kernel/timer/timer_signal ztest suite (delivery via
+      handler and sigwait, one-pending, overrun latch/coalescing/freeze,
+      thread-targeted delivery, delete-purges, queue-full recovery,
+      expiry-function coexistence, userspace positive and fault-injection
+      negative cases) and kernel timing documentation.
