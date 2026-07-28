@@ -1305,3 +1305,25 @@ patches:
       and expires immediately. Also report -EINVAL for an invalid timespec -
       the positive EINVAL previously returned was negated by the POSIX layer
       into a -22 return from pthread_cond_timedwait().
+  - path: zephyr/k-sleep-absolute-timeout-remainder.patch
+    sha256sum: f75666461933611399a0d6ebbf91fe9ba84d73f45af478ffe6b9b57763ea452d
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-28
+    upstreamable: true
+    comments: |
+      kernel: timeout: report the decoded expiry for absolute timeouts
+
+      z_add_timeout() returns the absolute expiry tick of the scheduled
+      timeout, which z_tick_sleep() records to compute the time remaining
+      when a sleep is cut short by k_wakeup(). For absolute timeouts the
+      raw encoded value (Z_TICK_ABS, a negative number) was returned
+      instead of the decoded expiry, so k_sleep() with an absolute timeout
+      reported a garbage remainder - typically 0, indistinguishable from
+      normal expiry - when woken early.
+
+      Return the decoded absolute expiry, matching what the relative branch
+      reports, and add a regression case to the kernel sleep testsuite
+      covering the woken-early remainder and re-arming against the same
+      absolute deadline.
