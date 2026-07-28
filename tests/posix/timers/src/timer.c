@@ -145,6 +145,10 @@ static void arm_ms(timer_t id, int flags, int64_t value_ms, int64_t interval_ms)
 
 ZTEST(posix_timers, test_create_default_evp)
 {
+	if (!IS_ENABLED(CONFIG_TIMER_SIGNAL)) {
+		/* signal-based expiry notification requires the kernel signal subsystem */
+		ztest_test_skip();
+	}
 	siginfo_t info = {0};
 
 	/* NULL sigevent: as if SIGEV_SIGNAL, SIGALRM, with the timer ID as the value */
@@ -163,6 +167,10 @@ ZTEST(posix_timers, test_create_default_evp)
 
 ZTEST(posix_timers, test_sigev_signal_delivery)
 {
+	if (!IS_ENABLED(CONFIG_TIMER_SIGNAL)) {
+		/* signal-based expiry notification requires the kernel signal subsystem */
+		ztest_test_skip();
+	}
 	if (IS_ENABLED(CONFIG_NATIVE_LIBC)) {
 		/* the host cannot block process-directed signals across simulator threads */
 		ztest_test_skip();
@@ -197,6 +205,10 @@ static void sig_handler(int signo, siginfo_t *info, void *ctx)
 
 ZTEST(posix_timers, test_sigev_signal_handler)
 {
+	if (!IS_ENABLED(CONFIG_TIMER_SIGNAL)) {
+		/* signal-based expiry notification requires the kernel signal subsystem */
+		ztest_test_skip();
+	}
 	struct sigaction act = {
 		.sa_flags = SA_SIGINFO,
 		.sa_sigaction = sig_handler,
@@ -230,6 +242,10 @@ ZTEST(posix_timers, test_sigev_signal_handler)
 
 ZTEST(posix_timers, test_overrun)
 {
+	if (!IS_ENABLED(CONFIG_TIMER_SIGNAL)) {
+		/* signal-based expiry notification requires the kernel signal subsystem */
+		ztest_test_skip();
+	}
 	if (IS_ENABLED(CONFIG_NATIVE_LIBC)) {
 		/* the host cannot block process-directed signals across simulator threads */
 		ztest_test_skip();
@@ -269,6 +285,10 @@ static void thread_fn(union sigval val)
 
 ZTEST(posix_timers, test_sigev_thread)
 {
+	if (!IS_ENABLED(CONFIG_TIMER_SIGNAL)) {
+		/* signal-based expiry notification requires the kernel signal subsystem */
+		ztest_test_skip();
+	}
 	struct sigevent sig = {
 		.sigev_notify = SIGEV_THREAD,
 		.sigev_notify_function = thread_fn,
@@ -318,6 +338,10 @@ ZTEST(posix_timers, test_sigev_none_gettime)
 
 ZTEST(posix_timers, test_abstime_monotonic)
 {
+	if (!IS_ENABLED(CONFIG_TIMER_SIGNAL)) {
+		/* signal-based expiry notification requires the kernel signal subsystem */
+		ztest_test_skip();
+	}
 	struct timespec now;
 	struct itimerspec its = {0};
 	struct sigevent sig = {
@@ -350,6 +374,10 @@ ZTEST(posix_timers, test_abstime_monotonic)
 
 ZTEST(posix_timers, test_abstime_realtime_settime)
 {
+	if (!IS_ENABLED(CONFIG_TIMER_SIGNAL)) {
+		/* signal-based expiry notification requires the kernel signal subsystem */
+		ztest_test_skip();
+	}
 	struct timespec now;
 	struct timespec jump;
 	struct itimerspec its = {0};
@@ -407,7 +435,7 @@ ZTEST(posix_timers, test_sigev_thread_id)
 		.sigev_value.sival_int = TEST_SIGNAL_VAL,
 	};
 
-	if (IS_ENABLED(CONFIG_NATIVE_LIBC)) {
+	if (IS_ENABLED(CONFIG_NATIVE_LIBC) || !IS_ENABLED(CONFIG_TIMER_SIGNAL)) {
 		/* on the host, sigev_notify_thread_id requires gettid(); covered by Linux */
 		ztest_test_skip();
 	}
@@ -424,6 +452,29 @@ ZTEST(posix_timers, test_sigev_thread_id)
 	zassert_equal(got, TEST_SIGNAL_VAL, "targeted thread did not receive the signal");
 }
 #endif /* defined(SIGEV_THREAD_ID) && !defined(CONFIG_NATIVE_LIBC) */
+
+ZTEST(posix_timers, test_signal_less_reduced_mode)
+{
+	struct sigevent sig = {
+		.sigev_notify = SIGEV_SIGNAL,
+		.sigev_signo = TEST_SIGNAL_VAL,
+	};
+
+	if (IS_ENABLED(CONFIG_TIMER_SIGNAL)) {
+		ztest_test_skip();
+	}
+
+	/* without signal-based expiry notification, only SIGEV_NONE is supported */
+	zassert_equal(timer_create(CLOCK_MONOTONIC, &sig, &timerid), -1);
+	zassert_equal(errno, ENOTSUP);
+	timerid = INVALID_TIMERID;
+
+	sig.sigev_notify = SIGEV_NONE;
+	zassert_ok(timer_create(CLOCK_MONOTONIC, &sig, &timerid));
+	arm_ms(timerid, 0, PERIOD_MS, 0);
+	test_sleep_ms(2 * PERIOD_MS);
+	zassert_equal(timer_getoverrun(timerid), 0);
+}
 
 ZTEST(posix_timers, test_errors)
 {
@@ -479,9 +530,11 @@ static void before(void *arg)
 	lc_install(TEST_SIGNAL_VAL);
 	lc_install(SIGALRM);
 #else
-	/* sigtimedwait()-style acceptance requires the signals to be blocked */
-	set_sig_blocked(TEST_SIGNAL_VAL, true);
-	set_sig_blocked(SIGALRM, true);
+	if (IS_ENABLED(CONFIG_TIMER_SIGNAL)) {
+		/* sigtimedwait()-style acceptance requires the signals to be blocked */
+		set_sig_blocked(TEST_SIGNAL_VAL, true);
+		set_sig_blocked(SIGALRM, true);
+	}
 #endif
 }
 
@@ -495,7 +548,7 @@ static void after(void *arg)
 		timerid = INVALID_TIMERID;
 	}
 
-	if (!IS_ENABLED(CONFIG_NATIVE_LIBC)) {
+	if (!IS_ENABLED(CONFIG_NATIVE_LIBC) && IS_ENABLED(CONFIG_TIMER_SIGNAL)) {
 		drain_sig(TEST_SIGNAL_VAL);
 		drain_sig(SIGALRM);
 	}
