@@ -25,6 +25,7 @@
 #include <zephyr/sys/elastipool.h>
 #include <zephyr/sys/slist.h>
 #include <zephyr/sys/sem.h>
+#include <zephyr/sys/timer.h>
 #include <zephyr/sys/util.h>
 #include <zephyr/toolchain.h>
 
@@ -303,5 +304,31 @@ static inline sigset_t *z_sig_set_to_posix(const struct k_sig_set *kset, sigset_
 struct timeval;
 struct timespec;
 bool timeval_to_timespec(const struct timeval *tv, struct timespec *ts);
+
+/*
+ * Shared sigevent dispatch (timers, mq_notify)
+ */
+
+/*
+ * Validate a sigevent for dispatch. @p thread_via_signal selects the SIGEV_THREAD transport:
+ * true for kernel-dispatched timer notifications, false for one-shot threads (mq).
+ *
+ * @retval 0 valid; -EINVAL malformed; -ENOTSUP valid but unsupported in this configuration
+ */
+int posix_sigev_validate(const struct sigevent *evp, bool thread_via_signal);
+
+/*
+ * One-shot dispatch of a validated sigevent (mq_notify send-side): SIGEV_NONE does nothing;
+ * SIGEV_SIGNAL / SIGEV_THREAD_ID queue a signal; SIGEV_THREAD spawns a detached one-shot
+ * thread running the notification function.
+ */
+int posix_sigev_notify_now(const struct sigevent *evp, k_tid_t default_target);
+
+/*
+ * Map a validated sigevent to a kernel timer notification (for SIGEV_THREAD, translating
+ * thread attributes to kernel notification-thread parameters at creation time).
+ * Returns 1 when @p out was populated, 0 for SIGEV_NONE, negative on error.
+ */
+int posix_sigev_to_notify(const struct sigevent *evp, struct k_timer_notify *out);
 
 #endif
