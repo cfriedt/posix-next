@@ -1327,3 +1327,32 @@ patches:
       reports, and add a regression case to the kernel sleep testsuite
       covering the woken-early remainder and re-arming against the same
       absolute deadline.
+  - path: zephyr/sys-clock-nanosleep-absolute-arming.patch
+    sha256sum: 7d8e22f5fe04cf093e137f6222812d0655a518195608b52f6d8ca8f211a3a4a5
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-28
+    upstreamable: true
+    comments: |
+      lib: os: clock: arm absolute nanosleep deadlines as absolute timeouts
+
+      The SYS_TIMER_ABSTIME path of sys_clock_nanosleep() converted the
+      absolute deadline to a relative duration by sampling "now", then
+      converted that duration back through a timepoint and slept in a
+      re-derived-relative retry loop: every conversion re-samples the
+      clock and adds scheduling-latency skew, and the retry loop re-arms
+      short relative sleeps rather than holding one deadline.
+
+      When CONFIG_TIMEOUT_64BIT is available (the default), convert the
+      deadline once with timespec_abs_to_timeout() - a single coherent
+      conversion, no "now" sample - and k_sleep() on the absolute timeout;
+      a premature k_wakeup() re-arms against the same absolute deadline.
+      Deadlines too distant for tick conversion (over ~584 years) and
+      32-bit-timeout configurations retain the relative fallback.
+
+      Depends on k-sleep-absolute-timeout-remainder.patch for the woken-
+      early remainder of an absolute-timeout k_sleep(). Covered by the
+      POSIX clock_nanosleep() testsuite (absolute-deadline accuracy on
+      both clocks and premature-wake-up re-arming were added to it in the
+      posix module).
