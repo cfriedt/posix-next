@@ -11,8 +11,8 @@
 #include <zephyr/sys/util.h>
 #include <zephyr/ztest.h>
 
-#include "../../common/linux_compat_test.h"
-#include "../../common/nanosleep_common.h"
+#include "../../shared/linux_compat_test.h"
+#include "../../shared/nanosleep_common.h"
 
 ZTEST(posix_clock_selection, test_pthread_condattr_getclock)
 {
