@@ -15,6 +15,4 @@ zephyr_library_compile_options_ifdef(CONFIG_XSI -U_XOPEN_SOURCE -D_XOPEN_SOURCE=
 
 if(NOT CONFIG_TC_PROVIDES_POSIX_TIMERS)
   zephyr_library_sources(clock.c timer.c)
-  zephyr_library_sources_ifdef(CONFIG_POSIX_CPUTIME getcpuclockid.c)
-  zephyr_library_sources_ifdef(CONFIG_POSIX_THREAD_CPUTIME getcpuclockid.c)
 endif()
