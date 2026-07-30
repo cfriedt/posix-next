@@ -11,7 +11,7 @@
 #include <zephyr/sys/util.h>
 #include <zephyr/ztest.h>
 
-#include "../../common/linux_compat_test.h"
+#include "../../shared/linux_compat_test.h"
 
 #define N_THR SYS_THREAD_THREAD_MIN
 
