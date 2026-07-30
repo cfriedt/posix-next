@@ -12,7 +12,7 @@
 #include <zephyr/sys/util.h>
 #include <zephyr/ztest.h>
 
-#include "../../common/linux_compat_test.h"
+#include "../../shared/linux_compat_test.h"
 
 static struct timespec sleep_timeout_abstime;
 

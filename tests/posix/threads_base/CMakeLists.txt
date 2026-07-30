@@ -9,8 +9,8 @@ zephyr_include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../../../lib/posix)
 
 target_sources(app PRIVATE
   ${app_sources}
-  ../common/msleep.c
-  ../common/test_sigmask_common.c
+  ../shared/msleep.c
+  ../shared/test_sigmask_common.c
 )
 
 target_include_directories(app PRIVATE

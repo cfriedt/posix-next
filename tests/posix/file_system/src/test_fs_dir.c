@@ -11,7 +11,7 @@
 #include <dirent.h>
 #include "test_fs.h"
 
-#include "../../common/linux_compat_test.h"
+#include "../../shared/linux_compat_test.h"
 
 extern int test_file_write(void);
 extern int test_file_close(void);
