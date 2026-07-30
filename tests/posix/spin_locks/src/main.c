@@ -9,7 +9,7 @@
 #include <zephyr/ztest.h>
 #include <zephyr/sys/util.h>
 
-#include "../../common/linux_compat_test.h"
+#include "../../shared/linux_compat_test.h"
 
 ZTEST(posix_spinlocks, test_spin_init_destroy)
 {

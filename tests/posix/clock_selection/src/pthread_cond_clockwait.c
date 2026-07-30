@@ -10,7 +10,7 @@
 #include <zephyr/sys/util.h>
 #include <zephyr/ztest.h>
 
-#include "../../common/linux_compat_test.h"
+#include "../../shared/linux_compat_test.h"
 
 #if !(_POSIX_C_SOURCE >= 202405L)
 /* pthread_cond_clockwait() was standardized in POSIX Issue 8 */
