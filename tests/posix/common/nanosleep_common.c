@@ -11,7 +11,7 @@
 #include <zephyr/sys_clock.h>
 #include <zephyr/ztest.h>
 
-#include "../../common/linux_compat_test.h"
+#include "linux_compat_test.h"
 
 #define SELECT_NANOSLEEP       1
 #define SELECT_CLOCK_NANOSLEEP 0
