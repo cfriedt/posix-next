@@ -6,7 +6,7 @@ project(posix_timers)
 
 FILE(GLOB app_sources src/*.c)
 
-target_sources(app PRIVATE ${app_sources})
+target_sources(app PRIVATE ${app_sources} ../common/nanosleep_common.c)
 
 # FIXME: We should not rely on usleep() (which is was dropped in Issue 7, 200809L)
 target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200112L)
