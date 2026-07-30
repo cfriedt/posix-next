@@ -11,7 +11,7 @@
 #include <zephyr/ztest.h>
 #include <zephyr/sys/util.h>
 
-#include "../../common/linux_compat_test.h"
+#include "../../shared/linux_compat_test.h"
 
 #if defined(__x86_64__) || defined(__amd64__)
 #define EXPECT_LP64_OFF64_CFLAGS     "-m64"

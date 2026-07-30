@@ -16,7 +16,7 @@
 #include <zephyr/sys/util.h>
 #include <zephyr/ztest.h>
 
-#include "../../common/linux_compat_test.h"
+#include "../../shared/linux_compat_test.h"
 
 #define WAIT_TIME_MS 100
 BUILD_ASSERT(WAIT_TIME_MS > 0, "WAIT_TIME_MS must be posistive");

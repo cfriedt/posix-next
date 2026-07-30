@@ -5,6 +5,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include "linux_compat_test.h"
+
+#include <errno.h>
 #include <pthread.h>
 
 #include <zephyr/ztest.h>
@@ -24,12 +27,22 @@ static void *normal_mutex_entry(void *p1)
 		if (rc == 0) {
 			break;
 		}
-		k_msleep(SLEEP_MS);
+		msleep(SLEEP_MS);
 	}
 
 	zassert_false(rc, "try lock failed");
 	TC_PRINT("mutex lock is taken\n");
 	zassert_false(pthread_mutex_unlock(&mutex), "mutex unlock is failed");
+	return NULL;
+}
+
+static void *errorcheck_mutex_entry(void *p1)
+{
+	ARG_UNUSED(p1);
+
+	zassert_ok(pthread_mutex_lock(&mutex), "mutex is not taken");
+	zassert_equal(pthread_mutex_lock(&mutex), EDEADLK);
+	zassert_ok(pthread_mutex_unlock(&mutex), "mutex is not unlocked");
 	return NULL;
 }
 
@@ -59,6 +72,9 @@ void test_mutex_common(int type)
 		break;
 	case PTHREAD_MUTEX_RECURSIVE:
 		entry = recursive_mutex_entry;
+		break;
+	case PTHREAD_MUTEX_ERRORCHECK:
+		entry = errorcheck_mutex_entry;
 		break;
 	default:
 		zassert_unreachable("unsupported mutex type for behavioral test");
@@ -98,14 +114,14 @@ void test_mutex_common(int type)
 	zassert_equal(protocol, PTHREAD_PRIO_NONE, "mutex protocol is not prio_none");
 #endif /* defined(_POSIX_THREAD_PRIO_INHERIT) || defined(_POSIX_THREAD_PRIO_PROTECT) */
 
-	if (CONFIG_SYS_THREAD_STACK_MAX > 0) {
+	if (IS_ENABLED(CONFIG_NATIVE_LIBC) || (CONFIG_SYS_THREAD_STACK_MAX > 0)) {
 		zassert_ok(pthread_create(&th, NULL, entry, NULL));
 	}
 
-	k_msleep(SLEEP_MS);
+	msleep(SLEEP_MS);
 	zassert_ok(pthread_mutex_unlock(&mutex));
 
-	if (CONFIG_SYS_THREAD_STACK_MAX > 0) {
+	if (IS_ENABLED(CONFIG_NATIVE_LIBC) || (CONFIG_SYS_THREAD_STACK_MAX > 0)) {
 		zassert_ok(pthread_join(th, NULL));
 	}
 

@@ -10,7 +10,7 @@
 #include <net/if.h>
 #include <zephyr/ztest.h>
 
-#include "../../common/linux_compat_test.h"
+#include "../../shared/linux_compat_test.h"
 
 #if !defined(CONFIG_NATIVE_LIBC)
 #include <zephyr/net/net_if.h>

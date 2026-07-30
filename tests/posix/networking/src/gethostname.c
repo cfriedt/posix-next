@@ -8,7 +8,7 @@
 
 #include <zephyr/ztest.h>
 
-#include "../../common/linux_compat_test.h"
+#include "../../shared/linux_compat_test.h"
 
 ZTEST(posix_networking, test_gethostname)
 {

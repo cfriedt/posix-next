@@ -10,7 +10,7 @@
 
 #include <zephyr/ztest.h>
 
-#include "../../common/linux_compat_test.h"
+#include "../../shared/linux_compat_test.h"
 #include "_main.h"
 
 #ifndef CONFIG_NATIVE_LIBC
