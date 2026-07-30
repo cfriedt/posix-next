@@ -19,7 +19,7 @@
  * dying thread leaves behind, which is kernel business either way.
  */
 
-/* provided by ../common/test_sigmask_common.c */
+/* provided by ../shared/test_sigmask_common.c */
 void test_pthread_sigmask_init_expectation_mask(void);
 void test_pthread_sigmask_common(int (*sigmask)(int how, const sigset_t *set, sigset_t *oset));
 
