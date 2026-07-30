@@ -9,7 +9,7 @@
 #include <zephyr/sys/util.h>
 #include <zephyr/ztest.h>
 
-#include "../../common/linux_compat_test.h"
+#include "../../shared/linux_compat_test.h"
 
 void test_mutex_common(int type);
 
@@ -126,11 +126,9 @@ ZTEST(posix_threads_ext, test_pthread_mutexattr_settype)
 
 	zassert_ok(pthread_mutexattr_destroy(&attr));
 
-	/* the behavioral test threads use Zephyr kernel APIs (k_msleep()) */
-	IF_NOT_NATIVE_LIBC({
-		test_mutex_common(PTHREAD_MUTEX_NORMAL);
-		test_mutex_common(PTHREAD_MUTEX_RECURSIVE);
-	})
+	test_mutex_common(PTHREAD_MUTEX_NORMAL);
+	test_mutex_common(PTHREAD_MUTEX_RECURSIVE);
+	test_mutex_common(PTHREAD_MUTEX_ERRORCHECK);
 }
 
 static void before(void *arg)
