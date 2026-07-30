@@ -14,15 +14,7 @@
 #include <zephyr/ztest.h>
 
 #include "../../common/linux_compat_test.h"
-
-#define SELECT_NANOSLEEP       1
-#define SELECT_CLOCK_NANOSLEEP 0
-
-void common_lower_bound_check(int selection, clockid_t clock_id, int flags, const uint32_t s,
-			      uint32_t ns);
-void common_errors(int selection, clockid_t clock_id, int flags);
-int select_nanosleep(int selection, clockid_t clock_id, int flags, const struct timespec *rqtp,
-		     struct timespec *rmtp);
+#include "../../common/nanosleep_common.h"
 
 static void nanosleep_errors_errno(void)
 {
