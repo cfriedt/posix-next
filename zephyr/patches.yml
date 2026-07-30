@@ -1405,3 +1405,44 @@ patches:
       suite under a new kernel.message_queue.prio twister variant, with
       priority ordering, variable-length, error, blocking, purge, and ISR
       sections.
+  - path: zephyr/k-msgq-notify.patch
+    sha256sum: 1ec74f670556e8e79c5895c43740f973baf6f37c71446311176b035d08457be3
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-30
+    upstreamable: true
+    comments: |
+      kernel: msgq: add one-shot empty-to-non-empty notification
+
+      Adds CONFIG_MSGQ_NOTIFY: a priority-mode message queue accepts a
+      single one-shot notification registration (k_msgq_notify_arm() /
+      k_msgq_notify_disarm()). When a message arrives at an empty queue,
+      a signal carrying the registered value is generated for the
+      registered thread with the new public si_code K_SI_MSGQ, and the
+      registration is consumed - atomically with the send, inside the
+      queue lock, on both the ISR and thread paths. This replaces the
+      inherently racy sample-num-used-then-put emulation the POSIX
+      mq_notify() shim performs today and is the kernel primitive that
+      backs mq_notify() semantics: sends to a non-empty queue do not
+      fire, arming while armed is refused, and a consumed registration
+      may be re-armed.
+
+      A signo of 0 arms a signal-less registration (consumed by the
+      transition, generates nothing), matching POSIX SIGEV_NONE, and is
+      the only form accepted without CONFIG_SIGNAL. If signal generation
+      fails on the transition (ISR signal-lock contention), the
+      registration stays armed for a later transition rather than being
+      lost. Registration state lives in the priority-buffer control
+      block, so struct k_msgq is again unchanged.
+
+      Notification signals are kernel-originated: they fire in the
+      context of whatever thread sends, not the registrant's, so signal
+      generation exempts them from the sender-holds-permission check the
+      same way timer expiry signals are exempt - the target thread was
+      validated when the registration was armed.
+
+      Covered by per-unit ZTESTs in the kernel msgq_api suite under a
+      new kernel.message_queue.notify twister variant: fire-once and
+      consumption, non-empty no-fire, signo-0, EBUSY/EINVAL/ENOTSUP
+      errors, disarm, and ISR-generation sections.
