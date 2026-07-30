@@ -8,7 +8,7 @@
 
 #include <zephyr/ztest.h>
 
-#include "../../common/linux_compat_test.h"
+#include "../../shared/linux_compat_test.h"
 
 struct waker_work {
 	k_tid_t tid;
