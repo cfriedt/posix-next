@@ -1,0 +1,1032 @@
+diff --git a/include/zephyr/kernel.h b/include/zephyr/kernel.h
+index 8f960c87a9d..ecc182e04a2 100644
+--- a/include/zephyr/kernel.h
++++ b/include/zephyr/kernel.h
+@@ -5682,10 +5682,18 @@ struct k_msgq {
+ 	char *buffer_start;
+ 	/** End of message buffer */
+ 	char *buffer_end;
+-	/** Read pointer */
+-	char *read_ptr;
+-	/** Write pointer */
+-	char *write_ptr;
++	union {
++		struct {
++			/** Read pointer */
++			char *read_ptr;
++			/** Write pointer */
++			char *write_ptr;
++		};
++#ifdef CONFIG_MSGQ_PRIO
++		/** Queued messages, descending priority order (@ref K_MSGQ_FLAG_PRIO) */
++		sys_slist_t used_q;
++#endif
++	};
+ 	/** Number of used messages */
+ 	uint32_t used_msgs;
+ 
+@@ -5728,6 +5736,51 @@ struct k_msgq {
+ 
+ #define K_MSGQ_FLAG_ALLOC	BIT(0)
+ 
++/**
++ * @brief Message queue delivers messages in priority order (see k_msgq_init_prio()).
++ */
++#define K_MSGQ_FLAG_PRIO	BIT(1)
++
++/**
++ * @cond INTERNAL_HIDDEN
++ */
++/* Control block at the start of a priority-mode message queue buffer */
++struct z_msgq_prio_hdr {
++	_wait_q_t send_q;
++	sys_slist_t free_q;
++};
++
++/* Per-message slot header in a priority-mode message queue buffer */
++struct z_msgq_prio_slot {
++	sys_snode_t node;
++	uint32_t prio;
++	uint32_t len;
++};
++
++#define Z_MSGQ_PRIO_SLOT_SIZE(q_msg_size)                                                          \
++	ROUND_UP(sizeof(struct z_msgq_prio_slot) + (q_msg_size),                                   \
++		 __alignof__(struct z_msgq_prio_slot))
++/**
++ * INTERNAL_HIDDEN @endcond
++ */
++
++/**
++ * @brief Required buffer size for a priority-mode message queue.
++ *
++ * Computes the size (in bytes) of the buffer to pass to k_msgq_init_prio()
++ * for a queue of @a q_max_msgs messages of up to @a q_msg_size bytes each.
++ *
++ * @param q_msg_size Maximum message size (in bytes).
++ * @param q_max_msgs Maximum number of messages that can be queued.
++ */
++#define K_MSGQ_PRIO_BUF_SIZE(q_msg_size, q_max_msgs)                                               \
++	(sizeof(struct z_msgq_prio_hdr) + (q_max_msgs) * Z_MSGQ_PRIO_SLOT_SIZE(q_msg_size))
++
++/**
++ * @brief Required buffer alignment for a priority-mode message queue.
++ */
++#define K_MSGQ_PRIO_BUF_ALIGN __alignof__(struct z_msgq_prio_hdr)
++
+ /**
+  * @brief Message Queue Attributes
+  */
+@@ -5805,6 +5858,50 @@ void k_msgq_init(struct k_msgq *msgq, char *buffer, size_t msg_size,
+ __syscall int k_msgq_alloc_init(struct k_msgq *msgq, size_t msg_size,
+ 				uint32_t max_msgs);
+ 
++/**
++ * @brief Initialize a priority-mode message queue.
++ *
++ * This routine initializes a message queue object that delivers messages in
++ * descending priority order (FIFO among messages of equal priority) and
++ * records the actual length of each message, prior to its first use.
++ *
++ * Messages are sent with k_msgq_put_prio() and received with
++ * k_msgq_get_prio(); the fixed-size FIFO operations k_msgq_put(),
++ * k_msgq_get(), k_msgq_put_front(), k_msgq_peek(), and k_msgq_peek_at()
++ * return `-ENOTSUP` on a priority-mode queue.
++ *
++ * @a buffer must be sized with @ref K_MSGQ_PRIO_BUF_SIZE, aligned to
++ * @ref K_MSGQ_PRIO_BUF_ALIGN, and reside in kernel-accessible (and, on
++ * @kconfig{CONFIG_KERNEL_COHERENCE} platforms, coherent) memory.
++ *
++ * @param msgq Address of the message queue.
++ * @param buffer Pointer to memory area that holds queued messages.
++ * @param msg_size Maximum message size (in bytes).
++ * @param max_msgs Maximum number of messages that can be queued.
++ */
++void k_msgq_init_prio(struct k_msgq *msgq, char *buffer, size_t msg_size, uint32_t max_msgs);
++
++/**
++ * @brief Initialize a priority-mode message queue with allocated storage.
++ *
++ * This routine initializes a priority-mode message queue object (see
++ * k_msgq_init_prio()), allocating its internal buffer from the calling
++ * thread's resource pool.
++ *
++ * Memory allocated for the buffer can be released by calling
++ * k_msgq_cleanup(), or if userspace is enabled and the msgq object loses
++ * all of its references.
++ *
++ * @param msgq Address of the message queue.
++ * @param msg_size Maximum message size (in bytes).
++ * @param max_msgs Maximum number of messages that can be queued.
++ *
++ * @return 0 on success, -ENOMEM if there was insufficient memory in the
++ *	thread's resource pool, or -EINVAL if the size parameters cause
++ *	an integer overflow.
++ */
++__syscall int k_msgq_alloc_init_prio(struct k_msgq *msgq, size_t msg_size, uint32_t max_msgs);
++
+ /**
+  * @brief Release allocated buffer for a queue
+  *
+@@ -5887,6 +5984,67 @@ __syscall int k_msgq_put_front(struct k_msgq *msgq, const void *data);
+  */
+ __syscall int k_msgq_get(struct k_msgq *msgq, void *data, k_timeout_t timeout);
+ 
++/**
++ * @brief Send a message with a priority to a priority-mode message queue.
++ *
++ * This routine sends a message of @a len bytes with priority @a prio to
++ * message queue @a msgq. Messages are delivered in descending priority
++ * order; messages of equal priority are delivered in FIFO order.
++ *
++ * The queue must have been initialized with k_msgq_init_prio() or
++ * k_msgq_alloc_init_prio().
++ *
++ * @note The message content is copied from @a data into @a msgq and the @a data
++ * pointer is not retained, so the message content will not be modified
++ * by this function.
++ *
++ * @isr_ok
++ *
++ * @param msgq Address of the message queue.
++ * @param data Pointer to the message.
++ * @param len Length of the message (in bytes); at most the queue's message size.
++ * @param prio Priority of the message.
++ * @param timeout Waiting period to add the message, or one of the special
++ *                values K_NO_WAIT and K_FOREVER.
++ *
++ * @retval 0 Message sent.
++ * @retval -ENOMSG Returned without waiting or queue purged.
++ * @retval -EAGAIN Waiting period timed out.
++ * @retval -EMSGSIZE @a len exceeds the queue's message size.
++ * @retval -ENOTSUP @a msgq is not a priority-mode message queue.
++ */
++__syscall int k_msgq_put_prio(struct k_msgq *msgq, const void *data, size_t len, uint32_t prio,
++			      k_timeout_t timeout);
++
++/**
++ * @brief Receive the highest-priority message from a priority-mode message queue.
++ *
++ * This routine receives the oldest message of the highest priority present in
++ * message queue @a msgq, copying it to @a data and storing its priority in
++ * @a prio when @a prio is not NULL.
++ *
++ * The queue must have been initialized with k_msgq_init_prio() or
++ * k_msgq_alloc_init_prio().
++ *
++ * @isr_ok
++ *
++ * @param msgq Address of the message queue.
++ * @param data Address of area to receive the message; must hold at least the
++ *             queue's message size.
++ * @param size Size of the receive area (in bytes).
++ * @param prio Address of area to receive the message priority, or NULL.
++ * @param timeout Waiting period to receive the message, or one of the special
++ *                values K_NO_WAIT and K_FOREVER.
++ *
++ * @retval >=0 Length of the received message.
++ * @retval -ENOMSG Returned without waiting or queue purged.
++ * @retval -EAGAIN Waiting period timed out.
++ * @retval -EMSGSIZE @a size is smaller than the queue's message size.
++ * @retval -ENOTSUP @a msgq is not a priority-mode message queue.
++ */
++__syscall int k_msgq_get_prio(struct k_msgq *msgq, void *data, size_t size, uint32_t *prio,
++			      k_timeout_t timeout);
++
+ /**
+  * @brief Peek/read a message from a message queue.
+  *
+diff --git a/kernel/Kconfig b/kernel/Kconfig
+index a8babbd326c..29c6a4d1a24 100644
+--- a/kernel/Kconfig
++++ b/kernel/Kconfig
+@@ -961,6 +961,16 @@ config EVENTS
+ 	  Note that setting this option slightly increases the size of the
+ 	  thread structure.
+ 
++config MSGQ_PRIO
++	bool "Priority-mode message queues"
++	depends on MULTITHREADING
++	help
++	  This option enables priority-mode message queues, initialized with
++	  k_msgq_init_prio() or k_msgq_alloc_init_prio(). A priority-mode
++	  queue delivers messages in descending priority order (FIFO among
++	  equal priorities) via k_msgq_put_prio() and k_msgq_get_prio(), and
++	  records the actual length of each message.
++
+ config KERNEL_MEM_POOL
+ 	bool "Use Kernel Memory Pool"
+ 	default y
+diff --git a/kernel/msg_q.c b/kernel/msg_q.c
+index 7ccfd5482fc..559cf2e9075 100644
+--- a/kernel/msg_q.c
++++ b/kernel/msg_q.c
+@@ -40,6 +40,25 @@ static inline bool handle_poll_events(struct k_msgq *msgq)
+ #endif /* CONFIG_POLL */
+ }
+ 
++#ifdef CONFIG_MSGQ_PRIO
++static inline bool msgq_is_prio(const struct k_msgq *msgq)
++{
++	return (msgq->flags & K_MSGQ_FLAG_PRIO) != 0U;
++}
++
++static inline struct z_msgq_prio_hdr *prio_hdr(const struct k_msgq *msgq)
++{
++	return (struct z_msgq_prio_hdr *)msgq->buffer_start;
++}
++
++static inline struct z_msgq_prio_slot *prio_slot_of(sys_snode_t *node)
++{
++	return CONTAINER_OF(node, struct z_msgq_prio_slot, node);
++}
++#else
++#define msgq_is_prio(msgq) false
++#endif /* CONFIG_MSGQ_PRIO */
++
+ void k_msgq_init(struct k_msgq *msgq, char *buffer, size_t msg_size,
+ 		 uint32_t max_msgs)
+ {
+@@ -119,6 +138,15 @@ static int msgq_cleanup(struct k_msgq *msgq, void **mem)
+ 		goto exit;
+ 	}
+ 
++#ifdef CONFIG_MSGQ_PRIO
++	if (msgq_is_prio(msgq)) {
++		CHECKIF(z_waitq_head(&prio_hdr(msgq)->send_q) != NULL) {
++			ret = -EBUSY;
++			goto exit;
++		}
++	}
++#endif /* CONFIG_MSGQ_PRIO */
++
+ 	if ((msgq->flags & K_MSGQ_FLAG_ALLOC) != 0U) {
+ 		*mem = msgq->buffer_start;
+ 		msgq->flags &= ~K_MSGQ_FLAG_ALLOC;
+@@ -157,6 +185,10 @@ static inline int put_msg_in_queue(struct k_msgq *msgq, const void *data,
+ 	int result;
+ 	bool resched = false;
+ 
++	if (msgq_is_prio(msgq)) {
++		return -ENOTSUP;
++	}
++
+ 	key = k_spin_lock(&msgq->lock);
+ 
+ 	if (put_at_back) {
+@@ -306,6 +338,10 @@ int z_impl_k_msgq_get(struct k_msgq *msgq, void *data, k_timeout_t timeout)
+ 	int result;
+ 	bool resched = false;
+ 
++	if (msgq_is_prio(msgq)) {
++		return -ENOTSUP;
++	}
++
+ 	key = k_spin_lock(&msgq->lock);
+ 
+ 	SYS_PORT_TRACING_OBJ_FUNC_ENTER(k_msgq, get, msgq, timeout);
+@@ -385,6 +421,10 @@ int z_impl_k_msgq_peek(struct k_msgq *msgq, void *data)
+ 	k_spinlock_key_t key;
+ 	int result;
+ 
++	if (msgq_is_prio(msgq)) {
++		return -ENOTSUP;
++	}
++
+ 	key = k_spin_lock(&msgq->lock);
+ 
+ 	if (msgq->used_msgs > 0U) {
+@@ -422,6 +462,10 @@ int z_impl_k_msgq_peek_at(struct k_msgq *msgq, void *data, uint32_t idx)
+ 	uint32_t byte_offset;
+ 	char *start_addr;
+ 
++	if (msgq_is_prio(msgq)) {
++		return -ENOTSUP;
++	}
++
+ 	key = k_spin_lock(&msgq->lock);
+ 
+ 	if (msgq->used_msgs > idx) {
+@@ -460,12 +504,352 @@ static inline int z_vrfy_k_msgq_peek_at(struct k_msgq *msgq, void *data, uint32_
+ #include <zephyr/syscalls/k_msgq_peek_at_mrsh.c>
+ #endif /* CONFIG_USERSPACE */
+ 
++#ifdef CONFIG_MSGQ_PRIO
++static void prio_insert(sys_slist_t *list, struct z_msgq_prio_slot *slot)
++{
++	struct z_msgq_prio_slot *it, *prev = NULL;
++	sys_snode_t *tail = sys_slist_peek_tail(list);
++
++	/* fast path: FIFO append among equal or lower priorities */
++	if ((tail == NULL) || (prio_slot_of(tail)->prio >= slot->prio)) {
++		sys_slist_append(list, &slot->node);
++		return;
++	}
++
++	SYS_SLIST_FOR_EACH_CONTAINER(list, it, node) {
++		if (it->prio < slot->prio) {
++			break;
++		}
++		prev = it;
++	}
++
++	if (prev == NULL) {
++		sys_slist_prepend(list, &slot->node);
++	} else {
++		sys_slist_insert(list, &prev->node, &slot->node);
++	}
++}
++
++void k_msgq_init_prio(struct k_msgq *msgq, char *buffer, size_t msg_size, uint32_t max_msgs)
++{
++	struct z_msgq_prio_hdr *hdr = (struct z_msgq_prio_hdr *)buffer;
++	const size_t stride = Z_MSGQ_PRIO_SLOT_SIZE(msg_size);
++	char *slots = buffer + sizeof(*hdr);
++
++	__ASSERT_NO_MSG(buffer != NULL);
++	__ASSERT_NO_MSG(max_msgs > 0U);
++	__ASSERT_NO_MSG(IS_ALIGNED(buffer, K_MSGQ_PRIO_BUF_ALIGN));
++	__ASSERT_NO_MSG(!size_mul_overflow(max_msgs, stride, &(size_t){0}));
++
++	msgq->msg_size = msg_size;
++	msgq->max_msgs = max_msgs;
++	msgq->buffer_start = buffer;
++	msgq->buffer_end = buffer + K_MSGQ_PRIO_BUF_SIZE(msg_size, max_msgs);
++	msgq->used_msgs = 0;
++	msgq->flags = K_MSGQ_FLAG_PRIO;
++	z_waitq_init(&msgq->wait_q);
++	z_waitq_init(&hdr->send_q);
++	sys_slist_init(&hdr->free_q);
++	sys_slist_init(&msgq->used_q);
++
++	for (uint32_t i = 0; i < max_msgs; i++) {
++		sys_slist_append(&hdr->free_q,
++				 &((struct z_msgq_prio_slot *)(slots + (i * stride)))->node);
++	}
++
++	msgq->lock = (struct k_spinlock) {};
++#ifdef CONFIG_POLL
++	sys_dlist_init(&msgq->poll_events);
++#endif /* CONFIG_POLL */
++
++#ifdef CONFIG_OBJ_CORE_MSGQ
++	k_obj_core_init_and_link(K_OBJ_CORE(msgq), &obj_type_msgq);
++#endif /* CONFIG_OBJ_CORE_MSGQ */
++
++	SYS_PORT_TRACING_OBJ_INIT(k_msgq, msgq);
++
++	k_object_init(msgq);
++}
++
++int z_impl_k_msgq_alloc_init_prio(struct k_msgq *msgq, size_t msg_size, uint32_t max_msgs)
++{
++	void *buffer;
++	int ret;
++	size_t slot_size;
++	size_t total_size;
++
++	SYS_PORT_TRACING_OBJ_FUNC_ENTER(k_msgq, alloc_init, msgq);
++
++	/* bound msg_size first: Z_MSGQ_PRIO_SLOT_SIZE() itself wraps on huge sizes */
++	if ((max_msgs == 0U) ||
++	    size_add_overflow(msg_size,
++			      sizeof(struct z_msgq_prio_slot) +
++				      (__alignof__(struct z_msgq_prio_slot) - 1U),
++			      &slot_size) ||
++	    size_mul_overflow(max_msgs, Z_MSGQ_PRIO_SLOT_SIZE(msg_size), &total_size) ||
++	    size_add_overflow(total_size, sizeof(struct z_msgq_prio_hdr), &total_size)) {
++		ret = -EINVAL;
++	} else {
++		buffer = z_thread_malloc(total_size);
++		if (buffer != NULL) {
++			k_msgq_init_prio(msgq, buffer, msg_size, max_msgs);
++			msgq->flags |= K_MSGQ_FLAG_ALLOC;
++			ret = 0;
++		} else {
++			ret = -ENOMEM;
++		}
++	}
++
++	SYS_PORT_TRACING_OBJ_FUNC_EXIT(k_msgq, alloc_init, msgq, ret);
++	return ret;
++}
++
++#ifdef CONFIG_USERSPACE
++int z_vrfy_k_msgq_alloc_init_prio(struct k_msgq *msgq, size_t msg_size, uint32_t max_msgs)
++{
++	K_OOPS(K_SYSCALL_OBJ_NEVER_INIT(msgq, K_OBJ_MSGQ));
++
++	return z_impl_k_msgq_alloc_init_prio(msgq, msg_size, max_msgs);
++}
++#include <zephyr/syscalls/k_msgq_alloc_init_prio_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++int z_impl_k_msgq_put_prio(struct k_msgq *msgq, const void *data, size_t len, uint32_t prio,
++			   k_timeout_t timeout)
++{
++	__ASSERT(!arch_is_in_isr() || K_TIMEOUT_EQ(timeout, K_NO_WAIT), "");
++
++	struct z_msgq_prio_slot *slot;
++	struct k_thread *pending_thread;
++	k_timepoint_t end;
++	k_spinlock_key_t key;
++	bool resched = false;
++	bool waited = false;
++	int result;
++
++	if (!msgq_is_prio(msgq)) {
++		return -ENOTSUP;
++	}
++
++	if (len > msgq->msg_size) {
++		return -EMSGSIZE;
++	}
++
++	end = sys_timepoint_calc(timeout);
++	key = k_spin_lock(&msgq->lock);
++
++	SYS_PORT_TRACING_OBJ_FUNC_ENTER(k_msgq, put, msgq, timeout);
++
++	while (msgq->used_msgs >= msgq->max_msgs) {
++		if (K_TIMEOUT_EQ(timeout, K_NO_WAIT)) {
++			/* first pass: don't wait; later passes: deadline expired */
++			result = waited ? -EAGAIN : -ENOMSG;
++			SYS_PORT_TRACING_OBJ_FUNC_EXIT(k_msgq, put, msgq, timeout, result);
++			k_spin_unlock(&msgq->lock, key);
++			return result;
++		}
++
++		SYS_PORT_TRACING_OBJ_FUNC_BLOCKING(k_msgq, put, msgq, timeout);
++
++		/* woken with 0 to retry when space may be available */
++		result = z_pend_curr(&msgq->lock, key, &prio_hdr(msgq)->send_q, timeout);
++		if (result != 0) {
++			SYS_PORT_TRACING_OBJ_FUNC_EXIT(k_msgq, put, msgq, timeout, result);
++			return result;
++		}
++
++		waited = true;
++		timeout = sys_timepoint_timeout(end);
++		key = k_spin_lock(&msgq->lock);
++	}
++
++	slot = prio_slot_of(sys_slist_get_not_empty(&prio_hdr(msgq)->free_q));
++	slot->prio = prio;
++	slot->len = len;
++	(void)memcpy((void *)&slot[1], data, len);
++	prio_insert(&msgq->used_q, slot);
++	msgq->used_msgs++;
++
++	resched = handle_poll_events(msgq);
++
++	/* wake up one thread waiting to read */
++	pending_thread = z_unpend_first_thread(&msgq->wait_q);
++	if (pending_thread != NULL) {
++		arch_thread_return_value_set(pending_thread, 0);
++		z_ready_thread(pending_thread);
++		resched = true;
++	}
++
++	SYS_PORT_TRACING_OBJ_FUNC_EXIT(k_msgq, put, msgq, timeout, 0);
++
++	if (resched) {
++		z_reschedule(&msgq->lock, key);
++	} else {
++		k_spin_unlock(&msgq->lock, key);
++	}
++
++	return 0;
++}
++
++#ifdef CONFIG_USERSPACE
++static inline int z_vrfy_k_msgq_put_prio(struct k_msgq *msgq, const void *data, size_t len,
++					 uint32_t prio, k_timeout_t timeout)
++{
++	K_OOPS(K_SYSCALL_OBJ(msgq, K_OBJ_MSGQ));
++
++	if (len > msgq->msg_size) {
++		return -EMSGSIZE;
++	}
++	K_OOPS(K_SYSCALL_MEMORY_READ(data, len));
++
++	return z_impl_k_msgq_put_prio(msgq, data, len, prio, timeout);
++}
++#include <zephyr/syscalls/k_msgq_put_prio_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++int z_impl_k_msgq_get_prio(struct k_msgq *msgq, void *data, size_t size, uint32_t *prio,
++			   k_timeout_t timeout)
++{
++	__ASSERT(!arch_is_in_isr() || K_TIMEOUT_EQ(timeout, K_NO_WAIT), "");
++
++	struct z_msgq_prio_slot *slot;
++	struct k_thread *pending_thread;
++	k_timepoint_t end;
++	k_spinlock_key_t key;
++	bool resched = false;
++	bool waited = false;
++	int result;
++
++	if (!msgq_is_prio(msgq)) {
++		return -ENOTSUP;
++	}
++
++	if (size < msgq->msg_size) {
++		return -EMSGSIZE;
++	}
++
++	end = sys_timepoint_calc(timeout);
++	key = k_spin_lock(&msgq->lock);
++
++	SYS_PORT_TRACING_OBJ_FUNC_ENTER(k_msgq, get, msgq, timeout);
++
++	while (msgq->used_msgs == 0U) {
++		if (K_TIMEOUT_EQ(timeout, K_NO_WAIT)) {
++			/* first pass: don't wait; later passes: deadline expired */
++			result = waited ? -EAGAIN : -ENOMSG;
++			SYS_PORT_TRACING_OBJ_FUNC_EXIT(k_msgq, get, msgq, timeout, result);
++			k_spin_unlock(&msgq->lock, key);
++			return result;
++		}
++
++		SYS_PORT_TRACING_OBJ_FUNC_BLOCKING(k_msgq, get, msgq, timeout);
++
++		/* woken with 0 to retry when a message may be available */
++		result = z_pend_curr(&msgq->lock, key, &msgq->wait_q, timeout);
++		if (result != 0) {
++			SYS_PORT_TRACING_OBJ_FUNC_EXIT(k_msgq, get, msgq, timeout, result);
++			return result;
++		}
++
++		waited = true;
++		timeout = sys_timepoint_timeout(end);
++		key = k_spin_lock(&msgq->lock);
++	}
++
++	slot = prio_slot_of(sys_slist_get_not_empty(&msgq->used_q));
++	(void)memcpy(data, (void *)&slot[1], slot->len);
++	if (prio != NULL) {
++		*prio = slot->prio;
++	}
++	result = (int)slot->len;
++	sys_slist_prepend(&prio_hdr(msgq)->free_q, &slot->node);
++	msgq->used_msgs--;
++
++	/* wake up one thread waiting to write */
++	pending_thread = z_unpend_first_thread(&prio_hdr(msgq)->send_q);
++	if (pending_thread != NULL) {
++		arch_thread_return_value_set(pending_thread, 0);
++		z_ready_thread(pending_thread);
++		resched = true;
++	}
++
++	SYS_PORT_TRACING_OBJ_FUNC_EXIT(k_msgq, get, msgq, timeout, result);
++
++	if (resched) {
++		z_reschedule(&msgq->lock, key);
++	} else {
++		k_spin_unlock(&msgq->lock, key);
++	}
++
++	return result;
++}
++
++#ifdef CONFIG_USERSPACE
++static inline int z_vrfy_k_msgq_get_prio(struct k_msgq *msgq, void *data, size_t size,
++					 uint32_t *prio, k_timeout_t timeout)
++{
++	K_OOPS(K_SYSCALL_OBJ(msgq, K_OBJ_MSGQ));
++
++	if (size < msgq->msg_size) {
++		return -EMSGSIZE;
++	}
++	K_OOPS(K_SYSCALL_MEMORY_WRITE(data, msgq->msg_size));
++	if (prio != NULL) {
++		K_OOPS(K_SYSCALL_MEMORY_WRITE(prio, sizeof(uint32_t)));
++	}
++
++	return z_impl_k_msgq_get_prio(msgq, data, size, prio, timeout);
++}
++#include <zephyr/syscalls/k_msgq_get_prio_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++static void msgq_purge_prio(struct k_msgq *msgq)
++{
++	struct z_msgq_prio_hdr *hdr = prio_hdr(msgq);
++	struct k_thread *pending_thread;
++	k_spinlock_key_t key;
++	sys_snode_t *node;
++	bool resched = false;
++
++	key = k_spin_lock(&msgq->lock);
++
++	SYS_PORT_TRACING_OBJ_FUNC(k_msgq, purge, msgq);
++
++	/* wake up any threads that are waiting to write */
++	for (pending_thread = z_unpend_first_thread(&hdr->send_q);
++	     pending_thread != NULL;
++	     pending_thread = z_unpend_first_thread(&hdr->send_q)) {
++		arch_thread_return_value_set(pending_thread, -ENOMSG);
++		z_ready_thread(pending_thread);
++		resched = true;
++	}
++
++	while ((node = sys_slist_get(&msgq->used_q)) != NULL) {
++		sys_slist_prepend(&hdr->free_q, node);
++	}
++	msgq->used_msgs = 0;
++
++	if (resched) {
++		z_reschedule(&msgq->lock, key);
++	} else {
++		k_spin_unlock(&msgq->lock, key);
++	}
++}
++#endif /* CONFIG_MSGQ_PRIO */
++
+ void z_impl_k_msgq_purge(struct k_msgq *msgq)
+ {
+ 	k_spinlock_key_t key;
+ 	struct k_thread *pending_thread;
+ 	bool resched = false;
+ 
++#ifdef CONFIG_MSGQ_PRIO
++	if (msgq_is_prio(msgq)) {
++		msgq_purge_prio(msgq);
++		return;
++	}
++#endif /* CONFIG_MSGQ_PRIO */
++
+ 	key = k_spin_lock(&msgq->lock);
+ 
+ 	SYS_PORT_TRACING_OBJ_FUNC(k_msgq, purge, msgq);
+diff --git a/tests/kernel/msgq/msgq_api/src/main.c b/tests/kernel/msgq/msgq_api/src/main.c
+index a3166bfc281..52fcc9cece1 100644
+--- a/tests/kernel/msgq/msgq_api/src/main.c
++++ b/tests/kernel/msgq/msgq_api/src/main.c
+@@ -30,11 +30,25 @@ extern struct k_thread tdata;
+ extern k_tid_t tids[2];
+ K_THREAD_STACK_DECLARE(tstack, STACK_SIZE);
+ 
++#define PRIO_MSG_SIZE 16
++#define PRIO_MSGQ_LEN 4
++
++struct k_msgq prio_msgq;
++struct k_msgq prio_alloc_msgq;
++static char __aligned(K_MSGQ_PRIO_BUF_ALIGN)
++	prio_msgq_buf[K_MSGQ_PRIO_BUF_SIZE(PRIO_MSG_SIZE, PRIO_MSGQ_LEN)];
++
+ void *msgq_api_setup(void)
+ {
+ 	k_thread_access_grant(k_current_get(), &kmsgq, &msgq, &end_sema,
+-			      &tdata, &tstack);
++			      &tdata, &tstack, &prio_msgq, &prio_alloc_msgq);
+ 	k_thread_heap_assign(k_current_get(), &test_pool);
++	k_sem_init(&end_sema, 0, 1);
++#ifdef CONFIG_MSGQ_PRIO
++	k_msgq_init_prio(&prio_msgq, prio_msgq_buf, PRIO_MSG_SIZE, PRIO_MSGQ_LEN);
++#else
++	ARG_UNUSED(prio_msgq_buf);
++#endif /* CONFIG_MSGQ_PRIO */
+ 	return NULL;
+ }
+ 
+diff --git a/tests/kernel/msgq/msgq_api/src/test_msgq_prio.c b/tests/kernel/msgq/msgq_api/src/test_msgq_prio.c
+new file mode 100644
+index 00000000000..24fa4075986
+--- /dev/null
++++ b/tests/kernel/msgq/msgq_api/src/test_msgq_prio.c
+@@ -0,0 +1,322 @@
++/*
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include "test_msgq.h"
++
++#ifdef CONFIG_MSGQ_PRIO
++
++#define PRIO_MSG_SIZE  16
++#define PRIO_MSGQ_LEN  4
++
++extern struct k_msgq prio_msgq;
++extern struct k_msgq prio_alloc_msgq;
++extern struct k_msgq msgq;
++extern struct k_sem end_sema;
++extern struct k_thread tdata;
++extern k_tid_t tids[2];
++K_THREAD_STACK_DECLARE(tstack, STACK_SIZE);
++
++static ZTEST_BMEM char child_buf[PRIO_MSG_SIZE];
++static ZTEST_BMEM uint32_t child_prio;
++static ZTEST_BMEM int child_ret;
++
++static void section_reset(void)
++{
++	k_msgq_purge(&prio_msgq);
++	k_sem_reset(&end_sema);
++}
++
++static void fill_queue(uint32_t prio)
++{
++	char msg[PRIO_MSG_SIZE] = "fill";
++
++	for (uint32_t i = k_msgq_num_used_get(&prio_msgq); i < PRIO_MSGQ_LEN; i++) {
++		zassert_ok(k_msgq_put_prio(&prio_msgq, msg, sizeof(msg), prio, K_NO_WAIT));
++	}
++}
++
++static void blocked_sender_entry(void *p1, void *p2, void *p3)
++{
++	static const char msg[PRIO_MSG_SIZE] = "blocked sender";
++
++	child_ret = k_msgq_put_prio(&prio_msgq, msg, sizeof(msg), 7, K_FOREVER);
++	k_sem_give(&end_sema);
++}
++
++static void blocked_receiver_entry(void *p1, void *p2, void *p3)
++{
++	child_ret = k_msgq_get_prio(&prio_msgq, child_buf, sizeof(child_buf), &child_prio,
++				    K_FOREVER);
++	k_sem_give(&end_sema);
++}
++
++static k_tid_t spawn_child(k_thread_entry_t entry)
++{
++	tids[0] = k_thread_create(&tdata, tstack, STACK_SIZE, entry, NULL, NULL, NULL,
++				  k_thread_priority_get(k_current_get()),
++				  K_USER | K_INHERIT_PERMS, K_NO_WAIT);
++	return tids[0];
++}
++
++static void put_prio_isr_entry(const void *param)
++{
++	char msg[PRIO_MSG_SIZE] = "from isr";
++
++	zassert_ok(k_msgq_put_prio((struct k_msgq *)param, msg, sizeof(msg), 5, K_NO_WAIT));
++}
++
++/* sections of test_k_msgq_put_prio */
++
++static void put_prio_ordering(void)
++{
++	char buf[PRIO_MSG_SIZE];
++	uint32_t prio;
++
++	zassert_ok(k_msgq_put_prio(&prio_msgq, "low", 4, 1, K_NO_WAIT));
++	zassert_ok(k_msgq_put_prio(&prio_msgq, "high A", 7, 3, K_NO_WAIT));
++	zassert_ok(k_msgq_put_prio(&prio_msgq, "mid", 4, 2, K_NO_WAIT));
++	zassert_ok(k_msgq_put_prio(&prio_msgq, "high B", 7, 3, K_NO_WAIT));
++
++	/* descending priority; FIFO among equal priorities */
++	zassert_equal(k_msgq_get_prio(&prio_msgq, buf, sizeof(buf), &prio, K_NO_WAIT), 7);
++	zassert_equal(prio, 3);
++	zassert_mem_equal(buf, "high A", 7);
++
++	zassert_equal(k_msgq_get_prio(&prio_msgq, buf, sizeof(buf), &prio, K_NO_WAIT), 7);
++	zassert_equal(prio, 3);
++	zassert_mem_equal(buf, "high B", 7);
++
++	zassert_equal(k_msgq_get_prio(&prio_msgq, buf, sizeof(buf), &prio, K_NO_WAIT), 4);
++	zassert_equal(prio, 2);
++	zassert_mem_equal(buf, "mid", 4);
++
++	zassert_equal(k_msgq_get_prio(&prio_msgq, buf, sizeof(buf), &prio, K_NO_WAIT), 4);
++	zassert_equal(prio, 1);
++	zassert_mem_equal(buf, "low", 4);
++}
++
++static void put_prio_varlen(void)
++{
++	char buf[PRIO_MSG_SIZE];
++
++	zassert_ok(k_msgq_put_prio(&prio_msgq, "", 0, 0, K_NO_WAIT));
++	zassert_ok(k_msgq_put_prio(&prio_msgq, "1234567", 8, 0, K_NO_WAIT));
++
++	zassert_equal(k_msgq_get_prio(&prio_msgq, buf, sizeof(buf), NULL, K_NO_WAIT), 0);
++	zassert_equal(k_msgq_get_prio(&prio_msgq, buf, sizeof(buf), NULL, K_NO_WAIT), 8);
++	zassert_mem_equal(buf, "1234567", 8);
++}
++
++static void put_prio_errors(void)
++{
++	char big[PRIO_MSG_SIZE + 1] = {0};
++
++	zassert_equal(k_msgq_put_prio(&prio_msgq, big, sizeof(big), 0, K_NO_WAIT), -EMSGSIZE);
++
++	fill_queue(0);
++	zassert_equal(k_msgq_put_prio(&prio_msgq, big, PRIO_MSG_SIZE, 0, K_NO_WAIT), -ENOMSG);
++	zassert_equal(k_msgq_put_prio(&prio_msgq, big, PRIO_MSG_SIZE, 0, TIMEOUT), -EAGAIN);
++}
++
++static void put_prio_blocked_sender(void)
++{
++	char buf[PRIO_MSG_SIZE];
++	uint32_t prio;
++
++	fill_queue(0);
++	spawn_child(blocked_sender_entry);
++	/* let the child block on the full queue */
++	k_msleep(TIMEOUT_MS);
++	zassert_equal(k_sem_take(&end_sema, K_NO_WAIT), -EBUSY);
++
++	/* freeing a slot unblocks the sender; its message lands with its priority */
++	zassert_equal(k_msgq_get_prio(&prio_msgq, buf, sizeof(buf), &prio, K_NO_WAIT),
++		      PRIO_MSG_SIZE);
++	zassert_ok(k_sem_take(&end_sema, TIMEOUT));
++	zassert_ok(child_ret);
++	zassert_equal(k_msgq_get_prio(&prio_msgq, buf, sizeof(buf), &prio, K_NO_WAIT),
++		      PRIO_MSG_SIZE);
++	zassert_equal(prio, 7);
++	zassert_mem_equal(buf, "blocked sender", sizeof("blocked sender"));
++	k_thread_join(tids[0], K_FOREVER);
++	tids[0] = NULL;
++}
++
++static void put_prio_purge_wakes_sender(void)
++{
++	fill_queue(0);
++	spawn_child(blocked_sender_entry);
++	/* let the child block on the full queue */
++	k_msleep(TIMEOUT_MS);
++
++	k_msgq_purge(&prio_msgq);
++	zassert_ok(k_sem_take(&end_sema, TIMEOUT));
++	zassert_equal(child_ret, -ENOMSG);
++	zassert_equal(k_msgq_num_used_get(&prio_msgq), 0);
++	k_thread_join(tids[0], K_FOREVER);
++	tids[0] = NULL;
++}
++
++static void put_prio_isr(void)
++{
++	char buf[PRIO_MSG_SIZE];
++	uint32_t prio;
++
++	irq_offload(put_prio_isr_entry, &prio_msgq);
++	zassert_equal(k_msgq_get_prio(&prio_msgq, buf, sizeof(buf), &prio, K_NO_WAIT),
++		      PRIO_MSG_SIZE);
++	zassert_equal(prio, 5);
++	zassert_mem_equal(buf, "from isr", sizeof("from isr"));
++}
++
++ZTEST_USER(msgq_api, test_k_msgq_put_prio)
++{
++	section_reset();
++	put_prio_ordering();
++	section_reset();
++	put_prio_varlen();
++	section_reset();
++	put_prio_errors();
++	section_reset();
++	put_prio_blocked_sender();
++	section_reset();
++	put_prio_purge_wakes_sender();
++	if (!k_is_user_context()) {
++		section_reset();
++		put_prio_isr();
++	}
++	section_reset();
++}
++
++/* sections of test_k_msgq_get_prio */
++
++static void get_prio_null_prio(void)
++{
++	char buf[PRIO_MSG_SIZE];
++
++	zassert_ok(k_msgq_put_prio(&prio_msgq, "no prio out", 12, 4, K_NO_WAIT));
++	zassert_equal(k_msgq_get_prio(&prio_msgq, buf, sizeof(buf), NULL, K_NO_WAIT), 12);
++	zassert_mem_equal(buf, "no prio out", 12);
++}
++
++static void get_prio_errors(void)
++{
++	char small[PRIO_MSG_SIZE - 1];
++	char buf[PRIO_MSG_SIZE];
++
++	zassert_ok(k_msgq_put_prio(&prio_msgq, "x", 2, 0, K_NO_WAIT));
++	zassert_equal(k_msgq_get_prio(&prio_msgq, small, sizeof(small), NULL, K_NO_WAIT),
++		      -EMSGSIZE);
++	zassert_equal(k_msgq_get_prio(&prio_msgq, buf, sizeof(buf), NULL, K_NO_WAIT), 2);
++
++	zassert_equal(k_msgq_get_prio(&prio_msgq, buf, sizeof(buf), NULL, K_NO_WAIT), -ENOMSG);
++	zassert_equal(k_msgq_get_prio(&prio_msgq, buf, sizeof(buf), NULL, TIMEOUT), -EAGAIN);
++}
++
++static void get_prio_blocked_receiver(void)
++{
++	spawn_child(blocked_receiver_entry);
++	/* let the child block on the empty queue */
++	k_msleep(TIMEOUT_MS);
++	zassert_equal(k_sem_take(&end_sema, K_NO_WAIT), -EBUSY);
++
++	zassert_ok(k_msgq_put_prio(&prio_msgq, "wake up", 8, 6, K_NO_WAIT));
++	zassert_ok(k_sem_take(&end_sema, TIMEOUT));
++	zassert_equal(child_ret, 8);
++	zassert_equal(child_prio, 6);
++	zassert_mem_equal(child_buf, "wake up", 8);
++	k_thread_join(tids[0], K_FOREVER);
++	tids[0] = NULL;
++}
++
++ZTEST_USER(msgq_api, test_k_msgq_get_prio)
++{
++	section_reset();
++	get_prio_null_prio();
++	section_reset();
++	get_prio_errors();
++	section_reset();
++	get_prio_blocked_receiver();
++	section_reset();
++}
++
++/* sections of test_k_msgq_init_prio */
++
++static void init_prio_attrs(void)
++{
++	struct k_msgq_attrs attrs;
++
++	k_msgq_get_attrs(&prio_msgq, &attrs);
++	zassert_equal(attrs.msg_size, PRIO_MSG_SIZE);
++	zassert_equal(attrs.max_msgs, PRIO_MSGQ_LEN);
++	zassert_equal(attrs.used_msgs, 0);
++	zassert_equal(k_msgq_num_free_get(&prio_msgq), PRIO_MSGQ_LEN);
++	zassert_equal(k_msgq_num_used_get(&prio_msgq), 0);
++}
++
++static void init_prio_classic_ops_enotsup(void)
++{
++	char buf[PRIO_MSG_SIZE] = {0};
++
++	zassert_equal(k_msgq_put(&prio_msgq, buf, K_NO_WAIT), -ENOTSUP);
++	zassert_equal(k_msgq_put_front(&prio_msgq, buf), -ENOTSUP);
++	zassert_equal(k_msgq_get(&prio_msgq, buf, K_NO_WAIT), -ENOTSUP);
++	zassert_equal(k_msgq_peek(&prio_msgq, buf), -ENOTSUP);
++	zassert_equal(k_msgq_peek_at(&prio_msgq, buf, 0), -ENOTSUP);
++}
++
++static void init_prio_ops_on_classic_enotsup(void)
++{
++	static char classic_buf[MSG_SIZE * MSGQ_LEN];
++	char buf[MSG_SIZE] = {0};
++	struct k_msgq classic;
++
++	k_msgq_init(&classic, classic_buf, MSG_SIZE, MSGQ_LEN);
++	zassert_equal(k_msgq_put_prio(&classic, buf, sizeof(buf), 0, K_NO_WAIT), -ENOTSUP);
++	zassert_equal(k_msgq_get_prio(&classic, buf, sizeof(buf), NULL, K_NO_WAIT), -ENOTSUP);
++}
++
++ZTEST(msgq_api, test_k_msgq_init_prio)
++{
++	section_reset();
++	init_prio_attrs();
++	init_prio_classic_ops_enotsup();
++	init_prio_ops_on_classic_enotsup();
++	section_reset();
++}
++
++/* sections of test_k_msgq_alloc_init_prio */
++
++static void alloc_init_prio_errors(void)
++{
++	zassert_equal(k_msgq_alloc_init_prio(&prio_alloc_msgq, PRIO_MSG_SIZE, 0), -EINVAL);
++	zassert_equal(k_msgq_alloc_init_prio(&prio_alloc_msgq, OVERFLOW_SIZE_MSG, 2), -EINVAL);
++	zassert_equal(k_msgq_alloc_init_prio(&prio_alloc_msgq, 1U << 24, 2), -ENOMEM);
++}
++
++static void alloc_init_prio_use(void)
++{
++	char buf[PRIO_MSG_SIZE];
++	uint32_t prio;
++
++	zassert_ok(k_msgq_alloc_init_prio(&prio_alloc_msgq, PRIO_MSG_SIZE, 2));
++	zassert_ok(k_msgq_put_prio(&prio_alloc_msgq, "alloc", 6, 2, K_NO_WAIT));
++	zassert_equal(k_msgq_get_prio(&prio_alloc_msgq, buf, sizeof(buf), &prio, K_NO_WAIT), 6);
++	zassert_equal(prio, 2);
++	zassert_mem_equal(buf, "alloc", 6);
++
++	if (!k_is_user_context()) {
++		zassert_ok(k_msgq_cleanup(&prio_alloc_msgq));
++	}
++}
++
++ZTEST_USER(msgq_api, test_k_msgq_alloc_init_prio)
++{
++	alloc_init_prio_errors();
++	alloc_init_prio_use();
++}
++
++#endif /* CONFIG_MSGQ_PRIO */
+diff --git a/tests/kernel/msgq/msgq_api/testcase.yaml b/tests/kernel/msgq/msgq_api/testcase.yaml
+index ea37668a86f..2377382fae8 100644
+--- a/tests/kernel/msgq/msgq_api/testcase.yaml
++++ b/tests/kernel/msgq/msgq_api/testcase.yaml
+@@ -7,3 +7,6 @@ tests:
+   kernel.message_queue.put_front:
+     extra_configs:
+       - CONFIG_TEST_MSGQ_PUT_FRONT=y
++  kernel.message_queue.prio:
++    extra_configs:
++      - CONFIG_MSGQ_PRIO=y
