@@ -11,7 +11,7 @@
 #include <dirent.h>
 #include "test_fs.h"
 
-#include "../../common/linux_compat_test.h"
+#include "../../shared/linux_compat_test.h"
 
 #define FILL_SIZE 128
 
