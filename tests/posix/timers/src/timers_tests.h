@@ -15,7 +15,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/ztest.h>
 
-#include "../../common/linux_compat_test.h"
+#include "../../shared/linux_compat_test.h"
 
 #define INVALID_TIMERID ((timer_t)-1)
 
