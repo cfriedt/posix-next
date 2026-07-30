@@ -25,7 +25,7 @@
 #include <zephyr/sys/util.h>
 #include <zephyr/ztest.h>
 
-#include "../../common/linux_compat_test.h"
+#include "../../shared/linux_compat_test.h"
 
 #ifdef CONFIG_USERSPACE
 int pthread_kill(pthread_t thread, int sig);
