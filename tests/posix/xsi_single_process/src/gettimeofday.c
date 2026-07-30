@@ -12,7 +12,7 @@
 #include <zephyr/sys/timeutil.h>
 #include <zephyr/ztest.h>
 
-#include "../../common/linux_compat_test.h"
+#include "../../shared/linux_compat_test.h"
 
 ZTEST(xsi_single_process, test_gettimeofday)
 {
