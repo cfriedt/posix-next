@@ -6,7 +6,7 @@ project(posix_file_locking)
 
 FILE(GLOB app_sources
   src/*.c
-  ../common/msleep.c
+  ../shared/msleep.c
 )
 target_sources(app PRIVATE ${app_sources})
 

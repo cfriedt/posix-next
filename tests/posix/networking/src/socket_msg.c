@@ -8,7 +8,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#include "../../common/linux_compat_test.h"
+#include "../../shared/linux_compat_test.h"
 #include "test_net.h"
 
 ZTEST_USER(posix_networking, test_sendmsg)

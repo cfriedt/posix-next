@@ -10,7 +10,7 @@
 
 #include <zephyr/ztest.h>
 
-#include "../../common/linux_compat_test.h"
+#include "../../shared/linux_compat_test.h"
 
 ZTEST_USER(posix_networking, test_sockatmark)
 {
