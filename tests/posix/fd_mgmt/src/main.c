@@ -14,7 +14,7 @@
 
 #include <zephyr/ztest.h>
 
-#include "../../common/linux_compat_test.h"
+#include "../../shared/linux_compat_test.h"
 #include "test_fs.h"
 
 #define EFD_INTERNAL_FLAG 0x1 /* ZVFS_EFD_IN_USE; not settable via F_SETFL */

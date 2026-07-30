@@ -13,8 +13,8 @@
 #include <zephyr/sys/timeutil.h>
 #include <zephyr/ztest.h>
 
-#include "../../common/linux_compat_test.h"
-#include "../../common/nanosleep_common.h"
+#include "../../shared/linux_compat_test.h"
+#include "../../shared/nanosleep_common.h"
 
 static void nanosleep_errors_errno(void)
 {

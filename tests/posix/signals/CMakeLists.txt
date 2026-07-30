@@ -10,7 +10,7 @@ target_sources(app PRIVATE
   src/test_generate.c
   src/test_sigaction.c
   src/test_wait.c
-  ../common/test_sigmask_common.c
+  ../shared/test_sigmask_common.c
 )
 
 target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
