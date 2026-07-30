@@ -15,5 +15,7 @@ zephyr_library_compile_options(-U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
 zephyr_library_compile_options_ifdef(CONFIG_XSI -U_XOPEN_SOURCE -D_XOPEN_SOURCE=700)
 
 if(NOT CONFIG_TC_PROVIDES_POSIX_CLOCK_SELECTION)
-  zephyr_library_sources(clock_selection.c)
+  zephyr_library_sources(clock_nanosleep.c)
+  zephyr_library_sources(pthread_condattr_getclock.c)
+  zephyr_library_sources(pthread_condattr_setclock.c)
 endif()
