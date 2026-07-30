@@ -15,7 +15,7 @@
 #include <zephyr/sys/util.h>
 #include <zephyr/ztest.h>
 
-#include "../../common/linux_compat_test.h"
+#include "../../shared/linux_compat_test.h"
 #include "_main.h"
 
 #define DETACH_THR_ID 2

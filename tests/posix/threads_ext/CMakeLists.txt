@@ -6,7 +6,7 @@ project(posix_threads_ext)
 
 target_sources(app PRIVATE
   src/main.c
-  ../common/test_mutex_common.c
+  ../shared/test_mutex_common.c
 )
 
 target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
