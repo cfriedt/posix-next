@@ -6,6 +6,6 @@ project(posix_clock_selection)
 
 FILE(GLOB app_sources src/*.c)
 
-target_sources(app PRIVATE ${app_sources} ../common/nanosleep_common.c)
+target_sources(app PRIVATE ${app_sources} ../shared/nanosleep_common.c)
 
 target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
