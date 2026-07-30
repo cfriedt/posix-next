@@ -1446,3 +1446,37 @@ patches:
       (function) it exercises - init, alloc, free, clear - and give the
       SYS_ELASTIPOOL_DEFINE storage-sizing case its own per-unit ZTEST.
       A follow-up file because the introducing patch predates this branch.
+  - path: zephyr/k-msgq-prio.patch
+    sha256sum: dd25ff2683df0cca933c87311808996bf265de4ccd4d91d14a2efc4a554d63df
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-30
+    upstreamable: true
+    comments: |
+      kernel: msgq: add opt-in priority-mode message queues
+
+      Adds CONFIG_MSGQ_PRIO: a message queue initialized with
+      k_msgq_init_prio() or k_msgq_alloc_init_prio() delivers messages in
+      descending priority order (FIFO among equal priorities) and records
+      the actual length of each message, as required to natively back POSIX
+      message queues (mq_send()/mq_receive() priorities and actual-length
+      receives). k_msgq_put_prio() bounds the caller-supplied length by the
+      queue's message size; k_msgq_get_prio() returns the stored length and
+      reports the message priority.
+
+      Priority mode is strictly opt-in: struct k_msgq does not grow (the
+      classic read/write ring pointers overlay a priority-sorted used list)
+      and the classic fixed-size FIFO paths are untouched. The priority
+      buffer embeds a control block holding a dedicated sender wait queue
+      and a free-slot list, splitting senders from the receivers on the
+      existing wait queue: blocked peers are woken to retry rather than
+      handed data through swap_data, so purge only ever wakes senders and,
+      unlike the classic direct-handoff path, caller buffers may live on
+      thread stacks under CONFIG_KERNEL_COHERENCE. Classic operations on a
+      priority-mode queue (and vice versa) fail with -ENOTSUP.
+
+      Covered by per-unit ZTESTs (user-capable) in the kernel msgq_api
+      suite under a new kernel.message_queue.prio twister variant, with
+      priority ordering, variable-length, error, blocking, purge, and ISR
+      sections.
