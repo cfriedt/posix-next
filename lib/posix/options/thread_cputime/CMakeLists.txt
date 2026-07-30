@@ -13,6 +13,6 @@ zephyr_library_include_directories(
 zephyr_library_compile_options(-U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
 zephyr_library_compile_options_ifdef(CONFIG_XSI -U_XOPEN_SOURCE -D_XOPEN_SOURCE=700)
 
-if(NOT CONFIG_TC_PROVIDES_POSIX_TIMERS)
-  zephyr_library_sources(clock.c timer.c)
+if(NOT CONFIG_TC_PROVIDES_POSIX_THREAD_CPUTIME)
+  zephyr_library_sources(pthread_getcpuclockid.c)
 endif()
