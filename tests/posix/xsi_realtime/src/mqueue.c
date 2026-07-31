@@ -264,13 +264,13 @@ static void mq_notify_errors(void)
 	int32_t mode = 0777;
 	int flags = O_RDWR | O_CREAT;
 
-	zassert_not_ok(mq_notify(NULL, NULL), "Should return -1 and set errno to EBADF.");
+	zassert_not_ok(mq_notify((mqd_t)-1, NULL), "Should return -1 and set errno to EBADF.");
 	zassert_equal(errno, EBADF);
 
 	mqd = mq_open(queue, flags, mode, &attrs);
 
-	zassert_not_ok(mq_notify(mqd, NULL), "Should return -1 and set errno to EINVAL.");
-	zassert_equal(errno, EINVAL);
+	/* removing a registration that was never armed is not an error */
+	zassert_ok(mq_notify(mqd, NULL));
 
 	/* SIGEV_SIGNAL is supported; a second registration while armed is EBUSY */
 	not.sigev_signo = SIGUSR1;
