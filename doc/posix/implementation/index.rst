@@ -526,14 +526,66 @@ to the distributed ``CONFIG_SYS_TIMER_MIN_ADD_<NAME>`` minimum, and
 ``CONFIG_TIMER_CREATE_WAIT`` was removed because :c:func:`timer_create` no longer blocks.
 
 
-Message Queue Notification
-==========================
+POSIX Message Queues
+====================
 
-:c:func:`mq_notify` supports ``SIGEV_NONE``, ``SIGEV_SIGNAL``, ``SIGEV_THREAD``, and (under
-``_GNU_SOURCE``) Linux's ``SIGEV_THREAD_ID`` extension (carrying a ``pthread_t`` rather than
-Linux's kernel thread ID), dispatched through the same sigevent machinery as POSIX timers. The registration stores a copy of the caller's
-``struct sigevent`` (caller-owned attributes are never modified), fires exactly once when the
-queue transitions from empty to non-empty, and is consumed before dispatch. ``SIGEV_SIGNAL``
-targets the registering thread until Zephyr gains process support. The delivered ``si_code``
-is ``SI_QUEUE`` rather than ``SI_MESGQ``, a documented limitation until the kernel records a
-message-queue-specific code.
+POSIX message queues map 1:1 onto kernel message queues: a queue is a :c:struct:`k_msgq`
+object allocated from the OS-managed system message queue pool
+(:kconfig:option:`CONFIG_SYS_MSGQ`), and ``mqd_t`` is a file descriptor naming it. Every
+``mq_*()`` call is one system call plus ``errno`` translation, so the whole option group is
+usable from user mode: no kernel object pointer is ever exposed, and a stale or foreign
+descriptor reports ``EBADF`` instead of corrupting memory.
+
+**Allocation.** Applications and libraries reserve guaranteed, statically-allocated queues by
+defining int Kconfig symbols named ``CONFIG_SYS_MSGQ_MIN_ADD_<NAME>``; the build system sums
+them with :kconfig:option:`CONFIG_SYS_MSGQ_MIN`. Up to :kconfig:option:`CONFIG_SYS_MSGQ_MAX`
+(default ``INT_MAX``) queues may exist, the excess allocated dynamically without guarantees;
+setting the maximum equal to the accumulated minimum prohibits dynamic allocation entirely.
+Statically allocated queues draw message storage from a fixed per-queue budget
+(:kconfig:option:`CONFIG_SYS_MSGQ_BUF_SIZE`) and :c:func:`mq_open` reports a geometry that
+does not fit as ``ENOSPC``; dynamically allocated queues size their storage to the request and
+are not bound by that budget. Queue names are at most
+:kconfig:option:`CONFIG_SYS_MSGQ_NAMELEN_MAX` characters.
+
+**Messages** carry a priority and a length. :c:func:`mq_send` orders messages by descending
+priority, FIFO within a priority, and :c:func:`mq_receive` reports the priority of the message
+it returns along with its actual length - messages shorter than ``mq_msgsize`` are delivered
+as sent, not padded. Priorities range from ``0`` to
+:kconfig:option:`CONFIG_POSIX_MQ_PRIO_MAX` - 1 (reported by ``MQ_PRIO_MAX``).
+
+**Descriptors.** The access mode and ``O_NONBLOCK`` are per open file description, as POSIX
+specifies: two descriptors for one queue may differ in both, and :c:func:`mq_setattr` changes
+``O_NONBLOCK`` for the calling descriptor alone. A queue persists after its last descriptor is
+closed and is destroyed only once it has been unlinked and no descriptor remains; the name is
+released immediately by :c:func:`mq_unlink`, so it may be reused for a new queue while the old
+one is still being drained. Both timed calls take absolute ``CLOCK_REALTIME`` deadlines,
+report expiry as ``ETIMEDOUT``, and are distinguished from a non-blocking descriptor's
+``EAGAIN``.
+
+**Notification.** :c:func:`mq_notify` supports ``SIGEV_NONE``, ``SIGEV_SIGNAL``,
+``SIGEV_THREAD``, and (under ``_GNU_SOURCE``) Linux's ``SIGEV_THREAD_ID`` extension
+(carrying a ``pthread_t`` rather than Linux's kernel thread ID). The
+registration is armed in the kernel, so the empty-to-non-empty transition is detected
+atomically with the send rather than by sampling the queue depth around it; it fires exactly
+once and is consumed as it fires, after which a new registration may be armed. Arming while
+one is already armed reports ``EBUSY``; removing one that was never armed succeeds, matching
+Linux. ``SIGEV_SIGNAL`` targets the registering thread until Zephyr gains process support and
+delivers ``si_code`` ``SI_MESGQ``. ``SIGEV_THREAD`` maps onto the kernel's function
+notification dispatch (see :c:member:`sys_msgq_notify.fn`): each arrival runs the
+notification function in a fresh detached system-pool thread, spawned by a kernel dispatcher
+woken through a reserved signal number past ``SIGRTMAX`` that applications can neither send,
+mask, nor wait on - notification threads for registrations made by user threads run in user
+mode, in the registrant's memory domain, with the registrant's object permissions.
+``sigev_notify_attributes`` are translated at registration time - stack size and priority are
+honored, the detach state is always detached - and the caller may destroy the attribute
+object afterwards; no POSIX-side state or service thread is involved, so every notification
+form works from user mode.
+
+Migration from earlier releases: ``mqd_t`` is now an ``int`` file descriptor rather than an
+opaque pointer, so a failed :c:func:`mq_open` compares against ``(mqd_t)-1`` and descriptors
+count against the ZVFS descriptor table
+(:kconfig:option:`CONFIG_ZVFS_OPEN_ADD_SIZE_SYS_MSGQ`). :c:func:`mq_receive` and
+:c:func:`mq_timedreceive` return ``ssize_t``, as POSIX specifies.
+:kconfig:option:`CONFIG_POSIX_MQ_OPEN_MAX`, ``CONFIG_MSG_SIZE_MAX``, and
+``CONFIG_MQUEUE_NAMELEN_MAX`` are no longer user configurable - they derive from the
+corresponding ``SYS_MSGQ`` bounds.
