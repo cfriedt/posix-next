@@ -1446,3 +1446,52 @@ patches:
       new kernel.message_queue.notify twister variant: fire-once and
       consumption, non-empty no-fire, signo-0, EBUSY/EINVAL/ENOTSUP
       errors, disarm, and ISR-generation sections.
+  - path: zephyr/sys-msgq.patch
+    sha256sum: d682b0380b09f5c9c5e7f54b3a22057d248a8bbefb24d6374194c3cfa3fcf047
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-30
+    upstreamable: true
+    comments: |
+      lib: os: add sys_msgq, an OS-managed pool of named message queues
+
+      Adds CONFIG_SYS_MSGQ: an OS-managed pool of named, priority-mode
+      message queues opened and operated on through file descriptors -
+      the substrate for POSIX message queues (mq_open() and friends),
+      following the sys_timer/sys_thread pool pattern.
+
+      sys_msgq_open() returns a zvfs descriptor of mode ZVFS_MODE_IMSGQ;
+      sys_msgq_send()/receive()/getattr()/setflags()/notify() are system
+      calls keyed by that descriptor, so no kernel object pointers are
+      ever exposed to user mode, and zvfs_close() releases it. Naming,
+      O_CREAT/O_EXCL, and unlink-with-deferred-destroy semantics live in
+      the registry here rather than in the POSIX shim, which is what lets
+      mq_open() work from user mode at all. Access mode and O_NONBLOCK
+      are per-descriptor state, held in the fd entry's mode bits.
+
+      Pool geometry follows the distributed-minimum idiom: SYS_MSGQ_MIN
+      plus every CONFIG_SYS_MSGQ_MIN_ADD_* contribution is summed by the
+      build system into the un-prefixed SYS_MSGQ_MIN, statically
+      allocated and guaranteed, with SYS_MSGQ_MAX bounding the heap
+      remainder. Statically allocated queues draw message storage from a
+      parallel static buffer array bounded by CONFIG_SYS_MSGQ_BUF_SIZE;
+      heap-allocated queues allocate storage sized to the request, so
+      they are not bounded by that budget.
+
+      Notification builds on the kernel signal registration from
+      k_msgq_notify_arm(). Function-style notification (POSIX
+      SIGEV_THREAD) is dispatched by a single kernel service thread,
+      mirroring sys_timer: it accepts every function-notify queue's
+      arrival signal (the reserved K_SIG_SYS_MSGQ, second-highest in the
+      set as K_SIG_SYS_TIMER holds the highest) and spawns one detached
+      system-pool thread per notification. Threads for registrations
+      made from user mode run in user mode, in the registrant's memory
+      domain, with the registrant's object permissions - so the whole
+      notification surface works from user threads. Starting the
+      dispatcher synchronizes on its signal mask being in place: an
+      arrival that fired before the mask would reach default-action
+      delivery and be discarded instead of staying pending.
+
+      Covered by a new tests/lib/sys_msgq suite with per-unit ZTEST_USERs
+      and libraries.sys_msgq{,.static_only,.userspace} variants.
