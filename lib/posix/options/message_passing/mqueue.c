@@ -1,6 +1,5 @@
 /*
- * Copyright (c) 2018 Intel Corporation
- * Copyright (c) 2024 BayLibre, SAS
+ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -10,517 +9,374 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <mqueue.h>
-#include <pthread.h>
 #include <signal.h>
 #include <string.h>
 #include <time.h>
 #include <sys/stat.h>
 
 #include <zephyr/kernel.h>
-#include <zephyr/sys/atomic.h>
-#include <zephyr/sys/math_extras.h>
+#include <zephyr/sys/fdtable.h>
+#include <zephyr/sys/mqueue.h>
 #include <zephyr/sys/timeutil.h>
 
-typedef struct mqueue_object {
-	sys_snode_t snode;
-	char *mem_buffer;
-	char *mem_obj;
-	struct k_msgq queue;
-	atomic_t ref_count;
-	char *name;
-	/* mq_notify() registration; a copy, never a reference to caller memory */
-	bool notification_armed;
-	struct sigevent notification;
-	/* registering thread: SIGEV_SIGNAL target. TODO(k_process): process-directed */
-	k_tid_t notifier;
-} mqueue_object;
-
-typedef struct mqueue_desc {
-	char *mem_desc;
-	mqueue_object *mqueue;
-	uint32_t  flags;
-} mqueue_desc;
-
-K_SEM_DEFINE(mq_sem, 1, 1);
-
-/* Initialize the list */
-sys_slist_t mq_list = SYS_SLIST_STATIC_INIT(&mq_list);
-
-static mqueue_object *find_in_list(const char *name);
-static int32_t send_message(mqueue_desc *mqd, const char *msg_ptr, size_t msg_len,
-			  k_timeout_t timeout);
-static int32_t receive_message(mqueue_desc *mqd, char *msg_ptr, size_t msg_len,
-			   k_timeout_t timeout);
-static void remove_notification(mqueue_object *msg_queue);
-static void remove_mq(mqueue_object *msg_queue);
-
-/**
- * @brief Open a message queue.
- *
- * Number of message queue and descriptor to message queue are limited by
- * heap size. increase the size through CONFIG_HEAP_MEM_POOL_SIZE.
- *
- * See IEEE 1003.1
+/*
+ * mqd_t is a zvfs file descriptor and the queue itself is a kernel object
+ * from the sys_msgq pool: this layer only translates POSIX spellings into
+ * sys_msgq_*() calls.
  */
+
+static int to_oflags(int oflags)
+{
+	int zflags = 0;
+
+	switch (oflags & O_ACCMODE) {
+	case O_WRONLY:
+		zflags = ZVFS_O_WRONLY;
+		break;
+	case O_RDWR:
+		zflags = ZVFS_O_RDWR;
+		break;
+	default:
+		zflags = ZVFS_O_RDONLY;
+		break;
+	}
+
+	if ((oflags & O_CREAT) != 0) {
+		zflags |= ZVFS_O_CREAT;
+	}
+	if ((oflags & O_EXCL) != 0) {
+		zflags |= ZVFS_O_EXCL;
+	}
+	if ((oflags & O_NONBLOCK) != 0) {
+		zflags |= ZVFS_O_NONBLOCK;
+	}
+
+	return zflags;
+}
+
 mqd_t mq_open(const char *name, int oflags, ...)
 {
+	int ret;
 	va_list va;
-	mode_t mode;
-	struct mq_attr *attrs = NULL;
-	long msg_size = 0U, max_msgs = 0U;
-	mqueue_object *msg_queue;
-	mqueue_desc *msg_queue_desc = NULL, *mqd = (mqueue_desc *)(-1);
-	char *mq_desc_ptr, *mq_obj_ptr, *mq_buf_ptr, *mq_name_ptr;
+	struct k_msgq_attrs kattrs;
+	const struct mq_attr *attrs = NULL;
+	mode_t mode = 0;
 
-	va_start(va, oflags);
 	if ((oflags & O_CREAT) != 0) {
+		va_start(va, oflags);
 		BUILD_ASSERT(sizeof(mode_t) <= sizeof(int));
 		mode = va_arg(va, unsigned int);
-		attrs = va_arg(va, struct mq_attr*);
-	}
-	va_end(va);
+		attrs = va_arg(va, const struct mq_attr *);
+		va_end(va);
 
-	if (attrs != NULL) {
-		msg_size = attrs->mq_msgsize;
-		max_msgs = attrs->mq_maxmsg;
-	}
-
-	if ((name == NULL) || ((oflags & O_CREAT) != 0 && (msg_size <= 0 ||
-						      max_msgs <= 0))) {
-		errno = EINVAL;
-		return (mqd_t)mqd;
-	}
-
-	if ((strlen(name) + 1)  > CONFIG_MQUEUE_NAMELEN_MAX) {
-		errno = ENAMETOOLONG;
-		return (mqd_t)mqd;
-	}
-
-	/* Check if queue already exists */
-	k_sem_take(&mq_sem, K_FOREVER);
-	msg_queue = find_in_list(name);
-	k_sem_give(&mq_sem);
-
-	if ((msg_queue != NULL) && (oflags & O_CREAT) != 0 &&
-	    (oflags & O_EXCL) != 0) {
-		/* Message queue has already been opened and O_EXCL is set */
-		errno = EEXIST;
-		return (mqd_t)mqd;
-	}
-
-	if ((msg_queue == NULL) && (oflags & O_CREAT) == 0) {
-		errno = ENOENT;
-		return (mqd_t)mqd;
-	}
-
-	mq_desc_ptr = k_malloc(sizeof(struct mqueue_desc));
-	if (mq_desc_ptr != NULL) {
-		(void)memset(mq_desc_ptr, 0, sizeof(struct mqueue_desc));
-		msg_queue_desc = (struct mqueue_desc *)mq_desc_ptr;
-		msg_queue_desc->mem_desc = mq_desc_ptr;
-	} else {
-		goto free_mq_desc;
-	}
-
-
-	/* Allocate mqueue object for new message queue */
-	if (msg_queue == NULL) {
-		size_t buf_size;
-
-		/* Check for message quantity and size in message queue */
-		if (attrs->mq_msgsize > CONFIG_MSG_SIZE_MAX ||
-		    attrs->mq_maxmsg > CONFIG_POSIX_MQ_OPEN_MAX) {
-			goto free_mq_desc;
+		if ((attrs == NULL) || (attrs->mq_msgsize <= 0) || (attrs->mq_maxmsg <= 0)) {
+			errno = EINVAL;
+			return (mqd_t)-1;
 		}
 
-		mq_obj_ptr = k_malloc(sizeof(mqueue_object));
-		if (mq_obj_ptr != NULL) {
-			(void)memset(mq_obj_ptr, 0, sizeof(mqueue_object));
-			msg_queue = (mqueue_object *)mq_obj_ptr;
-			msg_queue->mem_obj = mq_obj_ptr;
-
-		} else {
-			goto free_mq_object;
-		}
-
-		mq_name_ptr = k_malloc(strlen(name) + 1);
-		if (mq_name_ptr != NULL) {
-			(void)memset(mq_name_ptr, 0, strlen(name) + 1);
-			msg_queue->name = mq_name_ptr;
-
-		} else {
-			goto free_mq_name;
-		}
-
-		strcpy(msg_queue->name, name);
-
-		if (size_mul_overflow((size_t)msg_size, (size_t)max_msgs, &buf_size)) {
-			goto free_mq_buffer;
-		}
-
-		mq_buf_ptr = k_malloc(buf_size);
-		if (mq_buf_ptr != NULL) {
-			(void)memset(mq_buf_ptr, 0, buf_size);
-			msg_queue->mem_buffer = mq_buf_ptr;
-		} else {
-			goto free_mq_buffer;
-		}
-
-		(void)atomic_set(&msg_queue->ref_count, 1);
-		/* initialize zephyr message queue */
-		k_msgq_init(&msg_queue->queue, msg_queue->mem_buffer, msg_size,
-			    max_msgs);
-		k_sem_take(&mq_sem, K_FOREVER);
-		sys_slist_append(&mq_list, (sys_snode_t *)&(msg_queue->snode));
-		k_sem_give(&mq_sem);
-
-	} else {
-		atomic_inc(&msg_queue->ref_count);
+		kattrs = (struct k_msgq_attrs){
+			.msg_size = (size_t)attrs->mq_msgsize,
+			.max_msgs = (uint32_t)attrs->mq_maxmsg,
+		};
 	}
 
-	msg_queue_desc->mqueue = msg_queue;
-	msg_queue_desc->flags = (oflags & O_NONBLOCK) != 0 ? O_NONBLOCK : 0;
-	return (mqd_t)msg_queue_desc;
+	ret = sys_msgq_open(name, to_oflags(oflags), (uint32_t)mode, (attrs == NULL) ? NULL
+										   : &kattrs);
+	if (ret < 0) {
+		errno = -ret;
+		return (mqd_t)-1;
+	}
 
-free_mq_buffer:
-	k_free(mq_name_ptr);
-free_mq_name:
-	k_free(mq_obj_ptr);
-free_mq_object:
-	k_free(mq_desc_ptr);
-free_mq_desc:
-	errno = ENOSPC;
-	return (mqd_t)mqd;
+	return (mqd_t)ret;
 }
 
-/**
- * @brief Close a message queue descriptor.
- *
- * See IEEE 1003.1
- */
 int mq_close(mqd_t mqdes)
 {
-	mqueue_desc *mqd = (mqueue_desc *)mqdes;
-
-	if (mqd == NULL) {
-		errno = EBADF;
-		return -1;
-	}
-
-	atomic_dec(&mqd->mqueue->ref_count);
-
-	/* remove mq if marked for unlink */
-	if (mqd->mqueue->name == NULL) {
-		remove_mq(mqd->mqueue);
-	}
-
-	k_free(mqd->mem_desc);
-	return 0;
+	return zvfs_close((int)mqdes);
 }
 
-/**
- * @brief Remove a message queue.
- *
- * See IEEE 1003.1
- */
 int mq_unlink(const char *name)
 {
-	mqueue_object *msg_queue;
-
-	k_sem_take(&mq_sem, K_FOREVER);
-	msg_queue = find_in_list(name);
-
-	if (msg_queue == NULL) {
-		k_sem_give(&mq_sem);
-		errno = EBADF;
-		return -1;
-	}
-
-	k_free(msg_queue->name);
-	msg_queue->name = NULL;
-	k_sem_give(&mq_sem);
-	remove_mq(msg_queue);
-	return 0;
-}
-
-/**
- * @brief Send a message to a message queue.
- *
- * All messages in message queue are of equal priority.
- *
- * See IEEE 1003.1
- */
-int mq_send(mqd_t mqdes, const char *msg_ptr, size_t msg_len,
-	    unsigned int msg_prio)
-{
-	mqueue_desc *mqd = (mqueue_desc *)mqdes;
-
-	return send_message(mqd, msg_ptr, msg_len, K_FOREVER);
-}
-
-/**
- * @brief Send message to a message queue within abstime time.
- *
- * All messages in message queue are of equal priority.
- *
- * See IEEE 1003.1
- */
-int mq_timedsend(mqd_t mqdes, const char *msg_ptr, size_t msg_len,
-		 unsigned int msg_prio, const struct timespec *abstime)
-{
-	mqueue_desc *mqd = (mqueue_desc *)mqdes;
-
-	if ((abstime == NULL) || !timespec_is_valid(abstime)) {
-		errno = EINVAL;
-		return -1;
-	}
-
-	return send_message(mqd, msg_ptr, msg_len,
-			    sys_timepoint_timeout(timespec_abs_rt_to_timepoint(abstime)));
-}
-
-/**
- * @brief Receive a message from a message queue.
- *
- * All messages in message queue are of equal priority.
- *
- * See IEEE 1003.1
- */
-int mq_receive(mqd_t mqdes, char *msg_ptr, size_t msg_len,
-		   unsigned int *msg_prio)
-{
-	mqueue_desc *mqd = (mqueue_desc *)mqdes;
-
-	return receive_message(mqd, msg_ptr, msg_len, K_FOREVER);
-}
-
-/**
- * @brief Receive message from a message queue within abstime time.
- *
- * All messages in message queue are of equal priority.
- *
- * See IEEE 1003.1
- */
-int mq_timedreceive(mqd_t mqdes, char *msg_ptr, size_t msg_len,
-			unsigned int *msg_prio, const struct timespec *abstime)
-{
-	mqueue_desc *mqd = (mqueue_desc *)mqdes;
-
-	if ((abstime == NULL) || !timespec_is_valid(abstime)) {
-		errno = EINVAL;
-		return -1;
-	}
-
-	return receive_message(mqd, msg_ptr, msg_len,
-			       sys_timepoint_timeout(timespec_abs_rt_to_timepoint(abstime)));
-}
-
-/**
- * @brief Get message queue attributes.
- *
- * See IEEE 1003.1
- */
-int mq_getattr(mqd_t mqdes, struct mq_attr *mqstat)
-{
-	mqueue_desc *mqd = (mqueue_desc *)mqdes;
-	struct k_msgq_attrs attrs;
-
-	if (mqd == NULL) {
-		errno = EBADF;
-		return -1;
-	}
-
-	k_sem_take(&mq_sem, K_FOREVER);
-	k_msgq_get_attrs(&mqd->mqueue->queue, &attrs);
-	mqstat->mq_flags = mqd->flags;
-	mqstat->mq_maxmsg = attrs.max_msgs;
-	mqstat->mq_msgsize = attrs.msg_size;
-	mqstat->mq_curmsgs = attrs.used_msgs;
-	k_sem_give(&mq_sem);
-	return 0;
-}
-
-/**
- * @brief Set message queue attributes.
- *
- * See IEEE 1003.1
- */
-int mq_setattr(mqd_t mqdes, const struct mq_attr *mqstat,
-	       struct mq_attr *omqstat)
-{
-	mqueue_desc *mqd = (mqueue_desc *)mqdes;
-
-	if (mqd == NULL) {
-		errno = EBADF;
-		return -1;
-	}
-
-	if (mqstat->mq_flags != 0 && mqstat->mq_flags != O_NONBLOCK) {
-		errno = EINVAL;
-		return -1;
-	}
-
-	if (omqstat != NULL) {
-		mq_getattr(mqdes, omqstat);
-	}
-
-	k_sem_take(&mq_sem, K_FOREVER);
-	mqd->flags = mqstat->mq_flags;
-	k_sem_give(&mq_sem);
-
-	return 0;
-}
-
-/**
- * @brief Notify process that a message is available.
- *
- * See IEEE 1003.1
- */
-int mq_notify(mqd_t mqdes, const struct sigevent *notification)
-{
-	mqueue_desc *mqd = (mqueue_desc *)mqdes;
-
-	if (mqd == NULL) {
-		errno = EBADF;
-		return -1;
-	}
-
-	mqueue_object *msg_queue = mqd->mqueue;
-
-	if (notification == NULL) {
-		if (!msg_queue->notification_armed) {
-			errno = EINVAL;
-			return -1;
-		}
-		remove_notification(msg_queue);
-		return 0;
-	}
-
-	if (msg_queue->notification_armed) {
-		errno = EBUSY;
-		return -1;
-	}
-
-	int ret = posix_sigev_validate(notification, false);
+	int ret = sys_msgq_unlink(name);
 
 	if (ret < 0) {
 		errno = -ret;
 		return -1;
 	}
 
-	k_sem_take(&mq_sem, K_FOREVER);
-	msg_queue->notification = *notification;
-	msg_queue->notifier = k_current_get();
-	msg_queue->notification_armed = true;
-	k_sem_give(&mq_sem);
-
 	return 0;
 }
 
-/* Internal functions */
-static mqueue_object *find_in_list(const char *name)
+/*
+ * Translate a transfer failure to errno. The kernel distinguishes "did not
+ * wait" (-ENOMSG) from "waited and the deadline passed" (-EAGAIN), while POSIX
+ * distinguishes a non-blocking descriptor (EAGAIN) from an expired timeout
+ * (ETIMEDOUT). The two disagree in one case: a timed call whose deadline has
+ * already passed does not wait either, so the descriptor's flags decide.
+ */
+static int mq_transfer_errno(mqd_t mqdes, int ret, bool timed)
 {
-	sys_snode_t *mq;
-	mqueue_object *msg_queue;
+	int oflags = 0;
 
-	mq = mq_list.head;
-
-	while (mq != NULL) {
-		msg_queue = (mqueue_object *)mq;
-		if ((msg_queue->name != NULL) && (strcmp(msg_queue->name, name) == 0)) {
-			return msg_queue;
-		}
-
-		mq = mq->next;
+	if (!timed) {
+		return (ret == -ENOMSG) ? EAGAIN : -ret;
 	}
 
-	return NULL;
+	if (ret == -EAGAIN) {
+		return ETIMEDOUT;
+	}
+	if (ret != -ENOMSG) {
+		return -ret;
+	}
+
+	if ((sys_msgq_getattr((int)mqdes, NULL, &oflags) == 0) &&
+	    ((oflags & ZVFS_O_NONBLOCK) != 0)) {
+		return EAGAIN;
+	}
+
+	return ETIMEDOUT;
 }
 
-static int32_t send_message(mqueue_desc *mqd, const char *msg_ptr, size_t msg_len,
-			  k_timeout_t timeout)
+static int mq_send_common(mqd_t mqdes, const char *msg_ptr, size_t msg_len, unsigned int msg_prio,
+			  k_timeout_t timeout, bool timed)
 {
-	int32_t ret = -1;
+	int ret;
 
-	if (mqd == NULL) {
-		errno = EBADF;
-		return ret;
+	if (msg_prio >= CONFIG_POSIX_MQ_PRIO_MAX) {
+		errno = EINVAL;
+		return -1;
 	}
 
-	if ((mqd->flags & O_NONBLOCK) != 0U) {
-		timeout = K_NO_WAIT;
-	}
-
-	if (msg_len >  mqd->mqueue->queue.msg_size) {
-		errno = EMSGSIZE;
-		return ret;
-	}
-
-	uint32_t msgq_num = k_msgq_num_used_get(&mqd->mqueue->queue);
-
-	if (k_msgq_put(&mqd->mqueue->queue, (void *)msg_ptr, timeout) != 0) {
-		errno = K_TIMEOUT_EQ(timeout, K_NO_WAIT) ? EAGAIN : ETIMEDOUT;
-		return ret;
-	}
-
-	/* the registered notification fires once, when the queue goes empty -> non-empty */
-	if ((msgq_num == 0U) && mqd->mqueue->notification_armed) {
-		struct sigevent notification = mqd->mqueue->notification;
-		k_tid_t const notifier = mqd->mqueue->notifier;
-
-		remove_notification(mqd->mqueue);
-		(void)posix_sigev_notify_now(&notification, notifier);
+	ret = sys_msgq_send((int)mqdes, msg_ptr, msg_len, msg_prio, timeout);
+	if (ret < 0) {
+		errno = mq_transfer_errno(mqdes, ret, timed);
+		return -1;
 	}
 
 	return 0;
 }
 
-static int32_t receive_message(mqueue_desc *mqd, char *msg_ptr, size_t msg_len,
-			     k_timeout_t timeout)
+static ssize_t mq_receive_common(mqd_t mqdes, char *msg_ptr, size_t msg_len, unsigned int *msg_prio,
+				 k_timeout_t timeout, bool timed)
 {
-	int ret = -1;
+	int ret;
+	uint32_t prio;
 
-	if (mqd == NULL) {
-		errno = EBADF;
-		return ret;
+	ret = sys_msgq_receive((int)mqdes, msg_ptr, msg_len, &prio, timeout);
+	if (ret < 0) {
+		errno = mq_transfer_errno(mqdes, ret, timed);
+		return -1;
 	}
 
-	if (msg_len < mqd->mqueue->queue.msg_size) {
-		errno = EMSGSIZE;
-		return ret;
-	}
-
-	if ((mqd->flags & O_NONBLOCK) != 0U) {
-		timeout = K_NO_WAIT;
-	}
-
-	if (k_msgq_get(&mqd->mqueue->queue, (void *)msg_ptr, timeout) != 0) {
-		errno = K_TIMEOUT_EQ(timeout, K_NO_WAIT) ? EAGAIN : ETIMEDOUT;
-	} else {
-		ret = mqd->mqueue->queue.msg_size;
+	if (msg_prio != NULL) {
+		*msg_prio = prio;
 	}
 
 	return ret;
 }
 
-static void remove_mq(mqueue_object *msg_queue)
+int mq_send(mqd_t mqdes, const char *msg_ptr, size_t msg_len, unsigned int msg_prio)
 {
-	if (atomic_cas(&msg_queue->ref_count, 0, 0)) {
-		k_sem_take(&mq_sem, K_FOREVER);
-		sys_slist_find_and_remove(&mq_list, (sys_snode_t *) msg_queue);
-		k_sem_give(&mq_sem);
-
-		/* Free mq buffer and pbject */
-		k_free(msg_queue->mem_buffer);
-		k_free(msg_queue->mem_obj);
-	}
+	return mq_send_common(mqdes, msg_ptr, msg_len, msg_prio, K_FOREVER, false);
 }
 
-static void remove_notification(mqueue_object *msg_queue)
+int mq_timedsend(mqd_t mqdes, const char *msg_ptr, size_t msg_len, unsigned int msg_prio,
+		 const struct timespec *abstime)
 {
-	k_sem_take(&mq_sem, K_FOREVER);
-	msg_queue->notification_armed = false;
-	memset(&msg_queue->notification, 0, sizeof(struct sigevent));
-	msg_queue->notifier = NULL;
-	k_sem_give(&mq_sem);
+	if ((abstime == NULL) || !timespec_is_valid(abstime)) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	return mq_send_common(mqdes, msg_ptr, msg_len, msg_prio,
+			      timespec_abs_to_timeout(SYS_CLOCK_REALTIME, abstime), true);
+}
+
+ssize_t mq_receive(mqd_t mqdes, char *msg_ptr, size_t msg_len, unsigned int *msg_prio)
+{
+	return mq_receive_common(mqdes, msg_ptr, msg_len, msg_prio, K_FOREVER, false);
+}
+
+ssize_t mq_timedreceive(mqd_t mqdes, char *msg_ptr, size_t msg_len, unsigned int *msg_prio,
+			const struct timespec *abstime)
+{
+	if ((abstime == NULL) || !timespec_is_valid(abstime)) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	return mq_receive_common(mqdes, msg_ptr, msg_len, msg_prio,
+				 timespec_abs_to_timeout(SYS_CLOCK_REALTIME, abstime), true);
+}
+
+int mq_getattr(mqd_t mqdes, struct mq_attr *mqstat)
+{
+	int ret;
+	int oflags;
+	struct k_msgq_attrs kattrs;
+
+	if (mqstat == NULL) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	ret = sys_msgq_getattr((int)mqdes, &kattrs, &oflags);
+	if (ret < 0) {
+		errno = -ret;
+		return -1;
+	}
+
+	*mqstat = (struct mq_attr){
+		.mq_flags = ((oflags & ZVFS_O_NONBLOCK) != 0) ? O_NONBLOCK : 0,
+		.mq_maxmsg = (long)kattrs.max_msgs,
+		.mq_msgsize = (long)kattrs.msg_size,
+		.mq_curmsgs = (long)kattrs.used_msgs,
+	};
+
+	return 0;
+}
+
+int mq_setattr(mqd_t mqdes, const struct mq_attr *mqstat, struct mq_attr *omqstat)
+{
+	int ret;
+
+	if (mqstat == NULL) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	if ((mqstat->mq_flags & ~(long)O_NONBLOCK) != 0) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	if (omqstat != NULL) {
+		ret = mq_getattr(mqdes, omqstat);
+		if (ret < 0) {
+			return -1;
+		}
+	}
+
+	ret = sys_msgq_setflags((int)mqdes,
+				((mqstat->mq_flags & O_NONBLOCK) != 0) ? ZVFS_O_NONBLOCK : 0);
+	if (ret < 0) {
+		errno = -ret;
+		return -1;
+	}
+
+	return 0;
+}
+
+int mq_notify(mqd_t mqdes, const struct sigevent *notification)
+{
+	int ret;
+	struct sys_msgq_notify notify = {0};
+
+	if (notification == NULL) {
+		ret = sys_msgq_notify((int)mqdes, NULL);
+		if (ret == -EINVAL) {
+			/* removing a registration that was never armed is not an error */
+			ret = 0;
+		}
+		if (ret < 0) {
+			errno = -ret;
+			return -1;
+		}
+		return 0;
+	}
+
+	switch (notification->sigev_notify) {
+	case SIGEV_NONE:
+		/* consumed by the transition, generating nothing */
+		break;
+#ifdef CONFIG_SIGNAL
+	case SIGEV_SIGNAL:
+		/* TODO(k_process): becomes process-directed with process support */
+		notify.target = (k_pid_t)k_current_get();
+		notify.signo = z_sig_from_posix(notification->sigev_signo);
+		if (notify.signo < 0) {
+			errno = EINVAL;
+			return -1;
+		}
+		notify.value.sival_ptr = notification->sigev_value.sival_ptr;
+		break;
+#ifdef SIGEV_THREAD_ID
+	case SIGEV_THREAD_ID: {
+		pthread_t th = (pthread_t)notification->sigev_notify_thread_id;
+		struct k_thread *const target = to_k_thread(&th);
+
+		if (target == NULL) {
+			errno = EINVAL;
+			return -1;
+		}
+		notify.target = (k_pid_t)target;
+		notify.signo = z_sig_from_posix(notification->sigev_signo);
+		if (notify.signo < 0) {
+			errno = EINVAL;
+			return -1;
+		}
+		notify.value.sival_ptr = notification->sigev_value.sival_ptr;
+		break;
+	}
+#endif /* SIGEV_THREAD_ID */
+#endif /* CONFIG_SIGNAL */
+	case SIGEV_THREAD: {
+		if (notification->sigev_notify_function == NULL) {
+			errno = EINVAL;
+			return -1;
+		}
+
+		/*
+		 * The kernel dispatcher runs the notification function in a fresh
+		 * (detached) thread per arrival; both unions overlay an int and a
+		 * pointer at offset zero, so the conversion is ABI-transparent.
+		 */
+		notify.fn = (void (*)(union k_sig_val))notification->sigev_notify_function;
+		notify.value.sival_ptr = notification->sigev_value.sival_ptr;
+		notify.fn_stack_size = 0;
+		notify.fn_priority = k_thread_priority_get(k_current_get());
+
+#ifdef _POSIX_THREADS
+		const pthread_attr_t *attr =
+			(const pthread_attr_t *)notification->sigev_notify_attributes;
+
+		if (attr != NULL) {
+			/*
+			 * Translated at registration time: stack size and priority are
+			 * honored (where those option groups are configured); detach
+			 * state is always detached, other attributes do not apply.
+			 */
+#ifdef _POSIX_THREAD_ATTR_STACKSIZE
+			size_t stacksize = 0;
+
+			if (pthread_attr_getstacksize(attr, &stacksize) == 0) {
+				notify.fn_stack_size = stacksize;
+			}
+#endif /* _POSIX_THREAD_ATTR_STACKSIZE */
+#ifdef _POSIX_THREAD_PRIORITY_SCHEDULING
+			int policy = SCHED_RR;
+			struct sched_param param = {0};
+
+			if ((pthread_attr_getschedpolicy(attr, &policy) == 0) &&
+			    (pthread_attr_getschedparam(attr, &param) == 0)) {
+				notify.fn_priority =
+					posix_to_zephyr_priority(param.sched_priority, policy);
+			}
+#endif /* _POSIX_THREAD_PRIORITY_SCHEDULING */
+		}
+#endif /* _POSIX_THREADS */
+		break;
+	}
+	default:
+		errno = EINVAL;
+		return -1;
+	}
+
+	ret = sys_msgq_notify((int)mqdes, &notify);
+	if (ret < 0) {
+		errno = -ret;
+		return -1;
+	}
+
+	return 0;
 }
