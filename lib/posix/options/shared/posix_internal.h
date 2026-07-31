@@ -285,6 +285,10 @@ static inline int z_si_code_to_posix(int code)
 		return SI_QUEUE;
 	case K_SI_TIMER:
 		return SI_TIMER;
+#ifdef CONFIG_MSGQ_NOTIFY
+	case K_SI_MSGQ:
+		return SI_MESGQ;
+#endif /* CONFIG_MSGQ_NOTIFY */
 	default:
 		return code;
 	}
