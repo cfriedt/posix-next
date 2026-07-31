@@ -1,0 +1,1670 @@
+diff --git a/include/zephyr/kernel/signal.h b/include/zephyr/kernel/signal.h
+index 9cf7e64f1e2..afef8e15e87 100644
+--- a/include/zephyr/kernel/signal.h
++++ b/include/zephyr/kernel/signal.h
+@@ -125,6 +125,15 @@ struct k_sig_info {
+  */
+ #define K_SIG_SYS_TIMER SIGNAL_SET_SIZE
+ 
++/**
++ * @brief Kernel signal reserved for message queue function-notification dispatch
++ *
++ * When @kconfig{CONFIG_SYS_MSGQ} is enabled, the second-highest signal number is reserved to
++ * wake the system message queue dispatcher (see sys_msgq_notify()); applications should not
++ * queue or wait for it directly.
++ */
++#define K_SIG_SYS_MSGQ (SIGNAL_SET_SIZE - 1)
++
+ /** @brief A bitset large enough to contain all signal bits. */
+ struct k_sig_set {
+ 	unsigned long sig[DIV_ROUND_UP(MAX(SIGNAL_SET_SIZE, 1), BITS_PER_LONG)];
+diff --git a/include/zephyr/sys/mqueue.h b/include/zephyr/sys/mqueue.h
+new file mode 100644
+index 00000000000..f0d6fa6e7a8
+--- /dev/null
++++ b/include/zephyr/sys/mqueue.h
+@@ -0,0 +1,199 @@
++/*
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_INCLUDE_SYS_MQUEUE_H_
++#define ZEPHYR_INCLUDE_SYS_MQUEUE_H_
++
++#include <stddef.h>
++#include <stdint.h>
++
++#include <zephyr/kernel.h>
++#include <zephyr/kernel/signal.h>
++#include <zephyr/sys/fdtable.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/**
++ * @defgroup sys_msgq_apis OS-managed named message queue APIs
++ * @ingroup os_services
++ *
++ * An OS-managed pool of named, priority-mode message queues, opened and
++ * operated on through file descriptors: the substrate for POSIX message
++ * queues (mq_open() and friends). Queues are named, reference counted,
++ * persist until unlinked, and every operation is a system call keyed by the
++ * file descriptor, so no kernel object pointers or object permissions are
++ * exposed to user mode. A descriptor is closed with zvfs_close().
++ * @{
++ */
++
++/**
++ * @brief Notification registration for sys_msgq_notify().
++ *
++ * When @ref fn is NULL, signal @ref signo carrying @ref value is generated
++ * for thread @ref target when a message arrives at the empty queue; a
++ * @ref signo of 0 registers a notification that is consumed without
++ * generating anything (POSIX `SIGEV_NONE`). When @ref fn is non-NULL, a
++ * detached system-pool thread runs `fn(value)` instead (POSIX
++ * `SIGEV_THREAD`); @ref fn_priority and @ref fn_stack_size shape that
++ * thread, which runs in user mode in the registrant's memory domain when the
++ * registration was made from a user thread.
++ */
++struct sys_msgq_notify {
++	/** Thread the signal is generated for (fn == NULL, signo != 0) */
++	k_pid_t target;
++	/** Signal number to generate, or 0 for none */
++	int signo;
++	/** Value carried by the notification */
++	union k_sig_val value;
++	/** Function notification: called as fn(value) from a detached thread */
++	void (*fn)(union k_sig_val value);
++	/** Priority of the function-notification thread */
++	int fn_priority;
++	/** Stack size of the function-notification thread (0 for default) */
++	size_t fn_stack_size;
++};
++
++/** File-mode bit on an @ref ZVFS_MODE_IMSGQ descriptor: opened for reading */
++#define SYS_MSGQ_FMODE_READ  ZVFS_S_IRUSR
++/** File-mode bit on an @ref ZVFS_MODE_IMSGQ descriptor: opened for writing */
++#define SYS_MSGQ_FMODE_WRITE ZVFS_S_IWUSR
++/** File-mode bit on an @ref ZVFS_MODE_IMSGQ descriptor: non-blocking */
++#define SYS_MSGQ_FMODE_NONBLOCK ZVFS_S_IXUSR
++
++/**
++ * @brief Open (and possibly create) a named message queue.
++ *
++ * Opens the queue named @a name, creating it when @a oflags contains
++ * @ref ZVFS_O_CREAT and no queue of that name exists. Creation requires
++ * @a attr with a non-zero @c msg_size and @c max_msgs whose storage fits the
++ * per-queue buffer budget (@kconfig{CONFIG_SYS_MSGQ_BUF_SIZE}). The access
++ * mode and @ref ZVFS_O_NONBLOCK are recorded per descriptor.
++ *
++ * @param name Queue name (no path semantics; at most
++ *             @kconfig{CONFIG_SYS_MSGQ_NAMELEN_MAX} characters).
++ * @param oflags ZVFS_O_* flags: access mode, ZVFS_O_CREAT, ZVFS_O_EXCL,
++ *               ZVFS_O_NONBLOCK.
++ * @param mode Creation mode bits (recorded but not enforced).
++ * @param attr Queue geometry when creating (else may be NULL).
++ *
++ * @return A file descriptor on success, otherwise a negative errno: -EEXIST
++ *         (O_CREAT|O_EXCL and the name exists), -ENOENT (no O_CREAT and the
++ *         name does not exist), -EINVAL (bad name or geometry), -ENOSPC
++ *         (geometry exceeds the buffer budget or the pool is exhausted),
++ *         -ENFILE (no free file descriptors).
++ */
++__syscall int sys_msgq_open(const char *name, int oflags, uint32_t mode,
++			    const struct k_msgq_attrs *attr);
++
++/**
++ * @brief Unlink a named message queue.
++ *
++ * Removes @a name from the registry immediately; the queue itself is
++ * destroyed once its last descriptor is closed.
++ *
++ * @param name Queue name.
++ *
++ * @retval 0 Success.
++ * @retval -ENOENT No queue of that name exists.
++ * @retval -EINVAL Bad name.
++ */
++__syscall int sys_msgq_unlink(const char *name);
++
++/**
++ * @brief Send a message to an open message queue.
++ *
++ * @param fd Descriptor from sys_msgq_open().
++ * @param msg Message contents.
++ * @param len Message length; at most the queue's message size.
++ * @param prio Message priority (higher delivered first).
++ * @param timeout Waiting period, or K_NO_WAIT / K_FOREVER. Forced to
++ *                K_NO_WAIT on a non-blocking descriptor.
++ *
++ * @retval 0 Message sent.
++ * @retval -EBADF @a fd is not a message queue descriptor open for writing.
++ * @retval -EMSGSIZE @a len exceeds the queue's message size.
++ * @retval -ENOMSG Queue full and no waiting was performed.
++ * @retval -EAGAIN Waiting period timed out.
++ */
++__syscall int sys_msgq_send(int fd, const void *msg, size_t len, uint32_t prio,
++			    k_timeout_t timeout);
++
++/**
++ * @brief Receive the highest-priority message from an open message queue.
++ *
++ * @param fd Descriptor from sys_msgq_open().
++ * @param msg Receive buffer.
++ * @param size Receive buffer size; at least the queue's message size.
++ * @param prio Where to store the received message's priority, or NULL.
++ * @param timeout Waiting period, or K_NO_WAIT / K_FOREVER. Forced to
++ *                K_NO_WAIT on a non-blocking descriptor.
++ *
++ * @retval >=0 Length of the received message.
++ * @retval -EBADF @a fd is not a message queue descriptor open for reading.
++ * @retval -EMSGSIZE @a size is smaller than the queue's message size.
++ * @retval -ENOMSG Queue empty and no waiting was performed.
++ * @retval -EAGAIN Waiting period timed out.
++ */
++__syscall int sys_msgq_receive(int fd, void *msg, size_t size, uint32_t *prio,
++			       k_timeout_t timeout);
++
++/**
++ * @brief Retrieve queue attributes and per-descriptor flags.
++ *
++ * @param fd Descriptor from sys_msgq_open().
++ * @param attr Where to store the queue geometry and current fill, or NULL.
++ * @param oflags Where to store the descriptor's ZVFS_O_* flags (access mode
++ *               and ZVFS_O_NONBLOCK), or NULL.
++ *
++ * @retval 0 Success.
++ * @retval -EBADF @a fd is not a message queue descriptor.
++ */
++__syscall int sys_msgq_getattr(int fd, struct k_msgq_attrs *attr, int *oflags);
++
++/**
++ * @brief Update per-descriptor flags.
++ *
++ * Only @ref ZVFS_O_NONBLOCK may be changed.
++ *
++ * @param fd Descriptor from sys_msgq_open().
++ * @param oflags New flags; bits other than ZVFS_O_NONBLOCK must be zero.
++ *
++ * @retval 0 Success.
++ * @retval -EBADF @a fd is not a message queue descriptor.
++ * @retval -EINVAL Unsupported flag bits set.
++ */
++__syscall int sys_msgq_setflags(int fd, int oflags);
++
++/**
++ * @brief Register or remove an empty-to-non-empty notification.
++ *
++ * Registers @a notify on the queue underlying @a fd (see
++ * @ref sys_msgq_notify and k_msgq_notify_arm()); a NULL @a notify removes
++ * the armed registration.
++ *
++ * @param fd Descriptor from sys_msgq_open().
++ * @param notify Registration, or NULL to remove.
++ *
++ * @retval 0 Success.
++ * @retval -EBADF @a fd is not a message queue descriptor.
++ * @retval -EBUSY A registration is already armed.
++ * @retval -EINVAL Removal requested with no registration armed, or invalid
++ *         registration fields.
++ * @retval -ENOTSUP A signal was requested without @kconfig{CONFIG_SIGNAL}.
++ */
++__syscall int sys_msgq_notify(int fd, const struct sys_msgq_notify *notify);
++
++/** @} */
++
++#ifdef __cplusplus
++}
++#endif
++
++#include <zephyr/syscalls/mqueue.h>
++
++#endif /* ZEPHYR_INCLUDE_SYS_MQUEUE_H_ */
+diff --git a/lib/os/CMakeLists.txt b/lib/os/CMakeLists.txt
+index 0a9698bfa44..787dc864d25 100644
+--- a/lib/os/CMakeLists.txt
++++ b/lib/os/CMakeLists.txt
+@@ -108,3 +108,16 @@ if(CONFIG_SYS_TIMER)
+   endforeach()
+   zephyr_compile_definitions(SYS_TIMER_MIN=${_sys_timer_min})
+ endif()
++
++zephyr_sources_ifdef(CONFIG_SYS_MSGQ mqueue.c)
++zephyr_syscall_header_ifdef(CONFIG_SYS_MSGQ ${ZEPHYR_BASE}/include/zephyr/sys/mqueue.h)
++
++if(CONFIG_SYS_MSGQ)
++  # Sum CONFIG_SYS_MSGQ_MIN with any CONFIG_SYS_MSGQ_MIN_ADD_* additions
++  import_kconfig(CONFIG_SYS_MSGQ_MIN_ADD_ ${DOTCONFIG} _sys_msgq_min_add_keys)
++  set(_sys_msgq_min ${CONFIG_SYS_MSGQ_MIN})
++  foreach(_add ${_sys_msgq_min_add_keys})
++    math(EXPR _sys_msgq_min "${_sys_msgq_min} + ${${_add}}")
++  endforeach()
++  zephyr_compile_definitions(SYS_MSGQ_MIN=${_sys_msgq_min})
++endif()
+diff --git a/lib/os/Kconfig b/lib/os/Kconfig
+index f5decacd38f..36cfbddcd8e 100644
+--- a/lib/os/Kconfig
++++ b/lib/os/Kconfig
+@@ -147,6 +147,7 @@ rsource "Kconfig.cbprintf"
+ rsource "Kconfig.sys_thread"
+ 
+ rsource "Kconfig.sys_timer"
++rsource "Kconfig.sys_msgq"
+ rsource "zvfs/Kconfig"
+ rsource "cpu_load/Kconfig"
+ 
+diff --git a/lib/os/Kconfig.sys_msgq b/lib/os/Kconfig.sys_msgq
+new file mode 100644
+index 00000000000..2fdce6140b8
+--- /dev/null
++++ b/lib/os/Kconfig.sys_msgq
+@@ -0,0 +1,99 @@
++# SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++# SPDX-License-Identifier: Apache-2.0
++
++config SYS_MSGQ
++	bool "Support an OS-managed pool of named message queues"
++	select MSGQ_PRIO
++	select MSGQ_NOTIFY
++	select SYS_ELASTIPOOL
++	select ZVFS
++	select ZVFS_FDTABLE
++	# to support heap-based allocation by default, can be disabled
++	imply SYS_HASH_MAP
++	imply SYS_HASH_FUNC32
++	help
++	  Select 'y' here to support an OS-managed pool of named,
++	  priority-mode message queues operated on through file descriptors
++	  with the sys_msgq_*() system calls. This is the substrate for POSIX
++	  message queues (mq_open() and friends).
++
++if SYS_MSGQ
++
++config SYS_MSGQ_DISPATCH_PRIO
++	int "Priority of the function-notification dispatcher thread"
++	depends on SIGNAL && SYS_THREAD && THREAD_DETACH
++	default 0
++	help
++	  Priority of the system message queue dispatcher thread. Must be a
++	  preemptible priority: the dispatcher shares the kernel signal
++	  queue's readiness signal with every other signal waiter and must
++	  not starve them.
++
++config SYS_MSGQ_DISPATCH_STACK_SIZE
++	int "Stack size of the function-notification dispatcher thread"
++	depends on SIGNAL && SYS_THREAD && THREAD_DETACH
++	default 1024
++	help
++	  Stack size of the system message queue dispatcher, the kernel
++	  service thread that accepts function-notification message arrivals
++	  and spawns one detached thread per notification. Started on first
++	  use; notification threads themselves draw from the system thread
++	  pool (CONFIG_SYS_THREAD_STACK_SIZE and friends).
++
++config SYS_MSGQ_MAX
++	int "Maximum size of the system message queue pool"
++	default 2147483647
++	help
++	  This value represents the maximum number of message queues that may
++	  be allocated from the system message queue pool. The first
++	  SYS_MSGQ_MIN (the sum of CONFIG_SYS_MSGQ_MIN and all
++	  CONFIG_SYS_MSGQ_MIN_ADD_* contributions) are statically allocated
++	  and guaranteed; the remainder come from the heap, without
++	  guarantees.
++
++	  The default (INT_MAX) effectively does not limit dynamic
++	  allocation. Set this equal to the accumulated minimum to prohibit
++	  dynamic allocation entirely.
++
++	  CONFIG_SYS_MSGQ_MAX must be >= the accumulated SYS_MSGQ_MIN.
++
++config SYS_MSGQ_MIN
++	int "Minimum size of the system message queue pool"
++	default 0
++	help
++	  This value represents the minimum number of message queues that are
++	  guaranteed to be available from the system message queue pool. The
++	  minimum number is guaranteed via static allocation.
++
++	  Applications and libraries contribute additional guaranteed queues
++	  by defining int symbols named CONFIG_SYS_MSGQ_MIN_ADD_<NAME>; the
++	  build system sums CONFIG_SYS_MSGQ_MIN with all such contributions
++	  and, for technical reasons, provides the result to code as the
++	  un-prefixed SYS_MSGQ_MIN compile definition.
++
++config SYS_MSGQ_BUF_SIZE
++	int "Per-queue message storage budget (bytes)"
++	default 512
++	help
++	  Fixed per-queue message storage budget. Opening a queue fails with
++	  -ENOSPC when K_MSGQ_PRIO_BUF_SIZE(msg_size, max_msgs) exceeds this
++	  budget. Every pool slot - static or heap-allocated - carries this
++	  budget, keeping the pool's slot size uniform.
++
++config SYS_MSGQ_NAMELEN_MAX
++	int "Maximum message queue name length"
++	default 16
++	range 1 255
++	help
++	  Maximum length of a message queue name, not counting the
++	  terminating NUL.
++
++config ZVFS_OPEN_ADD_SIZE_SYS_MSGQ
++	int "File descriptors reserved for message queues"
++	default 4
++	help
++	  Contribution of the system message queue pool to the ZVFS file
++	  descriptor table size: the number of concurrently open message
++	  queue descriptors to reserve space for.
++
++endif # SYS_MSGQ
+diff --git a/lib/os/mqueue.c b/lib/os/mqueue.c
+new file mode 100644
+index 00000000000..7de8793bbfe
+--- /dev/null
++++ b/lib/os/mqueue.c
+@@ -0,0 +1,781 @@
++/*
++ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <string.h>
++
++#include <zephyr/internal/syscall_handler.h>
++#include <zephyr/kernel.h>
++#include <zephyr/kernel/signal.h>
++#include <zephyr/logging/log.h>
++#include <zephyr/sys/elastipool.h>
++#include <zephyr/sys/fdtable.h>
++#include <zephyr/sys/internal/fdtable_priv.h>
++#include <zephyr/sys/mqueue.h>
++#include <zephyr/sys/thread.h>
++#include <zephyr/toolchain.h>
++
++LOG_MODULE_REGISTER(sys_msgq, CONFIG_KERNEL_LOG_LEVEL);
++
++#if defined(CONFIG_SIGNAL) && defined(CONFIG_SYS_THREAD) && defined(CONFIG_THREAD_DETACH)
++#define SYS_MSGQ_DISPATCH 1
++#else
++#define SYS_MSGQ_DISPATCH 0
++#endif
++
++struct sys_msgq {
++	sys_snode_t node;  /* registry link */
++	uint16_t busy;     /* in-flight fd-keyed operations */
++	bool unlinked;
++	bool buf_heap;     /* message storage was heap-allocated */
++	char *buf;
++	struct k_msgq msgq;
++	char name[CONFIG_SYS_MSGQ_NAMELEN_MAX + 1];
++#if SYS_MSGQ_DISPATCH
++	/* function notification, dispatched via K_SIG_SYS_MSGQ */
++	void (*notify_fn)(union k_sig_val value);
++	int notify_fn_prio;
++	size_t notify_fn_stack_size;
++	union k_sig_val notify_value;
++#ifdef CONFIG_USERSPACE
++	struct k_mem_domain *notify_fn_domain;
++	k_tid_t notify_fn_perms_src;
++#endif /* CONFIG_USERSPACE */
++#endif /* SYS_MSGQ_DISPATCH */
++};
++
++/* Message storage for the statically allocated half of the pool */
++struct sys_msgq_buf {
++	char b[ROUND_UP(CONFIG_SYS_MSGQ_BUF_SIZE, K_MSGQ_PRIO_BUF_ALIGN)];
++} __aligned(K_MSGQ_PRIO_BUF_ALIGN);
++
++BUILD_ASSERT(SYS_MSGQ_MIN >= 0);
++BUILD_ASSERT(CONFIG_SYS_MSGQ_MAX >= SYS_MSGQ_MIN);
++BUILD_ASSERT(CONFIG_SYS_MSGQ_NAMELEN_MAX >= 1);
++
++static void *msgq_pool_heap_alloc(const void *ptr, size_t size, size_t align, uint32_t flags)
++{
++	ARG_UNUSED(align);
++	ARG_UNUSED(flags);
++
++#if defined(K_HEAP_MEM_POOL_SIZE) && (K_HEAP_MEM_POOL_SIZE > 0)
++	if (size == 0) {
++		k_free((void *)ptr);
++		return NULL;
++	}
++
++	return k_aligned_alloc(__alignof(struct sys_msgq), size);
++#else
++	ARG_UNUSED(ptr);
++	ARG_UNUSED(size);
++	return NULL;
++#endif
++}
++
++static struct k_spinlock msgq_pool_lock;
++static struct sys_msgq sys_msgq_pool_slots[MAX(SYS_MSGQ_MIN, 1)];
++static struct sys_msgq_buf sys_msgq_pool_bufs[MAX(SYS_MSGQ_MIN, 1)];
++SYS_ELASTIPOOL_DEFINE_ADVANCED(msgq_pool, sizeof(struct sys_msgq), __alignof(struct sys_msgq),
++			       SYS_MSGQ_MIN, CONFIG_SYS_MSGQ_MAX, msgq_pool_heap_alloc,
++			       sys_msgq_pool_slots, static);
++
++/* named queues, both open and closed-but-not-unlinked */
++static sys_slist_t sys_msgq_registry = SYS_SLIST_STATIC_INIT(&sys_msgq_registry);
++
++/*
++ * Statically allocated slots draw their message storage from the parallel
++ * static buffer array and are bounded by the per-queue budget; heap-allocated
++ * slots allocate storage sized to the request and are not.
++ */
++static struct sys_msgq_buf *static_buf_of(const struct sys_msgq *sm)
++{
++	size_t idx = sm - sys_msgq_pool_slots;
++
++	if ((SYS_MSGQ_MIN == 0) || (sm < sys_msgq_pool_slots) || (idx >= SYS_MSGQ_MIN)) {
++		return NULL;
++	}
++
++	return &sys_msgq_pool_bufs[idx];
++}
++
++static struct sys_msgq *registry_find_locked(const char *name)
++{
++	struct sys_msgq *sm;
++
++	SYS_SLIST_FOR_EACH_CONTAINER(&sys_msgq_registry, sm, node) {
++		if (strcmp(sm->name, name) == 0) {
++			return sm;
++		}
++	}
++
++	return NULL;
++}
++
++/*
++ * Descriptor accounting is zvfs's: the fd vtable close runs only when the
++ * last descriptor referencing the queue closes (zvfs_fd_obj_refcount()).
++ * @a closing_last is true in that callback, where the closing descriptor is
++ * still counted.
++ */
++static void maybe_destroy_locked(struct sys_msgq *sm, bool closing_last)
++{
++	int fds = zvfs_fd_obj_refcount(sm);
++	char *buf = sm->buf_heap ? sm->buf : NULL;
++
++	if (sm->unlinked && (sm->busy == 0U) && (fds <= (closing_last ? 1 : 0))) {
++		(void)sys_elastipool_free(&msgq_pool, sm);
++		k_free(buf);
++	}
++}
++
++/*
++ * Resolve an fd to its queue, taking a busy reference that defers destruction
++ * until sys_msgq_unref(). Pool membership is re-validated under the pool lock
++ * so a concurrent close-and-destroy cannot leave us with a dangling pointer.
++ */
++static struct sys_msgq *sys_msgq_ref(int fd, uint32_t *fdmode)
++{
++	struct sys_msgq *sm;
++	struct fd_entry *entry = zvfs_fd_entry_get(fd);
++
++	if ((entry == NULL) || ((entry->mode & ZVFS_MODE_IFMT) != ZVFS_MODE_IMSGQ) ||
++	    (entry->obj == NULL)) {
++		return NULL;
++	}
++
++	if (fdmode != NULL) {
++		*fdmode = entry->mode;
++	}
++	sm = entry->obj;
++
++	K_SPINLOCK(&msgq_pool_lock) {
++		if (sys_elastipool_check(&msgq_pool, sm) != 0) {
++			/* destroyed under us by a concurrent close/unlink */
++			sm = NULL;
++			K_SPINLOCK_BREAK;
++		}
++		sm->busy++;
++	}
++
++	return sm;
++}
++
++static void sys_msgq_unref(struct sys_msgq *sm)
++{
++	K_SPINLOCK(&msgq_pool_lock) {
++		sm->busy--;
++		maybe_destroy_locked(sm, false);
++	}
++}
++
++/* fd vtable */
++
++static int sys_msgq_fd_close(void *obj)
++{
++	struct sys_msgq *sm = obj;
++
++	K_SPINLOCK(&msgq_pool_lock) {
++		maybe_destroy_locked(sm, true);
++	}
++
++	return 0;
++}
++
++static int sys_msgq_fd_ioctl(void *obj, unsigned int request, va_list args)
++{
++	ARG_UNUSED(obj);
++	ARG_UNUSED(request);
++	ARG_UNUSED(args);
++
++	errno = EOPNOTSUPP;
++	return -1;
++}
++
++static const struct fd_op_vtable sys_msgq_fd_vtable = {
++	.close = sys_msgq_fd_close,
++	.ioctl = sys_msgq_fd_ioctl,
++};
++
++int z_impl_sys_msgq_open(const char *name, int oflags, uint32_t mode,
++			 const struct k_msgq_attrs *attr)
++{
++	struct sys_msgq *sm = NULL;
++	struct sys_msgq_buf *static_buf;
++	char *buf = NULL;
++	bool buf_heap = false;
++	size_t buf_size;
++	uint32_t fdmode = ZVFS_MODE_IMSGQ;
++	int accmode = oflags & (ZVFS_O_RDONLY | ZVFS_O_WRONLY | ZVFS_O_RDWR);
++	size_t name_len;
++	int ret = 0;
++	int fd;
++
++	ARG_UNUSED(mode);
++
++	if (name == NULL) {
++		return -EINVAL;
++	}
++	name_len = strnlen(name, CONFIG_SYS_MSGQ_NAMELEN_MAX + 1);
++	if (name_len == 0) {
++		return -EINVAL;
++	}
++	if (name_len > CONFIG_SYS_MSGQ_NAMELEN_MAX) {
++		return -ENAMETOOLONG;
++	}
++
++	fd = zvfs_reserve_fd();
++	if (fd < 0) {
++		return -ENFILE;
++	}
++
++	K_SPINLOCK(&msgq_pool_lock) {
++		sm = registry_find_locked(name);
++		if (sm != NULL) {
++			if (((oflags & ZVFS_O_CREAT) != 0) && ((oflags & ZVFS_O_EXCL) != 0)) {
++				ret = -EEXIST;
++			}
++			K_SPINLOCK_BREAK;
++		}
++
++		if ((oflags & ZVFS_O_CREAT) == 0) {
++			ret = -ENOENT;
++			K_SPINLOCK_BREAK;
++		}
++		if ((attr == NULL) || (attr->msg_size == 0) || (attr->max_msgs == 0)) {
++			ret = -EINVAL;
++			K_SPINLOCK_BREAK;
++		}
++
++		buf_size = K_MSGQ_PRIO_BUF_SIZE(attr->msg_size, attr->max_msgs);
++
++		ret = sys_elastipool_alloc(&msgq_pool, (void **)&sm);
++		if (ret < 0) {
++			ret = -ENOSPC;
++			K_SPINLOCK_BREAK;
++		}
++
++		static_buf = static_buf_of(sm);
++		if (static_buf != NULL) {
++			if (buf_size > sizeof(static_buf->b)) {
++				/* a static slot's storage is bounded by the budget */
++				(void)sys_elastipool_free(&msgq_pool, sm);
++				ret = -ENOSPC;
++				K_SPINLOCK_BREAK;
++			}
++			buf = static_buf->b;
++		} else {
++			buf = k_aligned_alloc(K_MSGQ_PRIO_BUF_ALIGN, buf_size);
++			if (buf == NULL) {
++				(void)sys_elastipool_free(&msgq_pool, sm);
++				ret = -ENOSPC;
++				K_SPINLOCK_BREAK;
++			}
++			buf_heap = true;
++		}
++
++		memset(sm, 0, sizeof(*sm));
++		strcpy(sm->name, name);
++		sm->buf = buf;
++		sm->buf_heap = buf_heap;
++		k_msgq_init_prio(&sm->msgq, buf, attr->msg_size, attr->max_msgs);
++		sys_slist_append(&sys_msgq_registry, &sm->node);
++	}
++
++	if (ret < 0) {
++		zvfs_free_fd(fd);
++		return ret;
++	}
++
++	if ((accmode == ZVFS_O_RDONLY) || (accmode == ZVFS_O_RDWR)) {
++		fdmode |= SYS_MSGQ_FMODE_READ;
++	}
++	if ((accmode == ZVFS_O_WRONLY) || (accmode == ZVFS_O_RDWR)) {
++		fdmode |= SYS_MSGQ_FMODE_WRITE;
++	}
++	if ((oflags & ZVFS_O_NONBLOCK) != 0) {
++		fdmode |= SYS_MSGQ_FMODE_NONBLOCK;
++	}
++	zvfs_finalize_typed_fd(fd, sm, &sys_msgq_fd_vtable, fdmode);
++
++	return fd;
++}
++
++#ifdef CONFIG_USERSPACE
++static inline int z_vrfy_sys_msgq_open(const char *name, int oflags, uint32_t mode,
++				       const struct k_msgq_attrs *attr)
++{
++	char kname[CONFIG_SYS_MSGQ_NAMELEN_MAX + 1];
++	struct k_msgq_attrs kattr;
++	const struct k_msgq_attrs *ap = NULL;
++	int err;
++
++	if (name == NULL) {
++		return -EINVAL;
++	}
++	/* an over-long name is an error to report, not a fault to oops on */
++	if (k_usermode_string_nlen(name, sizeof(kname), &err) >= sizeof(kname)) {
++		K_OOPS(err != 0);
++		return -ENAMETOOLONG;
++	}
++	K_OOPS(err != 0);
++	K_OOPS(k_usermode_string_copy(kname, name, sizeof(kname)));
++
++	if (attr != NULL) {
++		K_OOPS(k_usermode_from_copy(&kattr, attr, sizeof(kattr)));
++		ap = &kattr;
++	}
++
++	return z_impl_sys_msgq_open(kname, oflags, mode, ap);
++}
++#include <zephyr/syscalls/sys_msgq_open_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++int z_impl_sys_msgq_unlink(const char *name)
++{
++	struct sys_msgq *sm;
++	int ret = 0;
++
++	if (name == NULL) {
++		return -EINVAL;
++	}
++
++	K_SPINLOCK(&msgq_pool_lock) {
++		sm = registry_find_locked(name);
++		if (sm == NULL) {
++			ret = -ENOENT;
++			K_SPINLOCK_BREAK;
++		}
++		sys_slist_find_and_remove(&sys_msgq_registry, &sm->node);
++		sm->unlinked = true;
++		maybe_destroy_locked(sm, false);
++	}
++
++	return ret;
++}
++
++#ifdef CONFIG_USERSPACE
++static inline int z_vrfy_sys_msgq_unlink(const char *name)
++{
++	char kname[CONFIG_SYS_MSGQ_NAMELEN_MAX + 1];
++	int err;
++
++	if (name == NULL) {
++		return -EINVAL;
++	}
++	if (k_usermode_string_nlen(name, sizeof(kname), &err) >= sizeof(kname)) {
++		K_OOPS(err != 0);
++		return -ENOENT;
++	}
++	K_OOPS(err != 0);
++	K_OOPS(k_usermode_string_copy(kname, name, sizeof(kname)));
++
++	return z_impl_sys_msgq_unlink(kname);
++}
++#include <zephyr/syscalls/sys_msgq_unlink_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++int z_impl_sys_msgq_send(int fd, const void *msg, size_t len, uint32_t prio, k_timeout_t timeout)
++{
++	struct sys_msgq *sm;
++	uint32_t fdmode;
++	int ret;
++
++	sm = sys_msgq_ref(fd, &fdmode);
++	if (sm == NULL) {
++		return -EBADF;
++	}
++
++	if ((fdmode & SYS_MSGQ_FMODE_WRITE) == 0) {
++		ret = -EBADF;
++		goto out;
++	}
++
++	if ((fdmode & SYS_MSGQ_FMODE_NONBLOCK) != 0) {
++		timeout = K_NO_WAIT;
++	}
++
++	ret = k_msgq_put_prio(&sm->msgq, msg, len, prio, timeout);
++
++out:
++	sys_msgq_unref(sm);
++	return ret;
++}
++
++#ifdef CONFIG_USERSPACE
++static inline int z_vrfy_sys_msgq_send(int fd, const void *msg, size_t len, uint32_t prio,
++				       k_timeout_t timeout)
++{
++	if (zvfs_fd_syscall_verify(fd) == NULL) {
++		return -EBADF;
++	}
++	K_OOPS(K_SYSCALL_MEMORY_READ(msg, len));
++
++	return z_impl_sys_msgq_send(fd, msg, len, prio, timeout);
++}
++#include <zephyr/syscalls/sys_msgq_send_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++int z_impl_sys_msgq_receive(int fd, void *msg, size_t size, uint32_t *prio, k_timeout_t timeout)
++{
++	struct sys_msgq *sm;
++	uint32_t fdmode;
++	int ret;
++
++	sm = sys_msgq_ref(fd, &fdmode);
++	if (sm == NULL) {
++		return -EBADF;
++	}
++
++	if ((fdmode & SYS_MSGQ_FMODE_READ) == 0) {
++		ret = -EBADF;
++		goto out;
++	}
++
++	if ((fdmode & SYS_MSGQ_FMODE_NONBLOCK) != 0) {
++		timeout = K_NO_WAIT;
++	}
++
++	ret = k_msgq_get_prio(&sm->msgq, msg, size, prio, timeout);
++
++out:
++	sys_msgq_unref(sm);
++	return ret;
++}
++
++#ifdef CONFIG_USERSPACE
++static inline int z_vrfy_sys_msgq_receive(int fd, void *msg, size_t size, uint32_t *prio,
++					  k_timeout_t timeout)
++{
++	if (zvfs_fd_syscall_verify(fd) == NULL) {
++		return -EBADF;
++	}
++	K_OOPS(K_SYSCALL_MEMORY_WRITE(msg, size));
++	if (prio != NULL) {
++		K_OOPS(K_SYSCALL_MEMORY_WRITE(prio, sizeof(*prio)));
++	}
++
++	return z_impl_sys_msgq_receive(fd, msg, size, prio, timeout);
++}
++#include <zephyr/syscalls/sys_msgq_receive_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++int z_impl_sys_msgq_getattr(int fd, struct k_msgq_attrs *attr, int *oflags)
++{
++	struct sys_msgq *sm;
++	uint32_t fdmode;
++
++	sm = sys_msgq_ref(fd, &fdmode);
++	if (sm == NULL) {
++		return -EBADF;
++	}
++
++	if (attr != NULL) {
++		k_msgq_get_attrs(&sm->msgq, attr);
++	}
++	if (oflags != NULL) {
++		bool rd = (fdmode & SYS_MSGQ_FMODE_READ) != 0;
++		bool wr = (fdmode & SYS_MSGQ_FMODE_WRITE) != 0;
++
++		*oflags = (rd && wr) ? ZVFS_O_RDWR : (wr ? ZVFS_O_WRONLY : ZVFS_O_RDONLY);
++		if ((fdmode & SYS_MSGQ_FMODE_NONBLOCK) != 0) {
++			*oflags |= ZVFS_O_NONBLOCK;
++		}
++	}
++
++	sys_msgq_unref(sm);
++	return 0;
++}
++
++#ifdef CONFIG_USERSPACE
++static inline int z_vrfy_sys_msgq_getattr(int fd, struct k_msgq_attrs *attr, int *oflags)
++{
++	if (zvfs_fd_syscall_verify(fd) == NULL) {
++		return -EBADF;
++	}
++	if (attr != NULL) {
++		K_OOPS(K_SYSCALL_MEMORY_WRITE(attr, sizeof(*attr)));
++	}
++	if (oflags != NULL) {
++		K_OOPS(K_SYSCALL_MEMORY_WRITE(oflags, sizeof(*oflags)));
++	}
++
++	return z_impl_sys_msgq_getattr(fd, attr, oflags);
++}
++#include <zephyr/syscalls/sys_msgq_getattr_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++int z_impl_sys_msgq_setflags(int fd, int oflags)
++{
++	struct fd_entry *entry = zvfs_fd_entry_get(fd);
++
++	if ((entry == NULL) || ((entry->mode & ZVFS_MODE_IFMT) != ZVFS_MODE_IMSGQ)) {
++		return -EBADF;
++	}
++
++	if ((oflags & ~ZVFS_O_NONBLOCK) != 0) {
++		return -EINVAL;
++	}
++
++	if ((oflags & ZVFS_O_NONBLOCK) != 0) {
++		entry->mode |= SYS_MSGQ_FMODE_NONBLOCK;
++	} else {
++		entry->mode &= ~(uint32_t)SYS_MSGQ_FMODE_NONBLOCK;
++	}
++
++	return 0;
++}
++
++#ifdef CONFIG_USERSPACE
++static inline int z_vrfy_sys_msgq_setflags(int fd, int oflags)
++{
++	if (zvfs_fd_syscall_verify(fd) == NULL) {
++		return -EBADF;
++	}
++
++	return z_impl_sys_msgq_setflags(fd, oflags);
++}
++#include <zephyr/syscalls/sys_msgq_setflags_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++#if SYS_MSGQ_DISPATCH
++/*
++ * Function-notification dispatcher: a single kernel service thread accepts
++ * every function-notify queue's arrival signal (K_SIG_SYS_MSGQ) and spawns one
++ * detached thread per notification. Notification threads for registrations
++ * made by user threads run in user mode, in the registrant's memory domain,
++ * inheriting the registrant's object permissions at dispatch time.
++ */
++static struct k_thread sys_msgq_dispatch_thread;
++static K_KERNEL_STACK_DEFINE(sys_msgq_dispatch_stack, CONFIG_SYS_MSGQ_DISPATCH_STACK_SIZE);
++static K_SEM_DEFINE(sys_msgq_dispatch_ready, 0, 1);
++static bool sys_msgq_dispatch_running;
++
++static void sys_msgq_notify_entry(void *p1, void *p2, void *p3)
++{
++	void (*const fn)(union k_sig_val) = p1;
++	const union k_sig_val value = {
++		.sival_ptr = p2,
++	};
++
++	ARG_UNUSED(p3);
++
++	fn(value);
++}
++
++static void sys_msgq_dispatch(void *p1, void *p2, void *p3)
++{
++	struct k_sig_set set;
++	struct k_sig_info info;
++
++	ARG_UNUSED(p1);
++	ARG_UNUSED(p2);
++	ARG_UNUSED(p3);
++
++	(void)k_sig_emptyset(&set);
++	(void)k_sig_addset(&set, K_SIG_SYS_MSGQ);
++	(void)k_sig_mask(K_SIG_BLOCK, &set, NULL);
++
++	/* arms are ordered after this: a fire can now only find the signal blocked */
++	k_sem_give(&sys_msgq_dispatch_ready);
++
++	for (;;) {
++		int ret;
++		int prio = 0;
++		size_t stack_size = 0;
++		struct k_thread *th = NULL;
++		uint32_t options = K_INHERIT_PERMS;
++		void (*fn)(union k_sig_val) = NULL;
++		union k_sig_val value = {0};
++		struct sys_msgq *sm;
++#ifdef CONFIG_USERSPACE
++		k_tid_t perms_src = NULL;
++		struct k_mem_domain *domain = NULL;
++#endif /* CONFIG_USERSPACE */
++
++		if (k_sig_timedwait(&set, &info, K_FOREVER) < 0) {
++			/* defensive: never let a persistent error become a busy spin */
++			k_sleep(K_TICKS(1));
++			continue;
++		}
++
++		sm = info.value.sival_ptr;
++
++		K_SPINLOCK(&msgq_pool_lock) {
++			/*
++			 * The queue may have been destroyed (or its slot even recycled)
++			 * after the signal was queued; validate before touching it. A
++			 * drop here is the POSIX "disposition of pending notifications
++			 * is unspecified" case.
++			 */
++			if ((sys_elastipool_check(&msgq_pool, sm) != 0) ||
++			    (sm->notify_fn == NULL)) {
++				K_SPINLOCK_BREAK;
++			}
++			fn = sm->notify_fn;
++			prio = sm->notify_fn_prio;
++			stack_size = sm->notify_fn_stack_size;
++			value = sm->notify_value;
++#ifdef CONFIG_USERSPACE
++			domain = sm->notify_fn_domain;
++			perms_src = sm->notify_fn_perms_src;
++#endif /* CONFIG_USERSPACE */
++		}
++		if (fn == NULL) {
++			continue;
++		}
++
++#ifdef CONFIG_USERSPACE
++		if (domain != NULL) {
++			options |= K_USER;
++			ret = sys_thread_create_paused(&th, NULL, stack_size, 0,
++						       sys_msgq_notify_entry, fn, value.sival_ptr,
++						       NULL, prio, options);
++			if (ret == 0) {
++				ret = k_mem_domain_add_thread(domain, th);
++				if (ret == 0) {
++					k_thread_perms_inherit(perms_src, th);
++					k_thread_start(th);
++				} else {
++					k_thread_abort(th);
++				}
++			}
++		} else
++#endif /* CONFIG_USERSPACE */
++		{
++			ret = sys_thread_create(&th, NULL, stack_size, 0, sys_msgq_notify_entry,
++						fn, value.sival_ptr, NULL, prio, options);
++		}
++
++		if (ret == 0) {
++			(void)k_thread_detach(th);
++		} else {
++			LOG_DBG_RATELIMIT("function notification dropped for queue %p (%d)", sm,
++					  ret);
++		}
++	}
++}
++
++static void sys_msgq_dispatch_start(void)
++{
++	K_SPINLOCK(&msgq_pool_lock) {
++		if (!sys_msgq_dispatch_running) {
++			(void)k_thread_create(&sys_msgq_dispatch_thread, sys_msgq_dispatch_stack,
++					      K_KERNEL_STACK_SIZEOF(sys_msgq_dispatch_stack),
++					      sys_msgq_dispatch, NULL, NULL, NULL,
++					      CONFIG_SYS_MSGQ_DISPATCH_PRIO, 0, K_NO_WAIT);
++			(void)k_thread_name_set(&sys_msgq_dispatch_thread, "sys_msgq");
++			sys_msgq_dispatch_running = true;
++		}
++	}
++
++	/*
++	 * Wait until the dispatcher has blocked its wake signal: a registration
++	 * armed (and fired) before that would reach default-action delivery and
++	 * be discarded instead of staying pending.
++	 */
++	k_sem_take(&sys_msgq_dispatch_ready, K_FOREVER);
++	k_sem_give(&sys_msgq_dispatch_ready);
++}
++#endif /* SYS_MSGQ_DISPATCH */
++
++int z_impl_sys_msgq_notify(int fd, const struct sys_msgq_notify *notify)
++{
++	struct sys_msgq *sm;
++	int ret;
++
++	sm = sys_msgq_ref(fd, NULL);
++	if (sm == NULL) {
++		return -EBADF;
++	}
++
++	if (notify == NULL) {
++		ret = k_msgq_notify_disarm(&sm->msgq);
++#if SYS_MSGQ_DISPATCH
++		if (ret == 0) {
++			K_SPINLOCK(&msgq_pool_lock) {
++				sm->notify_fn = NULL;
++			}
++		}
++#endif /* SYS_MSGQ_DISPATCH */
++		goto out;
++	}
++
++	if (notify->fn != NULL) {
++#if SYS_MSGQ_DISPATCH
++		if ((notify->fn_priority > K_LOWEST_APPLICATION_THREAD_PRIO) ||
++		    (notify->fn_priority < K_HIGHEST_APPLICATION_THREAD_PRIO)) {
++			ret = -EINVAL;
++			goto out;
++		}
++
++		sys_msgq_dispatch_start();
++		/*
++		 * Arm before storing the function state, in one critical section:
++		 * a failed arm (-EBUSY) must not clobber the armed registration's
++		 * state, and the dispatcher takes this same lock before reading
++		 * it, so a fire on another CPU cannot observe the gap.
++		 */
++		K_SPINLOCK(&msgq_pool_lock) {
++			ret = k_msgq_notify_arm(&sm->msgq, &sys_msgq_dispatch_thread,
++						K_SIG_SYS_MSGQ,
++						(union k_sig_val){.sival_ptr = sm});
++			if (ret < 0) {
++				K_SPINLOCK_BREAK;
++			}
++			sm->notify_fn = notify->fn;
++			sm->notify_fn_prio = notify->fn_priority;
++			sm->notify_fn_stack_size = notify->fn_stack_size;
++			sm->notify_value = notify->value;
++#ifdef CONFIG_USERSPACE
++			sm->notify_fn_domain = NULL;
++			sm->notify_fn_perms_src = NULL;
++			if (k_is_in_user_syscall()) {
++				sm->notify_fn_domain = _current->mem_domain_info.mem_domain;
++				sm->notify_fn_perms_src = _current;
++			}
++#endif /* CONFIG_USERSPACE */
++		}
++#else
++		/* notification threads are detached system pool threads */
++		ret = -ENOTSUP;
++#endif /* SYS_MSGQ_DISPATCH */
++		goto out;
++	}
++
++	if ((notify->signo < 0) || ((notify->signo > 0) && (notify->target == NULL))) {
++		ret = -EINVAL;
++		goto out;
++	}
++
++	ret = k_msgq_notify_arm(&sm->msgq, notify->target, notify->signo, notify->value);
++
++out:
++	sys_msgq_unref(sm);
++	return ret;
++}
++
++#ifdef CONFIG_USERSPACE
++static inline int z_vrfy_sys_msgq_notify(int fd, const struct sys_msgq_notify *notify)
++{
++	struct sys_msgq_notify knotify;
++	const struct sys_msgq_notify *np = NULL;
++
++	if (zvfs_fd_syscall_verify(fd) == NULL) {
++		return -EBADF;
++	}
++	if (notify != NULL) {
++		/* copy to kernel stack: the target pointer must not change after validation */
++		K_OOPS(k_usermode_from_copy(&knotify, notify, sizeof(knotify)));
++		if ((knotify.signo > 0) && (knotify.target != NULL)) {
++			/* the caller must have been granted access to the target thread */
++			K_OOPS(K_SYSCALL_OBJ(knotify.target, K_OBJ_THREAD));
++		}
++		np = &knotify;
++	}
++
++	return z_impl_sys_msgq_notify(fd, np);
++}
++#include <zephyr/syscalls/sys_msgq_notify_mrsh.c>
++#endif /* CONFIG_USERSPACE */
+diff --git a/tests/lib/sys_msgq/CMakeLists.txt b/tests/lib/sys_msgq/CMakeLists.txt
+new file mode 100644
+index 00000000000..a4a1ce71731
+--- /dev/null
++++ b/tests/lib/sys_msgq/CMakeLists.txt
+@@ -0,0 +1,8 @@
++# SPDX-License-Identifier: Apache-2.0
++
++cmake_minimum_required(VERSION 3.20.0)
++find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
++project(sys_msgq)
++
++FILE(GLOB app_sources src/*.c)
++target_sources(app PRIVATE ${app_sources})
+diff --git a/tests/lib/sys_msgq/Kconfig b/tests/lib/sys_msgq/Kconfig
+new file mode 100644
+index 00000000000..e6a8876c9c9
+--- /dev/null
++++ b/tests/lib/sys_msgq/Kconfig
+@@ -0,0 +1,25 @@
++# SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++# SPDX-License-Identifier: Apache-2.0
++
++config SYS_MSGQ_MIN_ADD_TEST
++	int "Guaranteed system message queues contributed by this test"
++	default 2
++	help
++	  Contribution of this test to the accumulated minimum (guaranteed,
++	  statically allocated) size of the system message queue pool.
++
++config SYS_THREAD_STACK_MIN_ADD_TEST
++	int "Guaranteed system thread stacks contributed by this test"
++	default 2
++	help
++	  Contribution of this test to the accumulated minimum size of the
++	  system thread stack pool (function-notification threads).
++
++config SYS_THREAD_THREAD_MIN_ADD_TEST
++	int "Guaranteed system threads contributed by this test"
++	default 2
++	help
++	  Contribution of this test to the accumulated minimum size of the
++	  system thread pool (function-notification threads).
++
++source "Kconfig.zephyr"
+diff --git a/tests/lib/sys_msgq/prj.conf b/tests/lib/sys_msgq/prj.conf
+new file mode 100644
+index 00000000000..abbf96546b5
+--- /dev/null
++++ b/tests/lib/sys_msgq/prj.conf
+@@ -0,0 +1,10 @@
++CONFIG_ZTEST=y
++CONFIG_SYS_MSGQ=y
++CONFIG_SIGNAL=y
++CONFIG_SYS_THREAD=y
++CONFIG_THREAD_DETACH=y
++CONFIG_SYS_THREAD_THREAD_MAX=2147483647
++CONFIG_SYS_THREAD_STACK_MAX=2147483647
++CONFIG_ASSERT=y
++CONFIG_HEAP_MEM_POOL_SIZE=16384
++CONFIG_ZVFS_OPEN_MAX=8
+diff --git a/tests/lib/sys_msgq/src/main.c b/tests/lib/sys_msgq/src/main.c
+new file mode 100644
+index 00000000000..30bbeecd688
+--- /dev/null
++++ b/tests/lib/sys_msgq/src/main.c
+@@ -0,0 +1,423 @@
++/*
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <zephyr/kernel.h>
++#include <zephyr/kernel/signal.h>
++#include <zephyr/sys/fdtable.h>
++#include <zephyr/sys/mqueue.h>
++#include <zephyr/ztest.h>
++
++#define QNAME     "testq"
++#define MSG_SIZE  16
++#define MAX_MSGS  4
++#define TIMEOUT   K_MSEC(100)
++
++static const struct k_msgq_attrs attrs = {
++	.msg_size = MSG_SIZE,
++	.max_msgs = MAX_MSGS,
++};
++
++static ZTEST_BMEM volatile bool notify_fn_ran;
++
++static int open_rdwr(int extra_oflags)
++{
++	return sys_msgq_open(QNAME, ZVFS_O_RDWR | ZVFS_O_CREAT | extra_oflags, 0, &attrs);
++}
++
++static void section_reset(void)
++{
++	(void)sys_msgq_unlink(QNAME);
++}
++
++/* sections of test_sys_msgq_open */
++
++static void open_create_close(void)
++{
++	int fd = open_rdwr(0);
++
++	zassert_true(fd >= 0, "open failed: %d", fd);
++	zassert_ok(zvfs_close(fd));
++	/* the queue persists until unlinked and can be reopened without O_CREAT */
++	fd = sys_msgq_open(QNAME, ZVFS_O_RDWR, 0, NULL);
++	zassert_true(fd >= 0, "reopen failed: %d", fd);
++	zassert_ok(zvfs_close(fd));
++	zassert_ok(sys_msgq_unlink(QNAME));
++}
++
++static void open_errors(void)
++{
++	char long_name[CONFIG_SYS_MSGQ_NAMELEN_MAX + 2];
++	struct k_msgq_attrs bad = attrs;
++	int fd, fd2;
++
++	/* no O_CREAT and no such queue */
++	zassert_equal(sys_msgq_open(QNAME, ZVFS_O_RDWR, 0, NULL), -ENOENT);
++
++	/* creating requires geometry */
++	zassert_equal(sys_msgq_open(QNAME, ZVFS_O_RDWR | ZVFS_O_CREAT, 0, NULL), -EINVAL);
++	bad.msg_size = 0;
++	zassert_equal(sys_msgq_open(QNAME, ZVFS_O_RDWR | ZVFS_O_CREAT, 0, &bad), -EINVAL);
++
++	/* geometry must fit the per-queue budget */
++	bad.msg_size = CONFIG_SYS_MSGQ_BUF_SIZE * 2;
++	bad.max_msgs = 1;
++	zassert_equal(sys_msgq_open(QNAME, ZVFS_O_RDWR | ZVFS_O_CREAT, 0, &bad), -ENOSPC);
++
++	/* name length is bounded */
++	memset(long_name, 'a', sizeof(long_name) - 1);
++	long_name[sizeof(long_name) - 1] = '\0';
++	zassert_equal(sys_msgq_open(long_name, ZVFS_O_RDWR | ZVFS_O_CREAT, 0, &attrs),
++		      -ENAMETOOLONG);
++
++	/* O_EXCL on an existing queue */
++	fd = open_rdwr(0);
++	zassert_true(fd >= 0);
++	fd2 = open_rdwr(ZVFS_O_EXCL);
++	zassert_equal(fd2, -EEXIST);
++	zassert_ok(zvfs_close(fd));
++	zassert_ok(sys_msgq_unlink(QNAME));
++}
++
++ZTEST_USER(sys_msgq, test_sys_msgq_open)
++{
++	section_reset();
++	open_create_close();
++	open_errors();
++	section_reset();
++}
++
++/* sections of test_sys_msgq_unlink */
++
++static void unlink_deferred_destroy(void)
++{
++	char buf[MSG_SIZE];
++	int fd = open_rdwr(0);
++
++	zassert_true(fd >= 0);
++	zassert_ok(sys_msgq_unlink(QNAME));
++
++	/* the name is free immediately; the old queue lives until last close */
++	zassert_ok(sys_msgq_send(fd, "still alive", 12, 0, K_NO_WAIT));
++	zassert_equal(sys_msgq_receive(fd, buf, sizeof(buf), NULL, K_NO_WAIT), 12);
++
++	int fd2 = open_rdwr(0);
++
++	zassert_true(fd2 >= 0, "name not reusable after unlink: %d", fd2);
++	zassert_ok(zvfs_close(fd2));
++	zassert_ok(sys_msgq_unlink(QNAME));
++	zassert_ok(zvfs_close(fd));
++}
++
++static void unlink_errors(void)
++{
++	zassert_equal(sys_msgq_unlink(QNAME), -ENOENT);
++	zassert_equal(sys_msgq_unlink("nonexistent"), -ENOENT);
++}
++
++ZTEST_USER(sys_msgq, test_sys_msgq_unlink)
++{
++	section_reset();
++	unlink_deferred_destroy();
++	unlink_errors();
++	section_reset();
++}
++
++/* sections of test_sys_msgq_send */
++
++static void send_and_priority_order(void)
++{
++	char buf[MSG_SIZE];
++	uint32_t prio;
++	int fd = open_rdwr(0);
++
++	zassert_true(fd >= 0);
++	zassert_ok(sys_msgq_send(fd, "low", 4, 1, K_NO_WAIT));
++	zassert_ok(sys_msgq_send(fd, "high A", 7, 5, K_NO_WAIT));
++	zassert_ok(sys_msgq_send(fd, "high B", 7, 5, K_NO_WAIT));
++
++	zassert_equal(sys_msgq_receive(fd, buf, sizeof(buf), &prio, K_NO_WAIT), 7);
++	zassert_equal(prio, 5);
++	zassert_mem_equal(buf, "high A", 7);
++	zassert_equal(sys_msgq_receive(fd, buf, sizeof(buf), &prio, K_NO_WAIT), 7);
++	zassert_mem_equal(buf, "high B", 7);
++	zassert_equal(sys_msgq_receive(fd, buf, sizeof(buf), &prio, K_NO_WAIT), 4);
++	zassert_equal(prio, 1);
++
++	zassert_ok(zvfs_close(fd));
++	zassert_ok(sys_msgq_unlink(QNAME));
++}
++
++static void send_errors(void)
++{
++	char big[MSG_SIZE + 1] = {0};
++	int fd = open_rdwr(0);
++	int rd = sys_msgq_open(QNAME, ZVFS_O_RDONLY, 0, NULL);
++
++	zassert_true(fd >= 0);
++	zassert_true(rd >= 0);
++
++	/* a read-only descriptor cannot send */
++	zassert_equal(sys_msgq_send(rd, "x", 2, 0, K_NO_WAIT), -EBADF);
++	/* message length is bounded by the queue's message size */
++	zassert_equal(sys_msgq_send(fd, big, sizeof(big), 0, K_NO_WAIT), -EMSGSIZE);
++
++	for (int i = 0; i < MAX_MSGS; i++) {
++		zassert_ok(sys_msgq_send(fd, "fill", 5, 0, K_NO_WAIT));
++	}
++	zassert_equal(sys_msgq_send(fd, "full", 5, 0, K_NO_WAIT), -ENOMSG);
++	zassert_equal(sys_msgq_send(fd, "full", 5, 0, TIMEOUT), -EAGAIN);
++
++	zassert_ok(zvfs_close(rd));
++	zassert_ok(zvfs_close(fd));
++	zassert_ok(sys_msgq_unlink(QNAME));
++}
++
++static void send_nonblock_fd(void)
++{
++	int fd = open_rdwr(ZVFS_O_NONBLOCK);
++
++	zassert_true(fd >= 0);
++	for (int i = 0; i < MAX_MSGS; i++) {
++		zassert_ok(sys_msgq_send(fd, "fill", 5, 0, K_FOREVER));
++	}
++	/* K_FOREVER is forced to no-wait on a non-blocking descriptor */
++	zassert_equal(sys_msgq_send(fd, "full", 5, 0, K_FOREVER), -ENOMSG);
++	zassert_ok(zvfs_close(fd));
++	zassert_ok(sys_msgq_unlink(QNAME));
++}
++
++ZTEST_USER(sys_msgq, test_sys_msgq_send)
++{
++	section_reset();
++	send_and_priority_order();
++	send_errors();
++	send_nonblock_fd();
++	section_reset();
++}
++
++/* sections of test_sys_msgq_receive */
++
++static void receive_errors(void)
++{
++	char small[MSG_SIZE - 1];
++	char buf[MSG_SIZE];
++	int fd = open_rdwr(0);
++	int wr = sys_msgq_open(QNAME, ZVFS_O_WRONLY, 0, NULL);
++
++	zassert_true(fd >= 0);
++	zassert_true(wr >= 0);
++
++	zassert_ok(sys_msgq_send(fd, "x", 2, 0, K_NO_WAIT));
++	/* a write-only descriptor cannot receive */
++	zassert_equal(sys_msgq_receive(wr, buf, sizeof(buf), NULL, K_NO_WAIT), -EBADF);
++	/* the receive buffer must hold a maximum-size message */
++	zassert_equal(sys_msgq_receive(fd, small, sizeof(small), NULL, K_NO_WAIT), -EMSGSIZE);
++	zassert_equal(sys_msgq_receive(fd, buf, sizeof(buf), NULL, K_NO_WAIT), 2);
++
++	zassert_equal(sys_msgq_receive(fd, buf, sizeof(buf), NULL, K_NO_WAIT), -ENOMSG);
++	zassert_equal(sys_msgq_receive(fd, buf, sizeof(buf), NULL, TIMEOUT), -EAGAIN);
++
++	zassert_ok(zvfs_close(wr));
++	zassert_ok(zvfs_close(fd));
++	zassert_ok(sys_msgq_unlink(QNAME));
++}
++
++ZTEST_USER(sys_msgq, test_sys_msgq_receive)
++{
++	section_reset();
++	receive_errors();
++	section_reset();
++}
++
++/* sections of test_sys_msgq_getattr */
++
++static void getattr_reports(void)
++{
++	struct k_msgq_attrs out;
++	int oflags;
++	int fd = open_rdwr(ZVFS_O_NONBLOCK);
++
++	zassert_true(fd >= 0);
++	zassert_ok(sys_msgq_send(fd, "x", 2, 0, K_NO_WAIT));
++
++	zassert_ok(sys_msgq_getattr(fd, &out, &oflags));
++	zassert_equal(out.msg_size, MSG_SIZE);
++	zassert_equal(out.max_msgs, MAX_MSGS);
++	zassert_equal(out.used_msgs, 1);
++	zassert_equal(oflags & ZVFS_O_NONBLOCK, ZVFS_O_NONBLOCK);
++	zassert_equal(oflags & (ZVFS_O_RDONLY | ZVFS_O_WRONLY | ZVFS_O_RDWR), ZVFS_O_RDWR);
++
++	zassert_ok(zvfs_close(fd));
++	zassert_ok(sys_msgq_unlink(QNAME));
++
++	zassert_equal(sys_msgq_getattr(-1, &out, &oflags), -EBADF);
++}
++
++ZTEST_USER(sys_msgq, test_sys_msgq_getattr)
++{
++	section_reset();
++	getattr_reports();
++	section_reset();
++}
++
++/* sections of test_sys_msgq_setflags */
++
++static void setflags_nonblock(void)
++{
++	int oflags;
++	int fd = open_rdwr(0);
++
++	zassert_true(fd >= 0);
++
++	zassert_ok(sys_msgq_setflags(fd, ZVFS_O_NONBLOCK));
++	zassert_ok(sys_msgq_getattr(fd, NULL, &oflags));
++	zassert_equal(oflags & ZVFS_O_NONBLOCK, ZVFS_O_NONBLOCK);
++
++	zassert_ok(sys_msgq_setflags(fd, 0));
++	zassert_ok(sys_msgq_getattr(fd, NULL, &oflags));
++	zassert_equal(oflags & ZVFS_O_NONBLOCK, 0);
++
++	/* only O_NONBLOCK may be changed */
++	zassert_equal(sys_msgq_setflags(fd, ZVFS_O_CREAT), -EINVAL);
++
++	zassert_ok(zvfs_close(fd));
++	zassert_ok(sys_msgq_unlink(QNAME));
++}
++
++ZTEST_USER(sys_msgq, test_sys_msgq_setflags)
++{
++	section_reset();
++	setflags_nonblock();
++	section_reset();
++}
++
++/* sections of test_sys_msgq_notify */
++
++static void notify_signal_fires(void)
++{
++	struct k_sig_set set;
++	struct k_sig_info info;
++	struct sys_msgq_notify notify = {
++		.target = k_current_get(),
++		.signo = K_SIG_USR1,
++		.value.sival_int = 42,
++	};
++	int fd = open_rdwr(0);
++
++	zassert_true(fd >= 0);
++
++	zassert_ok(k_sig_emptyset(&set));
++	zassert_ok(k_sig_addset(&set, K_SIG_USR1));
++	zassert_ok(k_sig_mask(K_SIG_BLOCK, &set, NULL));
++
++	zassert_ok(sys_msgq_notify(fd, &notify));
++	/* second registration while armed */
++	zassert_equal(sys_msgq_notify(fd, &notify), -EBUSY);
++
++	zassert_ok(sys_msgq_send(fd, "wake", 5, 0, K_NO_WAIT));
++	zassert_equal(k_sig_timedwait(&set, &info, TIMEOUT), K_SIG_USR1);
++	zassert_equal(info.code, K_SI_MSGQ);
++	zassert_equal(info.value.sival_int, 42);
++
++	/* consumed: re-arming succeeds, removing works */
++	zassert_ok(sys_msgq_notify(fd, &notify));
++	zassert_ok(sys_msgq_notify(fd, NULL));
++	/* removing again: nothing armed */
++	zassert_equal(sys_msgq_notify(fd, NULL), -EINVAL);
++
++	zassert_ok(zvfs_close(fd));
++	zassert_ok(sys_msgq_unlink(QNAME));
++}
++
++static void notify_signal_none(void)
++{
++	struct k_sig_set set;
++	struct sys_msgq_notify notify = {
++		.signo = 0,
++	};
++	int fd = open_rdwr(0);
++
++	zassert_true(fd >= 0);
++
++	zassert_ok(k_sig_emptyset(&set));
++	zassert_ok(k_sig_addset(&set, K_SIG_USR1));
++	zassert_ok(k_sig_mask(K_SIG_BLOCK, &set, NULL));
++
++	/* signo 0 generates nothing but is still consumed by the transition */
++	zassert_ok(sys_msgq_notify(fd, &notify));
++	zassert_ok(sys_msgq_send(fd, "quiet", 6, 0, K_NO_WAIT));
++	zassert_true(k_sig_timedwait(&set, NULL, K_NO_WAIT) < 0);
++	zassert_ok(sys_msgq_notify(fd, &notify));
++	zassert_ok(sys_msgq_notify(fd, NULL));
++
++	zassert_ok(zvfs_close(fd));
++	zassert_ok(sys_msgq_unlink(QNAME));
++}
++
++static void notify_errors(void)
++{
++	struct sys_msgq_notify notify = {
++		.signo = K_SIG_USR1,
++		.target = NULL,
++	};
++	int fd = open_rdwr(0);
++
++	zassert_true(fd >= 0);
++
++	/* a signal-generating registration needs a target */
++	zassert_equal(sys_msgq_notify(fd, &notify), -EINVAL);
++	zassert_equal(sys_msgq_notify(-1, NULL), -EBADF);
++
++	zassert_ok(zvfs_close(fd));
++	zassert_ok(sys_msgq_unlink(QNAME));
++}
++
++static void notify_fn(union k_sig_val value)
++{
++	zassert_equal(value.sival_int, 43);
++	notify_fn_ran = true;
++}
++
++static void notify_function_fires(void)
++{
++	struct sys_msgq_notify notify = {
++		.fn = notify_fn,
++		.value.sival_int = 43,
++	};
++	int fd = open_rdwr(0);
++
++	zassert_true(fd >= 0);
++	notify_fn_ran = false;
++
++	zassert_ok(sys_msgq_notify(fd, &notify));
++	zassert_ok(sys_msgq_send(fd, "wake", 5, 0, K_NO_WAIT));
++
++	for (int i = 0; (i < 100) && !notify_fn_ran; i++) {
++		k_msleep(10);
++	}
++	zassert_true(notify_fn_ran, "function notification did not run");
++
++	zassert_ok(zvfs_close(fd));
++	zassert_ok(sys_msgq_unlink(QNAME));
++}
++
++ZTEST_USER(sys_msgq, test_sys_msgq_notify)
++{
++	section_reset();
++	notify_signal_fires();
++	section_reset();
++	notify_signal_none();
++	section_reset();
++	notify_errors();
++	if (IS_ENABLED(CONFIG_SIGNAL) && IS_ENABLED(CONFIG_SYS_THREAD) &&
++	    IS_ENABLED(CONFIG_THREAD_DETACH)) {
++		section_reset();
++		notify_function_fires();
++	}
++	section_reset();
++}
++
++ZTEST_SUITE(sys_msgq, NULL, NULL, NULL, NULL, NULL);
+diff --git a/tests/lib/sys_msgq/testcase.yaml b/tests/lib/sys_msgq/testcase.yaml
+new file mode 100644
+index 00000000000..9a8b5fece06
+--- /dev/null
++++ b/tests/lib/sys_msgq/testcase.yaml
+@@ -0,0 +1,24 @@
++common:
++  tags:
++    - os
++    - msgq
++tests:
++  libraries.sys_msgq:
++    integration_platforms:
++      - native_sim
++      - qemu_x86
++      - qemu_cortex_m3
++  libraries.sys_msgq.static_only:
++    integration_platforms:
++      - native_sim
++      - qemu_x86
++    extra_configs:
++      - CONFIG_SYS_MSGQ_MAX=2
++  libraries.sys_msgq.userspace:
++    filter: CONFIG_ARCH_HAS_USERSPACE
++    integration_platforms:
++      - qemu_x86
++      - qemu_cortex_m3
++    extra_configs:
++      - CONFIG_TEST_USERSPACE=y
++      - CONFIG_ZTEST_FATAL_HOOK=y
