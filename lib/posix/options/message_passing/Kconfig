@@ -1,41 +1,72 @@
-# Copyright (c) 2017 Intel Corporation
-#
+# SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
 # SPDX-License-Identifier: Apache-2.0
 
 menuconfig POSIX_MESSAGE_PASSING
 	bool "POSIX message queue support"
+	select SYS_MSGQ
 	help
 	  This enabled POSIX message queue related APIs.
 
 if POSIX_MESSAGE_PASSING
 
 config POSIX_MQ_OPEN_MAX
-	int "Maximum number of messages in a POSIX message queue"
-	default 16
+	def_int SYS_MSGQ_MAX
 	help
-	  Mention maximum number of messages in message queue in POSIX compliant
-	  application.
+	  Maximum number of message queues that may be open at once. Derived
+	  from the bound on the system message queue pool.
 
 config POSIX_MQ_PRIO_MAX
 	int "Maximum number of POSIX message priorities"
 	default 32
 	help
 	  Maximum number of message priorities supported by the implementation.
+	  Message priorities range from 0 to POSIX_MQ_PRIO_MAX - 1.
 
 config MSG_SIZE_MAX
-	int "Maximum size of a POSIX message"
-	default 16
+	def_int SYS_MSGQ_BUF_SIZE
 	help
-	  Mention maximum size of message in bytes.
+	  Maximum size of a POSIX message in bytes. Derived from the per-queue
+	  message storage budget.
 
 config MQUEUE_NAMELEN_MAX
-	int "Maximum POSIX message queue name size"
-	default 16
-	range 2 $(UINT8_MAX)
+	def_int SYS_MSGQ_NAMELEN_MAX
 	help
-	  Mention size of message queue name in number of characters.
+	  Maximum POSIX message queue name length, in characters. Derived from
+	  the system message queue name bound.
+
+config SIGNAL_SET_SIZE_MIN_POSIX_MESSAGE_PASSING
+	int
+	depends on SIGNAL
+	default 43
+	help
+	  mq_notify() with SIGEV_SIGNAL accepts any POSIX signal number
+	  (SIGRTMAX = 33 + 8 by default), and the kernel message queue
+	  dispatcher (SIGEV_THREAD) wakes on the reserved second-highest
+	  slot, K_SIG_SYS_MSGQ, below the timer dispatcher's top-of-set
+	  K_SIG_SYS_TIMER - so the set must extend two past SIGRTMAX for
+	  neither to be POSIX-reachable.
+
+config SIGNAL_QUEUE_SIZE_ADD_POSIX_MESSAGE_PASSING
+	int
+	depends on SIGNAL
+	default 4
+	help
+	  Queued signal instances contributed by message arrival notifications.
+
+config SYS_MSGQ_MIN_ADD_POSIX_MESSAGE_PASSING
+	int
+	default 0
+	help
+	  Contribution of the POSIX message passing option group to the
+	  accumulated minimum (guaranteed, statically allocated) size of the
+	  system message queue pool. Applications that require guaranteed
+	  message queues should raise this.
 
 config HEAP_MEM_POOL_ADD_SIZE_MQUEUE
 	def_int 1024
+	help
+	  Message queues beyond the guaranteed (statically allocated) minimum
+	  of the system message queue pool, and their message storage, are
+	  allocated from the kernel heap.
 
 endif
