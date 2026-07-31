@@ -22,13 +22,22 @@
 
 #include <time.h>
 #include <signal.h>
+#include <sys/types.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/** @brief Opaque message queue descriptor returned by mq_open().  @ingroup posix_option_message_passing*/
-typedef void *mqd_t;
+/**
+ * @brief Message queue descriptor returned by mq_open().
+ *
+ * A message queue descriptor is a file descriptor; the access mode and
+ * @c O_NONBLOCK are per-descriptor state, as for any other open file
+ * description.
+ *
+ * @ingroup posix_option_message_passing
+ */
+typedef int mqd_t;
 
 /** @brief Message queue attributes used with mq_getattr() and mq_setattr(). */
 struct mq_attr {
@@ -87,7 +96,7 @@ int mq_getattr(mqd_t mqdes, struct mq_attr *mqstat);
  * @return Number of bytes in the received message on success, or -1 on failure.
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/mq_receive.html
  */
-int mq_receive(mqd_t mqdes, char *msg_ptr, size_t msg_len, unsigned int *msg_prio);
+ssize_t mq_receive(mqd_t mqdes, char *msg_ptr, size_t msg_len, unsigned int *msg_prio);
 
 /**
  * @brief Add a message to a queue.
@@ -124,8 +133,8 @@ int mq_setattr(mqd_t mqdes, const struct mq_attr *mqstat, struct mq_attr *omqsta
  * @return Number of bytes in the message on success, or -1 on failure.
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/mq_timedreceive.html
  */
-int mq_timedreceive(mqd_t mqdes, char *msg_ptr, size_t msg_len, unsigned int *msg_prio,
-		    const struct timespec *abstime);
+ssize_t mq_timedreceive(mqd_t mqdes, char *msg_ptr, size_t msg_len, unsigned int *msg_prio,
+			const struct timespec *abstime);
 #endif
 
 #if defined(_POSIX_TIMEOUTS) || defined(__DOXYGEN__)
