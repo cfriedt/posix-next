@@ -9,7 +9,8 @@ are listed below, for reference, in terms that agree with the current POSIX-1 st
 
 Choosing a profile with :kconfig:option:`CONFIG_POSIX_AEP_CHOICE_PSE51` and friends enables
 every Option Group and Option in the corresponding tables by default; any of them may be
-disabled individually.
+disabled individually. The profile's macro (``_POSIX_AEP_REALTIME_MINIMAL`` and so on) is
+defined only while all of them remain enabled.
 
 .. tabs::
 
@@ -74,7 +75,7 @@ disabled individually.
          :header: Symbol, Support, Remarks
          :widths: 50, 10, 50
 
-          _POSIX_AEP_REALTIME_MINIMAL, -1, :kconfig:option:`CONFIG_POSIX_AEP_REALTIME_MINIMAL`
+          _POSIX_AEP_REALTIME_MINIMAL, 200312L, :kconfig:option:`CONFIG_POSIX_AEP_REALTIME_MINIMAL`
 
       .. csv-table:: PSE51 Option Groups
          :header: Symbol, Support, Remarks
