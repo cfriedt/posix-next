@@ -1,0 +1,34 @@
+common:
+  tags:
+    - posix_thread_sporadic_server
+  # 1 tier0 platform per supported architecture
+  platform_key:
+    - arch
+    - simulation
+  min_flash: 64
+  min_ram: 32
+tests:
+  portability.posix.thread_sporadic_server:
+    filter: not CONFIG_NATIVE_LIBC
+  portability.posix.thread_sporadic_server.minimal:
+    filter: not CONFIG_NATIVE_LIBC
+    extra_configs:
+      - CONFIG_MINIMAL_LIBC=y
+  portability.posix.thread_sporadic_server.newlib:
+    filter: (not CONFIG_NATIVE_LIBC) and (TOOLCHAIN_HAS_NEWLIB == 1)
+    extra_configs:
+      - CONFIG_NEWLIB_LIBC=y
+  portability.posix.thread_sporadic_server.picolibc:
+    tags: picolibc
+    filter: (not CONFIG_NATIVE_LIBC) and CONFIG_PICOLIBC_SUPPORTED
+    extra_configs:
+      - CONFIG_PICOLIBC=y
+  # fails: the host libc does not define SCHED_SPORADIC
+  # portability.posix.thread_sporadic_server.linux_compat:
+  #   tags: native
+  #   platform_allow:
+  #     - native_sim
+  #     - native_sim/native/64
+  #   filter: CONFIG_NATIVE_LIBC
+  #   extra_configs:
+  #     - CONFIG_POSIX_TEST_LINUX_COMPAT=y
