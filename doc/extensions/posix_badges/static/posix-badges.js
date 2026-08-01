@@ -26,7 +26,7 @@
     ["userspace", "\u{1F9D1}\u{200D}\u{1F4BB}", "Userspace tests"],
     ["ubsan", "\u{2049}\u{FE0F}", "UBSAN tests"],
     ["asan", "\u{1F4EC}", "ASAN tests"],
-    ["static_analysis", "\u{1F50D}", "Static analysis (LLVM)"],
+    ["static_analysis", "\u{1F50D}", "Static analysis (clang scan-build)"],
   ];
 
   function indexSection() {
@@ -196,9 +196,21 @@
     return slots;
   }
 
+  /* Effective per-function status of a scenario class: sanitizers and
+     static analysis only report what fails, so when a failed variant has
+     failure attribution, a function is red only when implicated. */
+  function scenarioStatusFor(name, key, scenarios, scenarioFailed) {
+    var status = scenarios[key];
+    var failed = (scenarioFailed || {})[key];
+    if (status === "failed" && failed !== undefined) {
+      return failed.indexOf(name) !== -1 ? "failed" : "passed";
+    }
+    return status;
+  }
+
   /* slot order: coverage, scenarios..., ISO C, implementation status;
      only slots with content somewhere in the table are reserved */
-  function buildFunctionStrip(db, scenarios, slots, name) {
+  function buildFunctionStrip(db, scenarios, scenarioFailed, slots, name) {
     var iso = db.iso_c || {};
     var f = (db.functions || {})[name] || {};
     var strip = document.createElement("span");
@@ -219,7 +231,7 @@
     }
 
     slots.scenarios.forEach(function (entry) {
-      var status = scenarios[entry[0]];
+      var status = scenarioStatusFor(name, entry[0], scenarios, scenarioFailed);
       any = true;
       strip.appendChild(cell(miniStatus(entry[0], entry[1], entry[2], status)));
     });
@@ -277,7 +289,9 @@
     }
     var stem = marker.getAttribute("data-group");
     var section = marker.getAttribute("data-section") || "groups";
-    var scenarios = ((db[section] || {})[stem] || {}).scenarios || {};
+    var group = (db[section] || {})[stem] || {};
+    var scenarios = group.scenarios || {};
+    var scenarioFailed = group.scenario_failed_functions || {};
 
     document.querySelectorAll('[role="main"] table').forEach(function (tbl) {
       var rows = Array.prototype.slice.call(tbl.querySelectorAll("tbody tr"));
@@ -296,7 +310,7 @@
       }
       var slots = computeSlots(db, scenarios, names);
       var strips = names.map(function (name) {
-        return name ? buildFunctionStrip(db, scenarios, slots, name) : null;
+        return name ? buildFunctionStrip(db, scenarios, scenarioFailed, slots, name) : null;
       });
 
       /* let content size the table instead of the baked-in csv widths */
