@@ -26,6 +26,16 @@ Twister nightly runs use --retry-failed; the final statuses in twister.json
 already reflect retries. When the same (name, platform) instance appears in
 multiple input files (e.g. twister-out.N retry directories), the last file
 listed wins.
+
+Sanitizer runs (asan / ubsan CI profiles) reuse the regular suites with
+extra Kconfig, so their twister.json carries no distinguishing variant
+token. Pass ``--force-variant asan`` to collapse every suite of the run
+into that single scenario class, and ``--findings`` (the output of
+sanitizer-findings.py) to record per-scenario ``failed_functions`` — the
+implementation functions implicated by sanitizer reports. When --findings
+is given, every scenario carries a failed_functions list (possibly empty:
+attribution ran and implicated nothing); without it the key is absent and
+consumers fall back to suite-level status.
 """
 
 import argparse
@@ -40,29 +50,56 @@ SUITE_PREFIX = "portability.posix."
 FAIL_STATUSES = frozenset({"failed", "error", "blocked"})
 
 # Statuses tallied in per-scenario counts, in output order.
-COUNTED_STATUSES = ("passed", "failed", "error", "blocked", "skipped", "filtered", "notrun")
+COUNTED_STATUSES = (
+    "passed",
+    "failed",
+    "error",
+    "blocked",
+    "skipped",
+    "filtered",
+    "notrun",
+)
 
 SCHEMA_VERSION = 1
 
 
 def parse_args(argv):
     parser = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        allow_abbrev=False,
     )
     parser.add_argument("--output", required=True, type=Path, help="output JSON path")
-    parser.add_argument("--commit", default="", help="commit sha the results were built from")
+    parser.add_argument(
+        "--commit", default="", help="commit sha the results were built from"
+    )
     parser.add_argument("--run-url", default="", help="workflow run URL")
     parser.add_argument("--profile", default="", help="CI config profile name")
     parser.add_argument(
         "--shards-expected", type=int, default=None, help="number of shards planned"
     )
     parser.add_argument(
-        "--prefix", default=SUITE_PREFIX, help=f"suite name prefix filter (default {SUITE_PREFIX})"
+        "--prefix",
+        default=SUITE_PREFIX,
+        help=f"suite name prefix filter (default {SUITE_PREFIX})",
     )
     parser.add_argument(
         "--created-at",
         default=None,
         help="ISO 8601 timestamp for provenance (default: now, UTC)",
+    )
+    parser.add_argument(
+        "--force-variant",
+        default=None,
+        metavar="NAME",
+        help="record every suite under this single scenario variant "
+        "(for sanitizer runs whose suite names carry no variant token)",
+    )
+    parser.add_argument(
+        "--findings",
+        type=Path,
+        default=None,
+        help="sanitizer-findings.py JSON; adds per-scenario failed_functions",
     )
     parser.add_argument("inputs", nargs="+", type=Path, help="twister.json files")
     return parser.parse_args(argv)
@@ -92,25 +129,41 @@ def load_instances(paths, prefix):
 
 
 def split_suite_name(name, prefix):
-    rest = name[len(prefix):]
+    rest = name[len(prefix) :]
     parts = rest.split(".")
     return parts[0], ".".join(parts[1:]) or "base"
 
 
-def summarize(instances, prefix):
+def load_findings(path, prefix):
+    """suite name -> [implicated functions] from sanitizer-findings.py output."""
+    if path is None:
+        return None
+    try:
+        with path.open() as f:
+            data = json.load(f)
+    except (OSError, ValueError) as e:
+        print(f"warning: ignoring findings {path}: {e}", file=sys.stderr)
+        return None
+    return {
+        name: sorted(entry.get("functions") or [])
+        for name, entry in (data.get("suites") or {}).items()
+        if name.startswith(prefix)
+    }
+
+
+def summarize(instances, prefix, force_variant=None, findings=None):
     groups = {}
     for (name, platform), status in instances.items():
         group, variant = split_suite_name(name, prefix)
-        scenario = (
-            groups.setdefault(group, {"scenarios": {}})["scenarios"]
-            .setdefault(
-                variant,
-                {
-                    "counts": {s: 0 for s in COUNTED_STATUSES},
-                    "platforms": set(),
-                    "failed_platforms": set(),
-                },
-            )
+        if force_variant:
+            variant = force_variant
+        scenario = groups.setdefault(group, {"scenarios": {}})["scenarios"].setdefault(
+            variant,
+            {
+                "counts": {s: 0 for s in COUNTED_STATUSES},
+                "platforms": set(),
+                "failed_platforms": set(),
+            },
         )
         if status in scenario["counts"]:
             scenario["counts"][status] += 1
@@ -118,8 +171,16 @@ def summarize(instances, prefix):
         if status in FAIL_STATUSES:
             scenario["failed_platforms"].add(platform)
 
-    for group in groups.values():
-        for scenario in group["scenarios"].values():
+    implicated = {}
+    if findings is not None:
+        for name, functions in findings.items():
+            group, variant = split_suite_name(name, prefix)
+            if force_variant:
+                variant = force_variant
+            implicated.setdefault((group, variant), set()).update(functions)
+
+    for key, group in groups.items():
+        for variant, scenario in group["scenarios"].items():
             counts = scenario["counts"]
             if any(counts[s] for s in FAIL_STATUSES):
                 status = "failed"
@@ -132,6 +193,10 @@ def summarize(instances, prefix):
             scenario["failed_platforms"] = sorted(scenario["failed_platforms"])
             # drop always-zero buckets to keep the checked-in file small
             scenario["counts"] = {k: v for k, v in counts.items() if v}
+            if findings is not None:
+                scenario["failed_functions"] = sorted(
+                    implicated.get((key, variant), ())
+                )
     return groups
 
 
@@ -142,6 +207,7 @@ def main(argv=None):
     if shards_reported == 0:
         print("error: no readable twister.json inputs", file=sys.stderr)
         return 1
+    findings = load_findings(args.findings, args.prefix)
 
     created_at = args.created_at or (
         datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -157,7 +223,7 @@ def main(argv=None):
             "shards_reported": shards_reported,
             "workflow_run_url": args.run_url,
         },
-        "groups": summarize(instances, args.prefix),
+        "groups": summarize(instances, args.prefix, args.force_variant, findings),
     }
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -167,7 +233,9 @@ def main(argv=None):
 
     ngroups = len(summary["groups"])
     nscen = sum(len(g["scenarios"]) for g in summary["groups"].values())
-    print(f"{args.output}: {ngroups} groups, {nscen} scenarios, {shards_reported} shard(s)")
+    print(
+        f"{args.output}: {ngroups} groups, {nscen} scenarios, {shards_reported} shard(s)"
+    )
     return 0
 
 
