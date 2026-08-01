@@ -59,6 +59,12 @@ if [ -s "$non_empty_traces" ]; then
     "${trace_args[@]}" \
     "${posix_filter_args[@]}" \
     --xml-pretty -o twister-out/coverage.xml
+  # Codecov's Cobertura parser counts branch partials as uncovered lines
+  # (parsers.gcov.branch_detection in .codecov.yml only applies to gcov text
+  # reports); strip branch data so Codecov reports pure line coverage. The
+  # gcovr JSON keeps branch data for coverageui.
+  sed -Ei 's/ condition-coverage="[^"]*"//g; s/ branch="true"/ branch="false"/g' \
+    twister-out/coverage.xml
   line_hits=$(jq '[.files[]?.lines[]?.count // empty | select(. > 0)] | length' twister-out/coverage.json)
   echo "PR coverage merge: ${line_hits} line hits"
 else
