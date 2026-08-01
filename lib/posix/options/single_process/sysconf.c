@@ -102,7 +102,11 @@ long sysconf(int name)
 		return -1L;
 #endif
 	case _SC_THREAD_SPORADIC_SERVER:
+#ifdef CONFIG_POSIX_THREAD_SPORADIC_SERVER
+		return _POSIX_VERSION;
+#else
 		return -1L;
+#endif
 	case _SC_THREADS:
 		return COND_CODE_1(CONFIG_POSIX_THREADS, (_POSIX_VERSION), (-1L));
 	case _SC_TIMEOUTS:

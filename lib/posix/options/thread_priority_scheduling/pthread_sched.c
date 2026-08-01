@@ -79,6 +79,12 @@ int pthread_setschedparam(pthread_t pthread, int policy, const struct sched_para
 		return EINVAL;
 	}
 
+#ifdef SCHED_SPORADIC
+	if ((policy == SCHED_SPORADIC) && !posix_sporadic_param_is_valid(param)) {
+		return EINVAL;
+	}
+#endif
+
 	k_thread_priority_set(to_k_thread(&pthread),
 			      posix_to_zephyr_priority(param->sched_priority, policy));
 
