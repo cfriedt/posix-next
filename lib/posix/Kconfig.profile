@@ -29,6 +29,8 @@ choice POSIX_AEP_CHOICE
 
 	  A subprofile enables its Option Groups and Options by default; each of them may
 	  still be disabled individually, and further Option Groups may be enabled on top.
+	  The conformance macros (_POSIX_AEP_REALTIME_MINIMAL and so on) are defined only
+	  when every constituent of the subprofile is actually enabled.
 
 config POSIX_AEP_CHOICE_NONE
 	bool "No POSIX subprofile"
@@ -67,7 +69,7 @@ config POSIX_AEP_CHOICE_PSE51
 	  PSE51 includes POSIX Base Definitions (System Interfaces) plus PSE51 delta:
 	  option groups POSIX_DEVICE_IO, POSIX_FILE_LOCKING, POSIX_SIGNALS,
 	  POSIX_SINGLE_PROCESS, POSIX_THREADS_EXT; and options
-	  _POSIX_FSYNC, _POSIX_MEMLOCK, _POSIX_MEMLOCK_RANGE,
+	  _POSIX_FSYNC, _POSIX_MEMLOCK, _POSIX_MEMLOCK_RANGE, _POSIX_MONOTONIC_CLOCK,
 	  _POSIX_SHARED_MEMORY_OBJECTS, _POSIX_SYNCHRONIZED_IO,
 	  _POSIX_THREAD_ATTR_STACKADDR, _POSIX_THREAD_ATTR_STACKSIZE,
 	  _POSIX_THREAD_CPUTIME, _POSIX_THREAD_PRIO_INHERIT,
@@ -183,7 +185,7 @@ config POSIX_AEP_REALTIME_MINIMAL
 	imply POSIX_THREAD_PRIO_INHERIT
 	imply POSIX_THREAD_PRIO_PROTECT
 	imply POSIX_THREAD_PRIORITY_SCHEDULING
-	# select POSIX_THREAD_SPORADIC_SERVER
+	imply POSIX_THREAD_SPORADIC_SERVER
 	help
 	  Internal PSE51 profile (POSIX_AEP_CHOICE_PSE51). Inherits
 	  POSIX_BASE_DEFINITIONS and enables the PSE51 option groups and individual
