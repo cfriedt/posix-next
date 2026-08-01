@@ -153,7 +153,13 @@ static void mq_notify_sigev_thread(void)
 #if defined(_POSIX_THREAD_ATTR_STACKSIZE) && defined(_POSIX_THREAD_PRIORITY_SCHEDULING) &&        \
 	!defined(CONFIG_NATIVE_LIBC)
 
-#define NOTIFY_ATTR_STACK_SIZE 6144
+/*
+ * Larger than the guaranteed pool slot so the notification thread takes the
+ * oversized (mapped or heap) stack path. Sized relative to the slot rather
+ * than fixed: MPU platforms round user stacks up to a power of two, and a
+ * fixed request can exceed what small-heap platforms can align and satisfy.
+ */
+#define NOTIFY_ATTR_STACK_SIZE (2 * CONFIG_SYS_THREAD_STACK_SIZE)
 
 static ZTEST_BMEM volatile int notify_fn_zprio;
 static ZTEST_BMEM volatile size_t notify_fn_stack;
@@ -206,17 +212,8 @@ static void mq_notify_sigev_thread_attributes(void)
 	attr_probe_await(mqd, "no attributes");
 	default_prio = notify_fn_zprio;
 
-	/*
-	 * FIXME(oversized-mapped-user-stacks): dynamically-allocated user
-	 * stacks larger than CONFIG_SYS_THREAD_STACK_SIZE are broken
-	 * (k_object_map_size() and the sys_thread recycler mishandle them),
-	 * so from user mode request only the guaranteed slot size.
-	 */
-	const size_t req_stack =
-		k_is_user_context() ? CONFIG_SYS_THREAD_STACK_SIZE : NOTIFY_ATTR_STACK_SIZE;
-
 	zassert_ok(pthread_attr_init(&attr));
-	zassert_ok(pthread_attr_setstacksize(&attr, req_stack));
+	zassert_ok(pthread_attr_setstacksize(&attr, NOTIFY_ATTR_STACK_SIZE));
 	zassert_ok(pthread_attr_setschedpolicy(&attr, SCHED_RR));
 	zassert_ok(pthread_attr_setschedparam(&attr, &param));
 	sev.sigev_notify_attributes = &attr;
