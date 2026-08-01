@@ -51,11 +51,35 @@ workflow's scheduled runs commit an abridged results summary when outcomes
 change (via the ``automation/twister-summary`` bot PR):
 
 - ``twister-summary.json.sh`` — per Option Group, per twister scenario
-  variant (``base``, ``minimal``, ``linux_compat``, ...): aggregate status,
-  instance counts, and platforms, plus provenance (commit, run URL,
-  timestamp). Produced by ``scripts/ci/twister-summarize.py`` from the
-  per-shard ``twister.json`` reports and stored as a jsonball shellball
-  (see above).
+  variant (``base``, ``minimal``, ``linux_compat``, ``userspace``, ...):
+  aggregate status, instance counts, and platforms, plus provenance
+  (commit, run URL, timestamp). Produced by
+  ``scripts/ci/twister-summarize.py`` from the per-shard ``twister.json``
+  reports and stored as a jsonball shellball (see above).
+- ``asan-summary.json.sh`` / ``ubsan-summary.json.sh`` — the same summary
+  shape for the nightly AddressSanitizer / UndefinedBehaviorSanitizer runs
+  (``native_sim`` only, ``--enable-asan`` / ``--enable-ubsan`` with
+  ``CONFIG_NO_OPTIMIZATIONS=y``), collapsed into a single ``asan`` /
+  ``ubsan`` variant per group. Refreshed by the dedicated
+  `ASAN <https://github.com/cfriedt/posix-next/actions/workflows/asan.yml>`__
+  and `UBSAN <https://github.com/cfriedt/posix-next/actions/workflows/ubsan.yml>`__
+  workflows via their own bot PRs. Each scenario also records
+  ``failed_functions``: the implementation functions implicated by
+  sanitizer reports (extracted from twister logs by
+  ``scripts/ci/sanitizer-findings.py``). Sanitizers only report what
+  fails, so a function absent from every report renders as passing.
+- ``static-analysis.json.sh`` — clang static analyzer (scan-build /
+  ``analyze-build``) findings from a ``--build-only`` twister run,
+  produced by ``scripts/ci/static-analysis.py`` in the dedicated
+  `Scan-Build <https://github.com/cfriedt/posix-next/actions/workflows/scan-build.yml>`__
+  workflow: analyzed files plus per-finding file, line, enclosing
+  function, checker, and description. Coverage spans the module
+  implementation and public headers as well as the Zephyr-tree sources
+  introduced by the module's patch series, with every distinct Kconfig
+  variant of each file analyzed (deduplicated by preprocessed content),
+  cross-translation-unit analysis, and Z3 refutation of findings. A group
+  whose files were analyzed shows a passing badge unless a finding lands
+  in them.
 
 At documentation build time, ``scripts/doc/posix_metrics.py`` combines this
 summary with ``coverage-posix.json``, the Option Group tables, and the curated
