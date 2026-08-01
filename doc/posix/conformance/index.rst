@@ -87,7 +87,7 @@ POSIX System Interfaces
     _POSIX_THREAD_PROCESS_SHARED, -1,
     _POSIX_THREAD_ROBUST_PRIO_INHERIT, -1,
     _POSIX_THREAD_ROBUST_PRIO_PROTECT, -1,
-    _POSIX_THREAD_SPORADIC_SERVER, -1,
+    :ref:`_POSIX_THREAD_SPORADIC_SERVER <posix_option_thread_sporadic_server>`, 200809L, :kconfig:option:`CONFIG_POSIX_THREAD_SPORADIC_SERVER` :ref:`†<posix_undefined_behaviour>`
     _POSIX_TYPED_MEMORY_OBJECTS, -1,
     _XOPEN_CRYPT, -1,
     :ref:`_XOPEN_REALTIME <posix_option_xopen_realtime>`, 700, :kconfig:option:`CONFIG_XSI_REALTIME`

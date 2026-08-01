@@ -249,6 +249,66 @@ its ready heap on that native value paired with a wraparound-safe submission seq
 number, so equal-priority requests complete first-in-first-out, as prioritized I/O
 requires.
 
+.. _posix_sporadic_server:
+
+Sporadic Server Scheduling
+==========================
+
+The Sporadic Server options (``_POSIX_SPORADIC_SERVER`` and ``_POSIX_THREAD_SPORADIC_SERVER``)
+describe the ``SCHED_SPORADIC`` scheduling policy, under which a thread runs at a foreground
+priority while it has execution budget remaining, is demoted to a background priority
+(``sched_ss_low_priority``) when the budget is exhausted, and has its budget restored through a
+queue of pending replenishment operations scheduled one replenishment period after each
+activation.
+
+With the Thread Sporadic Server option
+(:kconfig:option:`CONFIG_POSIX_THREAD_SPORADIC_SERVER`), Zephyr accepts ``SCHED_SPORADIC`` and
+validates the sporadic server scheduling parameters, but does not enforce execution-time
+budgets: a thread scheduled under ``SCHED_SPORADIC`` executes as if scheduled under
+``SCHED_RR`` at ``sched_priority``. This deviation is denoted with the
+:ref:`† (obelus) <posix_undefined_behaviour>` wherever the option is listed. The process-level
+option, ``_POSIX_SPORADIC_SERVER``, is reported as unsupported (``-1``).
+
+The decision not to implement the sporadic server algorithm itself is deliberate:
+
+**Known specification defects.**
+   The replenishment algorithm as specified in IEEE Std 1003.1 contains well-documented defects.
+   Under certain preemption and blocking patterns, a literal implementation of the specified
+   rules produces premature replenishments, allowing a thread scheduled under ``SCHED_SPORADIC``
+   to consume substantially more processor time than its nominal budget — up to the entire
+   processor in the worst case — thereby defeating the temporal isolation the policy is intended
+   to provide. See M. Stanovich, T. P. Baker, A. Wang, and M. González Harbour, *Defects of the
+   POSIX Sporadic Server and How to Correct Them*, in Proceedings of the 16th IEEE Real-Time and
+   Embedded Technology and Applications Symposium (RTAS), 2010. Corrected variants exist in the
+   literature, but they deviate from the standardized algorithm; an implementation must choose
+   between fidelity to the specification and correct budget enforcement.
+
+**Cost imposed on the scheduler hot path.**
+   Budget enforcement requires the kernel to maintain per-thread execution-time accounting,
+   per-thread queues of pending replenishment operations (bounded by ``sched_ss_max_repl``,
+   with merging logic when replenishments coalesce), and automatic priority switching on budget
+   exhaustion and replenishment. Every context switch, preemption, and blocking operation
+   touches this state. That bookkeeping conflicts with Zephyr's goals of small, deterministic,
+   low-overhead kernel primitives and would tax all users of the scheduler, including those who
+   do not use the policy.
+
+**Limited adoption.**
+   The algorithm is rarely implemented. Linux, FreeBSD, and most embedded and general-purpose
+   operating systems omit ``SCHED_SPORADIC`` entirely; conforming applications must already
+   handle its absence or partial support via the standard feature-test mechanisms.
+
+**Mature alternatives.**
+   Applications requiring bounded execution or temporal isolation are better served by
+   mechanisms that are already available and better understood:
+
+   - :kconfig:option:`CONFIG_SCHED_DEADLINE` provides earliest-deadline-first scheduling,
+     the same family of algorithms adopted by Linux in preference to the sporadic server model.
+   - :ref:`_POSIX_THREAD_CPUTIME <posix_option_thread_cputime>` (``CLOCK_THREAD_CPUTIME_ID``)
+     permits per-thread execution-time measurement, and together with
+     :ref:`_POSIX_TIMERS <posix_option_timers>` allows an application to implement
+     budget-monitoring policies in user space, with policy decisions (demotion, throttling,
+     logging) tailored to the application rather than fixed by the kernel.
+
 .. _posix_implementation_signals:
 
 Signal Implementation Details
