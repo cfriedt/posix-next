@@ -70,6 +70,11 @@ class ScenarioSummary:
     counts: dict[str, int]
     platforms: list[str]
     failed_platforms: list[str]
+    # Implementation functions implicated by sanitizer / static analysis
+    # reports. None: no attribution data (consumers fall back to `status`
+    # for every function). Empty list: attribution ran and implicated
+    # nothing (functions render as passing even when the suite failed).
+    failed_functions: list[str] | None = None
 
 
 @dataclass
@@ -107,6 +112,8 @@ class PosixMetrics:
     overrides: dict[str, dict]
     coverage_provenance: dict | None
     twister_provenance: dict | None
+    # asan / ubsan / static_analysis snapshot provenance, keyed by class
+    extra_provenance: dict[str, dict]
     rst_keys: dict[str, str]  # canonical key -> RST page stem
 
     def rst_key(self, key: str) -> str:
@@ -214,11 +221,17 @@ def _iter_functions(text: str):
                         # signature = text back to the previous ; } or start
                         tail = re.split(r"[;}]", stripped)[-1]
                         m = _FUNC_NAME_RE.search(tail)
-                        if m and m.group(1) not in ("if", "for", "while", "switch", "return"):
-                            name_off = (sig_start + len(stripped) - len(tail)
-                                        + m.start(1))
-                            yield (m.group(1), text[body_start + 1 : i],
-                                   name_off, i)
+                        if m and m.group(1) not in (
+                            "if",
+                            "for",
+                            "while",
+                            "switch",
+                            "return",
+                        ):
+                            name_off = (
+                                sig_start + len(stripped) - len(tail) + m.start(1)
+                            )
+                            yield (m.group(1), text[body_start + 1 : i], name_off, i)
                     body_start = None
                     sig_end = i + 1
         elif depth == 0 and ch in ";":
@@ -243,9 +256,7 @@ def function_spans(path: Path) -> list[tuple[str, int, int]]:
     except OSError:
         return []
     return [
-        (name,
-         text.count("\n", 0, name_off) + 1,
-         text.count("\n", 0, end_off) + 1)
+        (name, text.count("\n", 0, name_off) + 1, text.count("\n", 0, end_off) + 1)
         for name, _, name_off, end_off in _iter_functions(text)
     ]
 
@@ -335,18 +346,25 @@ def _merge_scenarios(scenario_dicts):
     merged: dict[str, ScenarioSummary] = {}
     for v in sorted(variants):
         entries = [d[v] for d in dicts]
+        # attribution merges only when no failing contributor lacks it:
+        # an unattributed failure means "any function may be implicated"
+        if any(
+            e.failed_functions is None and e.status == "failed" for e in entries
+        ) or all(e.failed_functions is None for e in entries):
+            failed_functions = None
+        else:
+            failed_functions = sorted(
+                {fn for e in entries for fn in (e.failed_functions or [])}
+            )
         merged[v] = ScenarioSummary(
-            status=max(
-                entries, key=lambda s: _STATUS_RANK.get(s.status, 0)
-            ).status,
+            status=max(entries, key=lambda s: _STATUS_RANK.get(s.status, 0)).status,
             counts={
                 k: sum(e.counts.get(k, 0) for e in entries)
                 for k in {k for e in entries for k in e.counts}
             },
             platforms=sorted({p for e in entries for p in e.platforms}),
-            failed_platforms=sorted(
-                {p for e in entries for p in e.failed_platforms}
-            ),
+            failed_platforms=sorted({p for e in entries for p in e.failed_platforms}),
+            failed_functions=failed_functions,
         )
     return merged or None
 
@@ -445,8 +463,11 @@ def function_coverage(coverage_json: dict, root: Path | None = None) -> dict:
         for fn in unknown:
             d = fn_lines.pop(fn)
             real = next(
-                (name for name, first, last in spans
-                 if any(first <= n <= last for n in d)),
+                (
+                    name
+                    for name, first, last in spans
+                    if any(first <= n <= last for n in d)
+                ),
                 None,
             )
             if real is None:
@@ -455,14 +476,19 @@ def function_coverage(coverage_json: dict, root: Path | None = None) -> dict:
             for n, hit in d.items():
                 dst[n] = dst.get(n, False) or hit
         for fn, d in fn_lines.items():
-            acc = per_fn.setdefault(fn, {"hits": 0, "total": 0, "file": repo_rel,
-                                         "line": min(d)})
+            acc = per_fn.setdefault(
+                fn, {"hits": 0, "total": 0, "file": repo_rel, "line": min(d)}
+            )
             acc["hits"] += sum(d.values())
             acc["total"] += len(d)
             acc["line"] = min(acc["line"], min(d))
         if file_lines and not fn_lines:
-            fallback[Path(rel).stem] = (sum(file_lines.values()), len(file_lines),
-                                        repo_rel, min(file_lines))
+            fallback[Path(rel).stem] = (
+                sum(file_lines.values()),
+                len(file_lines),
+                repo_rel,
+                min(file_lines),
+            )
     result = {
         k: (v["hits"], v["total"], v["file"], v["line"]) for k, v in per_fn.items()
     }
@@ -487,6 +513,7 @@ def load_twister_summary(path: Path, aliases: dict):
                 counts=s.get("counts", {}),
                 platforms=s.get("platforms", []),
                 failed_platforms=s.get("failed_platforms", []),
+                failed_functions=s.get("failed_functions"),
             )
         raw[token] = parsed
         key = token_map.get(token, token)  # missing -> identity, null -> skip
@@ -494,6 +521,78 @@ def load_twister_summary(path: Path, aliases: dict):
             continue
         scenarios.setdefault(key, {}).update(parsed)
     return data.get("provenance"), scenarios, raw
+
+
+def load_static_analysis(path: Path, aliases: dict):
+    """Return (provenance | None, {group key: ScenarioSummary},
+    {options dir: ScenarioSummary}) from a static-analysis.json snapshot.
+
+    Synthesizes a per-group ``static_analysis`` scenario from the findings:
+    a group whose implementation files were analyzed is "passed" unless a
+    finding lands in one of them — the analyzer only reports what it can
+    prove wrong, so absence means clean. Findings carry the enclosing
+    function name when the analyzer could attribute one; any unattributed
+    finding degrades the group's failed_functions to None (consumers then
+    fall back to the group status for every function).
+    """
+    data = _load_json(path)
+    if not data or data.get("schema_version", 0) > 1:
+        return None, {}, {}
+
+    def keys_for(rel: str) -> tuple[str | None, str | None]:
+        gkey = _attribute_file("modules/lib/posix/" + rel, aliases)
+        parts = rel.split("/")
+        okey = (
+            parts[3]
+            if len(parts) > 4 and parts[:3] == ["lib", "posix", "options"]
+            else None
+        )
+        return gkey, okey
+
+    group_files: dict[str, set] = {}
+    option_files: dict[str, set] = {}
+    for rel in data.get("analyzed_files") or []:
+        gkey, okey = keys_for(rel)
+        if gkey:
+            group_files.setdefault(gkey, set()).add(rel)
+        if okey:
+            option_files.setdefault(okey, set()).add(rel)
+
+    group_findings: dict[str, list] = {}
+    option_findings: dict[str, list] = {}
+    for f in data.get("findings") or []:
+        gkey, okey = keys_for(f.get("file", ""))
+        if gkey:
+            group_findings.setdefault(gkey, []).append(f)
+        if okey:
+            option_findings.setdefault(okey, []).append(f)
+
+    def summaries(files_map, findings_map):
+        out = {}
+        for key, files in files_map.items():
+            fs = findings_map.get(key, [])
+            flagged = {f.get("file") for f in fs}
+            if any(not f.get("function") for f in fs):
+                failed_functions = None
+            else:
+                failed_functions = sorted({f["function"] for f in fs})
+            counts = {"passed": len(files - flagged)}
+            if flagged:
+                counts["failed"] = len(flagged)
+            out[key] = ScenarioSummary(
+                status="failed" if fs else "passed",
+                counts=counts,
+                platforms=["native_sim"],
+                failed_platforms=["native_sim"] if fs else [],
+                failed_functions=failed_functions,
+            )
+        return out
+
+    return (
+        data.get("provenance"),
+        summaries(group_files, group_findings),
+        summaries(option_files, option_findings),
+    )
 
 
 def load_iso_c(path: Path) -> dict[str, str]:
@@ -552,6 +651,25 @@ def load_metrics(repo_root: Path | None = None) -> PosixMetrics:
     twister_provenance, scenarios, raw_scenarios = load_twister_summary(
         doc / "metrics" / "twister-summary.json", aliases
     )
+    # sanitizer runs publish their own single-variant summaries (asan/ubsan)
+    extra_provenance: dict[str, dict] = {}
+    for fname in ("asan-summary.json", "ubsan-summary.json"):
+        prov, scen, raw = load_twister_summary(doc / "metrics" / fname, aliases)
+        if not prov:
+            continue
+        extra_provenance[fname.split("-", 1)[0]] = prov
+        for key, variants in scen.items():
+            scenarios.setdefault(key, {}).update(variants)
+        for token, variants in raw.items():
+            raw_scenarios.setdefault(token, {}).update(variants)
+    sca_provenance, sca_groups, sca_options = load_static_analysis(
+        doc / "metrics" / "static-analysis.json", aliases
+    )
+    if sca_provenance:
+        extra_provenance["static_analysis"] = sca_provenance
+        for key, summary in sca_groups.items():
+            scenarios.setdefault(key, {})["static_analysis"] = summary
+    have_scenarios = bool(twister_provenance or extra_provenance)
 
     # canonical key <-> rst stem (rst_overrides: canonical key -> stem)
     rst_overrides = {
@@ -595,12 +713,12 @@ def load_metrics(repo_root: Path | None = None) -> PosixMetrics:
             coverage_paths=cov[2] if cov else [],
             scenarios=(
                 scenarios.get(twister_overrides.get(key, key))
-                if twister_provenance
+                if have_scenarios
                 else None
             ),
         )
     # scenario data may exist for groups whose pages have no tables yet
-    if twister_provenance:
+    if have_scenarios:
         for key, scen in scenarios.items():
             if key not in groups:
                 groups[key] = GroupMetrics(key=key, scenarios=scen)
@@ -622,8 +740,11 @@ def load_metrics(repo_root: Path | None = None) -> PosixMetrics:
                 n = ln.get("line_number")
                 by_line[n] = by_line.get(n, False) or ln.get("count", 0) > 0
             files_index.append(
-                ("lib/posix/" + rel.split(_IMPL_PREFIX, 1)[1],
-                 sum(by_line.values()), len(by_line))
+                (
+                    "lib/posix/" + rel.split(_IMPL_PREFIX, 1)[1],
+                    sum(by_line.values()),
+                    len(by_line),
+                )
             )
     synonyms = option_group_synonyms(doc / "posix" / "options")
     for stem, roster in option_rosters.items():
@@ -658,20 +779,23 @@ def load_metrics(repo_root: Path | None = None) -> PosixMetrics:
         else:
             # option with its own implementation dir but no component
             own = f"lib/posix/options/{stem}"
-            if any(rel == own or rel.startswith(own + "/")
-                   for rel, _, _ in files_index):
+            if any(
+                rel == own or rel.startswith(own + "/") for rel, _, _ in files_index
+            ):
                 paths = [own]
         if paths:
             hits = total = 0
             for rel, h, n in files_index:
-                if any(rel == pfx or rel.startswith(pfx + "/") or rel.startswith(pfx)
-                       for pfx in paths):
+                if any(
+                    rel == pfx or rel.startswith(pfx + "/") or rel.startswith(pfx)
+                    for pfx in paths
+                ):
                     hits += h
                     total += n
             if total:
                 cov = (hits, total)
         scen = None
-        if twister_provenance:
+        if have_scenarios:
             scenario_groups = over.get("scenarios")
             if scenario_groups:
                 scen = _merge_scenarios(
@@ -680,6 +804,12 @@ def load_metrics(repo_root: Path | None = None) -> PosixMetrics:
                 )
             else:
                 scen = raw_scenarios.get(stem)
+        # an option with its own implementation dir gets its static
+        # analysis attributed directly (more precise than any aggregate)
+        sca_own = sca_options.get(stem)
+        if sca_own is not None:
+            scen = dict(scen or {})
+            scen["static_analysis"] = sca_own
         options[stem] = GroupMetrics(
             key=stem,
             functions_total=len(roster),
@@ -735,6 +865,7 @@ def load_metrics(repo_root: Path | None = None) -> PosixMetrics:
         overrides=overrides,
         coverage_provenance=coverage_provenance,
         twister_provenance=twister_provenance,
+        extra_provenance=extra_provenance,
         rst_keys=rst_overrides,
     )
 
@@ -758,14 +889,18 @@ def _cli_report(metrics: PosixMetrics, root: Path) -> None:
             if supported and fn not in defined and fn not in metrics.overrides
         ]
         if missing:
-            print(f"{stem}: supported but no definition or override: {', '.join(missing)}")
+            print(
+                f"{stem}: supported but no definition or override: {', '.join(missing)}"
+            )
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("--json", action="store_true", help="dump metrics as JSON")
     parser.add_argument(
-        "--report", action="store_true", help="print functions needing curation overrides"
+        "--report",
+        action="store_true",
+        help="print functions needing curation overrides",
     )
     args = parser.parse_args(argv)
 
@@ -785,9 +920,7 @@ def main(argv=None) -> int:
                 "stub_functions": g.stub_functions,
                 "coverage": g.coverage,
                 "coverage_pct": g.coverage_pct,
-                "scenarios": {
-                    v: vars(s) for v, s in (g.scenarios or {}).items()
-                },
+                "scenarios": {v: vars(s) for v, s in (g.scenarios or {}).items()},
             }
             for key, g in sorted(metrics.groups.items())
         }
