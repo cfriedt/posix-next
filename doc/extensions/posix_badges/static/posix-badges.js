@@ -6,8 +6,8 @@
  * - Adds a badge column to the API tables on Option Group detail pages
  *   (keyed on the server-rendered .pn-badges[data-group] marker). Badges
  *   sit in fixed-slot cells (an invisible table) so they align vertically
- *   across rows: coverage, linux_compat, ubsan, asan, static_analysis,
- *   ISO C standard, ENOSYS.
+ *   across rows: coverage, linux_compat, userspace, ubsan, asan,
+ *   static_analysis, ISO C standard, ENOSYS.
  * - Compact badge strips on the option_groups index toctree entries.
  *
  * Reads _static/posix-badges.json written by the posix_badges extension.
@@ -23,6 +23,7 @@
 
   var SCENARIO_BADGES = [
     ["linux_compat", "\u{1F427}", "Linux compatibility tests"],
+    ["userspace", "U", "Userspace tests"],
     ["ubsan", "UB", "UndefinedBehaviorSanitizer tests"],
     ["asan", "AS", "AddressSanitizer tests"],
     ["static_analysis", "\u{1F50D}", "Static analysis (LLVM)"],
