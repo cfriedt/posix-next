@@ -208,6 +208,73 @@ platforms that fall back to ``CONFIG_ATOMIC_OPERATIONS_C``, each user-mode atomi
 itself traps into the kernel, which would make the futex "fast path" slower than the current
 single-syscall kernel-object path.
 
+.. _posix_scheduling_priorities:
+
+Scheduling Priorities
+=====================
+
+POSIX and Zephyr order their scheduling priorities in opposite directions. POSIX priorities
+are non-negative and numerically *larger is more urgent*: each policy advertises its range
+through :c:func:`sched_get_priority_min` and :c:func:`sched_get_priority_max`. Zephyr's
+native priorities are numerically *smaller is more urgent*: cooperative threads occupy the
+negative values and preemptible threads the non-negative ones.
+
+.. graphviz::
+   :caption: Zephyr's native priority axis. POSIX priorities map onto it reversed, so the
+             POSIX maximum for a policy corresponds to the most negative (leftmost) Zephyr
+             value in that policy's band.
+
+   digraph zephyr_priority_axis {
+       rankdir=LR;
+       node [shape=box, style=rounded, fontname="sans-serif", fontsize=10];
+       edge [fontname="sans-serif", fontsize=9, arrowsize=0.6];
+
+       urgent [label="most urgent\n(POSIX max)", shape=plaintext];
+       relaxed [label="least urgent\n(POSIX min)", shape=plaintext];
+
+       subgraph cluster_coop {
+           label="cooperative (SCHED_FIFO)";
+           fontname="sans-serif";
+           fontsize=10;
+           style=dashed;
+           cm [label="-CONFIG_NUM_COOP_PRIORITIES"];
+           cd [label="…", shape=plaintext];
+           c1 [label="-1"];
+       }
+
+       subgraph cluster_preempt {
+           label="preemptible (SCHED_RR, SCHED_OTHER)";
+           fontname="sans-serif";
+           fontsize=10;
+           style=dashed;
+           p0 [label="0"];
+           pd [label="…", shape=plaintext];
+           pn [label="CONFIG_NUM_PREEMPT_PRIORITIES - 1"];
+       }
+
+       urgent -> cm [dir=none];
+       cm -> cd -> c1 [dir=none];
+       c1 -> p0 [dir=none];
+       p0 -> pd -> pn [dir=none];
+       pn -> relaxed [dir=none];
+   }
+
+The POSIX layer converts exactly once, at its boundary: :c:func:`pthread_setschedparam`,
+:c:func:`sched_setscheduler`, and friends map a POSIX priority into the Zephyr band for the
+requested policy, and everything below the boundary works exclusively in Zephyr's native
+space.
+
+This is why prioritized I/O orders its ready queue with a *min*-heap even though POSIX
+phrases the ordering as a maximum. ``aio_reqprio`` is a non-negative delta that can only
+*lower* a request below its submitting thread - by itself it orders nothing, being relative
+to the submitter - so the effective POSIX priority is the thread's priority *minus* the
+delta, and selecting the next request would take the numeric *maximum* of those values.
+Expressed in Zephyr's native space the same subtraction becomes
+``k_thread_priority_get() + aio_reqprio`` - one Zephyr level per unit, moving *right* along
+the axis above - and the most urgent request is now the numeric *minimum*. ``sys_aio`` keys
+its ready heap on that native value paired with a wraparound-safe submission sequence
+number, so equal-priority requests complete first-in-first-out, as prioritized I/O
+requires.
 
 .. _posix_implementation_signals:
 
@@ -589,3 +656,76 @@ count against the ZVFS descriptor table
 :kconfig:option:`CONFIG_POSIX_MQ_OPEN_MAX`, ``CONFIG_MSG_SIZE_MAX``, and
 ``CONFIG_MQUEUE_NAMELEN_MAX`` are no longer user configurable - they derive from the
 corresponding ``SYS_MSGQ`` bounds.
+
+POSIX Asynchronous I/O
+======================
+
+Asynchronous I/O is a thin veneer over ``sys_aio``, an OS-managed pool of asynchronous I/O
+requests (:kconfig:option:`CONFIG_SYS_AIO`) performed by a dedicated kernel service queue.
+:c:struct:`aiocb` carries the request handle, and every ``aio_*()`` call is one system call
+plus ``errno`` translation - no POSIX-side request state or service thread exists - so the
+whole option group works from user mode. Handles are validated by pool membership on every
+call: a stale or foreign handle reports ``EINVAL`` instead of corrupting memory.
+
+**Dispatch.** Submission classifies the descriptor once: descriptors with a waitable
+readiness condition (sockets, eventfds) are armed on ``ZVFS_POLLIN``/``ZVFS_POLLOUT``
+readiness with a triggered work item over the events their backend registers for
+:c:func:`poll`, so no thread parks while a request waits; always-ready descriptors (regular
+files - see below), already-ready ones, and offloaded sockets execute directly on the
+service queue thread. Operations execute one at a time in completion order
+(:kconfig:option:`CONFIG_SYS_AIO_WORKQ_PRIO`,
+:kconfig:option:`CONFIG_SYS_AIO_WORKQ_STACK_SIZE`): a slow operation delays those queued
+behind it, the file-system driver runs on the service queue's stack, and a request whose
+readiness regresses between the wakeup and the transfer may briefly block the queue. This
+dispatcher is deliberately a small internal seam: a future backend with uniform,
+driver-level asynchronous submission can replace it without changing the system call
+contract or the POSIX layer above it. Connecting POSIX asynchronous I/O to :ref:`RTIO
+<rtio>` is in the early planning stages - RTIO would first need to express operations on
+integer file descriptors and file offsets (today its submissions address ``iodev`` objects
+with no offset field), possibly by way of a ``posix_devctl()``-style uniform device
+interface.
+
+As a prerequisite, :c:func:`poll` was taught that descriptors whose backends have no poll
+support - regular files, shared memory, message queues, and the standard streams - are
+always ready for input and output, as POSIX requires of regular files, rather than failing
+with an unspecified error.
+
+**Completion** is recorded in the request and is sticky: :c:func:`aio_error` reports
+``EINPROGRESS`` until the operation finishes, :c:func:`aio_suspend` waits any-of on
+per-request completion signals (at most :kconfig:option:`CONFIG_SYS_AIO_WAIT_MAX` entries),
+and :c:func:`aio_return` reaps the request, returning its slot to the pool. Closing a
+descriptor with requests in flight completes them with ``EBADF``: the service queue
+re-validates the descriptor's backing object before every transfer. :c:func:`aio_cancel`
+removes armed and queued requests race-free - a claimed request completes with
+``ECANCELED``, wakes waiters, and still fires its notification - and reports
+``AIO_NOTCANCELED`` for one already executing.
+
+**Notification** mirrors the message queue model: ``SIGEV_SIGNAL`` generates the signal
+kernel-side with an ``SI_ASYNCIO`` code (the target is validated at submission, so no
+sender permissions apply at completion time), and ``SIGEV_THREAD`` runs the notification
+function in a fresh detached system-pool thread - in user mode, in the submitter's memory
+domain, when the request was submitted from a user thread. Completion groups back
+:c:func:`lio_listio`'s ``LIO_NOWAIT`` list notification: each submission joins the group,
+and the group's single notification fires the moment its last member completes, after which
+the group destroys itself.
+
+**Allocation** follows the distributed-minimum idiom shared with ``sys_thread``,
+``sys_timer``, and ``sys_msgq``: ``CONFIG_SYS_AIO_MIN_ADD_<NAME>`` contributions are summed
+with :kconfig:option:`CONFIG_SYS_AIO_MIN` into a statically allocated, guaranteed pool
+minimum, with :kconfig:option:`CONFIG_SYS_AIO_MAX` bounding the heap-allocated remainder.
+``AIO_MAX`` and ``AIO_LISTIO_MAX`` derive from those bounds
+(:kconfig:option:`CONFIG_POSIX_AIO_MAX`, :kconfig:option:`CONFIG_POSIX_AIO_LISTIO_MAX`).
+:c:func:`aio_fsync` synchronizes data and metadata together: ``O_DSYNC`` and ``O_SYNC`` are
+equivalent.
+
+**Prioritization**: with :kconfig:option:`CONFIG_POSIX_PRIORITIZED_IO` (enabled by default;
+selects :kconfig:option:`CONFIG_SYS_AIO_PRIORITY`), ``_POSIX_PRIORITIZED_IO`` is defined and
+the service queue performs ready requests in priority order from a min-heap rather than in
+submission order: each request is ordered by the calling thread's scheduling priority lowered
+by ``aio_reqprio`` (0 through ``AIO_PRIO_DELTA_MAX``, one Zephyr priority level per unit),
+first-in-first-out among equal priorities, for every descriptor served by the request pool.
+:ref:`posix_scheduling_priorities` explains why that ordering is a min-heap in Zephyr's
+native priority space.
+When disabled, ``AIO_PRIO_DELTA_MAX`` is 0, ``aio_reqprio`` must be 0, and ready requests
+are performed in submission order.
+
