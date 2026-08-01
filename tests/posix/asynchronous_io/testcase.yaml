@@ -1,0 +1,51 @@
+common:
+  tags:
+    - posix
+    - posix_asynchronous_io
+  # 1 tier0 platform per supported architecture
+  platform_key:
+    - arch
+    - simulation
+  min_flash: 64
+  # the FAT-formatted RAM disk alone needs 80 KiB of RAM
+  min_ram: 128
+tests:
+  portability.posix.asynchronous_io:
+    filter: not CONFIG_NATIVE_LIBC
+  portability.posix.asynchronous_io.userspace:
+    filter: (not CONFIG_NATIVE_LIBC) and CONFIG_ARCH_SUPPORTS_USERSPACE_SIGNALS
+    tags: userspace
+    extra_configs:
+      - CONFIG_TEST_USERSPACE=y
+      - CONFIG_USERSPACE=y
+  portability.posix.asynchronous_io.no_priority:
+    filter: not CONFIG_NATIVE_LIBC
+    extra_configs:
+      - CONFIG_POSIX_PRIORITIZED_IO=n
+  portability.posix.asynchronous_io.static_only:
+    filter: not CONFIG_NATIVE_LIBC
+    extra_configs:
+      # equal to the accumulated SYS_AIO_MIN (SYS_AIO_MIN_ADD_TEST=4): no dynamic requests
+      - CONFIG_SYS_AIO_MAX=4
+  portability.posix.asynchronous_io.minimal:
+    filter: not CONFIG_NATIVE_LIBC
+    extra_configs:
+      - CONFIG_MINIMAL_LIBC=y
+  portability.posix.asynchronous_io.newlib:
+    filter: (not CONFIG_NATIVE_LIBC) and (TOOLCHAIN_HAS_NEWLIB == 1)
+    extra_configs:
+      - CONFIG_NEWLIB_LIBC=y
+  portability.posix.asynchronous_io.picolibc:
+    tags: picolibc
+    filter: (not CONFIG_NATIVE_LIBC) and CONFIG_PICOLIBC_SUPPORTED
+    extra_configs:
+      - CONFIG_PICOLIBC=y
+  portability.posix.asynchronous_io.linux_compat:
+    tags: native
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    filter: CONFIG_NATIVE_LIBC
+    extra_configs:
+      - CONFIG_POSIX_TEST_LINUX_COMPAT=y
+      - CONFIG_NATIVE_SIM_SLOWDOWN_TO_REAL_TIME=y
