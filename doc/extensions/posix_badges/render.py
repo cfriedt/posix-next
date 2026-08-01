@@ -19,14 +19,14 @@ import html
 
 # Scenario classes that map to badges, in display order.
 # (key, glyph, label). The static_analysis glyph is a magnifier rather than
-# the LLVM dragon logo: the logo is an LLVM Foundation trademark; "LLVM"
-# appears in the tooltip text only (nominative use).
+# the LLVM dragon logo: the logo is an LLVM Foundation trademark;
+# "clang scan-build" appears in the tooltip text only (nominative use).
 SCENARIO_BADGES = (
-    ("linux_compat", "\U0001F427", "Linux compatibility tests"),
+    ("linux_compat", "\U0001f427", "Linux compatibility tests"),
     ("userspace", "\U0001f9d1\u200d\U0001f4bb", "Userspace tests"),
     ("ubsan", "\u2049\ufe0f", "UBSAN tests"),
     ("asan", "\U0001f4ec", "ASAN tests"),
-    ("static_analysis", "\U0001F50D", "Static analysis (LLVM)"),
+    ("static_analysis", "\U0001f50d", "Static analysis (clang scan-build)"),
 )
 
 # Light-theme palette from coverageui.py; readable on dark backgrounds too.
@@ -59,12 +59,18 @@ def _linked(inner: str, href: str | None) -> str:
     if not href:
         return inner
     href = html.escape(href, quote=True)
-    return (f'<a class="pn-badge-link" href="{href}" target="_blank"'
-            f' rel="noopener">{inner}</a>')
+    return (
+        f'<a class="pn-badge-link" href="{href}" target="_blank"'
+        f' rel="noopener">{inner}</a>'
+    )
 
 
 def donut_html(
-    pct: float | None, label: str, title: str, thresholds=(70.0, 50.0), href: str | None = None
+    pct: float | None,
+    label: str,
+    title: str,
+    thresholds=(70.0, 50.0),
+    href: str | None = None,
 ) -> str:
     cls = pct_class(pct, *thresholds)
     if pct is None:
@@ -80,7 +86,7 @@ def donut_html(
         f"<span>{text}</span></div>"
     )
     return (
-        f'<div class="pn-badge-wrap">'
+        '<div class="pn-badge-wrap">'
         + _linked(ring, href)
         + f'<div class="pn-ring-label">{html.escape(label)}</div>'
         + "</div>"
@@ -126,7 +132,10 @@ def badge_strip_html(
     if group.get("completeness_pct") is not None:
         cells.append(
             donut_html(
-                group["completeness_pct"], "Impl", "Implementation completeness", thresholds
+                group["completeness_pct"],
+                "Impl",
+                "Implementation completeness",
+                thresholds,
             )
         )
     else:
@@ -137,7 +146,10 @@ def badge_strip_html(
     if group.get("coverage_pct") is not None:
         cells.append(
             donut_html(
-                group["coverage_pct"], "Cov", cov_title, thresholds,
+                group["coverage_pct"],
+                "Cov",
+                cov_title,
+                thresholds,
                 href=group.get("codecov_url"),
             )
         )
@@ -147,7 +159,9 @@ def badge_strip_html(
     for key, glyph, label in SCENARIO_BADGES:
         status = scenarios.get(key)
         cells.append(
-            status_html(key, glyph, label, status) if status in ("passed", "failed") else None
+            status_html(key, glyph, label, status)
+            if status in ("passed", "failed")
+            else None
         )
     if not any(cells):
         return ""
@@ -168,13 +182,21 @@ _R = 15.9155
 
 
 def donut_svg(
-    pct: float | None, label: str, title: str, thresholds=(70.0, 50.0), href: str | None = None
+    pct: float | None,
+    label: str,
+    title: str,
+    thresholds=(70.0, 50.0),
+    href: str | None = None,
 ) -> str:
     color = _COLORS[pct_class(pct, *thresholds)]
     if pct is None:
         text, tooltip, dash = "n/a", f"{title}: no data", "0 100"
     else:
-        text, tooltip, dash = f"{pct:.0f}", f"{title}: {pct:.1f}%", f"{pct:.4g} {100 - pct:.4g}"
+        text, tooltip, dash = (
+            f"{pct:.0f}",
+            f"{title}: {pct:.1f}%",
+            f"{pct:.4g} {100 - pct:.4g}",
+        )
     tooltip = html.escape(tooltip, quote=True)
     svg = (
         f'<svg class="pn-svg-badge" viewBox="0 0 48 48" width="72" height="72"'
@@ -354,6 +376,24 @@ def page_slots(names, functions: dict, iso: dict, scenarios: dict | None) -> dic
     return slots
 
 
+def scenario_status_for(
+    name: str, key: str, scenarios: dict | None, scenario_failed: dict | None
+) -> str | None:
+    """Effective per-function status of a scenario class.
+
+    Sanitizers and static analysis only report what fails, so when a failed
+    variant carries failure attribution (``scenario_failed``), a function
+    renders as failing only when implicated — every other function is
+    presumed clean. Variants without attribution fall back to the group
+    status for every member.
+    """
+    status = (scenarios or {}).get(key)
+    failed = (scenario_failed or {}).get(key)
+    if status == "failed" and failed is not None:
+        return "failed" if name in failed else "passed"
+    return status
+
+
 def function_badges_html(
     name: str,
     func: dict,
@@ -361,13 +401,15 @@ def function_badges_html(
     thresholds=(70.0, 50.0),
     scenarios: dict | None = None,
     slots: dict | None = None,
+    scenario_failed: dict | None = None,
 ) -> str:
     """Self-contained inline badge strip for one function (Doxygen memdoc).
 
     Slot order — coverage, scenario classes, ISO C, implementation status —
     with empty placeholder cells so badges align in columns across members.
     Pass ``slots`` (see :func:`page_slots`) to skip classes unused anywhere
-    on the page.
+    on the page. ``scenario_failed`` (variant -> implicated functions)
+    refines failed sanitizer / static analysis variants per function.
     """
     if slots is None:
         slots = {
@@ -389,7 +431,9 @@ def function_badges_html(
             cells.append(
                 (
                     donut_svg_mini(
-                        cov, f"{name} line coverage", thresholds,
+                        cov,
+                        f"{name} line coverage",
+                        thresholds,
                         href=func.get("codecov_url"),
                     ),
                     False,
@@ -399,11 +443,14 @@ def function_badges_html(
         else:
             cells.append((None, False))
     for key, glyph, label in slots["scenarios"]:
-        cells.append((status_svg_mini(glyph, label, (scenarios or {})[key]), False))
+        status = scenario_status_for(name, key, scenarios, scenario_failed)
+        cells.append((status_svg_mini(glyph, label, status), False))
         any_badge = True
     if slots["iso"]:
         if iso_standard:
-            cells.append((iso_c_svg(name, iso_c_status(scenarios), iso_standard), False))
+            cells.append(
+                (iso_c_svg(name, iso_c_status(scenarios), iso_standard), False)
+            )
             any_badge = True
         else:
             cells.append((None, False))
@@ -438,12 +485,20 @@ def badge_strip_svg(stem: str, group: dict, thresholds=(70.0, 50.0)) -> str:
     parts = []
     if group.get("completeness_pct") is not None:
         parts.append(
-            donut_svg(group["completeness_pct"], "Impl", "Implementation completeness", thresholds)
+            donut_svg(
+                group["completeness_pct"],
+                "Impl",
+                "Implementation completeness",
+                thresholds,
+            )
         )
     if group.get("coverage_pct") is not None:
         parts.append(
             donut_svg(
-                group["coverage_pct"], "Cov", "Line coverage", thresholds,
+                group["coverage_pct"],
+                "Cov",
+                "Line coverage",
+                thresholds,
                 href=group.get("codecov_url"),
             )
         )
