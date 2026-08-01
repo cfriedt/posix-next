@@ -146,11 +146,15 @@
 /** @brief Default process priority (nice value). */
 #define NZERO      (20)
 #undef AIO_LISTIO_MAX
-#define AIO_LISTIO_MAX                _POSIX_AIO_LISTIO_MAX
+#define AIO_LISTIO_MAX \
+	COND_CODE_1(CONFIG_POSIX_ASYNCHRONOUS_IO, (CONFIG_POSIX_AIO_LISTIO_MAX), (0))
 #undef AIO_MAX
-#define AIO_MAX                       _POSIX_AIO_MAX
+#define AIO_MAX \
+	COND_CODE_1(CONFIG_POSIX_ASYNCHRONOUS_IO, (CONFIG_POSIX_AIO_MAX), (0))
 #undef AIO_PRIO_DELTA_MAX
-#define AIO_PRIO_DELTA_MAX            (0)
+#define AIO_PRIO_DELTA_MAX \
+	COND_CODE_1(CONFIG_POSIX_PRIORITIZED_IO, \
+		    (CONFIG_NUM_COOP_PRIORITIES + CONFIG_NUM_PREEMPT_PRIORITIES - 1), (0))
 #undef ARG_MAX
 #define ARG_MAX                       _POSIX_ARG_MAX
 #undef ATEXIT_MAX
