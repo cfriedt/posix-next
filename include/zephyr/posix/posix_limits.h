@@ -123,6 +123,7 @@
 #define SEM_VALUE_MAX \
 	COND_CODE_1(CONFIG_POSIX_SEMAPHORES, (CONFIG_POSIX_SEM_VALUE_MAX), (0))
 #define SIGQUEUE_MAX                  _POSIX_SIGQUEUE_MAX
+#define SS_REPL_MAX                   _POSIX_SS_REPL_MAX
 #define STREAM_MAX                    _POSIX_STREAM_MAX
 #define SYMLOOP_MAX                   _POSIX_SYMLOOP_MAX
 #define TIMER_MAX \
