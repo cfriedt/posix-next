@@ -30,7 +30,21 @@
  */
 
 #undef _POSIX_AEP_REALTIME_MINIMAL
-#ifdef CONFIG_POSIX_AEP_REALTIME_MINIMAL
+#if defined(CONFIG_POSIX_ASYNCHRONOUS_IO) && defined(CONFIG_POSIX_BARRIERS) &&                     \
+	defined(CONFIG_POSIX_CLOCK_SELECTION) && defined(CONFIG_POSIX_MAPPED_FILES) &&             \
+	defined(CONFIG_POSIX_MEMORY_PROTECTION) && defined(CONFIG_POSIX_RW_LOCKS) &&               \
+	defined(CONFIG_POSIX_REALTIME_SIGNALS) && defined(CONFIG_POSIX_SEMAPHORES) &&              \
+	defined(CONFIG_POSIX_SPIN_LOCKS) && defined(CONFIG_POSIX_THREADS) &&                       \
+	defined(CONFIG_POSIX_TIMERS) && defined(CONFIG_POSIX_DEVICE_IO) &&                         \
+	defined(CONFIG_POSIX_FILE_LOCKING) && defined(CONFIG_POSIX_SIGNALS) &&                     \
+	defined(CONFIG_POSIX_SINGLE_PROCESS) && defined(CONFIG_POSIX_THREADS_EXT) &&               \
+	defined(CONFIG_POSIX_FSYNC) && defined(CONFIG_POSIX_MEMLOCK) &&                            \
+	defined(CONFIG_POSIX_MEMLOCK_RANGE) && defined(CONFIG_POSIX_SHARED_MEMORY_OBJECTS) &&      \
+	defined(CONFIG_POSIX_SYNCHRONIZED_IO) && defined(CONFIG_POSIX_THREAD_ATTR_STACKADDR) &&    \
+	defined(CONFIG_POSIX_THREAD_ATTR_STACKSIZE) && defined(CONFIG_POSIX_THREAD_CPUTIME) &&     \
+	defined(CONFIG_POSIX_THREAD_PRIO_INHERIT) && defined(CONFIG_POSIX_THREAD_PRIO_PROTECT) &&  \
+	defined(CONFIG_POSIX_THREAD_PRIORITY_SCHEDULING) &&                                        \
+	defined(CONFIG_POSIX_THREAD_SPORADIC_SERVER)
 #define _POSIX_AEP_REALTIME_MINIMAL 200312L
 #endif
 
