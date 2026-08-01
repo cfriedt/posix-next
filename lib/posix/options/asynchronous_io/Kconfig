@@ -1,9 +1,59 @@
-# Copyright (c) 2024 Tenstorrent AI ULC
+# SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
 #
 # SPDX-License-Identifier: Apache-2.0
 
 config POSIX_ASYNCHRONOUS_IO
 	bool "POSIX asynchronous I/O"
+	select SYS_AIO
 	help
-	  Enable this option for asynchronous I/O. This option is present for conformance purposes
-	  only. All functions listed in <aio.h> return -1 and set errno to ENOSYS.
+	  Enable the POSIX_ASYNCHRONOUS_IO Option Group: asynchronous read,
+	  write, and file synchronization over the OS-managed request pool
+	  (CONFIG_SYS_AIO), with per-request and list-completion sigevent
+	  notification.
+
+	  When enabled, the following functions are available:
+
+	  aio_cancel(), aio_error(), aio_fsync(), aio_read(), aio_return(),
+	  aio_suspend(), aio_write(), lio_listio()
+
+if POSIX_ASYNCHRONOUS_IO
+
+config POSIX_PRIORITIZED_IO
+	bool "POSIX prioritized asynchronous I/O"
+	default y
+	select SYS_AIO_PRIORITY
+	help
+	  Enable the _POSIX_PRIORITIZED_IO Option: asynchronous I/O requests
+	  are processed in priority order rather than submission order, each
+	  at the scheduling priority of the calling thread lowered by the
+	  control block's aio_reqprio (0 through AIO_PRIO_DELTA_MAX,
+	  one Zephyr priority level per unit).
+
+config POSIX_AIO_MAX
+	def_int SYS_AIO_MAX
+	help
+	  Maximum number of outstanding asynchronous I/O operations. Derived
+	  from the bound on the system asynchronous I/O request pool.
+
+config POSIX_AIO_LISTIO_MAX
+	def_int SYS_AIO_WAIT_MAX
+	help
+	  Maximum number of operations in one lio_listio() call. Derived from
+	  the bound on the number of requests one sys_aio_wait() call can
+	  wait on.
+
+config SYS_AIO_MIN_ADD_POSIX_ASYNCHRONOUS_IO
+	int
+	default 0
+	help
+	  Contribution of the POSIX asynchronous I/O option group to the
+	  accumulated minimum (guaranteed, statically allocated) size of the
+	  system asynchronous I/O request pool.
+
+config HEAP_MEM_POOL_ADD_SIZE_AIO
+	def_int 512
+	help
+	  Heap contribution for asynchronous I/O requests allocated beyond
+	  the statically guaranteed pool minimum.
+
+endif # POSIX_ASYNCHRONOUS_IO
