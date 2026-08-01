@@ -131,7 +131,9 @@ def _build_db(codecov_url: str = "") -> dict:
                 component = quote(names.pop(), safe="")
                 url = f"{codecov_url}/tree/main?components%5B0%5D={component}"
             else:
-                path = g.coverage_paths[0] if len(g.coverage_paths) == 1 else "lib/posix"
+                path = (
+                    g.coverage_paths[0] if len(g.coverage_paths) == 1 else "lib/posix"
+                )
                 url = f"{codecov_url}/tree/main/{path}"
         groups[metrics.rst_key(key)] = {
             "completeness_pct": g.completeness_pct,
@@ -140,6 +142,11 @@ def _build_db(codecov_url: str = "") -> dict:
             "stub_functions": g.stub_functions,
             "codecov_url": url,
             "scenarios": {v: s.status for v, s in (g.scenarios or {}).items()},
+            "scenario_failed_functions": {
+                v: s.failed_functions
+                for v, s in (g.scenarios or {}).items()
+                if s.failed_functions is not None
+            },
         }
     options = {}
     for stem, g in metrics.options.items():
@@ -161,6 +168,11 @@ def _build_db(codecov_url: str = "") -> dict:
             "stub_functions": g.stub_functions,
             "codecov_url": url,
             "scenarios": {v: s.status for v, s in (g.scenarios or {}).items()},
+            "scenario_failed_functions": {
+                v: s.failed_functions
+                for v, s in (g.scenarios or {}).items()
+                if s.failed_functions is not None
+            },
         }
 
     functions = {}
@@ -183,6 +195,7 @@ def _build_db(codecov_url: str = "") -> dict:
         "provenance": {
             "coverage": metrics.coverage_provenance,
             "twister": metrics.twister_provenance,
+            **metrics.extra_provenance,
         },
     }
 
@@ -245,7 +258,7 @@ def on_doctree_resolved(app: Sphinx, doctree, docname):
     section = stem = None
     for prefix, sec in SECTIONS:
         if docname.startswith(prefix):
-            section, stem = sec, docname[len(prefix):]
+            section, stem = sec, docname[len(prefix) :]
             break
     if not section or stem == "index":
         return
@@ -262,12 +275,16 @@ def on_doctree_resolved(app: Sphinx, doctree, docname):
                 return
 
 
-def _inject_function_badges(text: str, scenarios: dict | None) -> tuple[str, int]:
+def _inject_function_badges(
+    text: str, scenarios: dict | None, scenario_failed: dict | None
+) -> tuple[str, int]:
     """Insert per-function badge strips after each member's memdoc opening.
 
     ``scenarios`` is the page's Option Group scenario map: the group's
     testsuite covers its functions, so its pass/fail badges are shown on
-    every member of that group's page.
+    every member of that group's page. ``scenario_failed`` maps variants
+    with per-function failure attribution (sanitizers, static analysis) to
+    the implicated function names; unlisted members render as passing.
     """
     iso = _DB.get("iso_c") or {}
     functions = _DB.get("functions") or {}
@@ -279,7 +296,12 @@ def _inject_function_badges(text: str, scenarios: dict | None) -> tuple[str, int
         if not func:
             return m.group(0)
         strip = render.function_badges_html(
-            m.group(2), func, iso.get(m.group(2)), _THRESHOLDS, scenarios
+            m.group(2),
+            func,
+            iso.get(m.group(2)),
+            _THRESHOLDS,
+            scenarios,
+            scenario_failed=scenario_failed,
         )
         if not strip:
             return m.group(0)
@@ -304,15 +326,21 @@ def on_build_finished(app: Sphinx, exception):
         return
 
     group_pages = {
-        doxy_html / f"group__{f'posix_option_group_{stem}'.replace('_', '__')}.html":
-            ("groups", stem)
+        doxy_html / f"group__{f'posix_option_group_{stem}'.replace('_', '__')}.html": (
+            "groups",
+            stem,
+        )
         for stem in _DB["groups"]
     }
-    group_pages.update({
-        doxy_html / f"group__{f'posix_option_{stem}'.replace('_', '__')}.html":
-            ("options", stem)
-        for stem in _DB["options"]
-    })
+    group_pages.update(
+        {
+            doxy_html / f"group__{f'posix_option_{stem}'.replace('_', '__')}.html": (
+                "options",
+                stem,
+            )
+            for stem in _DB["options"]
+        }
+    )
 
     pages = 0
     members = 0
@@ -324,14 +352,16 @@ def on_build_finished(app: Sphinx, exception):
 
         section_stem = group_pages.get(page)
         scenarios = None
+        scenario_failed = None
         if section_stem:
             section, stem = section_stem
             scenarios = _DB[section][stem].get("scenarios")
+            scenario_failed = _DB[section][stem].get("scenario_failed_functions")
             strip = render.badge_strip_svg(stem, _DB[section][stem], _THRESHOLDS)
             if strip:
                 text = _HEADERTITLE_RE.sub(lambda m: m.group(1) + strip, text, count=1)
 
-        text, n = _inject_function_badges(text, scenarios)
+        text, n = _inject_function_badges(text, scenarios, scenario_failed)
         members += n
 
         if text != original:
@@ -345,7 +375,9 @@ def on_build_finished(app: Sphinx, exception):
 def setup(app: Sphinx):
     app.add_config_value("posix_badges_thresholds", None, "env")
     app.add_config_value(
-        "posix_badges_codecov_url", "https://app.codecov.io/gh/cfriedt/posix-next", "env"
+        "posix_badges_codecov_url",
+        "https://app.codecov.io/gh/cfriedt/posix-next",
+        "env",
     )
 
     app.connect("builder-inited", on_builder_inited)
