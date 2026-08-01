@@ -289,6 +289,10 @@ static inline int z_si_code_to_posix(int code)
 	case K_SI_MSGQ:
 		return SI_MESGQ;
 #endif /* CONFIG_MSGQ_NOTIFY */
+#ifdef CONFIG_SYS_AIO
+	case K_SI_ASYNCIO:
+		return SI_ASYNCIO;
+#endif /* CONFIG_SYS_AIO */
 	default:
 		return code;
 	}
