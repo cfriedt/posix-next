@@ -191,7 +191,8 @@ enum {
 	COND_CODE_1(CONFIG_POSIX_MESSAGE_PASSING, (_POSIX_MESSAGE_PASSING), (-1L))
 #define __z_posix_sysconf_SC_MONOTONIC_CLOCK                                                       \
 	COND_CODE_1(CONFIG_POSIX_MONOTONIC_CLOCK, (_POSIX_MONOTONIC_CLOCK), (-1L))
-#define __z_posix_sysconf_SC_PRIORITIZED_IO (-1L)
+#define __z_posix_sysconf_SC_PRIORITIZED_IO                                                        \
+	COND_CODE_1(CONFIG_POSIX_PRIORITIZED_IO, (_POSIX_PRIORITIZED_IO), (-1L))
 #define __z_posix_sysconf_SC_PRIORITY_SCHEDULING                                                   \
 	COND_CODE_1(CONFIG_POSIX_PRIORITY_SCHEDULING, (_POSIX_PRIORITY_SCHEDULING), (-1L))
 #define __z_posix_sysconf_SC_RAW_SOCKETS                                                           \
@@ -303,8 +304,8 @@ enum {
 	COND_CODE_1(CONFIG_POSIX_SYSTEM_DATABASE_R, (CONFIG_POSIX_GETGR_R_SIZE_MAX), (0L))
 #define __z_posix_sysconf_SC_GETPW_R_SIZE_MAX                                                          \
 	COND_CODE_1(CONFIG_POSIX_SYSTEM_DATABASE_R, (CONFIG_POSIX_GETPW_R_SIZE_MAX), (0L))
-#define __z_posix_sysconf_SC_AIO_LISTIO_MAX               _POSIX_AIO_LISTIO_MAX
-#define __z_posix_sysconf_SC_AIO_MAX                      _POSIX_AIO_MAX
+#define __z_posix_sysconf_SC_AIO_LISTIO_MAX               AIO_LISTIO_MAX
+#define __z_posix_sysconf_SC_AIO_MAX                      AIO_MAX
 #define __z_posix_sysconf_SC_AIO_PRIO_DELTA_MAX           0
 #define __z_posix_sysconf_SC_ARG_MAX                      _POSIX_ARG_MAX
 #define __z_posix_sysconf_SC_ATEXIT_MAX                   32
