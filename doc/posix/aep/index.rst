@@ -70,7 +70,7 @@ are listed below, for reference, in terms that agree with the current POSIX-1 st
          :header: Symbol, Support, Remarks
          :widths: 50, 10, 50
 
-          _POSIX_AEP_REALTIME_MINIMAL, -1, :kconfig:option:`CONFIG_POSIX_AEP_REALTIME_MINIMAL`
+          _POSIX_AEP_REALTIME_MINIMAL, 200312L, :kconfig:option:`CONFIG_POSIX_AEP_REALTIME_MINIMAL`
 
       .. csv-table:: PSE51 Option Groups
          :header: Symbol, Support, Remarks
