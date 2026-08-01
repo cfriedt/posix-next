@@ -559,3 +559,64 @@ count against the ZVFS descriptor table
 :kconfig:option:`CONFIG_POSIX_MQ_OPEN_MAX`, ``CONFIG_MSG_SIZE_MAX``, and
 ``CONFIG_MQUEUE_NAMELEN_MAX`` are no longer user configurable - they derive from the
 corresponding ``SYS_MSGQ`` bounds.
+
+POSIX Asynchronous I/O
+======================
+
+Asynchronous I/O is a thin veneer over ``sys_aio``, an OS-managed pool of asynchronous I/O
+requests (:kconfig:option:`CONFIG_SYS_AIO`) performed by a dedicated kernel service queue.
+:c:struct:`aiocb` carries the request handle, and every ``aio_*()`` call is one system call
+plus ``errno`` translation - no POSIX-side request state or service thread exists - so the
+whole option group works from user mode. Handles are validated by pool membership on every
+call: a stale or foreign handle reports ``EINVAL`` instead of corrupting memory.
+
+**Dispatch.** Submission classifies the descriptor once: descriptors with a waitable
+readiness condition (sockets, eventfds) are armed on ``ZVFS_POLLIN``/``ZVFS_POLLOUT``
+readiness with a triggered work item over the events their backend registers for
+:c:func:`poll`, so no thread parks while a request waits; always-ready descriptors (regular
+files - see below), already-ready ones, and offloaded sockets execute directly on the
+service queue thread. Operations execute one at a time in completion order
+(:kconfig:option:`CONFIG_SYS_AIO_WORKQ_PRIO`,
+:kconfig:option:`CONFIG_SYS_AIO_WORKQ_STACK_SIZE`): a slow operation delays those queued
+behind it, the file-system driver runs on the service queue's stack, and a request whose
+readiness regresses between the wakeup and the transfer may briefly block the queue. This
+dispatcher is deliberately a small internal seam: a future backend with uniform,
+driver-level asynchronous submission can replace it without changing the system call
+contract or the POSIX layer above it. Connecting POSIX asynchronous I/O to :ref:`RTIO
+<rtio>` is in the early planning stages - RTIO would first need to express operations on
+integer file descriptors and file offsets (today its submissions address ``iodev`` objects
+with no offset field), possibly by way of a ``posix_devctl()``-style uniform device
+interface.
+
+As a prerequisite, :c:func:`poll` was taught that descriptors whose backends have no poll
+support - regular files, shared memory, message queues, and the standard streams - are
+always ready for input and output, as POSIX requires of regular files, rather than failing
+with an unspecified error.
+
+**Completion** is recorded in the request and is sticky: :c:func:`aio_error` reports
+``EINPROGRESS`` until the operation finishes, :c:func:`aio_suspend` waits any-of on
+per-request completion signals (at most :kconfig:option:`CONFIG_SYS_AIO_WAIT_MAX` entries),
+and :c:func:`aio_return` reaps the request, returning its slot to the pool. Closing a
+descriptor with requests in flight completes them with ``EBADF``: the service queue
+re-validates the descriptor's backing object before every transfer. :c:func:`aio_cancel`
+removes armed and queued requests race-free - a claimed request completes with
+``ECANCELED``, wakes waiters, and still fires its notification - and reports
+``AIO_NOTCANCELED`` for one already executing.
+
+**Notification** mirrors the message queue model: ``SIGEV_SIGNAL`` generates the signal
+kernel-side with an ``SI_ASYNCIO`` code (the target is validated at submission, so no
+sender permissions apply at completion time), and ``SIGEV_THREAD`` runs the notification
+function in a fresh detached system-pool thread - in user mode, in the submitter's memory
+domain, when the request was submitted from a user thread. Completion groups back
+:c:func:`lio_listio`'s ``LIO_NOWAIT`` list notification: each submission joins the group,
+and the group's single notification fires the moment its last member completes, after which
+the group destroys itself.
+
+**Allocation** follows the distributed-minimum idiom shared with ``sys_thread``,
+``sys_timer``, and ``sys_msgq``: ``CONFIG_SYS_AIO_MIN_ADD_<NAME>`` contributions are summed
+with :kconfig:option:`CONFIG_SYS_AIO_MIN` into a statically allocated, guaranteed pool
+minimum, with :kconfig:option:`CONFIG_SYS_AIO_MAX` bounding the heap-allocated remainder.
+``AIO_MAX`` and ``AIO_LISTIO_MAX`` derive from those bounds
+(:kconfig:option:`CONFIG_POSIX_AIO_MAX`, :kconfig:option:`CONFIG_POSIX_AIO_LISTIO_MAX`);
+``AIO_PRIO_DELTA_MAX`` is 0, so ``aio_reqprio`` must be 0. :c:func:`aio_fsync` synchronizes
+data and metadata together: ``O_DSYNC`` and ``O_SYNC`` are equivalent.
