@@ -653,3 +653,33 @@ patches:
       and refactor zvfs_rw() so unlocked I/O can run under flockfile().
       Route minimal-libc stdout through z_impl_zephyr_write_stdout for reserved
       stdio fds. Select TC_PROVIDES_POSIX_FILE_LOCKING for picolibc.
+  - path: zephyr/zvfs-poll-no-poll-support.patch
+    sha256sum: 49904f6bdcf3c8bfe301d54b60fd9bff70fe024eecbec74e1d32c239b93b426f
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-01
+    upstreamable: true
+    comments: |
+      lib: os: zvfs: poll fds whose backends have no poll support
+
+      poll() on a descriptor whose backend implements no poll ioctls
+      (regular files, shared memory, message queues, directories, and
+      the stdio slots) failed with a garbage errno: the vmethod's -1
+      return was negated into errno as EPERM. POSIX requires that
+      regular files always poll readable and writable.
+
+      Classify such descriptors by their fd entry mode: IFREG, IFSHM,
+      IFBLK, IFCHR, IFDIR, and IMSGQ have no waitable condition and are
+      reported ready for input and output immediately, without
+      consulting the backend. The stdio slots, previously untyped, are
+      now typed IFCHR. Backends that do implement the poll ioctls
+      (sockets, eventfd, socketpair) are unaffected: eventfd finalizes
+      untyped and continues through the ioctl path.
+
+      The per-fd prepare and update steps move into zvfs_poll_prepare_fd()
+      and zvfs_poll_update_fd(), internal single-descriptor helpers that
+      zvfs_poll_internal() now loops over, so the classification exists
+      in exactly one place and kernel services can arm readiness waits
+      on a single descriptor (e.g. with k_work_poll) without a pollfd
+      array of their own.
