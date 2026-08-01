@@ -24,12 +24,6 @@ POSIX System Interfaces
     _POSIX_NO_TRUNC, 0,
     _POSIX_VDISABLE, ``'\0'``,
 
-.. TODO: POSIX_ASYNCHRONOUS_IO, and other interfaces below, are mandatory. That means that a
-   strictly conforming application need not be modified in order to compile against Zephyr.
-   However, we may add implementations that simply fail with ENOSYS as long as the functional
-   modification is clearly documented. The implementation is not required for PSE51 or PSE52
-   and beyond that POSIX async I/O functions are rarely used in practice.
-
 .. _posix_system_interfaces_required:
 
 .. csv-table:: POSIX System Interfaces
@@ -37,7 +31,7 @@ POSIX System Interfaces
    :widths: 50, 10, 50
 
     _POSIX_VERSION, 200809L,
-    :ref:`_POSIX_ASYNCHRONOUS_IO<posix_option_asynchronous_io>`, 200809L, :kconfig:option:`CONFIG_POSIX_ASYNCHRONOUS_IO`:ref:`†<posix_undefined_behaviour>`
+    :ref:`_POSIX_ASYNCHRONOUS_IO<posix_option_asynchronous_io>`, 200809L, :kconfig:option:`CONFIG_POSIX_ASYNCHRONOUS_IO`
     :ref:`_POSIX_BARRIERS<posix_option_barriers>`, 200809L, :kconfig:option:`CONFIG_POSIX_BARRIERS`
     :ref:`_POSIX_CLOCK_SELECTION<posix_option_clock_selection>`, 200809L, :kconfig:option:`CONFIG_POSIX_CLOCK_SELECTION`
     :ref:`_POSIX_MAPPED_FILES<posix_option_mapped_files>`, 200809L, :kconfig:option:`CONFIG_POSIX_MAPPED_FILES`
@@ -77,7 +71,7 @@ POSIX System Interfaces
     :ref:`_POSIX_MEMLOCK_RANGE <posix_option_memlock_range>`, 200809L, :kconfig:option:`CONFIG_POSIX_MEMLOCK_RANGE`
     :ref:`_POSIX_MESSAGE_PASSING<posix_option_message_passing>`, 200809L, :kconfig:option:`CONFIG_POSIX_MESSAGE_PASSING`
     :ref:`_POSIX_MONOTONIC_CLOCK<posix_option_monotonic_clock>`, 200809L, :kconfig:option:`CONFIG_POSIX_MONOTONIC_CLOCK`
-    _POSIX_PRIORITIZED_IO, -1,
+    :ref:`_POSIX_PRIORITIZED_IO <posix_option_prioritized_io>`, 200809L, :kconfig:option:`CONFIG_POSIX_PRIORITIZED_IO`
     :ref:`_POSIX_PRIORITY_SCHEDULING<posix_option_priority_scheduling>`, 200809L, :kconfig:option:`CONFIG_POSIX_PRIORITY_SCHEDULING`
     :ref:`_POSIX_RAW_SOCKETS<posix_option_raw_sockets>`, 200809L, :kconfig:option:`CONFIG_POSIX_RAW_SOCKETS`
     :ref:`_POSIX_SHARED_MEMORY_OBJECTS <posix_option_shared_memory_objects>`, 200809L, :kconfig:option:`CONFIG_POSIX_SHARED_MEMORY_OBJECTS`
