@@ -26,8 +26,11 @@
 
 #define DEFAULT_PTHREAD_POLICY (IS_ENABLED(CONFIG_PREEMPT_ENABLED) ? SCHED_RR : SCHED_FIFO)
 
-/* only 2 bits in struct posix_thread_attr for schedpolicy */
-BUILD_ASSERT(SCHED_OTHER < BIT(2) && SCHED_FIFO < BIT(2) && SCHED_RR < BIT(2));
+/* only 3 bits in struct posix_thread_attr for schedpolicy */
+BUILD_ASSERT(SCHED_OTHER < BIT(3) && SCHED_FIFO < BIT(3) && SCHED_RR < BIT(3));
+#ifdef SCHED_SPORADIC
+BUILD_ASSERT(SCHED_SPORADIC < BIT(3));
+#endif
 
 BUILD_ASSERT((PTHREAD_CREATE_DETACHED == 0 || PTHREAD_CREATE_JOINABLE == 0) &&
 	     (PTHREAD_CREATE_DETACHED == 1 || PTHREAD_CREATE_JOINABLE == 1));
@@ -72,6 +75,12 @@ int pthread_attr_setschedparam(pthread_attr_t *_attr, const struct sched_param *
 	    !is_posix_policy_prio_valid(schedparam->sched_priority, attr->schedpolicy)) {
 		return EINVAL;
 	}
+
+#ifdef SCHED_SPORADIC
+	if ((attr->schedpolicy == SCHED_SPORADIC) && !posix_sporadic_param_is_valid(schedparam)) {
+		return EINVAL;
+	}
+#endif
 
 	attr->priority = schedparam->sched_priority;
 	return 0;

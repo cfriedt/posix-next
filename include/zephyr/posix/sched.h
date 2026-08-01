@@ -38,12 +38,28 @@ extern "C" {
 /** @brief Round-robin (preemptive, priority-based) scheduling policy. @ingroup posix_option_priority_scheduling */
 #define SCHED_RR 2
 
+#if defined(_POSIX_SPORADIC_SERVER) || defined(_POSIX_THREAD_SPORADIC_SERVER) ||                   \
+	defined(__DOXYGEN__)
+/**
+ * @brief Sporadic server scheduling policy.
+ * @ingroup posix_option_thread_sporadic_server
+ */
+#define SCHED_SPORADIC 4
+#endif
+
 #if (defined(CONFIG_MINIMAL_LIBC) || defined(CONFIG_PICOLIBC) || defined(CONFIG_ARMCLANG_STD_LIBC) \
 	|| defined(CONFIG_ARCMWDT_LIBC)) && !defined(_SCHED_PARAM_DEFINED) && \
 	!defined(__sched_param_defined)
 /** @brief Scheduling parameters used with sched_setparam() / pthread_attr_setschedparam(). */
 struct sched_param {
 	int sched_priority; /**< Scheduling priority. */
+#if defined(_POSIX_SPORADIC_SERVER) || defined(_POSIX_THREAD_SPORADIC_SERVER) ||                   \
+	defined(__DOXYGEN__)
+	struct timespec sched_ss_repl_period; /**< Replenishment period for the sporadic server. */
+	struct timespec sched_ss_init_budget; /**< Initial budget for the sporadic server. */
+	int sched_ss_low_priority;            /**< Low priority for the sporadic server. */
+	int sched_ss_max_repl;                /**< Maximum pending replenishments. */
+#endif
 };
 #define _SCHED_PARAM_DEFINED
 #define __sched_param_defined
