@@ -1,0 +1,128 @@
+name: UBSAN
+
+on:
+  schedule:
+    - cron: '0 2 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ubsan:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up workspace
+        id: workspace
+        uses: ./.github/actions/setup-workspace
+        with:
+          toolchains: x86_64-zephyr-elf
+          ccache-key-prefix: ubsan
+
+      - name: Run Tests with Twister (UBSAN)
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          ccache --zero-stats
+          "${{ github.workspace }}/${{ env.MANIFEST_PATH }}/scripts/ci/ubsan.sh"
+          ccache --show-stats
+
+      - name: Upload UBSAN summary
+        if: always() && !cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ubsan-summary
+          path: |
+            ${{ github.workspace }}/ubsan-summary.json
+            ${{ github.workspace }}/ubsan-findings.json
+          if-no-files-found: error
+
+      - name: Save workspace ccache
+        if: always() && !cancelled()
+        uses: ./.github/actions/save-workspace-ccache
+        with:
+          cache-primary-key: ${{ steps.workspace.outputs.ccache-primary-key }}
+          save: true
+
+  ubsan-summary-publish:
+    if: >-
+      always() && !cancelled() &&
+      needs.ubsan.result != 'cancelled' &&
+      needs.ubsan.result != 'skipped'
+    needs: [ubsan]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Download UBSAN summary
+        uses: actions/download-artifact@v4
+        with:
+          name: ubsan-summary
+          path: ${{ runner.temp }}/summary
+
+      - name: Check for summary changes
+        id: changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          fresh="${RUNNER_TEMP}/summary/ubsan-summary.json"
+          dest=doc/metrics/ubsan-summary.json.sh
+          # Ignore provenance-only churn (timestamp/run URL/commit) so an
+          # unchanged result set does not open a no-op PR. The committed
+          # snapshot is a jsonball shellball; unpack it for the comparison.
+          norm() {
+            jq -S 'del(.provenance.created_at, .provenance.workflow_run_url,
+                       .provenance.commit, .provenance.commit_short)'
+          }
+          if [ ! -f "$fresh" ]; then
+            echo "summary_changed=false" >> "$GITHUB_OUTPUT"
+            echo "No fresh UBSAN summary; skipping publish PR"
+            exit 0
+          fi
+          if [ -f "$dest" ] && \
+             diff <(python3 scripts/ci/jsonball.py unpack "$dest" | norm) \
+                  <(norm < "$fresh") >/dev/null; then
+            echo "summary_changed=false" >> "$GITHUB_OUTPUT"
+            echo "UBSAN summary unchanged; skipping publish PR"
+            exit 0
+          fi
+          echo "summary_changed=true" >> "$GITHUB_OUTPUT"
+          python3 scripts/ci/jsonball.py pack "$fresh" -o "$dest"
+
+      - name: Create or update UBSAN summary PR
+        if: steps.changes.outputs.summary_changed == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: automation/ubsan-summary
+          sign-commits: true
+          add-paths: |
+            doc/metrics/ubsan-summary.json.sh
+          title: "doc: refresh nightly UBSAN summary"
+          commit-message: "doc: refresh nightly UBSAN summary"
+          body: |
+            Update the committed UndefinedBehaviorSanitizer results summary
+            from the UBSAN workflow (GitHub Actions run ${{ github.run_id }}).
+
+            This snapshot drives the UBSAN badges in the docs.
+          labels: |
+            automation
+            twister
