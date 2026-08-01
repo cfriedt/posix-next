@@ -27,6 +27,9 @@
   <a href="https://github.com/cfriedt/posix-next/actions/workflows/ubsan.yml">
     <img src="https://github.com/cfriedt/posix-next/actions/workflows/ubsan.yml/badge.svg" alt="UBSAN">
   </a>
+  <a href="https://github.com/cfriedt/posix-next/actions/workflows/scan-build.yml">
+    <img src="https://github.com/cfriedt/posix-next/actions/workflows/scan-build.yml/badge.svg" alt="Scan-Build">
+  </a>
   <a href="https://github.com/cfriedt/posix-next/blob/main/LICENSE">
     <img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License">
   </a>
