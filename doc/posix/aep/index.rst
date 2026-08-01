@@ -97,7 +97,12 @@ are listed below, for reference, in terms that agree with the current POSIX-1 st
           :ref:`_POSIX_THREAD_PRIO_INHERIT <posix_option_thread_prio_inherit>`, 200809L, :kconfig:option:`CONFIG_POSIX_THREAD_PRIO_INHERIT`
           :ref:`_POSIX_THREAD_PRIO_PROTECT <posix_option_thread_prio_protect>`, 200809L, :kconfig:option:`CONFIG_POSIX_THREAD_PRIO_PROTECT`
           :ref:`_POSIX_THREAD_PRIORITY_SCHEDULING <posix_option_thread_priority_scheduling>`, 200809L, :kconfig:option:`CONFIG_POSIX_THREAD_PRIORITY_SCHEDULING`
-          _POSIX_THREAD_SPORADIC_SERVER, -1,
+          :ref:`_POSIX_THREAD_SPORADIC_SERVER <posix_option_thread_sporadic_server>`, 200809L, :kconfig:option:`CONFIG_POSIX_THREAD_SPORADIC_SERVER` :ref:`†<posix_undefined_behaviour>`
+
+      .. note::
+         ``_POSIX_THREAD_SPORADIC_SERVER`` support is present for linking and argument
+         verification, but is otherwise unimplemented. See :ref:`posix_sporadic_server` for
+         additional information.
 
    .. tab:: PSE52
 
