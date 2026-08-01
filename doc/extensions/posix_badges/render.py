@@ -23,6 +23,7 @@ import html
 # appears in the tooltip text only (nominative use).
 SCENARIO_BADGES = (
     ("linux_compat", "\U0001F427", "Linux compatibility tests"),
+    ("userspace", "U", "Userspace tests"),
     ("ubsan", "UB", "UndefinedBehaviorSanitizer tests"),
     ("asan", "AS", "AddressSanitizer tests"),
     ("static_analysis", "\U0001F50D", "Static analysis (LLVM)"),
