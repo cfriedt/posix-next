@@ -12,6 +12,7 @@
 #define ZEPHYR_LIB_POSIX_POSIX_INTERNAL_H_
 
 #include <errno.h>
+#include <limits.h>
 #include <sched.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -61,10 +62,10 @@ struct posix_thread_attr {
 	size_t stacksize;
 	size_t guardsize;
 	union {
-		uint16_t: 16;
+		uint32_t: 32;
 		struct {
 			int8_t priority;
-			uint8_t schedpolicy: 2;
+			uint8_t schedpolicy: 3;
 			bool cancelstate: 1;
 			bool canceltype: 1;
 			bool contentionscope: 1;
@@ -88,6 +89,11 @@ BUILD_ASSERT(sizeof(pthread_mutexattr_t) >= sizeof(struct pthread_mutexattr));
 
 static inline bool valid_posix_policy(int policy)
 {
+#ifdef SCHED_SPORADIC
+	if (IS_ENABLED(CONFIG_POSIX_THREAD_SPORADIC_SERVER) && (policy == SCHED_SPORADIC)) {
+		return true;
+	}
+#endif
 	return policy == SCHED_FIFO || policy == SCHED_RR || policy == SCHED_OTHER;
 }
 
@@ -109,6 +115,13 @@ static inline int posix_sched_priority_max(int policy)
 		   (policy == SCHED_RR || policy == SCHED_OTHER)) {
 		return CONFIG_NUM_PREEMPT_PRIORITIES - 1;
 	}
+
+#ifdef SCHED_SPORADIC
+	if (IS_ENABLED(CONFIG_POSIX_THREAD_SPORADIC_SERVER) && IS_ENABLED(CONFIG_PREEMPT_ENABLED) &&
+	    (policy == SCHED_SPORADIC)) {
+		return CONFIG_NUM_PREEMPT_PRIORITIES - 1;
+	}
+#endif
 
 	errno = EINVAL;
 	return -1;
@@ -172,6 +185,16 @@ int posix_to_zephyr_priority(int priority, int policy);
 int zephyr_to_posix_priority(int priority, int *policy);
 bool is_posix_policy_prio_valid(int priority, int policy);
 int posix_thread_attr_default_priority(void);
+
+#ifdef SCHED_SPORADIC
+/* sporadic server parameters are validated but budgets are not enforced */
+static inline bool posix_sporadic_param_is_valid(const struct sched_param *param)
+{
+	return (param->sched_ss_max_repl >= 1) &&
+	       (param->sched_ss_max_repl <= _POSIX_SS_REPL_MAX) &&
+	       is_posix_policy_prio_valid(param->sched_ss_low_priority, SCHED_SPORADIC);
+}
+#endif
 
 BUILD_ASSERT((sizeof(void *) == sizeof(pthread_barrier_t)) ||
 		     (sizeof(void *) == 2 * sizeof(pthread_barrier_t)),
