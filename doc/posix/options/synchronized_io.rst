@@ -3,9 +3,10 @@
 _POSIX_SYNCHRONIZED_IO
 ======================
 
-Since Zephyr does not yet support Asynchronous I/O, all I/O is, in fact, synchronous.
-The functions below are provided for linking only and report success without performing
-any actions :ref:`†<posix_undefined_behaviour>`.
+The functions below complete synchronously; synchronization beyond what the underlying
+file system already guarantees may be a no-op :ref:`†<posix_undefined_behaviour>`.
+Asynchronous variants are provided by
+:ref:`_POSIX_ASYNCHRONOUS_IO <posix_option_asynchronous_io>` (see :c:func:`aio_fsync`).
 
 Enable this option with :kconfig:option:`CONFIG_POSIX_SYNCHRONIZED_IO`.
 
