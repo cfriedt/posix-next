@@ -148,6 +148,10 @@ appliance without processes, for example, is PSE52 plus networking:
     CONFIG_POSIX_AEP_CHOICE_PSE52=y
     CONFIG_POSIX_NETWORKING=y
 
+The conformance macros (``_POSIX_AEP_REALTIME_MINIMAL``, ``_XOPEN_REALTIME`` and so on) are
+defined only when every constituent of the corresponding profile or Option Group is actually
+enabled, so a subtracted profile is reported honestly by ``<unistd.h>`` and :c:func:`sysconf`.
+
 Libraries should depend on :kconfig:option:`CONFIG_POSIX_SYSTEM_INTERFACES` and other
 POSIX :ref:`Option Groups <posix_option_groups>`, as needed.
 
