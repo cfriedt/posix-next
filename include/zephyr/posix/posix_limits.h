@@ -212,6 +212,8 @@
 	COND_CODE_1(CONFIG_POSIX_SEMAPHORES, (CONFIG_POSIX_SEM_VALUE_MAX), (0))
 #undef SIGQUEUE_MAX
 #define SIGQUEUE_MAX                  _POSIX_SIGQUEUE_MAX
+#undef SS_REPL_MAX
+#define SS_REPL_MAX                   _POSIX_SS_REPL_MAX
 #undef SSIZE_MAX
 #define SSIZE_MAX                     LONG_MAX
 #undef STREAM_MAX

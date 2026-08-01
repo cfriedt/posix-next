@@ -234,7 +234,8 @@ enum {
 	COND_CODE_1(IS_ENABLED(CONFIG_POSIX_FILE_SYSTEM_R) &&                                        \
 			    IS_ENABLED(CONFIG_POSIX_C_LANG_SUPPORT_R),                               \
 		    (_POSIX_THREAD_SAFE_FUNCTIONS), (-1L))
-#define __z_posix_sysconf_SC_THREAD_SPORADIC_SERVER       (-1L)
+#define __z_posix_sysconf_SC_THREAD_SPORADIC_SERVER                                                \
+	COND_CODE_1(CONFIG_POSIX_THREAD_SPORADIC_SERVER, (_POSIX_THREAD_SPORADIC_SERVER), (-1L))
 #define __z_posix_sysconf_SC_THREADS                                                               \
 	COND_CODE_1(CONFIG_POSIX_THREADS, (_POSIX_THREADS), (-1L))
 #define __z_posix_sysconf_SC_TIMEOUTS                                                              \
