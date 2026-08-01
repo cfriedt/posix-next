@@ -80,6 +80,7 @@ functionality provided elsewhere.
 
    ipv6
    monotonic_clock
+   prioritized_io
    raw_sockets
 
 :ref:`_POSIX_IPV6 <posix_option_ipv6>`
@@ -91,6 +92,12 @@ functionality provided elsewhere.
    The ``CLOCK_MONOTONIC`` clock is supported by the clock and timer
    interfaces (mandatory since Issue 8). Enable with
    :kconfig:option:`CONFIG_POSIX_MONOTONIC_CLOCK`.
+
+:ref:`_POSIX_PRIORITIZED_IO <posix_option_prioritized_io>`
+   Asynchronous I/O requests are processed in priority order - the calling
+   thread's priority lowered per request by ``aio_reqprio`` - by the
+   :ref:`_POSIX_ASYNCHRONOUS_IO <posix_option_asynchronous_io>` interfaces.
+   Enable with :kconfig:option:`CONFIG_POSIX_PRIORITIZED_IO`.
 
 :ref:`_POSIX_RAW_SOCKETS <posix_option_raw_sockets>`
    Raw sockets are supported by the
