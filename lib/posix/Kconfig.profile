@@ -29,6 +29,8 @@ choice POSIX_AEP_CHOICE
 
 	  A subprofile enables its Option Groups and Options by default; each of them may
 	  still be disabled individually, and further Option Groups may be enabled on top.
+	  The conformance macros (_POSIX_AEP_REALTIME_MINIMAL and so on) are defined only
+	  when every constituent of the subprofile is actually enabled.
 
 config POSIX_AEP_CHOICE_NONE
 	bool "No POSIX subprofile"
@@ -183,7 +185,7 @@ config POSIX_AEP_REALTIME_MINIMAL
 	imply POSIX_THREAD_PRIO_INHERIT
 	imply POSIX_THREAD_PRIO_PROTECT
 	imply POSIX_THREAD_PRIORITY_SCHEDULING
-	# select POSIX_THREAD_SPORADIC_SERVER
+	imply POSIX_THREAD_SPORADIC_SERVER
 	help
 	  Internal PSE51 profile (POSIX_AEP_CHOICE_PSE51). Inherits
 	  POSIX_BASE_DEFINITIONS and enables the PSE51 option groups and individual
