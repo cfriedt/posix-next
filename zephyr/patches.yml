@@ -1495,3 +1495,84 @@ patches:
 
       Covered by a new tests/lib/sys_msgq suite with per-unit ZTEST_USERs
       and libraries.sys_msgq{,.static_only,.userspace} variants.
+  - path: zephyr/sys-aio.patch
+    sha256sum: 8079fedc83347b3f140a8e06550695d5f3bf8b06438961f64cd023a41b769ea0
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-01
+    upstreamable: true
+    comments: |
+      lib: os: add sys_aio, an OS-managed asynchronous I/O request pool
+
+      Adds CONFIG_SYS_AIO: an OS-managed pool of asynchronous I/O requests
+      over file descriptors, submitted and reaped with the sys_aio_*()
+      system calls - the substrate for POSIX asynchronous I/O (aio_read()
+      and friends), following the sys_timer/sys_thread/sys_msgq pool
+      pattern.
+
+      Requests are performed by a dedicated kernel service queue, started
+      on first use. Descriptors with a waitable readiness condition
+      (sockets, eventfds) are armed on ZVFS_POLLIN/ZVFS_POLLOUT readiness
+      with k_work_poll over the events produced by zvfs_poll_prepare_fd(),
+      so no thread parks while a request waits; always-ready descriptors
+      (regular files), already-ready ones, and offloaded sockets execute
+      directly on the queue thread. Publication and work submission share
+      one critical section, so a successful k_work(_poll)_cancel() in
+      sys_aio_cancel() always means the operation never ran, and requests
+      claimed that way complete as ECANCELED with waiters woken and
+      notifications fired.
+
+      Handles are pool object pointers validated with elastipool
+      membership on every call (stale or foreign handles fail with
+      -EINVAL, as sys_timer), held by busy references so a slot can never
+      be recycled under a concurrent sys_aio_wait()/sys_aio_error().
+      Completion state is queried with sys_aio_error(), awaited with
+      sys_aio_wait() (k_poll over per-request completion signals, so
+      completion is sticky), and reaped with sys_aio_release(). Closing a
+      descriptor mid-flight completes the request with EBADF: the service
+      queue re-validates the fd entry's object before executing.
+
+      Completion notification mirrors sys_msgq_notify: a signal (new
+      K_SI_ASYNCIO code, generated kernel-side so the target needs no
+      sender permissions; validated at submit) or a function dispatched
+      in a fresh detached system-pool thread, in user mode in the
+      submitter's memory domain when submitted from user mode. Completion
+      groups (sys_aio_group_create()/finalize()) fire one notification
+      when every member of a finalized group has completed - the
+      substrate for lio_listio(LIO_NOWAIT) list notification - and
+      destroy themselves after firing.
+
+      Pool geometry follows the distributed-minimum idiom: SYS_AIO_MIN
+      plus every CONFIG_SYS_AIO_MIN_ADD_* contribution is summed by the
+      build system into the un-prefixed SYS_AIO_MIN, statically allocated
+      and guaranteed, with SYS_AIO_MAX bounding the heap remainder.
+
+      With CONFIG_SYS_AIO_PRIORITY (the substrate for POSIX
+      _POSIX_PRIORITIZED_IO), ready requests are performed in priority
+      order rather than submission order: sys_aio_req gains a
+      thread-style priority, and ready requests are drained from a
+      min-heap (CONFIG_MIN_HEAP) keyed on (priority, readiness sequence),
+      so the service queue always executes the highest-priority ready
+      request next, first-in-first-out among equals. Ready-queue storage
+      keeps capacity >= outstanding requests - statically for the
+      guaranteed pool minimum, growing by doubling alongside the elastic
+      pool - so queuing at readiness time cannot fail, and a ready (not
+      yet running) request is canceled race-free by removal from the
+      heap. Readiness arming and the k_work_poll flow are unchanged; when
+      the option is disabled the original per-request k_work FIFO path is
+      compiled instead.
+
+      aio_fsync() consumers need the synchronized-I/O open flags, so
+      fdtable.h gains ZVFS_O_DSYNC/RSYNC/SYNC and the picolibc and newlib
+      fcntl.h shims override the libc spellings to those values, the same
+      way they already align O_NONBLOCK and F_GETFL/F_SETFL. A picolibc
+      limits.h shim chains the SDK header to Zephyr's posix_limits.h -
+      the SDK picolibc does not carry the POSIX limits
+      (AIO_PRIO_DELTA_MAX and friends) - matching minimal and newlib.
+
+      Covered by a new tests/lib/sys_aio suite with per-unit ZTEST_USERs
+      over a FAT RAM disk and eventfds, and
+      libraries.sys_aio{,.priority,.static_only,.userspace} variants;
+      the priority variant proves priority-order execution and
+      ready-state cancellation under a scheduler lock.
