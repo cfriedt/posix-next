@@ -11,24 +11,6 @@
 #include <errno.h>
 #include <pthread.h>
 
-int pthread_attr_setstack(pthread_attr_t *_attr, void *stackaddr, size_t stacksize)
-{
-	struct posix_thread_attr *attr = (struct posix_thread_attr *)_attr;
-
-	if (stackaddr == NULL) {
-		return EINVAL;
-	}
-
-	if (!posix_thread_attr_is_valid(attr) || (stacksize < PTHREAD_STACK_MIN)) {
-		return EINVAL;
-	}
-
-	attr->stack = stackaddr;
-	attr->stacksize = stacksize;
-
-	return 0;
-}
-
 int pthread_attr_getstack(const pthread_attr_t *_attr, void **stackaddr, size_t *stacksize)
 {
 	const struct posix_thread_attr *attr = (const struct posix_thread_attr *)_attr;
