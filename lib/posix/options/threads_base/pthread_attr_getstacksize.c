@@ -27,20 +27,3 @@ int pthread_attr_getstacksize(const pthread_attr_t *_attr, size_t *stacksize)
 
 	return 0;
 }
-
-int pthread_attr_setstacksize(pthread_attr_t *_attr, size_t stacksize)
-{
-	struct posix_thread_attr *attr = (struct posix_thread_attr *)_attr;
-
-	if (!posix_thread_attr_is_valid(attr) || (stacksize < PTHREAD_STACK_MIN)) {
-		return EINVAL;
-	}
-
-	if (attr->stack != NULL) {
-		return EINVAL;
-	}
-
-	attr->stacksize = stacksize;
-
-	return 0;
-}
