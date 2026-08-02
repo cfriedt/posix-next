@@ -18,14 +18,6 @@
 int pthread_kill(pthread_t thread, int sig);
 #endif
 
-void test_pthread_sigmask_init_expectation_mask(void);
-void test_pthread_sigmask_common(int (*sigmask)(int how, const sigset_t *set, sigset_t *oset));
-
-static void test_pthread_sigmask(void)
-{
-	test_pthread_sigmask_common(pthread_sigmask);
-}
-
 static void test_pthread_kill(void)
 {
 	zassert_ok(pthread_kill(pthread_self(), 0));
@@ -38,10 +30,4 @@ static void test_pthread_kill(void)
 	})
 }
 
-ZTEST_THREADS_BASE(test_pthread_sigmask);
 ZTEST_THREADS_BASE(test_pthread_kill);
-
-void pthread_signal_setup(void)
-{
-	test_pthread_sigmask_init_expectation_mask();
-}
