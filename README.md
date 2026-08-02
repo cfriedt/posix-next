@@ -12,9 +12,6 @@
   <a href="https://github.com/cfriedt/posix-next/actions/workflows/twister.yml">
     <img src="https://github.com/cfriedt/posix-next/actions/workflows/twister.yml/badge.svg" alt="Twister">
   </a>
-  <a href="https://github.com/cfriedt/posix-next/actions/workflows/docs.yml">
-    <img src="https://github.com/cfriedt/posix-next/actions/workflows/docs.yml/badge.svg" alt="Documentation">
-  </a>
   <a href="https://github.com/cfriedt/posix-next/actions/workflows/coverage.yml">
     <img src="https://github.com/cfriedt/posix-next/actions/workflows/coverage.yml/badge.svg" alt="Coverage">
   </a>
@@ -24,11 +21,17 @@
   <a href="https://github.com/cfriedt/posix-next/actions/workflows/asan.yml">
     <img src="https://github.com/cfriedt/posix-next/actions/workflows/asan.yml/badge.svg" alt="ASAN">
   </a>
+</p>
+
+<p align="center">
   <a href="https://github.com/cfriedt/posix-next/actions/workflows/ubsan.yml">
     <img src="https://github.com/cfriedt/posix-next/actions/workflows/ubsan.yml/badge.svg" alt="UBSAN">
   </a>
   <a href="https://github.com/cfriedt/posix-next/actions/workflows/scan-build.yml">
     <img src="https://github.com/cfriedt/posix-next/actions/workflows/scan-build.yml/badge.svg" alt="Scan-Build">
+  </a>
+  <a href="https://github.com/cfriedt/posix-next/actions/workflows/docs.yml">
+    <img src="https://github.com/cfriedt/posix-next/actions/workflows/docs.yml/badge.svg" alt="Documentation">
   </a>
   <a href="https://github.com/cfriedt/posix-next/blob/main/LICENSE">
     <img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License">
