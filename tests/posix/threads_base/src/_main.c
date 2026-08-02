@@ -17,9 +17,6 @@ static const struct posix_threads_base_module modules[] = {
 		.before = pthread_attr_before,
 		.after = pthread_attr_after,
 	},
-	{
-		.before = mutex_before,
-	},
 };
 
 static void *setup(void)
