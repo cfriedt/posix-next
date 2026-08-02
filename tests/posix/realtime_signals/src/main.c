@@ -265,6 +265,17 @@ static void test_sigtimedwait(void)
 	block_rt_signals();
 
 	ARRAY_FOR_EACH_PTR(harness, a) {
+		/*
+		 * The host libc declares the set argument of sigtimedwait()
+		 * and sigwaitinfo() nonnull, so the NULL-set probes are
+		 * undefined against it; UBSAN traps them at the call site
+		 * before EFAULT can be observed.
+		 */
+		if (IS_ENABLED(CONFIG_UBSAN) && IS_ENABLED(CONFIG_NATIVE_LIBC) &&
+		    a->set == NULL) {
+			continue;
+		}
+
 		errno = 0;
 		if (a->expected_errno == 0) {
 			zassert_ok(queue_rt_signal(self, SIGRTMIN, (union sigval){0}));
@@ -334,6 +345,17 @@ static void test_sigwaitinfo(void)
 	block_rt_signals();
 
 	ARRAY_FOR_EACH_PTR(harness, a) {
+		/*
+		 * The host libc declares the set argument of sigtimedwait()
+		 * and sigwaitinfo() nonnull, so the NULL-set probes are
+		 * undefined against it; UBSAN traps them at the call site
+		 * before EFAULT can be observed.
+		 */
+		if (IS_ENABLED(CONFIG_UBSAN) && IS_ENABLED(CONFIG_NATIVE_LIBC) &&
+		    a->set == NULL) {
+			continue;
+		}
+
 		errno = 0;
 		if (a->expected_errno == 0) {
 			zassert_ok(queue_rt_signal(pthread_self(), SIGRTMIN,
