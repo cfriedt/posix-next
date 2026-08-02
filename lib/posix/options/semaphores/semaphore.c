@@ -378,6 +378,8 @@ int sem_close(sem_t *sem)
 		return -1;
 	}
 
+	nsem = CONTAINER_OF(sem, struct nsem_obj, sem);
+
 	nsem_list_lock();
 	nsem = nsem_find_by_sem(sem);
 	if (nsem == NULL) {
@@ -395,11 +397,11 @@ int sem_close(sem_t *sem)
 /* Used by ztest to get the ref count of a named semaphore */
 int nsem_get_ref_count(sem_t *sem)
 {
-	struct nsem_obj *nsem = CONTAINER_OF(sem, struct nsem_obj, sem);
+	struct nsem_obj *nsem;
 	int ref_count;
 
 	__ASSERT_NO_MSG(sem != NULL);
-	__ASSERT_NO_MSG(nsem != NULL);
+	nsem = CONTAINER_OF(sem, struct nsem_obj, sem);
 
 	nsem_list_lock();
 	ref_count = nsem->ref_count;
