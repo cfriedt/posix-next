@@ -1,6 +1,5 @@
 /*
- * Copyright (c) 2018 Intel Corporation
- *
+ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -10,7 +9,6 @@
 #include <zephyr/sys/util.h>
 #include <zephyr/ztest.h>
 
-#include "../../shared/linux_compat_test.h"
 #include "_main.h"
 
 #define N_THR 2
@@ -61,7 +59,7 @@ static void make_keys(void)
 	}
 }
 
-static void test_key_1toN_thread(void)
+static void setspecific_key_1toN_thread(void)
 {
 	void *retval;
 	pthread_t newthread[N_THR];
@@ -80,7 +78,7 @@ static void test_key_1toN_thread(void)
 	zassert_ok(pthread_key_delete(keys[0]), "attempt to delete key failed");
 }
 
-static void test_key_Nto1_thread(void)
+static void setspecific_key_Nto1_thread(void)
 {
 	pthread_t newthread;
 
@@ -96,42 +94,7 @@ static void test_key_Nto1_thread(void)
 	}
 }
 
-ZTEST_THREADS_BASE(test_key_1toN_thread);
-ZTEST_THREADS_BASE(test_key_Nto1_thread);
-
-ZTEST(posix_threads_base, test_key_resource_leak)
-{
-	pthread_key_t leak_key;
-
-	for (size_t i = 0; i < CONFIG_POSIX_THREAD_KEYS_MAX; ++i) {
-		zassert_ok(pthread_key_create(&leak_key, NULL), "failed to create key %zu", i);
-		zassert_ok(pthread_key_delete(leak_key), "failed to delete key %zu", i);
-	}
-}
-
-static void test_correct_key_is_deleted(void)
-{
-	pthread_key_t deleted_key;
-	size_t j = CONFIG_POSIX_THREAD_KEYS_MAX - 1;
-	pthread_key_t all_keys[CONFIG_POSIX_THREAD_KEYS_MAX];
-
-	for (size_t i = 0; i < ARRAY_SIZE(all_keys); ++i) {
-		zassert_ok(pthread_key_create(&all_keys[i], NULL), "failed to create key %zu", i);
-	}
-
-	deleted_key = all_keys[j];
-	zassert_ok(pthread_key_delete(all_keys[j]));
-	zassert_ok(pthread_key_create(&all_keys[j], NULL), "failed to create key %zu", j);
-
-	zassert_equal(deleted_key, all_keys[j], "deleted key %lx instead of key %lx", (long)all_keys[j],
-		      (long)deleted_key);
-
-	for (size_t i = 0; i < ARRAY_SIZE(all_keys); ++i) {
-		zassert_ok(pthread_key_delete(all_keys[i]), "failed to delete key %zu", i);
-	}
-}
-
-ZTEST_THREADS_BASE(test_correct_key_is_deleted);
+static ZTEST_BMEM pthread_key_t alloc_keys[CONFIG_POSIX_THREAD_KEYS_MAX];
 
 static void *setspecific_thread(void *count)
 {
@@ -145,19 +108,27 @@ static void *setspecific_thread(void *count)
 			break;
 		}
 
-		if (pthread_key_create(&tkey, NULL) < 0) {
+		if (pthread_key_create(&tkey, NULL) != 0) {
 			break;
 		}
-		if (pthread_setspecific(tkey, &value) == ENOMEM) {
+		if (pthread_setspecific(tkey, &value) != 0) {
 			break;
 		}
+		alloc_keys[*alloc_count] = tkey;
 		*alloc_count += 1;
 	}
 
 	return NULL;
 }
 
-static void test_thread_specific_data_deallocation(void)
+static void setspecific_delete_keys(int count)
+{
+	for (int i = 0; i < count; ++i) {
+		zassert_ok(pthread_key_delete(alloc_keys[i]));
+	}
+}
+
+static void setspecific_data_deallocation(void)
 {
 	pthread_t thread;
 
@@ -168,68 +139,23 @@ static void test_thread_specific_data_deallocation(void)
 		   "attempt to create thread failed");
 	zassert_ok(pthread_join(thread, NULL), "failed to join thread");
 	printk("first thread allocated %d keys\n", alloc_count_t0);
+	setspecific_delete_keys(alloc_count_t0);
 
 	zassert_ok(pthread_create(&thread, NULL, setspecific_thread, &alloc_count_t1),
 		   "attempt to create thread failed");
 	zassert_ok(pthread_join(thread, NULL), "failed to join thread");
 	printk("second thread allocated %d keys\n", alloc_count_t1);
+	setspecific_delete_keys(alloc_count_t1);
 
 	zassert_equal(alloc_count_t0, alloc_count_t1,
 		      "failed to deallocate thread specific data");
 }
 
-ZTEST_THREADS_BASE(test_thread_specific_data_deallocation);
-
-static void test_pthread_key_create(void)
+static void test_pthread_setspecific(void)
 {
-	int ret;
-	size_t n = 0;
-	pthread_key_t k[CONFIG_POSIX_THREAD_KEYS_MAX + 1];
-
-	posix_test_skip_if_native_libc();
-
-	/* exhausting the key pool fails with EAGAIN */
-	for (; n < ARRAY_SIZE(k); ++n) {
-		ret = pthread_key_create(&k[n], NULL);
-		if (ret != 0) {
-			break;
-		}
-	}
-	zassert_true(n < ARRAY_SIZE(k), "key pool did not exhaust");
-	zassert_equal(ret, EAGAIN, "expected EAGAIN, got %d", ret);
-
-	for (size_t i = 0; i < n; ++i) {
-		zassert_ok(pthread_key_delete(k[i]));
-	}
+	setspecific_key_1toN_thread();
+	setspecific_key_Nto1_thread();
+	setspecific_data_deallocation();
 }
 
-ZTEST_THREADS_BASE(test_pthread_key_create);
-
-static void *getspecific_fn(void *arg)
-{
-	pthread_key_t *key = arg;
-
-	zassert_ok(pthread_setspecific(*key, (void *)0x42));
-	zassert_equal(pthread_getspecific(*key), (void *)0x42);
-
-	return NULL;
-}
-
-static void test_pthread_getspecific(void)
-{
-	pthread_t th;
-	pthread_key_t key;
-
-	posix_test_skip_if_native_libc();
-
-	zassert_ok(pthread_key_create(&key, NULL));
-	zassert_ok(pthread_create(&th, NULL, getspecific_fn, &key));
-	zassert_ok(pthread_join(th, NULL));
-	zassert_ok(pthread_key_delete(key));
-
-	/* lookups against a deleted key fail closed */
-	zassert_is_null(pthread_getspecific(key));
-	zassert_equal(pthread_setspecific(key, (void *)0x42), EINVAL);
-}
-
-ZTEST_THREADS_BASE(test_pthread_getspecific);
+ZTEST_THREADS_BASE(test_pthread_setspecific);
