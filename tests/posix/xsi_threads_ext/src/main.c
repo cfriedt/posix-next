@@ -70,7 +70,15 @@ static void create_thread_common(const pthread_attr_t *attrp, bool expect_succes
 		return;
 	}
 
-	zassert_not_ok(pthread_join(th, NULL));
+	/*
+	 * Should not be able to join a detached thread. POSIX leaves this
+	 * undefined; Zephyr detects it and fails the join, but ASAN's
+	 * pthread_join interceptor aborts on it before the implementation
+	 * can return.
+	 */
+	if (!IS_ENABLED(CONFIG_ASAN)) {
+		zassert_not_ok(pthread_join(th, NULL));
+	}
 
 	/* bounded by real time: under parallel load sim time can lag far behind */
 	for (uint32_t t0 = k_uptime_get_32(); !detached_thread_has_finished && (k_uptime_get_32() - t0) < 5000;) {
