@@ -21,7 +21,12 @@ ZTEST(xsi_system_logging, test_syslog)
 	};
 
 	openlog("syslog", LOG_PID | LOG_CONS | LOG_NOWAIT, LOG_LOCAL7);
-	(void)setlogmask(LOG_MASK(-1));
+	/*
+	 * Enable every priority up to LOG_DEBUG. Spelled out rather than
+	 * LOG_MASK(-1): the host libc's LOG_MASK is (1 << (pri)), so -1 is a
+	 * negative shift.
+	 */
+	(void)setlogmask((1 << (LOG_DEBUG + 1)) - 1);
 
 	for (size_t i = 0; i < N_PRIOS; ++i) {
 		syslog(i, "syslog priority %d", prios[i]);
