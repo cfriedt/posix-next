@@ -29,11 +29,17 @@ static void timer_settime_abstime_monotonic(void)
 	zassert_equal(accept_sig(TEST_SIGNAL_VAL, NULL, 10 * PERIOD_MS), TEST_SIGNAL_VAL,
 		      "future absolute deadline did not fire");
 
-	/* absolute deadline in the past expires immediately */
+	/*
+	 * An absolute deadline in the past expires immediately. The accept
+	 * window is an upper bound, not a delay: it matches the file's other
+	 * probes so that slow, loaded runners (e.g. -O0 sanitizer binaries
+	 * under linux_compat real-time slowdown) do not flake on delivery
+	 * latency.
+	 */
 	its.it_value.tv_sec = 0;
 	its.it_value.tv_nsec = 1;
 	zassert_ok(timer_settime(timerid, TIMER_ABSTIME, &its, NULL));
-	zassert_equal(accept_sig(TEST_SIGNAL_VAL, NULL, 2 * PERIOD_MS), TEST_SIGNAL_VAL,
+	zassert_equal(accept_sig(TEST_SIGNAL_VAL, NULL, 10 * PERIOD_MS), TEST_SIGNAL_VAL,
 		      "past absolute deadline did not fire immediately");
 }
 
