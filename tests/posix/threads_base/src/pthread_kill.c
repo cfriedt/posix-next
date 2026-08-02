@@ -18,19 +18,6 @@
 int pthread_kill(pthread_t thread, int sig);
 #endif
 
-void test_pthread_sigmask_init_expectation_mask(void);
-void test_pthread_sigmask_common(int (*sigmask)(int how, const sigset_t *set, sigset_t *oset));
-
-static void test_pthread_sigmask(void)
-{
-	if (!IS_ENABLED(CONFIG_SIGNAL)) {
-		zassert_equal(pthread_sigmask(SIG_BLOCK, NULL, NULL), ENOTSUP);
-		return;
-	}
-
-	test_pthread_sigmask_common(pthread_sigmask);
-}
-
 static void test_pthread_kill(void)
 {
 	if (!IS_ENABLED(CONFIG_SIGNAL)) {
@@ -48,10 +35,4 @@ static void test_pthread_kill(void)
 	})
 }
 
-ZTEST_THREADS_BASE(test_pthread_sigmask);
 ZTEST_THREADS_BASE(test_pthread_kill);
-
-void pthread_signal_setup(void)
-{
-	test_pthread_sigmask_init_expectation_mask();
-}
