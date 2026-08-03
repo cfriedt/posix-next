@@ -34,7 +34,7 @@ static void check_gmtime_r(const struct time_r_test_data *tp)
 	zassert_equal(tp->tm.tm_yday, result.tm_yday, "yday mismatch for ux %lld", ux);
 }
 
-ZTEST(posix_c_lang_support_r, test_gmtime_r)
+ZTEST_USER(posix_c_lang_support_r, test_gmtime_r)
 {
 	static const struct time_r_test_data tests[] = {
 		{

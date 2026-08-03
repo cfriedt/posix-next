@@ -8,7 +8,7 @@
 
 #include <zephyr/ztest.h>
 
-ZTEST(posix_c_lib_ext, test_strnlen)
+ZTEST_USER(posix_c_lib_ext, test_strnlen)
 {
 	zexpect_equal(strnlen("hello", 3), 3);
 	zexpect_equal(strnlen("hello", 8), 5);

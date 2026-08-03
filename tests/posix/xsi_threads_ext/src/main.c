@@ -15,12 +15,12 @@
 
 #define BIOS_FOOD 0xB105F00D
 
-static bool attr_valid;
-static pthread_attr_t attr;
+static ZTEST_BMEM bool attr_valid;
+static ZTEST_BMEM pthread_attr_t attr;
 #ifndef CONFIG_NATIVE_LIBC
 static const pthread_attr_t uninit_attr;
 #endif
-static bool detached_thread_has_finished;
+static ZTEST_BMEM bool detached_thread_has_finished;
 
 /*
  * Used by the static_stack twister variant (CONFIG_SYS_THREAD_STACK_MAX=0) where
@@ -100,7 +100,7 @@ static inline void cannot_create_thread(const pthread_attr_t *attrp)
 	create_thread_common(attrp, false, true);
 }
 
-ZTEST(xsi_threads_ext, test_pthread_attr_getstack)
+ZTEST_USER(xsi_threads_ext, test_pthread_attr_getstack)
 {
 	void *stackaddr = (void *)BIOS_FOOD;
 	size_t stacksize = BIOS_FOOD;
@@ -152,7 +152,7 @@ ZTEST(xsi_threads_ext, test_pthread_attr_setstack)
 	can_create_thread(&attr);
 }
 
-ZTEST(xsi_threads_ext, test_pthread_attr_getstacksize)
+ZTEST_USER(xsi_threads_ext, test_pthread_attr_getstacksize)
 {
 	size_t stacksize = BIOS_FOOD;
 
@@ -212,7 +212,7 @@ ZTEST(xsi_threads_ext, test_pthread_set_get_concurrency)
 	zassert_equal(EAGAIN, pthread_setconcurrency(CONFIG_MP_MAX_NUM_CPUS + 1));
 }
 
-ZTEST(xsi_threads_ext, test_pthread_attr_static_corner_cases)
+ZTEST_USER(xsi_threads_ext, test_pthread_attr_static_corner_cases)
 {
 	pthread_attr_t attr1;
 
