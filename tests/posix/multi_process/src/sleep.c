@@ -1,6 +1,5 @@
 /*
- * Copyright (c) 2022, Meta
- *
+ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -8,6 +7,14 @@
 #include <unistd.h>
 
 #include <zephyr/ztest.h>
+
+#include "../../shared/linux_compat_test.h"
+
+/* under native libc, sleep() blocks on the host clock, which the simulated clock does not track */
+static uint32_t uptime_ms(void)
+{
+	return IS_ENABLED(CONFIG_NATIVE_LIBC) ? now_ms() : (uint32_t)k_uptime_get();
+}
 
 struct waker_work {
 	k_tid_t tid;
@@ -44,30 +51,32 @@ ZTEST(posix_multi_process, test_sleep)
 	zassert_ok(sleep(0));
 
 	/* test that sleeping for 1s sleeps for at least 1s */
-	then = k_uptime_get();
+	then = uptime_ms();
 	zassert_equal(0, sleep(1));
-	now = k_uptime_get();
+	now = uptime_ms();
 	zassert_true((now - then) >= 1 * MSEC_PER_SEC);
 
 	/* test that sleeping for 2s sleeps for at least 2s */
-	then = k_uptime_get();
+	then = uptime_ms();
 	zassert_equal(0, sleep(2));
-	now = k_uptime_get();
+	now = uptime_ms();
 	zassert_true((now - then) >= 2 * MSEC_PER_SEC);
 
-	/* a caught signal ends the sleep early, which reports the seconds left */
-	struct sigaction act = {.sa_handler = sleep_signal_handler};
-	sigset_t set;
+	if (!IS_ENABLED(CONFIG_NATIVE_LIBC)) {
+		struct sigaction act = {.sa_handler = sleep_signal_handler};
+		sigset_t set;
 
-	zassert_ok(sigemptyset(&set));
-	zassert_ok(sigaddset(&set, SIGUSR1));
-	zassert_ok(sigprocmask(SIG_UNBLOCK, &set, NULL));
-	zassert_ok(sigaction(SIGUSR1, &act, NULL));
-	wake_work.tid = k_current_get();
-	k_work_init_delayable(&wake_work.dwork, waker_func);
-	zassert_equal(1, k_work_schedule(&wake_work.dwork, K_SECONDS(sleep_min_s)));
-	zassert_true(sleep(sleep_max_s) >= sleep_rem_s);
-	act.sa_handler = SIG_DFL;
-	zassert_ok(sigaction(SIGUSR1, &act, NULL));
-	zassert_ok(sigprocmask(SIG_BLOCK, &set, NULL));
+		/* a caught signal ends the sleep early, which reports the seconds left */
+		zassert_ok(sigemptyset(&set));
+		zassert_ok(sigaddset(&set, SIGUSR1));
+		zassert_ok(sigprocmask(SIG_UNBLOCK, &set, NULL));
+		zassert_ok(sigaction(SIGUSR1, &act, NULL));
+		wake_work.tid = k_current_get();
+		k_work_init_delayable(&wake_work.dwork, waker_func);
+		zassert_equal(1, k_work_schedule(&wake_work.dwork, K_SECONDS(sleep_min_s)));
+		zassert_true(sleep(sleep_max_s) >= sleep_rem_s);
+		act.sa_handler = SIG_DFL;
+		zassert_ok(sigaction(SIGUSR1, &act, NULL));
+		zassert_ok(sigprocmask(SIG_BLOCK, &set, NULL));
+	}
 }

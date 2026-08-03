@@ -43,7 +43,7 @@ static void run_strtok_r_case(const struct strtok_test_case *tc)
 	}
 }
 
-ZTEST(posix_c_lang_support_r, test_strtok_r)
+ZTEST_USER(posix_c_lang_support_r, test_strtok_r)
 {
 	for (size_t i = 0; i < strtok_test_cases_len; i++) {
 		run_strtok_r_case(&strtok_test_cases[i]);

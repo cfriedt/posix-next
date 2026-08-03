@@ -15,7 +15,7 @@ static const struct device *const dev = DEVICE_DT_GET(DT_CHOSEN(zephyr_entropy))
 static const struct device *const dev;
 #endif
 
-ZTEST(posix_c_lib_ext, test_getentropy)
+ZTEST_USER(posix_c_lib_ext, test_getentropy)
 {
 	/* verify that a buffer larger than 256 bytes returns an error */
 	{
