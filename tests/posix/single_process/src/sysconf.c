@@ -185,7 +185,7 @@ static const struct sysconf_case sysconf_cases[] = {
 	{_SC_TZNAME_MAX, SYSCONF_OPTION},
 };
 
-ZTEST(posix_single_process, test_sysconf_known_values)
+ZTEST_USER(posix_single_process, test_sysconf_known_values)
 {
 	long page_size;
 
@@ -199,7 +199,7 @@ ZTEST(posix_single_process, test_sysconf_known_values)
 	zassert_equal(sysconf(_SC_PAGESIZE), page_size);
 }
 
-ZTEST(posix_single_process, test_sysconf_invalid_name)
+ZTEST_USER(posix_single_process, test_sysconf_invalid_name)
 {
 	long ret;
 
@@ -213,7 +213,7 @@ ZTEST(posix_single_process, test_sysconf_invalid_name)
 
 #define CHECK_SYSCONF(_name, _exp) zassert_equal(sysconf(_name), (long)(_exp))
 
-ZTEST(posix_single_process, test_sysconf_known_values)
+ZTEST_USER(posix_single_process, test_sysconf_known_values)
 {
 	CHECK_SYSCONF(_SC_ADVISORY_INFO, -1L);
 	CHECK_SYSCONF(_SC_ASYNCHRONOUS_IO,

@@ -12,7 +12,7 @@
 
 #include "thread_sporadic_server_tests.h"
 
-ZTEST(posix_thread_sporadic_server, test_pthread_attr_setschedparam)
+ZTEST_USER(posix_thread_sporadic_server, test_pthread_attr_setschedparam)
 {
 	pthread_attr_t attr;
 	struct sched_param param = sporadic_param(sched_get_priority_min(SCHED_SPORADIC));

@@ -75,7 +75,7 @@ static void check_confstr_truncated(int name, const char *expected, size_t bufle
 	zassert_equal('\0', buf[buflen - 1], "name %d", name);
 }
 
-ZTEST(posix_single_process, test_confstr)
+ZTEST_USER(posix_single_process, test_confstr)
 {
 	char buf[64];
 	size_t len;

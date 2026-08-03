@@ -9,7 +9,7 @@
 
 #include <zephyr/ztest.h>
 
-ZTEST(posix_c_lang_support_r, test_asctime_r)
+ZTEST_USER(posix_c_lang_support_r, test_asctime_r)
 {
 	char buf[26] = { 0 };
 	struct tm tp = {

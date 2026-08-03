@@ -12,6 +12,12 @@ common:
   min_ram: 32
 tests:
   portability.posix.xsi_streams: {}
+  portability.posix.xsi_streams.userspace:
+    filter: (not CONFIG_NATIVE_LIBC) and CONFIG_ARCH_HAS_USERSPACE
+    tags: userspace
+    extra_configs:
+      - CONFIG_TEST_USERSPACE=y
+      - CONFIG_USERSPACE=y
   portability.posix.xsi_streams.minimal:
     extra_configs:
       - CONFIG_MINIMAL_LIBC=y
@@ -24,3 +30,12 @@ tests:
     filter: CONFIG_PICOLIBC_SUPPORTED
     extra_configs:
       - CONFIG_PICOLIBC=y
+  # fails: the host libc has no <stropts.h> / STREAMS interfaces (removed in glibc 2.30)
+  # portability.posix.xsi_streams.linux_compat:
+  #   tags: native
+  #   platform_allow:
+  #     - native_sim
+  #     - native_sim/native/64
+  #   filter: CONFIG_NATIVE_LIBC
+  #   extra_configs:
+  #     - CONFIG_POSIX_TEST_LINUX_COMPAT=y
