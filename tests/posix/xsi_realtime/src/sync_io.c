@@ -11,10 +11,15 @@
 #include <unistd.h>
 #include <zephyr/ztest.h>
 
+#include "../../shared/linux_compat_test.h"
+
 static const char test_str[] = "Hello World!";
 
 #define FATFS_MNTP "/RAM:"
-#define TEST_FILE  FATFS_MNTP "/testfile.txt"
+/* the host libc opens host paths: no volume to mount, a temporary file instead */
+#define TEST_FILE                                                                                  \
+	COND_CODE_1(CONFIG_NATIVE_LIBC, ("/tmp/posix_xsi_realtime_sync_io.txt"),                   \
+		    (FATFS_MNTP "/testfile.txt"))
 
 static FATFS fat_fs;
 
@@ -28,6 +33,9 @@ static void test_mount(void)
 {
 	int res;
 
+	if (IS_ENABLED(CONFIG_NATIVE_LIBC)) {
+		return;
+	}
 	res = fs_mount(&fatfs_mnt);
 	zassert_ok(res, "Error mounting fs [%d]\n", res);
 }
@@ -36,6 +44,10 @@ void test_unmount(void)
 {
 	int res;
 
+	if (IS_ENABLED(CONFIG_NATIVE_LIBC)) {
+		(void)unlink(TEST_FILE);
+		return;
+	}
 	res = fs_unmount(&fatfs_mnt);
 	zassert_ok(res, "Error unmounting fs [%d]", res);
 }
