@@ -14,7 +14,7 @@
 
 #define SLEEP_MS 100
 
-static pthread_mutex_t mutex;
+static ZTEST_BMEM pthread_mutex_t mutex;
 
 static void *normal_mutex_entry(void *p1)
 {
