@@ -8,7 +8,7 @@
 
 #include <zephyr/ztest.h>
 
-ZTEST(posix_c_lib_ext, test_stpcpy)
+ZTEST_USER(posix_c_lib_ext, test_stpcpy)
 {
 	char buf[16];
 

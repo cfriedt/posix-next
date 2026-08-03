@@ -8,7 +8,7 @@
 
 #include <zephyr/ztest.h>
 
-ZTEST(posix_c_lib_ext, test_stpncpy)
+ZTEST_USER(posix_c_lib_ext, test_stpncpy)
 {
 	/* truncated copy: no terminating NUL within n bytes */
 	char short_buf[4];

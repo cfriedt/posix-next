@@ -5,6 +5,6 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(posix_multi_process)
 
 FILE(GLOB app_sources src/*.c)
-target_sources(app PRIVATE ${app_sources})
+target_sources(app PRIVATE ${app_sources} ../shared/msleep.c)
 
 target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)

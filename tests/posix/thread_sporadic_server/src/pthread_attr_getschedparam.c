@@ -10,7 +10,7 @@
 
 #include "thread_sporadic_server_tests.h"
 
-ZTEST(posix_thread_sporadic_server, test_pthread_attr_getschedparam)
+ZTEST_USER(posix_thread_sporadic_server, test_pthread_attr_getschedparam)
 {
 	pthread_attr_t attr;
 	int priority = sched_get_priority_max(SCHED_SPORADIC);

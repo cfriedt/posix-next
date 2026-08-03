@@ -15,6 +15,8 @@
 
 #include <zephyr/ztest.h>
 
+#include "../../shared/linux_compat_test.h"
+
 #define _page_size COND_CODE_1(CONFIG_MMU, (CONFIG_MMU_PAGE_SIZE), (CONFIG_POSIX_PAGE_SIZE))
 
 #define SHM_SIZE 8
@@ -44,18 +46,23 @@ ZTEST(xsi_realtime, test_shm_open)
 	int fd[N];
 	struct stat st;
 
+	/* a leftover of an earlier run on the host would carry a size */
+	(void)shm_unlink(VALID_SHM_PATH);
+
 	{
-		/* degenerate error cases */
-		zassert_not_ok(shm_open(NULL, INVALID_FLAGS, INVALID_MODE));
-		zassert_not_ok(shm_open(NULL, INVALID_FLAGS, VALID_MODE));
-		zassert_not_ok(shm_open(NULL, VALID_FLAGS, INVALID_MODE));
-		zassert_not_ok(shm_open(NULL, VALID_FLAGS, VALID_MODE));
-		zassert_not_ok(shm_open(INVALID_SHM_PATH, VALID_FLAGS, VALID_MODE));
+		/* degenerate error cases; the host libc accepts a slashless name and mode 0 */
+		IF_NOT_NATIVE_LIBC({
+			zassert_not_ok(shm_open(NULL, INVALID_FLAGS, INVALID_MODE));
+			zassert_not_ok(shm_open(NULL, INVALID_FLAGS, VALID_MODE));
+			zassert_not_ok(shm_open(NULL, VALID_FLAGS, INVALID_MODE));
+			zassert_not_ok(shm_open(NULL, VALID_FLAGS, VALID_MODE));
+			zassert_not_ok(shm_open(INVALID_SHM_PATH, VALID_FLAGS, VALID_MODE));
+			zassert_not_ok(shm_open(VALID_SHM_PATH, VALID_FLAGS, INVALID_MODE));
+		})
 		zassert_not_ok(shm_open(EMPTY_SHM_PATH, VALID_FLAGS, VALID_MODE));
 		zassert_not_ok(shm_open(TOO_SHORT_SHM_PATH, VALID_FLAGS, VALID_MODE));
 		zassert_not_ok(shm_open(VALID_SHM_PATH, INVALID_FLAGS, INVALID_MODE));
 		zassert_not_ok(shm_open(VALID_SHM_PATH, INVALID_FLAGS, VALID_MODE));
-		zassert_not_ok(shm_open(VALID_SHM_PATH, VALID_FLAGS, INVALID_MODE));
 	}
 
 	/* open / close 1 file descriptor referring to VALID_SHM_PATH */
@@ -63,10 +70,10 @@ ZTEST(xsi_realtime, test_shm_open)
 	zassert_true(fd[0] >= 0, "shm_open(%s, %x, %04o) failed: %d", VALID_SHM_PATH, VALID_FLAGS,
 		     VALID_MODE, errno);
 
-	/* should have size 0 and be a shared memory object */
+	/* should have size 0 and be a shared memory object (the host cannot tell) */
 	zassert_ok(fstat(fd[0], &st));
 	zassert_equal(st.st_size, 0);
-	zassert_true(S_TYPEISSHM(&st));
+	IF_NOT_NATIVE_LIBC({ zassert_true(S_TYPEISSHM(&st)); })
 
 	/* technically, the order of close / shm_unlink can be reversed too */
 	zassert_ok(close(fd[0]));
@@ -92,7 +99,7 @@ ZTEST(xsi_realtime, test_shm_unlink)
 
 	{
 		/* degenerate error cases */
-		zassert_not_ok(shm_unlink(NULL));
+		IF_NOT_NATIVE_LIBC({ zassert_not_ok(shm_unlink(NULL)); })
 		zassert_not_ok(shm_unlink(INVALID_SHM_PATH));
 		zassert_not_ok(shm_unlink(EMPTY_SHM_PATH));
 		zassert_not_ok(shm_unlink(TOO_SHORT_SHM_PATH));
@@ -120,10 +127,11 @@ ZTEST(xsi_realtime, test_shm_read_write)
 		zassert_true(fd[i] >= 0, "shm_open(%s, %x, %04o) failed: %d", VALID_SHM_PATH,
 			     VALID_FLAGS, VALID_MODE, errno);
 		if (i == 0) {
-			/* size 0 on create / zero characters written */
-			zassert_equal(write(fd[0], "", 1), 0,
-				      "write() should fail on newly create shm fd with size 0");
-			/* size 0 on create / zero characters read */
+			/* size 0 on create: nothing to read or write (the host grows the object) */
+			IF_NOT_NATIVE_LIBC({
+				zassert_equal(write(fd[0], "", 1), 0,
+					      "write() should fail on newly create shm fd with size 0");
+			})
 			zassert_equal(read(fd[0], &cbuf, 1), 0,
 				      "read() should fail on newly create shm fd with size 0");
 

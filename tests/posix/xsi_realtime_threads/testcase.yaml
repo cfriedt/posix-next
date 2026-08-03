@@ -1,5 +1,4 @@
 common:
-  filter: not CONFIG_NATIVE_LIBC
   tags:
     - xsi_realtime_threads
   platform_key:
@@ -8,4 +7,19 @@ common:
   min_flash: 64
   min_ram: 32
 tests:
-  portability.posix.xsi_realtime_threads: {}
+  portability.posix.xsi_realtime_threads:
+    filter: not CONFIG_NATIVE_LIBC
+  portability.posix.xsi_realtime_threads.userspace:
+    filter: (not CONFIG_NATIVE_LIBC) and CONFIG_ARCH_HAS_USERSPACE
+    tags: userspace
+    extra_configs:
+      - CONFIG_TEST_USERSPACE=y
+      - CONFIG_USERSPACE=y
+  portability.posix.xsi_realtime_threads.linux_compat:
+    tags: native
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    filter: CONFIG_NATIVE_LIBC
+    extra_configs:
+      - CONFIG_POSIX_TEST_LINUX_COMPAT=y
