@@ -10,13 +10,13 @@
 
 #include <zephyr/ztest.h>
 
-bool attr_valid;
-pthread_attr_t attr;
+ZTEST_BMEM bool attr_valid;
+ZTEST_BMEM pthread_attr_t attr;
 #ifndef CONFIG_NATIVE_LIBC
 const pthread_attr_t uninit_attr;
 #endif
 
-static bool detached_thread_has_finished;
+static ZTEST_BMEM bool detached_thread_has_finished;
 
 static void *thread_entry(void *arg)
 {

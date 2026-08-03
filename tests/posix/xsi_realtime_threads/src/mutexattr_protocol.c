@@ -8,15 +8,19 @@
 
 #include <zephyr/ztest.h>
 
-ZTEST(xsi_realtime_threads, test_pthread_mutexattr_getprotocol)
+#include "../../shared/linux_compat_test.h"
+
+ZTEST_USER(xsi_realtime_threads, test_pthread_mutexattr_getprotocol)
 {
 #if defined(_POSIX_THREAD_PRIO_INHERIT) || defined(_POSIX_THREAD_PRIO_PROTECT)
 	int protocol = -1;
 	pthread_mutexattr_t attr;
 
-	zassert_equal(pthread_mutexattr_getprotocol(NULL, &protocol), EINVAL);
-	zassert_equal(pthread_mutexattr_getprotocol(&attr, NULL), EINVAL);
-	zassert_equal(pthread_mutexattr_getprotocol(NULL, NULL), EINVAL);
+	IF_NOT_NATIVE_LIBC({
+		zassert_equal(pthread_mutexattr_getprotocol(NULL, &protocol), EINVAL);
+		zassert_equal(pthread_mutexattr_getprotocol(&attr, NULL), EINVAL);
+		zassert_equal(pthread_mutexattr_getprotocol(NULL, NULL), EINVAL);
+	})
 
 	zassert_ok(pthread_mutexattr_init(&attr));
 	zassert_ok(pthread_mutexattr_getprotocol(&attr, &protocol));
@@ -27,13 +31,15 @@ ZTEST(xsi_realtime_threads, test_pthread_mutexattr_getprotocol)
 #endif
 }
 
-ZTEST(xsi_realtime_threads, test_pthread_mutexattr_setprotocol)
+ZTEST_USER(xsi_realtime_threads, test_pthread_mutexattr_setprotocol)
 {
 #if defined(_POSIX_THREAD_PRIO_INHERIT) || defined(_POSIX_THREAD_PRIO_PROTECT)
 	int protocol = -1;
 	pthread_mutexattr_t attr;
 
-	zassert_equal(pthread_mutexattr_setprotocol(NULL, PTHREAD_PRIO_NONE), EINVAL);
+	IF_NOT_NATIVE_LIBC({
+		zassert_equal(pthread_mutexattr_setprotocol(NULL, PTHREAD_PRIO_NONE), EINVAL);
+	})
 
 	zassert_ok(pthread_mutexattr_init(&attr));
 	zassert_ok(pthread_mutexattr_setprotocol(&attr, PTHREAD_PRIO_NONE));
@@ -43,8 +49,10 @@ ZTEST(xsi_realtime_threads, test_pthread_mutexattr_setprotocol)
 	zassert_ok(pthread_mutexattr_getprotocol(&attr, &protocol));
 	zassert_equal(protocol, PTHREAD_PRIO_INHERIT);
 
-	/* priority ceilings are not implemented */
-	zassert_equal(pthread_mutexattr_setprotocol(&attr, PTHREAD_PRIO_PROTECT), ENOTSUP);
+	if (!IS_ENABLED(CONFIG_NATIVE_LIBC)) {
+		/* priority ceilings are not implemented */
+		zassert_equal(pthread_mutexattr_setprotocol(&attr, PTHREAD_PRIO_PROTECT), ENOTSUP);
+	}
 	zassert_equal(pthread_mutexattr_setprotocol(&attr, 42), EINVAL);
 	zassert_ok(pthread_mutexattr_destroy(&attr));
 #else

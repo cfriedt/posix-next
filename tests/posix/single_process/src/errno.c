@@ -8,7 +8,7 @@
 
 #include <zephyr/ztest.h>
 
-ZTEST(posix_single_process, test_errno)
+ZTEST_USER(posix_single_process, test_errno)
 {
 	errno = 0;
 	zassert_equal(errno, 0);
