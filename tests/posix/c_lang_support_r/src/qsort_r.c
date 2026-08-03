@@ -37,9 +37,9 @@ static int compare_ints_with_boolp_arg(const void *a, const void *b, void *argp)
 	return (aa > bb) - (aa < bb);
 }
 
-ZTEST(posix_c_lang_support_r, test_qsort_r)
+ZTEST_USER(posix_c_lang_support_r, test_qsort_r)
 {
-	static int actual_int[93];
+	static ZTEST_BMEM int actual_int[93];
 	bool arg;
 
 	for (size_t i = 0; i < test_qsort_input_len; i++) {

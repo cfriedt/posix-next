@@ -28,7 +28,7 @@
  * Adapted from
  * https://git.musl-libc.org/cgit/libc-testsuite/tree/fnmatch.c
  */
-ZTEST(posix_c_lib_ext, test_fnmatch)
+ZTEST_USER(posix_c_lib_ext, test_fnmatch)
 {
 	zexpect_ok(fnmatch("*.c", "foo.c", 0));
 	zexpect_ok(fnmatch("*.c", ".c", 0));
