@@ -10,7 +10,7 @@
 
 #include <zephyr/ztest.h>
 
-ZTEST(posix_c_lang_support_r, test_ctime_r)
+ZTEST_USER(posix_c_lang_support_r, test_ctime_r)
 {
 	char buf[26] = { 0 };
 	time_t test1 = 1718260000;

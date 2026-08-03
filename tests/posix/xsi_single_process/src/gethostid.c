@@ -7,7 +7,7 @@
 
 #include <zephyr/ztest.h>
 
-ZTEST(xsi_single_process, test_gethostid)
+ZTEST_USER(xsi_single_process, test_gethostid)
 {
 	long id = gethostid();
 

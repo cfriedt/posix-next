@@ -12,6 +12,8 @@
 #include <zephyr/sys/util.h>
 #include <zephyr/ztest.h>
 
+#include "../../shared/linux_compat_test.h"
+
 #define SCHED_INVALID 4242
 
 static pthread_attr_t attr;
@@ -65,10 +67,11 @@ ZTEST(xsi_realtime, test_sched_policy_and_priority_limits)
 		"SCHED_OTHER",
 		"SCHED_INVALID",
 	};
+	/* the host libc implements every policy; Zephyr maps them onto its priority classes */
 	static const bool policy_enabled[] = {
-		CONFIG_NUM_COOP_PRIORITIES > 0,
-		CONFIG_NUM_PREEMPT_PRIORITIES > 0,
-		CONFIG_NUM_PREEMPT_PRIORITIES > 0,
+		IS_ENABLED(CONFIG_NATIVE_LIBC) || (CONFIG_NUM_COOP_PRIORITIES > 0),
+		IS_ENABLED(CONFIG_NATIVE_LIBC) || (CONFIG_NUM_PREEMPT_PRIORITIES > 0),
+		IS_ENABLED(CONFIG_NATIVE_LIBC) || (CONFIG_NUM_PREEMPT_PRIORITIES > 0),
 		false,
 	};
 	static int nprio[] = {
@@ -110,12 +113,18 @@ ZTEST(xsi_realtime, test_sched_policy_and_priority_limits)
 		}
 
 		if (policy != 3) {
-			zassert_true(pmax > pmin,
-				     "%s min/max inconsistency, pmax (%d) <= pmin (%d)",
+			zassert_true(pmax >= pmin,
+				     "%s min/max inconsistency, pmax (%d) < pmin (%d)",
 				     policy_names[policy], pmax, pmin);
-			zassert_equal(pmin, 0, "unexpected pmin for %s", policy_names[policy]);
-			zassert_equal(pmax, nprio[policy] - 1, "unexpected pmax for %s",
-				      policy_names[policy]);
+			/* the range is Zephyr's priority count for the class, the host has its own */
+			if (!IS_ENABLED(CONFIG_NATIVE_LIBC)) {
+				zassert_true(pmax > pmin, "%s has a single priority",
+					     policy_names[policy]);
+				zassert_equal(pmin, 0, "unexpected pmin for %s",
+					      policy_names[policy]);
+				zassert_equal(pmax, nprio[policy] - 1, "unexpected pmax for %s",
+					      policy_names[policy]);
+			}
 		}
 
 		ARRAY_FOR_EACH(prios, j) {

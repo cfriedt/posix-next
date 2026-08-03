@@ -17,11 +17,11 @@ void test_mutex_common(int type);
 #define SCHED_INVALID       4242
 #define INVALID_DETACHSTATE 7373
 
-static bool attr_valid;
-static pthread_attr_t attr;
+static ZTEST_BMEM bool attr_valid;
+static ZTEST_BMEM pthread_attr_t attr;
 __maybe_unused static const pthread_attr_t uninit_attr;
 
-ZTEST(posix_threads_ext, test_pthread_attr_getguardsize)
+ZTEST_USER(posix_threads_ext, test_pthread_attr_getguardsize)
 {
 	size_t guardsize;
 
@@ -41,7 +41,7 @@ ZTEST(posix_threads_ext, test_pthread_attr_getguardsize)
 	zassert_not_equal(guardsize, BIOS_FOOD);
 }
 
-ZTEST(posix_threads_ext, test_pthread_attr_setguardsize)
+ZTEST_USER(posix_threads_ext, test_pthread_attr_setguardsize)
 {
 	size_t guardsize;
 
@@ -67,7 +67,7 @@ ZTEST(posix_threads_ext, test_pthread_attr_setguardsize)
 	}
 }
 
-ZTEST(posix_threads_ext, test_pthread_mutexattr_gettype)
+ZTEST_USER(posix_threads_ext, test_pthread_mutexattr_gettype)
 {
 	int type;
 	pthread_mutexattr_t attr;
@@ -89,7 +89,7 @@ ZTEST(posix_threads_ext, test_pthread_mutexattr_gettype)
 	zassert_ok(pthread_mutexattr_destroy(&attr));
 }
 
-ZTEST(posix_threads_ext, test_pthread_mutexattr_settype)
+ZTEST_USER(posix_threads_ext, test_pthread_mutexattr_settype)
 {
 	int type;
 	pthread_mutexattr_t attr;

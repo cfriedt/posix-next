@@ -8,7 +8,7 @@
 
 #include <zephyr/ztest.h>
 
-ZTEST(posix_thread_sporadic_server, test_pthread_attr_setschedpolicy)
+ZTEST_USER(posix_thread_sporadic_server, test_pthread_attr_setschedpolicy)
 {
 	int policy;
 	pthread_attr_t attr;
