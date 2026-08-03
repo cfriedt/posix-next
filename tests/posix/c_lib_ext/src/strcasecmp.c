@@ -8,7 +8,7 @@
 
 #include <zephyr/ztest.h>
 
-ZTEST(posix_c_lib_ext, test_strcasecmp)
+ZTEST_USER(posix_c_lib_ext, test_strcasecmp)
 {
 	zexpect_equal(strcasecmp("Hello", "hello"), 0);
 	zexpect_equal(strcasecmp("abc", "abd"), -1);
