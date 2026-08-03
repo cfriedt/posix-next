@@ -96,7 +96,7 @@ static const char *const strfmon_tc_fmt[] = {
 	}
 
 /* oversized to accomodate coverage tests using native libc's strfmon() */
-static char buffer[64];
+static ZTEST_BMEM char buffer[64];
 static const double input[] = {
 	123.45,
 	-123.45,
@@ -149,7 +149,7 @@ static const struct test_data data[] = {
 #endif
 };
 
-ZTEST(posix_c_lib_ext, test_strfmon)
+ZTEST_USER(posix_c_lib_ext, test_strfmon)
 {
 	TC_PRINT("%.*s\nSetting locale to %s\n%.*s\n",
 		 (int)strlen("Setting locale to ") + (int)strlen(CONFIG_TEST_LOCALE_STR), HRULE,
