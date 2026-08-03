@@ -9,7 +9,7 @@
 
 #include <zephyr/ztest.h>
 
-ZTEST(posix_c_lang_support_r, test_rand_r)
+ZTEST_USER(posix_c_lang_support_r, test_rand_r)
 {
 	unsigned int seed;
 	unsigned int value;

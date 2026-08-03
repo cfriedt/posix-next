@@ -9,7 +9,7 @@
 
 #include <zephyr/ztest.h>
 
-ZTEST(posix_c_lib_ext, test_strndup)
+ZTEST_USER(posix_c_lib_ext, test_strndup)
 {
 	char *copy = strndup("posix-next", 7);
 
