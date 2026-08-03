@@ -18,7 +18,7 @@
 #error "Unsupported platform"
 #endif
 
-ZTEST(posix_single_process, test_uname)
+ZTEST_USER(posix_single_process, test_uname)
 {
 	struct utsname info;
 
