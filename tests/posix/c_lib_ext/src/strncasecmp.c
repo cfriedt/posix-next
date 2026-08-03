@@ -8,7 +8,7 @@
 
 #include <zephyr/ztest.h>
 
-ZTEST(posix_c_lib_ext, test_strncasecmp)
+ZTEST_USER(posix_c_lib_ext, test_strncasecmp)
 {
 	zexpect_equal(strncasecmp("Hello", "hello", 5), 0);
 	zexpect_equal(strncasecmp("abc", "abd", 2), 0);
