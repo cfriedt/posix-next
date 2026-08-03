@@ -7,7 +7,7 @@
 #include <stropts.h>
 #include <errno.h>
 
-ZTEST(xsi_streams, test_putmsg)
+ZTEST_USER(xsi_streams, test_putmsg)
 {
 	const struct strbuf *ctrl = NULL;
 	const struct strbuf *data = NULL;
@@ -18,7 +18,7 @@ ZTEST(xsi_streams, test_putmsg)
 	zassert_equal(errno, ENOSYS, "Expected errno ENOSYS, got %d", errno);
 }
 
-ZTEST(xsi_streams, test_fdetach)
+ZTEST_USER(xsi_streams, test_fdetach)
 {
 	char *path = NULL;
 	int ret = fdetach(path);
@@ -27,7 +27,7 @@ ZTEST(xsi_streams, test_fdetach)
 	zassert_equal(errno, ENOSYS, "Expected errno ENOSYS, got %d", errno);
 }
 
-ZTEST(xsi_streams, test_fattach)
+ZTEST_USER(xsi_streams, test_fattach)
 {
 	char *path = NULL;
 	int fd = -1;
@@ -37,7 +37,7 @@ ZTEST(xsi_streams, test_fattach)
 	zassert_equal(errno, ENOSYS, "Expected errno ENOSYS, got %d", errno);
 }
 
-ZTEST(xsi_streams, test_getmsg)
+ZTEST_USER(xsi_streams, test_getmsg)
 {
 	struct strbuf *ctrl = NULL;
 	struct strbuf *data = NULL;
@@ -48,7 +48,7 @@ ZTEST(xsi_streams, test_getmsg)
 	zassert_equal(errno, ENOSYS, "Expected errno ENOSYS, got %d", errno);
 }
 
-ZTEST(xsi_streams, test_getpmsg)
+ZTEST_USER(xsi_streams, test_getpmsg)
 {
 	struct strbuf *ctrl = NULL;
 	struct strbuf *data = NULL;
@@ -59,7 +59,7 @@ ZTEST(xsi_streams, test_getpmsg)
 	zassert_equal(errno, ENOSYS, "Expected errno ENOSYS, got %d", errno);
 }
 
-ZTEST(xsi_streams, test_isastream)
+ZTEST_USER(xsi_streams, test_isastream)
 {
 	int fd = -1;
 	int ret = isastream(fd);

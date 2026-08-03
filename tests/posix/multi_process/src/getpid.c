@@ -8,7 +8,7 @@
 
 #include <zephyr/ztest.h>
 
-ZTEST(posix_multi_process, test_getpid)
+ZTEST_USER(posix_multi_process, test_getpid)
 {
 	pid_t pid = getpid();
 
