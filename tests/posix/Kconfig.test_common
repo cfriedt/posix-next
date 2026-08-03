@@ -1,3 +1,16 @@
+# Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
+# When thread stacks cannot come from anonymously mapped pages (k_mem_map()),
+# dynamic user thread stacks are carved out of the kernel heap: power-of-two
+# MPU/PMP alignment plus a privileged stack inflate each allocation to several
+# times the nominal stack size (~10 KiB per 2 KiB stack on 64-bit).
+config HEAP_MEM_POOL_ADD_SIZE_TESTS_POSIX_THREAD_STACKS
+	int
+	default 32768 if USERSPACE && !SYS_THREAD_STACK_ALLOC_ANON && 64BIT
+	default 16384 if USERSPACE && !SYS_THREAD_STACK_ALLOC_ANON
+	default 0
+
 config SYS_THREAD_CONDVAR_MIN_ADD_TEST
 	int "Number of condition variables guaranteed to be available for POSIX tests"
 	default 0
@@ -72,6 +85,7 @@ config NATIVE_LIBC
 	select TC_PROVIDES_POSIX_ASYNCHRONOUS_IO
 	select TC_PROVIDES_POSIX_BARRIERS
 	select TC_PROVIDES_POSIX_CLOCK_SELECTION
+	select TC_PROVIDES_POSIX_CPUTIME
 	select TC_PROVIDES_POSIX_C_LANG_SUPPORT_R
 	select TC_PROVIDES_POSIX_C_LIB_EXT
 	select TC_PROVIDES_POSIX_DEVICE_IO
@@ -100,12 +114,14 @@ config NATIVE_LIBC
 	select TC_PROVIDES_POSIX_SYNCHRONIZED_IO
 	select TC_PROVIDES_POSIX_SYSTEM_DATABASE
 	select TC_PROVIDES_POSIX_SYSTEM_DATABASE_R
+	select TC_PROVIDES_POSIX_THREAD_CPUTIME
 	select TC_PROVIDES_POSIX_THREAD_PRIORITY_SCHEDULING
 	select TC_PROVIDES_POSIX_THREADS
 	select TC_PROVIDES_POSIX_THREADS_EXT
 	select TC_PROVIDES_POSIX_TIMERS
 	select TC_PROVIDES_XSI_ADVANCED_REALTIME
 	select TC_PROVIDES_XSI_ADVANCED_REALTIME_THREADS
+	select TC_PROVIDES_XSI_REALTIME
 	select TC_PROVIDES_XSI_REALTIME_THREADS
 	select TC_PROVIDES_XSI_SINGLE_PROCESS
 	select TC_PROVIDES_XSI_STREAMS
