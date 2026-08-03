@@ -8,7 +8,7 @@
 
 #include <zephyr/ztest.h>
 
-ZTEST(posix_multi_process, test_assert)
+ZTEST_USER(posix_multi_process, test_assert)
 {
 	assert(1 == 1);
 }
