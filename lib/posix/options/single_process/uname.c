@@ -7,6 +7,7 @@
 #include <string.h>
 #include <zephyr/kernel.h>
 #include <zephyr/net/hostname.h>
+#include <zephyr/net/socket.h>
 #include <sys/utsname.h>
 #include <zephyr/version.h>
 
@@ -46,7 +47,12 @@ int uname(struct utsname *name)
 {
 	memcpy(name, &z_name, sizeof(*name));
 	if (IS_ENABLED(CONFIG_NET_HOSTNAME_ENABLE)) {
-		strncpy(name->nodename, net_hostname_get(), sizeof(name->nodename));
+		if (IS_ENABLED(CONFIG_NET_SOCKETS)) {
+			/* a syscall: net_hostname_get()'s buffer is not readable from user mode */
+			(void)zsock_gethostname(name->nodename, sizeof(name->nodename));
+		} else {
+			strncpy(name->nodename, net_hostname_get(), sizeof(name->nodename));
+		}
 		name->nodename[sizeof(name->nodename) - 1] = '\0';
 	}
 	return 0;

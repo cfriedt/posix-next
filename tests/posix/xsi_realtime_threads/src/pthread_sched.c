@@ -10,6 +10,8 @@
 
 #include <zephyr/ztest.h>
 
+#include "../../shared/linux_compat_test.h"
+
 #define BIOS_FOOD     0xB105F00D
 #define SCHED_INVALID 4242
 #define PRIO_INVALID  -1
@@ -25,19 +27,19 @@ extern void create_thread_common_entry(const pthread_attr_t *attrp, bool expect_
 int zephyr_to_posix_priority(int z_prio, int *policy);
 int posix_to_zephyr_priority(int priority, int policy);
 
-ZTEST(xsi_realtime_threads, test_pthread_attr_getschedpolicy)
+ZTEST_USER(xsi_realtime_threads, test_pthread_attr_getschedpolicy)
 {
 #if defined(_POSIX_THREAD_PRIORITY_SCHEDULING)
 	int policy = BIOS_FOOD;
 
-	{
+	IF_NOT_NATIVE_LIBC({
 		if (false) {
 			zassert_equal(pthread_attr_getschedpolicy(NULL, NULL), EINVAL);
 			zassert_equal(pthread_attr_getschedpolicy(NULL, &policy), EINVAL);
 			zassert_equal(pthread_attr_getschedpolicy(&uninit_attr, &policy), EINVAL);
 		}
 		zassert_equal(pthread_attr_getschedpolicy(&attr, NULL), EINVAL);
-	}
+	})
 
 	zassert_ok(pthread_attr_getschedpolicy(&attr, &policy));
 	zassert_not_equal(BIOS_FOOD, policy);
@@ -46,12 +48,12 @@ ZTEST(xsi_realtime_threads, test_pthread_attr_getschedpolicy)
 #endif
 }
 
-ZTEST(xsi_realtime_threads, test_pthread_attr_setschedpolicy)
+ZTEST_USER(xsi_realtime_threads, test_pthread_attr_setschedpolicy)
 {
 #if defined(_POSIX_THREAD_PRIORITY_SCHEDULING)
 	int policy = SCHED_OTHER;
 
-	{
+	IF_NOT_NATIVE_LIBC({
 		if (false) {
 			zassert_equal(pthread_attr_setschedpolicy(NULL, SCHED_INVALID), EINVAL);
 			zassert_equal(pthread_attr_setschedpolicy(NULL, policy), EINVAL);
@@ -59,8 +61,8 @@ ZTEST(xsi_realtime_threads, test_pthread_attr_setschedpolicy)
 				pthread_attr_setschedpolicy((pthread_attr_t *)&uninit_attr, policy),
 				EINVAL);
 		}
-		zassert_equal(pthread_attr_setschedpolicy(&attr, SCHED_INVALID), EINVAL);
-	}
+	})
+	zassert_equal(pthread_attr_setschedpolicy(&attr, SCHED_INVALID), EINVAL);
 
 	zassert_ok(pthread_attr_setschedpolicy(&attr, SCHED_OTHER));
 	policy = SCHED_INVALID;
@@ -73,12 +75,12 @@ ZTEST(xsi_realtime_threads, test_pthread_attr_setschedpolicy)
 #endif
 }
 
-ZTEST(xsi_realtime_threads, test_pthread_attr_getscope)
+ZTEST_USER(xsi_realtime_threads, test_pthread_attr_getscope)
 {
 #if defined(_POSIX_THREAD_PRIORITY_SCHEDULING)
 	int contentionscope = BIOS_FOOD;
 
-	{
+	IF_NOT_NATIVE_LIBC({
 		if (false) {
 			zassert_equal(pthread_attr_getscope(NULL, NULL), EINVAL);
 			zassert_equal(pthread_attr_getscope(NULL, &contentionscope), EINVAL);
@@ -86,7 +88,7 @@ ZTEST(xsi_realtime_threads, test_pthread_attr_getscope)
 				      EINVAL);
 		}
 		zassert_equal(pthread_attr_getscope(&attr, NULL), EINVAL);
-	}
+	})
 
 	zassert_ok(pthread_attr_getscope(&attr, &contentionscope));
 	zassert_equal(contentionscope, PTHREAD_SCOPE_SYSTEM);
@@ -95,12 +97,12 @@ ZTEST(xsi_realtime_threads, test_pthread_attr_getscope)
 #endif
 }
 
-ZTEST(xsi_realtime_threads, test_pthread_attr_setscope)
+ZTEST_USER(xsi_realtime_threads, test_pthread_attr_setscope)
 {
 #if defined(_POSIX_THREAD_PRIORITY_SCHEDULING)
 	int contentionscope = BIOS_FOOD;
 
-	{
+	IF_NOT_NATIVE_LIBC({
 		if (false) {
 			zassert_equal(pthread_attr_setscope(NULL, PTHREAD_SCOPE_SYSTEM), EINVAL);
 			zassert_equal(pthread_attr_setscope(NULL, contentionscope), EINVAL);
@@ -108,8 +110,8 @@ ZTEST(xsi_realtime_threads, test_pthread_attr_setscope)
 							    contentionscope),
 				      EINVAL);
 		}
-		zassert_equal(pthread_attr_setscope(&attr, 3), EINVAL);
-	}
+	})
+	zassert_equal(pthread_attr_setscope(&attr, 3), EINVAL);
 
 	zassert_equal(pthread_attr_setscope(&attr, PTHREAD_SCOPE_PROCESS), ENOTSUP);
 	zassert_ok(pthread_attr_setscope(&attr, PTHREAD_SCOPE_SYSTEM));
@@ -120,12 +122,12 @@ ZTEST(xsi_realtime_threads, test_pthread_attr_setscope)
 #endif
 }
 
-ZTEST(xsi_realtime_threads, test_pthread_attr_getinheritsched)
+ZTEST_USER(xsi_realtime_threads, test_pthread_attr_getinheritsched)
 {
 #if defined(_POSIX_THREAD_PRIORITY_SCHEDULING)
 	int inheritsched = BIOS_FOOD;
 
-	{
+	IF_NOT_NATIVE_LIBC({
 		if (false) {
 			zassert_equal(pthread_attr_getinheritsched(NULL, NULL), EINVAL);
 			zassert_equal(pthread_attr_getinheritsched(NULL, &inheritsched), EINVAL);
@@ -133,7 +135,7 @@ ZTEST(xsi_realtime_threads, test_pthread_attr_getinheritsched)
 				      EINVAL);
 		}
 		zassert_equal(pthread_attr_getinheritsched(&attr, NULL), EINVAL);
-	}
+	})
 
 	zassert_ok(pthread_attr_getinheritsched(&attr, &inheritsched));
 	zassert_equal(inheritsched, PTHREAD_INHERIT_SCHED);
@@ -142,6 +144,7 @@ ZTEST(xsi_realtime_threads, test_pthread_attr_getinheritsched)
 #endif
 }
 
+#ifndef CONFIG_NATIVE_LIBC
 static void *inheritsched_entry(void *arg)
 {
 	int prio;
@@ -197,11 +200,12 @@ static void test_pthread_attr_setinheritsched_common(bool inheritsched)
 	create_thread_common_entry(&attr, true, true, inheritsched_entry,
 				   UINT_TO_POINTER(k_thread_priority_get(k_current_get())));
 }
+#endif /* CONFIG_NATIVE_LIBC */
 
-ZTEST(xsi_realtime_threads, test_pthread_attr_setinheritsched)
+ZTEST_USER(xsi_realtime_threads, test_pthread_attr_setinheritsched)
 {
 #if defined(_POSIX_THREAD_PRIORITY_SCHEDULING)
-	{
+	IF_NOT_NATIVE_LIBC({
 		if (false) {
 			zassert_equal(pthread_attr_setinheritsched(NULL, PTHREAD_EXPLICIT_SCHED),
 				      EINVAL);
@@ -211,17 +215,20 @@ ZTEST(xsi_realtime_threads, test_pthread_attr_setinheritsched)
 								   PTHREAD_INHERIT_SCHED),
 				      EINVAL);
 		}
-		zassert_equal(pthread_attr_setinheritsched(&attr, 3), EINVAL);
-	}
+	})
+	zassert_equal(pthread_attr_setinheritsched(&attr, 3), EINVAL);
 
-	test_pthread_attr_setinheritsched_common(PTHREAD_INHERIT_SCHED);
-	test_pthread_attr_setinheritsched_common(PTHREAD_EXPLICIT_SCHED);
+	IF_NOT_NATIVE_LIBC({
+		/* the remainder rides on the internal Zephyr <-> POSIX priority mapping */
+		test_pthread_attr_setinheritsched_common(PTHREAD_INHERIT_SCHED);
+		test_pthread_attr_setinheritsched_common(PTHREAD_EXPLICIT_SCHED);
+	})
 #else
 	ztest_test_skip();
 #endif
 }
 
-ZTEST(xsi_realtime_threads, test_pthread_setschedprio)
+ZTEST_USER(xsi_realtime_threads, test_pthread_setschedprio)
 {
 #if defined(_POSIX_THREAD_PRIORITY_SCHEDULING)
 	int policy;
@@ -240,9 +247,10 @@ ZTEST(xsi_realtime_threads, test_pthread_setschedprio)
 #endif
 }
 
-ZTEST(xsi_realtime_threads, test_pthread_priority_conversion)
+ZTEST_USER(xsi_realtime_threads, test_pthread_priority_conversion)
 {
-#if defined(_POSIX_THREAD_PRIORITY_SCHEDULING)
+#if defined(_POSIX_THREAD_PRIORITY_SCHEDULING) && !defined(CONFIG_NATIVE_LIBC)
+	/* the mapping is internal to the Zephyr implementation */
 	for (int z_prio = -CONFIG_NUM_COOP_PRIORITIES, prio = CONFIG_NUM_COOP_PRIORITIES - 1,
 		 p_prio, policy;
 	     z_prio <= -1; z_prio++, prio--) {

@@ -9,7 +9,7 @@
 
 #include <zephyr/ztest.h>
 
-ZTEST(posix_c_lang_support_r, test_localtime_r)
+ZTEST_USER(posix_c_lang_support_r, test_localtime_r)
 {
 	time_t tests3 = (time_t)-214748364800;
 	time_t tests4 = 951868800;

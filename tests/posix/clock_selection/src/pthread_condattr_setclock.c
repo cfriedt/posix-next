@@ -14,7 +14,7 @@
 #include "../../shared/linux_compat_test.h"
 #include "../../shared/nanosleep_common.h"
 
-ZTEST(posix_clock_selection, test_pthread_condattr_setclock)
+ZTEST_USER(posix_clock_selection, test_pthread_condattr_setclock)
 {
 	clockid_t clock_id;
 	pthread_condattr_t att = {0};

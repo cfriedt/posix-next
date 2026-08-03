@@ -33,9 +33,9 @@ struct thread_ctx {
 	bool success;
 };
 
-static size_t fp_idx;
-static FILE *fp[N];
-static struct thread_ctx ctx[N];
+static ZTEST_BMEM size_t fp_idx;
+static ZTEST_BMEM FILE *fp[N];
+static ZTEST_BMEM struct thread_ctx ctx[N];
 
 static void *flockfile_thread_entry(void *arg)
 {
@@ -198,7 +198,7 @@ static void flockfile_common(bool try)
 		     4 * CONFIG_TEST_LOCK_PERIOD_MS);
 }
 
-ZTEST(posix_file_locking, test_flockfile)
+ZTEST_USER(posix_file_locking, test_flockfile)
 {
 	flockfile_common(false);
 }
