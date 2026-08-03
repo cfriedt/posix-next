@@ -14,7 +14,7 @@
 
 #include "../../shared/linux_compat_test.h"
 
-ZTEST(xsi_single_process, test_gettimeofday)
+ZTEST_USER(xsi_single_process, test_gettimeofday)
 {
 	struct timeval tv;
 	struct timespec ts;

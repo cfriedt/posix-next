@@ -10,7 +10,7 @@
 
 #include "thread_sporadic_server_tests.h"
 
-ZTEST(posix_thread_sporadic_server, test_pthread_getschedparam)
+ZTEST_USER(posix_thread_sporadic_server, test_pthread_getschedparam)
 {
 	int policy = -1;
 	struct sched_param orig;
