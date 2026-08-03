@@ -14,7 +14,7 @@
 
 #include "../../shared/linux_compat_test.h"
 
-static struct timespec sleep_timeout_abstime;
+static ZTEST_BMEM struct timespec sleep_timeout_abstime;
 
 static inline void timespec_add_ms(struct timespec *ts, uint32_t ms)
 {
@@ -32,7 +32,7 @@ static void *timedjoin_thread(void *p1)
 	return NULL;
 }
 
-ZTEST(posix_non_portable, test_pthread_getname_np)
+ZTEST_USER(posix_non_portable, test_pthread_getname_np)
 {
 	pthread_t th;
 	static const char thr_name[] = "thread name";
@@ -63,7 +63,7 @@ ZTEST(posix_non_portable, test_pthread_getname_np)
 	zassert_ok(pthread_join(th, NULL));
 }
 
-ZTEST(posix_non_portable, test_pthread_setname_np)
+ZTEST_USER(posix_non_portable, test_pthread_setname_np)
 {
 	pthread_t th;
 
@@ -80,7 +80,7 @@ ZTEST(posix_non_portable, test_pthread_setname_np)
 	zassert_ok(pthread_join(th, NULL));
 }
 
-ZTEST(posix_non_portable, test_pthread_tryjoin_np)
+ZTEST_USER(posix_non_portable, test_pthread_tryjoin_np)
 {
 	pthread_t th = {0};
 	int sleep_duration_ms = 200;
@@ -102,7 +102,7 @@ ZTEST(posix_non_portable, test_pthread_tryjoin_np)
 	zassert_ok(pthread_tryjoin_np(th, &retval));
 }
 
-ZTEST(posix_non_portable, test_pthread_timedjoin_np)
+ZTEST_USER(posix_non_portable, test_pthread_timedjoin_np)
 {
 	int ret;
 	void *result;

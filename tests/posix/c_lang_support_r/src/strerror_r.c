@@ -9,7 +9,7 @@
 
 #include <zephyr/ztest.h>
 
-ZTEST(posix_c_lang_support_r, test_strerror_r)
+ZTEST_USER(posix_c_lang_support_r, test_strerror_r)
 {
 	char buf[64];
 	int ret;
@@ -40,7 +40,7 @@ ZTEST(posix_c_lang_support_r, test_strerror_r)
 	zassert_equal(ERANGE, ret, "strerror_r(EINVAL) with small buf returned %d", ret);
 }
 
-ZTEST(posix_c_lang_support_r, test_strerror_r_no_table)
+ZTEST_USER(posix_c_lang_support_r, test_strerror_r_no_table)
 {
 	char buf[64];
 	int ret;

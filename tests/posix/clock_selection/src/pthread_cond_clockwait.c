@@ -18,7 +18,7 @@ int pthread_cond_clockwait(pthread_cond_t *cond, pthread_mutex_t *mutex, clockid
 			   const struct timespec *abstime);
 #endif
 
-ZTEST(posix_clock_selection, test_pthread_cond_clockwait)
+ZTEST_USER(posix_clock_selection, test_pthread_cond_clockwait)
 {
 	int ret;
 	pthread_cond_t cond;
