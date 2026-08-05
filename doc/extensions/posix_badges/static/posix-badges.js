@@ -2,15 +2,19 @@
  * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
  * SPDX-License-Identifier: Apache-2.0
  *
- * Client-side decoration for the POSIX Option Group badges:
- * - Adds a badge column to the API tables on Option Group detail pages
- *   (keyed on the server-rendered .pn-badges[data-group] marker). Badges
- *   sit in fixed-slot cells (an invisible table) so they align vertically
- *   across rows: coverage, linux_compat, userspace, ubsan, asan,
- *   static_analysis, ISO C standard, ENOSYS.
- * - Compact badge strips on the option_groups index toctree entries.
+ * Client-side rendering for the POSIX Option Group badges. Pages carry no
+ * baked-in badge data: everything is drawn at load time from the JSON
+ * database _static/posix-badges.json written by the posix_badges extension,
+ * so the HTML stays byte-stable across metrics refreshes.
  *
- * Reads _static/posix-badges.json written by the posix_badges extension.
+ * - Option Group / Option detail pages get the badge strip after the title
+ *   and a badge column added to their API tables (coverage, linux_compat,
+ *   userspace, ubsan, asan, static_analysis, ISO C standard, ENOSYS).
+ * - The option_groups / options index toctrees are re-rendered as tables
+ *   with aligned Status columns.
+ * - Doxygen group__*.html pages (which include this script via the
+ *   extension's build-finished hook) get the strip after the page title and
+ *   an inline per-function strip at the top of each member doc.
  */
 (function () {
   "use strict";
@@ -29,6 +33,16 @@
     ["static_analysis", "\u{1F50D}", "Static analysis (clang scan-build)"],
   ];
 
+  /* (green, yellow) percentage cutoffs; replaced by db.thresholds */
+  var thresholds = [70, 50];
+
+  function pctClass(pct) {
+    if (pct === null || pct === undefined) {
+      return "unknown";
+    }
+    return pct >= thresholds[0] ? "green" : pct >= thresholds[1] ? "yellow" : "red";
+  }
+
   function indexSection() {
     if (/\/option_groups\/(index\.html)?$/.test(window.location.pathname)) {
       return "groups";
@@ -37,6 +51,36 @@
       return "options";
     }
     return null;
+  }
+
+  /* Option Group / Option detail page, from the URL alone */
+  function detailPage() {
+    var m = window.location.pathname.match(
+      /\/posix\/(option_groups|options)\/([^/]+)\.html$/
+    );
+    if (!m || m[2] === "index") {
+      return null;
+    }
+    return {section: m[1] === "options" ? "options" : "groups", stem: m[2]};
+  }
+
+  /* Doxygen group page: group__<name-with-underscores-doubled>.html.
+     Pages for an Option Group / Option carry a section and stem; other
+     group pages still get per-member strips (section: null). */
+  function doxygenPage() {
+    var seg = window.location.pathname.split("/").pop() || "";
+    var m = seg.match(/^group__(.+)\.html$/);
+    if (!m) {
+      return null;
+    }
+    var name = m[1].replace(/__/g, "_");
+    if (name.indexOf("posix_option_group_") === 0) {
+      return {section: "groups", stem: name.slice("posix_option_group_".length)};
+    }
+    if (name.indexOf("posix_option_") === 0) {
+      return {section: "options", stem: name.slice("posix_option_".length)};
+    }
+    return {section: null, stem: null};
   }
 
   function fetchDb() {
@@ -75,15 +119,27 @@
     var ring = document.createElement("span");
     ring.className = "pn-badge pn-ring";
     ring.setAttribute("role", "img");
-    var cls = pct >= 70 ? "green" : pct >= 50 ? "yellow" : "red";
     ring.style.background =
-      "conic-gradient(var(--pn-" + cls + ") " + pct + "%, var(--pn-ring-bg) " + pct + "%)";
+      "conic-gradient(var(--pn-" + pctClass(pct) + ") " + pct +
+      "%, var(--pn-ring-bg) " + pct + "%)";
     ring.title = title + ": " + pct.toFixed(1) + "%";
     ring.setAttribute("aria-label", ring.title);
     var span = document.createElement("span");
     span.textContent = String(Math.round(pct));
     ring.appendChild(span);
     return linked(ring, href);
+  }
+
+  /* labeled donut for the page-title strips (Impl / Cov) */
+  function labeledDonut(pct, label, title, href) {
+    var wrap = document.createElement("div");
+    wrap.className = "pn-badge-wrap";
+    wrap.appendChild(miniDonut(pct, title, href));
+    var caption = document.createElement("div");
+    caption.className = "pn-ring-label";
+    caption.textContent = label;
+    wrap.appendChild(caption);
+    return wrap;
   }
 
   function miniStatus(key, glyph, label, status) {
@@ -149,6 +205,56 @@
     return badge;
   }
 
+  /* full badge strip for one group/option: implementation and coverage
+     donuts plus one pass/fail badge per scenario class, in fixed slots */
+  function buildGroupStrip(stem, group, section) {
+    var cells = [];
+    if (group.completeness_pct !== null && group.completeness_pct !== undefined) {
+      cells.push(
+        labeledDonut(group.completeness_pct, "Impl", "Implementation completeness")
+      );
+    } else {
+      cells.push(null);
+    }
+    var covTitle = "Line coverage";
+    if (group.coverage) {
+      covTitle += " (" + group.coverage[0] + "/" + group.coverage[1] + " lines)";
+    }
+    if (group.coverage_pct !== null && group.coverage_pct !== undefined) {
+      cells.push(labeledDonut(group.coverage_pct, "Cov", covTitle, group.codecov_url));
+    } else {
+      cells.push(null);
+    }
+    var scen = group.scenarios || {};
+    SCENARIO_BADGES.forEach(function (entry) {
+      var s = scen[entry[0]];
+      if (s === "passed" || s === "failed") {
+        var wrap = document.createElement("div");
+        wrap.className = "pn-badge-wrap";
+        wrap.appendChild(miniStatus(entry[0], entry[1], entry[2], s));
+        cells.push(wrap);
+      } else {
+        cells.push(null);
+      }
+    });
+    if (!cells.some(Boolean)) {
+      return null;
+    }
+    var strip = document.createElement("div");
+    strip.className = "pn-badges";
+    strip.setAttribute("data-group", stem);
+    strip.setAttribute("data-section", section);
+    cells.forEach(function (c) {
+      var el = document.createElement("div");
+      el.className = "pn-cell" + (c ? "" : " pn-empty");
+      if (c) {
+        el.appendChild(c);
+      }
+      strip.appendChild(el);
+    });
+    return strip;
+  }
+
   function rowName(firstCell) {
     if (!firstCell) {
       return null;
@@ -167,7 +273,7 @@
     return null;
   }
 
-  /* which badge slots have content for any row of this table? */
+  /* which badge slots have content for any row of this table/page? */
   function computeSlots(db, scenarios, names) {
     var iso = db.iso_c || {};
     var funcs = db.functions || {};
@@ -260,6 +366,23 @@
     return any ? strip : null;
   }
 
+  /* badge strip after the title of an Option Group / Option detail page */
+  function decorateDetail(db) {
+    var page = detailPage();
+    if (!page) {
+      return;
+    }
+    var group = (db[page.section] || {})[page.stem];
+    if (!group) {
+      return;
+    }
+    var strip = buildGroupStrip(page.stem, group, page.section);
+    var title = document.querySelector('[role="main"] h1');
+    if (strip && title && title.parentNode) {
+      title.parentNode.insertBefore(strip, title.nextSibling);
+    }
+  }
+
   /* drop the redundant Supported column, preserving footnote references */
   function dropSupportedColumn(tbl, rows) {
     var headRow = tbl.querySelector("thead tr");
@@ -283,13 +406,11 @@
   }
 
   function decorateFunctions(db) {
-    var marker = document.querySelector(".pn-badges[data-group]");
-    if (!marker) {
+    var page = detailPage();
+    if (!page) {
       return;
     }
-    var stem = marker.getAttribute("data-group");
-    var section = marker.getAttribute("data-section") || "groups";
-    var group = (db[section] || {})[stem] || {};
+    var group = (db[page.section] || {})[page.stem] || {};
     var scenarios = group.scenarios || {};
     var scenarioFailed = group.scenario_failed_functions || {};
 
@@ -335,6 +456,49 @@
         }
         row.appendChild(td);
       });
+    });
+  }
+
+  /* Doxygen group pages: strip under the page title (Option Group /
+     Option pages), per-function strips at the top of each member doc. */
+  function decorateDoxygen(db) {
+    var page = doxygenPage();
+    if (!page) {
+      return;
+    }
+    document.body.classList.add("pn-doxy");
+    var group = page.section ? (db[page.section] || {})[page.stem] : null;
+    var scenarios = (group && group.scenarios) || {};
+    var scenarioFailed = (group && group.scenario_failed_functions) || {};
+
+    if (group) {
+      var strip = buildGroupStrip(page.stem, group, page.section);
+      var header = document.querySelector("div.header");
+      if (strip && header && header.parentNode) {
+        header.parentNode.insertBefore(strip, header.nextSibling);
+      }
+    }
+
+    var members = [];
+    document.querySelectorAll("h2.memtitle").forEach(function (h2) {
+      var m = h2.textContent.match(/(\w+)\(\)\s*$/);
+      var item = h2.nextElementSibling;
+      var memdoc = item && item.querySelector ? item.querySelector(".memdoc") : null;
+      if (m && memdoc && (db.functions || {})[m[1]]) {
+        members.push({name: m[1], memdoc: memdoc});
+      }
+    });
+    if (!members.length) {
+      return;
+    }
+    var slots = computeSlots(db, scenarios, members.map(function (mb) {
+      return mb.name;
+    }));
+    members.forEach(function (mb) {
+      var fnStrip = buildFunctionStrip(db, scenarios, scenarioFailed, slots, mb.name);
+      if (fnStrip) {
+        mb.memdoc.insertBefore(fnStrip, mb.memdoc.firstChild);
+      }
     });
   }
 
@@ -468,14 +632,18 @@
   }
 
   function run() {
-    var needsDetail = document.querySelector(".pn-badges[data-group]");
-    if (!needsDetail && !indexSection()) {
+    if (!detailPage() && !indexSection() && !doxygenPage()) {
       return;
     }
     fetchDb()
       .then(function (db) {
+        if (db.thresholds && db.thresholds.length === 2) {
+          thresholds = db.thresholds;
+        }
+        decorateDetail(db);
         decorateFunctions(db);
         decorateIndex(db);
+        decorateDoxygen(db);
       })
       .catch(function (err) {
         console.warn("posix-badges:", err);
