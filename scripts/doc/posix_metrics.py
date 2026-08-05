@@ -4,8 +4,8 @@
 """Compute POSIX Option Group metrics for the documentation badges.
 
 This module is the doc-build-time data layer behind the badges rendered by
-the posix_badges Sphinx extension. Everything is derived from files already
-in the repository:
+the posix_badges Sphinx extension. Everything is derived from repository
+files and the gitignored ``doc/metrics/*.json`` CI summaries:
 
 - Function rosters: the ``:c:func:`` rows of the csv-table in each
   ``doc/posix/option_groups/<name>.rst`` page (the curated, Open Group
@@ -14,10 +14,11 @@ in the repository:
   stub if and only if its entire body consists of ``ARG_UNUSED(...)``,
   ``errno = ENOSYS``, ``return -1`` and/or ``return ENOSYS`` statements.
 - Per-group line coverage: ``doc/metrics/coverage-posix.json`` (gcovr JSON,
-  refreshed by the Coverage workflow), attributed to groups by source
-  directory via ``doc/posix_group_aliases.yaml``.
-- Test scenarios: ``doc/metrics/twister-summary.json`` (refreshed by the
-  Twister workflow).
+  fetched from the Coverage workflow's artifacts at docs build time),
+  attributed to groups by source directory via
+  ``doc/posix_group_aliases.yaml``.
+- Test scenarios: ``doc/metrics/twister-summary.json`` (fetched from the
+  Twister workflow's artifacts).
 - Curated facts: ``doc/posix_api_overrides.yaml`` (implementation status
   that static analysis cannot see) and ``doc/iso_c_functions.yaml``.
 

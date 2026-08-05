@@ -16,7 +16,7 @@
 #   asan-summary.json       badge summary (single asan scenario class)
 #
 # The summary is not copied into doc/metrics/ automatically. To preview the
-# badges in a local docs build (do not commit the result):
+# badges in a local docs build (doc/metrics/*.json is gitignored):
 #   cp ../../../asan-summary.json doc/metrics/
 #
 # Prerequisites (once):
