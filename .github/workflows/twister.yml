@@ -97,14 +97,22 @@ jobs:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     outputs:
+      skip_nightly: ${{ steps.skip.outputs.skip }}
       shard_total: ${{ steps.plan.outputs.shard_total }}
       matrix: ${{ steps.plan.outputs.matrix }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Check if scheduled nightly should run
+        id: skip
+        uses: ./.github/actions/skip-unchanged-nightly
+        with:
+          artifact: twister-summary
+
       - name: Plan nightly shards
         id: plan
+        if: steps.skip.outputs.skip != 'true'
         shell: bash
         run: |
           total=$(jq -r '.twister_nightly.shards // 10' "$CI_CONFIG")
@@ -112,7 +120,9 @@ jobs:
           echo "matrix=$(jq -nc --argjson n "$total" '{shard: [range(1; $n+1)]}')" >> "$GITHUB_OUTPUT"
 
   twister-nightly:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: >-
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') &&
+      needs.twister-nightly-prep.outputs.skip_nightly != 'true'
     needs: twister-nightly-prep
     runs-on: ubuntu-24.04
     strategy:
@@ -279,6 +289,10 @@ jobs:
     steps:
       - name: Check nightly shards
         run: |
+          if [ "${{ needs.twister-nightly-prep.outputs.skip_nightly }}" = "true" ]; then
+            echo "Scheduled nightly skipped — main unchanged since the last summarized run"
+            exit 0
+          fi
           if [ "${{ needs.twister-nightly.result }}" != "success" ]; then
             echo "One or more twister nightly shards failed"
             exit 1
