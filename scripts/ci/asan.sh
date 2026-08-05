@@ -15,10 +15,9 @@
 #   asan-findings.json      sanitizer-implicated implementation functions
 #   asan-summary.json       badge summary (single asan scenario class)
 #
-# The summary is not packed into doc/metrics/ automatically. To preview the
-# badges in a local docs build (do not commit the result):
-#   python3 scripts/ci/jsonball.py pack ../../../asan-summary.json \
-#     -o doc/metrics/asan-summary.json.sh
+# The summary is not copied into doc/metrics/ automatically. To preview the
+# badges in a local docs build (doc/metrics/*.json is gitignored):
+#   cp ../../../asan-summary.json doc/metrics/
 #
 # Prerequisites (once):
 #   source ~/posix-next/zephyr/zephyr-env.sh
