@@ -225,9 +225,6 @@ jobs:
       needs.twister-nightly.result != 'skipped'
     needs: [twister-nightly-prep, twister-nightly]
     runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-      pull-requests: write
     steps:
       - name: Checkout main
         uses: actions/checkout@v5
@@ -263,46 +260,15 @@ jobs:
             "${inputs[@]}"
           echo "has_summary=true" >> "$GITHUB_OUTPUT"
 
-      - name: Check for twister summary changes
-        id: changes
+      - name: Upload twister summary
+        # The Documentation workflow fetches this artifact from the latest
+        # completed run on main to render the Option Group badges.
         if: steps.summarize.outputs.has_summary == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          dest=doc/metrics/twister-summary.json
-          # Ignore provenance-only churn (timestamp/run URL/commit) so an
-          # unchanged result set does not open a no-op PR.
-          norm() {
-            jq -S 'del(.provenance.created_at, .provenance.workflow_run_url,
-                       .provenance.commit, .provenance.commit_short)' "$1"
-          }
-          if [ -f "$dest" ] && diff <(norm "$dest") <(norm "${RUNNER_TEMP}/twister-summary.json") >/dev/null; then
-            echo "summary_changed=false" >> "$GITHUB_OUTPUT"
-            echo "Twister summary unchanged; skipping publish PR"
-            exit 0
-          fi
-          echo "summary_changed=true" >> "$GITHUB_OUTPUT"
-          cp "${RUNNER_TEMP}/twister-summary.json" "$dest"
-
-      - name: Create or update twister summary PR
-        if: steps.changes.outputs.summary_changed == 'true'
-        uses: peter-evans/create-pull-request@v7
+        uses: actions/upload-artifact@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          branch: automation/twister-summary
-          sign-commits: true
-          add-paths: |
-            doc/metrics/twister-summary.json
-          title: "doc: refresh nightly twister summary"
-          commit-message: "doc: refresh nightly twister summary"
-          body: |
-            Update the committed twister results summary from the Twister
-            workflow (GitHub Actions run ${{ github.run_id }}).
-
-            This snapshot drives the POSIX Option Group badges in the docs.
-          labels: |
-            automation
-            twister
+          name: twister-summary
+          path: ${{ runner.temp }}/twister-summary.json
+          if-no-files-found: error
 
   twister-nightly-status:
     if: >-
