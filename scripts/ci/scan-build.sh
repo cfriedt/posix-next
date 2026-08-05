@@ -14,7 +14,7 @@
 #                           file, line, enclosing function, checker)
 #
 # The snapshot is not copied into doc/metrics/ automatically. To preview the
-# badges in a local docs build (do not commit the result):
+# badges in a local docs build (doc/metrics/*.json is gitignored):
 #   cp ../../../static-analysis.json doc/metrics/
 #
 # Prerequisites (once):
