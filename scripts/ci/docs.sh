@@ -16,6 +16,8 @@ SERVE=0
 STRICT=0
 LIVE=0
 REFRESH=1
+FETCH=1
+TOKEN_FILE=""
 
 usage() {
 	cat <<'EOF'
@@ -28,11 +30,20 @@ Options:
   -s, --serve   Start a local HTTP server after a successful build
   --strict      Treat Sphinx warnings as errors (-W --keep-going, same as CI)
   --live        Run sphinx-autobuild (html-live) instead of a one-shot build
-  --no-refresh  Do not regenerate doc/metrics/twister-summary.json.sh from
-                local <workspace>/twister-out* results before building
+  --no-refresh  Do not overwrite the fetched twister summary with one
+                regenerated from local <workspace>/twister-out* results
+  --no-fetch    Do not download the latest CI metrics summaries (twister,
+                coverage, asan, ubsan, scan-build) from GitHub workflow
+                artifacts into doc/metrics/ before building. Fetching is the
+                default, mirroring the Documentation workflow; it requires
+                the gh CLI and a token, and fails without them
+  -t FILE       Read the GitHub token for fetching from FILE (exported as
+                GH_TOKEN). Defaults to ~/.ghtoken; without a token file,
+                a pre-set GH_TOKEN is required
 
 Environment:
   ZEPHYR_BASE          Zephyr tree (auto-sourced from the west workspace when unset)
+  GH_TOKEN             GitHub token used for artifact fetching (see -t)
   SPHINXOPTS           Extra sphinx-build options (default: -j auto -T)
   SPHINXOPTS_EXTRA     Additional Sphinx options (e.g. -t publish)
   DOCS_HTML_BASEURL    Base URL for generated links
@@ -71,6 +82,18 @@ while [[ $# -gt 0 ]]; do
 		REFRESH=0
 		shift
 		;;
+	--no-fetch)
+		FETCH=0
+		shift
+		;;
+	-t | --token-file)
+		if [[ $# -lt 2 ]]; then
+			echo "docs.sh: $1 requires an argument" >&2
+			exit 2
+		fi
+		TOKEN_FILE="$2"
+		shift 2
+		;;
 	*)
 		echo "docs.sh: unknown option: $1" >&2
 		usage >&2
@@ -102,10 +125,62 @@ if [[ "$STRICT" -eq 1 ]]; then
 	export SPHINXOPTS="$SPHINXOPTS -W --keep-going"
 fi
 
+# Download the latest metrics summaries from GitHub workflow artifacts,
+# mirroring the Documentation workflow's fetch step: newest completed run
+# of each producer on main that still has the artifact wins.
+fetch_metrics_artifacts() {
+	local repo tf id wf artifact found
+
+	if ! command -v gh >/dev/null 2>&1; then
+		echo "docs.sh: artifact fetch requires the GitHub CLI (gh);" \
+			"use --no-fetch to skip" >&2
+		exit 1
+	fi
+
+	tf="${TOKEN_FILE:-$HOME/.ghtoken}"
+	if [[ -f "$tf" ]]; then
+		GH_TOKEN="$(<"$tf")"
+		export GH_TOKEN
+	elif [[ -n "$TOKEN_FILE" ]]; then
+		echo "docs.sh: token file not found: $TOKEN_FILE" >&2
+		exit 1
+	elif [[ -z "${GH_TOKEN:-}" ]]; then
+		echo "docs.sh: no GitHub token: create ~/.ghtoken, pass -t FILE," \
+			"or set GH_TOKEN (--no-fetch to skip)" >&2
+		exit 1
+	fi
+
+	repo="$(git -C "$POSIX_NEXT_PATH" remote get-url origin 2>/dev/null |
+		sed -E 's#^(git@github\.com:|https://github\.com/)##; s#\.git$##')"
+	repo="${repo:-cfriedt/posix-next}"
+
+	while read -r wf artifact; do
+		found=0
+		for id in $(gh run list -R "$repo" --workflow "$wf" --branch main \
+			--status completed --limit 10 --json databaseId --jq '.[].databaseId'); do
+			if gh run download -R "$repo" "$id" --name "$artifact" \
+				--dir "$DOC_DIR/metrics" >/dev/null 2>&1; then
+				echo "docs.sh: $wf: fetched $artifact (run $id)"
+				found=1
+				break
+			fi
+		done
+		[[ "$found" -eq 1 ]] ||
+			echo "docs.sh: $wf: no $artifact artifact on main; badges will be absent"
+	done <<-EOF
+		Twister twister-summary
+		Coverage coverage-json-snapshot
+		ASAN asan-summary
+		UBSAN ubsan-summary
+		Scan-Build static-analysis-summary
+	EOF
+}
+
 # Regenerate the twister summary badge metadata from local twister results,
 # mirroring the twister-summary-publish CI job. Retry directories
 # (twister-out.N) are listed before the final twister-out: the summarizer
-# merges last-wins per (suite, platform).
+# merges last-wins per (suite, platform). doc/metrics/*.json is gitignored;
+# CI docs builds fetch the equivalent summaries from workflow artifacts.
 refresh_twister_summary() {
 	local workspace inputs=()
 
@@ -115,25 +190,21 @@ refresh_twister_summary() {
 	done
 	if [[ ${#inputs[@]} -eq 0 ]]; then
 		echo "docs.sh: no $workspace/twister-out*/twister.json;" \
-			"keeping committed twister summary"
+			"keeping any existing doc/metrics/twister-summary.json"
 		return 0
 	fi
 
-	local tmp
-	tmp="$(mktemp -d)"
-	# shellcheck disable=SC2064
-	trap "rm -rf '$tmp'" RETURN
-
 	python3 "$SCRIPT_PATH/twister-summarize.py" \
-		--output "$tmp/twister-summary.json" \
+		--output "$DOC_DIR/metrics/twister-summary.json" \
 		--commit "$(git -C "$POSIX_NEXT_PATH" rev-parse HEAD)" \
 		--profile local \
 		"${inputs[@]}"
-	python3 "$SCRIPT_PATH/jsonball.py" pack "$tmp/twister-summary.json" \
-		-o "$DOC_DIR/metrics/twister-summary.json.sh"
-	echo "docs.sh: refreshed doc/metrics/twister-summary.json.sh (local; do not commit)"
+	echo "docs.sh: refreshed doc/metrics/twister-summary.json (gitignored)"
 }
 
+if [[ "$FETCH" -eq 1 ]]; then
+	fetch_metrics_artifacts
+fi
 if [[ "$REFRESH" -eq 1 ]]; then
 	refresh_twister_summary
 fi
