@@ -53,6 +53,7 @@ jobs:
           test "$count" -eq 0
 
       - name: Upload static analysis summary
+        # Fetched by the Documentation workflow to render docs badges.
         if: always() && !cancelled()
         uses: actions/upload-artifact@v4
         with:
@@ -66,75 +67,3 @@ jobs:
         with:
           cache-primary-key: ${{ steps.workspace.outputs.ccache-primary-key }}
           save: true
-
-  scan-build-summary-publish:
-    if: >-
-      always() && !cancelled() &&
-      needs.scan-build.result != 'cancelled' &&
-      needs.scan-build.result != 'skipped'
-    needs: [scan-build]
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-      pull-requests: write
-    steps:
-      - name: Checkout main
-        uses: actions/checkout@v5
-        with:
-          ref: main
-          fetch-depth: 0
-
-      - name: Download static analysis summary
-        uses: actions/download-artifact@v4
-        with:
-          name: static-analysis-summary
-          path: ${{ runner.temp }}/summary
-
-      - name: Check for summary changes
-        id: changes
-        shell: bash
-        run: |
-          set -euo pipefail
-          fresh="${RUNNER_TEMP}/summary/static-analysis.json"
-          dest=doc/metrics/static-analysis.json.sh
-          # Ignore provenance-only churn (timestamp/run URL/commit) so an
-          # unchanged result set does not open a no-op PR. The committed
-          # snapshot is a jsonball shellball; unpack it for the comparison.
-          norm() {
-            jq -S 'del(.provenance.created_at, .provenance.workflow_run_url,
-                       .provenance.commit, .provenance.commit_short)'
-          }
-          if [ ! -f "$fresh" ]; then
-            echo "summary_changed=false" >> "$GITHUB_OUTPUT"
-            echo "No fresh static analysis summary; skipping publish PR"
-            exit 0
-          fi
-          if [ -f "$dest" ] && \
-             diff <(python3 scripts/ci/jsonball.py unpack "$dest" | norm) \
-                  <(norm < "$fresh") >/dev/null; then
-            echo "summary_changed=false" >> "$GITHUB_OUTPUT"
-            echo "Static analysis summary unchanged; skipping publish PR"
-            exit 0
-          fi
-          echo "summary_changed=true" >> "$GITHUB_OUTPUT"
-          python3 scripts/ci/jsonball.py pack "$fresh" -o "$dest"
-
-      - name: Create or update static analysis summary PR
-        if: steps.changes.outputs.summary_changed == 'true'
-        uses: peter-evans/create-pull-request@v7
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          branch: automation/static-analysis-summary
-          sign-commits: true
-          add-paths: |
-            doc/metrics/static-analysis.json.sh
-          title: "doc: refresh nightly static analysis summary"
-          commit-message: "doc: refresh nightly static analysis summary"
-          body: |
-            Update the committed clang static analyzer findings summary from
-            the Scan-Build workflow (GitHub Actions run ${{ github.run_id }}).
-
-            This snapshot drives the static analysis badges in the docs.
-          labels: |
-            automation
-            twister

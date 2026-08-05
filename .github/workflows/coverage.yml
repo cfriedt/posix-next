@@ -431,96 +431,12 @@ jobs:
           echo "Merged coverage: full ${full_pct}% (${full_hits}/${full_total}), posix ${posix_pct}% (${posix_hits}/${posix_total})"
 
       - name: Upload coverage JSON snapshot
+        # Fetched by the Documentation workflow to render docs badges.
         if: steps.coverage-check.outputs.has_coverage == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: coverage-json-snapshot
           path: coverage-json-snapshot/
-
-  coverage-publish:
-    needs: [coverage-nightly-prep, coverage-merge]
-    if: >-
-      needs.coverage-nightly-prep.outputs.skip_nightly != 'true' &&
-      (github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch') &&
-      needs.coverage-merge.result == 'success' &&
-      needs.coverage-merge.outputs.has_report == 'true'
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-      pull-requests: write
-    steps:
-      - name: Checkout main
-        uses: actions/checkout@v5
-        with:
-          ref: main
-          fetch-depth: 0
-
-      - name: Download merged JSON snapshot
-        uses: actions/download-artifact@v4
-        with:
-          name: coverage-json-snapshot
-          path: coverage-json-snapshot
-
-      - name: Check for coverage data changes
-        id: changes
-        shell: bash
-        run: |
-          set -euo pipefail
-          dest="${{ github.workspace }}/doc/metrics"
-          changed=0
-          # gcovr snapshots are stored as jsonball shellballs; compare the
-          # new payload sha256 against the ball's embedded PN_SHA256
-          for f in coverage-full.json coverage-posix.json; do
-            if [ ! -f "coverage-json-snapshot/$f" ]; then
-              echo "Missing coverage-json-snapshot/$f" >&2
-              exit 1
-            fi
-            new_sha=$(sha256sum "coverage-json-snapshot/$f" | cut -d' ' -f1)
-            old_sha=$(sed -n 's/^PN_SHA256="\(.*\)"$/\1/p' "$dest/$f.sh" 2>/dev/null || true)
-            if [ "$new_sha" != "$old_sha" ]; then
-              echo "Changed: $f"
-              changed=1
-            fi
-          done
-          if [ ! -f "$dest/coverage-provenance.json" ] || \
-             ! cmp -s coverage-json-snapshot/coverage-provenance.json "$dest/coverage-provenance.json"; then
-            echo "Changed: coverage-provenance.json"
-            changed=1
-          fi
-          if [ "$changed" -eq 0 ]; then
-            echo "coverage_changed=false" >> "$GITHUB_OUTPUT"
-            echo "Coverage JSON unchanged; skipping publish PR"
-            exit 0
-          fi
-          echo "coverage_changed=true" >> "$GITHUB_OUTPUT"
-          mkdir -p "$dest"
-          python3 scripts/ci/jsonball.py pack coverage-json-snapshot/coverage-full.json \
-            -o "$dest/coverage-full.json.sh"
-          python3 scripts/ci/jsonball.py pack coverage-json-snapshot/coverage-posix.json \
-            -o "$dest/coverage-posix.json.sh"
-          cp coverage-json-snapshot/coverage-provenance.json "$dest/"
-
-      - name: Create or update coverage JSON PR
-        if: steps.changes.outputs.coverage_changed == 'true'
-        uses: peter-evans/create-pull-request@v7
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          branch: automation/coverage-json
-          sign-commits: true
-          add-paths: |
-            doc/metrics/coverage-full.json.sh
-            doc/metrics/coverage-posix.json.sh
-            doc/metrics/coverage-provenance.json
-          title: "doc: refresh nightly coverage JSON snapshots"
-          commit-message: "doc: refresh nightly coverage JSON snapshots"
-          body: |
-            Update committed gcovr JSON coverage snapshots from the Coverage
-            workflow (GitHub Actions run ${{ github.run_id }}).
-
-            Interactive reports and PR comments are on Codecov.
-          labels: |
-            automation
-            coverage
 
   coverage-pr-codecov:
     if: github.event_name == 'pull_request'
@@ -587,7 +503,7 @@ jobs:
 
   coverage-status:
     if: always()
-    needs: [coverage-nightly-prep, coverage-nightly, coverage-merge, coverage-publish, coverage-pr-codecov]
+    needs: [coverage-nightly-prep, coverage-nightly, coverage-merge, coverage-pr-codecov]
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
@@ -673,13 +589,6 @@ jobs:
           if [ "${{ github.event_name }}" != "pull_request" ] && \
              [ "${{ needs.coverage-merge.result }}" != "success" ]; then
             echo "Coverage merge failed"
-            exit 1
-          fi
-          if { [ "${{ github.ref }}" = "refs/heads/main" ] || \
-               [ "${{ github.event_name }}" = "workflow_dispatch" ]; } && \
-             [ "${{ needs.coverage-publish.result }}" != "success" ] && \
-             [ "${{ needs.coverage-publish.result }}" != "skipped" ]; then
-            echo "Coverage publish failed"
             exit 1
           fi
           echo "Coverage pipeline succeeded"
