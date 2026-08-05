@@ -13,10 +13,9 @@
 #   static-analysis.json    findings snapshot (analyzed files + per-finding
 #                           file, line, enclosing function, checker)
 #
-# The snapshot is not packed into doc/metrics/ automatically. To preview the
-# badges in a local docs build (do not commit the result):
-#   python3 scripts/ci/jsonball.py pack ../../../static-analysis.json \
-#     -o doc/metrics/static-analysis.json.sh
+# The snapshot is not copied into doc/metrics/ automatically. To preview the
+# badges in a local docs build (doc/metrics/*.json is gitignored):
+#   cp ../../../static-analysis.json doc/metrics/
 #
 # Prerequisites (once):
 #   source ~/posix-next/zephyr/zephyr-env.sh
