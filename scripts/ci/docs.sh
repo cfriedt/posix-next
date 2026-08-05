@@ -18,6 +18,7 @@ LIVE=0
 REFRESH=1
 FETCH=1
 TOKEN_FILE=""
+HARVEST=""
 
 usage() {
 	cat <<'EOF'
@@ -40,6 +41,14 @@ Options:
   -t FILE       Read the GitHub token for fetching from FILE (exported as
                 GH_TOKEN). Defaults to ~/.ghtoken; without a token file,
                 a pre-set GH_TOKEN is required
+  --harvest LIST
+                Run local test/analysis suites to (re)generate metrics data
+                that is still missing after the fetch, without prompting.
+                LIST is 'all' or a comma-separated subset of
+                twister,coverage,asan,ubsan,scan-build. Runs take minutes
+                (scan-build) to hours (twister, coverage)
+  --no-harvest  Never prompt to harvest missing metrics data (the default
+                when stdin is not a terminal)
 
 Environment:
   ZEPHYR_BASE          Zephyr tree (auto-sourced from the west workspace when unset)
@@ -93,6 +102,18 @@ while [[ $# -gt 0 ]]; do
 		fi
 		TOKEN_FILE="$2"
 		shift 2
+		;;
+	--harvest)
+		if [[ $# -lt 2 ]]; then
+			echo "docs.sh: --harvest requires an argument" >&2
+			exit 2
+		fi
+		HARVEST="$2"
+		shift 2
+		;;
+	--no-harvest)
+		HARVEST="none"
+		shift
 		;;
 	*)
 		echo "docs.sh: unknown option: $1" >&2
@@ -202,12 +223,78 @@ refresh_twister_summary() {
 	echo "docs.sh: refreshed doc/metrics/twister-summary.json (gitignored)"
 }
 
+# Offer to run the local test/analysis suites for metrics classes still
+# missing after the fetch — the same data the nightlies harvest in CI (see
+# runci.sh, coverage.sh, asan.sh, ubsan.sh, scan-build.sh). Prompts appear
+# only on a terminal; --harvest LIST runs unattended, --no-harvest silences.
+harvest_missing_metrics() {
+	local m="$DOC_DIR/metrics" workspace reply
+	workspace="$($REALPATH "$POSIX_NEXT_PATH"/../../..)"
+
+	[[ "$HARVEST" != "none" ]] || return 0
+	if [[ -z "$HARVEST" && ! -t 0 ]]; then
+		return 0
+	fi
+
+	want() {
+		case ",$HARVEST," in
+		*,all,* | *,"$1",*) return 0 ;;
+		esac
+		[[ -z "$HARVEST" ]] || return 1
+		read -r -p "docs.sh: no $2; run $3 now to harvest it ($4)? [y/N] " reply
+		[[ "$reply" == [Yy]* ]]
+	}
+
+	no_concurrent_twister() {
+		if pgrep -af 'twister|runci\.sh' >/dev/null 2>&1; then
+			echo "docs.sh: another twister/runci.sh is running; not harvesting" >&2
+			return 1
+		fi
+	}
+
+	if [[ ! -f "$m/twister-summary.json" ]] &&
+		want twister "twister summary" "runci.sh" "hours"; then
+		no_concurrent_twister || return 0
+		"$SCRIPT_PATH/runci.sh"
+		refresh_twister_summary
+	fi
+	if [[ ! -f "$m/coverage-posix.json" ]] &&
+		want coverage "coverage data" "coverage.sh" "hours"; then
+		no_concurrent_twister || return 0
+		COVERAGE_SKIP_UI=1 "$SCRIPT_PATH/coverage.sh"
+		cp "$workspace/twister-out/coverage-posix.json" "$m/"
+		echo "docs.sh: harvested doc/metrics/coverage-posix.json"
+	fi
+	if [[ ! -f "$m/asan-summary.json" ]] &&
+		want asan "ASAN summary" "asan.sh" "an hour or more"; then
+		no_concurrent_twister || return 0
+		"$SCRIPT_PATH/asan.sh"
+		cp "$workspace/asan-summary.json" "$m/"
+		echo "docs.sh: harvested doc/metrics/asan-summary.json"
+	fi
+	if [[ ! -f "$m/ubsan-summary.json" ]] &&
+		want ubsan "UBSAN summary" "ubsan.sh" "an hour or more"; then
+		no_concurrent_twister || return 0
+		"$SCRIPT_PATH/ubsan.sh"
+		cp "$workspace/ubsan-summary.json" "$m/"
+		echo "docs.sh: harvested doc/metrics/ubsan-summary.json"
+	fi
+	if [[ ! -f "$m/static-analysis.json" ]] &&
+		want scan-build "static analysis summary" "scan-build.sh" "minutes"; then
+		no_concurrent_twister || return 0
+		"$SCRIPT_PATH/scan-build.sh"
+		cp "$workspace/static-analysis.json" "$m/"
+		echo "docs.sh: harvested doc/metrics/static-analysis.json"
+	fi
+}
+
 if [[ "$FETCH" -eq 1 ]]; then
 	fetch_metrics_artifacts
 fi
 if [[ "$REFRESH" -eq 1 ]]; then
 	refresh_twister_summary
 fi
+harvest_missing_metrics
 
 if [[ "$LIVE" -eq 1 ]]; then
 	make -C "$DOC_DIR" html-live
