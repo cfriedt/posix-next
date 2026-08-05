@@ -14,7 +14,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  asan-prep:
+    runs-on: ubuntu-24.04
+    outputs:
+      skip_nightly: ${{ steps.skip.outputs.skip }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          sparse-checkout: .github
+
+      - name: Check if scheduled nightly should run
+        id: skip
+        uses: ./.github/actions/skip-unchanged-nightly
+        with:
+          artifact: asan-summary
+
   asan:
+    needs: asan-prep
+    if: needs.asan-prep.outputs.skip_nightly != 'true'
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
