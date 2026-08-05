@@ -36,7 +36,7 @@ jobs:
   coverage-nightly-prep:
     runs-on: ubuntu-24.04
     outputs:
-      skip_nightly: ${{ steps.skip.outputs.skip_nightly }}
+      skip_nightly: ${{ steps.skip.outputs.skip }}
       main_sha: ${{ steps.skip.outputs.main_sha }}
       shard_total: ${{ steps.plan.outputs.shard_total }}
       matrix: ${{ steps.plan.outputs.matrix }}
@@ -48,42 +48,13 @@ jobs:
 
       - name: Check if scheduled nightly should run
         id: skip
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          main_sha=$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" \
-            --jq .commit.sha)
-          echo "main_sha=${main_sha}" >> "$GITHUB_OUTPUT"
-          echo "skip_nightly=false" >> "$GITHUB_OUTPUT"
-
-          if [ "${GITHUB_EVENT_NAME}" != "schedule" ]; then
-            echo "Not a scheduled run; nightly coverage enabled (main=${main_sha})"
-            exit 0
-          fi
-
-          last_sha=""
-          last_conclusion=""
-          read -r last_sha last_conclusion < <(gh run list -R "${GITHUB_REPOSITORY}" \
-            --workflow "${GITHUB_WORKFLOW}" --branch main --status completed \
-            --limit 1 --json headSha,conclusion \
-            --jq '.[] | "\(.headSha) \(.conclusion)"') || true
-
-          if [ -z "$last_sha" ]; then
-            echo "No completed run on main; scheduled nightly will run"
-          elif [ "$last_sha" != "$main_sha" ]; then
-            echo "Scheduled nightly will run (main=${main_sha}, last run=${last_sha})"
-          elif [ "$last_conclusion" != "success" ]; then
-            echo "Scheduled nightly will run: last run at ${main_sha} concluded ${last_conclusion}"
-          else
-            echo "skip_nightly=true" >> "$GITHUB_OUTPUT"
-            echo "Scheduled nightly skipped: main unchanged since the last successful run (${main_sha})"
-          fi
+        uses: ./.github/actions/skip-unchanged-nightly
+        with:
+          artifact: coverage-json-snapshot
 
       - name: Plan nightly shards
         id: plan
-        if: github.event_name != 'pull_request' && steps.skip.outputs.skip_nightly != 'true'
+        if: github.event_name != 'pull_request' && steps.skip.outputs.skip != 'true'
         shell: bash
         run: |
           total=$(jq -r '.coverage_nightly.shards // 10' "$CI_CONFIG")
