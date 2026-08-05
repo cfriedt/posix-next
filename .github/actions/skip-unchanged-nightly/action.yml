@@ -1,0 +1,58 @@
+# SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+name: Skip unchanged nightly
+description: >-
+  Decide whether a scheduled nightly should run: skip when main is unchanged
+  since the newest completed run of this workflow that uploaded its summary
+  artifact (the published data is already current). workflow_dispatch runs
+  are never skipped. Mirrors the Coverage workflow's Codecov-based check.
+
+inputs:
+  artifact:
+    description: Summary artifact name a prior run must have uploaded
+    required: true
+
+outputs:
+  skip:
+    description: "'true' when the scheduled run should be skipped"
+    value: ${{ steps.check.outputs.skip }}
+
+runs:
+  using: composite
+  steps:
+    - name: Compare main against the last summarized run
+      id: check
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        ARTIFACT: ${{ inputs.artifact }}
+      run: |
+        set -euo pipefail
+        echo "skip=false" >> "$GITHUB_OUTPUT"
+        if [ "${GITHUB_EVENT_NAME}" != "schedule" ]; then
+          echo "Not a scheduled run; nightly enabled"
+          exit 0
+        fi
+        main_sha=$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" \
+          --jq .commit.sha)
+        while read -r id sha; do
+          has=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${id}/artifacts" \
+            --jq "[.artifacts[].name] | any(. == \"${ARTIFACT}\")")
+          if [ "$has" != "true" ]; then
+            continue
+          fi
+          if [ "$sha" = "$main_sha" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Scheduled nightly skipped: main unchanged since run ${id}" \
+              "already summarized ${sha}"
+          else
+            echo "Scheduled nightly will run (main=${main_sha}," \
+              "last summarized=${sha})"
+          fi
+          exit 0
+        done < <(gh run list -R "${GITHUB_REPOSITORY}" \
+          --workflow "${GITHUB_WORKFLOW}" --branch main --status completed \
+          --limit 10 --json databaseId,headSha \
+          --jq '.[] | "\(.databaseId) \(.headSha)"')
+        echo "No prior ${ARTIFACT} artifact found; scheduled nightly will run"
