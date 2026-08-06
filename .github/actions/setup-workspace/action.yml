@@ -44,6 +44,11 @@ inputs:
     required: false
     default: "true"
 
+  ccache-max-size:
+    description: CCACHE_MAXSIZE (on-disk, after compression)
+    required: false
+    default: 1G
+
 outputs:
   manifest-path:
     description: Resolved manifest path (manifest.self.path from west.yml)
@@ -183,6 +188,9 @@ runs:
         mkdir -p "${ccache_dir}"
         echo "CCACHE_DIR=${ccache_dir}" >> "$GITHUB_ENV"
         echo "CCACHE_BASEDIR=${GITHUB_WORKSPACE}" >> "$GITHUB_ENV"
-        echo "CCACHE_MAXSIZE=1G" >> "$GITHUB_ENV"
+        echo "CCACHE_MAXSIZE=${{ inputs.ccache-max-size }}" >> "$GITHUB_ENV"
+        # maxsize is measured on disk, so a higher zstd level fits ~2x the
+        # objects into the same Actions cache quota
+        echo "CCACHE_COMPRESSLEVEL=5" >> "$GITHUB_ENV"
         echo "CCACHE_COMPILERCHECK=content" >> "$GITHUB_ENV"
         echo "CCACHE_IGNOREOPTIONS=-specs=* --specs=*" >> "$GITHUB_ENV"
