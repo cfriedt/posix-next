@@ -29,9 +29,37 @@ env:
   CI_CONFIG: ${{ github.workspace }}/.github/ci-config.json
 
 jobs:
+  # Ensure the CI environment image exists before any job that wants it:
+  # resolve the tag for this tree's inputs and, when it is not published yet,
+  # build and push it here so dependent jobs (needs:) always enter it. The
+  # image reference is empty only when it truly cannot be provided — a fork
+  # PR (read-only token) or a failed build — and an empty `container:` runs
+  # the job directly on the runner, where setup-workspace builds the
+  # environment inline as before.
+  ci-image-check:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.ensure.outputs.image }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Ensure CI image
+        id: ensure
+        uses: ./.github/actions/ensure-ci-image
+        with:
+          can-push: >-
+            ${{ github.event_name != 'pull_request' ||
+                github.event.pull_request.head.repo.full_name == github.repository }}
+
   twister-build:
     if: github.event_name == 'pull_request'
+    needs: ci-image-check
     runs-on: ubuntu-24.04
+    container: ${{ needs.ci-image-check.outputs.image }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -127,8 +155,9 @@ jobs:
     if: >-
       (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') &&
       needs.twister-nightly-prep.outputs.skip_nightly != 'true'
-    needs: twister-nightly-prep
+    needs: [twister-nightly-prep, ci-image-check]
     runs-on: ubuntu-24.04
+    container: ${{ needs.ci-image-check.outputs.image }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.twister-nightly-prep.outputs.matrix) }}
