@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright (c) The Zephyr Project Contributors
+
+# Build the CI container image (docker/ci/Dockerfile) and push it to GHCR
+# tagged with the input hash from scripts/ci/ci-image.sh. Runs after merges
+# that change any baked input so consuming workflows rarely have to build it
+# themselves; the weekly rebuild refreshes base-image packages under the same
+# tag. Consumer workflows ensure the image exists via the same
+# ensure-ci-image action (building on demand when this workflow has not run
+# yet), so this workflow is a warm-up, never a gate.
+
+name: CI image
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - west.yml
+      - docker/ci/**
+      - scripts/ci/ci-image.sh
+      - scripts/ci/requirements-coverage.txt
+      - .github/actions/ensure-ci-image/**
+      - .github/workflows/ci-image.yml
+  schedule:
+    - cron: '0 0 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Ensure CI image
+        id: ensure
+        uses: ./.github/actions/ensure-ci-image
+        with:
+          # Scheduled runs rebuild the same tag to pick up base-image updates
+          force-rebuild: ${{ github.event_name == 'schedule' }}
+
+      - name: Require image
+        shell: bash
+        run: |
+          test -n "${{ steps.ensure.outputs.image }}" || {
+            echo "CI image was not resolved or built" >&2
+            exit 1
+          }
+          echo "CI image: ${{ steps.ensure.outputs.image }}"

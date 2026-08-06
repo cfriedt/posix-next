@@ -24,14 +24,45 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
-env:
-  ZEPHYR_BASE: ${{ github.workspace }}/zephyr
-  CI_CONFIG: ${{ github.workspace }}/.github/ci-config.json
+# Inside container jobs the workspace mounts at a different path than on the
+# host, and ${{ github.workspace }} always expands to the HOST path — never
+# interpolate it into scripts or env here. Steps use $GITHUB_WORKSPACE (the
+# shell env var, correct in both contexts) or workspace-relative paths;
+# setup-workspace exports ZEPHYR_BASE, and the ci scripts self-locate their
+# ci-config.json.
 
 jobs:
+  # Ensure the CI environment image exists before any job that wants it:
+  # resolve the tag for this tree's inputs and, when it is not published yet,
+  # build and push it here so dependent jobs (needs:) always enter it. The
+  # image reference is empty only when it truly cannot be provided — a fork
+  # PR (read-only token) or a failed build — and an empty `container:` runs
+  # the job directly on the runner, where setup-workspace builds the
+  # environment inline as before.
+  ci-image-check:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.ensure.outputs.image }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Ensure CI image
+        id: ensure
+        uses: ./.github/actions/ensure-ci-image
+        with:
+          can-push: >-
+            ${{ github.event_name != 'pull_request' ||
+                github.event.pull_request.head.repo.full_name == github.repository }}
+
   twister-build:
     if: github.event_name == 'pull_request'
+    needs: ci-image-check
     runs-on: ubuntu-24.04
+    container: ${{ needs.ci-image-check.outputs.image }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -51,16 +82,15 @@ jobs:
       - name: Generate PR test plan
         id: plan
         shell: bash
-        working-directory: ${{ github.workspace }}
         env:
-          MANIFEST: ${{ github.workspace }}/${{ env.MANIFEST_PATH }}
           BASE_REF: origin/${{ github.base_ref }}
         run: |
           set -euo pipefail
-          git -C "${MANIFEST}" diff --name-only "${BASE_REF}.." \
+          manifest="${GITHUB_WORKSPACE}/${MANIFEST_PATH}"
+          git -C "${manifest}" diff --name-only "${BASE_REF}.." \
             | python3 -c 'import json,sys; json.dump([l for l in sys.stdin.read().splitlines() if l], sys.stdout)' \
             > changed_files.json
-          "${{ github.workspace }}/${{ env.MANIFEST_PATH }}/scripts/ci/gen-pr-testplan.sh" \
+          "${manifest}/scripts/ci/gen-pr-testplan.sh" \
             changed_files.json
           count=$(jq '.testsuites | length' testplan.json)
           if [ "$count" -gt 0 ]; then
@@ -83,11 +113,10 @@ jobs:
       - name: Run Tests with Twister (Pull Request)
         if: steps.plan.outputs.has_tests == 'true'
         shell: bash
-        working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
           ccache --zero-stats
-          "${{ github.workspace }}/${{ env.MANIFEST_PATH }}/scripts/ci/twister-pr-run.sh"
+          "${GITHUB_WORKSPACE}/${MANIFEST_PATH}/scripts/ci/twister-pr-run.sh"
           ccache --show-stats
 
       - name: Save workspace ccache
@@ -119,7 +148,7 @@ jobs:
         if: steps.skip.outputs.skip != 'true'
         shell: bash
         run: |
-          total=$(jq -r '.twister_nightly.shards // 10' "$CI_CONFIG")
+          total=$(jq -r '.twister_nightly.shards // 10' .github/ci-config.json)
           echo "shard_total=$total" >> "$GITHUB_OUTPUT"
           echo "matrix=$(jq -nc --argjson n "$total" '{shard: [range(1; $n+1)]}')" >> "$GITHUB_OUTPUT"
 
@@ -127,8 +156,9 @@ jobs:
     if: >-
       (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') &&
       needs.twister-nightly-prep.outputs.skip_nightly != 'true'
-    needs: twister-nightly-prep
+    needs: [twister-nightly-prep, ci-image-check]
     runs-on: ubuntu-24.04
+    container: ${{ needs.ci-image-check.outputs.image }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.twister-nightly-prep.outputs.matrix) }}
@@ -150,11 +180,10 @@ jobs:
       - name: Generate nightly test plan
         if: matrix.shard == 1
         shell: bash
-        working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
           CI_CONFIG_PROFILE=twister_nightly \
-            "${{ github.workspace }}/${{ env.MANIFEST_PATH }}/scripts/ci/gen-testplan.sh"
+            "${GITHUB_WORKSPACE}/${MANIFEST_PATH}/scripts/ci/gen-testplan.sh"
           test -s testplan.json
 
       - name: Upload nightly test plan
@@ -200,17 +229,15 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: twister-nightly-testplan
-          path: ${{ github.workspace }}
 
       - name: Run Tests with Twister (Nightly)
         shell: bash
-        working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
           test -s testplan.json
           ccache --zero-stats
           CI_CONFIG_PROFILE=twister_nightly \
-            "${{ github.workspace }}/${{ env.MANIFEST_PATH }}/scripts/ci/runci.sh" \
+            "${GITHUB_WORKSPACE}/${MANIFEST_PATH}/scripts/ci/runci.sh" \
             -i \
             --load-tests testplan.json \
             --subset ${{ matrix.shard }}/${{ needs.twister-nightly-prep.outputs.shard_total }}
@@ -222,8 +249,8 @@ jobs:
         with:
           name: twister-json-shard-${{ matrix.shard }}
           path: |
-            ${{ github.workspace }}/twister-out/twister.json
-            ${{ github.workspace }}/twister-out.*/twister.json
+            twister-out/twister.json
+            twister-out.*/twister.json
           if-no-files-found: ignore
 
       - name: Save workspace ccache
