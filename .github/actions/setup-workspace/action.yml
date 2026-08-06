@@ -245,7 +245,13 @@ runs:
     - name: Export ccache environment
       shell: bash
       run: |
-        ccache_dir="${{ inputs.base-path == '.' && format('{0}/.ccache', github.workspace) || format('{0}/{1}/.ccache', github.workspace, inputs.base-path) }}"
+        # Use $GITHUB_WORKSPACE (container-correct), never the
+        # ${{ github.workspace }} expression (always the host path)
+        if [ "${{ inputs.base-path }}" = "." ]; then
+          ccache_dir="${GITHUB_WORKSPACE}/.ccache"
+        else
+          ccache_dir="${GITHUB_WORKSPACE}/${{ inputs.base-path }}/.ccache"
+        fi
         mkdir -p "${ccache_dir}"
         echo "CCACHE_DIR=${ccache_dir}" >> "$GITHUB_ENV"
         echo "CCACHE_BASEDIR=${GITHUB_WORKSPACE}" >> "$GITHUB_ENV"
