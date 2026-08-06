@@ -21,10 +21,13 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# Allow only one Pages deployment at a time; cancel in-progress runs.
+# Serialize docs runs per ref. Never cancel main runs mid-flight: a dying
+# deploy job's cleanup cancels its Pages deployment by SHA, and since
+# deployments are keyed by SHA it can kill the successor run's deployment of
+# the same commit. PR runs never deploy and may cancel freely.
 concurrency:
   group: docs-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -186,11 +189,25 @@ jobs:
 
     environment:
       name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
+      url: ${{ steps.deploy.outputs.page_url || steps.deploy-retry.outputs.page_url }}
 
     steps:
+      # Back-to-back runs (force-push after a push, staggered workflow_run
+      # redeploys) race the Pages backend: the previous run's deployment can
+      # still be in progress and the create request is rejected. Give it
+      # time to settle and try once more before failing the run.
       - name: Deploy Pages
         id: deploy
+        continue-on-error: true
+        uses: actions/deploy-pages@v4
+
+      - name: Wait for in-flight deployment to settle
+        if: steps.deploy.outcome == 'failure'
+        run: sleep 120
+
+      - name: Deploy Pages (retry)
+        if: steps.deploy.outcome == 'failure'
+        id: deploy-retry
         uses: actions/deploy-pages@v4
 
   # ---------------------------------------------------------------------------
