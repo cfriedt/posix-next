@@ -1,0 +1,108 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright (c) The Zephyr Project Contributors
+
+name: Ensure CI image
+description: >-
+  Resolve the prebuilt CI environment image for this tree's inputs
+  (scripts/ci/ci-image.sh), building and pushing it first when it is missing
+  and the run is allowed to push. Outputs an empty image reference only when
+  the image cannot be provided (fork PR with a read-only token, or a failed
+  build), in which case jobs run on plain runners and setup-workspace builds
+  the environment inline.
+
+  Builder policy: to keep concurrent builds of the same tag rare, only
+  ci-image.yml (serialized by its concurrency group) and the twister
+  ci-image-check job build on demand; other consumer workflows should pass
+  can-push: false and rely on those builders plus the inline fallback. Tags
+  are content-addressed, so the residual race (two runs building identical
+  inputs simultaneously) at worst wastes one build — the loser detects the
+  published tag before pushing and defers to it.
+
+inputs:
+  can-push:
+    description: Whether this run may build and push a missing image (false for fork PRs)
+    required: false
+    default: "true"
+
+  force-rebuild:
+    description: Rebuild and push even when the tag exists (weekly base-package refresh)
+    required: false
+    default: "false"
+
+  token:
+    description: Token with packages read (and write when can-push)
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  image:
+    description: GHCR image reference, or empty when unavailable
+    value: ${{ steps.resolve.outputs.image }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve or build CI image
+      id: resolve
+      shell: bash
+      env:
+        CAN_PUSH: ${{ inputs.can-push }}
+        FORCE_REBUILD: ${{ inputs.force-rebuild }}
+        TOKEN: ${{ inputs.token }}
+        ACTOR: ${{ github.actor }}
+      run: |
+        set -euo pipefail
+
+        if [ ! -x ./scripts/ci/ci-image.sh ]; then
+          echo "image=" >> "$GITHUB_OUTPUT"
+          echo "No ci-image.sh on this ref; jobs will build the environment inline"
+          exit 0
+        fi
+
+        # Derived from the repository running the workflow, so forks build
+        # and pull within their own GHCR namespace with their own token.
+        tag=$(./scripts/ci/ci-image.sh)
+        image="ghcr.io/${GITHUB_REPOSITORY,,}/ci:${tag}"
+
+        echo "${TOKEN}" | docker login ghcr.io -u "${ACTOR}" --password-stdin || true
+
+        if [ "${FORCE_REBUILD}" != "true" ] \
+            && docker manifest inspect "${image}" >/dev/null 2>&1; then
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+          echo "Prebuilt CI image: ${image}"
+          exit 0
+        fi
+
+        if [ "${CAN_PUSH}" != "true" ]; then
+          echo "image=" >> "$GITHUB_OUTPUT"
+          echo "CI image ${image} is missing and this run cannot push;" \
+            "jobs will build the environment inline"
+          exit 0
+        fi
+
+        echo "Building ${image}"
+        sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+          /usr/local/.ghcup /usr/local/share/boost || true
+        df -h /
+
+        # The source label links the GHCR package to the repository
+        if ! docker build --pull -f docker/ci/Dockerfile -t "${image}" \
+            --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" .; then
+          echo "image=" >> "$GITHUB_OUTPUT"
+          echo "::warning::CI image build failed for ${image}; jobs will build the environment inline"
+          exit 0
+        fi
+
+        # Tags are content-addressed, so a concurrent run that finished first
+        # pushed the same environment; defer to it instead of re-uploading.
+        if [ "${FORCE_REBUILD}" != "true" ] \
+            && docker manifest inspect "${image}" >/dev/null 2>&1; then
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+          echo "${image} was published by a concurrent run while building; skipping push"
+        elif docker push "${image}"; then
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+          echo "Built and pushed ${image}"
+        else
+          echo "image=" >> "$GITHUB_OUTPUT"
+          echo "::warning::CI image push failed for ${image}; jobs will build the environment inline"
+        fi
