@@ -43,6 +43,10 @@ jobs:
         uses: ./.github/actions/setup-workspace
         with:
           toolchains: aarch64-zephyr-elf:arm-zephyr-eabi:riscv64-zephyr-elf:x86_64-zephyr-elf
+          # PR jobs never save ccache; warm from nightly shard 1's cache
+          # (nightly keys are per-shard, so the bare "twister" prefix would
+          # match nothing).
+          ccache-key-prefix: twister-shard-1
 
       - name: Generate PR test plan
         id: plan
@@ -139,7 +143,9 @@ jobs:
         uses: ./.github/actions/setup-workspace
         with:
           toolchains: aarch64-zephyr-elf:arm-zephyr-eabi:riscv64-zephyr-elf:x86_64-zephyr-elf
-          ccache-key-prefix: twister
+          # Per-shard cache: subsets are deterministic (--shuffle-tests-seed),
+          # so each shard reuses its own objects night over night.
+          ccache-key-prefix: twister-shard-${{ matrix.shard }}
 
       - name: Generate nightly test plan
         if: matrix.shard == 1
@@ -221,7 +227,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Save workspace ccache
-        if: always() && !cancelled() && matrix.shard == 1
+        if: always() && !cancelled()
         uses: ./.github/actions/save-workspace-ccache
         with:
           cache-primary-key: ${{ steps.workspace.outputs.ccache-primary-key }}
