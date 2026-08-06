@@ -109,7 +109,62 @@ runs:
         echo "path=${manifest_path}" >> "$GITHUB_OUTPUT"
         echo "MANIFEST_PATH=${manifest_path}" >> "$GITHUB_ENV"
 
+    - name: Detect CI image fast path
+      id: fastpath
+      shell: bash
+      run: |
+        if [ "${POSIX_NEXT_CI_IMAGE:-}" = "1" ] && [ -f /repo-cache/west-workspace.tar.zst ]; then
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+          echo "Running inside the posix-next CI image; using baked environment"
+        else
+          echo "enabled=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Set up workspace from CI image
+      if: steps.fastpath.outputs.enabled == 'true'
+      working-directory: ${{ inputs.base-path }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "/opt/venv/bin" >> "$GITHUB_PATH"
+        export PATH="/opt/venv/bin:$PATH"
+
+        zstd -d -q -c /repo-cache/west-workspace.tar.zst | tar -xf -
+
+        # A manifest that changed since the image bake (e.g. a PR editing
+        # west.yml) reconciles against the baked checkouts; unchanged
+        # manifests skip west update entirely, like a west-cache hit today.
+        baked=$(cat /opt/posix-next-ci/west.yml.sha256)
+        current=$(sha256sum "${{ steps.manifest.outputs.path }}/west.yml" | awk '{print $1}')
+        if [ "$baked" != "$current" ]; then
+          echo "west.yml differs from the CI image bake; running west update"
+          west update -o=--depth=1 -n
+        fi
+
+        sdk_version=$(cat zephyr/SDK_VERSION)
+        if [ "$sdk_version" = "$(cat /opt/posix-next-ci/SDK_VERSION)" ]; then
+          echo "ZEPHYR_SDK_INSTALL_DIR=/opt/zephyr-sdk" >> "$GITHUB_ENV"
+        else
+          echo "SDK ${sdk_version} not in CI image; downloading into workspace"
+          sdk_file="zephyr-sdk-${sdk_version}_linux-x86_64_minimal.tar.xz"
+          wget -q "https://github.com/zephyrproject-rtos/sdk-ng/releases/download/v${sdk_version}/${sdk_file}"
+          mkdir -p zephyr-sdk
+          tar xf "${sdk_file}" -C zephyr-sdk --strip-components=1
+          rm -f "${sdk_file}"
+          cd zephyr-sdk
+          IFS=":"
+          for toolchain in ${{ inputs.toolchains }}; do
+            ./setup.sh -t "${toolchain}"
+          done
+          unset IFS
+          if [ ! -d sysroots ]; then ./setup.sh -h; fi
+          ./setup.sh -c
+          cd ..
+          echo "ZEPHYR_SDK_INSTALL_DIR=$(pwd)/zephyr-sdk" >> "$GITHUB_ENV"
+        fi
+
     - name: Set up Zephyr west workspace
+      if: steps.fastpath.outputs.enabled != 'true'
       uses: ./.github/actions/action-zephyr-setup
       with:
         base-path: ${{ inputs.base-path }}
@@ -125,10 +180,16 @@ runs:
       run: |
         if [ "${{ inputs.base-path }}" = "." ]; then
           echo "ZEPHYR_BASE=${GITHUB_WORKSPACE}/zephyr" >> "$GITHUB_ENV"
-          echo "ZEPHYR_SDK_INSTALL_DIR=${GITHUB_WORKSPACE}/zephyr-sdk" >> "$GITHUB_ENV"
         else
           echo "ZEPHYR_BASE=${GITHUB_WORKSPACE}/${{ inputs.base-path }}/zephyr" >> "$GITHUB_ENV"
-          echo "ZEPHYR_SDK_INSTALL_DIR=${GITHUB_WORKSPACE}/${{ inputs.base-path }}/zephyr-sdk" >> "$GITHUB_ENV"
+        fi
+        # The CI-image fast path already exported the baked (or fallback) SDK
+        if [ -z "${ZEPHYR_SDK_INSTALL_DIR:-}" ]; then
+          if [ "${{ inputs.base-path }}" = "." ]; then
+            echo "ZEPHYR_SDK_INSTALL_DIR=${GITHUB_WORKSPACE}/zephyr-sdk" >> "$GITHUB_ENV"
+          else
+            echo "ZEPHYR_SDK_INSTALL_DIR=${GITHUB_WORKSPACE}/${{ inputs.base-path }}/zephyr-sdk" >> "$GITHUB_ENV"
+          fi
         fi
         manifest_path="${{ steps.manifest.outputs.path }}"
         if [ -n "$manifest_path" ] && [ "$manifest_path" != "." ]; then
@@ -184,7 +245,13 @@ runs:
     - name: Export ccache environment
       shell: bash
       run: |
-        ccache_dir="${{ inputs.base-path == '.' && format('{0}/.ccache', github.workspace) || format('{0}/{1}/.ccache', github.workspace, inputs.base-path) }}"
+        # Use $GITHUB_WORKSPACE (container-correct), never the
+        # ${{ github.workspace }} expression (always the host path)
+        if [ "${{ inputs.base-path }}" = "." ]; then
+          ccache_dir="${GITHUB_WORKSPACE}/.ccache"
+        else
+          ccache_dir="${GITHUB_WORKSPACE}/${{ inputs.base-path }}/.ccache"
+        fi
         mkdir -p "${ccache_dir}"
         echo "CCACHE_DIR=${ccache_dir}" >> "$GITHUB_ENV"
         echo "CCACHE_BASEDIR=${GITHUB_WORKSPACE}" >> "$GITHUB_ENV"
