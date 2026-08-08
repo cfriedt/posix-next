@@ -130,7 +130,7 @@ defined only while all of them remain enabled.
          :header: Symbol, Support, Remarks
          :widths: 50, 10, 50
 
-          _POSIX_AEP_REALTIME_CONTROLLER, -1, :kconfig:option:`CONFIG_POSIX_AEP_REALTIME_CONTROLLER`
+          _POSIX_AEP_REALTIME_CONTROLLER, 200312L, :kconfig:option:`CONFIG_POSIX_AEP_REALTIME_CONTROLLER`
 
       .. csv-table:: PSE52 Option Groups
          :header: Symbol, Support, Remarks
