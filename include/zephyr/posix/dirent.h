@@ -1,7 +1,5 @@
 /*
- * Copyright (c) 2018 Intel Corporation
- * Copyright (c) 2024 Tenstorrent AI ULC
- *
+ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -19,6 +17,7 @@
 #define ZEPHYR_INCLUDE_POSIX_DIRENT_H_
 
 #include <limits.h>
+#include <sys/types.h>
 
 #include <zephyr/toolchain.h>
 
@@ -36,15 +35,33 @@ extern "C" {
 #define NAME_MAX _POSIX_NAME_MAX
 #endif
 
-/** @brief Opaque directory stream type.  @ingroup posix_option_group_file_system*/
-typedef void DIR;
+struct zvfs_dirstream;
+/**
+ * @brief Directory stream type.
+ * @ingroup posix_option_group_file_system
+ *
+ * An open directory stream is backed by a file descriptor, so it inherits the
+ * kernel object permission model and works from user mode. The type is
+ * intentionally incomplete here; dirfd() returns the descriptor.
+ */
+typedef struct zvfs_dirstream DIR;
 
-/** @brief Directory entry returned by readdir(). */
+#if !defined(_DIRENT_DECLARED) && !defined(__dirent_defined)
+/**
+ * @brief Directory entry returned by readdir().
+ *
+ * The d_name capacity is fixed rather than derived from NAME_MAX, whose
+ * value depends on feature-test macros: a structure layout that varies per
+ * translation unit would not be an ABI.
+ */
 struct dirent {
-	unsigned int d_ino;          /**< File serial number. */
-	unsigned char d_type;        /**< File type, a DT_* value; DT_UNKNOWN when not reported. */
-	char d_name[NAME_MAX + 1];   /**< Filename (null-terminated). */
+	ino_t d_ino;          /**< File serial number, 0 (untracked). */
+	unsigned char d_type; /**< File type, a DT_* value; DT_UNKNOWN when not reported. */
+	char d_name[255 + 1]; /**< Filename (null-terminated). */
 };
+#define _DIRENT_DECLARED
+#define __dirent_defined
+#endif
 
 /**
  * @name File types reported in d_type
@@ -68,7 +85,7 @@ struct dirent {
 #if (_POSIX_C_SOURCE >= 200809L) || (_XOPEN_SOURCE >= 700)
 /**
  * @brief Compare two directory entries alphabetically (for use with scandir()).
- * @ingroup posix_option_group_file_system
+ * @ingroup posix_option_group_file_system_ext
  * @param d1 First directory entry.
  * @param d2 Second directory entry.
  * @return Negative, zero, or positive per strcmp() semantics.
@@ -89,7 +106,7 @@ int closedir(DIR *dirp);
 #if (_POSIX_C_SOURCE >= 200809L) || (_XOPEN_SOURCE >= 700)
 /**
  * @brief Get the file descriptor for an open directory stream.
- * @ingroup posix_option_group_file_system
+ * @ingroup posix_option_group_file_system_ext
  * @param dirp Directory stream.
  * @return File descriptor on success, or -1 with errno set on failure.
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/dirfd.html
@@ -148,7 +165,7 @@ void rewinddir(DIR *dirp);
 #if (_POSIX_C_SOURCE >= 200809L) || (_XOPEN_SOURCE >= 700)
 /**
  * @brief Scan a directory, optionally filtering and sorting the entries.
- * @ingroup posix_option_group_file_system
+ * @ingroup posix_option_group_file_system_ext
  * @param dir      Path to the directory.
  * @param namelist Output: allocated array of directory entry pointers.
  * @param sel      Filter function, or NULL to include all entries.
@@ -163,7 +180,7 @@ int scandir(const char *dir, struct dirent ***namelist, int (*sel)(const struct 
 #if defined(_XOPEN_SOURCE)
 /**
  * @brief Set the position of a directory stream (XSI extension).
- * @ingroup posix_option_group_file_system
+ * @ingroup posix_option_group_xsi_file_system
  * @param dirp Directory stream.
  * @param loc  Position value from telldir().
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/seekdir.html
@@ -172,7 +189,7 @@ void seekdir(DIR *dirp, long loc);
 
 /**
  * @brief Get the current position of a directory stream (XSI extension).
- * @ingroup posix_option_group_file_system
+ * @ingroup posix_option_group_xsi_file_system
  * @param dirp Directory stream.
  * @return Current position value, or -1 on failure.
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/telldir.html
