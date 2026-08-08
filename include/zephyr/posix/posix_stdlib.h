@@ -54,6 +54,18 @@ int getenv_r(const char *name, char *buf, size_t len);
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/getsubopt.html
  */
 int getsubopt(char **optionp, char *const *keylistp, char **valuep);
+
+#if (_POSIX_C_SOURCE >= 200112L) || defined(__DOXYGEN__)
+/**
+ * @brief Create a unique regular file and open it for reading and writing.
+ * @ingroup posix_option_group_file_system
+ * @param template Path template whose final six characters are "XXXXXX",
+ *                 replaced in place with the generated name.
+ * @return An open file descriptor on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/mkstemp.html
+ */
+int mkstemp(char *template);
+#endif
 #endif
 
 #if defined(_XOPEN_SOURCE) || defined(__DOXYGEN__)
