@@ -26,6 +26,7 @@ if(NOT CONFIG_TC_PROVIDES_POSIX_FILE_SYSTEM)
     fstat.c
     fstatvfs.c
     mkdir.c
+    mkstemp.c
     opendir.c
     pathconf.c
     readdir.c
