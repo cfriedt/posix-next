@@ -1,69 +1,33 @@
 /*
- * Copyright (c) 2018 Intel Corporation
+ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <errno.h>
 #include <string.h>
 #include <sys/stat.h>
 
-#include <zephyr/fs/fs.h>
+#include <zephyr/sys/zvfs_fs.h>
 
-/**
- * @brief Get file status.
- *
- * See IEEE 1003.1
- */
-int stat(const char *path, struct stat *buf)
+int stat(const char *ZRESTRICT path, struct stat *ZRESTRICT buf)
 {
-	int rc;
-	struct fs_statvfs stat_vfs;
-	struct fs_dirent stat_file;
+	struct zvfs_stat zs;
 
-	if (buf == NULL) {
-		errno = EBADF;
+	if (zvfs_stat(path, &zs) < 0) {
 		return -1;
 	}
 
-	rc = fs_statvfs(path, &stat_vfs);
-	if (rc < 0) {
-		errno = -rc;
-		return -1;
-	}
-
-	rc = fs_stat(path, &stat_file);
-	if (rc < 0) {
-		errno = -rc;
-		return -1;
-	}
-
-	memset(buf, 0, sizeof(struct stat));
-
-	switch (stat_file.type) {
-	case FS_DIR_ENTRY_FILE:
+	memset(buf, 0, sizeof(*buf));
+	buf->st_mode = zs.mode;
+	buf->st_size = zs.size;
+	buf->st_nlink = zs.nlink;
 #if defined(_XOPEN_SOURCE)
-		buf->st_mode = S_IFREG;
+	buf->st_blksize = zs.blksize;
+	buf->st_blocks = zs.blocks;
 #endif
-		break;
-	case FS_DIR_ENTRY_DIR:
-#if defined(_XOPEN_SOURCE)
-		buf->st_mode = S_IFDIR;
-#endif
-		break;
-	default:
-		errno = EIO;
-		return -1;
-	}
-	buf->st_size = stat_file.size;
-#if defined(_XOPEN_SOURCE)
-	buf->st_blksize = stat_vfs.f_bsize;
-	/*
-	 * This is a best effort guess, as this information is not provided
-	 * by the fs_stat function.
-	 */
-	buf->st_blocks = (stat_file.size + stat_vfs.f_bsize - 1) / stat_vfs.f_bsize;
-#endif
+	buf->st_atim = zs.atime;
+	buf->st_mtim = zs.mtime;
+	buf->st_ctim = zs.ctime;
 
 	return 0;
 }
