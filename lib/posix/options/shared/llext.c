@@ -202,6 +202,7 @@ EXPORT_SYMBOL(futimens);
 EXPORT_SYMBOL(getcwd);
 EXPORT_SYMBOL(link);
 EXPORT_SYMBOL(mkdir);
+EXPORT_SYMBOL(mkstemp);
 EXPORT_SYMBOL(opendir);
 EXPORT_SYMBOL(pathconf);
 EXPORT_SYMBOL(readdir);
