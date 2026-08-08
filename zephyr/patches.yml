@@ -2267,6 +2267,26 @@ patches:
       not a pointer, so the marshaller never round-trips an address; the
       POSIX getcwd() wrapper returns its own buffer. fopen(), remove(), and
       tmpfile() inherit the CWD for free via zvfs_open()/zvfs_remove().
+  - path: zephyr/zvfs-userspace-tests.patch
+    sha256sum: 99e8d5bbaade1be1eee9b9534116c5f398c166cb4bfd38554c2a03545053314a
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-07
+    upstreamable: true
+    comments: |
+      Add tests/lib/zvfs_fs: one ZTEST per ZVFS path, directory-stream, and
+      working-directory system call, nearly all ZTEST_USER, over a FAT RAM
+      disk, with a userspace twister variant. Covers O_EXCL and O_DIRECTORY,
+      EISDIR/ENOTDIR/ENOTEMPTY tightening (tolerating FatFs' ENOENT/EACCES
+      spellings), dirstream pool exhaustion, end-of-directory leaving errno
+      untouched, relative resolution after chdir()/fchdir(), a table-driven
+      zvfs_resolve_path() check, ENAMETOOLONG as a reported error, and a
+      fault harness proving the verifier oopses on an unmapped path.
+      Prove an ungranted user thread oopses on zvfs and zsock fd access
+      (tests/net/socket/socketpair, tcp), that close revokes all grants including
+      K_OBJ_FLAG_PUBLIC before slot reuse, and that user threads can write
+      to the public stdio descriptors.
   - path: zephyr/arm64-userspace-cache-maintenance.patch
     sha256sum: 2e42fc6bdc1fec89817fa1326b6d9ac8fe57cb5096b98a4201c9b175676babf7
     module: zephyr
