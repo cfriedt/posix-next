@@ -57,6 +57,7 @@
 #include <syslog.h>
 #include <time.h>
 #include <unistd.h>
+#include <utime.h>
 #include <wchar.h>
 #include <wctype.h>
 
