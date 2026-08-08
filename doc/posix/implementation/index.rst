@@ -760,3 +760,181 @@ native priority space.
 When disabled, ``AIO_PRIO_DELTA_MAX`` is 0, ``aio_reqprio`` must be 0, and ready requests
 are performed in submission order.
 
+File System Implementation Details
+==================================
+
+The :ref:`POSIX_FILE_SYSTEM <posix_option_group_file_system>` option group is a thin layer over
+the Zephyr Virtual File System (ZVFS) and, through it, the :ref:`file system API <file_system_api>`.
+Path, directory-stream, and working-directory operations are ZVFS system calls, so the whole
+option group works from user mode when :kconfig:option:`CONFIG_USERSPACE` is enabled.
+
+ZVFS is the common waypoint for every file-descriptor consumer. The POSIX file API and the C
+library's ``<stdio.h>`` both bottom out in the same ZVFS entry points - ``fopen()`` and
+``open()`` are two spellings of ``zvfs_open()`` - so an application reaches one file system
+implementation whichever interface it uses.
+
+.. graphviz::
+   :caption: libc and the POSIX API both reach the file system through ZVFS
+
+   digraph {
+       node [shape=rect, style="rounded,filled"];
+       rankdir=TB;
+
+       app        [label="application", fillcolor="#ffffff"];
+       libc       [label="C library\n(fopen, fread, ...)", fillcolor="#dae8fc"];
+       posix      [label="POSIX file API\n(open, stat, opendir, ...)", fillcolor="#d5e8d4"];
+       zvfs       [label="ZVFS\n(fd table + per-fd vtable)", fillcolor="#ffe6cc"];
+       fs         [label="file system subsystem\n(fs_open, fs_readdir, ...)", fillcolor="#f8cecc"];
+       backend    [label="FatFs / LittleFS / ext2 / ...", fillcolor="#f8cecc"];
+
+       app -> libc;
+       app -> posix;
+       libc -> zvfs;
+       posix -> zvfs;
+       zvfs -> fs;
+       fs -> backend;
+   }
+
+The file system is only one of several descriptor types ZVFS multiplexes. Every open descriptor
+is a slot in the ZVFS fd table carrying a vtable; a read, write, or ``ioctl`` on the descriptor
+dispatches through that vtable to the owning backend, so the same ``read()``/``write()``/
+``close()``/``poll()`` reach a regular file, a socket, an eventfd, or a message queue without the
+caller knowing which.
+
+.. graphviz::
+   :caption: A ZVFS descriptor dispatches through its vtable to one of many backends
+
+   digraph {
+       node [shape=rect, style="rounded,filled"];
+       rankdir=TB;
+
+       fd    [label="ZVFS fd (K_OBJ_FILE slot + fd_op_vtable)", fillcolor="#ffe6cc"];
+       file  [label="regular file\n(file system subsystem)", fillcolor="#f8cecc"];
+       sock  [label="socket\n(network stack)", fillcolor="#dae8fc"];
+       efd   [label="eventfd", fillcolor="#d5e8d4"];
+       mq    [label="message queue", fillcolor="#e1d5e7"];
+
+       fd -> file;
+       fd -> sock;
+       fd -> efd;
+       fd -> mq;
+   }
+
+Zephyr kernel caveats
+---------------------
+
+These reflect Zephyr's single-process kernel model rather than the file system.
+
+Working directory
+   The current working directory is a single, process-wide string maintained by ZVFS, matching
+   the POSIX per-process model on a single-process system. Every path operation resolves its
+   argument against it, so relative paths work throughout - including through ISO C
+   :c:func:`fopen` and POSIX :c:func:`open`, which share the same ZVFS entry point.
+   :c:func:`chdir`, :c:func:`fchdir`, and :c:func:`getcwd` read and update it. Resolution is
+   purely lexical: ``.``, ``..``, and repeated separators are collapsed without consulting the
+   file system. On a backend that supports symbolic links (such as ext2) this is a simplification
+   - full POSIX pathname resolution would resolve a ``..`` component relative to the target of a
+   preceding symbolic link, whereas lexical resolution collapses it textually.
+
+Temporary files
+   :c:func:`tmpfile` and :c:func:`tmpnam` are provided by the common C library
+   (:kconfig:option:`CONFIG_COMMON_LIBC_TMPFILE`) for every libc, and require ``/tmp`` to exist
+   on a mounted file system. ISO C removes the :c:func:`tmpfile` stream when it is closed or at
+   normal program termination; Zephyr runs as a single process with no such termination boundary
+   at which to reclaim it, so the file is left in place - a documented deviation.
+
+Zephyr FS subsystem caveats
+---------------------------
+
+Because the POSIX layer is thin, its capabilities track the Zephyr FS subsystem - the
+``fs_*`` API and its ``fs_file_system_t`` back-end interface - rather than the on-disk features
+of any particular file system. The deviations below are gaps in what the subsystem exposes, not in
+the POSIX code or the backing file system; when the subsystem grows an operation, the POSIX layer
+surfaces it with little or no change.
+
+No hard links
+   The Zephyr FS subsystem exposes no hard-link operation, so :c:func:`link` always fails with
+   ``EPERM`` - which POSIX permits for an implementation that prohibits the operation - and
+   ``st_nlink`` is always 1. This is a subsystem limitation, not a file system one: ext2, for
+   example, stores hard links on disk, but the subsystem offers no way to create or count them.
+
+No symbolic links
+   The subsystem exposes no symbolic-link operations, so path resolution never follows a symlink
+   and stays purely lexical (see *Working directory* above). As with hard links this is a subsystem
+   limitation, not a file system one - ext2 stores symbolic links on disk, but the subsystem offers
+   no way to create or read them.
+
+Permission bits are not exposed
+   The subsystem's ``struct fs_dirent`` carries no mode bits, so :c:func:`stat` cannot report a
+   file system's stored permissions even when it has them - ext2 again being the example. It
+   reports a synthesised mode instead: read and search for everyone, plus write unless the mount
+   is read-only. :c:func:`access` and :c:func:`mkdir` follow suit - ``mkdir()`` accepts its
+   ``mode`` argument and ignores it, and :c:func:`access` grants ``X_OK`` only for directories.
+
+Timestamps
+   File timestamps are surfaced only when the backend records them, gated by
+   :kconfig:option:`CONFIG_FS_DIRENT_EXT`. Where a backend stores no timestamps, ``fs_utime()``
+   returns ``-ENOTSUP`` - which :c:func:`utime` surfaces as ``errno`` ``ENOTSUP`` - and
+   :c:func:`stat` reports zero for ``st_atim``/``st_mtim``/``st_ctim``. Per-backend behaviour is
+   noted under the file-system-specific caveats below.
+
+FAT-specific caveats
+--------------------
+
+FatFs (the ELM ChaN library behind :kconfig:option:`CONFIG_FAT_FILESYSTEM_ELM`) predates and
+ignores POSIX naming conventions, which leaks through the abstraction in a few ways worth knowing
+when FatFs is the backend.
+
+Type-name collision with ``<dirent.h>``
+   FatFs declares its public types with unprefixed names - ``DIR``, ``FIL``, ``FATFS``,
+   ``FRESULT`` - in ``ff.h``. ``DIR`` collides with the POSIX ``DIR`` from ``<dirent.h>``, so a
+   single translation unit cannot include both ``ff.h`` (needed to declare a ``FATFS`` mount
+   object, for example) and ``<dirent.h>``. Code that mounts a FAT volume *and* walks directories
+   with POSIX :c:func:`opendir`/:c:func:`readdir` must split those uses across separate
+   translation units, or use the ``fs_*`` directory API on the FatFs side. This is a namespacing
+   defect in the FatFs module, not in the POSIX layer, but the POSIX layer inherits the
+   constraint.
+
+Short file names
+   Without :kconfig:option:`CONFIG_FS_FATFS_LFN`, FatFs is limited to 8.3 short names, so
+   ``pathconf(_PC_NAME_MAX)`` reports 12 and longer names fail. Short names are stored
+   upper-cased, so :c:func:`readdir` returns ``FILE.TXT`` for a file created as ``file.txt``.
+
+Coarse, modification-only timestamps
+   FAT records a single modification time with two-second granularity and no access time, so
+   ``st_atim`` mirrors ``st_mtim`` and ``pathconf(_PC_TIMESTAMP_RESOLUTION)`` reflects the coarser
+   value. Timestamp writes additionally require :kconfig:option:`CONFIG_FS_FATFS_FF_USE_CHMOD`.
+
+Non-canonical ``errno`` values
+   FatFs maps several conditions onto ``errno`` values that differ from the POSIX-preferred
+   spelling: opening a non-directory as a directory reports ``ENOENT`` rather than ``ENOTDIR``,
+   and removing a non-empty directory reports ``EACCES`` rather than ``ENOTEMPTY``. Tests that
+   assert these paths accept either spelling.
+
+rename() is not an atomic replace
+   FatFs :c:func:`rename` fails with ``EEXIST`` when the target already exists, rather than
+   atomically replacing it as POSIX requires.
+
+LittleFS-specific caveats
+-------------------------
+
+No timestamps
+   LittleFS records no per-file timestamps, so :c:func:`utime` fails with ``ENOTSUP`` and
+   :c:func:`stat` reports zero for ``st_atim``/``st_mtim``/``st_ctim``.
+
+ext2-specific caveats
+---------------------
+
+Among the in-tree backends, ext2 is the notable case where the on-disk format *does* support the
+features the Zephyr FS subsystem withholds. The limitations in *Zephyr FS subsystem caveats* above
+therefore still apply to ext2, even though the volume itself could satisfy them:
+
+Hard links are not supported
+   :c:func:`link` fails with ``EPERM`` and ``st_nlink`` is always 1, though ext2 stores hard links
+   on disk.
+
+Symbolic links are not supported
+   Symbolic links are neither created nor followed, though ext2 stores them on disk.
+
+Permissions may not be reported accurately
+   :c:func:`stat` reports a synthesised mode rather than the file's stored permission bits.
