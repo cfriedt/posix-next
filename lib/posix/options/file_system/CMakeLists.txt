@@ -15,7 +15,10 @@ zephyr_library_compile_options_ifdef(CONFIG_XSI -U_XOPEN_SOURCE -D_XOPEN_SOURCE=
 
 if(NOT CONFIG_TC_PROVIDES_POSIX_FILE_SYSTEM)
   zephyr_library_sources(
+    chdir.c
     closedir.c
+    fchdir.c
+    getcwd.c
     fstat.c
     mkdir.c
     opendir.c
