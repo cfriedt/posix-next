@@ -1,0 +1,113 @@
+diff --git a/lib/libc/common/CMakeLists.txt b/lib/libc/common/CMakeLists.txt
+index 16140d8dcbf..a7adcea58a8 100644
+--- a/lib/libc/common/CMakeLists.txt
++++ b/lib/libc/common/CMakeLists.txt
+@@ -24,6 +24,7 @@ zephyr_library_sources_ifdef(CONFIG_COMMON_LIBC_THRD
+ zephyr_library_sources_ifdef(CONFIG_COMMON_LIBC_REMOVE source/stdio/remove.c)
+ zephyr_library_sources_ifdef(CONFIG_COMMON_LIBC_FCLOSE source/stdio/fclose.c)
+ zephyr_library_sources_ifdef(CONFIG_COMMON_LIBC_FOPEN source/stdio/fopen.c)
++zephyr_library_sources_ifdef(CONFIG_COMMON_LIBC_TMPFILE source/stdio/tmpfile.c)
+
+ # Prevent compiler from optimizing calloc into an infinite recursive call
+ zephyr_library_compile_options($<TARGET_PROPERTY:compiler,no_builtin_malloc>)
+diff --git a/lib/libc/common/Kconfig b/lib/libc/common/Kconfig
+index c65fcc7f2ae..a3f2cc179a8 100644
+--- a/lib/libc/common/Kconfig
++++ b/lib/libc/common/Kconfig
+@@ -159,3 +159,15 @@ config COMMON_LIBC_FOPEN
+ 	  file via zvfs_open() (ZVFS path open, not the POSIX_FILE_SYSTEM option group) and binds a
+ 	  C library FILE to the descriptor with zvfs_libc_fdopen(), whose storage comes from the
+ 	  statically-allocated ZVFS FILE store (no dynamic allocation).
++
++config COMMON_LIBC_TMPFILE
++	bool "Common C library tmpfile()/tmpnam()"
++	depends on !SEMIHOST
++	depends on ZVFS && FILE_SYSTEM
++	default y
++	help
++	  Common implementation of tmpfile() and tmpnam() for ZVFS-backed C
++	  libraries. tmpfile() opens a generated name under /tmp via zvfs_open()
++	  and binds a FILE to it with zvfs_libc_fdopen(). Deviation from ISO C:
++	  the file is not automatically removed when it is closed or on normal
++	  program termination.
+diff --git a/lib/libc/minimal/source/stdio/tmpfile.c b/lib/libc/common/source/stdio/tmpfile.c
+similarity index 63%
+rename from lib/libc/minimal/source/stdio/tmpfile.c
+rename to lib/libc/common/source/stdio/tmpfile.c
+index 51f9c503b56..ea291b3703d 100644
+--- a/lib/libc/minimal/source/stdio/tmpfile.c
++++ b/lib/libc/common/source/stdio/tmpfile.c
+@@ -5,22 +5,25 @@
+
+ #include <stdio.h>
+
+-#include <zephyr/logging/log.h>
+-#include <zephyr/sys/util.h>
+-#include <zephyr/toolchain.h>
+-
+-LOG_MODULE_REGISTER(minimal_libc_tmpfile, CONFIG_LOG_DEFAULT_LEVEL);
+-
+-#if defined(CONFIG_ZVFS)
+ #include <zephyr/sys/fdtable.h>
++#include <zephyr/sys/util.h>
+ #include <zephyr/sys/zvfs.h>
+ #include <zephyr/sys/zvfs_fs.h>
+ #include <zephyr/sys/zvfs_libc.h>
+-#endif
++#include <zephyr/toolchain.h>
++
++/*
++ * Longest name tmpnam() generates. L_tmpnam varies per libc and is only 8
++ * for picolibc, so the format must fit the smallest contract: two counter
++ * digits cover every libc's TMP_MAX (26..32).
++ */
++#define ZTMP_NAME_LEN sizeof("/tmp/00")
++BUILD_ASSERT(L_tmpnam >= ZTMP_NAME_LEN, "L_tmpnam too small for tmpnam()");
++BUILD_ASSERT(TMP_MAX <= 100, "TMP_MAX exceeds the two-digit name format");
+
+ char *tmpnam(char *s)
+ {
+-	static char name[L_tmpnam];
++	static char name[ZTMP_NAME_LEN];
+ 	static unsigned int counter;
+ 	char *buf = (s == NULL) ? name : s;
+
+@@ -28,15 +31,14 @@ char *tmpnam(char *s)
+ 		return NULL;
+ 	}
+
+-	(void)snprintf(buf, L_tmpnam, "/tmp/tmp_%04u", counter++);
++	(void)snprintf(buf, ZTMP_NAME_LEN, "/tmp/%02u", counter++);
+
+ 	return buf;
+ }
+
+ FILE *tmpfile(void)
+ {
+-#if defined(CONFIG_ZVFS)
+-	char name[L_tmpnam];
++	char name[ZTMP_NAME_LEN];
+ 	FILE *fp;
+ 	int fd;
+
+@@ -59,8 +61,4 @@ FILE *tmpfile(void)
+ 	 * it is closed or on normal program termination.
+ 	 */
+ 	return fp;
+-#else
+-	LOG_WRN_ONCE("tmpfile() requires CONFIG_ZVFS");
+-	return NULL;
+-#endif
+ }
+diff --git a/lib/libc/minimal/CMakeLists.txt b/lib/libc/minimal/CMakeLists.txt
+index d79dfed683f..edc7bf624bd 100644
+--- a/lib/libc/minimal/CMakeLists.txt
++++ b/lib/libc/minimal/CMakeLists.txt
+@@ -32,7 +32,6 @@ zephyr_library_sources(
+   source/stdio/stdout_console.c
+   source/stdio/fgetc.c
+   source/stdio/stream_state.c
+-  source/stdio/tmpfile.c
+   source/stdio/fgets.c
+   source/stdio/fseek.c
+   source/stdio/sprintf.c
