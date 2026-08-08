@@ -20,11 +20,13 @@ if(NOT CONFIG_TC_PROVIDES_POSIX_FILE_SYSTEM)
     creat.c
     closedir.c
     fchdir.c
+    fpathconf.c
     getcwd.c
     fstat.c
     fstatvfs.c
     mkdir.c
     opendir.c
+    pathconf.c
     readdir.c
     rename.c
     rmdir.c
