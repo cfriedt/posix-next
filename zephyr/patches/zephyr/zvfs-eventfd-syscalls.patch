@@ -1,0 +1,123 @@
+diff --git a/include/zephyr/zvfs/eventfd.h b/include/zephyr/zvfs/eventfd.h
+--- a/include/zephyr/zvfs/eventfd.h
++++ b/include/zephyr/zvfs/eventfd.h
+@@ -35,7 +35,7 @@ typedef uint64_t zvfs_eventfd_t;
+  *
+  * @return New ZVFS eventfd file descriptor on success, -1 on error
+  */
+-int zvfs_eventfd(unsigned int initval, int flags);
++__syscall int zvfs_eventfd(unsigned int initval, int flags);
+ 
+ /**
+  * @brief Read from a ZVFS eventfd
+@@ -47,7 +47,7 @@ int zvfs_eventfd(unsigned int initval, int flags);
+  *
+  * @return 0 on success, -1 on error
+  */
+-int zvfs_eventfd_read(int fd, zvfs_eventfd_t *value);
++__syscall int zvfs_eventfd_read(int fd, zvfs_eventfd_t *value);
+ 
+ /**
+  * @brief Write to a ZVFS eventfd
+@@ -57,10 +57,12 @@ int zvfs_eventfd_read(int fd, zvfs_eventfd_t *value);
+  *
+  * @return 0 on success, -1 on error
+  */
+-int zvfs_eventfd_write(int fd, zvfs_eventfd_t value);
++__syscall int zvfs_eventfd_write(int fd, zvfs_eventfd_t value);
+ 
+ #ifdef __cplusplus
+ }
+ #endif
+ 
++#include <zephyr/syscalls/eventfd.h>
++
+ #endif /* ZEPHYR_INCLUDE_ZEPHYR_ZVFS_EVENTFD_H_ */
+
+diff --git a/lib/os/CMakeLists.txt b/lib/os/CMakeLists.txt
+--- a/lib/os/CMakeLists.txt
++++ b/lib/os/CMakeLists.txt
+@@ -14,6 +14,7 @@ zephyr_sources(
+   )
+ 
+ zephyr_sources_ifdef(CONFIG_SYS_THREAD thread.c)
++zephyr_syscall_header_ifdef(CONFIG_ZVFS_EVENTFD ${ZEPHYR_BASE}/include/zephyr/zvfs/eventfd.h)
+ zephyr_syscall_header_ifdef(CONFIG_SYS_THREAD ${ZEPHYR_BASE}/include/zephyr/sys/thread.h)
+ 
+ if(CONFIG_SYS_THREAD)
+
+diff --git a/lib/os/zvfs/zvfs_eventfd.c b/lib/os/zvfs/zvfs_eventfd.c
+--- a/lib/os/zvfs/zvfs_eventfd.c
++++ b/lib/os/zvfs/zvfs_eventfd.c
+@@ -12,6 +12,7 @@
+ #include <zephyr/zvfs/eventfd.h>
+ #include <zephyr/sys/bitarray.h>
+ #include <zephyr/sys/fdtable.h>
++#include <zephyr/internal/syscall_handler.h>
+ #include <zephyr/sys/math_extras.h>
+ 
+ #define ZVFS_EFD_IN_USE    0x1
+@@ -394,7 +395,7 @@ out:
+  * Public-facing API
+  */
+ 
+-int zvfs_eventfd(unsigned int initval, int flags)
++int z_impl_zvfs_eventfd(unsigned int initval, int flags)
+ {
+ 	int fd = 1;
+ 	size_t offset;
+@@ -435,7 +436,15 @@ int zvfs_eventfd(unsigned int initval, int flags)
+ 	return fd;
+ }
+ 
+-int zvfs_eventfd_read(int fd, zvfs_eventfd_t *value)
++#ifdef CONFIG_USERSPACE
++static int z_vrfy_zvfs_eventfd(unsigned int initval, int flags)
++{
++	return z_impl_zvfs_eventfd(initval, flags);
++}
++#include <zephyr/syscalls/zvfs_eventfd_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++int z_impl_zvfs_eventfd_read(int fd, zvfs_eventfd_t *value)
+ {
+ 	int ret;
+ 	void *obj;
+@@ -469,7 +478,20 @@ int zvfs_eventfd_read(int fd, zvfs_eventfd_t *value)
+ 	return 0;
+ }
+ 
+-int zvfs_eventfd_write(int fd, zvfs_eventfd_t value)
++#ifdef CONFIG_USERSPACE
++static int z_vrfy_zvfs_eventfd_read(int fd, zvfs_eventfd_t *value)
++{
++	if (zvfs_fd_syscall_verify(fd) == NULL) {
++		return -1;
++	}
++	K_OOPS(K_SYSCALL_MEMORY_WRITE(value, sizeof(*value)));
++
++	return z_impl_zvfs_eventfd_read(fd, value);
++}
++#include <zephyr/syscalls/zvfs_eventfd_read_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++int z_impl_zvfs_eventfd_write(int fd, zvfs_eventfd_t value)
+ {
+ 	int ret;
+ 	void *obj;
+@@ -502,3 +524,15 @@ int zvfs_eventfd_write(int fd, zvfs_eventfd_t value)
+ 
+ 	return 0;
+ }
++
++#ifdef CONFIG_USERSPACE
++static int z_vrfy_zvfs_eventfd_write(int fd, zvfs_eventfd_t value)
++{
++	if (zvfs_fd_syscall_verify(fd) == NULL) {
++		return -1;
++	}
++
++	return z_impl_zvfs_eventfd_write(fd, value);
++}
++#include <zephyr/syscalls/zvfs_eventfd_write_mrsh.c>
++#endif /* CONFIG_USERSPACE */
