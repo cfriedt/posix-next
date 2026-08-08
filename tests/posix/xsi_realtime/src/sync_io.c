@@ -93,6 +93,15 @@ ZTEST(xsi_realtime, test_fs_sync)
 	res = fsync(file);
 	zassert_ok(res, "Failed to sync file: %d, errno = %d\n", res, errno);
 	zassert_ok(close(file), "Failed to close file");
+
+	/* a directory descriptor syncs too */
+	if (!IS_ENABLED(CONFIG_NATIVE_LIBC)) {
+		int dir = open(FATFS_MNTP, O_RDONLY | O_DIRECTORY);
+
+		zassert_true(dir >= 0, "Failed to open directory: errno = %d", errno);
+		zassert_ok(fsync(dir), "Failed to sync directory: errno = %d", errno);
+		zassert_ok(close(dir));
+	}
 	test_unmount();
 }
 
