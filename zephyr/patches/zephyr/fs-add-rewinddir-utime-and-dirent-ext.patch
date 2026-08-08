@@ -1,0 +1,248 @@
+diff --git a/include/zephyr/fs/fs.h b/include/zephyr/fs/fs.h
+index 9b66abf4c33..b5c9aecb40f 100644
+--- a/include/zephyr/fs/fs.h
++++ b/include/zephyr/fs/fs.h
+@@ -9,6 +9,7 @@
+ #define ZEPHYR_INCLUDE_FS_FS_H_
+
+ #include <sys/types.h>
++#include <time.h>
+
+ #include <zephyr/sys/dlist.h>
+ #include <zephyr/fs/fs_interface.h>
+@@ -126,6 +127,21 @@ struct fs_dirent {
+ 	char name[MAX_FILE_NAME + 1];
+ 	/** Size of file (0 if directory). */
+ 	size_t size;
++#if defined(CONFIG_FS_DIRENT_EXT) || defined(__DOXYGEN__)
++	/**
++	 * Time of last access, zero when the file system does not record it.
++	 *
++	 * @kconfig_dep{CONFIG_FS_DIRENT_EXT}
++	 */
++	struct timespec atime;
++	/**
++	 * Time of last modification, zero when the file system does not
++	 * record it.
++	 *
++	 * @kconfig_dep{CONFIG_FS_DIRENT_EXT}
++	 */
++	struct timespec mtime;
++#endif
+ };
+
+ /**
+@@ -538,6 +554,20 @@ int fs_opendir(struct fs_dir_t *zdp, const char *path);
+  */
+ int fs_readdir(struct fs_dir_t *zdp, struct fs_dirent *entry);
+
++/**
++ * @brief Directory rewind
++ *
++ * Resets an open directory so that the next fs_readdir() returns the first
++ * directory entry again.
++ *
++ * @param zdp Pointer to the directory object
++ *
++ * @retval 0 on success;
++ * @retval -ENOTSUP when not implemented by underlying file system driver;
++ * @retval <0 a negative errno code on error.
++ */
++int fs_rewinddir(struct fs_dir_t *zdp);
++
+ /**
+  * @brief Directory close
+  *
+@@ -647,6 +677,26 @@ int fs_stat(const char *path, struct fs_dirent *entry);
+  */
+ int fs_statvfs(const char *path, struct fs_statvfs *stat);
+
++/**
++ * @brief Set file or directory timestamps
++ *
++ * Sets the access and modification times of the file or directory named by
++ * @p path.
++ *
++ * @param path Path to the file or directory
++ * @param times Access time in <tt>times[0]</tt> and modification time in
++ * <tt>times[1]</tt>, or NULL to set both to the current time as reported by
++ * @ref SYS_CLOCK_REALTIME.
++ *
++ * @retval 0 on success;
++ * @retval -EINVAL when a bad file name is given;
++ * @retval -ENOENT when no such file or directory is found;
++ * @retval -EROFS when the file system is read-only;
++ * @retval -ENOTSUP when not implemented by underlying file system driver;
++ * @retval <0 a negative errno code on error.
++ */
++int fs_utime(const char *path, const struct timespec times[2]);
++
+ /**
+  * @brief Create fresh file system
+  *
+diff --git a/include/zephyr/fs/fs_sys.h b/include/zephyr/fs/fs_sys.h
+index 3be3aded8f0..e450f35791e 100644
+--- a/include/zephyr/fs/fs_sys.h
++++ b/include/zephyr/fs/fs_sys.h
+@@ -7,6 +7,8 @@
+ #ifndef ZEPHYR_INCLUDE_FS_FS_SYS_H_
+ #define ZEPHYR_INCLUDE_FS_FS_SYS_H_
+
++#include <time.h>
++
+ #ifdef __cplusplus
+ extern "C" {
+ #endif
+@@ -120,6 +122,14 @@ struct fs_file_system_t {
+ 	 * @return 0 on success, negative errno code on fail.
+ 	 */
+ 	int (*closedir)(struct fs_dir_t *dirp);
++	/**
++	 * Resets an open directory to its first entry. Optional; when NULL,
++	 * fs_rewinddir() reports -ENOTSUP.
++	 *
++	 * @param dirp Directory to rewind.
++	 * @return 0 on success, negative errno code on fail.
++	 */
++	int (*rewinddir)(struct fs_dir_t *dirp);
+ 	/** @} */
+
+ 	/**
+@@ -186,6 +196,17 @@ struct fs_file_system_t {
+ 	 */
+ 	int (*statvfs)(struct fs_mount_t *mountp, const char *path,
+ 					struct fs_statvfs *stat);
++	/**
++	 * Sets file or directory access and modification times. Optional;
++	 * when NULL, fs_utime() reports -ENOTSUP.
++	 *
++	 * @param mountp Mount point.
++	 * @param name Path to the file or directory.
++	 * @param times Access time in times[0], modification time in times[1].
++	 * @return 0 on success, negative errno code on fail.
++	 */
++	int (*utime)(struct fs_mount_t *mountp, const char *name,
++					const struct timespec times[2]);
+ #if defined(CONFIG_FILE_SYSTEM_GC) || defined(__DOXYGEN__)
+ 	/**
+ 	 * Attempt to proactively clean file system
+diff --git a/subsys/fs/Kconfig b/subsys/fs/Kconfig
+index f77d1346d51..5f98823f315 100644
+--- a/subsys/fs/Kconfig
++++ b/subsys/fs/Kconfig
+@@ -42,6 +42,13 @@ config FILE_SYSTEM_MAX_FILE_NAME
+ 	  supported by a file system may result in memory access
+ 	  violations.
+
++config FS_DIRENT_EXT
++	bool "Report file timestamps in struct fs_dirent"
++	help
++	  Extend struct fs_dirent with access and modification timestamps.
++	  File systems that record timestamps fill them in fs_stat() and
++	  fs_readdir() results; others leave them zero.
++
+ config FILE_SYSTEM_INIT_PRIORITY
+ 	int "File system initialization priority"
+ 	default 99
+diff --git a/subsys/fs/fs.c b/subsys/fs/fs.c
+index 3e02f780b0d..8c019a71609 100644
+--- a/subsys/fs/fs.c
++++ b/subsys/fs/fs.c
+@@ -15,6 +15,7 @@
+ #include <zephyr/fs/fs.h>
+ #include <zephyr/fs/fs_sys.h>
+ #include <zephyr/sys/check.h>
++#include <zephyr/sys/clock.h>
+
+ #include <zephyr/logging/log.h>
+ LOG_MODULE_REGISTER(fs, CONFIG_FS_LOG_LEVEL);
+@@ -472,6 +473,40 @@ int fs_readdir(struct fs_dir_t *zdp, struct fs_dirent *entry)
+ 	return 0;
+ }
+
++
++int fs_rewinddir(struct fs_dir_t *zdp)
++{
++	int rc;
++
++	if (zdp->mp == NULL) {
++		if (zdp->dirp == NULL) {
++			return -EINVAL;
++		}
++
++		/* VFS root dir: restart the mount point list walk */
++		k_mutex_lock(&mutex, K_FOREVER);
++		zdp->dirp = sys_dlist_peek_head(&fs_mnt_list);
++		k_mutex_unlock(&mutex);
++
++		return 0;
++	}
++
++	if (zdp->mp->fs == NULL) {
++		return -EINVAL;
++	}
++
++	CHECKIF(zdp->mp->fs->rewinddir == NULL) {
++		return -ENOTSUP;
++	}
++
++	rc = zdp->mp->fs->rewinddir(zdp);
++	if (rc < 0) {
++		LOG_ERR("directory rewind error (%d)", rc);
++	}
++
++	return rc;
++}
++
+ int fs_closedir(struct fs_dir_t *zdp)
+ {
+ 	int rc = -EINVAL;
+@@ -678,6 +713,48 @@ int fs_statvfs(const char *abs_path, struct fs_statvfs *stat)
+ 	return rc;
+ }
+
++int fs_utime(const char *abs_path, const struct timespec times[2])
++{
++	struct fs_mount_t *mp;
++	struct timespec now[2];
++	int rc = -EINVAL;
++
++	if ((abs_path == NULL) || (abs_path[0] != '/') || (abs_path[1] == '\0')) {
++		LOG_ERR("invalid file or dir name!!");
++		return -EINVAL;
++	}
++
++	rc = fs_get_mnt_point(&mp, abs_path, NULL);
++	if (rc < 0) {
++		LOG_ERR("mount point not found!!");
++		return rc;
++	}
++
++	if (mp->flags & FS_MOUNT_FLAG_READ_ONLY) {
++		return -EROFS;
++	}
++
++	CHECKIF(mp->fs->utime == NULL) {
++		return -ENOTSUP;
++	}
++
++	if (times == NULL) {
++		rc = sys_clock_gettime(SYS_CLOCK_REALTIME, &now[0]);
++		if (rc < 0) {
++			return rc;
++		}
++		now[1] = now[0];
++		times = now;
++	}
++
++	rc = mp->fs->utime(mp, abs_path, times);
++	if (rc < 0) {
++		LOG_ERR("failed set file or dir time (%d)", rc);
++	}
++
++	return rc;
++}
++
+ #if defined(CONFIG_FILE_SYSTEM_GC)
+
+ int fs_gc(struct fs_mount_t *mp)
