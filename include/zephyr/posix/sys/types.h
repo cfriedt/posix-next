@@ -56,16 +56,19 @@ typedef int dev_t;
 #define __dev_t_defined
 #endif
 
+/* the widths newlib and picolibc use, so the layout of struct statvfs cannot depend on which
+ * <sys/types.h> a translation unit saw first
+ */
 #if !defined(_FSBLKCNT_T_DECLARED) && !defined(__fsblkcnt_t_defined)
 /** @brief Used for file system block counts. */
-typedef unsigned long fsblkcnt_t;
+typedef uint64_t fsblkcnt_t;
 #define _FSBLKCNT_T_DECLARED
 #define __fsblkcnt_t_defined
 #endif
 
 #if !defined(_FSFILCNT_T_DECLARED) && !defined(__fsfilcnt_t_defined)
 /** @brief Used for file system file counts. */
-typedef unsigned long fsfilcnt_t;
+typedef uint32_t fsfilcnt_t;
 #define _FSFILCNT_T_DECLARED
 #define __fsfilcnt_t_defined
 #endif
