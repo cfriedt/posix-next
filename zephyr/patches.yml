@@ -1703,3 +1703,23 @@ patches:
       now rejects directories with EISDIR and zvfs_rmdir() rejects
       non-directories with ENOTDIR. zvfs_truncate() borrows a zvfs_fs_desc
       slot instead of putting a struct fs_file_t on the privileged stack.
+  - path: zephyr/zvfs-dirent-syscalls.patch
+    sha256sum: 4128c4c535ddc1b2795fb64c59c5a1dd9489e7834f2dca9478f16fce62c30334
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-07
+    upstreamable: true
+    comments: |
+      Open directories as K_OBJ_FILE-backed file descriptors: zvfs_opendir()
+      allocates a struct zvfs_dirstream from user-accessible storage
+      (zvfs_dir_partition, CONFIG_ZVFS_DIR_MAX slots, kernel-side elastipool
+      bookkeeping) plus a directory fd served by a dedicated fd_op_vtable
+      whose close path finally routes through fs_closedir() and releases the
+      stream. zvfs_readdir() fills a caller buffer through a verified system
+      call and returns 1 at end-of-directory so POSIX readdir() can return
+      NULL with errno untouched; zvfs_rewinddir() maps to fs_rewinddir().
+      zvfs_open() honours the newly-defined ZVFS_O_DIRECTORY by producing a
+      streamless directory fd, and directory fds answer ZFD_IOCTL_STAT and
+      ZFD_IOCTL_STATVFS. Directory streams now consume an fd each,
+      compensated by CONFIG_ZVFS_OPEN_ADD_SIZE_DIR in the fd table sizing.
