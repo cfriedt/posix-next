@@ -1,0 +1,620 @@
+diff --git a/include/zephyr/sys/zvfs_fs.h b/include/zephyr/sys/zvfs_fs.h
+index de55c63..f9e515f 100644
+--- a/include/zephyr/sys/zvfs_fs.h
++++ b/include/zephyr/sys/zvfs_fs.h
+@@ -41,6 +41,10 @@ struct zvfs_fs_desc {
+ 	};
+ 	/** Stream object returned by zvfs_opendir(), NULL for plain fds. */
+ 	struct zvfs_dirstream *stream;
++#if defined(CONFIG_ZVFS_FS) || defined(__DOXYGEN__)
++	/** Resolved absolute path of directory descriptors, for zvfs_fchdir(). */
++	char path[CONFIG_ZVFS_PATH_MAX];
++#endif
+ 	bool is_dir: 1;
+ 	bool used: 1;
+ };
+@@ -285,6 +289,39 @@ __syscall int zvfs_access(const char *path, int amode);
+  */
+ __syscall int zvfs_utime(const char *path, const struct timespec *times);
+ 
++/**
++ * @brief Change the ZVFS current working directory.
++ *
++ * The working directory is system-wide, matching POSIX per-process semantics
++ * on a single-process system, and seeds relative path resolution for every
++ * ZVFS path operation.
++ *
++ * @param path Absolute or relative path of an existing directory.
++ *
++ * @return 0 on success, -1 with errno set on error.
++ */
++__syscall int zvfs_chdir(const char *path);
++
++/**
++ * @brief Change the ZVFS current working directory to an open directory.
++ *
++ * @param fd Directory file descriptor from zvfs_opendir() or
++ *           zvfs_open() with ZVFS_O_DIRECTORY.
++ *
++ * @return 0 on success, -1 with errno set on error.
++ */
++__syscall int zvfs_fchdir(int fd);
++
++/**
++ * @brief Copy the ZVFS current working directory into @p buf.
++ *
++ * @param buf Destination buffer.
++ * @param size Size of @p buf; ERANGE when the path does not fit.
++ *
++ * @return 0 on success, -1 with errno set on error.
++ */
++__syscall int zvfs_getcwd(char *buf, size_t size);
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/lib/os/zvfs/CMakeLists.txt b/lib/os/zvfs/CMakeLists.txt
+index 73e36ffb4de..eaa5b82d39e 100644
+--- a/lib/os/zvfs/CMakeLists.txt
++++ b/lib/os/zvfs/CMakeLists.txt
+@@ -18,6 +18,7 @@ zephyr_library_sources_ifdef(CONFIG_ZVFS_LIBC_FILE
+   zvfs_libc_file.c
+ )
+ zephyr_library_sources_ifdef(CONFIG_ZVFS_FS
++  zvfs_cwd.c
+   zvfs_dirent.c
+   zvfs_fs.c
+   zvfs_path.c
+diff --git a/lib/os/zvfs/zvfs_cwd.c b/lib/os/zvfs/zvfs_cwd.c
+new file mode 100644
+index 00000000000..f2e315c290d
+--- /dev/null
++++ b/lib/os/zvfs/zvfs_cwd.c
+@@ -0,0 +1,231 @@
++/*
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++/**
++ * @file
++ * @brief ZVFS current working directory.
++ *
++ * Zephyr is a single process, so the working directory is a single
++ * system-wide string, as POSIX defines it per-process. The lock is held only
++ * to snapshot or store the string, never across a file system operation.
++ */
++
++#include <errno.h>
++#include <string.h>
++
++#include <zephyr/fs/fs.h>
++#include <zephyr/internal/syscall_handler.h>
++#include <zephyr/kernel.h>
++#include <zephyr/sys/fdtable.h>
++#include <zephyr/sys/internal/fdtable_priv.h>
++#include <zephyr/sys/zvfs_fs.h>
++
++#include "zvfs_fs_priv.h"
++
++static char zvfs_cwd[CONFIG_ZVFS_PATH_MAX] = "/";
++static K_MUTEX_DEFINE(zvfs_cwd_lock);
++
++/*
++ * Resolution is purely lexical: '.', '..', and repeated '/' are collapsed
++ * without consulting the file system. On a backend that supports symbolic
++ * links (such as ext2) this is a simplification rather than full POSIX
++ * pathname resolution. The output always begins with '/', has no '.', '..',
++ * or repeated '/' components, and has no trailing '/' except for the root
++ * itself.
++ */
++int zvfs_resolve_path(const char *in, char *out, size_t outsz)
++{
++	size_t o = 0;
++	const char *p = in;
++
++	if (in == NULL) {
++		return -EFAULT;
++	}
++
++	if (in[0] == '\0') {
++		return -ENOENT;
++	}
++
++	if (in[0] != '/') {
++		k_mutex_lock(&zvfs_cwd_lock, K_FOREVER);
++		o = strlen(zvfs_cwd);
++		if (o >= outsz) {
++			k_mutex_unlock(&zvfs_cwd_lock);
++			return -ENAMETOOLONG;
++		}
++		memcpy(out, zvfs_cwd, o + 1);
++		k_mutex_unlock(&zvfs_cwd_lock);
++
++		if (o == 1) {
++			/* the root: seed with the empty prefix */
++			o = 0;
++		}
++	}
++
++	while (*p != '\0') {
++		const char *start;
++		size_t len;
++
++		while (*p == '/') {
++			p++;
++		}
++		if (*p == '\0') {
++			break;
++		}
++
++		start = p;
++		while (*p != '\0' && *p != '/') {
++			p++;
++		}
++		len = p - start;
++
++		if (len == 1 && start[0] == '.') {
++			continue;
++		}
++
++		if (len == 2 && start[0] == '.' && start[1] == '.') {
++			/* pop the previous component; ".." at the root is a no-op */
++			while (o > 0 && out[o - 1] != '/') {
++				o--;
++			}
++			if (o > 0) {
++				o--;
++			}
++			continue;
++		}
++
++		if (o + 1 + len + 1 > outsz) {
++			return -ENAMETOOLONG;
++		}
++
++		out[o++] = '/';
++		memcpy(&out[o], start, len);
++		o += len;
++	}
++
++	if (o == 0) {
++		out[o++] = '/';
++	}
++	out[o] = '\0';
++
++	return 0;
++}
++
++int z_impl_zvfs_chdir(const char *path)
++{
++	int rc;
++	struct fs_dirent entry;
++	char r[CONFIG_ZVFS_PATH_MAX];
++
++	rc = zvfs_resolve_path(path, r, sizeof(r));
++	if (rc < 0) {
++		errno = -rc;
++		return -1;
++	}
++
++	rc = fs_stat(r, &entry);
++	if (rc < 0) {
++		errno = -rc;
++		return -1;
++	}
++
++	if (entry.type != FS_DIR_ENTRY_DIR) {
++		errno = ENOTDIR;
++		return -1;
++	}
++
++	k_mutex_lock(&zvfs_cwd_lock, K_FOREVER);
++	strcpy(zvfs_cwd, r);
++	k_mutex_unlock(&zvfs_cwd_lock);
++
++	return 0;
++}
++
++#ifdef CONFIG_USERSPACE
++static int z_vrfy_zvfs_chdir(const char *path)
++{
++	char kpath[CONFIG_ZVFS_PATH_MAX];
++
++	if (zvfs_copy_user_path(kpath, path) < 0) {
++		return -1;
++	}
++
++	return z_impl_zvfs_chdir(kpath);
++}
++#include <zephyr/syscalls/zvfs_chdir_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++int z_impl_zvfs_fchdir(int fd)
++{
++	struct fd_entry *entry = zvfs_fd_entry_get(fd);
++	struct zvfs_fs_desc *desc;
++
++	if (entry == NULL) {
++		return -1;
++	}
++
++	if ((entry->mode & ZVFS_MODE_IFMT) != ZVFS_MODE_IFDIR) {
++		errno = ENOTDIR;
++		return -1;
++	}
++
++	desc = entry->obj;
++	if (desc == NULL || desc->path[0] == '\0') {
++		errno = EBADF;
++		return -1;
++	}
++
++	k_mutex_lock(&zvfs_cwd_lock, K_FOREVER);
++	strcpy(zvfs_cwd, desc->path);
++	k_mutex_unlock(&zvfs_cwd_lock);
++
++	return 0;
++}
++
++#ifdef CONFIG_USERSPACE
++static int z_vrfy_zvfs_fchdir(int fd)
++{
++	if (zvfs_fd_syscall_verify(fd) == NULL) {
++		return -1;
++	}
++
++	return z_impl_zvfs_fchdir(fd);
++}
++#include <zephyr/syscalls/zvfs_fchdir_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++int z_impl_zvfs_getcwd(char *buf, size_t size)
++{
++	size_t len;
++
++	if (buf == NULL || size == 0) {
++		errno = EINVAL;
++		return -1;
++	}
++
++	k_mutex_lock(&zvfs_cwd_lock, K_FOREVER);
++	len = strlen(zvfs_cwd);
++	if (len >= size) {
++		k_mutex_unlock(&zvfs_cwd_lock);
++		errno = ERANGE;
++		return -1;
++	}
++	memcpy(buf, zvfs_cwd, len + 1);
++	k_mutex_unlock(&zvfs_cwd_lock);
++
++	return 0;
++}
++
++#ifdef CONFIG_USERSPACE
++static int z_vrfy_zvfs_getcwd(char *buf, size_t size)
++{
++	if (buf != NULL && size != 0) {
++		K_OOPS(K_SYSCALL_MEMORY_WRITE(buf, size));
++	}
++
++	return z_impl_zvfs_getcwd(buf, size);
++}
++#include <zephyr/syscalls/zvfs_getcwd_mrsh.c>
++#endif /* CONFIG_USERSPACE */
+diff --git a/lib/os/zvfs/zvfs_dirent.c b/lib/os/zvfs/zvfs_dirent.c
+index 6fec298bab0..757e7c1b328 100644
+--- a/lib/os/zvfs/zvfs_dirent.c
++++ b/lib/os/zvfs/zvfs_dirent.c
+@@ -48,6 +48,13 @@ struct zvfs_dirstream *z_impl_zvfs_opendir(const char *path)
+ 	void *obj = NULL;
+ 	struct zvfs_dirstream *d = NULL;
+ 	struct zvfs_fs_desc *ptr = NULL;
++	char r[CONFIG_ZVFS_PATH_MAX];
++
++	rc = zvfs_resolve_path(path, r, sizeof(r));
++	if (rc < 0) {
++		errno = -rc;
++		return NULL;
++	}
+
+ 	fd = zvfs_reserve_fd();
+ 	if (fd < 0) {
+@@ -69,7 +76,7 @@ struct zvfs_dirstream *z_impl_zvfs_opendir(const char *path)
+
+ 	fs_dir_t_init(&ptr->dir);
+
+-	rc = fs_opendir(&ptr->dir, path);
++	rc = fs_opendir(&ptr->dir, r);
+ 	if (rc < 0) {
+ 		goto out_err;
+ 	}
+@@ -77,6 +84,7 @@ struct zvfs_dirstream *z_impl_zvfs_opendir(const char *path)
+ 	memset(d, 0, sizeof(*d));
+ 	d->fd = fd;
+ 	ptr->stream = d;
++	strcpy(ptr->path, r);
+
+ 	zvfs_finalize_typed_fd(fd, ptr, &fs_dir_fd_op_vtable, ZVFS_MODE_IFDIR);
+
+diff --git a/lib/os/zvfs/zvfs_fs.c b/lib/os/zvfs/zvfs_fs.c
+index cc9731151a0..43915cac8d2 100644
+--- a/lib/os/zvfs/zvfs_fs.c
++++ b/lib/os/zvfs/zvfs_fs.c
+@@ -92,10 +92,19 @@ int z_impl_zvfs_open(const char *name, int flags, int mode)
+ 	struct zvfs_fs_desc *ptr = NULL;
+ 	int zmode = posix_mode_to_zephyr(flags);
+
++	char r[CONFIG_ZVFS_PATH_MAX];
++
+ 	if (zmode < 0) {
+ 		return zmode;
+ 	}
+
++	rc = zvfs_resolve_path(name, r, sizeof(r));
++	if (rc < 0) {
++		errno = -rc;
++		return -1;
++	}
++	name = r;
++
+ 	if ((flags & ZVFS_O_DIRECTORY) != 0) {
+ 		fd = zvfs_reserve_fd();
+ 		if (fd < 0) {
+@@ -116,6 +125,7 @@ int z_impl_zvfs_open(const char *name, int flags, int mode)
+ 		}
+
+ 		ptr->stream = NULL;
++		strcpy(ptr->path, name);
+ 		zvfs_finalize_typed_fd(fd, ptr, &fs_dir_fd_op_vtable, ZVFS_MODE_IFDIR);
+
+ 		return fd;
+diff --git a/lib/os/zvfs/zvfs_fs_priv.h b/lib/os/zvfs/zvfs_fs_priv.h
+index 99a5cdcd918..81ba1a9a3d4 100644
+--- a/lib/os/zvfs/zvfs_fs_priv.h
++++ b/lib/os/zvfs/zvfs_fs_priv.h
+@@ -12,6 +12,7 @@
+ #define ZEPHYR_LIB_OS_ZVFS_ZVFS_FS_PRIV_H_
+
+ #include <stdbool.h>
++#include <stddef.h>
+
+ #ifdef __cplusplus
+ extern "C" {
+@@ -32,6 +33,24 @@ extern const struct fd_op_vtable fs_dir_fd_op_vtable;
+  */
+ void zvfs_dirstream_free(struct zvfs_dirstream *d);
+
++/**
++ * @brief Resolve @p in against the ZVFS current working directory.
++ *
++ * Lexically normalizes the path: collapses repeated separators, drops "."
++ * components, pops on "..", and prefixes the working directory when @p in is
++ * relative. The output always begins with '/'.
++ *
++ * @param in Input path.
++ * @param out Destination buffer, which must not alias @p in.
++ * @param outsz Size of @p out.
++ *
++ * @retval 0 on success;
++ * @retval -EFAULT when @p in is NULL;
++ * @retval -ENOENT when @p in is empty;
++ * @retval -ENAMETOOLONG when the result does not fit @p outsz.
++ */
++int zvfs_resolve_path(const char *in, char *out, size_t outsz);
++
+ /**
+  * @brief Map Zephyr file system statistics into ZVFS statistics.
+  *
+diff --git a/lib/os/zvfs/zvfs_path.c b/lib/os/zvfs/zvfs_path.c
+index d3560ac5d98..851c028dac9 100644
+--- a/lib/os/zvfs/zvfs_path.c
++++ b/lib/os/zvfs/zvfs_path.c
+@@ -94,14 +94,21 @@ int z_impl_zvfs_unlink(const char *path)
+ {
+ 	int res;
+ 	struct fs_dirent entry;
++	char r[CONFIG_ZVFS_PATH_MAX];
++	int rrc = zvfs_resolve_path(path, r, sizeof(r));
+
+-	res = fs_stat(path, &entry);
++	if (rrc < 0) {
++		errno = -rrc;
++		return -1;
++	}
++
++	res = fs_stat(r, &entry);
+ 	if (res == 0 && entry.type == FS_DIR_ENTRY_DIR) {
+ 		errno = EISDIR;
+ 		return -1;
+ 	}
+
+-	return zvfs_err(fs_unlink(path));
++	return zvfs_err(fs_unlink(r));
+ }
+
+ #ifdef CONFIG_USERSPACE
+@@ -120,7 +127,20 @@ static int z_vrfy_zvfs_unlink(const char *path)
+
+ int z_impl_zvfs_rename(const char *old, const char *newp)
+ {
+-	return zvfs_err(fs_rename(old, newp));
++	int rrc;
++	char rold[CONFIG_ZVFS_PATH_MAX];
++	char rnew[CONFIG_ZVFS_PATH_MAX];
++
++	rrc = zvfs_resolve_path(old, rold, sizeof(rold));
++	if (rrc == 0) {
++		rrc = zvfs_resolve_path(newp, rnew, sizeof(rnew));
++	}
++	if (rrc < 0) {
++		errno = -rrc;
++		return -1;
++	}
++
++	return zvfs_err(fs_rename(rold, rnew));
+ }
+
+ #ifdef CONFIG_USERSPACE
+@@ -140,8 +160,16 @@ static int z_vrfy_zvfs_rename(const char *old, const char *newp)
+
+ int z_impl_zvfs_remove(const char *path)
+ {
++	char r[CONFIG_ZVFS_PATH_MAX];
++	int rrc = zvfs_resolve_path(path, r, sizeof(r));
++
++	if (rrc < 0) {
++		errno = -rrc;
++		return -1;
++	}
++
+ 	/* Zephyr fs_unlink() removes files and empty directories alike */
+-	return zvfs_err(fs_unlink(path));
++	return zvfs_err(fs_unlink(r));
+ }
+
+ #ifdef CONFIG_USERSPACE
+@@ -164,8 +192,15 @@ int z_impl_zvfs_stat(const char *path, struct zvfs_stat *buf)
+ 	struct fs_dirent entry;
+ 	struct fs_statvfs vfs;
+ 	bool is_dir;
++	char r[CONFIG_ZVFS_PATH_MAX];
++	int rrc = zvfs_resolve_path(path, r, sizeof(r));
++
++	if (rrc < 0) {
++		errno = -rrc;
++		return -1;
++	}
+
+-	res = fs_stat(path, &entry);
++	res = fs_stat(r, &entry);
+ 	if (res < 0) {
+ 		return zvfs_err(res);
+ 	}
+@@ -174,7 +209,7 @@ int z_impl_zvfs_stat(const char *path, struct zvfs_stat *buf)
+
+ 	*buf = (struct zvfs_stat){0};
+ 	buf->size = entry.size;
+-	buf->mode = zvfs_synth_mode(is_dir, zvfs_mount_rdonly(path));
++	buf->mode = zvfs_synth_mode(is_dir, zvfs_mount_rdonly(r));
+ 	buf->nlink = 1;
+ #ifdef CONFIG_FS_DIRENT_EXT
+ 	buf->atime = entry.atime;
+@@ -184,7 +219,7 @@ int z_impl_zvfs_stat(const char *path, struct zvfs_stat *buf)
+ #endif
+
+ 	/* block accounting is best-effort: not every backend supports statvfs */
+-	if (fs_statvfs(path, &vfs) == 0) {
++	if (fs_statvfs(r, &vfs) == 0) {
+ 		buf->blksize = vfs.f_bsize;
+ 		buf->blocks = DIV_ROUND_UP(entry.size, 512);
+ 	}
+@@ -223,13 +258,20 @@ int z_impl_zvfs_statvfs(const char *path, struct zvfs_statvfs *buf)
+ {
+ 	int res;
+ 	struct fs_statvfs vfs;
++	char r[CONFIG_ZVFS_PATH_MAX];
++	int rrc = zvfs_resolve_path(path, r, sizeof(r));
+
+-	res = fs_statvfs(path, &vfs);
++	if (rrc < 0) {
++		errno = -rrc;
++		return -1;
++	}
++
++	res = fs_statvfs(r, &vfs);
+ 	if (res < 0) {
+ 		return zvfs_err(res);
+ 	}
+
+-	zvfs_statvfs_from_fs(buf, &vfs, zvfs_mount_rdonly(path));
++	zvfs_statvfs_from_fs(buf, &vfs, zvfs_mount_rdonly(r));
+
+ 	return 0;
+ }
+@@ -276,9 +318,17 @@ static int z_vrfy_zvfs_fstatvfs(int fd, struct zvfs_statvfs *buf)
+
+ int z_impl_zvfs_mkdir(const char *path, uint32_t mode)
+ {
++	char r[CONFIG_ZVFS_PATH_MAX];
++	int rrc = zvfs_resolve_path(path, r, sizeof(r));
++
++	if (rrc < 0) {
++		errno = -rrc;
++		return -1;
++	}
++
+ 	ARG_UNUSED(mode);
+
+-	return zvfs_err(fs_mkdir(path));
++	return zvfs_err(fs_mkdir(r));
+ }
+
+ #ifdef CONFIG_USERSPACE
+@@ -299,8 +349,15 @@ int z_impl_zvfs_rmdir(const char *path)
+ {
+ 	int res;
+ 	struct fs_dirent entry;
++	char r[CONFIG_ZVFS_PATH_MAX];
++	int rrc = zvfs_resolve_path(path, r, sizeof(r));
++
++	if (rrc < 0) {
++		errno = -rrc;
++		return -1;
++	}
+
+-	res = fs_stat(path, &entry);
++	res = fs_stat(r, &entry);
+ 	if (res < 0) {
+ 		return zvfs_err(res);
+ 	}
+@@ -310,7 +367,7 @@ int z_impl_zvfs_rmdir(const char *path)
+ 		return -1;
+ 	}
+
+-	return zvfs_err(fs_unlink(path));
++	return zvfs_err(fs_unlink(r));
+ }
+
+ #ifdef CONFIG_USERSPACE
+@@ -338,6 +395,14 @@ int z_impl_zvfs_truncate(const char *path, off_t length)
+ 		return -1;
+ 	}
+
++	char r[CONFIG_ZVFS_PATH_MAX];
++	int rrc = zvfs_resolve_path(path, r, sizeof(r));
++
++	if (rrc < 0) {
++		errno = -rrc;
++		return -1;
++	}
++
+ 	/* struct fs_file_t is too large for the privileged stack */
+ 	ptr = zvfs_fs_desc_alloc(false);
+ 	if (ptr == NULL) {
+@@ -347,7 +412,7 @@ int z_impl_zvfs_truncate(const char *path, off_t length)
+
+ 	fs_file_t_init(&ptr->file);
+
+-	res = fs_open(&ptr->file, path, FS_O_WRITE);
++	res = fs_open(&ptr->file, r, FS_O_WRITE);
+ 	if (res < 0) {
+ 		zvfs_fs_desc_free(ptr);
+ 		return zvfs_err(res);
+@@ -425,7 +490,15 @@ static int z_vrfy_zvfs_access(const char *path, int amode)
+
+ int z_impl_zvfs_utime(const char *path, const struct timespec *times)
+ {
+-	return zvfs_err(fs_utime(path, times));
++	char r[CONFIG_ZVFS_PATH_MAX];
++	int rrc = zvfs_resolve_path(path, r, sizeof(r));
++
++	if (rrc < 0) {
++		errno = -rrc;
++		return -1;
++	}
++
++	return zvfs_err(fs_utime(r, times));
+ }
+
+ #ifdef CONFIG_USERSPACE
