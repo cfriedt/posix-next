@@ -35,5 +35,6 @@ if(NOT CONFIG_TC_PROVIDES_POSIX_FILE_SYSTEM)
     statvfs.c
     truncate.c
     unlink.c
+    utime.c
   )
 endif()
