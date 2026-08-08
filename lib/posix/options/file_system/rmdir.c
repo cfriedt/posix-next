@@ -1,17 +1,14 @@
 /*
- * Copyright (c) 2018 Intel Corporation
+ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include <unistd.h>
 
-/**
- * @brief Remove a directory.
- *
- * See IEEE 1003.1
- */
+#include <zephyr/sys/zvfs_fs.h>
+
 int rmdir(const char *path)
 {
-	return unlink(path);
+	return zvfs_rmdir(path);
 }
