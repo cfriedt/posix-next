@@ -16,5 +16,5 @@ zephyr_library_compile_options(-U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
 zephyr_library_compile_options_ifdef(CONFIG_XSI -U_XOPEN_SOURCE -D_XOPEN_SOURCE=700)
 
 if(NOT CONFIG_TC_PROVIDES_POSIX_FILE_SYSTEM_R)
-  zephyr_library_sources(file_system_r.c)
+  zephyr_library_sources(readdir_r.c)
 endif()
