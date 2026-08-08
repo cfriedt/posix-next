@@ -683,3 +683,21 @@ patches:
       in exactly one place and kernel services can arm readiness waits
       on a single descriptor (e.g. with k_work_poll) without a pollfd
       array of their own.
+  - path: zephyr/fs-fatfs-rewinddir-utime.patch
+    sha256sum: e054af500da31c40447293cc8f8c3b370391aec5805b8fd084b35a6551fd7fe4
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-07
+    upstreamable: true
+    comments: |
+      Back fs_rewinddir() on FatFs with f_readdir(dp, NULL) and fs_utime()
+      with f_utime() behind a new CONFIG_FS_FATFS_FF_USE_CHMOD (mapped to
+      FF_USE_CHMOD in zephyr_fatfs_config.h). Under CONFIG_FS_DIRENT_EXT,
+      stat and readdir results carry the modification timestamp, converted
+      from the FAT date fields with timeutil_timegm64(); the write path uses
+      gmtime_r() per the existing subsys precedent. FAT records no access
+      time, so atime mirrors mtime, and timestamps outside 1980-2107 are
+      rejected with -EINVAL. Covered by a new
+      filesystem.fat.api.dirent_ext scenario whose test round-trips an
+      explicit timestamp through the conversion and exercises rewinddir.
