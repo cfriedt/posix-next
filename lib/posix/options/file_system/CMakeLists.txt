@@ -22,12 +22,14 @@ if(NOT CONFIG_TC_PROVIDES_POSIX_FILE_SYSTEM)
     fchdir.c
     getcwd.c
     fstat.c
+    fstatvfs.c
     mkdir.c
     opendir.c
     readdir.c
     rename.c
     rmdir.c
     stat.c
+    statvfs.c
     truncate.c
     unlink.c
   )
