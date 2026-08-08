@@ -1,0 +1,281 @@
+diff --git a/modules/fatfs/zephyr_fatfs_config.h b/modules/fatfs/zephyr_fatfs_config.h
+--- a/modules/fatfs/zephyr_fatfs_config.h
++++ b/modules/fatfs/zephyr_fatfs_config.h
+@@ -97,6 +97,11 @@
+ #define FF_FS_NORTC 1
+ #endif /* defined(CONFIG_FS_FATFS_HAS_RTC) */
+ 
++#if defined(CONFIG_FS_FATFS_FF_USE_CHMOD)
++#undef FF_USE_CHMOD
++#define FF_USE_CHMOD 1
++#endif /* defined(CONFIG_FS_FATFS_FF_USE_CHMOD) */
++
+ /* Zephyr uses FF_VOLUME_STRS */
+ #undef FF_STR_VOLUME_ID
+ #define FF_STR_VOLUME_ID 1
+
+diff --git a/subsys/fs/Kconfig.fatfs b/subsys/fs/Kconfig.fatfs
+--- a/subsys/fs/Kconfig.fatfs
++++ b/subsys/fs/Kconfig.fatfs
+@@ -102,6 +102,15 @@ config FS_FATFS_HAS_RTC
+ 	    10: 5 = Minute (0..59)
+ 	     4: 0 = Seconds/2 (0..29)
+ 
++config FS_FATFS_FF_USE_CHMOD
++	bool "Attribute and timestamp write support"
++	depends on !FS_FATFS_READ_ONLY
++	help
++	  Enable the FatFs f_chmod() and f_utime() functions so file
++	  attributes and timestamps can be changed, backing fs_utime().
++	  The timestamp conversion uses gmtime_r(), which the minimal libc
++	  provides with CONFIG_STD_C23.
++
+ config FS_FATFS_EXTRA_NATIVE_API
+ 	bool "Additional native API functions"
+ 	help
+
+diff --git a/subsys/fs/fat_fs.c b/subsys/fs/fat_fs.c
+--- a/subsys/fs/fat_fs.c
++++ b/subsys/fs/fat_fs.c
+@@ -5,14 +5,18 @@
+  * SPDX-License-Identifier: Apache-2.0
+  */
+ 
++#define _POSIX_C_SOURCE 200809L /* Required for gmtime_r */
++
+ #include <stdio.h>
+ #include <string.h>
+ #include <zephyr/kernel.h>
+ #include <zephyr/types.h>
+ #include <errno.h>
+ #include <zephyr/init.h>
++#include <time.h>
+ #include <zephyr/fs/fs.h>
+ #include <zephyr/fs/fs_sys.h>
++#include <zephyr/sys/timeutil.h>
+ #include <zephyr/sys/__assert.h>
+ #include <ff.h>
+ #include <diskio.h>
+@@ -364,6 +368,32 @@ static int fatfs_opendir(struct fs_dir_t *zdp, const char *path)
+ 	return translate_error(res);
+ }
+ 
++#if defined(CONFIG_FS_DIRENT_EXT)
++static void fatfs_time_to_timespec(WORD fdate, WORD ftime, struct timespec *ts)
++{
++	struct tm tm = {
++		.tm_year = ((fdate >> 9) & 0x7f) + 80,
++		.tm_mon = ((fdate >> 5) & 0xf) - 1,
++		.tm_mday = fdate & 0x1f,
++		.tm_hour = (ftime >> 11) & 0x1f,
++		.tm_min = (ftime >> 5) & 0x3f,
++		.tm_sec = (ftime & 0x1f) * 2,
++	};
++
++	ts->tv_sec = timeutil_timegm64(&tm);
++	ts->tv_nsec = 0;
++}
++
++static void fatfs_fill_dirent_times(struct fs_dirent *entry, const FILINFO *fno)
++{
++	/* FAT records only the modification time */
++	fatfs_time_to_timespec(fno->fdate, fno->ftime, &entry->mtime);
++	entry->atime = entry->mtime;
++}
++#else
++#define fatfs_fill_dirent_times(entry, fno)
++#endif /* defined(CONFIG_FS_DIRENT_EXT) */
++
+ static int fatfs_readdir(struct fs_dir_t *zdp, struct fs_dirent *entry)
+ {
+ 	FRESULT res;
+@@ -376,12 +406,23 @@ static int fatfs_readdir(struct fs_dir_t *zdp, struct fs_dirent *entry)
+ 			entry->type = ((fno.fattrib & AM_DIR) ?
+ 			       FS_DIR_ENTRY_DIR : FS_DIR_ENTRY_FILE);
+ 			entry->size = fno.fsize;
++			fatfs_fill_dirent_times(entry, &fno);
+ 		}
+ 	}
+ 
+ 	return translate_error(res);
+ }
+ 
++static int fatfs_rewinddir(struct fs_dir_t *zdp)
++{
++	FRESULT res;
++
++	/* A NULL FILINFO rewinds the directory stream */
++	res = f_readdir(zdp->dirp, NULL);
++
++	return translate_error(res);
++}
++
+ static int fatfs_closedir(struct fs_dir_t *zdp)
+ {
+ 	FRESULT res;
+@@ -406,11 +447,40 @@ static int fatfs_stat(struct fs_mount_t *mountp,
+ 			       FS_DIR_ENTRY_DIR : FS_DIR_ENTRY_FILE);
+ 		strcpy(entry->name, fno.fname);
+ 		entry->size = fno.fsize;
++		fatfs_fill_dirent_times(entry, &fno);
+ 	}
+ 
+ 	return translate_error(res);
+ }
+ 
++#if FF_USE_CHMOD && !FF_FS_READONLY
++static int fatfs_utime(struct fs_mount_t *mountp, const char *name,
++		       const struct timespec times[2])
++{
++	FRESULT res;
++	FILINFO fno;
++	struct tm tm;
++	time_t sec = times[1].tv_sec;
++
++	/* FAT records only the modification time; times[0] is ignored */
++	if (gmtime_r(&sec, &tm) == NULL) {
++		return -EINVAL;
++	}
++
++	/* FAT timestamps span 1980 through 2107 */
++	if ((tm.tm_year < 80) || (tm.tm_year > 207)) {
++		return -EINVAL;
++	}
++
++	fno.fdate = ((tm.tm_year - 80) << 9) | ((tm.tm_mon + 1) << 5) | tm.tm_mday;
++	fno.ftime = (tm.tm_hour << 11) | (tm.tm_min << 5) | (tm.tm_sec / 2);
++
++	res = f_utime(translate_path(name), &fno);
++
++	return translate_error(res);
++}
++#endif /* FF_USE_CHMOD && !FF_FS_READONLY */
++
+ static int fatfs_statvfs(struct fs_mount_t *mountp,
+ 			 const char *path, struct fs_statvfs *stat)
+ {
+@@ -545,6 +615,7 @@ static const struct fs_file_system_t fatfs_fs = {
+ 	.opendir = fatfs_opendir,
+ 	.readdir = fatfs_readdir,
+ 	.closedir = fatfs_closedir,
++	.rewinddir = fatfs_rewinddir,
+ 	.mount = fatfs_mount,
+ 	.unmount = fatfs_unmount,
+ 	.unlink = fatfs_unlink,
+@@ -552,6 +623,9 @@ static const struct fs_file_system_t fatfs_fs = {
+ 	.mkdir = fatfs_mkdir,
+ 	.stat = fatfs_stat,
+ 	.statvfs = fatfs_statvfs,
++#if FF_USE_CHMOD && !FF_FS_READONLY
++	.utime = fatfs_utime,
++#endif
+ #if defined(CONFIG_FILE_SYSTEM_MKFS) && defined(CONFIG_FS_FATFS_MKFS)
+ 	.mkfs = fatfs_mkfs,
+ #endif
+
+diff --git a/tests/subsys/fs/fat_fs_api/CMakeLists.txt b/tests/subsys/fs/fat_fs_api/CMakeLists.txt
+--- a/tests/subsys/fs/fat_fs_api/CMakeLists.txt
++++ b/tests/subsys/fs/fat_fs_api/CMakeLists.txt
+@@ -14,6 +14,7 @@ target_sources(app PRIVATE
+ 		src/test_fat_rename.c
+ 		src/test_fat_rd_only_mount.c
+ 		src/test_fat_file.c
++		src/test_fat_utime.c
+ 		../common/test_fs_open_flags.c)
+ target_sources_ifdef(CONFIG_FLASH app PRIVATE
+ 		../common/test_fs_mkfs.c
+
+diff --git ab/tests/subsys/fs/fat_fs_api/src/test_fat_utime.c b/tests/subsys/fs/fat_fs_api/src/test_fat_utime.c
+new file mode 100644
+--- /dev/null
++++ b/tests/subsys/fs/fat_fs_api/src/test_fat_utime.c
+@@ -0,0 +1,72 @@
++/*
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include "test_fat.h"
++
++#if defined(CONFIG_FS_DIRENT_EXT) && defined(CONFIG_FS_FATFS_FF_USE_CHMOD)
++
++/* 2026-08-07 12:34:56 UTC, even seconds so the FAT 2 s granularity is exact */
++#define TEST_MTIME 1786106096LL
++
++static struct fs_mount_t fatfs_mnt = {
++	.type = FS_FATFS,
++	.mnt_point = FATFS_MNTP,
++	.fs_data = &fat_fs,
++};
++
++ZTEST(fat_fs_basic, test_fat_utime_rewinddir)
++{
++	struct fs_file_t fs;
++	struct fs_dir_t dir;
++	struct fs_dirent entry;
++	const struct timespec times[2] = {
++		{.tv_sec = TEST_MTIME},
++		{.tv_sec = TEST_MTIME},
++	};
++	int seen;
++
++	fs_file_t_init(&fs);
++	fs_dir_t_init(&dir);
++	zassert_equal(fs_mount(&fatfs_mnt), 0);
++	zassert_equal(fs_open(&fs, FATFS_MNTP"/utime.txt", FS_O_CREATE), 0);
++	zassert_equal(fs_close(&fs), 0);
++
++	/* explicit timestamp round-trips through the FAT date conversion */
++	zassert_equal(fs_utime(FATFS_MNTP"/utime.txt", times), 0);
++	zassert_equal(fs_stat(FATFS_MNTP"/utime.txt", &entry), 0);
++	zassert_equal(entry.mtime.tv_sec, TEST_MTIME,
++		      "expected %lld got %lld", (long long)TEST_MTIME,
++		      (long long)entry.mtime.tv_sec);
++	zassert_equal(entry.mtime.tv_nsec, 0);
++	zassert_equal(entry.atime.tv_sec, entry.mtime.tv_sec);
++
++	/* pre-epoch-of-FAT timestamps are rejected */
++	zassert_equal(fs_utime(FATFS_MNTP"/utime.txt",
++			       (const struct timespec[2]){{.tv_sec = 0}, {.tv_sec = 0}}),
++		      -EINVAL);
++
++	/* readdir reports the same timestamp, and rewinddir restarts the walk */
++	zassert_equal(fs_opendir(&dir, FATFS_MNTP"/"), 0);
++	for (seen = 0;; seen++) {
++		zassert_equal(fs_readdir(&dir, &entry), 0);
++		if (entry.name[0] == '\0') {
++			break;
++		}
++		if (strcmp(entry.name, "utime.txt") == 0) {
++			zassert_equal(entry.mtime.tv_sec, TEST_MTIME);
++		}
++	}
++	zassert_true(seen >= 1);
++	zassert_equal(fs_rewinddir(&dir), 0);
++	zassert_equal(fs_readdir(&dir, &entry), 0);
++	zassert_not_equal(entry.name[0], '\0',
++			  "rewound directory should list entries again");
++	zassert_equal(fs_closedir(&dir), 0);
++
++	zassert_equal(fs_unlink(FATFS_MNTP"/utime.txt"), 0);
++	zassert_true(fs_unmount(&fatfs_mnt) >= 0);
++}
++
++#endif /* CONFIG_FS_DIRENT_EXT && CONFIG_FS_FATFS_FF_USE_CHMOD */
+
+diff --git a/tests/subsys/fs/fat_fs_api/testcase.yaml b/tests/subsys/fs/fat_fs_api/testcase.yaml
+--- a/tests/subsys/fs/fat_fs_api/testcase.yaml
++++ b/tests/subsys/fs/fat_fs_api/testcase.yaml
+@@ -46,6 +46,12 @@ tests:
+     extra_args:
+       - CONF_FILE="prj_ram.conf"
+       - EXTRA_DTC_OVERLAY_FILE="ramdisk.overlay"
++  filesystem.fat.api.dirent_ext:
++    platform_allow:
++      - native_sim
++    extra_configs:
++      - CONFIG_FS_DIRENT_EXT=y
++      - CONFIG_FS_FATFS_FF_USE_CHMOD=y
+   filesystem.fat.api.reentrant:
+     platform_allow:
+       - native_sim
