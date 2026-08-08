@@ -190,8 +190,11 @@ EXPORT_SYMBOL(putchar_unlocked);
 
 /* FILE_SYSTEM */
 #ifdef CONFIG_POSIX_FILE_SYSTEM
+EXPORT_SYMBOL(chdir);
 EXPORT_SYMBOL(closedir);
+EXPORT_SYMBOL(fchdir);
 EXPORT_SYMBOL(fstat);
+EXPORT_SYMBOL(getcwd);
 EXPORT_SYMBOL(mkdir);
 EXPORT_SYMBOL(opendir);
 EXPORT_SYMBOL(readdir);
