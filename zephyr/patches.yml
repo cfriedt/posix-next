@@ -1532,3 +1532,21 @@ patches:
       modification timespecs behind the new CONFIG_FS_DIRENT_EXT so timestamp
       support costs nothing when disabled. Backends that implement neither
       operation report -ENOTSUP through the existing CHECKIF convention.
+  - path: zephyr/fs-fatfs-rewinddir-utime.patch
+    sha256sum: 4c22061022bf2852c7400765ec7bafe0a77d673620a6e08a92a4c93b7f07e999
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-07
+    upstreamable: true
+    comments: |
+      Back fs_rewinddir() on FatFs with f_readdir(dp, NULL) and fs_utime()
+      with f_utime() behind a new CONFIG_FS_FATFS_FF_USE_CHMOD (mapped to
+      FF_USE_CHMOD in zephyr_fatfs_config.h). Under CONFIG_FS_DIRENT_EXT,
+      stat and readdir results carry the modification timestamp, converted
+      from the FAT date fields with timeutil_timegm64(); the write path uses
+      gmtime_r() per the existing subsys precedent. FAT records no access
+      time, so atime mirrors mtime, and timestamps outside 1980-2107 are
+      rejected with -EINVAL. Covered by a new
+      filesystem.fat.api.dirent_ext scenario whose test round-trips an
+      explicit timestamp through the conversion and exercises rewinddir.
