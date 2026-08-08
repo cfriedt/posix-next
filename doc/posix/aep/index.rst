@@ -133,7 +133,7 @@ are listed below, for reference, in terms that agree with the current POSIX-1 st
 
           :ref:`POSIX_C_LANG_MATH <posix_option_group_c_lang_math>`, yes,
           :ref:`POSIX_FD_MGMT <posix_option_group_fd_mgmt>`, yes, :kconfig:option:`CONFIG_POSIX_FD_MGMT`
-          :ref:`POSIX_FILE_SYSTEM <posix_option_group_file_system>`,, :kconfig:option:`CONFIG_POSIX_FILE_SYSTEM`
+          :ref:`POSIX_FILE_SYSTEM <posix_option_group_file_system>`, yes, :kconfig:option:`CONFIG_POSIX_FILE_SYSTEM` :ref:`†<posix_undefined_behaviour>`
 
       .. csv-table:: PSE52 Option Requirements
          :header: Symbol, Support, Remarks
