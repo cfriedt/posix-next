@@ -1723,3 +1723,25 @@ patches:
       streamless directory fd, and directory fds answer ZFD_IOCTL_STAT and
       ZFD_IOCTL_STATVFS. Directory streams now consume an fd each,
       compensated by CONFIG_ZVFS_OPEN_ADD_SIZE_DIR in the fd table sizing.
+  - path: zephyr/zvfs-cwd.patch
+    sha256sum: fbf2ac4f08189cfd68ba4eb9d84174c687400650ecb6fb77537404ef9006f6dd
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-07
+    upstreamable: true
+    comments: |
+      Add a namespaced, ZVFS-owned current working directory: zvfs_chdir(),
+      zvfs_fchdir(), and zvfs_getcwd() system calls over a single system-wide
+      string (POSIX per-process semantics on a single-process system), with
+      an internal zvfs_resolve_path() applied inside every path z_impl so
+      supervisor and user callers get identical semantics with no TOCTOU
+      window. Resolution is purely lexical, exact because the fs API has no
+      symbolic links: collapse '//', drop '.', pop on '..' (a no-op at the
+      root), and prefix the working directory for relative inputs; output is
+      always absolute, as fs_open()/fs_opendir() require. Mount operations
+      deliberately stay CWD-independent. Directory descriptors record their
+      resolved path in zvfs_fs_desc for fchdir(). zvfs_getcwd() returns int,
+      not a pointer, so the marshaller never round-trips an address; the
+      POSIX getcwd() wrapper returns its own buffer. fopen(), remove(), and
+      tmpfile() inherit the CWD for free via zvfs_open()/zvfs_remove().
