@@ -701,3 +701,16 @@ patches:
       rejected with -EINVAL. Covered by a new
       filesystem.fat.api.dirent_ext scenario whose test round-trips an
       explicit timestamp through the conversion and exercises rewinddir.
+  - path: zephyr/fs-littlefs-rewinddir.patch
+    sha256sum: fc13b868ee9295c39500cf4b0f33e63bb50d0a913bf9875824ba50fa2abdf2c3
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-07
+    upstreamable: true
+    comments: |
+      Back fs_rewinddir() on LittleFS with lfs_dir_rewind() under the
+      filesystem lock, following the littlefs_readdir() pattern. No utime
+      hook is registered: littlefs records no timestamps, so fs_utime()
+      reports -ENOTSUP through the core CHECKIF, which the extended
+      test_lfs_basic asserts alongside a rewind-then-readdir check.
