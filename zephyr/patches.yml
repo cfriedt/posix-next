@@ -1604,3 +1604,27 @@ patches:
       syscall header. Pure relocation with no behavior change and no in-tree
       callers affected; isolates series-application risk from the syscall
       promotion that follows.
+  - path: zephyr/zvfs-fs-path-syscalls.patch
+    sha256sum: 4accc0bf6a7be0d839e18fd37769f5803c519f69d41371f22d494ad444eb379b
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-07
+    upstreamable: true
+    comments: |
+      Promote zvfs_open()/zvfs_unlink()/zvfs_rename() to system calls and add
+      zvfs_remove/stat/statvfs/fstatvfs/mkdir/rmdir/truncate/access/utime,
+      each verifier copying the user path into a CONFIG_ZVFS_PATH_MAX kernel
+      buffer per the sys_msgq_open() precedent (over-long paths report
+      ENAMETOOLONG, bad pointers oops). zvfs_open() gains O_EXCL, unblocking
+      a race-checked mkstemp(). struct zvfs_stat is extended with blksize,
+      blocks, nlink, and timespec atime/mtime/ctime (filled from
+      CONFIG_FS_DIRENT_EXT); modes are synthesized from a new
+      fs_mount_flags() accessor since Zephyr file systems store no permission
+      bits, which also drives access() W_OK -> EROFS on read-only mounts.
+      struct zvfs_statvfs carries a reserved f_timestamp_resolution (0 until
+      backends report it). ISO C remove() moves onto zvfs_remove(), gaining
+      empty-directory removal as the standard requires, while zvfs_unlink()
+      now rejects directories with EISDIR and zvfs_rmdir() rejects
+      non-directories with ENOTDIR. zvfs_truncate() borrows a zvfs_fs_desc
+      slot instead of putting a struct fs_file_t on the privileged stack.
