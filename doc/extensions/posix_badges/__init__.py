@@ -9,8 +9,8 @@ Decorates the POSIX Option Group documentation with data-driven badges:
 
 - Each ``posix/option_groups/<name>`` page gets a badge strip injected after
   its title (``doctree-resolved``): implementation-completeness and line
-  coverage donuts plus pass/fail badges for the linux_compat / ubsan / asan /
-  static_analysis twister scenario classes.
+  coverage donuts plus pass/fail badges for the linux_compat / userspace /
+  ubsan / asan / static_analysis twister scenario classes.
 - The Option Groups index toctree and the per-function "ISO C" pills are
   decorated client-side by ``static/posix-badges.js`` from a JSON database
   written to ``_static/posix-badges.json``.
