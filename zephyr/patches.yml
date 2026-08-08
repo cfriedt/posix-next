@@ -1579,3 +1579,17 @@ patches:
       names could overflow a caller-supplied tmpnam() buffer; two digits
       cover every libc's TMP_MAX, and BUILD_ASSERTs enforce both bounds.
       The unreachable !ZVFS fallback and its LOG registration are dropped.
+  - path: zephyr/zvfs-eventfd-syscalls.patch
+    sha256sum: 4cdf6b4427ebbf2cbee70e4dedf80b031809df91ef62717d173c5df69cad5b4a
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-07
+    upstreamable: true
+    comments: |
+      Promote zvfs_eventfd(), zvfs_eventfd_read(), and zvfs_eventfd_write()
+      to system calls so eventfd works from user mode. The read/write
+      verifiers check K_OBJ_FILE ownership via zvfs_fd_syscall_verify() in
+      addition to the vtable match inside the implementation (which validates
+      the type but not the caller's grant), and the read verifier bounds the
+      value pointer. zvfs/eventfd.h joins the registered syscall headers.
