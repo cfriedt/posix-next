@@ -29,6 +29,7 @@ if(NOT CONFIG_TC_PROVIDES_POSIX_FILE_SYSTEM)
     pathconf.c
     readdir.c
     rename.c
+    rewinddir.c
     rmdir.c
     stat.c
     statvfs.c
