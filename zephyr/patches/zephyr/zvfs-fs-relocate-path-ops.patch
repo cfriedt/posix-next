@@ -1,0 +1,158 @@
+diff --git a/include/zephyr/sys/fdtable.h b/include/zephyr/sys/fdtable.h
+index b7362d01a2b..29f03868806 100644
+--- a/include/zephyr/sys/fdtable.h
++++ b/include/zephyr/sys/fdtable.h
+@@ -359,25 +359,6 @@ ssize_t zvfs_write_vmeth(void *obj, const void *buffer, size_t count);
+ ssize_t zvfs_read_vmeth(void *obj, void *buffer, size_t count);
+ #endif
+
+-/**
+- * @brief Delete file or directory.
+- *
+- * @param path Path or name of file to be removed.
+- *
+- * @return 0 on success, -1 with errno set on error.
+- */
+-int zvfs_unlink(const char *path);
+-
+-/**
+- * @brief Rename file or directory, moving it if necessary.
+- *
+- * @param old Current name
+- * @param newp Target name
+- *
+- * @return 0 on success, -1 with errno set on error.
+- */
+-int zvfs_rename(const char *old, const char *newp);
+-
+ #if defined(CONFIG_ZTEST) && defined(CONFIG_USERSPACE)
+ /**
+  * @brief Return the kernel object backing a file descriptor slot (tests only).
+diff --git a/include/zephyr/sys/zvfs_fs.h b/include/zephyr/sys/zvfs_fs.h
+index fba34c08ab5..b72af97a615 100644
+--- a/include/zephyr/sys/zvfs_fs.h
++++ b/include/zephyr/sys/zvfs_fs.h
+@@ -72,6 +72,25 @@ void zvfs_fs_desc_free(struct zvfs_fs_desc *ptr);
+  */
+ void zvfs_record_lock_drop_obj(void *obj);
+
++/**
++ * @brief Delete file or directory.
++ *
++ * @param path Path or name of file to be removed.
++ *
++ * @return 0 on success, -1 with errno set on error.
++ */
++int zvfs_unlink(const char *path);
++
++/**
++ * @brief Rename file or directory, moving it if necessary.
++ *
++ * @param old Current name
++ * @param newp Target name
++ *
++ * @return 0 on success, -1 with errno set on error.
++ */
++int zvfs_rename(const char *old, const char *newp);
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/lib/os/CMakeLists.txt b/lib/os/CMakeLists.txt
+index e1a8c64d8f4..3b001a447e3 100644
+--- a/lib/os/CMakeLists.txt
++++ b/lib/os/CMakeLists.txt
+@@ -80,6 +80,7 @@ zephyr_syscall_header_ifdef(CONFIG_ZVFS_FDTABLE
+   ${ZEPHYR_BASE}/include/zephyr/sys/zvfs.h
+   ${ZEPHYR_BASE}/include/zephyr/sys/fdtable.h
+ )
++zephyr_syscall_header_ifdef(CONFIG_ZVFS_FS ${ZEPHYR_BASE}/include/zephyr/sys/zvfs_fs.h)
+
+ zephyr_sources_ifdef(CONFIG_SYS_THREAD thread.c)
+ zephyr_syscall_header_ifdef(CONFIG_ZVFS_EVENTFD ${ZEPHYR_BASE}/include/zephyr/zvfs/eventfd.h)
+diff --git a/lib/os/zvfs/CMakeLists.txt b/lib/os/zvfs/CMakeLists.txt
+index a5596b30781..992aa9a27aa 100644
+--- a/lib/os/zvfs/CMakeLists.txt
++++ b/lib/os/zvfs/CMakeLists.txt
+@@ -19,6 +19,7 @@ zephyr_library_sources_ifdef(CONFIG_ZVFS_LIBC_FILE
+ )
+ zephyr_library_sources_ifdef(CONFIG_ZVFS_FS
+   zvfs_fs.c
++  zvfs_path.c
+   zvfs_record_lock.c
+ )
+ zephyr_library_sources_ifdef(CONFIG_ZVFS_EVENTFD zvfs_eventfd.c)
+diff --git a/lib/os/zvfs/zvfs_fdtable.c b/lib/os/zvfs/zvfs_fdtable.c
+index 89e5b6cbeca..0dcbe87a323 100644
+--- a/lib/os/zvfs/zvfs_fdtable.c
++++ b/lib/os/zvfs/zvfs_fdtable.c
+@@ -499,27 +499,7 @@ int zvfs_fileno(FILE *file)
+ 	return (struct fd_entry *)file - fdtable;
+ }
+
+-int zvfs_unlink(const char *path)
+-{
+-	int res = fs_unlink(path);
+-
+-	if (res < 0) {
+-		errno = -res;
+-		return -1;
+-	}
+-	return 0;
+-}
+
+-int zvfs_rename(const char *old, const char *newp)
+-{
+-	int res = fs_rename(old, newp);
+-
+-	if (res < 0) {
+-		errno = -res;
+-		return -1;
+-	}
+-	return 0;
+-}
+
+ #if defined(CONFIG_POSIX_DEVICE_IO) || defined(CONFIG_ZVFS_RESERVE_STDIO_FDS)
+ /*
+diff --git a/lib/os/zvfs/zvfs_path.c b/lib/os/zvfs/zvfs_path.c
+new file mode 100644
+index 00000000000..cf386ec505c
+--- /dev/null
++++ b/lib/os/zvfs/zvfs_path.c
+@@ -0,0 +1,36 @@
++/*
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++/**
++ * @file
++ * @brief Path-based ZVFS operations over a mounted Zephyr file system.
++ */
++
++#include <errno.h>
++
++#include <zephyr/fs/fs.h>
++#include <zephyr/sys/zvfs_fs.h>
++
++int zvfs_unlink(const char *path)
++{
++	int res = fs_unlink(path);
++
++	if (res < 0) {
++		errno = -res;
++		return -1;
++	}
++	return 0;
++}
++
++int zvfs_rename(const char *old, const char *newp)
++{
++	int res = fs_rename(old, newp);
++
++	if (res < 0) {
++		errno = -res;
++		return -1;
++	}
++	return 0;
++}
