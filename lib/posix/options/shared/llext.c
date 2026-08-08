@@ -200,6 +200,7 @@ EXPORT_SYMBOL(fstat);
 EXPORT_SYMBOL(fstatvfs);
 EXPORT_SYMBOL(futimens);
 EXPORT_SYMBOL(getcwd);
+EXPORT_SYMBOL(link);
 EXPORT_SYMBOL(mkdir);
 EXPORT_SYMBOL(opendir);
 EXPORT_SYMBOL(pathconf);
