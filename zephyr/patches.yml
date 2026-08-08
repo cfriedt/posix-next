@@ -587,3 +587,17 @@ patches:
       without POSIX_FILE_SYSTEM by moving zvfs_open() and the FS fd vtable into
       lib/os/zvfs/zvfs_fs.c (CONFIG_ZVFS_FS). Reserve fd table slots via
       CONFIG_ZVFS_RESERVE_STDIO_FDS and CONFIG_ZVFS_OPEN_ADD_SIZE_STDIO.
+  - path: zephyr/kernel-k-object-is-valid-honor-type.patch
+    sha256sum: 9b82611195f23a8da5f40127cd150c775be97ee6b94bd6567e373b66367095c1
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-08
+    upstreamable: true
+    comments: |
+      k_object_is_valid() accepts an object type and an init-state argument
+      but validated against K_OBJ_ANY / _OBJ_INIT_ANY, silently discarding
+      both. Callers such as the BSD socket layer therefore received an
+      existence-and-permission check with no type or init-state enforcement,
+      permitting type confusion between kernel object families at the
+      syscall boundary. Forward both arguments to k_object_validate().
