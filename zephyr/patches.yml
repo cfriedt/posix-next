@@ -922,3 +922,17 @@ patches:
       fs_opendir("/") opens a file system mounted at the root itself when
       one exists, instead of unconditionally enumerating mount points via
       the virtual root directory.
+  - path: zephyr/zvfs-eventfd-syscalls.patch
+    sha256sum: 0e4795b4e1831c2065b56cbfe8f958047ba39aa5f25a78731c768bf5a92b7f45
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-07
+    upstreamable: true
+    comments: |
+      Promote zvfs_eventfd(), zvfs_eventfd_read(), and zvfs_eventfd_write()
+      to system calls so eventfd works from user mode. The read/write
+      verifiers check K_OBJ_FILE ownership via zvfs_fd_syscall_verify() in
+      addition to the vtable match inside the implementation (which validates
+      the type but not the caller's grant), and the read verifier bounds the
+      value pointer. zvfs/eventfd.h joins the registered syscall headers.
