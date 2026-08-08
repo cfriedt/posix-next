@@ -12,6 +12,15 @@
 #include <zephyr/sys/util.h>
 #include <zephyr/ztest.h>
 
+#ifdef CONFIG_TEST_POSIX_PROFILE_SUBTRACT
+#if defined(_POSIX_AEP_REALTIME_MINIMAL) || defined(_POSIX_AEP_REALTIME_CONTROLLER)
+#error "a subprofile with a constituent disabled must not claim conformance"
+#endif
+#if !defined(_POSIX_VERSION) || defined(_POSIX_ASYNCHRONOUS_IO) || defined(_POSIX_MESSAGE_PASSING)
+#error "the remaining Option Groups must still be reported"
+#endif
+#endif /* CONFIG_TEST_POSIX_PROFILE_SUBTRACT */
+
 #ifdef CONFIG_POSIX_SYSCONF_IMPL_FULL
 
 enum sysconf_expect {
