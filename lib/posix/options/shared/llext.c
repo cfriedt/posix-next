@@ -205,6 +205,7 @@ EXPORT_SYMBOL(pathconf);
 EXPORT_SYMBOL(readdir);
 EXPORT_SYMBOL(remove);
 EXPORT_SYMBOL(rename);
+EXPORT_SYMBOL(rewinddir);
 EXPORT_SYMBOL(rmdir);
 EXPORT_SYMBOL(stat);
 EXPORT_SYMBOL(statvfs);
