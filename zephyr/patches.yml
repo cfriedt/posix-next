@@ -1822,3 +1822,19 @@ patches:
       (tests/net/socket/socketpair, tcp), that close revokes all grants including
       K_OBJ_FLAG_PUBLIC before slot reuse, and that user threads can write
       to the public stdio descriptors.
+  - path: zephyr/libc-common-tmpfile.patch
+    sha256sum: bfe69e5de96920f811b558605adf45c9e118a1d648ff70b7162a83acc63fa6cd
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-07
+    upstreamable: true
+    comments: |
+      Move tmpfile()/tmpnam() from the minimal libc into the common C library
+      behind CONFIG_COMMON_LIBC_TMPFILE (default y with ZVFS and FILE_SYSTEM,
+      mirroring COMMON_LIBC_REMOVE/FOPEN/FCLOSE) so newlib and picolibc get
+      the ZVFS-backed implementation too. The generated name format shrinks
+      to /tmp/NN: picolibc's L_tmpnam is only 8, so the previous 14-byte
+      names could overflow a caller-supplied tmpnam() buffer; two digits
+      cover every libc's TMP_MAX, and BUILD_ASSERTs enforce both bounds.
+      The unreachable !ZVFS fallback and its LOG registration are dropped.
