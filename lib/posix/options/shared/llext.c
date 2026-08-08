@@ -213,6 +213,7 @@ EXPORT_SYMBOL(tmpfile);
 EXPORT_SYMBOL(tmpnam);
 EXPORT_SYMBOL(truncate);
 EXPORT_SYMBOL(unlink);
+EXPORT_SYMBOL(utime);
 #endif /* CONFIG_POSIX_FILE_SYSTEM */
 
 /* FILE_SYSTEM_R */
