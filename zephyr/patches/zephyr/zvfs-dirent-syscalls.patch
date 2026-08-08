@@ -1,0 +1,547 @@
+diff --git a/include/zephyr/sys/fdtable.h b/include/zephyr/sys/fdtable.h
+index 22b51eaafb5..50821cd7017 100644
+--- a/include/zephyr/sys/fdtable.h
++++ b/include/zephyr/sys/fdtable.h
+@@ -32,6 +32,8 @@
+ #define ZVFS_O_EXCL     0x0800
+ #define ZVFS_O_NONBLOCK 0x4000
+
++#define ZVFS_O_DIRECTORY 0x80000
++
+ #define ZVFS_O_DSYNC 0x10000
+ #define ZVFS_O_RSYNC 0x20000
+ #define ZVFS_O_SYNC  0x40000
+@@ -347,6 +349,8 @@ enum {
+ 	ZFD_IOCTL_TRUNCATE,
+ 	ZFD_IOCTL_MMAP,
+ 	ZFD_IOCTL_STATVFS,
++	ZFD_IOCTL_READDIR,
++	ZFD_IOCTL_REWINDDIR,
+
+ 	/* Codes above 0x5400 and below 0x5500 are reserved for termios, FIO, etc */
+ 	ZFD_IOCTL_FIONREAD = 0x541B,
+diff --git a/include/zephyr/sys/zvfs_fs.h b/include/zephyr/sys/zvfs_fs.h
+index 40131922b91..de55c63eaea 100644
+--- a/include/zephyr/sys/zvfs_fs.h
++++ b/include/zephyr/sys/zvfs_fs.h
+@@ -32,11 +32,15 @@ extern "C" {
+  * Used by zvfs_open() for files (registered in the fd table) and by POSIX
+  * opendir() for directory streams (not fd-backed).
+  */
++struct zvfs_dirstream;
++
+ struct zvfs_fs_desc {
+ 	union {
+ 		struct fs_file_t file;
+ 		struct fs_dir_t dir;
+ 	};
++	/** Stream object returned by zvfs_opendir(), NULL for plain fds. */
++	struct zvfs_dirstream *stream;
+ 	bool is_dir: 1;
+ 	bool used: 1;
+ };
+@@ -74,6 +78,68 @@ struct zvfs_statvfs {
+ 	unsigned long f_timestamp_resolution;
+ };
+
++/**
++ * Longest directory entry name zvfs_readdir() reports. A fixed constant, not
++ * MAX_FILE_NAME, so struct zvfs_dirent has a configuration-independent layout
++ * that POSIX struct dirent can mirror; longer backend names are truncated.
++ */
++#define ZVFS_NAME_MAX 255
++
++/**
++ * @brief Directory entry as reported by zvfs_readdir().
++ */
++struct zvfs_dirent {
++	uint32_t d_type;                 /**< ZVFS_MODE_IFDIR or ZVFS_MODE_IFREG */
++	unsigned long d_ino;             /**< Serial number, 0 (untracked) */
++	size_t d_size;                   /**< Entry size in bytes, 0 for directories */
++	char d_name[ZVFS_NAME_MAX + 1];  /**< NUL-terminated entry name */
++};
++
++/**
++ * @brief Directory stream state backing a POSIX DIR.
++ *
++ * Allocated by zvfs_opendir() from storage that is user-accessible under
++ * CONFIG_USERSPACE (zvfs_dir_partition) and released when the stream's file
++ * descriptor is closed.
++ */
++struct zvfs_dirstream {
++	int fd;                  /**< Directory file descriptor (a K_OBJ_FILE) */
++	struct zvfs_dirent ent;  /**< Storage for the current entry */
++};
++
++/**
++ * @brief Open a directory stream.
++ *
++ * The stream's descriptor closes through zvfs_close(), which also releases
++ * the stream object.
++ *
++ * @param path Absolute path of the directory.
++ *
++ * @return Stream pointer on success, or NULL on error (errno is set).
++ */
++__syscall struct zvfs_dirstream *zvfs_opendir(const char *path);
++
++/**
++ * @brief Read the next directory entry.
++ *
++ * @param fd Directory file descriptor.
++ * @param ent Destination for the entry.
++ *
++ * @retval 0 when an entry was read;
++ * @retval 1 at end of directory (@p ent is not modified, errno is unchanged);
++ * @retval -1 on error (errno is set).
++ */
++__syscall int zvfs_readdir(int fd, struct zvfs_dirent *ent);
++
++/**
++ * @brief Reset a directory stream to its first entry.
++ *
++ * @param fd Directory file descriptor.
++ *
++ * @return 0 on success, -1 with errno set on error.
++ */
++__syscall int zvfs_rewinddir(int fd);
++
+ /**
+  * @brief Open a path on a mounted Zephyr file system and return an fd.
+  *
+diff --git a/lib/libc/newlib/include/fcntl.h b/lib/libc/newlib/include/fcntl.h
+index 09f9a69f8ca..73877e987fe 100644
+--- a/lib/libc/newlib/include/fcntl.h
++++ b/lib/libc/newlib/include/fcntl.h
+@@ -32,6 +32,13 @@
+ #define O_NONBLOCK ZVFS_O_NONBLOCK
+ #endif
+
++#if defined(O_DIRECTORY) && O_DIRECTORY != ZVFS_O_DIRECTORY
++#undef O_DIRECTORY
++#endif
++#ifndef O_DIRECTORY
++#define O_DIRECTORY ZVFS_O_DIRECTORY
++#endif
++
+
+ #if defined(O_DSYNC) && O_DSYNC != ZVFS_O_DSYNC
+ #undef O_DSYNC
+diff --git a/lib/libc/picolibc/include/fcntl.h b/lib/libc/picolibc/include/fcntl.h
+index 417e2a7c727..a0b17a91188 100644
+--- a/lib/libc/picolibc/include/fcntl.h
++++ b/lib/libc/picolibc/include/fcntl.h
+@@ -32,6 +32,13 @@
+ #define O_NONBLOCK ZVFS_O_NONBLOCK
+ #endif
+
++#if defined(O_DIRECTORY) && O_DIRECTORY != ZVFS_O_DIRECTORY
++#undef O_DIRECTORY
++#endif
++#ifndef O_DIRECTORY
++#define O_DIRECTORY ZVFS_O_DIRECTORY
++#endif
++
+
+ #if defined(O_DSYNC) && O_DSYNC != ZVFS_O_DSYNC
+ #undef O_DSYNC
+diff --git a/lib/os/zvfs/CMakeLists.txt b/lib/os/zvfs/CMakeLists.txt
+index 992aa9a27aa..73e36ffb4de 100644
+--- a/lib/os/zvfs/CMakeLists.txt
++++ b/lib/os/zvfs/CMakeLists.txt
+@@ -18,6 +18,7 @@ zephyr_library_sources_ifdef(CONFIG_ZVFS_LIBC_FILE
+   zvfs_libc_file.c
+ )
+ zephyr_library_sources_ifdef(CONFIG_ZVFS_FS
++  zvfs_dirent.c
+   zvfs_fs.c
+   zvfs_path.c
+   zvfs_record_lock.c
+diff --git a/lib/os/zvfs/Kconfig b/lib/os/zvfs/Kconfig
+index 23484a913a6..ea00807c7b0 100644
+--- a/lib/os/zvfs/Kconfig
++++ b/lib/os/zvfs/Kconfig
+@@ -52,6 +52,7 @@ config ZVFS_LIBC_FILE_ALIGN
+ config ZVFS_FS
+ 	bool "ZVFS path open via Zephyr file system"
+ 	depends on FILE_SYSTEM
++	select SYS_ELASTIPOOL
+ 	default y
+ 	help
+ 	  Build the ZVFS path opener (zvfs_open) that wraps Zephyr fs_open() and
+@@ -111,6 +112,25 @@ config ZVFS_OPEN_ADD_SIZE_FS
+ 	  Number of file descriptors reserved for ZVFS path opens via zvfs_open()
+ 	  (ISO C fopen()/freopen() and POSIX open() on a mounted file system).
+
++config ZVFS_DIR_MAX
++	int "Maximum number of ZVFS directory streams"
++	depends on ZVFS_FS
++	default 2
++	help
++	  Number of statically allocated directory stream objects returned by
++	  zvfs_opendir(). Each open stream also consumes one file descriptor
++	  and one ZVFS_FS_DESC_MAX slot. Under CONFIG_USERSPACE the storage
++	  lives in zvfs_dir_partition, which a user thread's memory domain
++	  must include.
++
++config ZVFS_OPEN_ADD_SIZE_DIR
++	int
++	depends on ZVFS_FS
++	default ZVFS_DIR_MAX
++	help
++	  Number of file descriptors reserved for ZVFS directory streams in
++	  the fd table size calculation.
++
+ config ZVFS_RESERVE_STDIO_FDS
+ 	bool
+ 	help
+diff --git a/lib/os/zvfs/zvfs_dirent.c b/lib/os/zvfs/zvfs_dirent.c
+new file mode 100644
+index 00000000000..6fec298bab0
+--- /dev/null
++++ b/lib/os/zvfs/zvfs_dirent.c
+@@ -0,0 +1,161 @@
++/*
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++/**
++ * @file
++ * @brief ZVFS directory streams backed by file descriptors.
++ *
++ * Directory streams are opened as K_OBJ_FILE file descriptors so that user
++ * threads can enumerate directories through verified system calls. The
++ * stream objects themselves live in zvfs_dir_partition so a user thread can
++ * read the entry storage directly; allocation bookkeeping stays kernel-side,
++ * inside the zvfs_opendir() and close paths.
++ */
++
++#include <errno.h>
++#include <string.h>
++
++#include <zephyr/app_memory/app_memdomain.h>
++#include <zephyr/fs/fs.h>
++#include <zephyr/internal/syscall_handler.h>
++#include <zephyr/kernel.h>
++#include <zephyr/sys/elastipool.h>
++#include <zephyr/sys/fdtable.h>
++#include <zephyr/sys/internal/fdtable_priv.h>
++#include <zephyr/sys/zvfs_fs.h>
++
++#include "zvfs_fs_priv.h"
++
++K_APPMEM_PARTITION_DEFINE(zvfs_dir_partition);
++
++static K_APP_DMEM(zvfs_dir_partition) struct zvfs_dirstream
++	zvfs_dir_storage[CONFIG_ZVFS_DIR_MAX];
++
++SYS_ELASTIPOOL_DEFINE_ADVANCED(zvfs_dir_pool, sizeof(struct zvfs_dirstream),
++			       __alignof(struct zvfs_dirstream), CONFIG_ZVFS_DIR_MAX,
++			       CONFIG_ZVFS_DIR_MAX, NULL, zvfs_dir_storage, static);
++
++void zvfs_dirstream_free(struct zvfs_dirstream *d)
++{
++	(void)sys_elastipool_free(&zvfs_dir_pool, d);
++}
++
++struct zvfs_dirstream *z_impl_zvfs_opendir(const char *path)
++{
++	int rc, fd;
++	void *obj = NULL;
++	struct zvfs_dirstream *d = NULL;
++	struct zvfs_fs_desc *ptr = NULL;
++
++	fd = zvfs_reserve_fd();
++	if (fd < 0) {
++		return NULL;
++	}
++
++	rc = sys_elastipool_alloc(&zvfs_dir_pool, &obj);
++	if (rc < 0) {
++		rc = -ENOMEM;
++		goto out_err;
++	}
++	d = obj;
++
++	ptr = zvfs_fs_desc_alloc(true);
++	if (ptr == NULL) {
++		rc = -EMFILE;
++		goto out_err;
++	}
++
++	fs_dir_t_init(&ptr->dir);
++
++	rc = fs_opendir(&ptr->dir, path);
++	if (rc < 0) {
++		goto out_err;
++	}
++
++	memset(d, 0, sizeof(*d));
++	d->fd = fd;
++	ptr->stream = d;
++
++	zvfs_finalize_typed_fd(fd, ptr, &fs_dir_fd_op_vtable, ZVFS_MODE_IFDIR);
++
++	return d;
++
++out_err:
++	if (ptr != NULL) {
++		zvfs_fs_desc_free(ptr);
++	}
++	if (d != NULL) {
++		zvfs_dirstream_free(d);
++	}
++	zvfs_free_fd(fd);
++	errno = -rc;
++	return NULL;
++}
++
++#ifdef CONFIG_USERSPACE
++static struct zvfs_dirstream *z_vrfy_zvfs_opendir(const char *path)
++{
++	char kpath[CONFIG_ZVFS_PATH_MAX];
++
++	if (zvfs_copy_user_path(kpath, path) < 0) {
++		return NULL;
++	}
++
++	return z_impl_zvfs_opendir(kpath);
++}
++#include <zephyr/syscalls/zvfs_opendir_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++static int zvfs_dir_fd_ioctl(int fd, unsigned long request, void *arg)
++{
++	struct fd_entry *entry = zvfs_fd_entry_get(fd);
++
++	if (entry == NULL) {
++		return -1;
++	}
++
++	if ((entry->mode & ZVFS_MODE_IFMT) != ZVFS_MODE_IFDIR) {
++		errno = ENOTDIR;
++		return -1;
++	}
++
++	return zvfs_fdtable_call_ioctl(entry->vtable, entry->obj, request, arg);
++}
++
++int z_impl_zvfs_readdir(int fd, struct zvfs_dirent *ent)
++{
++	return zvfs_dir_fd_ioctl(fd, ZFD_IOCTL_READDIR, ent);
++}
++
++#ifdef CONFIG_USERSPACE
++static int z_vrfy_zvfs_readdir(int fd, struct zvfs_dirent *ent)
++{
++	if (zvfs_fd_syscall_verify(fd) == NULL) {
++		return -1;
++	}
++
++	K_OOPS(K_SYSCALL_MEMORY_WRITE(ent, sizeof(*ent)));
++
++	return z_impl_zvfs_readdir(fd, ent);
++}
++#include <zephyr/syscalls/zvfs_readdir_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++int z_impl_zvfs_rewinddir(int fd)
++{
++	return zvfs_dir_fd_ioctl(fd, ZFD_IOCTL_REWINDDIR, NULL);
++}
++
++#ifdef CONFIG_USERSPACE
++static int z_vrfy_zvfs_rewinddir(int fd)
++{
++	if (zvfs_fd_syscall_verify(fd) == NULL) {
++		return -1;
++	}
++
++	return z_impl_zvfs_rewinddir(fd);
++}
++#include <zephyr/syscalls/zvfs_rewinddir_mrsh.c>
++#endif /* CONFIG_USERSPACE */
+diff --git a/lib/os/zvfs/zvfs_fs.c b/lib/os/zvfs/zvfs_fs.c
+index 72eb5a5f5bb..cc9731151a0 100644
+--- a/lib/os/zvfs/zvfs_fs.c
++++ b/lib/os/zvfs/zvfs_fs.c
+@@ -96,6 +96,31 @@ int z_impl_zvfs_open(const char *name, int flags, int mode)
+ 		return zmode;
+ 	}
+
++	if ((flags & ZVFS_O_DIRECTORY) != 0) {
++		fd = zvfs_reserve_fd();
++		if (fd < 0) {
++			return -1;
++		}
++
++		ptr = zvfs_fs_desc_alloc(true);
++		if (ptr == NULL) {
++			rc = -EMFILE;
++			goto out_err;
++		}
++
++		fs_dir_t_init(&ptr->dir);
++
++		rc = fs_opendir(&ptr->dir, name);
++		if (rc < 0) {
++			goto out_err;
++		}
++
++		ptr->stream = NULL;
++		zvfs_finalize_typed_fd(fd, ptr, &fs_dir_fd_op_vtable, ZVFS_MODE_IFDIR);
++
++		return fd;
++	}
++
+ 	fd = zvfs_reserve_fd();
+ 	if (fd < 0) {
+ 		return -1;
+@@ -140,6 +165,7 @@ int z_impl_zvfs_open(const char *name, int flags, int mode)
+ 		goto out_err;
+ 	}
+
++	ptr->stream = NULL;
+ 	zvfs_finalize_typed_fd(fd, ptr, &fs_fd_op_vtable, ZVFS_MODE_IFREG);
+
+ 	return fd;
+@@ -154,6 +180,115 @@ out_err:
+ 	return -1;
+ }
+
++static int fs_dir_close_vmeth(void *obj)
++{
++	struct zvfs_fs_desc *ptr = obj;
++	int rc;
++
++	rc = fs_closedir(&ptr->dir);
++	if (ptr->stream != NULL) {
++		zvfs_dirstream_free(ptr->stream);
++		ptr->stream = NULL;
++	}
++	zvfs_fs_desc_free(ptr);
++
++	return rc;
++}
++
++static ssize_t fs_dir_rw_vmeth(void *obj, void *buffer, size_t count)
++{
++	ARG_UNUSED(obj);
++	ARG_UNUSED(buffer);
++	ARG_UNUSED(count);
++
++	errno = EISDIR;
++	return -1;
++}
++
++static ssize_t fs_dir_write_vmeth(void *obj, const void *buffer, size_t count)
++{
++	return fs_dir_rw_vmeth(obj, (void *)buffer, count);
++}
++
++static int fs_dir_ioctl_vmeth(void *obj, unsigned int request, va_list args)
++{
++	int rc;
++	struct zvfs_fs_desc *ptr = obj;
++
++	switch (request) {
++	case ZFD_IOCTL_STAT: {
++		struct zvfs_stat *buf = va_arg(args, struct zvfs_stat *);
++
++		*buf = (struct zvfs_stat){0};
++		buf->mode = ZVFS_MODE_IFDIR;
++		return 0;
++	}
++	case ZFD_IOCTL_STATVFS: {
++		struct zvfs_statvfs *buf = va_arg(args, struct zvfs_statvfs *);
++		struct fs_statvfs vfs;
++		const struct fs_mount_t *mp = ptr->dir.mp;
++
++		if (mp == NULL || mp->mnt_point == NULL) {
++			errno = EBADF;
++			return -1;
++		}
++
++		/* fs_statvfs() rejects a bare "/"; the backend ignores the path */
++		rc = fs_statvfs(mp->mnt_point[1] == '\0' ? "/." : mp->mnt_point, &vfs);
++		if (rc < 0) {
++			break;
++		}
++
++		zvfs_statvfs_from_fs(buf, &vfs,
++				     (mp->flags & FS_MOUNT_FLAG_READ_ONLY) != 0);
++		return 0;
++	}
++	case ZFD_IOCTL_READDIR: {
++		struct zvfs_dirent *ent = va_arg(args, struct zvfs_dirent *);
++		struct fs_dirent entry;
++
++		rc = fs_readdir(&ptr->dir, &entry);
++		if (rc < 0) {
++			break;
++		}
++
++		if (entry.name[0] == '\0') {
++			/* end of directory: errno stays untouched */
++			return 1;
++		}
++
++		ent->d_type = (entry.type == FS_DIR_ENTRY_DIR) ? ZVFS_MODE_IFDIR
++							       : ZVFS_MODE_IFREG;
++		ent->d_ino = 0;
++		ent->d_size = entry.size;
++		strncpy(ent->d_name, entry.name, ZVFS_NAME_MAX);
++		ent->d_name[ZVFS_NAME_MAX] = '\0';
++		return 0;
++	}
++	case ZFD_IOCTL_REWINDDIR: {
++		rc = fs_rewinddir(&ptr->dir);
++		break;
++	}
++	default:
++		errno = EOPNOTSUPP;
++		return -1;
++	}
++
++	if (rc < 0) {
++		errno = -rc;
++		return -1;
++	}
++
++	return rc;
++}
++
++const struct fd_op_vtable fs_dir_fd_op_vtable = {
++	.read = fs_dir_rw_vmeth,
++	.write = fs_dir_write_vmeth,
++	.close = fs_dir_close_vmeth,
++	.ioctl = fs_dir_ioctl_vmeth,
++};
++
+ #ifdef CONFIG_USERSPACE
+ static int z_vrfy_zvfs_open(const char *name, int flags, int mode)
+ {
+diff --git a/lib/os/zvfs/zvfs_fs_priv.h b/lib/os/zvfs/zvfs_fs_priv.h
+index 151477d1306..99a5cdcd918 100644
+--- a/lib/os/zvfs/zvfs_fs_priv.h
++++ b/lib/os/zvfs/zvfs_fs_priv.h
+@@ -19,6 +19,18 @@ extern "C" {
+
+ struct fs_statvfs;
+ struct zvfs_statvfs;
++struct zvfs_dirstream;
++struct fd_op_vtable;
++
++/** File-descriptor vtable for ZVFS directory streams. */
++extern const struct fd_op_vtable fs_dir_fd_op_vtable;
++
++/**
++ * @brief Release a directory stream object to the pool.
++ *
++ * @param d Stream previously returned by zvfs_opendir().
++ */
++void zvfs_dirstream_free(struct zvfs_dirstream *d);
+
+ /**
+  * @brief Map Zephyr file system statistics into ZVFS statistics.
