@@ -1,22 +1,20 @@
 /*
- * Copyright (c) 2024 Tenstorrent AI ULC
+ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include <dirent.h>
 #include <errno.h>
 #include <string.h>
 
-#include <zephyr/fs/fs.h>
-#include <dirent.h>
-#include <zephyr/sys/util.h>
 #include <zephyr/sys/zvfs_fs.h>
+#include <zephyr/toolchain.h>
 
-int readdir_r(DIR *dirp, struct dirent *entry, struct dirent **result)
+int readdir_r(DIR *ZRESTRICT dirp, struct dirent *ZRESTRICT entry,
+	      struct dirent **ZRESTRICT result)
 {
 	int rc;
-	struct fs_dirent de;
-	struct zvfs_fs_desc *const ptr = (struct zvfs_fs_desc *)dirp;
 
 #ifndef CONFIG_NATIVE_LIBC
 	/* Silence __nonnull warnings for args the spec leaves undefined. */
@@ -36,20 +34,22 @@ int readdir_r(DIR *dirp, struct dirent *entry, struct dirent **result)
 	}
 #endif
 
-	rc = fs_readdir(&ptr->dir, &de);
+	rc = zvfs_readdir(dirp->fd, &dirp->ent);
 	if (rc < 0) {
 		*result = NULL;
-		return -rc;
+		return errno;
 	}
 
-	strncpy(entry->d_name, de.name, min(sizeof(entry->d_name), sizeof(de.name)));
-	entry->d_name[sizeof(entry->d_name) - 1] = '\0';
-
-	if (entry->d_name[0] == '\0') {
+	if (rc > 0) {
+		/* end of directory */
 		*result = NULL;
 		return 0;
 	}
 
+	entry->d_ino = (ino_t)dirp->ent.d_ino;
+	strncpy(entry->d_name, dirp->ent.d_name, sizeof(entry->d_name));
+	entry->d_name[sizeof(entry->d_name) - 1] = '\0';
 	*result = entry;
+
 	return 0;
 }
