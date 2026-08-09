@@ -11,6 +11,7 @@
 #include <signal.h>
 #include <stdio.h>
 
+#include <zephyr/app_memory/app_memdomain.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/util.h>
 
@@ -35,10 +36,11 @@ static inline bool signo_is_rt(int signo)
 	return ((signo >= SIGRTMIN) && (signo <= SIGRTMAX));
 }
 
+K_APPMEM_PARTITION_DEFINE(posix_signals_ext_partition);
+static K_APP_BMEM(posix_signals_ext_partition) char buf[sizeof("RT signal " STRINGIFY(UINT_MAX))];
+
 char *strsignal(int signum)
 {
-	static char buf[sizeof("RT signal " STRINGIFY(UINT_MAX))];
-
 	if (!signo_valid(signum)) {
 		errno = EINVAL;
 		return "Invalid signal";
