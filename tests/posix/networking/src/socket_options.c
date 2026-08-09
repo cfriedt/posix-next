@@ -9,7 +9,7 @@
 
 #include <zephyr/ztest.h>
 
-ZTEST(posix_networking, test_getsockopt)
+ZTEST_USER(posix_networking, test_getsockopt)
 {
 	int sock;
 	int optval;
@@ -22,7 +22,7 @@ ZTEST(posix_networking, test_getsockopt)
 	close(sock);
 }
 
-ZTEST(posix_networking, test_setsockopt)
+ZTEST_USER(posix_networking, test_setsockopt)
 {
 	int sock;
 	int optval = 1;

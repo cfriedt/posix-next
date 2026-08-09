@@ -9,7 +9,7 @@
 
 #include "test_net.h"
 
-ZTEST(posix_networking, test_sendto_ipv6)
+ZTEST_USER(posix_networking, test_sendto_ipv6)
 {
 	int sock;
 	struct sockaddr_in6 addr;
@@ -23,7 +23,7 @@ ZTEST(posix_networking, test_sendto_ipv6)
 	close(sock);
 }
 
-ZTEST(posix_networking, test_recvfrom_ipv6)
+ZTEST_USER(posix_networking, test_recvfrom_ipv6)
 {
 	int rx_sock;
 	int tx_sock;
