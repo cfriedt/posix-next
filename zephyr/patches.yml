@@ -953,3 +953,15 @@ patches:
       instead of overwriting it with -errno. When a failed socket()/bind()/setsockopt()
       leaves errno at 0, -errno is 0, which the caller reads as a valid fd (0) and then
       calls recvfrom() on it, tripping the get_sock_vtable() crash above.
+  - path: zephyr/net-addr-ntop-vrfy-honor-size.patch
+    sha256sum: 1cf03a7ee9ca3b420521a4378204fbd08d4fe71cfbcfc764004188e1fe20a284
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-09
+    upstreamable: true
+    comments: |
+      The net_addr_ntop() syscall verifier formatted into its full-size local
+      buffer and ignored the caller's size, so undersized destination buffers
+      succeeded (truncated) from user mode where kernel mode fails. Clamp the
+      format width to the caller's size so both modes agree.
