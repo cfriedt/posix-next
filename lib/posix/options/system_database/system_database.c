@@ -10,15 +10,18 @@
 #include <stddef.h>
 #include <string.h>
 
+#include <zephyr/app_memory/app_memdomain.h>
 #include <zephyr/posix/grp.h>
 #include <zephyr/posix/pwd.h>
 #include <zephyr/sys/util.h>
 
-static char gr_line_buf[CONFIG_POSIX_GETGR_R_SIZE_MAX];
-static char pw_line_buf[CONFIG_POSIX_GETPW_R_SIZE_MAX];
+K_APPMEM_PARTITION_DEFINE(posix_system_database_partition);
 
-static struct group gr;
-static struct passwd pw;
+static K_APP_BMEM(posix_system_database_partition) char gr_line_buf[CONFIG_POSIX_GETGR_R_SIZE_MAX];
+static K_APP_BMEM(posix_system_database_partition) char pw_line_buf[CONFIG_POSIX_GETPW_R_SIZE_MAX];
+
+static K_APP_BMEM(posix_system_database_partition) struct group gr;
+static K_APP_BMEM(posix_system_database_partition) struct passwd pw;
 
 struct group *getgrgid(gid_t gid)
 {

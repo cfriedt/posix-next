@@ -10,7 +10,7 @@
 
 #include <zephyr/ztest.h>
 
-ZTEST(posix_system_database, test_getpwnam)
+ZTEST_USER(posix_system_database, test_getpwnam)
 {
 	struct passwd *result;
 
@@ -57,7 +57,7 @@ ZTEST(posix_system_database, test_getpwnam)
 #endif
 }
 
-ZTEST(posix_system_database, test_getpwuid)
+ZTEST_USER(posix_system_database, test_getpwuid)
 {
 	struct passwd *result;
 
@@ -106,7 +106,7 @@ static const char *const members[] = {
 };
 #endif
 
-ZTEST(posix_system_database, test_getgrnam)
+ZTEST_USER(posix_system_database, test_getgrnam)
 {
 	struct group *result;
 
@@ -148,7 +148,7 @@ ZTEST(posix_system_database, test_getgrnam)
 #endif
 }
 
-ZTEST(posix_system_database, test_getgrgid)
+ZTEST_USER(posix_system_database, test_getgrgid)
 {
 	struct group *result;
 
@@ -186,4 +186,19 @@ ZTEST(posix_system_database, test_getgrgid)
 void *setup(void);
 void teardown(void *arg);
 
-ZTEST_SUITE(posix_system_database, NULL, setup, NULL, NULL, teardown);
+#ifdef CONFIG_USERSPACE
+extern struct k_mem_partition posix_system_database_partition;
+#endif
+
+static void *sdb_setup(void)
+{
+	void *ret = setup();
+
+#ifdef CONFIG_USERSPACE
+	zassert_ok(k_mem_domain_add_partition(&k_mem_domain_default,
+					      &posix_system_database_partition));
+#endif
+	return ret;
+}
+
+ZTEST_SUITE(posix_system_database, NULL, sdb_setup, NULL, NULL, teardown);
