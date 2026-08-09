@@ -20,7 +20,7 @@ static bool strsignal_is_unknown(const char *actual)
 	return (strstr(actual, "Unknown") != NULL) || (strstr(actual, "Invalid") != NULL);
 }
 
-ZTEST(posix_signals_ext, test_strsignal)
+ZTEST_USER(posix_signals_ext, test_strsignal)
 {
 	char *actual;
 	/* Using -INT_MAX here because compiler resolves INT_MIN to (-2147483647 - 1) */
@@ -126,4 +126,17 @@ ZTEST(posix_signals_ext, test_strsignal)
 	}
 }
 
-ZTEST_SUITE(posix_signals_ext, NULL, NULL, NULL, NULL, NULL);
+#ifdef CONFIG_USERSPACE
+extern struct k_mem_partition posix_signals_ext_partition;
+#endif
+
+static void *setup(void)
+{
+#ifdef CONFIG_USERSPACE
+	zassert_ok(k_mem_domain_add_partition(&k_mem_domain_default,
+					      &posix_signals_ext_partition));
+#endif
+	return NULL;
+}
+
+ZTEST_SUITE(posix_signals_ext, NULL, setup, NULL, NULL, NULL);
