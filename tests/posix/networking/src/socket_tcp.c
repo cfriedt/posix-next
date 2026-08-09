@@ -11,7 +11,7 @@
 
 #include "test_net.h"
 
-ZTEST(posix_networking, test_socket)
+ZTEST_USER(posix_networking, test_socket)
 {
 	int sock;
 
@@ -24,7 +24,7 @@ ZTEST(posix_networking, test_socket)
 	zassert_equal(errno, EAFNOSUPPORT);
 }
 
-ZTEST(posix_networking, test_bind)
+ZTEST_USER(posix_networking, test_bind)
 {
 	int sock;
 	struct sockaddr_in addr;
@@ -39,7 +39,7 @@ ZTEST(posix_networking, test_bind)
 	close(sock);
 }
 
-ZTEST(posix_networking, test_listen)
+ZTEST_USER(posix_networking, test_listen)
 {
 	uint16_t port;
 	int sock = tcp_listen_socket(&port);
@@ -48,7 +48,7 @@ ZTEST(posix_networking, test_listen)
 	close(sock);
 }
 
-ZTEST(posix_networking, test_connect)
+ZTEST_USER(posix_networking, test_connect)
 {
 	uint16_t port;
 	int lsock = tcp_listen_socket(&port);
@@ -58,7 +58,7 @@ ZTEST(posix_networking, test_connect)
 	close(lsock);
 }
 
-ZTEST(posix_networking, test_accept)
+ZTEST_USER(posix_networking, test_accept)
 {
 	uint16_t port;
 	int lsock = tcp_listen_socket(&port);
@@ -74,7 +74,7 @@ ZTEST(posix_networking, test_accept)
 	close(lsock);
 }
 
-ZTEST(posix_networking, test_send)
+ZTEST_USER(posix_networking, test_send)
 {
 	uint16_t port;
 	int lsock = tcp_listen_socket(&port);
@@ -92,7 +92,7 @@ ZTEST(posix_networking, test_send)
 	close(lsock);
 }
 
-ZTEST(posix_networking, test_recv)
+ZTEST_USER(posix_networking, test_recv)
 {
 	uint16_t port;
 	int lsock = tcp_listen_socket(&port);
@@ -115,7 +115,7 @@ ZTEST(posix_networking, test_recv)
 	close(lsock);
 }
 
-ZTEST(posix_networking, test_shutdown)
+ZTEST_USER(posix_networking, test_shutdown)
 {
 	uint16_t port;
 	int lsock = tcp_listen_socket(&port);
@@ -136,7 +136,7 @@ ZTEST(posix_networking, test_shutdown)
 	close(lsock);
 }
 
-ZTEST(posix_networking, test_getsockname)
+ZTEST_USER(posix_networking, test_getsockname)
 {
 	uint16_t port;
 	int lsock = tcp_listen_socket(&port);
@@ -149,7 +149,7 @@ ZTEST(posix_networking, test_getsockname)
 	close(lsock);
 }
 
-ZTEST(posix_networking, test_getpeername)
+ZTEST_USER(posix_networking, test_getpeername)
 {
 	uint16_t port;
 	int lsock = tcp_listen_socket(&port);

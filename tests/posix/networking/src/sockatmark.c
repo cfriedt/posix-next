@@ -12,7 +12,7 @@
 
 #include "../../shared/linux_compat_test.h"
 
-ZTEST(posix_networking, test_sockatmark)
+ZTEST_USER(posix_networking, test_sockatmark)
 {
 	int sock;
 

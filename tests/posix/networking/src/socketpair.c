@@ -9,7 +9,7 @@
 
 #include "test_net.h"
 
-ZTEST(posix_networking, test_socketpair)
+ZTEST_USER(posix_networking, test_socketpair)
 {
 	int sv[2];
 	char buf[8];
