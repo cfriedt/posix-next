@@ -14,7 +14,7 @@
 
 #define SCHED_INVALID 4242
 
-static pthread_attr_t attr;
+static ZTEST_BMEM pthread_attr_t attr;
 
 static void *thread_entry(void *arg)
 {
@@ -34,21 +34,21 @@ static void can_create_thread(const pthread_attr_t *attrp)
 	zassert_ok(pthread_join(th, NULL));
 }
 
-ZTEST(xsi_realtime, test_sched_get_priority_min)
+ZTEST_USER(xsi_realtime, test_sched_get_priority_min)
 {
 	errno = 0;
 	zassert_equal(sched_get_priority_min(SCHED_INVALID), -1);
 	zassert_equal(errno, EINVAL);
 }
 
-ZTEST(xsi_realtime, test_sched_get_priority_max)
+ZTEST_USER(xsi_realtime, test_sched_get_priority_max)
 {
 	errno = 0;
 	zassert_equal(sched_get_priority_max(SCHED_INVALID), -1);
 	zassert_equal(errno, EINVAL);
 }
 
-ZTEST(xsi_realtime, test_sched_policy_and_priority_limits)
+ZTEST_USER(xsi_realtime, test_sched_policy_and_priority_limits)
 {
 	int pmin = -1;
 	int pmax = -1;
