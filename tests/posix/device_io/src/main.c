@@ -25,7 +25,7 @@ static void cleanup_test_file(void)
 	(void)unlink(TEST_FILE);
 }
 
-ZTEST(posix_device_io, test_read_write)
+ZTEST_USER(posix_device_io, test_read_write)
 {
 	static const char payload[] = "read-write";
 	char buf[sizeof(payload)] = {0};
@@ -113,7 +113,7 @@ ZTEST(posix_device_io, test_fopen_fread_fwrite)
 	cleanup_test_file();
 }
 
-ZTEST(posix_device_io, test_pread_pwrite)
+ZTEST_USER(posix_device_io, test_pread_pwrite)
 {
 	static const char payload[] = "pread-pwrite";
 	char buf[sizeof(payload)] = {0};
@@ -142,6 +142,11 @@ ZTEST(posix_device_io, test_pread_pwrite_shm)
 	char buf[sizeof(payload)] = {0};
 	int fd;
 
+	if (IS_ENABLED(CONFIG_USERSPACE)) {
+		/* k_mem_map() pages are absent from memory-domain page tables */
+		ztest_test_skip();
+	}
+
 	fd = shm_open("/device_io", O_RDWR | O_CREAT, 0666);
 	zassert_true(fd >= 0, "shm_open() failed, errno=%d", errno);
 	zassert_ok(ftruncate(fd, sizeof(payload)));
@@ -155,7 +160,7 @@ ZTEST(posix_device_io, test_pread_pwrite_shm)
 	zassert_ok(shm_unlink("/device_io"));
 }
 
-ZTEST(posix_device_io, test_pread_pwrite_einval)
+ZTEST_USER(posix_device_io, test_pread_pwrite_einval)
 {
 	char byte;
 	int fd;
@@ -175,7 +180,7 @@ ZTEST(posix_device_io, test_pread_pwrite_einval)
 	cleanup_test_file();
 }
 
-ZTEST(posix_device_io, test_poll)
+ZTEST_USER(posix_device_io, test_poll)
 {
 	struct pollfd pfd;
 	int efd;
@@ -203,7 +208,7 @@ ZTEST(posix_device_io, test_poll)
 	zassert_ok(close(efd));
 }
 
-ZTEST(posix_device_io, test_select_fd_macros)
+ZTEST_USER(posix_device_io, test_select_fd_macros)
 {
 	fd_set readfds;
 	struct timeval tv = {0, 0};
@@ -237,7 +242,7 @@ ZTEST(posix_device_io, test_select_fd_macros)
 	zassert_ok(close(efd));
 }
 
-ZTEST(posix_device_io, test_pselect)
+ZTEST_USER(posix_device_io, test_pselect)
 {
 	fd_set readfds;
 	struct timespec ts = {0, 0};
@@ -263,7 +268,7 @@ ZTEST(posix_device_io, test_pselect)
 	zassert_ok(close(efd));
 }
 
-ZTEST(posix_device_io, test_perror)
+ZTEST_USER(posix_device_io, test_perror)
 {
 	errno = ENOENT;
 	perror(NULL);
@@ -298,47 +303,47 @@ static void iso_c_close_file(FILE *fp)
 	cleanup_test_file();
 }
 
-ZTEST(posix_device_io, test_stdin)
+ZTEST_USER(posix_device_io, test_stdin)
 {
 	zassert_not_null(stdin);
 }
 
-ZTEST(posix_device_io, test_stdout)
+ZTEST_USER(posix_device_io, test_stdout)
 {
 	zassert_not_null(stdout);
 }
 
-ZTEST(posix_device_io, test_stderr)
+ZTEST_USER(posix_device_io, test_stderr)
 {
 	zassert_not_null(stderr);
 }
 
-ZTEST(posix_device_io, test_printf)
+ZTEST_USER(posix_device_io, test_printf)
 {
 	zassert_true(printf("%s", "") >= 0);
 }
 
-ZTEST(posix_device_io, test_fprintf)
+ZTEST_USER(posix_device_io, test_fprintf)
 {
 	zassert_true(fprintf(stdout, "%s", "") >= 0);
 }
 
-ZTEST(posix_device_io, test_fputs)
+ZTEST_USER(posix_device_io, test_fputs)
 {
 	zassert_true(fputs("", stdout) >= 0);
 }
 
-ZTEST(posix_device_io, test_putchar)
+ZTEST_USER(posix_device_io, test_putchar)
 {
 	zassert_equal(putchar('\n'), '\n');
 }
 
-ZTEST(posix_device_io, test_puts)
+ZTEST_USER(posix_device_io, test_puts)
 {
 	zassert_true(puts("") >= 0);
 }
 
-ZTEST(posix_device_io, test_fflush)
+ZTEST_USER(posix_device_io, test_fflush)
 {
 	zassert_ok(fflush(stdout));
 }
