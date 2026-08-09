@@ -9,9 +9,9 @@
 
 #include <zephyr/ztest.h>
 
-static char buf[CONFIG_POSIX_GETGR_R_SIZE_MAX];
+static ZTEST_BMEM char buf[CONFIG_POSIX_GETGR_R_SIZE_MAX];
 
-ZTEST(posix_system_database_r, test_getpwnam_r)
+ZTEST_USER(posix_system_database_r, test_getpwnam_r)
 {
 	struct passwd pwd;
 	struct passwd *result;
@@ -92,7 +92,7 @@ ZTEST(posix_system_database_r, test_getpwnam_r)
 #endif
 }
 
-ZTEST(posix_system_database_r, test_getpwuid_r)
+ZTEST_USER(posix_system_database_r, test_getpwuid_r)
 {
 	struct passwd pwd;
 	struct passwd *result;
@@ -179,7 +179,7 @@ static const char *const members[] = {
 	"admin",
 };
 
-ZTEST(posix_system_database_r, test_getgrnam_r)
+ZTEST_USER(posix_system_database_r, test_getgrnam_r)
 {
 	struct group grp;
 	struct group *result;
@@ -255,7 +255,7 @@ ZTEST(posix_system_database_r, test_getgrnam_r)
 #endif
 }
 
-ZTEST(posix_system_database_r, test_getgrgid_r)
+ZTEST_USER(posix_system_database_r, test_getgrgid_r)
 {
 	struct group grp;
 	struct group *result;
