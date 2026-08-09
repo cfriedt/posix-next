@@ -36,7 +36,7 @@ static int open_test_file(void)
 	return fd;
 }
 
-ZTEST(posix_fd_mgmt, test_dup)
+ZTEST_USER(posix_fd_mgmt, test_dup)
 {
 	static const char payload[] = "dup-file";
 	const size_t len = strlen(payload);
@@ -74,7 +74,7 @@ ZTEST(posix_fd_mgmt, test_dup)
 	cleanup_test_file();
 }
 
-ZTEST(posix_fd_mgmt, test_dup2)
+ZTEST_USER(posix_fd_mgmt, test_dup2)
 {
 	eventfd_t val = 19;
 	eventfd_t read_val = 0;
@@ -115,7 +115,7 @@ ZTEST(posix_fd_mgmt, test_dup2)
 	zassert_ok(close(efd));
 }
 
-ZTEST(posix_fd_mgmt, test_fcntl)
+ZTEST_USER(posix_fd_mgmt, test_fcntl)
 {
 	eventfd_t val = 42;
 	eventfd_t read_val = 0;
@@ -234,7 +234,7 @@ ZTEST(posix_fd_mgmt, test_fcntl)
 	zassert_ok(close(efd));
 }
 
-ZTEST(posix_fd_mgmt, test_dup_eventfd)
+ZTEST_USER(posix_fd_mgmt, test_dup_eventfd)
 {
 	eventfd_t val = 77;
 	eventfd_t read_val = 0;
@@ -256,7 +256,7 @@ ZTEST(posix_fd_mgmt, test_dup_eventfd)
 	zassert_ok(close(efd));
 }
 
-ZTEST(posix_fd_mgmt, test_ftruncate)
+ZTEST_USER(posix_fd_mgmt, test_ftruncate)
 {
 	static const char payload[] = "ftruncate-test";
 	const size_t len = strlen(payload);
@@ -275,10 +275,11 @@ ZTEST(posix_fd_mgmt, test_ftruncate)
 	cleanup_test_file();
 }
 
-ZTEST(posix_fd_mgmt, test_lseek)
+ZTEST_USER(posix_fd_mgmt, test_lseek)
 {
 	static const char payload[] = "lseek-test";
 	const size_t len = strlen(payload);
+	char buf[4];
 	int fd;
 
 	zassert_equal(lseek(-1, 0, SEEK_SET), (off_t)-1);
@@ -290,6 +291,13 @@ ZTEST(posix_fd_mgmt, test_lseek)
 	zassert_equal(lseek(fd, (off_t)len, SEEK_SET), (off_t)len);
 	zassert_equal(lseek(fd, 0, SEEK_END), (off_t)len);
 	zassert_equal(lseek(fd, -2, SEEK_END), (off_t)(len - 2));
+
+	/* SEEK_CUR is relative to the fd offset advanced by read()/write() */
+	zassert_equal(lseek(fd, 0, SEEK_SET), 0);
+	zassert_equal(read(fd, buf, sizeof(buf)), (ssize_t)sizeof(buf));
+	zassert_equal(lseek(fd, 0, SEEK_CUR), (off_t)sizeof(buf));
+	zassert_equal(lseek(fd, 2, SEEK_CUR), (off_t)(sizeof(buf) + 2));
+	zassert_equal(lseek(fd, -2, SEEK_CUR), (off_t)sizeof(buf));
 
 	zassert_ok(close(fd));
 	cleanup_test_file();
