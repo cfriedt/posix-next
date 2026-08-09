@@ -5,11 +5,13 @@
  */
 
 #include <errno.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include <zephyr/sys/fdtable.h>
 #include <zephyr/sys/util.h>
+#include <zephyr/sys/zvfs.h>
+#include <zephyr/sys/zvfs_fs.h>
 #include <zephyr/posix/grp.h>
 #include <zephyr/posix/pwd.h>
 
@@ -24,12 +26,37 @@ static int count(const char *s, char c)
 	return count;
 }
 
+/* fgets()-like line reader over zvfs syscalls, usable from user mode */
+static ssize_t read_line(int fd, char *buf, size_t bufsize)
+{
+	char *nl;
+	ssize_t n = zvfs_read_offset(fd, buf, bufsize - 1, NULL);
+
+	if (n <= 0) {
+		return n;
+	}
+	buf[n] = '\0';
+
+	nl = strchr(buf, '\n');
+	if (nl != NULL) {
+		ssize_t used = (nl - buf) + 1;
+
+		if ((used < n) && (zvfs_lseek(fd, used - n, ZVFS_SEEK_CUR) < 0)) {
+			return -1;
+		}
+		nl[1] = '\0';
+		return used;
+	}
+
+	return n;
+}
+
 int z_getgr_r(const char *name, gid_t gid, struct group *grp, char *buffer, size_t bufsize,
 	      struct group **result)
 {
 	int ret;
 	int nmemb;
-	FILE *file;
+	int fd;
 
 	if (((name == NULL) && (gid == (gid_t)-1)) || (grp == NULL) || (buffer == NULL) ||
 	    (result == NULL)) {
@@ -39,20 +66,16 @@ int z_getgr_r(const char *name, gid_t gid, struct group *grp, char *buffer, size
 		return EINVAL;
 	}
 
-	/*
-	 * Originally, this checked for a bufsize of 0, but newlib will return NULL from fgets when
-	 * bufsize is < 2
-	 */
 	if (bufsize < 2) {
 		return ERANGE;
 	}
 
-	file = fopen("/etc/group", "r");
-	if (file == NULL) {
+	fd = zvfs_open("/etc/group", ZVFS_O_RDONLY, 0);
+	if (fd < 0) {
 		return EIO;
 	}
 
-	while (fgets(buffer, (int)bufsize, file) != NULL) {
+	while (read_line(fd, buffer, bufsize) > 0) {
 		char *p = buffer;
 		char *q;
 
@@ -144,7 +167,7 @@ close_erange:
 	ret = ERANGE;
 
 close_ret:
-	fclose(file);
+	zvfs_close(fd);
 	return ret;
 }
 
@@ -152,7 +175,7 @@ int z_getpw_r(const char *name, uid_t uid, struct passwd *pwd, char *buffer, siz
 	      struct passwd **result)
 {
 	int ret;
-	FILE *file;
+	int fd;
 
 	if (((name == NULL) && (uid == (uid_t)-1)) || (pwd == NULL) || (buffer == NULL) ||
 	    (result == NULL)) {
@@ -162,20 +185,16 @@ int z_getpw_r(const char *name, uid_t uid, struct passwd *pwd, char *buffer, siz
 		return EINVAL;
 	}
 
-	/*
-	 * Originally, this checked for a bufsize of 0, but newlib will return NULL from fgets when
-	 * bufsize is < 2
-	 */
 	if (bufsize < 2) {
 		return ERANGE;
 	}
 
-	file = fopen("/etc/passwd", "r");
-	if (file == NULL) {
+	fd = zvfs_open("/etc/passwd", ZVFS_O_RDONLY, 0);
+	if (fd < 0) {
 		return EIO;
 	}
 
-	while (fgets(buffer, (int)bufsize, file) != NULL) {
+	while (read_line(fd, buffer, bufsize) > 0) {
 		char *p = buffer;
 		char *q;
 
@@ -271,6 +290,6 @@ close_erange:
 	ret = ERANGE;
 
 close_ret:
-	fclose(file);
+	zvfs_close(fd);
 	return ret;
 }
