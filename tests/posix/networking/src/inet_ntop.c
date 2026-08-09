@@ -11,7 +11,7 @@
 
 #include <zephyr/ztest.h>
 
-ZTEST(posix_networking, test_inet_ntop)
+ZTEST_USER(posix_networking, test_inet_ntop)
 {
 	struct in_addr in4;
 	char buf[INET_ADDRSTRLEN];
@@ -25,7 +25,7 @@ ZTEST(posix_networking, test_inet_ntop)
 	zassert_is_null(inet_ntop(AF_UNSPEC, &in4, buf, sizeof(buf)));
 }
 
-ZTEST(posix_networking, test_inet_pton)
+ZTEST_USER(posix_networking, test_inet_pton)
 {
 	struct in_addr in4;
 	struct in6_addr in6;

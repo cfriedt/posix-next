@@ -12,7 +12,7 @@
 #include <zephyr/sys/util.h>
 #include <zephyr/ztest.h>
 
-ZTEST(posix_networking, test_inet_addr)
+ZTEST_USER(posix_networking, test_inet_addr)
 {
 	in_addr_t ret;
 	static const struct parm_fail {

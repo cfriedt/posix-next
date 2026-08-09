@@ -11,7 +11,7 @@
 #include "../../shared/linux_compat_test.h"
 #include "test_net.h"
 
-ZTEST(posix_networking, test_sendmsg)
+ZTEST_USER(posix_networking, test_sendmsg)
 {
 	uint16_t port;
 	int lsock = tcp_listen_socket(&port);
@@ -40,7 +40,7 @@ ZTEST(posix_networking, test_sendmsg)
 	close(lsock);
 }
 
-ZTEST(posix_networking, test_recvmsg)
+ZTEST_USER(posix_networking, test_recvmsg)
 {
 	int rx_sock;
 	int tx_sock;
@@ -86,7 +86,7 @@ ZTEST(posix_networking, test_recvmsg)
 	close(rx_sock);
 }
 
-ZTEST(posix_networking, test_recvmsg_null)
+ZTEST_USER(posix_networking, test_recvmsg_null)
 {
 	IF_NOT_NATIVE_LIBC({
 		int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
