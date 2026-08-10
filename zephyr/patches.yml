@@ -587,6 +587,41 @@ patches:
       POSIX sem_destroy() EBUSY detection, which lets sem_t be exactly
       struct sys_sem and the POSIX semaphore layer be a thin spelling
       adapter over the sys_sem API.
+  - path: zephyr/futex-wait-at-any-user-accessible-address.patch
+    sha256sum: 9950d1bd5efed9776fc2101e9b8f861a85d130bc07d8735f2cd8777cd1664fa1
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-09
+    upstreamable: false
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/sys-sem-track-blocked-waiters.patch
+    comments: |
+      Rebased onto v4.5.0-rc1 on top of kernel-futex-per-object-wait-queues, which restores the v4.4.1 futex
+      this variant extends; the implementation lives in kernel/userspace/futex.c there.
+      k_futex_wait() resolved its wait queue through the kernel object
+      table, so only statically-defined futexes - the ones the kernel
+      object scanner can see - were waitable; a futex on a stack or in
+      heap memory failed with -EINVAL even for supervisor callers, and
+      only under contention, since uncontended operations never enter the
+      kernel. Fall back to a small fixed array of address-hashed wait
+      queues for unregistered futexes, in the manner of Linux: waiters
+      record the futex address and wake-ups unpend only matching waiters,
+      in priority order, so sharing a bucket costs lock contention but
+      never a lost or spurious wakeup. Statically-defined futexes keep
+      their dedicated wait queues. Update the mem_protect/futex testsuite
+      cases that asserted -EINVAL for user-accessible non-kobject
+      addresses to assert the new pend/no-waiter behavior instead.
+
+      This lifts the static-allocation restriction from sys_sem and
+      everything built on it, notably POSIX sem_t.
+
+      Inspired by upstream PR #110059, which fixes the same issue with a
+      single global wait queue and the awaited address in the thread
+      struct, but the implementation here varies quite differently and it
+      is not clear if this is a candidate for upstreaming.
   - path: zephyr/k-obj-map-size.patch
     sha256sum: a490528e70769c7d22d9029f19b972603270dc4acbead1c98f761f9e0b25a3df
     module: zephyr
