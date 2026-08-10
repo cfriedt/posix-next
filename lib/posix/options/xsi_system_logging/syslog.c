@@ -7,13 +7,13 @@
 
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/sys/atomic.h>
 #include <zephyr/sys/printk.h>
 
 #undef LOG_ERR
 #include <syslog.h>
 
-static struct k_spinlock syslog_lock;
-static uint8_t syslog_mask;
+static atomic_t syslog_mask;
 
 static int syslog_priority_to_zephyr_log_level(int priority)
 {
@@ -57,19 +57,12 @@ void syslog(int priority, const char *format, ...)
 
 int setlogmask(int maskpri)
 {
-	int oldpri = -1;
-
-	K_SPINLOCK(&syslog_lock) {
-		oldpri = syslog_mask;
-		syslog_mask = maskpri;
-	}
-
-	return oldpri;
+	return (int)atomic_set(&syslog_mask, (atomic_val_t)(uint8_t)maskpri);
 }
 
 void vsyslog(int priority, const char *format, va_list ap)
 {
-	uint8_t mask = 0;
+	uint8_t mask;
 	int level = syslog_priority_to_zephyr_log_level(priority);
 
 	if (level < 0) {
@@ -77,9 +70,7 @@ void vsyslog(int priority, const char *format, va_list ap)
 		return;
 	}
 
-	K_SPINLOCK(&syslog_lock) {
-		mask = syslog_mask;
-	}
+	mask = (uint8_t)atomic_get(&syslog_mask);
 
 	if ((BIT(level) & mask) == 0) {
 		/* masked */
