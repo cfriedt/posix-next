@@ -36,9 +36,12 @@ static uint32_t write_lock_acquire(struct posix_rwlock *rwl, k_timeout_t timeout
 LOG_MODULE_REGISTER(pthread_rwlock, CONFIG_PTHREAD_RWLOCK_LOG_LEVEL);
 
 static SYS_SEM_DEFINE(posix_rwlock_lock, 1, 1);
-SYS_ELASTIPOOL_DEFINE_STATIC(posix_rwlock_pool, sizeof(struct posix_rwlock),
-			     __alignof(struct posix_rwlock), CONFIG_MAX_PTHREAD_RWLOCK_COUNT,
-			     CONFIG_MAX_PTHREAD_RWLOCK_COUNT);
+/* typed (not raw) storage, so the kobject scanner registers each embedded sys_sem futex */
+static struct posix_rwlock posix_rwlock_pool_storage[CONFIG_MAX_PTHREAD_RWLOCK_COUNT];
+SYS_ELASTIPOOL_DEFINE_ADVANCED(posix_rwlock_pool, sizeof(struct posix_rwlock),
+			       __alignof(struct posix_rwlock), CONFIG_MAX_PTHREAD_RWLOCK_COUNT,
+			       CONFIG_MAX_PTHREAD_RWLOCK_COUNT, NULL, posix_rwlock_pool_storage,
+			       static);
 
 /**
  * @brief Initialize read-write lock object.
