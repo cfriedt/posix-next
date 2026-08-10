@@ -2,6 +2,9 @@
 
 zephyr_library()
 
+# library globals live in the C library partition, so user mode callers can reach them
+zephyr_library_app_memory(z_libc_partition)
+
 zephyr_library_property(ALLOW_EMPTY TRUE)
 
 zephyr_library_include_directories(
