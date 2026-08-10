@@ -459,6 +459,26 @@ patches:
     upstreamable: true
     comments: |
       use finalize in the k_mem_paging API rather than free.
+  - path: zephyr/sys-sem-track-blocked-waiters.patch
+    sha256sum: 4bbdbd822bf76f0605572e4a2082bf1ccb87a2f9b3b5b19cdced33a97f53d45a
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-09
+    upstreamable: true
+    comments: |
+      Track whether any thread is blocked taking a sys_sem and expose it
+      as sys_sem_has_waiters(). The kernel maintains the count in every
+      k_futex: it is incremented under the wait-queue lock before the
+      value compare and decremented by whoever unblocks the thread, the
+      waker in k_futex_wake() or the thread itself on timeout, still inside
+      the system call. A woken thread therefore never touches the futex
+      again, which makes it safe to destroy a semaphore right after the
+      give that released its last waiter. Without userspace the k_sem wait
+      queue is peeked. The answer is a snapshot intended as a hint, e.g. for
+      POSIX sem_destroy() EBUSY detection, which lets sem_t be exactly
+      struct sys_sem and the POSIX semaphore layer be a thin spelling
+      adapter over the sys_sem API.
   - path: zephyr/k-obj-map-size.patch
     sha256sum: 2dd724c14885b31b9dff2cb7caa53b0b9aedecde81f801dd97f18280a5a38d58
     module: zephyr
