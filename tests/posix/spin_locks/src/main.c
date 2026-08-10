@@ -11,7 +11,7 @@
 
 #include "../../shared/linux_compat_test.h"
 
-ZTEST(posix_spinlocks, test_spin_init_destroy)
+ZTEST_USER(posix_spinlocks, test_spin_init_destroy)
 {
 	pthread_spinlock_t lock;
 
@@ -47,7 +47,7 @@ ZTEST(posix_spinlocks, test_spin_init_destroy)
 	})
 }
 
-ZTEST(posix_spinlocks, test_spin_descriptor_leak)
+ZTEST_USER(posix_spinlocks, test_spin_descriptor_leak)
 {
 	pthread_spinlock_t lock[CONFIG_MAX_PTHREAD_SPINLOCK_COUNT];
 
@@ -73,7 +73,7 @@ ZTEST(posix_spinlocks, test_spin_descriptor_leak)
 	}
 }
 
-ZTEST(posix_spinlocks, test_spin_lock_unlock)
+ZTEST_USER(posix_spinlocks, test_spin_lock_unlock)
 {
 	pthread_spinlock_t lock;
 
