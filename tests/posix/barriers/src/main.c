@@ -14,9 +14,9 @@
 
 #define N_THR 3
 
-static pthread_barrier_t barrier;
-static int barrier_return[N_THR];
-static int barrier_done[N_THR];
+static ZTEST_BMEM pthread_barrier_t barrier;
+static ZTEST_BMEM int barrier_return[N_THR];
+static ZTEST_BMEM int barrier_done[N_THR];
 
 static void *barrier_thread(void *p1)
 {
@@ -28,7 +28,7 @@ static void *barrier_thread(void *p1)
 	return NULL;
 }
 
-ZTEST(posix_barriers, test_pthread_barrierattr_init)
+ZTEST_USER(posix_barriers, test_pthread_barrierattr_init)
 {
 	int ret, pshared;
 	pthread_barrierattr_t attr;
@@ -60,13 +60,13 @@ ZTEST(posix_barriers, test_pthread_barrierattr_init)
 	zassert_equal(ret, 0, "pthread_barrierattr_destroy failed");
 }
 
-ZTEST(posix_barriers, test_pthread_barrier_init)
+ZTEST_USER(posix_barriers, test_pthread_barrier_init)
 {
 	zassert_ok(pthread_barrier_init(&barrier, NULL, N_THR));
 	zassert_ok(pthread_barrier_destroy(&barrier));
 }
 
-ZTEST(posix_barriers, test_pthread_barrier_wait)
+ZTEST_USER(posix_barriers, test_pthread_barrier_wait)
 {
 	pthread_t threads[N_THR];
 	int serial_threads = 0;
@@ -95,7 +95,7 @@ ZTEST(posix_barriers, test_pthread_barrier_wait)
 	zassert_ok(pthread_barrier_destroy(&barrier));
 }
 
-ZTEST(posix_barriers, test_pthread_barrier_destroy)
+ZTEST_USER(posix_barriers, test_pthread_barrier_destroy)
 {
 	zassert_ok(pthread_barrier_init(&barrier, NULL, 2));
 	zassert_ok(pthread_barrier_destroy(&barrier));
