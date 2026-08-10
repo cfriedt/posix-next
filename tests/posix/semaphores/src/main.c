@@ -21,6 +21,9 @@
 #define WAIT_TIME_MS 100
 BUILD_ASSERT(WAIT_TIME_MS > 0, "WAIT_TIME_MS must be posistive");
 
+/* static (rather than automatic) storage, so that waits work from user mode */
+static ZTEST_BMEM sem_t sema;
+
 static void *child_func_sem_post(void *p1)
 {
 	sem_t *sem = (sem_t *)p1;
@@ -124,9 +127,10 @@ static void semaphore_test(sem_t *sem)
 	zassert_ok(pthread_join(thread3, NULL));
 }
 
-ZTEST(posix_semaphores, test_semaphore)
+ZTEST_USER(posix_semaphores, test_semaphore)
 {
-	sem_t sema;
+	sem_t stack_sem;
+	struct timespec abstime;
 
 	/* degenerate cases */
 	IF_NOT_NATIVE_LIBC({
@@ -142,6 +146,19 @@ ZTEST(posix_semaphores, test_semaphore)
 			      " semaphore is destroyed");
 		zassert_equal(errno, EINVAL);
 	})
+
+	/* TESTPOINT: a sem_t works in any caller-accessible memory, including this stack */
+	zassert_ok(sem_init(&stack_sem, 0, 0));
+	zassert_equal(sem_trywait(&stack_sem), -1);
+	zassert_equal(errno, EAGAIN);
+	zassert_ok(sem_post(&stack_sem));
+	zassert_ok(sem_wait(&stack_sem));
+	/* a blocking take exercises the futex wait path at an unregistered address */
+	zassert_ok(clock_gettime(CLOCK_REALTIME, &abstime));
+	timespec_add(&abstime, &(struct timespec){.tv_nsec = WAIT_TIME_MS * NSEC_PER_MSEC});
+	zassert_equal(sem_timedwait(&stack_sem, &abstime), -1);
+	zassert_equal(errno, ETIMEDOUT);
+	zassert_ok(sem_destroy(&stack_sem));
 
 	semaphore_test(&sema);
 }
@@ -184,7 +201,7 @@ static void *nsem_close_func(void *p)
 
 #endif /* CONFIG_NATIVE_LIBC */
 
-ZTEST(posix_semaphores, test_named_semaphore)
+ZTEST_USER(posix_semaphores, test_named_semaphore)
 {
 #ifdef CONFIG_NATIVE_LIBC
 	/* relies on Zephyr-internal named semaphore accounting */
