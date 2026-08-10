@@ -1,0 +1,113 @@
+diff --git a/include/zephyr/kernel.h b/include/zephyr/kernel.h
+--- a/include/zephyr/kernel.h
++++ b/include/zephyr/kernel.h
+@@ -2741,6 +2741,14 @@ struct k_futex {
+ 	 * k_futex_wait().
+ 	 */
+ 	atomic_t val;
++	/**
++	 * Threads currently blocked on the futex: incremented before a thread
++	 * blocks and decremented by whoever unblocks it (a waker, or the thread
++	 * itself on timeout), so a woken thread never touches the futex again.
++	 * Callers zero-initialize it and may read it as a hint, e.g. to skip a
++	 * wake-up when nobody is waiting.
++	 */
++	atomic_t waiters;
+ };
+ 
+ /**
+diff --git a/include/zephyr/sys/sem.h b/include/zephyr/sys/sem.h
+--- a/include/zephyr/sys/sem.h
++++ b/include/zephyr/sys/sem.h
+@@ -139,6 +139,19 @@ int sys_sem_take(struct sys_sem *sem, k_timeout_t timeout);
+  */
+ unsigned int sys_sem_count_get(struct sys_sem *sem);
+ 
++/**
++ * @brief Check whether any thread is blocked taking @a sem.
++ *
++ * The answer is a snapshot: it may already be stale by the time the caller
++ * acts on it, so it is a hint (e.g. for POSIX `sem_destroy()` `EBUSY`
++ * detection) rather than a synchronization primitive.
++ *
++ * @param sem Address of the sys_sem.
++ *
++ * @return true if at least one thread was blocked taking @a sem.
++ */
++bool sys_sem_has_waiters(struct sys_sem *sem);
++
+ /**
+  * @cond INTERNAL_HIDDEN
+  */
+diff --git a/kernel/sys/sem.c b/kernel/sys/sem.c
+--- a/kernel/sys/sem.c
++++ b/kernel/sys/sem.c
+@@ -5,6 +5,7 @@
+ 
+ #include <zephyr/kernel.h>
+ #include <zephyr/sys/sem.h>
++#include <wait_q.h>
+ 
+ int sys_sem_init(struct sys_sem *sem, unsigned int initial_count,
+ 		 unsigned int limit)
+@@ -37,3 +38,8 @@ unsigned int sys_sem_count_get(struct sys_sem *sem)
+ {
+ 	return k_sem_count_get(&sem->kernel_sem);
+ }
++
++bool sys_sem_has_waiters(struct sys_sem *sem)
++{
++	return z_waitq_head(&sem->kernel_sem.wait_q) != NULL;
++}
+diff --git a/kernel/userspace/futex.c b/kernel/userspace/futex.c
+--- a/kernel/userspace/futex.c
++++ b/kernel/userspace/futex.c
+@@ -41,6 +41,7 @@ int z_impl_k_futex_wake(struct k_futex *futex, bool wake_all)
+ 		if (!z_sched_wake(&futex_data->wait_q, 0, NULL)) {
+ 			break;
+ 		}
++		(void)atomic_dec(&futex->waiters);
+ 		woken++;
+ 	} while (wake_all);
+ 
+@@ -77,7 +78,11 @@ int z_impl_k_futex_wait(struct k_futex *futex, int expected,
+ 
+ 	key = k_spin_lock(&futex_data->lock);
+ 
++	/* counted before the compare, so a waker that sees zero knows the value check follows */
++	(void)atomic_inc(&futex->waiters);
++
+ 	if (atomic_get(&futex->val) != (atomic_val_t)expected) {
++		(void)atomic_dec(&futex->waiters);
+ 		k_spin_unlock(&futex_data->lock, key);
+ 		return -EAGAIN;
+ 	}
+@@ -85,6 +90,8 @@ int z_impl_k_futex_wait(struct k_futex *futex, int expected,
+ 	ret = z_pend_curr(&futex_data->lock,
+ 			key, &futex_data->wait_q, timeout);
+ 	if (ret == -EAGAIN) {
++		/* timed out: nobody unpended us, so nobody decremented for us */
++		(void)atomic_dec(&futex->waiters);
+ 		ret = -ETIMEDOUT;
+ 	}
+ 
+diff --git a/kernel/userspace/sem.c b/kernel/userspace/sem.c
+--- a/kernel/userspace/sem.c
++++ b/kernel/userspace/sem.c
+@@ -53,6 +53,7 @@ int sys_sem_init(struct sys_sem *sem, unsigned int initial_count,
+ 
+ 	(void)atomic_set(&sem->futex.val, initial_count);
+ 	sem->limit = limit;
++	(void)atomic_clear(&sem->futex.waiters);
+ 
+ 	return 0;
+ }
+@@ -103,3 +104,8 @@ unsigned int sys_sem_count_get(struct sys_sem *sem)
+ 
+ 	return (value > SYS_SEM_MINIMUM) ? value : SYS_SEM_MINIMUM;
+ }
++
++bool sys_sem_has_waiters(struct sys_sem *sem)
++{
++	return atomic_get(&sem->futex.waiters) > 0;
++}
