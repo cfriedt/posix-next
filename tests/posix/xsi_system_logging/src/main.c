@@ -13,7 +13,7 @@
 /* avoid clashing with Zephyr's LOG_ERR() */
 #define _LOG_ERR 3
 
-ZTEST(xsi_system_logging, test_syslog)
+ZTEST_USER(xsi_system_logging, test_syslog)
 {
 	int prios[N_PRIOS] = {
 		LOG_EMERG,   LOG_ALERT,  LOG_CRIT, _LOG_ERR,
