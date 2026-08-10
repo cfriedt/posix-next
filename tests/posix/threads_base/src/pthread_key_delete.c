@@ -5,7 +5,7 @@
 
 #include <errno.h>
 #include <pthread.h>
-#include <sched.h>
+#include <semaphore.h>
 
 #include <zephyr/kernel.h>
 #include <zephyr/sys/util.h>
@@ -14,9 +14,8 @@
 #include "_main.h"
 
 static ZTEST_BMEM pthread_key_t held_key;
-/* sem_t is not usable from user mode yet: spin on shared flags */
-static ZTEST_BMEM atomic_t held_ready;
-static ZTEST_BMEM atomic_t release;
+static ZTEST_BMEM sem_t held_sem;
+static ZTEST_BMEM sem_t release_sem;
 static ZTEST_BMEM int held_dtor_calls;
 
 static void held_dtor(void *value)
@@ -30,10 +29,8 @@ static void *hold_key_value(void *arg)
 	ARG_UNUSED(arg);
 
 	zassert_ok(pthread_setspecific(held_key, (void *)0x42));
-	atomic_set(&held_ready, 1);
-	while (atomic_get(&release) == 0) {
-		sched_yield();
-	}
+	zassert_ok(sem_post(&held_sem));
+	zassert_ok(sem_wait(&release_sem));
 	/* the key is gone, and so is this thread's value */
 	zassert_equal(pthread_setspecific(held_key, (void *)0x73), EINVAL);
 	zassert_is_null(pthread_getspecific(held_key));
@@ -47,17 +44,17 @@ static void key_delete_live_association(void)
 	pthread_t th;
 
 	held_dtor_calls = 0;
-	atomic_clear(&held_ready);
-	atomic_clear(&release);
+	zassert_ok(sem_init(&held_sem, 0, 0));
+	zassert_ok(sem_init(&release_sem, 0, 0));
 	zassert_ok(pthread_key_create(&held_key, held_dtor));
 	zassert_ok(pthread_create(&th, NULL, hold_key_value, NULL));
-	while (atomic_get(&held_ready) == 0) {
-		sched_yield();
-	}
+	zassert_ok(sem_wait(&held_sem));
 	zassert_ok(pthread_key_delete(held_key));
-	atomic_set(&release, 1);
+	zassert_ok(sem_post(&release_sem));
 	zassert_ok(pthread_join(th, NULL));
 	zassert_equal(held_dtor_calls, 0, "destructor ran for a deleted key");
+	zassert_ok(sem_destroy(&held_sem));
+	zassert_ok(sem_destroy(&release_sem));
 }
 
 /* the calling thread's own value goes the same way, and the key is free for reuse */
