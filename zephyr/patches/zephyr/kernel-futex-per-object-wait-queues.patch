@@ -1,0 +1,674 @@
+diff --git a/doc/kernel/services/synchronization/mutexes.rst b/doc/kernel/services/synchronization/mutexes.rst
+--- a/doc/kernel/services/synchronization/mutexes.rst
++++ b/doc/kernel/services/synchronization/mutexes.rst
+@@ -184,9 +184,9 @@ Futex API Reference
+ 
+ :c:struct:`k_futex` is a lightweight mutual exclusion primitive designed to minimize
+ kernel involvement. Uncontended operation relies only on atomic access
+-to shared memory. :c:struct:`k_futex` are not kernel objects and do not use the
+-kernel object permission management. They live in user memory and can be
+-used by any thread which has read-write access to this memory.
++to shared memory. :c:struct:`k_futex` are tracked as kernel objects and can live in
++user memory so that any access bypasses the kernel object permission
++management mechanism.
+ 
+ .. doxygengroup:: futex_apis
+ 
+diff --git a/include/zephyr/kernel.h b/include/zephyr/kernel.h
+--- a/include/zephyr/kernel.h
++++ b/include/zephyr/kernel.h
+@@ -2730,9 +2730,9 @@ __syscall void *k_queue_peek_tail(struct k_queue *queue);
+  *
+  * A k_futex is a lightweight mutual exclusion primitive designed
+  * to minimize kernel involvement. Uncontended operation relies
+- * only on atomic access to shared memory. k_futex live in user
+- * memory so that any address can be used as long as the thread
+- * has access to the underlying memory.
++ * only on atomic access to shared memory. k_futex are tracked as
++ * kernel objects and can live in user memory so that any access
++ * bypasses the kernel object permission management mechanism.
+  */
+ struct k_futex {
+ 	/**
+@@ -2743,6 +2743,37 @@ struct k_futex {
+ 	atomic_t val;
+ };
+ 
++/**
++ * @brief futex kernel data structure
++ *
++ * z_futex_data are the helper data structure for k_futex to complete
++ * futex contended operation on kernel side, structure z_futex_data
++ * of every futex object is invisible in user mode.
++ *
++ * All the members are internal and should not be accessed directly.
++ */
++struct z_futex_data {
++/**
++ * @cond INTERNAL_HIDDEN
++ */
++	_wait_q_t wait_q;
++	struct k_spinlock lock;
++/**
++ * INTERNAL_HIDDEN @endcond
++ */
++};
++
++/**
++ * @cond INTERNAL_HIDDEN
++ */
++#define Z_FUTEX_DATA_INITIALIZER(obj) \
++	{ \
++	.wait_q = Z_WAIT_Q_INIT(&obj.wait_q) \
++	}
++/**
++ * INTERNAL_HIDDEN @endcond
++ */
++
+ /**
+  * @defgroup futex_apis FUTEX APIs
+  * @ingroup kernel_apis
+@@ -2762,6 +2793,7 @@ struct k_futex {
+  *                K_NO_WAIT or K_FOREVER.
+  * @retval -EACCES Caller does not have write access to futex address.
+  * @retval -EAGAIN If the futex value did not match the expected parameter.
++ * @retval -EINVAL Futex parameter address not recognized by the kernel.
+  * @retval -ETIMEDOUT Thread woke up due to timeout and not a futex wakeup.
+  * @retval 0 if the caller went to sleep and was woken up. The caller
+  *	     should check the futex's value on wakeup to determine if it needs
+@@ -2781,6 +2813,7 @@ __syscall int k_futex_wait(struct k_futex *futex, int expected,
+  * @param wake_all If true, wake up all pending threads; If false,
+  *                 wakeup the highest priority thread.
+  * @retval -EACCES Caller does not have access to the futex address.
++ * @retval -EINVAL Futex parameter address not recognized by the kernel.
+  * @retval >=0 Number of threads that were woken up.
+  */
+ __syscall int k_futex_wake(struct k_futex *futex, bool wake_all);
+diff --git a/include/zephyr/kernel/thread.h b/include/zephyr/kernel/thread.h
+--- a/include/zephyr/kernel/thread.h
++++ b/include/zephyr/kernel/thread.h
+@@ -296,31 +296,24 @@ struct k_thread {
+ 	/** threads waiting in k_thread_join() */
+ 	_wait_q_t join_queue;
+ 
+-#if defined(CONFIG_USERSPACE)
+-	/**
+-	 * The futex this thread is waiting on.
+-	 * Value may be stale if inspected while thread is not waiting on a futex.
+-	 */
+-	void *futex_pointer;
+-#endif /* CONFIG_USERSPACE */
+-
+ #if defined(CONFIG_POLL)
+ 	struct z_poller poller;
+ #endif /* CONFIG_POLL */
+ 
+-#if defined(CONFIG_WAITQ_SCALABLE) && (defined(CONFIG_EVENTS) || defined(CONFIG_USERSPACE))
+-	/**
+-	 * Some operations which satisfy wait conditions need to build a list of
+-	 * threads that should be woken up. This field serves as a link to place
+-	 * any thread in such a list when necessary:
+-	 * - k_event_post/set() when rbtree waitqs are used (because these waitqs
+-	 *   are not mutable during walk)
+-	 * - k_futex_wake() when rbtree waitqs are used (for the same reason)
++#if defined(CONFIG_EVENTS)
++#if defined(CONFIG_WAITQ_SCALABLE)
++	/*
++	 * Used to build a list of threads that are
++	 * pending on a k_event and should be woken
++	 * up due to a k_event_post/set() call.
++	 *
++	 * Needed only when red-black tree is used for
++	 * wait queues because it is forbidden to mutate
++	 * an rbtree waitq while walking it.
+ 	 */
+-	struct k_thread *next_wake_link;
+-#endif /* CONFIG_WAITQ_SCALABLE && (CONFIG_EVENTS || CONFIG_USERSPACE) */
++	struct k_thread *next_event_link;
++#endif /* CONFIG_WAITQ_SCALABLE */
+ 
+-#if defined(CONFIG_EVENTS)
+ 	uint32_t   events; /* dual purpose - wait on and then received */
+ 	uint32_t   event_options;
+ #endif /* CONFIG_EVENTS */
+diff --git a/include/zephyr/sys/internal/kobject_internal.h b/include/zephyr/sys/internal/kobject_internal.h
+--- a/include/zephyr/sys/internal/kobject_internal.h
++++ b/include/zephyr/sys/internal/kobject_internal.h
+@@ -44,6 +44,9 @@ union k_object_data {
+ 	size_t stack_size;
+ #endif /* CONFIG_GEN_PRIV_STACKS */
+ 
++	/* Futex wait queue and spinlock for K_OBJ_FUTEX */
++	struct z_futex_data *futex_data;
++
+ 	/* All other objects */
+ 	int unused;
+ };
+diff --git a/include/zephyr/sys/kobject.h b/include/zephyr/sys/kobject.h
+--- a/include/zephyr/sys/kobject.h
++++ b/include/zephyr/sys/kobject.h
+@@ -18,6 +18,7 @@ extern "C" {
+ 
+ struct k_thread;
+ struct k_mutex;
++struct z_futex_data;
+ 
+ /**
+  * @brief Kernel Object Types
+diff --git a/kernel/events.c b/kernel/events.c
+--- a/kernel/events.c
++++ b/kernel/events.c
+@@ -122,7 +122,7 @@ static void event_post_walk_op(int status, void *data)
+ 	thread = walk_data->head;
+ 
+ 	while (thread != NULL) {
+-		next = thread->next_wake_link;
++		next = thread->next_event_link;
+ 
+ 		arch_thread_return_value_set(thread, 0);
+ 		z_sched_wake_thread_locked(thread);
+@@ -168,7 +168,7 @@ static int event_walk_op(struct k_thread *thread, void *data)
+ 		arch_thread_return_value_set(thread, 0);
+ 		z_sched_wake_thread_locked(thread);
+ #else /* !CONFIG_WAITQ_SCALABLE */
+-		thread->next_wake_link = event_data->head;
++		thread->next_event_link = event_data->head;
+ 		event_data->head = thread;
+ #endif /* !CONFIG_WAITQ_SCALABLE */
+ 	}
+diff --git a/kernel/userspace/futex.c b/kernel/userspace/futex.c
+--- a/kernel/userspace/futex.c
++++ b/kernel/userspace/futex.c
+@@ -6,172 +6,51 @@
+ 
+ #include <zephyr/kernel.h>
+ #include <zephyr/spinlock.h>
++#include <kswap.h>
+ #include <zephyr/internal/syscall_handler.h>
+ #include <zephyr/init.h>
+ #include <ksched.h>
+ #include <scheduler.h>
+ 
+-/*
+- * Kernel futex implementation
+- *
+- * We use a single queue for all futex waiters. This is lightweight and
+- * efficient for a small number of threads but does not scale well to larger
+- * numbers waiting on different futexes, because each wake needs to walk the
+- * full queue while holding _sched_spinlock.
+- *
+- * Potential alternatives for scaling:
+- * - Use dedicated queues per futex, which requires a dynamic data structure to
+- *   map futex addresses to wait queues.
+- * - Create a new data structure to sort by both futex address and priority to
+- *   efficiently find the highest priority thread waiting on a given futex.
+- * - Keep a small rbtree of active futexes keyed by address, but put the rbnode
+- *   in the waiting thread's own TCB instead of a slab pool — the lead waiter
+- *   for each futex contributes the node, handed to the next waiter when it
+- *   leaves. Per-futex queues, no heap, no fixed table, at the cost of a little
+- *   bookkeeping on wait/wake.
+- *   https://github.com/zephyrproject-rtos/zephyr/pull/110059#issuecomment-4625886727
+- *
+- * Further improvements:
+- * - Add a futex wait call with priority inheritance, where the futex value is
+- *   expected to be the TID of the holder, so that a higher priority thread
+- *   waiting for a futex can boost the holders priority.
+- */
+-static _wait_q_t futex_wait_q = Z_WAIT_Q_INIT(&futex_wait_q);
+-static struct k_spinlock futex_lock;
+-
+-/**
+- * Context structure for walking the futex wait queue
+- */
+-struct futex_walk_data {
+-	/**
+-	 * List head of threads to wake up during post op (NULL if empty)
+-	 * This is an intermediate value filled by the walk op
+-	 * Must be initialized to NULL before the walk
+-	 */
+-	struct k_thread *head;
+-	/**
+-	 * Futex address
+-	 * This is an input to the walk
+-	 */
+-	struct k_futex *futex;
+-	/**
+-	 * Number of threads that have been woken up
+-	 * This is an output of the walk and must be initialized to zero
+-	 */
+-	int woken;
+-};
+-
+-static void futex_post_walk_op(int status, void *data)
++static struct z_futex_data *k_futex_find_data(struct k_futex *futex)
+ {
+-	/*
+-	 * Note: z_sched_wake_thread_locked() is safe
+-	 * to call here because this walk_op callback
+-	 * is invoked with _sched_spinlock held.
+-	 */
+-	ARG_UNUSED(status);
+-	struct futex_walk_data *walk_data = data;
+-	struct k_thread *thread, *next;
+-
+-	thread = walk_data->head;
+-
+-	/* Wake up threads if any */
+-	while (thread != NULL) {
+-#ifndef CONFIG_WAITQ_SCALABLE
+-		/*
+-		 * walk_data->head will only ever be non-NULL for wake-one,
+-		 * which has no "next" thread to wake by definition.
+-		 */
+-		next = NULL;
+-#else  /* !CONFIG_WAITQ_SCALABLE */
+-		next = thread->next_wake_link;
+-#endif /* !CONFIG_WAITQ_SCALABLE */
+-
+-		(void)z_try_abort_thread_timeout(thread);
+-		arch_thread_return_value_set(thread, 0);
+-		z_sched_wake_thread_locked(thread);
+-		walk_data->woken++;
+-
+-		thread = next;
+-	}
+-}
++	struct k_object *obj;
+ 
+-static int futex_wake_one_walk_op(struct k_thread *thread, void *data)
+-{
+-	struct futex_walk_data *walk_data = data;
+-
+-	/* Ignore threads waiting on different futexes */
+-	if (thread->futex_pointer == walk_data->futex) {
+-		/* Find the highest priority thread */
+-		if (walk_data->head == NULL ||
+-		    z_is_prio_higher(thread->base.prio, walk_data->head->base.prio)) {
+-			/*
+-			 * next_wake_link is initialized to NULL in z_impl_k_futex_wait so
+-			 * this is always a single thread
+-			 */
+-			walk_data->head = thread;
+-		}
++	obj = k_object_find(futex);
++	if ((obj == NULL) || (obj->type != K_OBJ_FUTEX)) {
++		return NULL;
+ 	}
+ 
+-	return 0;
++	return obj->data.futex_data;
+ }
+ 
+-static int futex_wake_all_walk_op(struct k_thread *thread, void *data)
++int z_impl_k_futex_wake(struct k_futex *futex, bool wake_all)
+ {
+-	struct futex_walk_data *walk_data = data;
+-
+-	/* Ignore threads waiting on different futexes */
+-	if (thread->futex_pointer == walk_data->futex) {
+-#ifndef CONFIG_WAITQ_SCALABLE
+-		/*
+-		 * Note: z_sched_wake_thread_locked() is safe
+-		 * to call here because this walk_op callback
+-		 * is invoked with _sched_spinlock held.
+-		 */
+-		(void)z_try_abort_thread_timeout(thread);
+-		arch_thread_return_value_set(thread, 0);
+-		z_sched_wake_thread_locked(thread);
+-		walk_data->woken++;
+-#else  /* !CONFIG_WAITQ_SCALABLE */
+-		thread->next_wake_link = walk_data->head;
+-		walk_data->head = thread;
+-#endif /* !CONFIG_WAITQ_SCALABLE */
++	k_spinlock_key_t key;
++	unsigned int woken = 0U;
++	struct z_futex_data *futex_data;
++
++	futex_data = k_futex_find_data(futex);
++	if (futex_data == NULL) {
++		return -EINVAL;
+ 	}
+ 
+-	return 0;
+-}
++	key = k_spin_lock(&futex_data->lock);
+ 
+-int z_impl_k_futex_wake(struct k_futex *futex, bool wake_all)
+-{
+-	k_spinlock_key_t key;
+-	struct futex_walk_data walk_data = {.head = NULL, .futex = futex, .woken = 0};
+-
+-	key = k_spin_lock(&futex_lock);
+-
+-	/*
+-	 * Walk through the wait queue to find threads waiting on this futex.
+-	 *
+-	 * Wake-all mode operates similarly to events.c: threads are awakened
+-	 * by futex_wake_all_walk_op when possible, and otherwise added to a
+-	 * linked list for wake-up by futex_post_walk_op later on.
+-	 * (NOTE: in the former case, the post-walk op has no effect)
+-	 *
+-	 * Wake-one mode operates differently: futex_wake_one_walk_op searches
+-	 * for the highest-priority thread among those waiting on this futex and
+-	 * lets futex_post_walk_op perform the wake-up. Note that we cannot use
+-	 * z_unpend_first_thread because the overall highest priority thread
+-	 * could be waiting on a different futex.
+-	 */
+-	z_sched_waitq_walk(&futex_wait_q,
+-			   (wake_all) ? futex_wake_all_walk_op : futex_wake_one_walk_op,
+-			   futex_post_walk_op, &walk_data);
+-
+-	if (walk_data.woken == 0) {
+-		k_spin_unlock(&futex_lock, key);
++	do {
++		if (!z_sched_wake(&futex_data->wait_q, 0, NULL)) {
++			break;
++		}
++		woken++;
++	} while (wake_all);
++
++	if (woken == 0) {
++		k_spin_unlock(&futex_data->lock, key);
+ 	} else {
+-		z_reschedule(&futex_lock, key);
++		z_reschedule(&futex_data->lock, key);
+ 	}
+ 
+-	return walk_data.woken;
++	return woken;
+ }
+ 
+ static inline int z_vrfy_k_futex_wake(struct k_futex *futex, bool wake_all)
+@@ -184,27 +63,27 @@ static inline int z_vrfy_k_futex_wake(struct k_futex *futex, bool wake_all)
+ }
+ #include <zephyr/syscalls/k_futex_wake_mrsh.c>
+ 
+-int z_impl_k_futex_wait(struct k_futex *futex, int expected, k_timeout_t timeout)
++int z_impl_k_futex_wait(struct k_futex *futex, int expected,
++			k_timeout_t timeout)
+ {
+ 	int ret;
+ 	k_spinlock_key_t key;
++	struct z_futex_data *futex_data;
++
++	futex_data = k_futex_find_data(futex);
++	if (futex_data == NULL) {
++		return -EINVAL;
++	}
+ 
+-	key = k_spin_lock(&futex_lock);
++	key = k_spin_lock(&futex_data->lock);
+ 
+ 	if (atomic_get(&futex->val) != (atomic_val_t)expected) {
+-		k_spin_unlock(&futex_lock, key);
++		k_spin_unlock(&futex_data->lock, key);
+ 		return -EAGAIN;
+ 	}
+ 
+-	/*
+-	 * Store futex pointer we are waiting on, so that it can be used to filter
+-	 * futexes when walking the wait queue
+-	 */
+-	_current->futex_pointer = futex;
+-#ifdef CONFIG_WAITQ_SCALABLE
+-	_current->next_wake_link = NULL;
+-#endif /* CONFIG_WAITQ_SCALABLE */
+-	ret = z_pend_curr(&futex_lock, key, &futex_wait_q, timeout);
++	ret = z_pend_curr(&futex_data->lock,
++			key, &futex_data->wait_q, timeout);
+ 	if (ret == -EAGAIN) {
+ 		ret = -ETIMEDOUT;
+ 	}
+@@ -212,7 +91,8 @@ int z_impl_k_futex_wait(struct k_futex *futex, int expected, k_timeout_t timeout
+ 	return ret;
+ }
+ 
+-static inline int z_vrfy_k_futex_wait(struct k_futex *futex, int expected, k_timeout_t timeout)
++static inline int z_vrfy_k_futex_wait(struct k_futex *futex, int expected,
++				      k_timeout_t timeout)
+ {
+ 	if (K_SYSCALL_MEMORY_WRITE(futex, sizeof(struct k_futex)) != 0) {
+ 		return -EACCES;
+diff --git a/kernel/userspace/userspace.c b/kernel/userspace/userspace.c
+--- a/kernel/userspace/userspace.c
++++ b/kernel/userspace/userspace.c
+@@ -477,6 +477,7 @@ static void *z_object_alloc(enum k_objects otype, size_t size)
+ 		}
+ 		break;
+ 	/* The following are currently not allowed at all */
++	case K_OBJ_FUTEX:			/* Lives in user memory */
+ 	case K_OBJ_SYS_MUTEX:			/* Lives in user memory */
+ 	case K_OBJ_NET_SOCKET:			/* Indeterminate size */
+ 		LOG_ERR("forbidden object type '%s' requested",
+diff --git a/scripts/build/gen_kobject_list.py b/scripts/build/gen_kobject_list.py
+--- a/scripts/build/gen_kobject_list.py
++++ b/scripts/build/gen_kobject_list.py
+@@ -106,6 +106,7 @@ kobjects = OrderedDict(
+         ("NET_SOCKET", (None, False, False)),
+         ("net_if", (None, False, False)),
+         ("sys_mutex", (None, True, False)),
++        ("k_futex", (None, True, False)),
+         ("k_condvar", (None, False, True)),
+         ("k_event", ("CONFIG_EVENTS", False, True)),
+         ("ztest_suite_node", ("CONFIG_ZTEST", True, False)),
+@@ -201,6 +202,7 @@ DW_OP_addrx = 0xA1
+ STACK_TYPE = "z_thread_stack_element"
+ thread_counter = 0
+ sys_mutex_counter = 0
++futex_counter = 0
+ stack_counter = 0
+ 
+ # Global type environment. Populated by pass 1.
+@@ -573,6 +575,7 @@ def device_get_api_addr(elf, addr):
+ def find_kobjects(elf, syms):
+     global thread_counter
+     global sys_mutex_counter
++    global futex_counter
+     global stack_counter
+ 
+     if not elf.has_dwarf_info():
+@@ -723,6 +726,9 @@ def find_kobjects(elf, syms):
+         elif ko.type_obj.name == "sys_mutex":
+             ko.data = f"&kernel_mutexes[{sys_mutex_counter}]"
+             sys_mutex_counter += 1
++        elif ko.type_obj.name == "k_futex":
++            ko.data = f"&futex_data[{futex_counter}]"
++            futex_counter += 1
+         elif ko.type_obj.name == STACK_TYPE:
+             stack_counter += 1
+ 
+@@ -823,9 +829,18 @@ def write_gperf_table(fp, syms, objs, little_endian, static_begin, static_end):
+                 fp.write(", ")
+         fp.write("};\n")
+ 
++    if futex_counter != 0:
++        fp.write(f"static struct z_futex_data futex_data[{futex_counter}] = {{\n")
++        for i in range(futex_counter):
++            fp.write(f"Z_FUTEX_DATA_INITIALIZER(futex_data[{i}])")
++            if i != futex_counter - 1:
++                fp.write(", ")
++        fp.write("};\n")
++
+     metadata_names = {
+         "K_OBJ_THREAD": "thread_id",
+         "K_OBJ_SYS_MUTEX": "mutex",
++        "K_OBJ_FUTEX": "futex_data",
+     }
+ 
+     if "CONFIG_GEN_PRIV_STACKS" in syms:
+diff --git a/tests/kernel/mem_protect/futex/src/main.c b/tests/kernel/mem_protect/futex/src/main.c
+--- a/tests/kernel/mem_protect/futex/src/main.c
++++ b/tests/kernel/mem_protect/futex/src/main.c
+@@ -37,8 +37,9 @@ ZTEST_BMEM int woken;
+ ZTEST_BMEM int timeout;
+ ZTEST_BMEM struct k_futex simple_futex;
+ ZTEST_BMEM struct k_futex multiple_futex[TOTAL_THREADS_WAITING];
+-ZTEST_BMEM atomic_t any_address_futex;
+ struct k_futex no_access_futex;
++ZTEST_BMEM atomic_t not_a_futex;
++ZTEST_BMEM struct sys_mutex also_not_a_futex;
+ 
+ struct k_thread futex_tid;
+ struct k_thread futex_wake_tid;
+@@ -532,93 +533,6 @@ ZTEST(futex, test_futex_multiple_threads_wait_wake)
+ 	}
+ }
+ 
+-/**
+- * @brief Verify that wake-one resumes threads in correct order.
+- *
+- * @details
+- * k_futex_wake() with wake_all unset shall resume only the one thread waiting
+- * on this futex with the highest priority.
+- *
+- * Test steps:
+- * - Block a batch of user threads with different priorities on one futex.
+- * - Block a single thread with the highest priority on a different futex.
+- * - Sleep to let threads execute.
+- * - Repeatedly issue a single wake without wake_all from another thread on
+- *   the first futex and check that the highest priority waiter on that futex
+- *   is resumed by joining it. Also check that futex value has only been
+- *   decremented by one, indicating that only one thread was resumed.
+- * - Finally, wake and join the single waiter on the second futex.
+- *
+- * Expected result:
+- * - Waiters resume in the correct order.
+- *
+- * @see k_futex_wake()
+- * @see k_futex_wait()
+- */
+-ZTEST(futex, test_futex_multiple_threads_wait_wake_one_priority)
+-{
+-	/*
+-	 * Waiting thread priority and order:
+-	 * - Highest priority is index 1, so it should come first
+-	 * - Middle is index 0, so it should come second
+-	 * - Lowest is index 2, so it should come last
+-	 */
+-	const int wait_thread_prio[TOTAL_THREADS_WAITING] = {PRIO_WAIT - 1, PRIO_WAIT - 2,
+-							     PRIO_WAIT};
+-	const int wait_thread_order[TOTAL_THREADS_WAITING] = {1, 0, 2};
+-
+-	timeout = K_TICKS_FOREVER;
+-	/* Set to 1 so that futex_multiple_wake_task passes false to wake_all */
+-	woken = 1;
+-
+-	atomic_clear(&multiple_futex[0].val);
+-	atomic_set(&multiple_futex[1].val, 1);
+-
+-	/* Start waiting threads on same futex (index 0) with given priority */
+-	for (int i = 0; i < TOTAL_THREADS_WAITING; i++) {
+-		atomic_inc(&multiple_futex[0].val);
+-		k_thread_create(&multiple_tid[i], multiple_stack[i], STACK_SIZE,
+-				futex_multiple_wait_wake_task, &timeout, INT_TO_POINTER(0), NULL,
+-				wait_thread_prio[i], K_USER | K_INHERIT_PERMS, K_NO_WAIT);
+-	}
+-
+-	/* Start single waiter with highest overall priority on different futex (index 1) */
+-	k_thread_create(&futex_tid, stack_1, STACK_SIZE, futex_multiple_wait_wake_task, &timeout,
+-			INT_TO_POINTER(1), NULL, PRIO_WAIT - TOTAL_THREADS_WAITING,
+-			K_USER | K_INHERIT_PERMS, K_NO_WAIT);
+-
+-	/* Giving time for the other threads to execute */
+-	k_sleep(K_MSEC(100));
+-
+-	/*
+-	 * Repeatedly wake one thread (because woken == 1) on same futex (index 0)
+-	 * and join expected waiter based on order
+-	 */
+-	for (int i = 0; i < TOTAL_THREADS_WAITING; i++) {
+-		k_thread_create(&futex_wake_tid, futex_wake_stack, STACK_SIZE,
+-				futex_multiple_wake_task, &woken, INT_TO_POINTER(0), NULL,
+-				PRIO_WAKE, K_USER | K_INHERIT_PERMS, K_NO_WAIT);
+-
+-		/* Giving time for the other threads to execute */
+-		k_sleep(K_MSEC(100));
+-
+-		/* Join the waiter in the expected order */
+-		zassert_true(k_thread_join(&multiple_tid[wait_thread_order[i]], K_SECONDS(1)) == 0,
+-			     "wake one did not resume expected waiter");
+-		/* Check that only a single thread was resumed */
+-		zassert_true(atomic_get(&multiple_futex[0].val) == TOTAL_THREADS_WAITING - i - 1,
+-			     "wake one resumed more than one thread");
+-	}
+-
+-	/* Wake remaining waiter on different futex (index 1) */
+-	k_thread_create(&futex_wake_tid, futex_wake_stack, STACK_SIZE, futex_multiple_wake_task,
+-			&woken, INT_TO_POINTER(1), NULL, PRIO_WAKE, K_USER | K_INHERIT_PERMS,
+-			K_NO_WAIT);
+-
+-	zassert_true(k_thread_join(&futex_tid, K_SECONDS(1)) == 0,
+-		     "single futex waiter did not resume");
+-}
+-
+ /**
+  * @brief Verify that independent futexes wake independently.
+  *
+@@ -674,28 +588,19 @@ ZTEST(futex, test_futex_independent_wait_wake)
+ 	}
+ }
+ 
+-ZTEST_USER(futex, test_user_futex_any_address)
+-{
+-	int ret;
+-
+-	/* Use futex from arbitrary userspace-accessible address */
+-	ret = k_futex_wait((struct k_futex *)&any_address_futex, 0, K_NO_WAIT);
+-	zassert_equal(ret, -ETIMEDOUT, "didn't time out");
+-	ret = k_futex_wake((struct k_futex *)&any_address_futex, false);
+-	zassert_equal(ret, 0, "didn't succeed");
+-}
+-
+ /**
+- * @brief Verify that futex calls reject invalid values and states.
++ * @brief Verify that futex calls reject invalid objects, values and states.
+  *
+  * @details
+  * From user mode every futex argument is untrusted, so each way it can be
+- * wrong has its own error: memory the caller cannot access is -EACCES, a
+- * mismatched expected value is -EAGAIN, and a matching value with K_NO_WAIT
+- * times out with -ETIMEDOUT.
++ * wrong has its own error: memory the caller cannot access is -EACCES, an
++ * address that is not a futex kernel object is -EINVAL, a mismatched
++ * expected value is -EAGAIN, and a matching value with K_NO_WAIT times out
++ * with -ETIMEDOUT.
+  *
+  * Test steps:
+  * - Wait on and wake a futex the caller has no access to.
++ * - Wait on and wake two objects that are not futexes.
+  * - Wait with an expected value that does not match the futex.
+  * - Wait with the matching value and K_NO_WAIT.
+  *
+@@ -715,6 +620,18 @@ ZTEST_USER(futex, test_futex_bad_inputs)
+ 	ret = k_futex_wake(&no_access_futex, false);
+ 	zassert_equal(ret, -EACCES, "shouldn't have been able to access");
+ 
++	/* Access to memory, but not a kernel object */
++	ret = k_futex_wait((struct k_futex *)&not_a_futex, 0, K_NO_WAIT);
++	zassert_equal(ret, -EINVAL, "waited on non-futex");
++	ret = k_futex_wake((struct k_futex *)&not_a_futex, false);
++	zassert_equal(ret, -EINVAL, "woke non-futex");
++
++	/* Access to memory, but wrong object type */
++	ret = k_futex_wait((struct k_futex *)&also_not_a_futex, 0, K_NO_WAIT);
++	zassert_equal(ret, -EINVAL, "waited on non-futex");
++	ret = k_futex_wake((struct k_futex *)&also_not_a_futex, false);
++	zassert_equal(ret, -EINVAL, "woke non-futex");
++
+ 	/* Wait with unexpected value */
+ 	atomic_set(&simple_futex.val, 100);
+ 	ret = k_futex_wait(&simple_futex, 0, K_NO_WAIT);
+diff --git a/tests/kernel/mem_protect/mem_protect/src/kobject.c b/tests/kernel/mem_protect/mem_protect/src/kobject.c
+--- a/tests/kernel/mem_protect/mem_protect/src/kobject.c
++++ b/tests/kernel/mem_protect/mem_protect/src/kobject.c
+@@ -1301,6 +1301,10 @@ ZTEST_USER(mem_protect_kobj, test_kobject_init_error)
+ 			"expected got NULL kobject");
+ 	zassert_is_null(k_object_alloc(K_OBJ_LAST),
+ 			"expected got NULL kobject");
++
++	/* futex not support */
++	zassert_is_null(k_object_alloc(K_OBJ_FUTEX),
++			"expected got NULL kobject");
+ }
+ 
+ /**
