@@ -16,8 +16,10 @@
 #include <zephyr/sys/sem.h>
 
 static SYS_SEM_DEFINE(posix_spin_lock, 1, 1);
-SYS_ELASTIPOOL_DEFINE_STATIC(posix_spin_pool, sizeof(atomic_t), __alignof(atomic_t),
-			     CONFIG_MAX_PTHREAD_SPINLOCK_COUNT, CONFIG_MAX_PTHREAD_SPINLOCK_COUNT);
+static atomic_t posix_spin_pool_storage[CONFIG_MAX_PTHREAD_SPINLOCK_COUNT];
+SYS_ELASTIPOOL_DEFINE_ADVANCED(posix_spin_pool, sizeof(atomic_t), __alignof(atomic_t),
+			       CONFIG_MAX_PTHREAD_SPINLOCK_COUNT, CONFIG_MAX_PTHREAD_SPINLOCK_COUNT,
+			       NULL, posix_spin_pool_storage, static);
 
 int pthread_spin_init(pthread_spinlock_t *lock, int pshared)
 {
