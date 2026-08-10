@@ -1,42 +1,57 @@
 /*
- * Copyright (c) 2018 Intel Corporation
- * Copyright (c) 2023 Meta
+ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include <errno.h>
 #include <zephyr/kernel.h>
-#include <zephyr/sys/atomic.h>
+#include <zephyr/sys/elastipool.h>
+#include <zephyr/sys/sem.h>
 #include <zephyr/sys/timeutil.h>
 #include <fcntl.h>
 #include <pthread.h>
 #include <semaphore.h>
-#include <ksem.h>
-#include <wait_q.h>
 
 struct nsem_obj {
 	sys_snode_t snode;
 	sem_t sem;
 	int ref_count;
-	char *name;
+	bool linked;
+	char name[CONFIG_POSIX_SEM_NAMELEN_MAX];
 };
 
-/* Initialize the list */
-static sys_slist_t nsem_list = SYS_SLIST_STATIC_INIT(&nsem_list);
+static sys_slist_t nsem_list;
 
-static K_MUTEX_DEFINE(nsem_mutex);
+/* sem_wait() is a cancellation point; test only when about to block, like the futex path */
+static inline void sem_wait_testcancel(sem_t *semaphore)
+{
+#ifdef CONFIG_THREAD_CANCEL
+	if ((sys_sem_count_get(semaphore) == 0) && k_thread_cancel_may_be_pending()) {
+		k_thread_testcancel();
+	}
+#else
+	ARG_UNUSED(semaphore);
+#endif
+}
+
+static SYS_SEM_DEFINE(nsem_lock, 1, 1);
+/* typed (not raw) storage, so the kobject scanner registers each embedded sem_t futex */
+static struct nsem_obj nsem_pool_storage[CONFIG_POSIX_SEM_NSEMS_MAX];
+SYS_ELASTIPOOL_DEFINE_ADVANCED(nsem_pool, sizeof(struct nsem_obj), __alignof(struct nsem_obj),
+			       CONFIG_POSIX_SEM_NSEMS_MAX, CONFIG_POSIX_SEM_NSEMS_MAX, NULL,
+			       nsem_pool_storage, static);
 
 static inline void nsem_list_lock(void)
 {
-	__unused int ret = k_mutex_lock(&nsem_mutex, K_FOREVER);
+	__unused int ret = sys_sem_take(&nsem_lock, K_FOREVER);
 
 	__ASSERT(ret == 0, "nsem_list_lock() failed: %d", ret);
 }
 
 static inline void nsem_list_unlock(void)
 {
-	(void)k_mutex_unlock(&nsem_mutex);
+	(void)sys_sem_give(&nsem_lock);
 }
 
 static struct nsem_obj *nsem_find(const char *name)
@@ -44,7 +59,7 @@ static struct nsem_obj *nsem_find(const char *name)
 	struct nsem_obj *nsem;
 
 	SYS_SLIST_FOR_EACH_CONTAINER(&nsem_list, nsem, snode) {
-		if ((nsem->name != NULL) && (strcmp(nsem->name, name) == 0)) {
+		if (nsem->linked && (strcmp(nsem->name, name) == 0)) {
 			return nsem;
 		}
 	}
@@ -65,17 +80,6 @@ static struct nsem_obj *nsem_find_by_sem(const sem_t *sem)
 	return NULL;
 }
 
-/* Clean up a named semaphore object completely (incl its `name` buffer) */
-static void nsem_cleanup(struct nsem_obj *nsem)
-{
-	if (nsem != NULL) {
-		if (nsem->name != NULL) {
-			k_free(nsem->name);
-		}
-		k_free(nsem);
-	}
-}
-
 /* Remove a named semaphore if it isn't used */
 static void nsem_unref(struct nsem_obj *nsem)
 {
@@ -83,12 +87,13 @@ static void nsem_unref(struct nsem_obj *nsem)
 	__ASSERT(nsem->ref_count >= 0, "ref_count may not be negative");
 
 	if (nsem->ref_count == 0) {
-		__ASSERT(nsem->name == NULL, "ref_count is 0 but sem is not unlinked");
+		__ASSERT(!nsem->linked, "ref_count is 0 but sem is not unlinked");
 
 		sys_slist_find_and_remove(&nsem_list, (sys_snode_t *) nsem);
 
-		/* Free nsem */
-		nsem_cleanup(nsem);
+		__unused int ret = sys_elastipool_free(&nsem_pool, (void *)nsem);
+
+		__ASSERT(ret == 0, "failed to free named semaphore %p: %d", nsem, ret);
 	}
 }
 
@@ -104,12 +109,12 @@ int sem_destroy(sem_t *semaphore)
 		return -1;
 	}
 
-	if (z_waitq_head(&((struct k_sem *)semaphore)->wait_q) != NULL) {
+	if (sys_sem_has_waiters(semaphore)) {
 		errno = EBUSY;
 		return -1;
 	}
 
-	k_sem_reset((struct k_sem *)semaphore);
+	(void)sys_sem_init(semaphore, 0, CONFIG_POSIX_SEM_VALUE_MAX);
 	return 0;
 }
 
@@ -125,7 +130,7 @@ int sem_getvalue(sem_t *semaphore, int *value)
 		return -1;
 	}
 
-	*value = (int) k_sem_count_get((struct k_sem *)semaphore);
+	*value = (int)sys_sem_count_get(semaphore);
 
 	return 0;
 }
@@ -147,7 +152,7 @@ int sem_init(sem_t *semaphore, int pshared, unsigned int value)
 	 */
 	__ASSERT(pshared == 0, "pshared should be 0");
 
-	k_sem_init(semaphore, value, CONFIG_POSIX_SEM_VALUE_MAX);
+	(void)sys_sem_init(semaphore, value, CONFIG_POSIX_SEM_VALUE_MAX);
 
 	return 0;
 }
@@ -159,33 +164,13 @@ int sem_init(sem_t *semaphore, int pshared, unsigned int value)
  */
 int sem_post(sem_t *semaphore)
 {
-	int ret;
-
 	if (semaphore == NULL) {
 		errno = EINVAL;
 		return -1;
 	}
 
-#ifdef CONFIG_USERSPACE
-	if (k_is_user_context()) {
-		/*
-		 * User threads cannot take the semaphore lock, so the check is
-		 * best effort here: a concurrent post may still saturate.
-		 */
-		if (k_sem_count_get((struct k_sem *)semaphore) >= CONFIG_POSIX_SEM_VALUE_MAX) {
-			errno = EOVERFLOW;
-			return -1;
-		}
-
-		k_sem_give((struct k_sem *)semaphore);
-		return 0;
-	}
-#endif
-
-	ret = z_sem_give_checked((struct k_sem *)semaphore);
-	if (ret < 0) {
-		/* the value would exceed SEM_VALUE_MAX */
-		errno = -ret;
+	if (sys_sem_give(semaphore) == -EAGAIN) {
+		errno = EOVERFLOW;
 		return -1;
 	}
 
@@ -206,7 +191,8 @@ int sem_timedwait(sem_t *semaphore, struct timespec *abstime)
 
 	k_timeout_t to = sys_timepoint_timeout(timespec_abs_rt_to_timepoint(abstime));
 
-	if (k_sem_take((struct k_sem *)semaphore, to)) {
+	sem_wait_testcancel(semaphore);
+	if (sys_sem_take(semaphore, to) != 0) {
 		errno = ETIMEDOUT;
 		return -1;
 	}
@@ -221,12 +207,12 @@ int sem_timedwait(sem_t *semaphore, struct timespec *abstime)
  */
 int sem_trywait(sem_t *semaphore)
 {
-	if (k_sem_take((struct k_sem *)semaphore, K_NO_WAIT) == -EBUSY) {
+	if (sys_sem_take(semaphore, K_NO_WAIT) != 0) {
 		errno = EAGAIN;
 		return -1;
-	} else {
-		return 0;
 	}
+
+	return 0;
 }
 
 /**
@@ -236,8 +222,12 @@ int sem_trywait(sem_t *semaphore)
  */
 int sem_wait(sem_t *semaphore)
 {
-	/* With K_FOREVER, may return only success. */
-	(void)k_sem_take((struct k_sem *)semaphore, K_FOREVER);
+	sem_wait_testcancel(semaphore);
+	if (sys_sem_take(semaphore, K_FOREVER) != 0) {
+		errno = EINVAL;
+		return -1;
+	}
+
 	return 0;
 }
 
@@ -245,17 +235,19 @@ sem_t *sem_open(const char *name, int oflags, ...)
 {
 	va_list va;
 	mode_t mode;
-	unsigned int value = 0U;
+	unsigned int value = 0;
 	struct nsem_obj *nsem = NULL;
 	size_t namelen;
 
+	/* mode and value are only passed with O_CREAT */
 	if ((oflags & O_CREAT) != 0) {
 		va_start(va, oflags);
 		BUILD_ASSERT(sizeof(mode_t) <= sizeof(int));
 		mode = va_arg(va, int);
-		(void)mode;
 		value = va_arg(va, unsigned int);
 		va_end(va);
+
+		ARG_UNUSED(mode);
 	}
 
 	if (name == NULL) {
@@ -298,33 +290,22 @@ sem_t *sem_open(const char *name, int oflags, ...)
 		goto error_unlock;
 	}
 
-	nsem = k_calloc(1, sizeof(struct nsem_obj));
-	if (nsem == NULL) {
+	if (sys_elastipool_alloc(&nsem_pool, (void **)&nsem) < 0) {
 		errno = ENOSPC;
 		goto error_unlock;
 	}
 
-	/* goto `cleanup_error_unlock` past this point to avoid memory leak */
-
-	nsem->name = k_calloc(namelen + 1, sizeof(uint8_t));
-	if (nsem->name == NULL) {
-		errno = ENOSPC;
-		goto cleanup_error_unlock;
-	}
-
 	strcpy(nsem->name, name);
+	nsem->linked = true;
 
 	/* 1 for this open instance, +1 for the linked name */
 	nsem->ref_count = 2;
 
-	(void)k_sem_init(&nsem->sem, value, CONFIG_POSIX_SEM_VALUE_MAX);
+	(void)sys_sem_init(&nsem->sem, value, CONFIG_POSIX_SEM_VALUE_MAX);
 
 	sys_slist_append(&nsem_list, (sys_snode_t *)&(nsem->snode));
 
 	goto unlock;
-
-cleanup_error_unlock:
-	nsem_cleanup(nsem);
 
 error_unlock:
 	nsem = NULL;
@@ -359,8 +340,7 @@ int sem_unlink(const char *name)
 		goto unlock;
 	}
 
-	k_free(nsem->name);
-	nsem->name = NULL;
+	nsem->linked = false;
 	nsem_unref(nsem);
 
 unlock:
@@ -376,8 +356,6 @@ int sem_close(sem_t *sem)
 		errno = EINVAL;
 		return -1;
 	}
-
-	nsem = CONTAINER_OF(sem, struct nsem_obj, sem);
 
 	nsem_list_lock();
 	nsem = nsem_find_by_sem(sem);
