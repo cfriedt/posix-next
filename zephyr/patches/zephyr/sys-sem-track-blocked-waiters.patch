@@ -1,0 +1,88 @@
+diff --git a/include/zephyr/sys/sem.h b/include/zephyr/sys/sem.h
+index 16c6b33ba46..b76ec9c1c31 100644
+--- a/include/zephyr/sys/sem.h
++++ b/include/zephyr/sys/sem.h
+@@ -36,6 +36,7 @@ struct sys_sem {
+ #ifdef CONFIG_USERSPACE
+ 	struct k_futex futex;
+ 	int limit;
++	atomic_t waiters;
+ #else
+ 	struct k_sem kernel_sem;
+ #endif
+@@ -139,6 +140,19 @@ int sys_sem_take(struct sys_sem *sem, k_timeout_t timeout);
+  */
+ unsigned int sys_sem_count_get(struct sys_sem *sem);
+
++/**
++ * @brief Check whether any thread is blocked taking @a sem.
++ *
++ * The answer is a snapshot: it may already be stale by the time the caller
++ * acts on it, so it is a hint (e.g. for POSIX `sem_destroy()` `EBUSY`
++ * detection) rather than a synchronization primitive.
++ *
++ * @param sem Address of the sys_sem.
++ *
++ * @return true if at least one thread was blocked taking @a sem.
++ */
++bool sys_sem_has_waiters(struct sys_sem *sem);
++
+ /**
+  * @cond INTERNAL_HIDDEN
+  */
+diff --git a/lib/os/sem.c b/lib/os/sem.c
+index bb1b3fdc6b8..95cc520a1d2 100644
+--- a/lib/os/sem.c
++++ b/lib/os/sem.c
+@@ -7,6 +7,10 @@
+ #include <zephyr/sys/sem.h>
+ #include <zephyr/internal/syscall_handler.h>
+
++#ifndef CONFIG_USERSPACE
++#include <wait_q.h>
++#endif
++
+ #ifdef CONFIG_USERSPACE
+ #define SYS_SEM_MINIMUM      0
+ #define SYS_SEM_CONTENDED    (SYS_SEM_MINIMUM - 1)
+@@ -54,6 +58,7 @@ int sys_sem_init(struct sys_sem *sem, unsigned int initial_count,
+
+ 	(void)atomic_set(&sem->futex.val, initial_count);
+ 	sem->limit = limit;
++	(void)atomic_clear(&sem->waiters);
+
+ 	return 0;
+ }
+@@ -91,8 +96,10 @@ int sys_sem_take(struct sys_sem *sem, k_timeout_t timeout)
+ 			return 0;
+ 		}
+
++		(void)atomic_inc(&sem->waiters);
+ 		ret = k_futex_wait(&sem->futex,
+ 				   SYS_SEM_CONTENDED, timeout);
++		(void)atomic_dec(&sem->waiters);
+ 	} while (ret == 0 || ret == -EAGAIN);
+
+ 	return ret;
+@@ -104,6 +111,11 @@ unsigned int sys_sem_count_get(struct sys_sem *sem)
+
+ 	return (value > SYS_SEM_MINIMUM) ? value : SYS_SEM_MINIMUM;
+ }
++
++bool sys_sem_has_waiters(struct sys_sem *sem)
++{
++	return atomic_get(&sem->waiters) > 0;
++}
+ #else
+ int sys_sem_init(struct sys_sem *sem, unsigned int initial_count,
+ 		 unsigned int limit)
+@@ -136,4 +148,9 @@ unsigned int sys_sem_count_get(struct sys_sem *sem)
+ {
+ 	return k_sem_count_get(&sem->kernel_sem);
+ }
++
++bool sys_sem_has_waiters(struct sys_sem *sem)
++{
++	return z_waitq_head(&sem->kernel_sem.wait_q) != NULL;
++}
+ #endif
