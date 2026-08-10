@@ -4,6 +4,7 @@
 
 menuconfig POSIX_SEMAPHORES
 	bool "POSIX semaphore support"
+	select SYS_ELASTIPOOL
 	help
 	  Enable this option for POSIX semaphore support.
 
@@ -18,12 +19,15 @@ config POSIX_SEM_VALUE_MAX
 
 config POSIX_SEM_NSEMS_MAX
 	int "Maximum number of semaphores"
-	default 256
+	default 16
+	range 1 32767
 	help
 	  Maximum number of semaphores in a POSIX application.
 
 	  Note: currently, in Zephyr, this only limits the number of named semaphores (i.e. those
-	  created via sem_open()).
+	  created via sem_open()). Named semaphores are allocated from a statically-allocated
+	  pool of this many objects, so that they remain usable from user mode; size it to the
+	  number of concurrently-open named semaphores the application actually needs.
 
 config POSIX_SEM_NAMELEN_MAX
 	int "Maximum semaphore name length"
@@ -32,8 +36,5 @@ config POSIX_SEM_NAMELEN_MAX
 	help
 	  Maximum length of name for a named semaphore.
 	  The max value of 255 corresponds to {NAME_MAX}.
-
-config HEAP_MEM_POOL_ADD_SIZE_POSIX_SEMAPHORES
-	def_int 256
 
 endif # POSIX_SEMAPHORES
