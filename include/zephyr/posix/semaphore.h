@@ -20,6 +20,7 @@
 #include <time.h>
 
 #include <zephyr/kernel.h>
+#include <zephyr/sys/sem.h>
 #include <zephyr/toolchain.h>
 
 #ifdef __cplusplus
@@ -30,8 +31,17 @@ extern "C" {
 #define SEM_FAILED ((sem_t *) 0)
 
 #if !(defined(_SEM_T_DECLARED) || defined(__sem_t_defined)) || defined(__DOXYGEN__)
-/** @brief Semaphore object type.  @ingroup posix_option_group_semaphores*/
-typedef struct k_sem sem_t;
+/**
+ * @brief Semaphore object type.
+ *
+ * A `sem_t` may live in any memory the calling thread can access (static, stack, or heap).
+ * Sharing one between threads requires memory every participant can access: with
+ * `CONFIG_USERSPACE` enabled, a user thread's stack is private to it, so a shared
+ * `sem_t` belongs in static storage, a common memory partition, or the malloc arena.
+ *
+ * @ingroup posix_option_group_semaphores
+ */
+typedef struct sys_sem sem_t;
 #define _SEM_T_DECLARED
 #define __sem_t_defined
 #endif
