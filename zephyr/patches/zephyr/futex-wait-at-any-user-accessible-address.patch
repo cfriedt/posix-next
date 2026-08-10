@@ -1,0 +1,160 @@
+diff --git a/include/zephyr/kernel.h b/include/zephyr/kernel.h
+index f9ab8681e69..2a5d44fa5fd 100644
+--- a/include/zephyr/kernel.h
++++ b/include/zephyr/kernel.h
+@@ -2905,9 +2905,12 @@ __syscall void *k_queue_peek_tail(struct k_queue *queue);
+  *
+  * A k_futex is a lightweight mutual exclusion primitive designed
+  * to minimize kernel involvement. Uncontended operation relies
+- * only on atomic access to shared memory. k_futex are tracked as
+- * kernel objects and can live in user memory so that any access
+- * bypasses the kernel object permission management mechanism.
++ * only on atomic access to shared memory. A futex may live at any
++ * user-accessible address and access bypasses the kernel object
++ * permission management mechanism: statically-defined futexes are
++ * tracked as kernel objects with a dedicated wait queue, while
++ * futexes at other addresses (e.g. stack or heap) share a fixed set
++ * of address-hashed wait queues.
+  */
+ struct k_futex {
+ 	atomic_t val;
+@@ -2963,7 +2966,6 @@ struct z_futex_data {
+  *                K_NO_WAIT or K_FOREVER.
+  * @retval -EACCES Caller does not have read access to futex address.
+  * @retval -EAGAIN If the futex value did not match the expected parameter.
+- * @retval -EINVAL Futex parameter address not recognized by the kernel.
+  * @retval -ETIMEDOUT Thread woke up due to timeout and not a futex wakeup.
+  * @retval 0 if the caller went to sleep and was woken up. The caller
+  *	     should check the futex's value on wakeup to determine if it needs
+@@ -2983,7 +2985,6 @@ __syscall int k_futex_wait(struct k_futex *futex, int expected,
+  * @param wake_all If true, wake up all pending threads; If false,
+  *                 wakeup the highest priority thread.
+  * @retval -EACCES Caller does not have access to the futex address.
+- * @retval -EINVAL Futex parameter address not recognized by the kernel.
+  * @retval >=0 Number of threads that were woken up.
+  */
+ __syscall int k_futex_wake(struct k_futex *futex, bool wake_all);
+diff --git a/kernel/futex.c b/kernel/futex.c
+index 85245183f18..69073c35d7b 100644
+--- a/kernel/futex.c
++++ b/kernel/futex.c
+@@ -11,17 +11,34 @@
+ #include <zephyr/internal/syscall_handler.h>
+ #include <zephyr/init.h>
+ #include <ksched.h>
++#include <wait_q.h>
++
++#define FUTEX_HASH_BUCKETS 16
++BUILD_ASSERT(IS_POWER_OF_TWO(FUTEX_HASH_BUCKETS));
++
++/*
++ * Futexes at addresses the kernel object scanner cannot see (stack, heap, or
++ * any other user-accessible memory) share this fixed set of address-hashed
++ * wait queues. Waiters record which futex they wait on, and wake-ups unpend
++ * only matching waiters, so sharing a bucket costs lock contention but never
++ * a lost or spurious wakeup.
++ */
++#define FUTEX_HASH_BUCKET_INIT(i, _) Z_FUTEX_DATA_INITIALIZER(futex_hash_buckets[i])
++static struct z_futex_data futex_hash_buckets[FUTEX_HASH_BUCKETS] = {
++	LISTIFY(FUTEX_HASH_BUCKETS, FUTEX_HASH_BUCKET_INIT, (,))
++};
+
+ static struct z_futex_data *k_futex_find_data(struct k_futex *futex)
+ {
+ 	struct k_object *obj;
++	uintptr_t addr = (uintptr_t)futex;
+
+ 	obj = k_object_find(futex);
+-	if ((obj == NULL) || (obj->type != K_OBJ_FUTEX)) {
+-		return NULL;
++	if ((obj != NULL) && (obj->type == K_OBJ_FUTEX)) {
++		return obj->data.futex_data;
+ 	}
+
+-	return obj->data.futex_data;
++	return &futex_hash_buckets[(addr / sizeof(struct k_futex)) % FUTEX_HASH_BUCKETS];
+ }
+
+ int z_impl_k_futex_wake(struct k_futex *futex, bool wake_all)
+@@ -29,18 +46,25 @@ int z_impl_k_futex_wake(struct k_futex *futex, bool wake_all)
+ 	k_spinlock_key_t key;
+ 	unsigned int woken = 0U;
+ 	struct k_thread *thread;
++	struct k_thread *iter;
+ 	struct z_futex_data *futex_data;
+
+ 	futex_data = k_futex_find_data(futex);
+-	if (futex_data == NULL) {
+-		return -EINVAL;
+-	}
+
+ 	key = k_spin_lock(&futex_data->lock);
+
+ 	do {
+-		thread = z_unpend_first_thread(&futex_data->wait_q);
++		/* wake in priority order, skipping waiters that hashed to the same bucket */
++		thread = NULL;
++		_WAIT_Q_FOR_EACH(&futex_data->wait_q, iter) {
++			if (iter->base.swap_data == (void *)futex) {
++				thread = iter;
++				break;
++			}
++		}
++
+ 		if (thread != NULL) {
++			z_unpend_thread(thread);
+ 			woken++;
+ 			arch_thread_return_value_set(thread, 0);
+ 			z_ready_thread(thread);
+@@ -74,9 +98,6 @@ int z_impl_k_futex_wait(struct k_futex *futex, int expected,
+ 	struct z_futex_data *futex_data;
+
+ 	futex_data = k_futex_find_data(futex);
+-	if (futex_data == NULL) {
+-		return -EINVAL;
+-	}
+
+ 	key = k_spin_lock(&futex_data->lock);
+
+@@ -85,6 +106,9 @@ int z_impl_k_futex_wait(struct k_futex *futex, int expected,
+ 		return -EAGAIN;
+ 	}
+
++	/* record which futex we wait on, so that wake-ups skip bucket-mates */
++	_current->base.swap_data = futex;
++
+ 	ret = z_pend_curr(&futex_data->lock,
+ 			key, &futex_data->wait_q, timeout);
+ 	if (ret == -EAGAIN) {
+diff --git a/tests/kernel/mem_protect/futex/src/main.c b/tests/kernel/mem_protect/futex/src/main.c
+index b4ddb7738ce..91576b2de95 100644
+--- a/tests/kernel/mem_protect/futex/src/main.c
++++ b/tests/kernel/mem_protect/futex/src/main.c
+@@ -430,17 +430,21 @@ ZTEST_USER(futex, test_user_futex_bad)
+ 	ret = k_futex_wake(&no_access_futex, false);
+ 	zassert_equal(ret, -EACCES, "shouldn't have been able to access");
+
+-	/* Access to memory, but not a kernel object */
++	/*
++	 * Any user-accessible address is a valid futex, even when it is not a
++	 * statically-defined kernel object: such futexes share address-hashed
++	 * wait queues. A matching value pends (timing out with K_NO_WAIT) and
++	 * a wake with no waiters wakes nobody.
++	 */
+ 	ret = k_futex_wait((struct k_futex *)&not_a_futex, 0, K_NO_WAIT);
+-	zassert_equal(ret, -EINVAL, "waited on non-futex");
++	zassert_equal(ret, -ETIMEDOUT, "didn't pend on unregistered futex");
+ 	ret = k_futex_wake((struct k_futex *)&not_a_futex, false);
+-	zassert_equal(ret, -EINVAL, "woke non-futex");
++	zassert_equal(ret, 0, "woke nonexistent waiter");
+
+-	/* Access to memory, but wrong object type */
+ 	ret = k_futex_wait((struct k_futex *)&also_not_a_futex, 0, K_NO_WAIT);
+-	zassert_equal(ret, -EINVAL, "waited on non-futex");
++	zassert_equal(ret, -ETIMEDOUT, "didn't pend on unregistered futex");
+ 	ret = k_futex_wake((struct k_futex *)&also_not_a_futex, false);
+-	zassert_equal(ret, -EINVAL, "woke non-futex");
++	zassert_equal(ret, 0, "woke nonexistent waiter");
+
+ 	/* Wait with unexpected value */
+ 	atomic_set(&simple_futex.val, 100);
