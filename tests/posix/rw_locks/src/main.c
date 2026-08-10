@@ -17,7 +17,7 @@
 
 LOG_MODULE_REGISTER(posix_rwlock_test);
 
-static pthread_rwlock_t rwlock;
+static ZTEST_BMEM pthread_rwlock_t rwlock;
 
 static void *thread_top(void *p1)
 {
@@ -50,7 +50,7 @@ static void *thread_top(void *p1)
 	return NULL;
 }
 
-ZTEST(posix_rw_locks, test_rw_lock)
+ZTEST_USER(posix_rw_locks, test_rw_lock)
 {
 	int ret;
 	pthread_t newthread[N_THR];
@@ -175,22 +175,22 @@ static void rwlock_timedlock_past_deadline(rwlock_timedlock_fn timedlock)
 	zassert_ok(pthread_rwlock_destroy(&rwlock));
 }
 
-ZTEST(posix_rw_locks, test_pthread_rwlock_timedrdlock)
+ZTEST_USER(posix_rw_locks, test_pthread_rwlock_timedrdlock)
 {
 	rwlock_timedlock_past_deadline(pthread_rwlock_timedrdlock);
 }
 
-ZTEST(posix_rw_locks, test_pthread_rwlock_timedwrlock)
+ZTEST_USER(posix_rw_locks, test_pthread_rwlock_timedwrlock)
 {
 	rwlock_timedlock_past_deadline(pthread_rwlock_timedwrlock);
 }
 
-ZTEST(posix_rw_locks, test_pthread_rwlockattr_getpshared)
+ZTEST_USER(posix_rw_locks, test_pthread_rwlockattr_getpshared)
 {
 	test_pthread_rwlockattr_pshared_common(false, 0);
 }
 
-ZTEST(posix_rw_locks, test_pthread_rwlockattr_setpshared)
+ZTEST_USER(posix_rw_locks, test_pthread_rwlockattr_setpshared)
 {
 	test_pthread_rwlockattr_pshared_common(true, PTHREAD_PROCESS_PRIVATE);
 	test_pthread_rwlockattr_pshared_common(true, PTHREAD_PROCESS_SHARED);
