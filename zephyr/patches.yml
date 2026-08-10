@@ -479,6 +479,34 @@ patches:
       POSIX sem_destroy() EBUSY detection, which lets sem_t be exactly
       struct sys_sem and the POSIX semaphore layer be a thin spelling
       adapter over the sys_sem API.
+  - path: zephyr/futex-wait-at-any-user-accessible-address.patch
+    sha256sum: 879f14110d651444dd36634883c368d8c704228c74bf738673997faccfc41aa7
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-09
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/sys-sem-track-blocked-waiters.patch
+    comments: |
+      k_futex_wait() resolved its wait queue through the kernel object
+      table, so only statically-defined futexes - the ones the kernel
+      object scanner can see - were waitable; a futex on a stack or in
+      heap memory failed with -EINVAL even for supervisor callers, and
+      only under contention, since uncontended operations never enter the
+      kernel. Fall back to a small fixed array of address-hashed wait
+      queues for unregistered futexes, in the manner of Linux: waiters
+      record the futex address and wake-ups unpend only matching waiters,
+      in priority order, so sharing a bucket costs lock contention but
+      never a lost or spurious wakeup. Statically-defined futexes keep
+      their dedicated wait queues. Update the mem_protect/futex testsuite
+      cases that asserted -EINVAL for user-accessible non-kobject
+      addresses to assert the new pend/no-waiter behavior instead.
+
+      This lifts the static-allocation restriction from sys_sem and
+      everything built on it, notably POSIX sem_t.
   - path: zephyr/k-obj-map-size.patch
     sha256sum: 2dd724c14885b31b9dff2cb7caa53b0b9aedecde81f801dd97f18280a5a38d58
     module: zephyr
