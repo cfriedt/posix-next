@@ -1,0 +1,124 @@
+diff --git a/include/zephyr/kernel.h b/include/zephyr/kernel.h
+index 681882b6f04..ed9c3d6b46e 100644
+--- a/include/zephyr/kernel.h
++++ b/include/zephyr/kernel.h
+@@ -2878,9 +2878,17 @@ __syscall void *k_queue_peek_tail(struct k_queue *queue);
+  * only on atomic access to shared memory. k_futex are tracked as
+  * kernel objects and can live in user memory so that any access
+  * bypasses the kernel object permission management mechanism.
++ *
++ * The kernel maintains @a waiters, the number of threads currently
++ * blocked on the futex: it is incremented before a thread blocks and
++ * decremented by whoever unblocks it (a waker, or the thread itself on
++ * timeout), so a thread that has been woken never touches the futex
++ * again. Callers zero-initialize it and may read it as a hint, e.g.
++ * to skip a wake-up when nobody is waiting.
+  */
+ struct k_futex {
+ 	atomic_t val;
++	atomic_t waiters;
+ };
+ 
+ /**
+diff --git a/include/zephyr/sys/sem.h b/include/zephyr/sys/sem.h
+index 16c6b33ba46..fc45817e1da 100644
+--- a/include/zephyr/sys/sem.h
++++ b/include/zephyr/sys/sem.h
+@@ -139,6 +139,19 @@ int sys_sem_take(struct sys_sem *sem, k_timeout_t timeout);
+  */
+ unsigned int sys_sem_count_get(struct sys_sem *sem);
+ 
++/**
++ * @brief Check whether any thread is blocked taking @a sem.
++ *
++ * The answer is a snapshot: it may already be stale by the time the caller
++ * acts on it, so it is a hint (e.g. for POSIX `sem_destroy()` `EBUSY`
++ * detection) rather than a synchronization primitive.
++ *
++ * @param sem Address of the sys_sem.
++ *
++ * @return true if at least one thread was blocked taking @a sem.
++ */
++bool sys_sem_has_waiters(struct sys_sem *sem);
++
+ /**
+  * @cond INTERNAL_HIDDEN
+  */
+diff --git a/kernel/futex.c b/kernel/futex.c
+index 85245183f18..8cd8b001ef0 100644
+--- a/kernel/futex.c
++++ b/kernel/futex.c
+@@ -41,6 +41,7 @@ int z_impl_k_futex_wake(struct k_futex *futex, bool wake_all)
+ 	do {
+ 		thread = z_unpend_first_thread(&futex_data->wait_q);
+ 		if (thread != NULL) {
++			(void)atomic_dec(&futex->waiters);
+ 			woken++;
+ 			arch_thread_return_value_set(thread, 0);
+ 			z_ready_thread(thread);
+@@ -80,7 +81,11 @@ int z_impl_k_futex_wait(struct k_futex *futex, int expected,
+ 
+ 	key = k_spin_lock(&futex_data->lock);
+ 
++	/* counted before the compare, so a waker that sees zero knows the value check follows */
++	(void)atomic_inc(&futex->waiters);
++
+ 	if (atomic_get(&futex->val) != (atomic_val_t)expected) {
++		(void)atomic_dec(&futex->waiters);
+ 		k_spin_unlock(&futex_data->lock, key);
+ 		return -EAGAIN;
+ 	}
+@@ -88,6 +93,8 @@ int z_impl_k_futex_wait(struct k_futex *futex, int expected,
+ 	ret = z_pend_curr(&futex_data->lock,
+ 			key, &futex_data->wait_q, timeout);
+ 	if (ret == -EAGAIN) {
++		/* timed out: nobody unpended us, so nobody decremented for us */
++		(void)atomic_dec(&futex->waiters);
+ 		ret = -ETIMEDOUT;
+ 	}
+ 
+diff --git a/lib/os/sem.c b/lib/os/sem.c
+index bb1b3fdc6b8..a45eb46d586 100644
+--- a/lib/os/sem.c
++++ b/lib/os/sem.c
+@@ -7,6 +7,10 @@
+ #include <zephyr/sys/sem.h>
+ #include <zephyr/internal/syscall_handler.h>
+ 
++#ifndef CONFIG_USERSPACE
++#include <wait_q.h>
++#endif
++
+ #ifdef CONFIG_USERSPACE
+ #define SYS_SEM_MINIMUM      0
+ #define SYS_SEM_CONTENDED    (SYS_SEM_MINIMUM - 1)
+@@ -54,6 +58,7 @@ int sys_sem_init(struct sys_sem *sem, unsigned int initial_count,
+ 
+ 	(void)atomic_set(&sem->futex.val, initial_count);
+ 	sem->limit = limit;
++	(void)atomic_clear(&sem->futex.waiters);
+ 
+ 	return 0;
+ }
+@@ -104,6 +109,11 @@ unsigned int sys_sem_count_get(struct sys_sem *sem)
+ 
+ 	return (value > SYS_SEM_MINIMUM) ? value : SYS_SEM_MINIMUM;
+ }
++
++bool sys_sem_has_waiters(struct sys_sem *sem)
++{
++	return atomic_get(&sem->futex.waiters) > 0;
++}
+ #else
+ int sys_sem_init(struct sys_sem *sem, unsigned int initial_count,
+ 		 unsigned int limit)
+@@ -136,4 +146,9 @@ unsigned int sys_sem_count_get(struct sys_sem *sem)
+ {
+ 	return k_sem_count_get(&sem->kernel_sem);
+ }
++
++bool sys_sem_has_waiters(struct sys_sem *sem)
++{
++	return z_waitq_head(&sem->kernel_sem.wait_q) != NULL;
++}
+ #endif

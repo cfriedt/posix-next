@@ -1838,3 +1838,20 @@ patches:
       names could overflow a caller-supplied tmpnam() buffer; two digits
       cover every libc's TMP_MAX, and BUILD_ASSERTs enforce both bounds.
       The unreachable !ZVFS fallback and its LOG registration are dropped.
+  - path: zephyr/sys-sem-track-blocked-waiters.patch
+    sha256sum: 358f0203efcfd0b75b720cfcebe46d32761714dab0cff7f76e89406ad76f72de
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-09
+    upstreamable: true
+    comments: |
+      Track whether any thread is blocked taking a sys_sem and expose it
+      as sys_sem_has_waiters(). The kernel maintains the count in every
+      k_futex: it is incremented under the wait-queue lock before the
+      value compare and decremented by whoever unblocks the thread, the
+      waker in k_futex_wake() or the thread itself on timeout, still inside
+      the system call. A woken thread therefore never touches the futex
+      again, which makes it safe to destroy a semaphore right after the
+      give that released its last waiter. Without userspace the k_sem wait
+      queue is inspected directly.
