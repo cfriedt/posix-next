@@ -1903,3 +1903,26 @@ patches:
       z_sig_queue_chld() (declared in the lifecycle patch). kernel/process.c
       emits K_SIG_CHLD to a zombie's parent from a notifier thread, since
       signal generation cannot run in the scheduler's thread-halt path.
+  - path: zephyr/k-process-pgrp-session.patch
+    sha256sum: f1eb5d1019c4bfaa7aa1a0f8b232cd3ad0de3246dc2f335adca3b06cc28c6ff2
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-11
+    upstreamable: true
+    comments: |
+      Complete process-group and session control: k_setpgid() joins live
+      groups (session rules; the user-mode handler validates the group and
+      every member record via z_pgrp_validate);
+      k_process_group_init()/k_session_init() initialize caller-provided
+      cells, erroring -EBUSY first on busy cells; sys_setpgid()/sys_setsid()
+      are the pool-backed tiers in lib/os, numbering the new group or
+      session once the kernel primitive succeeds. k_kill() is
+      process-directed via identity resolution (leader handles first, then
+      any live member's handle); k_kill_pgrp() fans out to every member
+      process in bounded batches with the lock dropped between them;
+      k_waitpid_pgrp() waits on a group's children. Process-directed
+      delivery picks an unblocked member thread (process_sig_target),
+      preferring the caller for self-signals; z_syscall_sig_check() skips
+      delivery while a user syscall is in progress so wrappers reached in
+      kernel context cannot corrupt the syscall return frame.
