@@ -1852,3 +1852,27 @@ patches:
       rather than include_next, following the sys/select.h and
       sys/statvfs.h precedents: independent C library headers must be
       independent.
+  - path: zephyr/libc-common-exit.patch
+    sha256sum: f7dd5aafa3c190c06c09b42a1bc0170c1dc45a710f56a22acffe9aeb18e00bc1
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-10
+    upstreamable: true
+    comments: |
+      Promote exit() and atexit() from the minimal libc into the common C
+      library (COMMON_LIBC_EXIT, following the COMMON_LIBC_TMPFILE
+      precedent), with the registry sized by COMMON_LIBC_ATEXIT_MAX
+      (default 32, the ISO C minimum, replacing minimal's 8 fixed slots).
+
+      This also makes the ISO C exit sequence real for picolibc: the
+      prebuilt (SDK) picolibc registers atexit() handlers into a stub and
+      its exit() runs only __libc_fini_array before _exit, so handlers
+      never execute. With COMMON_LIBC_EXIT (default y for minimal libc
+      and picolibc), exit() runs registered handlers in reverse
+      registration order and then _exit() terminates the program.
+
+      Documented deviations, unchanged from the minimal libc behaviour:
+      open streams are not flushed on exit and fini-array functions do
+      not run (nothing on Zephyr registers them at exit today; newlib
+      keeps its own complete exit machinery and is not affected).
