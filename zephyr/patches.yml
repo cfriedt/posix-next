@@ -1889,3 +1889,17 @@ patches:
       k_exit()/k_waitpid() implement zombie/reap with process_lock nested
       inside the scheduler lock (z_sched_waitq_pend_if); SIGCHLD emission
       defers to a notifier thread.
+  - path: zephyr/k-process-sigchld.patch
+    sha256sum: ab670674260a8f0f4a22dfa673be7af8babcf4931f8b5b499a8534136abff709
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-11
+    upstreamable: true
+    comments: |
+      Extend struct k_sig_info with pid/status fields and add the
+      K_SI_CLD_EXITED / K_SI_CLD_KILLED codes (gated on CONFIG_PROCESS);
+      widen the internal z_sig_queue_common() to carry them and add
+      z_sig_queue_chld() (declared in the lifecycle patch). kernel/process.c
+      emits K_SIG_CHLD to a zombie's parent from a notifier thread, since
+      signal generation cannot run in the scheduler's thread-halt path.
