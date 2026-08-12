@@ -3057,6 +3057,23 @@ patches:
       toolchain libcs ship their own <spawn.h> whose types do not match the
       Zephyr implementation, and the shim directories override the
       toolchain headers.
+  - path: zephyr/libc-multi-process-headers.patch
+    sha256sum: e70236b0424ab39e83b838f7ea435a8660821c225e9948e7ee33563b9406ca44
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-10
+    upstreamable: true
+    comments: |
+      Add <sys/wait.h> forwarder shims for picolibc and newlib so that
+      the header resolves to the Zephyr POSIX <zephyr/posix/sys/wait.h>
+      rather than the partial toolchain copy, which declares only wait()
+      and waitpid() and lacks waitid(), idtype_t, id_t, and the P_*
+      constants, and whose W* macros would conflict with the
+      Zephyr-native K_WSTATUS_*-derived definitions. Full replacement
+      rather than include_next, following the sys/select.h and
+      sys/statvfs.h precedents: independent C library headers must be
+      independent.
   - path: zephyr/arm64-userspace-cache-maintenance.patch
     sha256sum: 2e42fc6bdc1fec89817fa1326b6d9ac8fe57cb5096b98a4201c9b175676babf7
     module: zephyr
