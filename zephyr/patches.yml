@@ -1773,3 +1773,28 @@ patches:
       identity-value scans and are never dereferenced; only caller-provided
       records passed to k_process_init() are kernel objects
       (K_OBJ_PROCESS), validated like thread objects.
+  - path: zephyr/k-process-exit-wait.patch
+    sha256sum: 3c62233314618a8479bda089bee068c0ce61c33f1b671dae1a4dd8b4635a46ce
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-10
+    upstreamable: true
+    comments: |
+      Implement the k_process lifecycle over the core API: threads join
+      their creator's process at creation (z_process_init_thread) and leave
+      in the scheduler halt epilogue (z_process_exit_thread); the idle
+      threads and the boot thread belong to the idle process, boot-time
+      kernel threads to the kthread process, and user threads descend from
+      init; the reserved trio is wired at build time. The kernel neither
+      allocates nor calls an allocator: k_process_init() initializes
+      caller-provided records (-EBUSY on busy records or leaders) and a
+      live-record registry resolves them. Everything allocation-adjacent
+      lives in lib/os/process.c under CONFIG_SYS_PROCESS: elastipool
+      records and group/session cells with graveyard-deferred heap
+      reclamation, the sys_process_id() numbering tables, and the
+      pool-backed sys_clone(). Provider frees error (-EINVAL) on memory the
+      provider does not own - static or caller memory recycles in place.
+      k_exit()/k_waitpid() implement zombie/reap with process_lock nested
+      inside the scheduler lock (z_sched_waitq_pend_if); SIGCHLD emission
+      defers to a notifier thread.
