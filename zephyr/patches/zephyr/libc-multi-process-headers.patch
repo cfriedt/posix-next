@@ -1,0 +1,112 @@
+diff --git a/lib/libc/newlib/include/signal.h b/lib/libc/newlib/include/signal.h
+index 812d77f196a..8b8bbccb194 100644
+--- a/lib/libc/newlib/include/signal.h
++++ b/lib/libc/newlib/include/signal.h
+@@ -54,6 +54,18 @@
+ #define _SIGVAL_DECLARED
+ #endif
+ 
++#include <zephyr/kernel/signal.h>
++
++/* SIGCHLD si_code values */
++#ifndef CLD_EXITED
++#define CLD_EXITED    K_SI_CLD_EXITED
++#define CLD_KILLED    K_SI_CLD_KILLED
++#define CLD_DUMPED    K_SI_CLD_DUMPED
++#define CLD_TRAPPED   K_SI_CLD_TRAPPED
++#define CLD_STOPPED   K_SI_CLD_STOPPED
++#define CLD_CONTINUED K_SI_CLD_CONTINUED
++#endif
++
+ #endif /* defined(_POSIX_C_SOURCE) || defined(__DOXYGEN__) */
+ 
+ 
+diff --git a/lib/libc/newlib/include/sys/wait.h b/lib/libc/newlib/include/sys/wait.h
+new file mode 100644
+index 00000000000..2db12040a83
+--- /dev/null
++++ b/lib/libc/newlib/include/sys/wait.h
+@@ -0,0 +1,27 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_SYS_WAIT_H_
++#define ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_SYS_WAIT_H_
++
++/*
++ * <stdlib.h> pulls in <sys/_wait.h>, which defines a subset of these with its own
++ * encoding. Claim its guard and drop anything it already defined, so the values the
++ * wait wrappers hand to k_waitpid() are the kernel's.
++ */
++#define _SYS__WAIT_H
++#undef WEXITSTATUS
++#undef WIFEXITED
++#undef WIFSIGNALED
++#undef WIFSTOPPED
++#undef WNOHANG
++#undef WSTOPSIG
++#undef WTERMSIG
++#undef WUNTRACED
++
++#include <zephyr/posix/sys/wait.h>
++
++#endif /* ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_SYS_WAIT_H_ */
+diff --git a/lib/libc/picolibc/include/signal.h b/lib/libc/picolibc/include/signal.h
+index 068728e975a..2d7a11a40eb 100644
+--- a/lib/libc/picolibc/include/signal.h
++++ b/lib/libc/picolibc/include/signal.h
+@@ -76,6 +76,18 @@ int pthread_sigmask(int how, const sigset_t *ZRESTRICT set, sigset_t *ZRESTRICT
+ #define _SIGVAL_DECLARED
+ #endif
+ 
++#include <zephyr/kernel/signal.h>
++
++/* SIGCHLD si_code values */
++#ifndef CLD_EXITED
++#define CLD_EXITED    K_SI_CLD_EXITED
++#define CLD_KILLED    K_SI_CLD_KILLED
++#define CLD_DUMPED    K_SI_CLD_DUMPED
++#define CLD_TRAPPED   K_SI_CLD_TRAPPED
++#define CLD_STOPPED   K_SI_CLD_STOPPED
++#define CLD_CONTINUED K_SI_CLD_CONTINUED
++#endif
++
+ #endif /* defined(_POSIX_C_SOURCE) || defined(__DOXYGEN__) */
+ 
+ 
+diff --git a/lib/libc/picolibc/include/sys/wait.h b/lib/libc/picolibc/include/sys/wait.h
+new file mode 100644
+index 00000000000..6792687d1ca
+--- /dev/null
++++ b/lib/libc/picolibc/include/sys/wait.h
+@@ -0,0 +1,27 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SYS_WAIT_H_
++#define ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SYS_WAIT_H_
++
++/*
++ * <stdlib.h> pulls in <sys/_wait.h>, which defines a subset of these with its own
++ * encoding. Claim its guard and drop anything it already defined, so the values the
++ * wait wrappers hand to k_waitpid() are the kernel's.
++ */
++#define _SYS__WAIT_H
++#undef WEXITSTATUS
++#undef WIFEXITED
++#undef WIFSIGNALED
++#undef WIFSTOPPED
++#undef WNOHANG
++#undef WSTOPSIG
++#undef WTERMSIG
++#undef WUNTRACED
++
++#include <zephyr/posix/sys/wait.h>
++
++#endif /* ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SYS_WAIT_H_ */
