@@ -609,6 +609,20 @@ patches:
     upstreamable: true
     comments: |
       lib: os: add sys_thread api for pooled condvar, mutex, thread, and stack
+  - path: zephyr/sys-thread-paused-delay.patch
+    sha256sum: c8a7505ddd7e71ea9bc468cb88398ecdbd4fa3eb692fbf9bb3c68d059717c237
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-16
+    upstreamable: true
+    comments: |
+      Fix sys_thread_create_common(): the user-syscall branch passed
+      K_NO_WAIT to z_vrfy_k_thread_create() instead of the caller's delay,
+      so paused creation (sys_thread_create_paused(), K_FOREVER) silently
+      started the thread immediately when reached inside a user syscall.
+      sys_spawn() depends on paused creation to adopt the leader thread
+      into the new process before it runs.
   - path: zephyr/kernel-dyn-stack-priv-placement.patch
     sha256sum: b03443cf0eeb6f3885c794cb3def2cef46042a41978c62c7727d4033371165fd
     module: zephyr
