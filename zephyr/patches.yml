@@ -2126,3 +2126,29 @@ patches:
       from the awaiting-substrate path. SYS_CLONE_VM_COPY excludes
       SYS_CLONE_THREAD, and a seeded signal mask is invalid with it -
       a forked child always inherits the caller's mask.
+  - path: zephyr/process-vm.patch
+    sha256sum: f1411c6a39da8461e379d17855a7591be1bec32a973441487071805634ced94d
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-17
+    upstreamable: true
+    comments: |
+      Experimental per-process virtual address spaces for the fork() model
+      (CONFIG_PROCESS_VM, default n, x86 only). Adds the arch hook
+      z_mem_domain_clone_remap() (x86: repoint a domain's page-table entries
+      at fresh frames, no TLB flush since the child is not yet live), the
+      system-layer process_vm_clone() that builds the child's memory domain
+      (parent partitions mirrored, writable ones and the stack copied onto
+      fresh frames), the clone/leader/perms-inherit path, and reap-time
+      teardown. sys_clone(SYS_CLONE_VM_COPY) and POSIX fork() resume the
+      child via setjmp/longjmp on its stack copy. Also folds a real fix
+      exposed by exercising process-directed signals under userspace:
+      k_kill()/k_kill_pgrp() deliver to a kernel-resolved thread through
+      z_sig_queue_thread(), which bypasses the per-thread-object sender
+      permission check (kill() authorization is process-level, already
+      established by identity resolution). CONFIRMED: fork returns twice,
+      the child diverges its stack and exits, the parent reaps it. KNOWN
+      GAP: writable app-data partitions are not yet isolated on x86 (a
+      child write is visible in the parent); the frame remap for
+      globally-mapped partitions needs follow-up.
