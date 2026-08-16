@@ -1965,3 +1965,23 @@ patches:
       loaders terminate the old image's threads and continue on the calling
       thread. The abort loop drops and retakes the process lock around
       k_thread_abort(), which cannot run under it.
+  - path: zephyr/sys-clone-fork-tier.patch
+    sha256sum: 32de624f26deb1783260ce4945c426605f6385bc140889ae1acf29aac5c08970
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-16
+    upstreamable: true
+    comments: |
+      Define the fork model over sys_clone(): SYS_CLONE_VM_COPY asks for a
+      child that receives copies of the caller's writable memory at the same
+      virtual addresses and resumes at the clone point, and sys_fork() is
+      the resume-style wrapper (returns the child handle to the parent, NULL
+      to the child). Copied memory is what makes the model sound where vfork
+      was not - the child cannot disturb the parent's stack, and a plain
+      setjmp/longjmp resumes the child because every address it restores is
+      valid in its own copy. The record and pipeline are in place down to
+      process_vm_clone(), which returns -ENOSYS until per-process virtual
+      address spaces (per-domain tables mapping fresh frames at the caller's
+      addresses) exist; undefined flags are -EINVAL, distinguishing them
+      from the awaiting-substrate path.
