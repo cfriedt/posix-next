@@ -12,7 +12,7 @@
 #include <string.h>
 
 #include "image_registry.h"
-#include "spawn_internal.h"
+#include "posix_image.h"
 
 const struct posix_spawn_image *posix_spawn_image_lookup(const char *path)
 {

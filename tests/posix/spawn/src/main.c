@@ -14,6 +14,7 @@
 #include <zephyr/ztest.h>
 
 #include "image_registry.h"
+#include "spawn_internal.h"
 
 static char *const spawn_argv[] = {"child", NULL};
 static char *const spawn_envp[] = {NULL};

@@ -5,14 +5,54 @@
  */
 
 #include <errno.h>
+#include <stdlib.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
+#include <zephyr/kernel.h>
+#include <zephyr/sys/process.h>
 #include <zephyr/ztest.h>
+
+/*
+ * Prelinked-image resolution walks a registry in kernel memory, so it only
+ * works from supervisor mode until an exec loader exists (M3). The in-place
+ * exec round trip below is therefore supervisor-only; a user-mode execve()
+ * resolves nothing and returns ENOENT.
+ */
+#ifndef CONFIG_USERSPACE
+#include "image_registry.h"
+
+static char *const exec_argv[] = {"execme", NULL};
+
+static void execme_entry(void *p1, void *p2, void *p3)
+{
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	/* the previous image's argv arrives as the entry parameters */
+	_exit(((char *const *)p1 == exec_argv) ? 42 : 43);
+}
+
+IMAGE_REGISTRY_ENTRY_DEFINE(img_execme, "/bin/execme", execme_entry);
+
+static K_THREAD_STACK_DEFINE(exec_child_stack, 2048);
+static struct k_thread exec_child_thread;
+
+static void exec_child_entry(void *p1, void *p2, void *p3)
+{
+	ARG_UNUSED(p1);
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	(void)execve("/bin/execme", exec_argv, NULL);
+	_exit(99);
+}
+#endif /* !CONFIG_USERSPACE */
 
 ZTEST_USER(posix_multi_process, test_execve)
 {
 	if (IS_ENABLED(CONFIG_NATIVE_LIBC)) {
-		/* host libc actually execs/forks; the ENOSYS fallback is Zephyr-only */
+		/* host libc actually execs/forks; the prelinked-image resolution is Zephyr-only */
 		ztest_test_skip();
 		return;
 	}
@@ -24,5 +64,29 @@ ZTEST_USER(posix_multi_process, test_execve)
 
 	errno = 0;
 	zexpect_equal(execve("/bin/true", argv, envp), -1);
-	zexpect_equal(errno, ENOSYS);
+	zexpect_equal(errno, ENOENT);
+
+#ifndef CONFIG_USERSPACE
+	if (!k_is_user_context()) {
+		/* a child execs a registry image in place: same pid, new image */
+		int status = -1;
+		k_pid_t child = NULL;
+		struct sys_clone_args args = {
+			.entry = exec_child_entry,
+			.thread = &exec_child_thread,
+			.stack = exec_child_stack,
+			.stack_size = 2048,
+			.prio = k_thread_priority_get(k_current_get()),
+		};
+
+		zassert_ok(sys_clone(&args, &child));
+
+		pid_t pid = (pid_t)sys_process_id(child);
+
+		zassert_true(pid > 0);
+		zassert_equal(waitpid(pid, &status, 0), pid);
+		zassert_true(WIFEXITED(status));
+		zassert_equal(WEXITSTATUS(status), 42, "exec image did not run");
+	}
+#endif /* !CONFIG_USERSPACE */
 }

@@ -8,7 +8,7 @@
 
 #include <zephyr/kernel.h>
 
-#include "spawn_internal.h"
+#include "posix_image.h"
 
 struct image_registry_entry {
 	const char *path;

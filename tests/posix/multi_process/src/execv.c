@@ -12,7 +12,7 @@
 ZTEST_USER(posix_multi_process, test_execv)
 {
 	if (IS_ENABLED(CONFIG_NATIVE_LIBC)) {
-		/* host libc actually execs/forks; the ENOSYS fallback is Zephyr-only */
+		/* host libc actually execs/forks; the prelinked-image resolution is Zephyr-only */
 		ztest_test_skip();
 		return;
 	}
@@ -24,5 +24,5 @@ ZTEST_USER(posix_multi_process, test_execv)
 
 	errno = 0;
 	zexpect_equal(execv("/bin/true", argv), -1);
-	zexpect_equal(errno, ENOSYS);
+	zexpect_equal(errno, ENOENT);
 }
