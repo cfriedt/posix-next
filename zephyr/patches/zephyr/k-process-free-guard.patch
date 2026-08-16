@@ -1,0 +1,21 @@
+diff --git a/kernel/userspace.c b/kernel/userspace.c
+index 625185d1f50..c3a911c9d14 100644
+--- a/kernel/userspace.c
++++ b/kernel/userspace.c
+@@ -485,6 +485,16 @@ void k_object_free(void *obj)
+ 
+ 	dyn = dyn_object_find(obj);
+ 	if (dyn != NULL) {
++#ifdef CONFIG_PROCESS
++		if ((dyn->kobj.type == K_OBJ_PROCESS) &&
++		    (((struct k_process *)obj)->state != K_PROCESS_UNUSED)) {
++			/* a live or unreaped process record must not be freed;
++			 * its memory is reclaimed at reap
++			 */
++			k_spin_unlock(&objfree_lock, key);
++			return;
++		}
++#endif /* CONFIG_PROCESS */
+ 		sys_dlist_remove(&dyn->dobj_list);
+ 
+ 		if (dyn->kobj.type == K_OBJ_THREAD) {

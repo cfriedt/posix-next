@@ -2079,3 +2079,16 @@ patches:
       GAP: writable app-data partitions are not yet isolated on x86 (a
       child write is visible in the parent); the frame remap for
       globally-mapped partitions needs follow-up.
+  - path: zephyr/k-process-free-guard.patch
+    sha256sum: dfec80d221286142194d846e2c5dd50f969b8a04efc3b8f5c2dffb2f3d945ee2
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-17
+    upstreamable: true
+    comments: |
+      Refuse k_object_free() of a K_OBJ_PROCESS record that is still active
+      or an unreaped zombie: a dynamically allocated process record must
+      live until the process is reaped, when its memory is reclaimed, so
+      user code cannot free it out from under the kernel's live-record
+      lists.
