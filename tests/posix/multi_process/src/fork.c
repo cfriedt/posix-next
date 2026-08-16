@@ -11,8 +11,8 @@
 
 ZTEST_USER(posix_multi_process, test_fork)
 {
-	if (IS_ENABLED(CONFIG_NATIVE_LIBC)) {
-		/* host libc actually execs/forks; the ENOSYS fallback is Zephyr-only */
+	if (IS_ENABLED(CONFIG_NATIVE_LIBC) || IS_ENABLED(CONFIG_PROCESS_VM)) {
+		/* the fork round-trip is exercised by tests/posix/fork */
 		ztest_test_skip();
 		return;
 	}
