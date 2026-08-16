@@ -8,6 +8,8 @@
 #include <stdarg.h>
 #include <unistd.h>
 
+#include <string.h>
+
 #include "multi_process_internal.h"
 
 int execlp(const char *file, const char *arg0, ...)
@@ -24,6 +26,7 @@ int execlp(const char *file, const char *arg0, ...)
 		return -1;
 	}
 
-	/* no PATH search before exec loading: names resolve exactly */
-	return execve(file, argv, NULL);
+	char resolved[CONFIG_POSIX_EXEC_PATH_MAX];
+
+	return execve(z_posix_exec_resolve(file, resolved, sizeof(resolved)), argv, NULL);
 }

@@ -15,6 +15,7 @@ zephyr_library_compile_options_ifdef(CONFIG_XSI -U_XOPEN_SOURCE -D_XOPEN_SOURCE=
 
 if(NOT CONFIG_TC_PROVIDES_POSIX_MULTI_PROCESS)
   zephyr_library_sources(
+    exec_resolve.c
     execl.c
     execl_argv.c
     execle.c

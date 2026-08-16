@@ -5,12 +5,50 @@
  */
 
 #include <errno.h>
+#include <fcntl.h>
 #include <stdlib.h>
 #include <unistd.h>
 
 #include <zephyr/kernel.h>
+#include <zephyr/kernel/signal.h>
 
 #include "posix_image.h"
+
+#ifdef CONFIG_SIGNAL
+static void exec_reset_signals(void)
+{
+	/* handled dispositions revert to default across exec (POSIX) */
+	for (int sig = 1; sig < SIGNAL_SET_SIZE; sig++) {
+		struct k_sig_action act = {.handler = K_SIG_DFL};
+		struct k_sig_action old;
+
+		if (k_sig_action(sig, NULL, &old) != 0) {
+			continue;
+		}
+		if ((old.handler != K_SIG_DFL) && (old.handler != K_SIG_IGN)) {
+			(void)k_sig_action(sig, &act, NULL);
+		}
+	}
+}
+#endif /* CONFIG_SIGNAL */
+
+#if defined(CONFIG_POSIX_FD_MGMT) && defined(CONFIG_POSIX_DEVICE_IO)
+static void exec_close_cloexec(void)
+{
+	/* descriptors marked FD_CLOEXEC are closed across exec */
+	for (int fd = 0; fd < CONFIG_POSIX_OPEN_MAX; fd++) {
+		int flags = fcntl(fd, F_GETFD);
+
+		if ((flags >= 0) && ((flags & FD_CLOEXEC) != 0)) {
+			(void)close(fd);
+		}
+	}
+}
+#else
+static void exec_close_cloexec(void)
+{
+}
+#endif /* CONFIG_POSIX_FD_MGMT && CONFIG_POSIX_DEVICE_IO */
 
 int execve(const char *path, char *const argv[], char *const envp[])
 {
@@ -28,14 +66,18 @@ int execve(const char *path, char *const argv[], char *const envp[])
 	}
 
 	/*
-	 * The process image is replaced in place: every other member thread
-	 * is aborted and the calling thread continues as the new image, which
-	 * preserves the process's identity, parent, and group membership.
-	 * Deviations before exec loading (M3): the new image runs on the
-	 * calling thread's stack, and signal dispositions and FD_CLOEXEC are
-	 * not yet reset.
+	 * Replace the process image in place: abort every other member thread
+	 * and continue on the calling thread, preserving the process's
+	 * identity, parent, and group membership. Signal dispositions revert
+	 * to default and FD_CLOEXEC descriptors are closed, per POSIX.
+	 * Remaining deviation before exec loading: the new image runs on the
+	 * calling thread's existing stack rather than a fresh one.
 	 */
 	(void)k_process_prune();
+#ifdef CONFIG_SIGNAL
+	exec_reset_signals();
+#endif /* CONFIG_SIGNAL */
+	exec_close_cloexec();
 
 	img->entry((void *)argv, (void *)envp, NULL);
 

@@ -90,4 +90,6 @@ static inline int posix_wait_common(k_pid_t child, k_pgrp_t grp, bool by_grp, pi
  */
 int z_posix_execl_argv(char **argv, const char *arg0, va_list ap);
 
+const char *z_posix_exec_resolve(const char *file, char *buf, size_t buflen);
+
 #endif /* ZEPHYR_LIB_POSIX_OPTIONS_MULTI_PROCESS_INTERNAL_H_ */
