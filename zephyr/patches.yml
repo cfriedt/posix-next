@@ -2024,3 +2024,25 @@ patches:
       CONFIG_SYS_THREAD_IDS (0 disables member numbering; leaders still
       resolve). Deliberately adds no POSIX consumer:
       pthread_t remains a handle.
+  - path: zephyr/sys-clone-fork-tier.patch
+    sha256sum: 9258cf7400c05d7dd3ee99aa84bdd23c9b1322dbd081cd4896ef5c0c5c7e68ec
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-16
+    upstreamable: true
+    comments: |
+      Define the fork model over sys_clone(): SYS_CLONE_VM_COPY asks for a
+      child that receives copies of the caller's writable memory at the same
+      virtual addresses and resumes at the clone point, and sys_fork() is
+      the resume-style wrapper (returns the child handle to the parent, NULL
+      to the child). Copied memory is what makes the model sound where vfork
+      was not - the child cannot disturb the parent's stack, and a plain
+      setjmp/longjmp resumes the child because every address it restores is
+      valid in its own copy. The record and pipeline are in place down to
+      process_vm_clone(), which returns -ENOSYS until per-process virtual
+      address spaces (per-domain tables mapping fresh frames at the caller's
+      addresses) exist; undefined flags are -EINVAL, distinguishing them
+      from the awaiting-substrate path. SYS_CLONE_VM_COPY excludes
+      SYS_CLONE_THREAD, and a seeded signal mask is invalid with it -
+      a forked child always inherits the caller's mask.
