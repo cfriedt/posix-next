@@ -621,7 +621,7 @@ patches:
       K_NO_WAIT to z_vrfy_k_thread_create() instead of the caller's delay,
       so paused creation (sys_thread_create_paused(), K_FOREVER) silently
       started the thread immediately when reached inside a user syscall.
-      sys_spawn() depends on paused creation to adopt the leader thread
+      sys_clone() depends on paused creation to adopt the leader thread
       into the new process before it runs.
   - path: zephyr/kernel-dyn-stack-priv-placement.patch
     sha256sum: b03443cf0eeb6f3885c794cb3def2cef46042a41978c62c7727d4033371165fd
@@ -1907,3 +1907,23 @@ patches:
       CONFIG_PROCESS the common _exit() reproduces the prior
       report-and-halt behaviour, and the per-C-library stubs are used as
       before.
+  - path: zephyr/sys-clone-pool-leader.patch
+    sha256sum: 2146231ae4297115396036d366d65610ee5ed683d20cf2583fbe6d3d0a7532f6
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-16
+    upstreamable: true
+    comments: |
+      sys_clone() gains the pool-drawn leader tier: when the caller provides
+      no thread object, the leader thread and its stack come from the system
+      thread pools via sys_thread_create_paused(), and the record is marked
+      K_PROCESS_FLAG_LEADER_POOLED. At reap the kernel calls
+      z_process_leader_release() (static-inline no-op without
+      CONFIG_SYS_PROCESS) for pool-owned leaders only; lib/os parks the dead
+      leader on a release list drained at the next spawn, where
+      sys_thread_destroy() returns thread and stack to the pools - reap can
+      run under the scheduler lock, where the pools' heap tier is off
+      limits. The user-mode sys_clone() handler validates caller-provided
+      thread/stack objects only when they are supplied; the pool path needs
+      no caller objects.
