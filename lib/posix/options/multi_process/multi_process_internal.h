@@ -7,6 +7,8 @@
 #ifndef ZEPHYR_LIB_POSIX_OPTIONS_MULTI_PROCESS_INTERNAL_H_
 #define ZEPHYR_LIB_POSIX_OPTIONS_MULTI_PROCESS_INTERNAL_H_
 
+#include <stdarg.h>
+
 #include "posix_internal.h"
 
 #include <sys/wait.h>
@@ -79,5 +81,13 @@ static inline int posix_wait_common(k_pid_t child, k_pgrp_t grp, bool by_grp, pi
 		/* stolen by a concurrent waiter: go around again */
 	}
 }
+
+/*
+ * Collect an execl-style variadic argument list into @a argv (sized
+ * CONFIG_POSIX_EXEC_ARGS_MAX + 1). On success @a ap is positioned after the
+ * NULL terminator (execle's envp follows). Returns -1 when the list does not
+ * fit.
+ */
+int z_posix_execl_argv(char **argv, const char *arg0, va_list ap);
 
 #endif /* ZEPHYR_LIB_POSIX_OPTIONS_MULTI_PROCESS_INTERNAL_H_ */
