@@ -1,0 +1,623 @@
+diff --git a/arch/Kconfig b/arch/Kconfig
+index 3c7740119b2..a86194d7049 100644
+--- a/arch/Kconfig
++++ b/arch/Kconfig
+@@ -739,6 +739,12 @@ config ARCH_HAS_TRUSTED_EXECUTION
+ config ARCH_HAS_STACK_PROTECTION
+ 	bool
+ 
++config ARCH_HAS_PROCESS_VM
++	bool
++	help
++	  Set by an architecture that implements z_mem_domain_clone_remap()
++	  for CONFIG_PROCESS_VM.
++
+ config ARCH_HAS_STACK_JUMP
+ 	bool
+ 	help
+diff --git a/arch/x86/Kconfig b/arch/x86/Kconfig
+index 03a8c6e4419..268d2dbaa45 100644
+--- a/arch/x86/Kconfig
++++ b/arch/x86/Kconfig
+@@ -18,6 +18,7 @@ config CPU_ATOM
+ 	select CPU_HAS_FPU
+ 	select ARCH_HAS_STACK_PROTECTION if X86_MMU
+ 	select ARCH_HAS_USERSPACE if X86_MMU
++	select ARCH_HAS_PROCESS_VM if X86_MMU && !X86_COMMON_PAGE_TABLE
+ 	select X86_CPU_HAS_MMX
+ 	select X86_CPU_HAS_SSE
+ 	select X86_CPU_HAS_SSE2
+@@ -31,6 +32,7 @@ config CPU_APOLLO_LAKE
+ 	select CPU_HAS_FPU
+ 	select ARCH_HAS_STACK_PROTECTION if X86_MMU
+ 	select ARCH_HAS_USERSPACE if X86_MMU
++	select ARCH_HAS_PROCESS_VM if X86_MMU && !X86_COMMON_PAGE_TABLE
+ 	select X86_MMU
+ 	select X86_CPU_HAS_MMX
+ 	select X86_CPU_HAS_SSE
+@@ -48,6 +50,7 @@ config CPU_LAKEMONT_VALUE
+ 	select CPU_HAS_FPU
+ 	select ARCH_HAS_STACK_PROTECTION if X86_MMU
+ 	select ARCH_HAS_USERSPACE if X86_MMU
++	select ARCH_HAS_PROCESS_VM if X86_MMU && !X86_COMMON_PAGE_TABLE
+ 	select CPU_HAS_DCACHE
+ 	help
+ 	  This option signifies the use of a CPU from the Lakemont Value family.
+@@ -57,6 +60,7 @@ config CPU_LAKEMONT_PERF
+ 	select CPU_HAS_FPU
+ 	select ARCH_HAS_STACK_PROTECTION if X86_MMU
+ 	select ARCH_HAS_USERSPACE if X86_MMU
++	select ARCH_HAS_PROCESS_VM if X86_MMU && !X86_COMMON_PAGE_TABLE
+ 	select X86_CPU_HAS_MMX
+ 	select X86_CPU_HAS_SSE
+ 	select X86_CPU_HAS_SSE2
+diff --git a/arch/x86/core/x86_mmu.c b/arch/x86/core/x86_mmu.c
+index 9bece5dd9f5..783f3d5a04a 100644
+--- a/arch/x86/core/x86_mmu.c
++++ b/arch/x86/core/x86_mmu.c
+@@ -1860,6 +1860,50 @@ int arch_mem_domain_init(struct k_mem_domain *domain)
+ 	return ret;
+ }
+ 
++#ifdef CONFIG_PROCESS_VM
++/*
++ * Repoint the mappings of [virt, virt+size) in @a domain at fresh physical
++ * memory starting at @a phys, preserving each page's existing permission
++ * flags. The domain is not live on any CPU when this runs (a forking child
++ * before its first start), so no TLB shootdown is required.
++ */
++int z_mem_domain_clone_remap(struct k_mem_domain *domain, void *virt, size_t size, uintptr_t phys)
++{
++	const pentry_t addr_mask = paging_levels[PTE_LEVEL].mask;
++	int ret = 0;
++
++	CHECKIF((((uintptr_t)virt | size) % CONFIG_MMU_PAGE_SIZE) != 0U) {
++		return -EINVAL;
++	}
++
++	K_SPINLOCK(&x86_mmu_lock) {
++		for (size_t off = 0; off < size; off += CONFIG_MMU_PAGE_SIZE) {
++			uint8_t *page = (uint8_t *)virt + off;
++			pentry_t old_val;
++			pentry_t new_val;
++			int level;
++
++			pentry_get(&level, &old_val, domain->arch.ptables, page);
++			if ((level != PTE_LEVEL) || ((old_val & MMU_P) == 0U)) {
++				ret = -EFAULT;
++				break;
++			}
++
++			/* keep the flag bits, swap only the physical address */
++			new_val = (old_val & ~addr_mask) | ((phys + off) & addr_mask);
++
++			ret = page_map_set(domain->arch.ptables, page, new_val, NULL, addr_mask,
++					   0U);
++			if (ret != 0) {
++				break;
++			}
++		}
++	}
++
++	return ret;
++}
++#endif /* CONFIG_PROCESS_VM */
++
+ int arch_mem_domain_partition_remove(struct k_mem_domain *domain,
+ 				     uint32_t partition_id)
+ {
+diff --git a/include/zephyr/kernel/process.h b/include/zephyr/kernel/process.h
+index 9b2c4953cdc..c0839c20608 100644
+--- a/include/zephyr/kernel/process.h
++++ b/include/zephyr/kernel/process.h
+@@ -265,6 +265,10 @@ struct k_process {
+ 	/** Permission-principal index; every member thread holds it */
+ 	int16_t perm_index;
+ #endif /* CONFIG_USERSPACE */
++#ifdef CONFIG_PROCESS_VM
++	/** Cloned address-space context (system layer), or NULL */
++	void *vm;
++#endif /* CONFIG_PROCESS_VM */
+ 	/** @endcond */
+ };
+ 
+diff --git a/kernel/Kconfig.process b/kernel/Kconfig.process
+index 3b6b42a00d8..f94745cafb5 100644
+--- a/kernel/Kconfig.process
++++ b/kernel/Kconfig.process
+@@ -19,6 +19,16 @@ config PROCESS
+ 
+ if PROCESS
+ 
++config PROCESS_VM
++	bool "Per-process virtual address space duplication (experimental)"
++	depends on PROCESS && USERSPACE && ARCH_HAS_PROCESS_VM
++	select SYS_THREAD
++	help
++	  Enable address-space duplication for the fork() model: a cloned
++	  child receives copies of the calling process's writable memory at
++	  the same virtual addresses. Requires architecture support
++	  (z_mem_domain_clone_remap()). Experimental.
++
+ config MAX_PROCESS_BYTES
+ 	int "Bytes to use to track process permissions to kernel objects"
+ 	default 1
+diff --git a/kernel/include/kernel_internal.h b/kernel/include/kernel_internal.h
+index 911d39646ad..7105b6d0784 100644
+--- a/kernel/include/kernel_internal.h
++++ b/kernel/include/kernel_internal.h
+@@ -192,6 +192,20 @@ void z_process_perm_index_free(int16_t index);
+ void z_process_perms_all_clear(struct k_process *proc);
+ #endif /* CONFIG_USERSPACE */
+ 
++#ifdef CONFIG_PROCESS_VM
++/* clone a domain's [virt,size) onto fresh frames at @a phys (arch, no TLB flush) */
++int z_mem_domain_clone_remap(struct k_mem_domain *domain, void *virt, size_t size,
++			     uintptr_t phys);
++/* system-layer address-space clone teardown / domain accessor (lib/os) */
++void z_process_vm_teardown(void *vm);
++struct k_mem_domain *z_process_vm_domain(void *vm);
++#endif /* CONFIG_PROCESS_VM */
++
++#if defined(CONFIG_USERSPACE) && defined(CONFIG_PROCESS)
++/* copy a parent process's kernel-object permissions to a child (fork) */
++void z_process_perms_inherit(struct k_process *parent, struct k_process *child);
++#endif /* CONFIG_USERSPACE && CONFIG_PROCESS */
++
+ /* validate a user-supplied group handle and every member record (under lock) */
+ int z_pgrp_validate(k_pgrp_t pgrp);
+ #endif /* CONFIG_PROCESS */
+@@ -413,6 +427,7 @@ int z_sig_queue_aio(k_pid_t pid, int signo, union k_sig_val value);
+ /* generation-side plumbing between kernel/process.c and kernel/signal.c (internal) */
+ int z_sig_queue_chld(k_tid_t tid, struct k_process *proc, k_pid_t child_pid, int child_status,
+ 		     bool exited);
++int z_sig_queue_thread(k_tid_t tid, int signo);
+ int z_sig_queue_process(struct k_process *proc, int signo);
+ void z_sig_process_drop(struct k_process *proc);
+ #endif /* CONFIG_PROCESS && CONFIG_SIGNAL */
+diff --git a/kernel/process.c b/kernel/process.c
+index 331d886a75d..3b3a7eb4914 100644
+--- a/kernel/process.c
++++ b/kernel/process.c
+@@ -323,6 +323,12 @@ static void process_free_locked(struct k_process *proc)
+ #ifdef CONFIG_SIGNAL
+ 	z_sig_process_drop(proc);
+ #endif /* CONFIG_SIGNAL */
++#ifdef CONFIG_PROCESS_VM
++	if (proc->vm != NULL) {
++		z_process_vm_teardown(proc->vm);
++		proc->vm = NULL;
++	}
++#endif /* CONFIG_PROCESS_VM */
+ #ifdef CONFIG_USERSPACE
+ 	k_object_uninit(proc);
+ 	z_process_perms_all_clear(proc);
+@@ -889,7 +895,7 @@ int z_impl_k_kill_pgrp(k_pgrp_t pgrp, int signo)
+ 		found += n;
+ #ifdef CONFIG_SIGNAL
+ 		for (int i = 0; i < n; i++) {
+-			int err = k_sig_queue(targets[i], signo, (union k_sig_val){0});
++			int err = z_sig_queue_thread(targets[i], signo);
+ 
+ 			if (err == -EINVAL) {
+ 				return -EINVAL;
+@@ -970,7 +976,7 @@ int z_impl_k_kill(k_pid_t pid, int signo)
+ 	if (pended) {
+ 		return ret;
+ 	}
+-	return k_sig_queue(tid, signo, (union k_sig_val){0});
++	return z_sig_queue_thread(tid, signo);
+ #else
+ 	ARG_UNUSED(pended);
+ 	ARG_UNUSED(ret);
+diff --git a/kernel/signal.c b/kernel/signal.c
+index e3c30b7268e..91d3b94c96f 100644
+--- a/kernel/signal.c
++++ b/kernel/signal.c
+@@ -237,7 +237,7 @@ static bool z_sig_match(const struct k_sig_set *match, uint8_t *pos, k_tid_t tid
+ 
+ static int z_sig_queue_common(k_pid_t pid, int signo, union k_sig_val value, int code,
+ 			      struct k_timer *timer, k_pid_t child_pid, int child_status,
+-			      struct k_process *proc)
++			      struct k_process *proc, bool resolved)
+ {
+ 	if ((signo < 0) || (signo > SIGNAL_SET_SIZE)) {
+ 		LOG_DBG("invalid signo %d", signo);
+@@ -256,7 +256,8 @@ static int z_sig_queue_common(k_pid_t pid, int signo, union k_sig_val value, int
+ 	}
+ 
+ #if defined(CONFIG_USERSPACE) && defined(CONFIG_DYNAMIC_OBJECTS)
+-	if ((proc == NULL) && (timer == NULL) && (code != K_SI_MSGQ) && (code != K_SI_ASYNCIO) &&
++	if (!resolved && (proc == NULL) && (timer == NULL) && (code != K_SI_MSGQ) &&
++	    (code != K_SI_ASYNCIO) &&
+ 	    (k_object_validate(k_object_find(pid), K_OBJ_THREAD, _OBJ_INIT_TRUE) < 0)) {
+ 		/*
+ 		 * Only allow signals from threads granted access. Timer-, message-
+@@ -355,10 +356,16 @@ static int z_sig_queue_common(k_pid_t pid, int signo, union k_sig_val value, int
+ }
+ 
+ #ifdef CONFIG_PROCESS
++int z_sig_queue_thread(k_tid_t tid, int signo)
++{
++	return z_sig_queue_common(tid, signo, (union k_sig_val){0}, K_SI_QUEUE, NULL, NULL, 0, NULL,
++				  true);
++}
++
+ int z_sig_queue_process(struct k_process *proc, int signo)
+ {
+ 	return z_sig_queue_common(NULL, signo, (union k_sig_val){0}, K_SI_QUEUE, NULL, NULL, 0,
+-				  proc);
++				  proc, true);
+ }
+ 
+ /*
+@@ -394,7 +401,7 @@ void z_sig_process_drop(struct k_process *proc)
+ 
+ int z_impl_k_sig_queue(k_pid_t pid, int signo, union k_sig_val value)
+ {
+-	return z_sig_queue_common(pid, signo, value, K_SI_QUEUE, NULL, NULL, 0, NULL);
++	return z_sig_queue_common(pid, signo, value, K_SI_QUEUE, NULL, NULL, 0, NULL, false);
+ }
+ 
+ #ifdef CONFIG_PROCESS
+@@ -403,28 +410,28 @@ int z_sig_queue_chld(k_tid_t tid, struct k_process *proc, k_pid_t child_pid, int
+ {
+ 	return z_sig_queue_common(tid, K_SIG_CHLD, (union k_sig_val){0},
+ 				  exited ? K_SI_CLD_EXITED : K_SI_CLD_KILLED, NULL, child_pid,
+-				  child_status, proc);
++				  child_status, proc, proc != NULL);
+ }
+ #endif /* CONFIG_PROCESS */
+ 
+ #ifdef CONFIG_MSGQ_NOTIFY
+ int z_sig_queue_msgq(k_pid_t pid, int signo, union k_sig_val value)
+ {
+-	return z_sig_queue_common(pid, signo, value, K_SI_MSGQ, NULL, NULL, 0, NULL);
++	return z_sig_queue_common(pid, signo, value, K_SI_MSGQ, NULL, NULL, 0, NULL, false);
+ }
+ #endif /* CONFIG_MSGQ_NOTIFY */
+ 
+ #ifdef CONFIG_SYS_AIO
+ int z_sig_queue_aio(k_pid_t pid, int signo, union k_sig_val value)
+ {
+-	return z_sig_queue_common(pid, signo, value, K_SI_ASYNCIO, NULL, NULL, 0, NULL);
++	return z_sig_queue_common(pid, signo, value, K_SI_ASYNCIO, NULL, NULL, 0, NULL, false);
+ }
+ #endif /* CONFIG_SYS_AIO */
+ 
+ #ifdef CONFIG_TIMER_SIGNAL
+ int z_sig_queue_timer(struct k_timer *timer, k_pid_t pid, int signo, union k_sig_val value)
+ {
+-	return z_sig_queue_common(pid, signo, value, K_SI_TIMER, timer, NULL, 0, NULL);
++	return z_sig_queue_common(pid, signo, value, K_SI_TIMER, timer, NULL, 0, NULL, false);
+ }
+ 
+ void z_sig_purge_timer(struct k_timer *timer)
+diff --git a/kernel/userspace.c b/kernel/userspace.c
+index 358c1692acd..c3a911c9d14 100644
+--- a/kernel/userspace.c
++++ b/kernel/userspace.c
+@@ -722,6 +722,32 @@ void z_process_perms_all_clear(struct k_process *proc)
+ 		k_object_wordlist_foreach(clear_perms_sched_locked_cb, (void *)index);
+ 	}
+ }
++
++struct perm_inherit_ctx {
++	int parent_index;
++	int child_index;
++};
++
++static void perm_inherit_cb(struct k_object *ko, void *ctx_ptr)
++{
++	struct perm_inherit_ctx *ctx = ctx_ptr;
++
++	if (sys_bitfield_test_bit((mem_addr_t)&ko->perms, ctx->parent_index)) {
++		sys_bitfield_set_bit((mem_addr_t)&ko->perms, ctx->child_index);
++	}
++}
++
++void z_process_perms_inherit(struct k_process *parent, struct k_process *child)
++{
++	struct perm_inherit_ctx ctx = {
++		.parent_index = parent->perm_index,
++		.child_index = child->perm_index,
++	};
++
++	if ((ctx.parent_index >= 0) && (ctx.child_index >= 0)) {
++		k_object_wordlist_foreach(perm_inherit_cb, &ctx);
++	}
++}
+ #endif /* CONFIG_PROCESS */
+ 
+ static void unref_check(struct k_object *ko, uintptr_t index, bool sched_locked)
+diff --git a/lib/os/clone.c b/lib/os/clone.c
+index 619b95cb1b8..d18fee74dc7 100644
+--- a/lib/os/clone.c
++++ b/lib/os/clone.c
+@@ -113,10 +113,6 @@ int z_impl_sys_clone(const struct sys_clone_args *args, k_pid_t *child)
+ 		return -EINVAL;
+ 	}
+ 	if ((args->flags & SYS_CLONE_VM_COPY) != 0U) {
+-		/* the fork model: no entry point, the child resumes in place */
+-		if (args->entry != NULL) {
+-			return -EINVAL;
+-		}
+ 		return z_sys_clone_vm_copy(args, child);
+ 	}
+ 	if (args->entry == NULL) {
+diff --git a/lib/os/process.c b/lib/os/process.c
+index 72018d5ca16..e21db1cf7ed 100644
+--- a/lib/os/process.c
++++ b/lib/os/process.c
+@@ -817,43 +817,245 @@ void sys_process_release_gc(void)
+  * (per-domain page tables mapping fresh frames at the caller's addresses),
+  * there is nothing to duplicate onto.
+  */
++#ifdef CONFIG_PROCESS_VM
++#include <zephyr/kernel/mm.h>
++
++#define VM_CLONE_MAX_RANGES (CONFIG_MAX_DOMAIN_PARTITIONS + 1)
++
++struct vm_clone_ctx {
++	struct k_mem_domain domain;
++	sys_dnode_t free_node;
++	void *frames[VM_CLONE_MAX_RANGES];
++	size_t nframes;
++};
++
++/* one child-domain context per pool record; freed to a graveyard at record free */
++static struct vm_clone_ctx vm_ctx_slab[SYS_PROCESS_MIN];
++static sys_dlist_t vm_ctx_free = SYS_DLIST_STATIC_INIT(&vm_ctx_free);
++static bool vm_ctx_ready;
++
++static void vm_ctx_init(void)
++{
++	if (!vm_ctx_ready) {
++		for (size_t i = 0; i < ARRAY_SIZE(vm_ctx_slab); i++) {
++			sys_dlist_append(&vm_ctx_free, &vm_ctx_slab[i].free_node);
++		}
++		vm_ctx_ready = true;
++	}
++}
++
++static size_t page_up(size_t v)
++{
++	return ROUND_UP(v, CONFIG_MMU_PAGE_SIZE);
++}
++
++static int vm_clone_range(struct vm_clone_ctx *ctx, uintptr_t start, size_t size)
++{
++	void *frames;
++	int ret;
++
++	if (ctx->nframes >= ARRAY_SIZE(ctx->frames)) {
++		return -ENOMEM;
++	}
++
++	frames = k_aligned_alloc(CONFIG_MMU_PAGE_SIZE, page_up(size));
++	if (frames == NULL) {
++		return -ENOMEM;
++	}
++
++	memcpy(frames, (void *)start, size);
++
++	ret = z_mem_domain_clone_remap(&ctx->domain, (void *)start, page_up(size),
++				       k_mem_phys_addr(frames));
++	if (ret != 0) {
++		k_free(frames);
++		return ret;
++	}
++
++	ctx->frames[ctx->nframes++] = frames;
++
++	return 0;
++}
++
+ static int process_vm_clone(struct k_process *parent, struct k_process *proc)
+ {
++	struct k_mem_domain *src = _current->mem_domain_info.mem_domain;
++	struct vm_clone_ctx *ctx;
++	sys_dnode_t *n;
++	int ret;
++
+ 	ARG_UNUSED(parent);
+-	ARG_UNUSED(proc);
+ 
+-	return -ENOSYS;
++	if (src == NULL) {
++		return -EINVAL;
++	}
++
++	K_SPINLOCK(&pool_lock) {
++		vm_ctx_init();
++		n = sys_dlist_get(&vm_ctx_free);
++	}
++	if (n == NULL) {
++		return -EAGAIN;
++	}
++	ctx = CONTAINER_OF(n, struct vm_clone_ctx, free_node);
++	ctx->nframes = 0;
++
++	ret = k_mem_domain_init(&ctx->domain, 0, NULL);
++	if (ret != 0) {
++		goto err_return_ctx;
++	}
++
++	/* mirror every parent partition into the child (perms + shared frames) */
++	for (uint8_t i = 0; i < src->num_partitions; i++) {
++		struct k_mem_partition *part = &src->partitions[i];
++
++		if (part->size == 0U) {
++			continue;
++		}
++		ret = k_mem_domain_add_partition(&ctx->domain, part);
++		if (ret != 0) {
++			goto err_return_ctx;
++		}
++	}
++
++	/* the child's leader runs on the caller's stack range, copied */
++	{
++		struct k_mem_partition stack = {
++			.start = _current->stack_info.start,
++			.size = page_up(_current->stack_info.size),
++			.attr = K_MEM_PARTITION_P_RW_U_RW,
++		};
++
++		ret = k_mem_domain_add_partition(&ctx->domain, &stack);
++		if (ret != 0) {
++			goto err_return_ctx;
++		}
++	}
++
++	/* now that user perms are set in the child tables, remap onto copies */
++	for (uint8_t i = 0; i < src->num_partitions; i++) {
++		struct k_mem_partition *part = &src->partitions[i];
++
++		if ((part->size == 0U) || !K_MEM_PARTITION_IS_WRITABLE(part->attr)) {
++			continue;
++		}
++		ret = vm_clone_range(ctx, part->start, part->size);
++		if (ret != 0) {
++			goto err_free_frames;
++		}
++	}
++	ret = vm_clone_range(ctx, _current->stack_info.start, _current->stack_info.size);
++	if (ret != 0) {
++		goto err_free_frames;
++	}
++
++	proc->vm = ctx;
++
++	return 0;
++
++err_free_frames:
++	for (size_t i = 0; i < ctx->nframes; i++) {
++		k_free(ctx->frames[i]);
++	}
++err_return_ctx:
++	K_SPINLOCK(&pool_lock) {
++		sys_dlist_append(&vm_ctx_free, &ctx->free_node);
++	}
++
++	return ret;
++}
++
++void z_process_vm_teardown(void *vm)
++{
++	struct vm_clone_ctx *ctx = vm;
++
++	for (size_t i = 0; i < ctx->nframes; i++) {
++		k_free(ctx->frames[i]);
++	}
++	ctx->nframes = 0;
++	K_SPINLOCK(&pool_lock) {
++		sys_dlist_append(&vm_ctx_free, &ctx->free_node);
++	}
+ }
+ 
++struct k_mem_domain *z_process_vm_domain(void *vm)
++{
++	struct vm_clone_ctx *ctx = vm;
++
++	return &ctx->domain;
++}
++#endif /* CONFIG_PROCESS_VM */
++
+ /* the fork tier of sys_clone(); the dispatch has validated args */
+ int z_sys_clone_vm_copy(const struct sys_clone_args *args, k_pid_t *child)
+ {
++#ifdef CONFIG_PROCESS_VM
+ 	int ret;
++	k_tid_t tid;
+ 	struct k_process *proc;
++	struct k_process *parent = _current->process;
+ 
+-	ARG_UNUSED(args);
++	if (args->entry == NULL) {
++		/* the child needs a resume trampoline (see fork()) */
++		return -EINVAL;
++	}
+ 
+ 	proc = record_alloc();
+ 	if (proc == NULL) {
+ 		return -EAGAIN;
+ 	}
+ 
+-	ret = process_vm_clone(_current->process, proc);
++	ret = process_vm_clone(parent, proc);
+ 	if (ret < 0) {
+ 		(void)z_process_record_free(proc);
+ 		return ret;
+ 	}
+ 
+ 	/*
+-	 * The remainder of the fork model (blocked on process_vm_clone):
+-	 * create the child's leader on the copied stack, seed it with a
+-	 * longjmp trampoline into the jmp_buf sys_fork() captured, and start
+-	 * it; both sides then return from sys_fork() - the parent with the
+-	 * child's handle, the child with NULL.
++	 * The child's leader runs on the COPIED stack: k_process_init() adopts
++	 * it, we move it into the cloned domain, inherit the parent's object
++	 * permissions, then start it. It resumes through args->entry, which
++	 * longjmps into the jmp_buf the caller captured on that stack - valid
++	 * because the child's copy holds the same bytes at the same address.
+ 	 */
+-	(void)z_process_record_free(proc);
++	ret = sys_thread_create_paused(&tid, NULL, CONFIG_MMU_PAGE_SIZE, 0, args->entry, args->p1,
++				       args->p2, args->p3,
++				       k_thread_priority_get(k_current_get()),
++				       K_USER | K_INHERIT_PERMS);
++	if (ret < 0) {
++		(void)z_process_record_free(proc);
++		return ret;
++	}
++
++	(void)k_mem_domain_add_thread(z_process_vm_domain(proc->vm), tid);
++
++	ret = k_process_init(proc, &tid, 1);
++	if (ret < 0) {
++		k_thread_abort(tid);
++		(void)z_process_record_free(proc);
++		return ret;
++	}
++	/* the leader is bound and numbered: its thread number becomes the pid */
++	process_id_assign(proc);
++	proc->flags |= K_PROCESS_FLAG_LEADER_RELEASE;
++
++	z_process_perms_inherit(parent, proc);
++	k_object_access_grant(tid, tid);
+ 
+-	return -ENOSYS;
++	if (child != NULL) {
++		*child = tid;
++	}
++
++	if ((args->flags & SYS_CLONE_PAUSED) == 0U) {
++		k_thread_start(tid);
++	}
++
++	return 0;
++#else
++	ARG_UNUSED(args);
++	ARG_UNUSED(child);
++	return -ENOTSUP;
++#endif /* CONFIG_PROCESS_VM */
+ }
+ 
+ /* the process tier of sys_clone(); the dispatch has validated args */
+diff --git a/tests/kernel/process/src/main.c b/tests/kernel/process/src/main.c
+index d2bac61dfff..2b415ba5194 100644
+--- a/tests/kernel/process/src/main.c
++++ b/tests/kernel/process/src/main.c
+@@ -424,8 +424,8 @@ ZTEST(kernel_process, test_spawn_invalid)
+ 	zassert_equal(sys_clone(&args, NULL), -EINVAL);
+ 	args.flags = SYS_CLONE_VM_COPY;
+ 	args.entry = NULL;
+-	zassert_equal(sys_clone(&args, NULL), -ENOSYS);
+-	zassert_equal(sys_fork(NULL), -ENOSYS);
++	zassert_equal(sys_clone(&args, NULL), -ENOTSUP);
++	zassert_equal(sys_fork(NULL), -ENOTSUP);
+ }
+ 
+ #if (CONFIG_SYS_PROCESS_MAX >= 4) && (CONFIG_HEAP_MEM_POOL_SIZE > 0)
