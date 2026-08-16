@@ -2016,3 +2016,40 @@ patches:
       toolchain libcs ship their own <spawn.h> whose types do not match the
       Zephyr implementation, and the shim directories override the
       toolchain headers.
+  - path: zephyr/sys-clone-paused.patch
+    sha256sum: f77e8a48da368a847f479eb46cb09fd25c9a58cf82c51ae7d259b2fc1d588c4e
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-17
+    upstreamable: true
+    comments: |
+      Add SYS_CLONE_PAUSED: the child is fully constructed but its initial
+      thread is left stopped, so the caller can complete setup - process
+      group, signal state, priority - and start it with k_thread_start() on
+      the child handle. posix_spawn() uses this to apply spawn attributes
+      race-free before the child first runs.
+      The clone args also carry an optional initial signal mask for the
+      leader: NULL keeps the thread-creation inheritance rules; a
+      non-NULL mask is vrfy-copied and seeded into the paused leader
+      before it first runs, scrubbing K_SIG_KILL and K_SIG_STOP exactly
+      as k_sig_mask() does. It is invalid with SYS_CLONE_VM_COPY - a
+      forked child always inherits the caller's mask. This lets
+      posix_spawn() implement POSIX_SPAWN_SETSIGMASK uniformly for
+      kernel- and user-mode callers.
+  - path: zephyr/k-signal-scope-queue-lock.patch
+    sha256sum: af2d10fb92ba838ea8028880be65fc2a2644dd3effdb6ba66d4c79b039c9c4db
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-17
+    upstreamable: true
+    comments: |
+      Queue process-scoped pending signals while still holding the process
+      lock, in k_kill(), k_kill_pgrp(), and the SIGCHLD notifier: the
+      process lock -> signal lock order is already established by the
+      reap-time drop, and queueing under it closes the window where a
+      process could be reaped between target resolution and the queue,
+      leaving an element aimed at a retired record. k_kill() also now
+      distinguishes an empty (zombie) process (-ESRCH) from a fully-masked
+      one (pend at process scope).
