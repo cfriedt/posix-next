@@ -1,0 +1,356 @@
+diff --git a/include/zephyr/kernel/process.h b/include/zephyr/kernel/process.h
+index 468d46f5bc5..a571aa353ce 100644
+--- a/include/zephyr/kernel/process.h
++++ b/include/zephyr/kernel/process.h
+@@ -207,6 +207,10 @@ struct k_process {
+ 	_wait_q_t waitq;
+ 	/** Node in the kernel's registry of live process records */
+ 	sys_dnode_t active_node;
++#ifdef CONFIG_SIGNAL
++	/** Count of process-scoped pending signals (any member may claim) */
++	atomic_t sig_pending;
++#endif /* CONFIG_SIGNAL */
+ #ifdef CONFIG_USERSPACE
+ 	/** Permission-principal index; every member thread holds it */
+ 	int16_t perm_index;
+diff --git a/kernel/include/kernel_internal.h b/kernel/include/kernel_internal.h
+index 2cef19dfb85..86939349022 100644
+--- a/kernel/include/kernel_internal.h
++++ b/kernel/include/kernel_internal.h
+@@ -393,7 +393,10 @@ int z_sig_queue_aio(k_pid_t pid, int signo, union k_sig_val value);
+ 
+ #if defined(CONFIG_PROCESS) && defined(CONFIG_SIGNAL)
+ /* generation-side plumbing between kernel/process.c and kernel/signal.c (internal) */
+-int z_sig_queue_chld(k_tid_t tid, k_pid_t child_pid, int child_status, bool exited);
++int z_sig_queue_chld(k_tid_t tid, struct k_process *proc, k_pid_t child_pid, int child_status,
++		     bool exited);
++int z_sig_queue_process(struct k_process *proc, int signo);
++void z_sig_process_drop(struct k_process *proc);
+ #endif /* CONFIG_PROCESS && CONFIG_SIGNAL */
+ 
+ #ifdef __cplusplus
+diff --git a/kernel/process.c b/kernel/process.c
+index 57c790942f7..dd12b57111c 100644
+--- a/kernel/process.c
++++ b/kernel/process.c
+@@ -319,6 +319,9 @@ static void process_free_locked(struct k_process *proc)
+ {
+ 	pgrp_leave_locked(proc);
+ 	sys_dlist_remove(&proc->active_node);
++#ifdef CONFIG_SIGNAL
++	z_sig_process_drop(proc);
++#endif /* CONFIG_SIGNAL */
+ #ifdef CONFIG_USERSPACE
+ 	k_object_uninit(proc);
+ 	z_process_perms_all_clear(proc);
+@@ -749,15 +752,8 @@ static k_tid_t process_sig_target(struct k_process *proc, int signo)
+ 		}
+ 	}
+ 
+-	/* all masked: pend on a non-leader member when one exists */
+-	SYS_DLIST_FOR_EACH_CONTAINER(&proc->threads, t, process_node) {
+-		if ((k_tid_t)t != proc->leader) {
+-			return t;
+-		}
+-	}
+-
+-	t = SYS_DLIST_PEEK_HEAD_CONTAINER(&proc->threads, t, process_node);
+-	return t;
++	/* every member has the signal masked: pend at process scope */
++	return NULL;
+ }
+ #endif /* CONFIG_SIGNAL */
+ 
+@@ -809,6 +805,7 @@ int z_impl_k_kill_pgrp(k_pgrp_t pgrp, int signo)
+ 	size_t skip = 0;
+ 	bool done = false;
+ 	struct k_thread *targets[8];
++	struct k_process *scopes[8];
+ 
+ 	/*
+ 	 * Resolve deliverable threads (one per member process) under the lock
+@@ -850,16 +847,19 @@ int z_impl_k_kill_pgrp(k_pgrp_t pgrp, int signo)
+ #else
+ 			tgt = SYS_DLIST_PEEK_HEAD_CONTAINER(&proc->threads, tgt, process_node);
+ #endif /* CONFIG_SIGNAL */
+-			if (tgt != NULL) {
+-				targets[n++] = tgt;
+-			}
++			/* NULL target: every member masked, pend at process scope */
++			targets[n] = tgt;
++			scopes[n] = (tgt == NULL) ? proc : NULL;
++			n++;
+ 		}
+ 		k_spin_unlock(&process_lock, key);
+ 
+ 		found += n;
+ #ifdef CONFIG_SIGNAL
+ 		for (int i = 0; i < n; i++) {
+-			int err = k_sig_queue(targets[i], signo, (union k_sig_val){0});
++			int err = (targets[i] == NULL)
++					  ? z_sig_queue_process(scopes[i], signo)
++					  : k_sig_queue(targets[i], signo, (union k_sig_val){0});
+ 
+ 			if (err == -EINVAL) {
+ 				return -EINVAL;
+@@ -923,6 +923,10 @@ int z_impl_k_kill(k_pid_t pid, int signo)
+ 	if (tid == NULL) {
+ 		return -ESRCH;
+ 	}
++	if (tid == NULL) {
++		/* every member has the signal masked: pend at process scope */
++		return z_sig_queue_process(proc, signo);
++	}
+ 	return k_sig_queue(tid, signo, (union k_sig_val){0});
+ #else
+ 	return -ENOSYS;
+@@ -1257,6 +1261,7 @@ static void sigchld_notifier(void *p1, void *p2, void *p3)
+ 		bool exited;
+ 		k_tid_t target;
+ 		struct k_process *child;
++		struct k_process *parent;
+ 		atomic_val_t gen = atomic_get(&process_wait_gen);
+ 
+ 		k_spinlock_key_t key = k_spin_lock(&process_lock);
+@@ -1274,13 +1279,14 @@ static void sigchld_notifier(void *p1, void *p2, void *p3)
+ 		pid = child->leader;
+ 		status = child->wstatus;
+ 		exited = K_WIFEXITED(status);
+-		target = (child->parent == NULL) ? NULL
+-						 : process_sig_target(child->parent, K_SIG_CHLD);
++		parent = child->parent;
++		target = (parent == NULL) ? NULL : process_sig_target(parent, K_SIG_CHLD);
+ 		k_spin_unlock(&process_lock, key);
+ 
+-		if (target != NULL) {
+-			/* best-effort: the target may have exited, or the queue may be full */
+-			(void)z_sig_queue_chld(target, pid, status, exited);
++		if ((target != NULL) || (parent != NULL)) {
++			/* best effort: the target may exit, or the queue may be full */
++			(void)z_sig_queue_chld(target, (target == NULL) ? parent : NULL, pid,
++					       status, exited);
+ 		}
+ 	}
+ }
+diff --git a/kernel/signal.c b/kernel/signal.c
+index 6feddce3f93..8d81d1a13a8 100644
+--- a/kernel/signal.c
++++ b/kernel/signal.c
+@@ -23,6 +23,10 @@ LOG_MODULE_REGISTER(k_sig, CONFIG_SIGNAL_LOG_LEVEL);
+ 
+ struct k_sig_fifo_element {
+ 	k_tid_t tid;
++#ifdef CONFIG_PROCESS
++	/* non-NULL: pending at process scope; any member may claim it */
++	struct k_process *proc;
++#endif /* CONFIG_PROCESS */
+ 	struct k_sig_info info;
+ 	struct k_sig_action action;
+ };
+@@ -72,6 +76,16 @@ static void z_sig_slab_free_unlocked(uint8_t pos)
+ 	k_sig_slab.info.num_used--;
+ }
+ 
++static bool sig_entry_for(const struct k_sig_fifo_element *entry, k_tid_t tid)
++{
++#ifdef CONFIG_PROCESS
++	if ((entry->proc != NULL) && (entry->proc == tid->process)) {
++		return true;
++	}
++#endif /* CONFIG_PROCESS */
++	return entry->tid == tid;
++}
++
+ static bool z_sig_pid_is_valid(k_pid_t pid)
+ {
+ 	k_tid_t const tid = (k_tid_t)pid;
+@@ -123,7 +137,7 @@ static void z_sig_pending_unlocked(struct k_sig_set *set, struct k_thread *tid)
+ 		ring_buf_get(&k_sig_fifo, &pos, 1);
+ 		entry = &((struct k_sig_fifo_element *)k_sig_slab.buffer)[pos];
+ 
+-		if ((entry->tid == tid) && !k_is_in_isr()) {
++		if (sig_entry_for(entry, tid) && !k_is_in_isr()) {
+ 			k_sig_addset(set, entry->info.signo);
+ 		}
+ 
+@@ -202,11 +216,11 @@ static bool z_sig_match(const struct k_sig_set *match, uint8_t *pos, k_tid_t tid
+ 			ring_buf_get(&k_sig_fifo, &p, 1);
+ 			entry = &k_sig_array[p];
+ 
+-			if (!found && (entry->tid == tid) && (filter_sig > 0) &&
++			if (!found && sig_entry_for(entry, tid) && (filter_sig > 0) &&
+ 			    (entry->info.signo == filter_sig)) {
+ 				*pos = p;
+ 				found = true;
+-			} else if (!found && (entry->tid == tid) && (filter_sig <= 0) &&
++			} else if (!found && sig_entry_for(entry, tid) && (filter_sig <= 0) &&
+ 				   ((bool)k_sig_ismember(&set, entry->info.signo))) {
+ 				*pos = p;
+ 				found = true;
+@@ -220,14 +234,15 @@ static bool z_sig_match(const struct k_sig_set *match, uint8_t *pos, k_tid_t tid
+ }
+ 
+ static int z_sig_queue_common(k_pid_t pid, int signo, union k_sig_val value, int code,
+-			      struct k_timer *timer, k_pid_t child_pid, int child_status)
++			      struct k_timer *timer, k_pid_t child_pid, int child_status,
++			      struct k_process *proc)
+ {
+ 	if ((signo < 0) || (signo > SIGNAL_SET_SIZE)) {
+ 		LOG_DBG("invalid signo %d", signo);
+ 		return -EINVAL;
+ 	}
+ 
+-	if (!z_sig_pid_is_valid(pid)) {
++	if ((proc == NULL) && !z_sig_pid_is_valid(pid)) {
+ 		LOG_DBG("invalid pid %p", pid);
+ 		return -ESRCH;
+ 	}
+@@ -239,7 +254,7 @@ static int z_sig_queue_common(k_pid_t pid, int signo, union k_sig_val value, int
+ 	}
+ 
+ #if defined(CONFIG_USERSPACE) && defined(CONFIG_DYNAMIC_OBJECTS)
+-	if ((timer == NULL) && (code != K_SI_MSGQ) && (code != K_SI_ASYNCIO) &&
++	if ((proc == NULL) && (timer == NULL) && (code != K_SI_MSGQ) && (code != K_SI_ASYNCIO) &&
+ 	    (k_object_validate(k_object_find(pid), K_OBJ_THREAD, _OBJ_INIT_TRUE) < 0)) {
+ 		/*
+ 		 * Only allow signals from threads granted access. Timer-, message-
+@@ -291,6 +306,9 @@ static int z_sig_queue_common(k_pid_t pid, int signo, union k_sig_val value, int
+ 
+ 	*entry = (struct k_sig_fifo_element){
+ 		.tid = pid,
++#ifdef CONFIG_PROCESS
++		.proc = proc,
++#endif /* CONFIG_PROCESS */
+ 		.info =
+ 			{
+ 				.signo = signo,
+@@ -309,7 +327,14 @@ static int z_sig_queue_common(k_pid_t pid, int signo, union k_sig_val value, int
+ 	pos = entry - k_sig_array;
+ 
+ 	ring_buf_put(&k_sig_fifo, &pos, 1);
+-	atomic_inc(&pid->base.sig.pending);
++#ifdef CONFIG_PROCESS
++	if (proc != NULL) {
++		atomic_inc(&proc->sig_pending);
++	} else
++#endif /* CONFIG_PROCESS */
++	{
++		atomic_inc(&pid->base.sig.pending);
++	}
+ 
+ 	if (IS_ENABLED(CONFIG_SIGNAL_LOG_LEVEL_DBG)) {
+ 		struct k_sig_set pend;
+@@ -327,38 +352,67 @@ static int z_sig_queue_common(k_pid_t pid, int signo, union k_sig_val value, int
+ 	return 0;
+ }
+ 
++#ifdef CONFIG_PROCESS
++int z_sig_queue_process(struct k_process *proc, int signo)
++{
++	return z_sig_queue_common(NULL, signo, (union k_sig_val){0}, K_SI_QUEUE, NULL, NULL, 0,
++				  proc);
++}
++
++/* drop process-scoped pending at reap; the record is about to be retired */
++void z_sig_process_drop(struct k_process *proc)
++{
++	K_SPINLOCK(k_sig_lock) {
++		for (size_t i = 0, N = ring_buf_size_get(&k_sig_fifo); i < N; ++i) {
++			uint8_t pos;
++			struct k_sig_fifo_element *entry;
++
++			ring_buf_get(&k_sig_fifo, &pos, 1);
++			entry = &k_sig_array[pos];
++			if (entry->proc == proc) {
++				atomic_dec(&proc->sig_pending);
++				z_sig_slab_free_unlocked(pos);
++			} else {
++				ring_buf_put(&k_sig_fifo, &pos, 1);
++			}
++		}
++	}
++}
++#endif /* CONFIG_PROCESS */
++
+ int z_impl_k_sig_queue(k_pid_t pid, int signo, union k_sig_val value)
+ {
+-	return z_sig_queue_common(pid, signo, value, K_SI_QUEUE, NULL, NULL, 0);
++	return z_sig_queue_common(pid, signo, value, K_SI_QUEUE, NULL, NULL, 0, NULL);
+ }
+ 
+ #ifdef CONFIG_PROCESS
+-int z_sig_queue_chld(k_tid_t tid, k_pid_t child_pid, int child_status, bool exited)
++int z_sig_queue_chld(k_tid_t tid, struct k_process *proc, k_pid_t child_pid, int child_status,
++		     bool exited)
+ {
+ 	return z_sig_queue_common(tid, K_SIG_CHLD, (union k_sig_val){0},
+ 				  exited ? K_SI_CLD_EXITED : K_SI_CLD_KILLED, NULL, child_pid,
+-				  child_status);
++				  child_status, proc);
+ }
+ #endif /* CONFIG_PROCESS */
+ 
+ #ifdef CONFIG_MSGQ_NOTIFY
+ int z_sig_queue_msgq(k_pid_t pid, int signo, union k_sig_val value)
+ {
+-	return z_sig_queue_common(pid, signo, value, K_SI_MSGQ, NULL, NULL, 0);
++	return z_sig_queue_common(pid, signo, value, K_SI_MSGQ, NULL, NULL, 0, NULL);
+ }
+ #endif /* CONFIG_MSGQ_NOTIFY */
+ 
+ #ifdef CONFIG_SYS_AIO
+ int z_sig_queue_aio(k_pid_t pid, int signo, union k_sig_val value)
+ {
+-	return z_sig_queue_common(pid, signo, value, K_SI_ASYNCIO, NULL, NULL, 0);
++	return z_sig_queue_common(pid, signo, value, K_SI_ASYNCIO, NULL, NULL, 0, NULL);
+ }
+ #endif /* CONFIG_SYS_AIO */
+ 
+ #ifdef CONFIG_TIMER_SIGNAL
+ int z_sig_queue_timer(struct k_timer *timer, k_pid_t pid, int signo, union k_sig_val value)
+ {
+-	return z_sig_queue_common(pid, signo, value, K_SI_TIMER, timer, NULL, 0);
++	return z_sig_queue_common(pid, signo, value, K_SI_TIMER, timer, NULL, 0, NULL);
+ }
+ 
+ void z_sig_purge_timer(struct k_timer *timer)
+@@ -377,6 +433,7 @@ void z_sig_purge_timer(struct k_timer *timer)
+ 
+ 			if (entry->info.timer == timer) {
+ 				atomic_dec(&entry->tid->base.sig.pending);
++				/* timer signals are always thread-scoped */
+ 				/* frees the element and reports the discard to the timer */
+ 				z_sig_slab_free_unlocked(pos);
+ 			} else {
+@@ -530,8 +587,15 @@ int z_impl_k_sig_timedwait(const struct k_sig_set *ZRESTRICT set, struct k_sig_i
+ 
+ #endif /* CONFIG_TIMER_SIGNAL */
+ 
++#ifdef CONFIG_PROCESS
++	if (k_sig_array[pos].proc != NULL) {
++		atomic_dec(&k_sig_array[pos].proc->sig_pending);
++	} else
++#endif /* CONFIG_PROCESS */
++	{
++		atomic_dec(&tid->base.sig.pending);
++	}
+ 	k_mem_slab_free(&k_sig_slab, &k_sig_array[pos]);
+-	atomic_dec(&tid->base.sig.pending);
+ 
+ #ifdef CONFIG_TIMER_SIGNAL
+ 	if (gen_timer != NULL) {
+@@ -1304,7 +1368,13 @@ __pinned_func void z_syscall_sig_check(void)
+ 	}
+ #endif /* CONFIG_USERSPACE */
+ 
+-	if (atomic_get(&_current->base.sig.pending) > 0) {
++	bool pending = atomic_get(&_current->base.sig.pending) > 0;
++
++#ifdef CONFIG_PROCESS
++	pending = pending || ((_current->process != NULL) &&
++			      (atomic_get(&_current->process->sig_pending) > 0));
++#endif /* CONFIG_PROCESS */
++	if (pending) {
+ 		while (z_sig_handle(NULL)) {
+ 			z_sig_trampoline();
+ 		}
