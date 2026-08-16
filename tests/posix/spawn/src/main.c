@@ -37,8 +37,22 @@ static void child_pgrp_entry(void *p1, void *p2, void *p3)
 	_exit(getpgid(0) == getpid() ? 0 : 1);
 }
 
+static void child_sigmask_entry(void *p1, void *p2, void *p3)
+{
+	sigset_t cur;
+
+	ARG_UNUSED(p1);
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	sigemptyset(&cur);
+	(void)sigprocmask(SIG_SETMASK, NULL, &cur);
+	_exit(((sigismember(&cur, SIGUSR2) == 1) && (sigismember(&cur, SIGUSR1) == 0)) ? 0 : 1);
+}
+
 IMAGE_REGISTRY_ENTRY_DEFINE(img_exit, "/bin/child", child_exit_entry);
 IMAGE_REGISTRY_ENTRY_DEFINE(img_pgrp, "/bin/pgrp", child_pgrp_entry);
+IMAGE_REGISTRY_ENTRY_DEFINE(img_sigmask, "/bin/sigmask", child_sigmask_entry);
 
 ZTEST(posix_spawn, test_posix_spawn)
 {
@@ -255,6 +269,16 @@ ZTEST(posix_spawn, test_posix_spawnattr_setsigmask)
 	zassert_ok(posix_spawnattr_setsigmask(&attr, &set));
 	zassert_ok(posix_spawnattr_getsigmask(&attr, &out));
 	zassert_true(sigismember(&out, SIGUSR2));
+
+	/* end-to-end: SETSIGMASK seeds the child's initial signal mask */
+	pid_t pid = -1;
+	int status = -1;
+
+	zassert_ok(posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETSIGMASK));
+	zassert_ok(posix_spawn(&pid, "/bin/sigmask", NULL, &attr, spawn_argv, spawn_envp));
+	zassert_equal(waitpid(pid, &status, 0), pid);
+	zassert_true(WIFEXITED(status));
+	zassert_equal(WEXITSTATUS(status), 0, "child mask did not match the spawn attr");
 }
 
 ZTEST(posix_spawn, test_posix_spawn_file_actions_init)

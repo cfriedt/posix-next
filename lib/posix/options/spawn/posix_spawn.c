@@ -5,10 +5,12 @@
  */
 
 #include "spawn_internal.h"
+#include "posix_internal.h"
 
 #include <errno.h>
 #include <fcntl.h>
 #include <spawn.h>
+#include <signal.h>
 #include <unistd.h>
 
 #include <zephyr/kernel.h>
@@ -58,6 +60,9 @@ int posix_spawn(pid_t *pid, const char *path, const posix_spawn_file_actions_t *
 {
 	int ret;
 	k_pid_t child;
+	sigset_t inherit;
+	struct k_sig_set kmask;
+	const sigset_t *maskp = &inherit;
 	const struct posix_spawn_image *img;
 	struct sys_clone_args args = {0};
 
@@ -77,33 +82,57 @@ int posix_spawn(pid_t *pid, const char *path, const posix_spawn_file_actions_t *
 		}
 	}
 
+	args.flags = SYS_CLONE_PAUSED;
 	args.entry = img->entry;
 	args.p1 = (void *)argv;
 	args.p2 = (void *)envp;
 	args.stack_size = CONFIG_POSIX_SPAWN_STACK_SIZE;
 	args.prio = k_thread_priority_get(k_current_get());
 
+	if ((attrp != NULL) && ((attrp->flags & POSIX_SPAWN_SETSCHEDPARAM) != 0)) {
+		int policy = ((attrp->flags & POSIX_SPAWN_SETSCHEDULER) != 0)
+				     ? attrp->schedpolicy
+				     : SCHED_RR;
+
+		if (!is_posix_policy_prio_valid(attrp->schedparam.sched_priority, policy)) {
+			return EINVAL;
+		}
+		args.prio = posix_to_zephyr_priority(attrp->schedparam.sched_priority, policy);
+	}
+
+	/* POSIX: the child gets the SETSIGMASK mask, else the caller's mask */
+	if ((attrp != NULL) && ((attrp->flags & POSIX_SPAWN_SETSIGMASK) != 0)) {
+		maskp = &attrp->sigmask;
+	} else {
+		(void)sigprocmask(SIG_SETMASK, NULL, &inherit);
+	}
+	args.sigmask = z_sig_set_from_posix(maskp, &kmask);
+
 	ret = sys_clone(&args, &child);
 	if (ret < 0) {
 		return (ret == -EINVAL) ? EINVAL : EAGAIN;
 	}
 
-	if ((attrp != NULL) && ((attrp->flags & POSIX_SPAWN_SETPGROUP) != 0)) {
-		/* pgroup 0 starts a new group led by the child (POSIX) */
-		k_pgrp_t grp = (attrp->pgroup == 0) ? NULL : sys_pgrp_find((int)attrp->pgroup);
+	/* the child is stopped: apply the attributes, then start it */
+	if (attrp != NULL) {
+		if ((attrp->flags & POSIX_SPAWN_SETPGROUP) != 0) {
+			/* pgroup 0 starts a new group led by the child (POSIX) */
+			k_pgrp_t grp = (attrp->pgroup == 0) ? NULL
+							    : sys_pgrp_find((int)attrp->pgroup);
 
-		if ((attrp->pgroup != 0) && (grp == NULL)) {
-			return EINVAL;
-		}
-		ret = sys_setpgid(child, grp);
-		if (ret < 0) {
-			return -ret;
+			if (((attrp->pgroup != 0) && (grp == NULL)) ||
+			    (sys_setpgid(child, grp) < 0)) {
+				k_thread_abort(child);
+				return EINVAL;
+			}
 		}
 	}
 
 	if (pid != NULL) {
 		*pid = (pid_t)sys_process_id(child);
 	}
+
+	k_thread_start(child);
 
 	return 0;
 }
