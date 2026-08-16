@@ -1851,3 +1851,24 @@ patches:
       preferring the caller for self-signals; z_syscall_sig_check() skips
       delivery while a user syscall is in progress so wrappers reached in
       kernel context cannot corrupt the syscall return frame.
+  - path: zephyr/k-signal-process-scope.patch
+    sha256sum: 3809c49113818dfe486ab69b19e6106405d121b3ed3247d59ad7367c47cb0699
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-16
+    upstreamable: true
+    comments: |
+      Process-directed signals with no eligible recipient now pend at
+      PROCESS scope instead of being pinned to a thread at generation time:
+      the fifo element carries a process target, any member thread's
+      pending-set, sigwait matching, and return-to-user delivery consider
+      its process's pending signals alongside its own (a per-process
+      pending counter extends the fast path), and whichever member first
+      unmasks or waits claims the signal - strict POSIX semantics for
+      fully-masked processes. k_kill(), k_kill_pgrp(), and the SIGCHLD
+      notifier queue at process scope when process_sig_target() finds no
+      unmasked member; process-scoped entries are dropped at reap, along
+      with any unclaimed K_SIG_CHLD notification about the reaped child -
+      its status has been collected, and retiring the entry keeps a parent
+      that never sigwaits from pinning queue slots.
