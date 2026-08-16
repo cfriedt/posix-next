@@ -1947,3 +1947,18 @@ patches:
       re-grants the leader its own thread and stack objects after the child
       is re-homed out of the caller's process. Configurations without
       CONFIG_PROCESS keep the thread-indexed scheme unchanged.
+  - path: zephyr/k-process-prune.patch
+    sha256sum: 8ebf52a8a96072f70236f1c6a63fcd2ea4f0e8ec41c19f1f8b36f80c0a588c5d
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-16
+    upstreamable: true
+    comments: |
+      Add k_process_prune(): abort every other member thread of the calling
+      process, leaving the caller as the sole member with the process's
+      identity, parent, and group membership unchanged. This is the kernel
+      substrate for replacing a process's image in place - exec-style
+      loaders terminate the old image's threads and continue on the calling
+      thread. The abort loop drops and retakes the process lock around
+      k_thread_abort(), which cannot run under it.
