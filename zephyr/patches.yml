@@ -2423,3 +2423,26 @@ patches:
       the common exception exit path: privilege-stack bookkeeping, the
       domain SATP switch and sret included. Floating-point state is not
       inherited.
+  - path: zephyr/k-process-fork-x86.patch
+    sha256sum: db4abf26dc66205e18bacd60e4ce436e9ecc85d271928dea4a061821f0b1f704
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-17
+    upstreamable: true
+    comments: |
+      x86 fork resume, 32- and 64-bit. intel64: the syscall entry also
+      saves the callee-saved registers (the C convention preserves them
+      through the kernel, so the exit path never restores them, but a
+      forked child has no such history), gives the signal-delivery RAX
+      stash a dedicated frame slot, and pads the frame so the fxsave area
+      stays 16-byte aligned; arch_fork_frame_init() stages a copy at the
+      top of the child's privilege stack - exactly where a live syscall
+      would build it - and z_x86_fork_resume() loads the callee-saved
+      registers, zeroes RAX, and enters the common syscall exit path
+      (page-table switch and sysret included). ia32 is smaller: the syscall
+      convention passes arguments in the callee-saved registers, so the
+      entry's argument slots already bank the caller's complete state; only
+      ESI (the syscall id register) needs a per-thread stash, and the
+      resume stages the argument-slot/iret-frame block and re-enters the
+      iret-based exit path with EAX zeroed.
