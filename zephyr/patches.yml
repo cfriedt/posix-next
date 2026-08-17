@@ -2108,3 +2108,50 @@ patches:
       children's cycles, letting POSIX times() fill tms_utime and tms_cutime
       correctly (Zephyr has no user/system split, so tms_stime/tms_cstime
       are zero).
+  - path: zephyr/k-process-fork-resume.patch
+    sha256sum: 5ad38ccc5f785b395a44e7dff19b9952315853ff55622b3b4a27c18d1c74ce1c
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-17
+    upstreamable: true
+    comments: |
+      Kernel-assisted fork resume, generic layer (ARCH_HAS_FORK_RESUME):
+      the forked child's first run returns to user mode from its parent's
+      captured syscall frame instead of longjmping through userspace. The
+      clone path creates the child's leader as a supervisor pool thread via
+      a trusted create (kernel-generated pool objects skip user-syscall
+      revalidation, which would demand K_USER), stages the resume through
+      arch_fork_frame_init()/arch_fork_resume(), and marks the child a user
+      thread before its first instruction. The child keeps its OWN TLS
+      block - a kernel-visible identity, since the parent's TLS address
+      would alias parent physical memory from kernel mode - with the
+      parent's TLS contents copied in (per-arch variant-I/II layouts
+      handled) and the cached thread identity fixed to the child, the TCB
+      self-pointer fix every fork performs. POSIX fork() is a plain
+      sys_fork() call; a kernel-mode caller has no syscall frame and keeps
+      -ENOSYS. Per-architecture support lands in k-process-fork-x86.patch
+      and k-process-fork-arm.patch.
+  - path: zephyr/k-process-fork-x86.patch
+    sha256sum: 7a2a843fa3d6348e22b9b753f8e32be3c34be8d338edcc83fe79b0194b393115
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-17
+    upstreamable: true
+    comments: |
+      x86 fork resume, 32- and 64-bit. intel64: the syscall entry also
+      saves the callee-saved registers (the C convention preserves them
+      through the kernel, so the exit path never restores them, but a
+      forked child has no such history), gives the signal-delivery RAX
+      stash a dedicated frame slot, and pads the frame so the fxsave area
+      stays 16-byte aligned; arch_fork_frame_init() stages a copy at the
+      top of the child's privilege stack - exactly where a live syscall
+      would build it - and z_x86_fork_resume() loads the callee-saved
+      registers, zeroes RAX, and enters the common syscall exit path
+      (page-table switch and sysret included). ia32 is smaller: the syscall
+      convention passes arguments in the callee-saved registers, so the
+      entry's argument slots already bank the caller's complete state; only
+      ESI (the syscall id register) needs a per-thread stash, and the
+      resume stages the argument-slot/iret-frame block and re-enters the
+      iret-based exit path with EAX zeroed.
