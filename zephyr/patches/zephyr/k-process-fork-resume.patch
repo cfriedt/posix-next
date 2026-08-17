@@ -1,0 +1,349 @@
+diff --git a/arch/Kconfig b/arch/Kconfig
+index a86194d7049..a0b8f53ebf5 100644
+--- a/arch/Kconfig
++++ b/arch/Kconfig
+@@ -745,6 +745,13 @@ config ARCH_HAS_PROCESS_VM
+ 	  Set by an architecture that implements z_mem_domain_clone_remap()
+ 	  for CONFIG_PROCESS_VM.
+ 
++config ARCH_HAS_FORK_RESUME
++	bool
++	help
++	  Set by an architecture that implements arch_fork_frame_init() and
++	  arch_fork_resume(): the forked child's first run returns to user
++	  mode from its parent's captured syscall frame.
++
+ config ARCH_HAS_STACK_JUMP
+ 	bool
+ 	help
+diff --git a/kernel/include/kernel_internal.h b/kernel/include/kernel_internal.h
+index 17dbc56eae0..08567c96bdf 100644
+--- a/kernel/include/kernel_internal.h
++++ b/kernel/include/kernel_internal.h
+@@ -181,6 +181,12 @@ int z_mem_domain_clone_remap(struct k_mem_domain *domain, void *virt, size_t siz
+ /* system-layer address-space clone teardown / domain accessor (lib/os) */
+ void z_process_vm_teardown(void *vm);
+ struct k_mem_domain *z_process_vm_domain(void *vm);
++#ifdef CONFIG_ARCH_HAS_FORK_RESUME
++/* stage the parent's syscall frame for the child; returns the resume handle */
++void *arch_fork_frame_init(struct k_thread *child, void *parent_ssf);
++/* first-run entry to user mode from a staged frame; child's syscall returns 0 */
++FUNC_NORETURN void arch_fork_resume(void *frame);
++#endif /* CONFIG_ARCH_HAS_FORK_RESUME */
+ #endif /* CONFIG_PROCESS_VM */
+ 
+ #if defined(CONFIG_USERSPACE) && defined(CONFIG_PROCESS)
+diff --git a/lib/os/process.c b/lib/os/process.c
+index ccc53775429..5ec1703efa0 100644
+--- a/lib/os/process.c
++++ b/lib/os/process.c
+@@ -24,6 +24,9 @@
+ #include <zephyr/sys/process.h>
+ #include <zephyr/sys/thread.h>
+ #include <kernel_internal.h>
++#ifdef CONFIG_THREAD_LOCAL_STORAGE
++#include <kernel_tls.h>
++#endif /* CONFIG_THREAD_LOCAL_STORAGE */
+ #include <ksched.h>
+ 
+ STRUCT_SECTION_START_EXTERN(k_process);
+@@ -822,11 +825,21 @@ void sys_process_release_gc(void)
+ 
+ #define VM_CLONE_MAX_RANGES (CONFIG_MAX_DOMAIN_PARTITIONS + 1)
+ 
++struct vm_clone_range {
++	uintptr_t start;
++	size_t size;
++	void *copy;
++};
++
+ struct vm_clone_ctx {
+ 	struct k_mem_domain domain;
+ 	sys_dnode_t free_node;
+-	void *frames[VM_CLONE_MAX_RANGES];
++	struct vm_clone_range ranges[VM_CLONE_MAX_RANGES];
+ 	size_t nframes;
++#ifdef CONFIG_ARCH_HAS_FORK_RESUME
++	/* staged parent syscall frame the child's first run resumes from */
++	void *fork_frame;
++#endif /* CONFIG_ARCH_HAS_FORK_RESUME */
+ };
+ 
+ /* one child-domain context per pool record; freed to a graveyard at record free */
+@@ -854,7 +867,7 @@ static int vm_clone_range(struct vm_clone_ctx *ctx, uintptr_t start, size_t size
+ 	void *frames;
+ 	int ret;
+ 
+-	if (ctx->nframes >= ARRAY_SIZE(ctx->frames)) {
++	if (ctx->nframes >= ARRAY_SIZE(ctx->ranges)) {
+ 		return -ENOMEM;
+ 	}
+ 
+@@ -872,11 +885,16 @@ static int vm_clone_range(struct vm_clone_ctx *ctx, uintptr_t start, size_t size
+ 		return ret;
+ 	}
+ 
+-	ctx->frames[ctx->nframes++] = frames;
++	ctx->ranges[ctx->nframes++] = (struct vm_clone_range){
++		.start = start,
++		.size = size,
++		.copy = frames,
++	};
+ 
+ 	return 0;
+ }
+ 
++
+ static int process_vm_clone(struct k_process *parent, struct k_process *proc)
+ {
+ 	struct k_mem_domain *src = _current->mem_domain_info.mem_domain;
+@@ -955,7 +973,7 @@ static int process_vm_clone(struct k_process *parent, struct k_process *proc)
+ 
+ err_free_frames:
+ 	for (size_t i = 0; i < ctx->nframes; i++) {
+-		k_free(ctx->frames[i]);
++		k_free(ctx->ranges[i].copy);
+ 	}
+ err_return_ctx:
+ 	K_SPINLOCK(&pool_lock) {
+@@ -970,7 +988,7 @@ void z_process_vm_teardown(void *vm)
+ 	struct vm_clone_ctx *ctx = vm;
+ 
+ 	for (size_t i = 0; i < ctx->nframes; i++) {
+-		k_free(ctx->frames[i]);
++		k_free(ctx->ranges[i].copy);
+ 	}
+ 	ctx->nframes = 0;
+ 	K_SPINLOCK(&pool_lock) {
+@@ -986,18 +1004,51 @@ struct k_mem_domain *z_process_vm_domain(void *vm)
+ }
+ #endif /* CONFIG_PROCESS_VM */
+ 
++#if defined(CONFIG_PROCESS_VM) && defined(CONFIG_ARCH_HAS_FORK_RESUME)
++/* lib/os/thread.c: pool create that skips user-syscall revalidation */
++int sys_thread_create_paused_trusted(struct k_thread **th, k_thread_stack_t *stack,
++				     uint32_t stack_size, uint32_t guard_size,
++				     k_thread_entry_t entry, void *p1, void *p2, void *p3, int prio,
++				     uint32_t options);
++
++static void fork_child_entry(void *p1, void *p2, void *p3)
++{
++	struct vm_clone_ctx *ctx = _current->process->vm;
++
++	ARG_UNUSED(p1);
++	ARG_UNUSED(p2);
++	ARG_UNUSED(p3);
++
++	/* first run of a forked child: enter the parent's captured context */
++	arch_fork_resume(ctx->fork_frame);
++}
++#endif /* CONFIG_PROCESS_VM && CONFIG_ARCH_HAS_FORK_RESUME */
++
+ /* the fork tier of sys_clone(); the dispatch has validated args */
+ int z_sys_clone_vm_copy(const struct sys_clone_args *args, k_pid_t *child)
+ {
+ #ifdef CONFIG_PROCESS_VM
+ 	int ret;
+ 	k_tid_t tid;
++	bool fork_resume = false;
++	k_thread_entry_t entry = args->entry;
+ 	struct k_process *proc;
+ 	struct k_process *parent = _current->process;
+ 
+-	if (args->entry == NULL) {
+-		/* the child needs a resume trampoline (see fork()) */
+-		return -EINVAL;
++	if (entry == NULL) {
++		/*
++		 * The fork model: the child's first run returns to user mode
++		 * from the parent's captured syscall frame. Only meaningful
++		 * for a user-mode caller mid-syscall.
++		 */
++		if (!IS_ENABLED(CONFIG_ARCH_HAS_FORK_RESUME) ||
++		    (_current->syscall_frame == NULL)) {
++			return -ENOTSUP;
++		}
++		fork_resume = true;
++#ifdef CONFIG_ARCH_HAS_FORK_RESUME
++		entry = fork_child_entry;
++#endif /* CONFIG_ARCH_HAS_FORK_RESUME */
+ 	}
+ 
+ 	proc = record_alloc();
+@@ -1014,14 +1065,25 @@ int z_sys_clone_vm_copy(const struct sys_clone_args *args, k_pid_t *child)
+ 	/*
+ 	 * The child's leader runs on the COPIED stack: k_process_init() adopts
+ 	 * it, we move it into the cloned domain, inherit the parent's object
+-	 * permissions, then start it. It resumes through args->entry, which
+-	 * longjmps into the jmp_buf the caller captured on that stack - valid
+-	 * because the child's copy holds the same bytes at the same address.
++	 * permissions, then start it. In the fork model the leader is created
++	 * as a supervisor thread whose first run stages into the parent's
++	 * captured syscall frame (fork_child_entry -> arch_fork_resume) and
++	 * becomes a user thread there; an explicit entry starts normally.
+ 	 */
+-	ret = sys_thread_create_paused(&tid, NULL, CONFIG_MMU_PAGE_SIZE, 0, args->entry, args->p1,
+-				       args->p2, args->p3,
+-				       k_thread_priority_get(k_current_get()),
+-				       K_USER | K_INHERIT_PERMS);
++#ifdef CONFIG_ARCH_HAS_FORK_RESUME
++	if (fork_resume) {
++		ret = sys_thread_create_paused_trusted(&tid, NULL, CONFIG_MMU_PAGE_SIZE, 0, entry,
++						       args->p1, args->p2, args->p3,
++						       k_thread_priority_get(k_current_get()),
++						       K_INHERIT_PERMS);
++	} else
++#endif /* CONFIG_ARCH_HAS_FORK_RESUME */
++	{
++		ret = sys_thread_create_paused(&tid, NULL, CONFIG_MMU_PAGE_SIZE, 0, entry,
++					       args->p1, args->p2, args->p3,
++					       k_thread_priority_get(k_current_get()),
++					       K_USER | K_INHERIT_PERMS);
++	}
+ 	if (ret < 0) {
+ 		(void)z_process_record_free(proc);
+ 		return ret;
+@@ -1041,6 +1103,65 @@ int z_sys_clone_vm_copy(const struct sys_clone_args *args, k_pid_t *child)
+ 
+ 	z_process_perms_inherit(parent, proc);
+ 	k_object_access_grant(tid, tid);
++	k_object_access_grant(tid->stack_obj, tid);
++
++#ifdef CONFIG_ARCH_HAS_FORK_RESUME
++	if (fork_resume) {
++		struct vm_clone_ctx *ctx = proc->vm;
++
++		ctx->fork_frame = arch_fork_frame_init(tid, _current->syscall_frame);
++		/* the child is a user thread from its first instruction on */
++		tid->base.user_options |= K_USER;
++#ifdef CONFIG_THREAD_LOCAL_STORAGE
++		/*
++		 * The child keeps its OWN TLS block (create-time tid->tls):
++		 * a kernel-visible identity that reads the same from kernel
++		 * page tables and the child's domain, unlike the parent's
++		 * TLS address, whose kernel-mode view would alias the
++		 * parent's physical memory. The parent's TLS contents are
++		 * inherited by copy, the cached thread identity is fixed to
++		 * the child (the TCB self-pointer fix every fork performs),
++		 * and the child's stack region joins its domain so user-mode
++		 * TLS accesses resolve. Deviation: the child's TLS occupies
++		 * a different address than its parent's.
++		 */
++		{
++			size_t tsz = z_tls_data_size();
++#ifdef CONFIG_X86
++			/* variant-II TLS: data below the base pointer */
++			ptrdiff_t tls_lo = -(ptrdiff_t)tsz;
++			size_t tls_len = tsz;
++#else
++			/* variant-I TLS: two toolchain slots at the base, data above */
++			ptrdiff_t tls_lo = 0;
++			size_t tls_len = tsz + (2 * sizeof(uintptr_t));
++#endif /* CONFIG_X86 */
++
++			(void)memcpy((char *)tid->tls + tls_lo,
++				     (char *)_current->tls + tls_lo, tls_len);
++#ifdef CONFIG_CURRENT_THREAD_USE_TLS
++			extern Z_THREAD_LOCAL k_tid_t z_tls_current;
++			ptrdiff_t tls_off = (char *)&z_tls_current - (char *)_current->tls;
++
++			*(k_tid_t *)((char *)tid->tls + tls_off) = tid;
++#endif /* CONFIG_CURRENT_THREAD_USE_TLS */
++
++			struct k_mem_partition selfstack = {
++				.start = tid->stack_info.start,
++				.size = page_up(tid->stack_info.size),
++				.attr = K_MEM_PARTITION_P_RW_U_RW,
++			};
++
++			ret = k_mem_domain_add_partition(&ctx->domain, &selfstack);
++			if (ret != 0) {
++				k_thread_abort(tid);
++				(void)z_process_record_free(proc);
++				return ret;
++			}
++		}
++#endif /* CONFIG_THREAD_LOCAL_STORAGE */
++	}
++#endif /* CONFIG_ARCH_HAS_FORK_RESUME */
+ 
+ 	if (child != NULL) {
+ 		*child = tid;
+diff --git a/lib/os/thread.c b/lib/os/thread.c
+index 76393d3a9a4..71dd3693b9c 100644
+--- a/lib/os/thread.c
++++ b/lib/os/thread.c
+@@ -618,6 +618,7 @@ __maybe_unused static void sys_thread_recycle(void)
+ }
+ 
+ int z_sys_thread_create_common(struct k_thread **th, k_thread_stack_t *stack,
++				    bool trusted,
+ 				    uint32_t stack_size, uint32_t guard_size,
+ 				    k_thread_entry_t entry, void *p1, void *p2, void *p3, int prio,
+ 				    uint32_t options, k_timeout_t delay)
+@@ -652,7 +653,7 @@ int z_sys_thread_create_common(struct k_thread **th, k_thread_stack_t *stack,
+ 	}
+ 
+ #ifdef CONFIG_USERSPACE
+-	if (k_is_in_user_syscall()) {
++	if (k_is_in_user_syscall() && !trusted) {
+ 		k_object_access_grant(stack, *th);
+ 
+ 		k_tid_t z_vrfy_k_thread_create(struct k_thread * new_thread,
+@@ -719,6 +720,20 @@ int sys_thread_create_paused(struct k_thread **th, k_thread_stack_t *stack, uint
+ 				   options, SYS_CLONE_PAUSED);
+ }
+ 
++int sys_thread_create_paused_trusted(struct k_thread **th, k_thread_stack_t *stack,
++				     uint32_t stack_size, uint32_t guard_size,
++				     k_thread_entry_t entry, void *p1, void *p2, void *p3, int prio,
++				     uint32_t options)
++{
++	/*
++	 * Kernel-generated arguments (pool-drawn objects): skip the
++	 * user-syscall revalidation even when called mid-syscall, so the
++	 * kernel may construct e.g. a forked child's supervisor bootstrap.
++	 */
++	return z_sys_thread_create_common(th, stack, true, stack_size, guard_size, entry, p1, p2, p3,
++					prio, options, K_FOREVER);
++}
++
+ #ifdef CONFIG_USERSPACE
+ int z_vrfy_sys_thread_create(struct k_thread **th, k_thread_stack_t *stack, uint32_t stack_size,
+ 			     uint32_t guard_size, k_thread_entry_t entry, void *p1, void *p2,
+diff --git a/lib/os/clone.c b/lib/os/clone.c
+index 2d91b0928a0..e85abc3225c 100644
+--- a/lib/os/clone.c
++++ b/lib/os/clone.c
+@@ -40,14 +40,16 @@ static inline int z_sys_clone_vm_copy(const struct sys_clone_args *args, k_pid_t
+ 
+ /* pooled creation (thread.c); stubbed when there is no pool to draw from */
+ #ifdef CONFIG_SYS_THREAD
+-int z_sys_thread_create_common(struct k_thread **th, k_thread_stack_t *stack, uint32_t stack_size,
+-			       uint32_t guard_size, k_thread_entry_t entry, void *p1, void *p2,
+-			       void *p3, int prio, uint32_t options, k_timeout_t delay);
++int z_sys_thread_create_common(struct k_thread **th, k_thread_stack_t *stack, bool trusted,
++			       uint32_t stack_size, uint32_t guard_size, k_thread_entry_t entry,
++			       void *p1, void *p2, void *p3, int prio, uint32_t options,
++			       k_timeout_t delay);
+ #else
+ static inline int z_sys_thread_create_common(struct k_thread **th, k_thread_stack_t *stack,
+-					     uint32_t stack_size, uint32_t guard_size,
+-					     k_thread_entry_t entry, void *p1, void *p2, void *p3,
+-					     int prio, uint32_t options, k_timeout_t delay)
++					     bool trusted, uint32_t stack_size,
++					     uint32_t guard_size, k_thread_entry_t entry, void *p1,
++					     void *p2, void *p3, int prio, uint32_t options,
++					     k_timeout_t delay)
+ {
+ 	return -EINVAL;
+ }
+@@ -59,7 +61,7 @@ static int clone_thread(const struct sys_clone_args *args, k_pid_t *child)
+ 	k_tid_t tid;
+ 
+ 	if (args->thread == NULL) {
+-		ret = z_sys_thread_create_common(&tid, args->stack, args->stack_size,
++		ret = z_sys_thread_create_common(&tid, args->stack, false, args->stack_size,
+ 						 args->guard_size, args->entry, args->p1, args->p2,
+ 						 args->p3, args->prio, args->options, K_FOREVER);
+ 		if (ret < 0) {
