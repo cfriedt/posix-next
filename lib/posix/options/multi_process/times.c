@@ -13,28 +13,30 @@
 #include <zephyr/sys/time_units.h>
 #include <zephyr/sys/util.h>
 
+static clock_t cyc_to_clock(uint64_t cycles)
+{
+	return (clock_t)z_tmcvt(cycles, sys_clock_hw_cycles_per_sec(), USEC_PER_SEC,
+				IS_ENABLED(CONFIG_TIMER_READS_ITS_FREQUENCY_AT_RUNTIME) ? false : true,
+				sizeof(clock_t) == sizeof(uint32_t), false, false);
+}
+
 clock_t times(struct tms *buffer)
 {
-	int ret;
-	clock_t utime; /* user time */
-	k_thread_runtime_stats_t stats;
+	uint64_t self_cycles = 0;
+	uint64_t child_cycles = 0;
 
-	ret = k_thread_runtime_stats_all_get(&stats);
-	if (ret < 0) {
-		errno = -ret;
-		return (clock_t)-1;
-	}
+	(void)k_process_cpu_stats(&self_cycles, &child_cycles);
 
-	utime = z_tmcvt(stats.total_cycles, sys_clock_hw_cycles_per_sec(), USEC_PER_SEC,
-			IS_ENABLED(CONFIG_TIMER_READS_ITS_FREQUENCY_AT_RUNTIME) ? false : true,
-			sizeof(clock_t) == sizeof(uint32_t), false, false);
-
+	/*
+	 * Zephyr does not distinguish user from system CPU time, so all of a
+	 * process's cycles are reported as user time and system time is zero.
+	 */
 	*buffer = (struct tms){
-		.tms_utime = utime,
+		.tms_utime = cyc_to_clock(self_cycles),
 		.tms_stime = 0,
-		.tms_cutime = 0,
+		.tms_cutime = cyc_to_clock(child_cycles),
 		.tms_cstime = 0,
 	};
 
-	return utime;
+	return (clock_t)k_uptime_ticks();
 }
