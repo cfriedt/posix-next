@@ -2072,3 +2072,70 @@ patches:
       GAP: writable app-data partitions are not yet isolated on x86 (a
       child write is visible in the parent); the frame remap for
       globally-mapped partitions needs follow-up.
+  - path: zephyr/k-process-fork-resume.patch
+    sha256sum: ef4e8f3bca4421334bfde0b990d57d1255a67e7755b84f9ba5c8fe4ad9403120
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-17
+    upstreamable: true
+    comments: |
+      Kernel-assisted fork resume, generic layer (ARCH_HAS_FORK_RESUME):
+      the forked child's first run returns to user mode from its parent's
+      captured syscall frame instead of longjmping through userspace. The
+      clone path creates the child's leader as a supervisor pool thread via
+      a trusted create (kernel-generated pool objects skip user-syscall
+      revalidation, which would demand K_USER), stages the resume through
+      arch_fork_frame_init()/arch_fork_resume(), and marks the child a user
+      thread before its first instruction. The child keeps its OWN TLS
+      block - a kernel-visible identity, since the parent's TLS address
+      would alias parent physical memory from kernel mode - with the
+      parent's TLS contents copied in (per-arch variant-I/II layouts
+      handled) and the cached thread identity fixed to the child, the TCB
+      self-pointer fix every fork performs. POSIX fork() is a plain
+      sys_fork() call; a kernel-mode caller has no syscall frame and keeps
+      -ENOSYS. Per-architecture support lands in k-process-fork-x86.patch
+      and k-process-fork-arm.patch.
+  - path: zephyr/k-process-fork-tls-same-va.patch
+    sha256sum: 7f4a6a22849b61c755bcc0709b27fd39ed8164b65bcdd2c355babf56007a283e
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-18
+    upstreamable: true
+    comments: |
+      A forked child's TLS is the parent's address, retiring the last
+      fork deviation: the clone already copies that region (the child
+      resumes on the parent's stack address, and TLS lives above it), so
+      captured TLS-variable addresses and register-relative accesses
+      agree, as fork demands. The own-block machinery - the TLS content
+      copy, the cached-current-thread fix, the child-stack domain
+      partition - deletes. Enabling condition: PROCESS_VM now excludes
+      CURRENT_THREAD_USE_TLS (the current thread resolves through the
+      per-CPU arch path), since kernel-mode reads of the TLS-cached
+      current thread would alias the parent's physical memory through
+      the shared kernel page tables - the bug the own-block design was
+      built to dodge.
+  - path: zephyr/k-process-fork-x86.patch
+    sha256sum: 7a2a843fa3d6348e22b9b753f8e32be3c34be8d338edcc83fe79b0194b393115
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-17
+    upstreamable: true
+    comments: |
+      x86 fork resume, 32- and 64-bit. intel64: the syscall entry also
+      saves the callee-saved registers (the C convention preserves them
+      through the kernel, so the exit path never restores them, but a
+      forked child has no such history), gives the signal-delivery RAX
+      stash a dedicated frame slot, and pads the frame so the fxsave area
+      stays 16-byte aligned; arch_fork_frame_init() stages a copy at the
+      top of the child's privilege stack - exactly where a live syscall
+      would build it - and z_x86_fork_resume() loads the callee-saved
+      registers, zeroes RAX, and enters the common syscall exit path
+      (page-table switch and sysret included). ia32 is smaller: the syscall
+      convention passes arguments in the callee-saved registers, so the
+      entry's argument slots already bank the caller's complete state; only
+      ESI (the syscall id register) needs a per-thread stash, and the
+      resume stages the argument-slot/iret-frame block and re-enters the
+      iret-based exit path with EAX zeroed.
