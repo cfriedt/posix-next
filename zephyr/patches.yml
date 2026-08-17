@@ -2361,3 +2361,19 @@ patches:
       orders its two-thread start deterministically - the exiting leader
       could abort its sibling before the sibling recorded its pid, a
       latent race made more visible by the k_exit() close sweep.
+  - path: zephyr/k-process-times.patch
+    sha256sum: 3011ce43937a2e2150fe6c553c5bcd113f45e12a1aad1e8a2b1bf99982bfd732
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-17
+    upstreamable: true
+    comments: |
+      Per-process CPU accounting for times(): struct k_process gains
+      self_cycles (accumulated as member threads exit) and child_cycles
+      (rolled up from reaped children and their children) under
+      CONFIG_SCHED_THREAD_USAGE. k_process_cpu_stats() returns the calling
+      process's cycles (live members plus exited members) and its reaped
+      children's cycles, letting POSIX times() fill tms_utime and tms_cutime
+      correctly (Zephyr has no user/system split, so tms_stime/tms_cstime
+      are zero).
