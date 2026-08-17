@@ -3224,6 +3224,47 @@ patches:
       left in %edx - into the fork clone-context pool here, where a forked
       process's domain partitions then read as garbage. Latent upstream
       whenever KPTI is off.
+  - path: zephyr/k-process-fork-x86.patch
+    sha256sum: 4ac6b2f8b3433ca02ed4623734d5ca674b144fa9b464c79b89187085c21f4461
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-17
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/k-process-vm.patch
+    comments: |
+      x86 fork support: memory substrate and resume, 32- and 64-bit.
+      x86 with the MMU, separate page tables per domain and no KPTI
+      selects ARCH_HAS_PROCESS_VM; z_mem_domain_clone_remap() repoints
+      a domain's page-table entries at fresh frames, keeping each page's
+      flags (under KPTI the kernel runs on the shared kernel tables, so a
+      syscall on the child's behalf would read the parent's frames
+      behind the child's private copies). arch_page_phys_get() resolves
+      through the kernel's page tables, not the current domain's: a
+      domain's private remaps of a kernel address (its fork copies) are
+      not the kernel's view, and k_mem_unmap() of a mapping released from
+      inside a forked process must find the mapping's own frames.
+      arch_syscall_frame_sp() reads the caller's stack pointer from the
+      captured syscall frame (intel64: the rsp slot; ia32: the iret
+      frame's ESP). intel64: the syscall entry also
+      saves the callee-saved registers (the C convention preserves them
+      through the kernel, so the exit path never restores them, but a
+      forked child has no such history), gives the signal-delivery RAX
+      stash a dedicated frame slot, and pads the frame so the fxsave area
+      stays 16-byte aligned; arch_fork_frame_init() stages a copy at the
+      top of the child's privilege stack - exactly where a live syscall
+      would build it - and z_x86_fork_resume() loads the callee-saved
+      registers, zeroes RAX, and enters the common syscall exit path
+      (page-table switch and sysret included). ia32 is smaller: the syscall
+      convention passes arguments in the callee-saved registers, so the
+      entry's argument slots already bank the caller's complete state; only
+      ESI (the syscall id register) needs a per-thread stash, and the
+      resume stages the argument-slot/iret-frame block and re-enters the
+      iret-based exit path with EAX zeroed.
+      The frame's alignment pad is the syscall id slot.
   - path: zephyr/libc-sys-stat-utime-markers.patch
     sha256sum: 8edfcf83058522bb80d601e92c4a9e6be14baec04cf8253ffbd344fbadf05b78
     module: zephyr
