@@ -2219,3 +2219,26 @@ patches:
       ESI (the syscall id register) needs a per-thread stash, and the
       resume stages the argument-slot/iret-frame block and re-enters the
       iret-based exit path with EAX zeroed.
+  - path: zephyr/k-process-fork-arm.patch
+    sha256sum: d452a1d983ba6ff21e30a62adcbb2677d7d221949b6d6d3324633a3ed642c9a2
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-17
+    upstreamable: true
+    comments: |
+      arm64 fork support: memory substrate and resume. ARMv8-A/ARMv9-A with
+      the MMU select ARCH_HAS_PROCESS_VM and ARCH_HAS_FORK_RESUME.
+      z_mem_domain_clone_remap() is a thin wrapper over private_map(),
+      which privatizes the leaf translation tables before installing the
+      copy-frame mapping, so cloned writable ranges isolate per domain. The
+      resume needs no new exit path: every arm64 thread is born through
+      z_arm64_exit_exc popping a synthetic ESF, so arch_fork_frame_init()
+      rewrites the paused child's birth ESF with the parent's captured
+      syscall frame (x0 zeroed, EL0 SPSR) and seeds callee_saved.x19-x28 -
+      captured by a small SVC-dispatch block while they still hold the
+      caller's values - plus sp_el0; the context switch and eret deliver
+      the child straight to user mode at the fork call site with complete
+      parent/child stack and data isolation. AArch32 Cortex-A has an MMU
+      but no userspace support in Zephyr yet; a 32-bit resume flavor slots
+      in here once that substrate exists.
