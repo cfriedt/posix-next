@@ -2092,3 +2092,19 @@ patches:
       live until the process is reaped, when its memory is reclaimed, so
       user code cannot free it out from under the kernel's live-record
       lists.
+  - path: zephyr/k-process-times.patch
+    sha256sum: ce81d8891879e02b5c4805048e3dcc898a97783a6b37239345e743281dcb2fc0
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-17
+    upstreamable: true
+    comments: |
+      Per-process CPU accounting for times(): struct k_process gains
+      self_cycles (accumulated as member threads exit) and child_cycles
+      (rolled up from reaped children and their children) under
+      CONFIG_SCHED_THREAD_USAGE. k_process_cpu_stats() returns the calling
+      process's cycles (live members plus exited members) and its reaped
+      children's cycles, letting POSIX times() fill tms_utime and tms_cutime
+      correctly (Zephyr has no user/system split, so tms_stime/tms_cstime
+      are zero).
