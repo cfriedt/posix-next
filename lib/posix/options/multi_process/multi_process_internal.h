@@ -38,6 +38,16 @@ static inline int wstatus_to_posix(int kws)
 	return kws;
 }
 
+#ifdef CONFIG_POSIX_EXEC_LLEXT
+/* unload the extension (if any) behind a just-reaped exec'd process */
+void z_posix_exec_llext_reap(k_pid_t reaped);
+#else
+static inline void z_posix_exec_llext_reap(k_pid_t reaped)
+{
+	ARG_UNUSED(reaped);
+}
+#endif /* CONFIG_POSIX_EXEC_LLEXT */
+
 /*
  * Wait, peek-first: the numbering entry for a child retires when it is reaped,
  * so its numeric pid must be read while it is still a zombie. Peek with
@@ -76,6 +86,7 @@ static inline int posix_wait_common(k_pid_t child, k_pgrp_t grp, bool by_grp, pi
 
 		ret = k_waitpid(reaped, NULL, NULL, 0, K_NO_WAIT);
 		if (ret == 0) {
+			z_posix_exec_llext_reap(reaped);
 			return 0;
 		}
 		/* stolen by a concurrent waiter: go around again */
@@ -91,5 +102,13 @@ static inline int posix_wait_common(k_pid_t child, k_pgrp_t grp, bool by_grp, pi
 int z_posix_execl_argv(char **argv, const char *arg0, va_list ap);
 
 const char *z_posix_exec_resolve(const char *file, char *buf, size_t buflen);
+
+/* in-place image replacement: prune members, reset signals, close CLOEXEC */
+void z_posix_exec_prepare(void);
+
+#ifdef CONFIG_POSIX_EXEC_LLEXT
+/* load @a path as an ELF extension and run its main() as the new image */
+int z_posix_exec_llext(const char *path, char *const argv[], char *const envp[]);
+#endif /* CONFIG_POSIX_EXEC_LLEXT */
 
 #endif /* ZEPHYR_LIB_POSIX_OPTIONS_MULTI_PROCESS_INTERNAL_H_ */

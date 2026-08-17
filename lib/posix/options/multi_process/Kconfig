@@ -1,5 +1,4 @@
-# Copyright (c) 2024 Tenstorrent AI ULC
-#
+# SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
 # SPDX-License-Identifier: Apache-2.0
 
 menuconfig POSIX_MULTI_PROCESS
@@ -13,9 +12,26 @@ menuconfig POSIX_MULTI_PROCESS
 
 	  The kernel process object (CONFIG_PROCESS) provides process identity,
 	  the process/session hierarchy, exit status, and wait semantics.
-	  fork()/exec() are not yet implemented and fail at runtime.
 
 if POSIX_MULTI_PROCESS
+
+config POSIX_EXEC_LLEXT
+	bool "exec loads ELF extensions from the filesystem"
+	depends on LLEXT && FILE_SYSTEM
+	help
+	  When a path passed to the exec family does not name a prelinked
+	  image, load it from the filesystem as a linkable loadable extension
+	  (llext) and run its exported main() as the new process image; the
+	  return value of main() becomes the process's exit status.
+
+config POSIX_EXEC_LLEXT_MAX
+	int "Maximum concurrently loaded exec'd extensions"
+	depends on POSIX_EXEC_LLEXT
+	default 4
+	help
+	  Size of the table tracking which loaded extension backs each exec'd
+	  process, so the extension can be unloaded when the process is
+	  reaped. exec fails with ENOMEM when the table is full.
 
 config POSIX_EXEC_PATH_MAX
 	int "Maximum resolved executable path length"

@@ -12,6 +12,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/kernel/signal.h>
 
+#include "multi_process_internal.h"
 #include "posix_image.h"
 
 #ifdef CONFIG_SIGNAL
@@ -61,26 +62,35 @@ int execve(const char *path, char *const argv[], char *const envp[])
 
 	img = posix_spawn_image_lookup(path);
 	if ((img == NULL) || (img->entry == NULL)) {
+#ifdef CONFIG_POSIX_EXEC_LLEXT
+		/* not a prelinked image: try loading an ELF extension */
+		return z_posix_exec_llext(path, argv, envp);
+#else
 		errno = ENOENT;
 		return -1;
+#endif /* CONFIG_POSIX_EXEC_LLEXT */
 	}
 
-	/*
-	 * Replace the process image in place: abort every other member thread
-	 * and continue on the calling thread, preserving the process's
-	 * identity, parent, and group membership. Signal dispositions revert
-	 * to default and FD_CLOEXEC descriptors are closed, per POSIX.
-	 * Remaining deviation before exec loading: the new image runs on the
-	 * calling thread's existing stack rather than a fresh one.
-	 */
-	(void)k_process_prune();
-#ifdef CONFIG_SIGNAL
-	exec_reset_signals();
-#endif /* CONFIG_SIGNAL */
-	exec_close_cloexec();
+	z_posix_exec_prepare();
 
 	img->entry((void *)argv, (void *)envp, NULL);
 
 	/* the image's entry returned: exit as if main() returned 0 */
 	exit(0);
+}
+
+/*
+ * Replace the process image in place: abort every other member thread and
+ * continue on the calling thread, preserving the process's identity, parent,
+ * and group membership. Signal dispositions revert to default and FD_CLOEXEC
+ * descriptors are closed, per POSIX. Remaining deviation: the new image runs
+ * on the calling thread's existing stack rather than a fresh one.
+ */
+void z_posix_exec_prepare(void)
+{
+	(void)k_process_prune();
+#ifdef CONFIG_SIGNAL
+	exec_reset_signals();
+#endif /* CONFIG_SIGNAL */
+	exec_close_cloexec();
 }

@@ -38,4 +38,5 @@ if(NOT CONFIG_TC_PROVIDES_POSIX_MULTI_PROCESS)
     waitid.c
     waitpid.c
   )
+  zephyr_library_sources_ifdef(CONFIG_POSIX_EXEC_LLEXT exec_llext.c)
 endif()
