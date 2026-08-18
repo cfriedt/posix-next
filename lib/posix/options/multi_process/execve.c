@@ -71,20 +71,26 @@ int execve(const char *path, char *const argv[], char *const envp[])
 #endif /* CONFIG_POSIX_EXEC_LLEXT */
 	}
 
-	z_posix_exec_prepare();
+	struct z_posix_exec_run_args run = {
+		.entry = img->entry,
+		.argv = argv,
+		.envp = envp,
+	};
 
-	img->entry((void *)argv, (void *)envp, NULL);
+	if (z_posix_exec_args_check(argv, envp) != 0) {
+		return -1;
+	}
 
-	/* the image's entry returned: exit as if main() returned 0 */
-	exit(0);
+	z_posix_exec_run(&run);
+	CODE_UNREACHABLE;
 }
 
 /*
- * Replace the process image in place: abort every other member thread and
- * continue on the calling thread, preserving the process's identity, parent,
- * and group membership. Signal dispositions revert to default and FD_CLOEXEC
- * descriptors are closed, per POSIX. Remaining deviation: the new image runs
- * on the calling thread's existing stack rather than a fresh one.
+ * Replace the process image: abort every other member thread, preserving the
+ * process's identity, parent, and group membership. Signal dispositions
+ * revert to default and FD_CLOEXEC descriptors are closed, per POSIX. The
+ * new image then runs on a fresh pool-drawn stack (the caller's own stack
+ * when the pool is exhausted or CONFIG_SYS_THREAD is absent).
  */
 void z_posix_exec_prepare(void)
 {

@@ -22,6 +22,7 @@ if(NOT CONFIG_TC_PROVIDES_POSIX_MULTI_PROCESS)
     execlp.c
     execv.c
     execve.c
+    exec_run.c
     execvp.c
     fork.c
     posix_spawn_image.c

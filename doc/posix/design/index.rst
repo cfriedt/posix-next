@@ -151,10 +151,20 @@ from the extension - so a table sized by
 which exec'd process: a ``main()`` that returns unloads in place, an image
 terminated by ``_exit()`` or a signal is unloaded by the ``wait()`` family
 when the process is reaped, and a chain-exec'ing image is unloaded by its
-successor past exec's point of no return. Remaining deviations: the new
-image runs on the calling thread's existing stack rather than a fresh one,
-and a child that is never collected by ``wait()`` holds its table slot until
-the slot is swept on a later exec.
+successor past exec's point of no return. The new image then runs as
+Linux runs one: the calling thread is restarted in place. The argument
+and environment vectors are staged at the top of the thread's own stack
+(``sys_thread_stack_stage()``, bounded by
+:kconfig:option:`CONFIG_POSIX_EXEC_ARG_BYTES` else ``E2BIG`` - the
+``setup_arg_pages()`` analog), and ``sys_thread_restart()`` resets the
+stack pointer just below them and enters the image
+(``arch_stack_jump()``, the ``start_thread()`` analog) - same thread,
+same stack, pid, signal mask, and priority all trivially preserved.
+Remaining deviations: architectures without stack-jump support
+(native_sim, whose threads run on host stacks) run the image on the
+calling thread's live frames instead, and a child that is never
+collected by ``wait()`` holds its extension-table slot until the slot
+is swept on a later exec.
 
 Known deviations
 ================
@@ -177,8 +187,10 @@ Each is expected to be retired as the corresponding substrate lands.
    * - :c:func:`execve` family
      - A path names a prelinked image or, with
        :kconfig:option:`CONFIG_POSIX_EXEC_LLEXT`, a filesystem ELF
-       extension; the new image runs on the calling thread's existing
-       stack. ``execvp``/``execlp`` resolve bare names against
+       extension; the new image runs on the calling thread restarted at
+       the base of its own stack (on its live frames only where the
+       architecture lacks stack-jump support, e.g. native_sim).
+       ``execvp``/``execlp`` resolve bare names against
        :kconfig:option:`CONFIG_POSIX_EXEC_PATH_PREFIX` rather than a
        ``PATH`` environment variable.
    * - ``posix_spawn``

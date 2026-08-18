@@ -6,6 +6,7 @@
 
 #include <errno.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -26,11 +27,16 @@ static char *const exec_argv[] = {"execme", NULL};
 
 static void execme_entry(void *p1, void *p2, void *p3)
 {
+	char *const *argv = p1;
+
 	ARG_UNUSED(p2);
 	ARG_UNUSED(p3);
 
-	/* the previous image's argv arrives as the entry parameters */
-	_exit(((char *const *)p1 == exec_argv) ? 42 : 43);
+	/* the previous image's argv arrives by value: exec copies the vectors */
+	_exit(((argv != NULL) && (argv[0] != NULL) && (strcmp(argv[0], "execme") == 0) &&
+	       (argv[1] == NULL))
+		      ? 42
+		      : 43);
 }
 
 IMAGE_REGISTRY_ENTRY_DEFINE(img_execme, "/bin/execme", execme_entry);

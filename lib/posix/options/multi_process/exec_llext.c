@@ -52,6 +52,11 @@ void z_posix_exec_llext_reap(k_pid_t reaped)
 {
 	struct llext *ext;
 
+	if (k_is_user_context()) {
+		/* table and loader are supervisor-side; the sweep reclaims later */
+		return;
+	}
+
 	/* both slots of a process killed mid-exec unload here */
 	while ((ext = exec_image_detach(reaped, NULL)) != NULL) {
 		(void)llext_unload(&ext);
@@ -113,7 +118,6 @@ int z_posix_exec_llext(const char *path, char *const argv[], char *const envp[])
 	struct llext *prior;
 	int (*ext_main)(int argc, char **argv, char **envp);
 	const char *name;
-	int argc = 0;
 	int ret;
 
 	/* the extension's name is the path's last component */
@@ -134,12 +138,23 @@ int z_posix_exec_llext(const char *path, char *const argv[], char *const envp[])
 		return -1;
 	}
 
+	if (z_posix_exec_args_check(argv, envp) != 0) {
+		(void)llext_unload(&ext);
+		return -1;
+	}
+
 	ret = exec_image_register(ext, k_getpid());
 	if (ret != 0) {
 		(void)llext_unload(&ext);
 		errno = ENOMEM;
 		return -1;
 	}
+
+	struct z_posix_exec_run_args run = {
+		.ext_main = ext_main,
+		.argv = argv,
+		.envp = envp,
+	};
 
 	/*
 	 * Point of no return: nothing below the current frame runs again, so
@@ -150,23 +165,12 @@ int z_posix_exec_llext(const char *path, char *const argv[], char *const envp[])
 		(void)llext_unload(&prior);
 	}
 
-	z_posix_exec_prepare();
-
-	while ((argv != NULL) && (argv[argc] != NULL)) {
-		argc++;
-	}
-
 	/*
 	 * The image ABI: the extension exports int main(int, char **, char **)
-	 * and its return value becomes the process's exit status. The image
-	 * runs on the calling thread's stack (the documented exec deviation).
-	 * A normal return unloads here; _exit() or signal death leaves the
+	 * and its return value becomes the process's exit status; a normal
+	 * return unloads the extension, _exit() or signal death leaves the
 	 * unload to the reaper via z_posix_exec_llext_reap().
 	 */
-	ret = ext_main(argc, (char **)argv, (char **)envp);
-	ext = exec_image_detach(k_getpid(), NULL);
-	if (ext != NULL) {
-		(void)llext_unload(&ext);
-	}
-	exit(ret);
+	z_posix_exec_run(&run);
+	CODE_UNREACHABLE;
 }
