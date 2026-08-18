@@ -2063,3 +2063,26 @@ patches:
       stack, pid trivially preserved, signal mask and priority naturally
       retained. Architectures without the shim (native_sim: host pthread
       stacks) report -ENOSYS and callers fall back to running in place.
+  - path: zephyr/k-process-native-topology.patch
+    sha256sum: eb53f73fc5112b07d609b261fa5f5da2be461df47f88aa6f4183b977c845e2a1
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-18
+    upstreamable: true
+    comments: |
+      Native binaries are host-linked after the Zephyr link, so the
+      post-build static-topology assembler sees a relocatable object -
+      no loadable segments, section-relative symbols, membership
+      pointers still in relocations - and cannot patch it (nor could a
+      pass over the final host executable: RELA architectures keep
+      pointer initializers in relocation addends). Skip the hook under
+      CONFIG_NATIVE_BUILD and assemble the K_SESSION_DEFINE /
+      K_PROCESS_GROUP_DEFINE membership lists at PRE_KERNEL_1 boot
+      instead, where every pointer is real; ROMable targets keep the
+      link-time-only assembly. The suite's per-test child fixtures also
+      consolidate into one shared trio (tests run sequentially and reap
+      their children, so dedicated objects per test bought nothing),
+      and the userspace scenario sizes the kernel-object permission
+      bitmap for SMP platforms, whose per-CPU statics still exceed the
+      default 16-thread bitmap.
