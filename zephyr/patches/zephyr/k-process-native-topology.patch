@@ -1,0 +1,374 @@
+diff --git a/kernel/CMakeLists.txt b/kernel/CMakeLists.txt
+index 87764954065..4015d7a3b4f 100644
+--- a/kernel/CMakeLists.txt
++++ b/kernel/CMakeLists.txt
+@@ -82,11 +82,13 @@ zephyr_compile_definitions(SIGNAL_ACTION_DB_SIZE=${sigaction_min_size})
+ zephyr_sources_ifdef(CONFIG_SIGNAL signal.c)
+ zephyr_sources_ifdef(CONFIG_PROCESS process.c)
+ 
+-if(CONFIG_PROCESS)
++if(CONFIG_PROCESS AND NOT CONFIG_NATIVE_BUILD)
+   # Assemble the static process topology (K_SESSION_DEFINE /
+   # K_PROCESS_GROUP_DEFINE / K_PROCESS_DEFINE_EXT membership lists) directly
+-  # into the ELF. Mandatory for static topology, like gen_kobject_list for
+-  # user-mode kernel objects: there is no boot-time fallback.
++  # into the ELF. Mandatory for static topology on ROMable targets, like
++  # gen_kobject_list for user-mode kernel objects. Native binaries are
++  # host-linked after this hook (the ELF here is still relocatable), so
++  # they assemble the topology at boot instead.
+   set_property(GLOBAL APPEND PROPERTY extra_post_build_commands
+     COMMAND ${PYTHON_EXECUTABLE} ${ZEPHYR_BASE}/scripts/build/gen_process_topology.py
+             ${PROJECT_BINARY_DIR}/${KERNEL_ELF_NAME}
+diff --git a/kernel/process.c b/kernel/process.c
+index de2b114018a..39a6ba671be 100644
+--- a/kernel/process.c
++++ b/kernel/process.c
+@@ -445,6 +445,31 @@ static int process_boot_init(void)
+ 			sys_dlist_append(&session_active, &session->cell_node);
+ 		}
+ 	}
++#ifdef CONFIG_NATIVE_BUILD
++	/*
++	 * Native binaries are host-linked after the Zephyr link, so the
++	 * post-build topology assembler cannot patch them (it sees a
++	 * relocatable object): assemble the static membership lists here.
++	 */
++	STRUCT_SECTION_FOREACH(k_session, session) {
++		if ((session->flags & K_SESSION_FLAG_STATIC) != 0U) {
++			sys_dlist_init(&session->pgrps);
++		}
++	}
++	STRUCT_SECTION_FOREACH(k_process_group, grp) {
++		if ((grp->session != NULL) &&
++		    ((grp->session->flags & K_SESSION_FLAG_STATIC) != 0U)) {
++			sys_dlist_init(&grp->members);
++			sys_dlist_append(&grp->session->pgrps, &grp->session_node);
++		}
++	}
++	STRUCT_SECTION_FOREACH(k_process, proc) {
++		if ((proc->pgrp != NULL) && (proc->pgrp->session != NULL) &&
++		    ((proc->pgrp->session->flags & K_SESSION_FLAG_STATIC) != 0U)) {
++			sys_dlist_append(&proc->pgrp->members, &proc->pgrp_node);
++		}
++	}
++#endif /* CONFIG_NATIVE_BUILD */
+ 	for (size_t i = 0; i < RESERVED_NUM; i++) {
+ 		sys_dlist_append(&session_active, &z_session_reserved[i].cell_node);
+ 	}
+diff --git a/tests/kernel/process/src/main.c b/tests/kernel/process/src/main.c
+index 7d472bfed27..618c5cd0844 100644
+--- a/tests/kernel/process/src/main.c
++++ b/tests/kernel/process/src/main.c
+@@ -184,11 +184,6 @@ ZTEST(kernel_process, test_setsid)
+ 	zassert_is_null(sys_setsid());
+ }
+ 
+-static K_THREAD_STACK_DEFINE(spawn_stack_a, STATIC_PROC_STACK_SIZE);
+-static K_THREAD_STACK_DEFINE(spawn_stack_b, STATIC_PROC_STACK_SIZE);
+-static struct k_thread spawn_thread_a;
+-static struct k_thread spawn_thread_b;
+-
+ static K_THREAD_STACK_DEFINE(child_stack_b, STATIC_PROC_STACK_SIZE);
+ static struct k_thread child_b;
+ 
+@@ -210,12 +205,12 @@ ZTEST(kernel_process, test_spawn)
+ 	int ws = 0;
+ 	int pid;
+ 	k_pid_t reaped = NULL;
+-	k_pid_t child = &spawn_thread_a;
++	k_pid_t child = &child_a;
+ 	struct sys_clone_args args = {
+ 		.entry = spawn_entry_exit,
+ 		.p1 = (void *)(intptr_t)7,
+-		.thread = &spawn_thread_a,
+-		.stack = spawn_stack_a,
++		.thread = &child_a,
++		.stack = child_stack_a,
+ 		.stack_size = STATIC_PROC_STACK_SIZE,
+ 		.prio = K_LOWEST_APPLICATION_THREAD_PRIO,
+ 	};
+@@ -290,12 +285,12 @@ ZTEST(kernel_process, test_spawn_waitpid_selectors)
+ {
+ 	int ws = 0;
+ 	k_pid_t reaped = NULL;
+-	k_pid_t child = &spawn_thread_b;
++	k_pid_t child = &child_b;
+ 	struct sys_clone_args args = {
+ 		.entry = spawn_entry_exit,
+ 		.p1 = (void *)(intptr_t)3,
+-		.thread = &spawn_thread_b,
+-		.stack = spawn_stack_b,
++		.thread = &child_b,
++		.stack = child_stack_b,
+ 		.stack_size = STATIC_PROC_STACK_SIZE,
+ 		.prio = K_LOWEST_APPLICATION_THREAD_PRIO,
+ 	};
+@@ -317,8 +312,8 @@ ZTEST(kernel_process, test_spawn_waitpid_selectors)
+ 	zassert_equal(K_WEXITSTATUS(ws), 3);
+ }
+ 
+-static K_THREAD_STACK_DEFINE(spawn_stack_c, STATIC_PROC_STACK_SIZE);
+-static struct k_thread spawn_thread_c;
++static K_THREAD_STACK_DEFINE(child_stack_c, STATIC_PROC_STACK_SIZE);
++static struct k_thread child_c;
+ 
+ static void spawn_entry_libc_exit(void *p1, void *p2, void *p3)
+ {
+@@ -342,14 +337,14 @@ ZTEST(kernel_process, test_spawn_libc_exit)
+ 
+ 	struct sys_clone_args args = {
+ 		.entry = spawn_entry_libc_exit,
+-		.thread = &spawn_thread_c,
+-		.stack = spawn_stack_c,
++		.thread = &child_c,
++		.stack = child_stack_c,
+ 		.stack_size = STATIC_PROC_STACK_SIZE,
+ 		.prio = K_LOWEST_APPLICATION_THREAD_PRIO,
+ 	};
+ 
+ 	zassert_ok(sys_clone(&args, NULL));
+-	zassert_ok(k_waitpid(&spawn_thread_c, NULL, &ws, 0, K_FOREVER));
++	zassert_ok(k_waitpid(&child_c, NULL, &ws, 0, K_FOREVER));
+ 	zassert_true(K_WIFEXITED(ws));
+ 	zassert_equal(K_WEXITSTATUS(ws), 5);
+ }
+@@ -408,8 +403,6 @@ ZTEST(kernel_process, test_spawn_heap_growth)
+ }
+ #endif /* CONFIG_SYS_PROCESS_MAX >= 4 && CONFIG_HEAP_MEM_POOL_SIZE > 0 */
+ 
+-static K_THREAD_STACK_DEFINE(pgrp_stack_a, STATIC_PROC_STACK_SIZE);
+-static struct k_thread pgrp_thread_a;
+ static K_SEM_DEFINE(pgrp_gate, 0, 2);
+ 
+ static void pgrp_child_entry(void *p1, void *p2, void *p3)
+@@ -424,11 +417,11 @@ static void pgrp_child_entry(void *p1, void *p2, void *p3)
+ 
+ ZTEST(kernel_process, test_setpgid)
+ {
+-	k_pid_t child = &pgrp_thread_a;
++	k_pid_t child = &child_a;
+ 	struct sys_clone_args args = {
+ 		.entry = pgrp_child_entry,
+-		.thread = &pgrp_thread_a,
+-		.stack = pgrp_stack_a,
++		.thread = &child_a,
++		.stack = child_stack_a,
+ 		.stack_size = STATIC_PROC_STACK_SIZE,
+ 		.prio = K_LOWEST_APPLICATION_THREAD_PRIO,
+ 	};
+@@ -494,26 +487,24 @@ static void pgrp_sigwait_entry(void *p1, void *p2, void *p3)
+ 	k_exit(ret == K_SIG_CHLD ? 0 : 1);
+ }
+ 
+-static K_THREAD_STACK_DEFINE(pgrp_stack_b, STATIC_PROC_STACK_SIZE);
+-static struct k_thread pgrp_thread_b;
+ 
+ ZTEST(kernel_process, test_kill_pgrp)
+ {
+ 	int wsa = 1;
+ 	int wsb = 1;
+-	k_pid_t a = &pgrp_thread_a;
+-	k_pid_t b = &pgrp_thread_b;
++	k_pid_t a = &child_a;
++	k_pid_t b = &child_b;
+ 	struct sys_clone_args args_a = {
+ 		.entry = pgrp_sigwait_entry,
+-		.thread = &pgrp_thread_a,
+-		.stack = pgrp_stack_a,
++		.thread = &child_a,
++		.stack = child_stack_a,
+ 		.stack_size = STATIC_PROC_STACK_SIZE,
+ 		.prio = K_LOWEST_APPLICATION_THREAD_PRIO,
+ 	};
+ 	struct sys_clone_args args_b = {
+ 		.entry = pgrp_sigwait_entry,
+-		.thread = &pgrp_thread_b,
+-		.stack = pgrp_stack_b,
++		.thread = &child_b,
++		.stack = child_stack_b,
+ 		.stack_size = STATIC_PROC_STACK_SIZE,
+ 		.prio = K_LOWEST_APPLICATION_THREAD_PRIO,
+ 	};
+@@ -546,8 +537,6 @@ ZTEST(kernel_process, test_kill_pgrp)
+  * k_kill() must deliver to the eligible (second) thread, not the leader.
+  */
+ static K_SEM_DEFINE(elig_ready, 0, 1);
+-static K_THREAD_STACK_DEFINE(elig_sib_stack, STATIC_PROC_STACK_SIZE);
+-static struct k_thread elig_sib_thread;
+ static ZTEST_BMEM volatile k_tid_t elig_recipient;
+ static ZTEST_BMEM volatile bool elig_handler_ran;
+ 
+@@ -597,7 +586,7 @@ static void elig_leader(void *p1, void *p2, void *p3)
+ 	/* the leader (a kernel thread) blocks all signals by default; spawn the
+ 	 * sibling into this same process and then idle so it is never eligible
+ 	 */
+-	k_thread_create(&elig_sib_thread, elig_sib_stack, STATIC_PROC_STACK_SIZE, elig_sibling,
++	k_thread_create(&child_b, child_stack_b, STATIC_PROC_STACK_SIZE, elig_sibling,
+ 			NULL, NULL, NULL, K_LOWEST_APPLICATION_THREAD_PRIO, 0, K_NO_WAIT);
+ 	k_sleep(K_FOREVER);
+ }
+@@ -605,11 +594,11 @@ static void elig_leader(void *p1, void *p2, void *p3)
+ ZTEST(kernel_process, test_kill)
+ {
+ 	int ws = 1;
+-	k_pid_t child = &pgrp_thread_a;
++	k_pid_t child = &child_a;
+ 	struct sys_clone_args args = {
+ 		.entry = elig_leader,
+-		.thread = &pgrp_thread_a,
+-		.stack = pgrp_stack_a,
++		.thread = &child_a,
++		.stack = child_stack_a,
+ 		.stack_size = STATIC_PROC_STACK_SIZE,
+ 		.prio = K_LOWEST_APPLICATION_THREAD_PRIO,
+ 	};
+@@ -640,10 +629,6 @@ ZTEST(kernel_process, test_kill)
+ #endif /* CONFIG_SIGNAL */
+ 
+ #ifdef CONFIG_SIGNAL
+-static K_THREAD_STACK_DEFINE(sig_parent_stack, STATIC_PROC_STACK_SIZE);
+-static K_THREAD_STACK_DEFINE(sig_child_stack, STATIC_PROC_STACK_SIZE);
+-static struct k_thread sig_parent_thread;
+-static struct k_thread sig_child_thread;
+ 
+ #define SIGCHLD_OK	   0x51
+ #define SIGCHLD_BAD_SPAWN  0x52
+@@ -660,12 +645,12 @@ static void sig_parent_entry(void *p1, void *p2, void *p3)
+ 	int ws;
+ 	struct k_sig_set set;
+ 	struct k_sig_info info;
+-	k_pid_t child = &sig_child_thread;
++	k_pid_t child = &child_b;
+ 	struct sys_clone_args args = {
+ 		.entry = spawn_entry_exit,
+ 		.p1 = (void *)(intptr_t)9,
+-		.thread = &sig_child_thread,
+-		.stack = sig_child_stack,
++		.thread = &child_b,
++		.stack = child_stack_b,
+ 		.stack_size = STATIC_PROC_STACK_SIZE,
+ 		.prio = K_LOWEST_APPLICATION_THREAD_PRIO,
+ 	};
+@@ -718,14 +703,14 @@ ZTEST(kernel_process, test_sigchld)
+ 	int ws = 0;
+ 	struct sys_clone_args args = {
+ 		.entry = sig_parent_entry,
+-		.thread = &sig_parent_thread,
+-		.stack = sig_parent_stack,
++		.thread = &child_a,
++		.stack = child_stack_a,
+ 		.stack_size = STATIC_PROC_STACK_SIZE,
+ 		.prio = K_LOWEST_APPLICATION_THREAD_PRIO,
+ 	};
+ 
+ 	zassert_ok(sys_clone(&args, NULL));
+-	zassert_ok(k_waitpid(&sig_parent_thread, NULL, &ws, 0, K_FOREVER));
++	zassert_ok(k_waitpid(&child_a, NULL, &ws, 0, K_FOREVER));
+ 	zassert_true(K_WIFEXITED(ws));
+ 	zassert_equal(K_WEXITSTATUS(ws), SIGCHLD_OK, "parent reported 0x%x", K_WEXITSTATUS(ws));
+ }
+@@ -892,10 +877,6 @@ ZTEST(kernel_process, test_static_topology)
+ 	zassert_equal(sys_session_id(&topo_session), MIN(MIN(p1, p2), p3));
+ }
+ 
+-static K_THREAD_STACK_DEFINE(pi_stack_a, STATIC_PROC_STACK_SIZE);
+-static K_THREAD_STACK_DEFINE(pi_stack_b, STATIC_PROC_STACK_SIZE);
+-static struct k_thread pi_thread_a;
+-static struct k_thread pi_thread_b;
+ static struct k_process pi_record;
+ static struct k_process pi_record2;
+ 
+@@ -998,10 +979,10 @@ static void process_init_two_threads(void)
+ 	int ws = 0;
+ 	k_tid_t list[2];
+ 
+-	list[0] = k_thread_create(&pi_thread_a, pi_stack_a, STATIC_PROC_STACK_SIZE, pi_entry_exit,
++	list[0] = k_thread_create(&child_a, child_stack_a, STATIC_PROC_STACK_SIZE, pi_entry_exit,
+ 				  (void *)(intptr_t)5, NULL, NULL,
+ 				  K_LOWEST_APPLICATION_THREAD_PRIO, 0, K_FOREVER);
+-	list[1] = k_thread_create(&pi_thread_b, pi_stack_b, STATIC_PROC_STACK_SIZE, pi_entry_wait,
++	list[1] = k_thread_create(&child_b, child_stack_b, STATIC_PROC_STACK_SIZE, pi_entry_wait,
+ 				  NULL, NULL, NULL, K_LOWEST_APPLICATION_THREAD_PRIO, 0,
+ 				  K_FOREVER);
+ 
+@@ -1025,7 +1006,7 @@ static void process_init_two_threads(void)
+ static void process_init_reuse(void)
+ {
+ 	int ws = 0;
+-	k_tid_t tid = k_thread_create(&pi_thread_a, pi_stack_a, STATIC_PROC_STACK_SIZE,
++	k_tid_t tid = k_thread_create(&child_a, child_stack_a, STATIC_PROC_STACK_SIZE,
+ 				      pi_entry_exit, (void *)(intptr_t)6, NULL, NULL,
+ 				      K_LOWEST_APPLICATION_THREAD_PRIO, 0, K_FOREVER);
+ 
+@@ -1044,8 +1025,6 @@ ZTEST(kernel_process, test_process_init)
+ 	process_init_reuse();
+ }
+ 
+-static K_THREAD_STACK_DEFINE(pgi_stack, STATIC_PROC_STACK_SIZE);
+-static struct k_thread pgi_thread;
+ static K_SEM_DEFINE(pgi_gate, 0, 1);
+ static struct k_process_group pgi_cell;
+ static struct k_process_group pgi_cell2;
+@@ -1062,11 +1041,11 @@ static void pgi_entry(void *p1, void *p2, void *p3)
+ 
+ ZTEST(kernel_process, test_process_group_init)
+ {
+-	k_pid_t child = &pgi_thread;
++	k_pid_t child = &child_a;
+ 	struct sys_clone_args args = {
+ 		.entry = pgi_entry,
+-		.thread = &pgi_thread,
+-		.stack = pgi_stack,
++		.thread = &child_a,
++		.stack = child_stack_a,
+ 		.stack_size = STATIC_PROC_STACK_SIZE,
+ 		.prio = K_LOWEST_APPLICATION_THREAD_PRIO,
+ 	};
+@@ -1095,8 +1074,6 @@ ZTEST(kernel_process, test_process_group_init)
+ 	zassert_ok(k_waitpid(child, NULL, NULL, 0, K_FOREVER));
+ }
+ 
+-static K_THREAD_STACK_DEFINE(si_stack, STATIC_PROC_STACK_SIZE);
+-static struct k_thread si_thread;
+ static K_SEM_DEFINE(si_ready, 0, 1);
+ static K_SEM_DEFINE(si_gate, 0, 1);
+ static struct k_session si_session;
+@@ -1119,11 +1096,11 @@ static void si_entry(void *p1, void *p2, void *p3)
+ 
+ ZTEST(kernel_process, test_session_init)
+ {
+-	k_pid_t child = &si_thread;
++	k_pid_t child = &child_a;
+ 	struct sys_clone_args args = {
+ 		.entry = si_entry,
+-		.thread = &si_thread,
+-		.stack = si_stack,
++		.thread = &child_a,
++		.stack = child_stack_a,
+ 		.stack_size = STATIC_PROC_STACK_SIZE,
+ 		.prio = K_LOWEST_APPLICATION_THREAD_PRIO,
+ 	};
+diff --git a/tests/kernel/process/testcase.yaml b/tests/kernel/process/testcase.yaml
+index fd5b28e7fa5..6522288ffe8 100644
+--- a/tests/kernel/process/testcase.yaml
++++ b/tests/kernel/process/testcase.yaml
+@@ -37,6 +37,9 @@ tests:
+     extra_configs:
+       - CONFIG_TEST_USERSPACE=y
+       - CONFIG_USERSPACE=y
++      # SMP platforms' per-CPU statics push the thread-object count
++      # past the default 16-thread permission bitmap
++      - CONFIG_MAX_THREAD_BYTES=3
+   kernel.process.heap:
+     integration_platforms:
+       - qemu_cortex_m3
+@@ -53,6 +56,9 @@ tests:
+     extra_configs:
+       - CONFIG_TEST_USERSPACE=y
+       - CONFIG_USERSPACE=y
++      # SMP platforms' per-CPU statics push the thread-object count
++      # past the default 16-thread permission bitmap
++      - CONFIG_MAX_THREAD_BYTES=3
+       - CONFIG_SYS_PROCESS_MAX=4
+       - CONFIG_HEAP_MEM_POOL_SIZE=8192
+       # 6 heap-growth children + the suite's other thread objects exceed the
