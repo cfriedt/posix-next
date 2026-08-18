@@ -10,9 +10,13 @@ Unlike other multi-purpose POSIX operating systems
 
 - Zephyr is not "a POSIX OS". The Zephyr kernel was not designed around the POSIX standard, and
   POSIX support is an opt-in feature
-- Zephyr apps are not linked separately, nor do they execute as subprocesses
-- Zephyr, libraries, and application code are compiled and linked together, running similarly to
-  a single-process application, in a single (possibly virtual) address space
+- Zephyr, libraries, and application code are compiled and linked together into one artifact,
+  running by default like a single-process application, in a single (possibly virtual) address
+  space
+- Processes are opt-in: with :ref:`POSIX_MULTI_PROCESS <posix_option_group_multi_process>`, a
+  process is a kernel thread group, additional process images are prelinked into the same
+  artifact or loaded from the file system as ELF extensions, and :c:func:`fork` duplicates an
+  address space where the hardware supports it (see :ref:`posix_multi_process_design`)
 - Zephyr does not provide a POSIX shell, compiler, utilities, and is not self-hosting.
 
 .. note::
@@ -336,6 +340,220 @@ The decision not to implement the sporadic server algorithm itself is deliberate
      budget-monitoring policies in user space, with policy decisions (demotion, throttling,
      logging) tailored to the application rather than fixed by the kernel.
 
+.. _posix_multi_process_design:
+
+Multi-Process Design
+====================
+
+This section documents the kernel and system-layer substrate that backs the
+:c:func:`fork`, :c:func:`execve`, and ``posix_spawn`` families in the
+``POSIX_MULTI_PROCESS`` and ``POSIX_SPAWN`` Option Groups.
+
+Process model
+-------------
+
+A process is a **thread group**: its identity is its thread-group leader, so a
+process handle (``k_pid_t``) is a thread handle. ``struct k_process`` is the
+kernel-owned record of one thread group and hangs off the leader; it is not a
+handle and, except when a caller-provided record crosses the user/kernel
+boundary, not a kernel object. Foreign handles are resolved by identity-value
+scans under a lock and never dereferenced, so a handle stays meaningful from
+creation to reap - including after the leader thread has exited.
+
+Numeric process, group, and session IDs are a *system-layer* concept, not a
+kernel one: the kernel speaks only in handles, and ``lib/os`` maintains the
+numbering tables behind :c:func:`sys_process_id` and friends. All allocation is
+likewise confined to ``lib/os``: the kernel never allocates and never calls an
+allocator, only initializing caller-provided or statically defined records.
+
+.. graphviz::
+
+   digraph process_layers {
+       rankdir=LR;
+       node [shape=box, fontname="Helvetica"];
+       app [label="POSIX layer\nfork / execve / posix_spawn\n(numeric pid_t)"];
+       sys [label="system layer (lib/os)\nsys_clone / sys_setsid\nnumbering, pools"];
+       kern [label="kernel\nk_process_init / k_kill / k_waitpid\n(handles only, no allocation)"];
+       app -> sys -> kern;
+       app -> kern [label="handle APIs", style=dotted];
+   }
+
+Creation: sys_clone
+-------------------
+
+``sys_clone()`` is the creation primitive; :c:func:`fork`, ``posix_spawn``,
+:c:func:`pthread_create`, and ``sys_thread_create()`` are library constructs
+over it. With no flags it produces a fresh process from a
+pooled record and a pool-drawn leader thread. ``SYS_CLONE_THREAD`` selects
+the thread tier: the new thread joins the caller's thread group instead -
+and without :kconfig:option:`CONFIG_PROCESS` it is simply a new thread, so
+thread creation behaves identically in process-less builds.
+``SYS_CLONE_PAUSED`` leaves the created thread stopped so a caller can apply
+attributes (process group, signal mask, scheduling) before starting it.
+``SYS_CLONE_VM_COPY`` selects the fork model. Beneath the system layer,
+``k_clone()`` is the kernel primitive with the same two tiers over entirely
+caller-provided memory - record, thread, and stack - allocating nothing.
+
+.. graphviz::
+
+   digraph clone {
+       node [shape=box, fontname="Helvetica"];
+       args [label="sys_clone(args)"];
+       vm   [label="SYS_CLONE_VM_COPY?"; shape=diamond];
+       fork [label="z_sys_clone_vm_copy\n(duplicate address space,\nkernel-assisted resume)"];
+       thr  [label="SYS_CLONE_THREAD?"; shape=diamond];
+       member[label="thread in the\ncalling process"];
+       fresh[label="fresh leader\n(pool thread + entry)"];
+       init [label="k_process_init\n(adopt leader, register)"];
+       start[label="SYS_CLONE_PAUSED?\nstart or hand back stopped"; shape=diamond];
+       args -> vm;
+       vm -> fork [label="yes"];
+       vm -> thr [label="no"];
+       thr -> member [label="yes"];
+       thr -> fresh [label="no"];
+       member -> start;
+       fresh -> init -> start;
+       fork -> init;
+   }
+
+The fork model and its substrate
+--------------------------------
+
+The fork model duplicates the caller's writable memory into the child at
+identical virtual addresses and resumes the child at the call site. Copied
+memory at identical addresses is what makes the model sound where ``vfork``
+was not: the child cannot disturb the parent's stack, and a plain
+``setjmp``/``longjmp`` resumes the child because every address it restores is
+valid in its own copy - no architecture context-copy code is required.
+
+The substrate is experimental (:kconfig:option:`CONFIG_PROCESS_VM`, x86 and aarch64).
+``process_vm_clone()`` builds the child's memory domain by mirroring the
+parent's partitions, then repoints the writable ranges and the stack at fresh
+frames through the architecture hook ``z_mem_domain_clone_remap()`` (no TLB
+shootdown, since the child is not yet live on any CPU).
+
+The child's resume is **kernel-assisted** (``ARCH_HAS_FORK_RESUME``, selected
+by architectures providing a resume path):
+the syscall entry captures the caller's complete register state - the
+callee-saved registers are saved alongside the frame precisely because the C
+convention would otherwise leave a forked child with no history to restore
+them from - and the child's first run enters the common syscall exit path
+from a staged copy of that frame with the return-value register zeroed. The
+child's TLS is the parent's address: the clone already copied that region,
+so captured TLS-variable addresses and register-relative accesses agree,
+as fork demands. This is possible because ``CONFIG_PROCESS_VM`` excludes
+:kconfig:option:`CONFIG_CURRENT_THREAD_USE_TLS`, leaving kernel mode with
+no reason to dereference user TLS. fork() is therefore a user-mode
+operation: a kernel-mode caller has no syscall frame to resume and receives
+``ENOTSUP``; kernel-mode callers create processes with :c:func:`posix_spawn`
+or ``sys_clone()``, which require no duplication of the caller.
+
+.. note::
+   **Confirmed working (x86-64, x86, and aarch64):** fork() returns twice through
+   the kernel resume, the child diverges on its own stack and data copies,
+   and the parent - whose view is asserted unchanged - reaps it. On aarch64
+   no dedicated resume path was needed at all: every aarch64 thread is born
+   through the exception return path popping a synthetic ESF, so the forked
+   child's birth context simply *is* the parent's captured syscall frame
+   with the return-value register zeroed.
+
+Per-process permissions
+-----------------------
+
+With :kconfig:option:`CONFIG_PROCESS` and userspace, the process - not the
+thread - is the kernel-object permission principal: threads sharing an address
+space can already reach each other's memory, so per-thread object permissions
+within a process add no isolation. Each object's permission bitmap is sized by
+:kconfig:option:`CONFIG_MAX_PROCESS_BYTES` rather than
+``CONFIG_MAX_THREAD_BYTES``, the principal index lives once in
+``struct k_process``, and one sweep at reap replaces the per-thread-death walk.
+Granting to any member thread grants the whole process, and a forking child
+inherits the parent's grants.
+
+Signals
+-------
+
+Signals are delivered either to a specific thread (:c:func:`pthread_kill`) or to
+a process (:c:func:`kill`). A process-directed signal is delivered to one member
+thread that has it unblocked, preferring the caller for a self-signal. When
+every member has the signal masked it pends at **process scope** and is claimed
+by whichever member first unblocks or waits for it - strict POSIX semantics for
+fully-masked processes. Kernel-resolved process delivery bypasses the
+per-thread-object permission check, since :c:func:`kill` authorization is
+process-level.
+
+Exec
+----
+
+An exec *path* resolves in two tiers. First, prelinked images: a lookup
+through ``posix_spawn_image_lookup()`` (a weak function applications and test
+suites override). Second, with :kconfig:option:`CONFIG_POSIX_EXEC_LLEXT`,
+real executable loading: the path is loaded from the filesystem as a linkable
+loadable extension (llext), and its exported ``main()`` runs as the new
+process image - the image ABI is ``int main(int argc, char **argv, char
+**envp)``, and the return value becomes the process's exit status.
+
+Either way :c:func:`execve` replaces the image in place: it aborts every
+other member thread with ``k_process_prune()`` and continues on the calling
+thread, preserving the process's identity, parent, and group membership;
+handled signal dispositions revert to default and ``FD_CLOEXEC`` descriptors
+are closed. An extension image cannot unload itself - its caller executes
+from the extension - so a table sized by
+:kconfig:option:`CONFIG_POSIX_EXEC_LLEXT_MAX` records which extension backs
+which exec'd process: a ``main()`` that returns unloads in place, an image
+terminated by ``_exit()`` or a signal is unloaded by the ``wait()`` family
+when the process is reaped, and a chain-exec'ing image is unloaded by its
+successor past exec's point of no return. The new image then runs on the
+calling thread, restarted in place. The argument
+and environment vectors are staged at the top of the thread's own stack
+(``sys_thread_stack_stage()``, bounded by
+:kconfig:option:`CONFIG_POSIX_EXEC_ARG_BYTES` else ``E2BIG`` - the
+``setup_arg_pages()`` analog), and ``sys_thread_restart()`` resets the
+stack pointer just below them and enters the image
+(``arch_stack_jump()``, the ``start_thread()`` analog) - same thread,
+same stack, pid, signal mask, and priority all trivially preserved.
+Memory protection composes per class: MMU platforms map kernel RAM
+executable and PMP does not constrain machine-mode execution, so both
+run images as-is; XIP MPU platforms map RAM execute-never, so under
+``CONFIG_USERSPACE`` the image's llext partitions enter a per-image
+memory domain that the exec'ing thread joins before the jump.
+Remaining deviations: architectures without stack-jump support
+(native_sim, whose threads run on host stacks) run the image on the
+calling thread's live frames instead, and a child that is never
+collected by ``wait()`` holds its extension-table slot until the slot
+is swept on a later exec.
+
+Known deviations
+----------------
+
+The following deviations from strict POSIX are documented for
+``POSIX_MULTI_PROCESS`` and ``POSIX_SPAWN`` in the current implementation.
+Each is expected to be retired as the corresponding substrate lands.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Interface
+     - Deviation
+   * - :c:func:`fork`
+     - Requires :kconfig:option:`CONFIG_PROCESS_VM` and a kernel-assisted
+       resume architecture (x86-64, x86, aarch64); returns ``ENOTSUP``
+       otherwise. ``CONFIG_PROCESS_VM`` excludes
+       :kconfig:option:`CONFIG_CURRENT_THREAD_USE_TLS` (the current thread
+       resolves through the per-CPU arch path instead), since kernel-mode
+       reads of user TLS would alias the parent's physical memory through
+       the shared kernel page tables.
+   * - :c:func:`execve` family
+     - A path names a prelinked image or, with
+       :kconfig:option:`CONFIG_POSIX_EXEC_LLEXT`, a filesystem ELF
+       extension; the new image runs on the calling thread restarted at
+       the base of its own stack (on its live frames only where the
+       architecture lacks stack-jump support, e.g. native_sim).
+       ``execvp``/``execlp`` resolve bare names against
+       :kconfig:option:`CONFIG_POSIX_EXEC_PATH_PREFIX` rather than a
+       ``PATH`` environment variable.
+
 .. _posix_implementation_signals:
 
 Signal Implementation Details
@@ -367,12 +585,18 @@ Note that only the six ISO C signal numbers can be assumed: a C library is free 
 other signal however it likes, and the numbering shipped with a given toolchain need not match
 the Linux-aligned numbering used by the kernel and the POSIX option group.
 
-Zephyr does not support processes, which shapes the implementation in several ways:
+Process support (:ref:`POSIX_MULTI_PROCESS <posix_option_group_multi_process>`, over the
+kernel's :kconfig:option:`CONFIG_PROCESS` thread-group substrate - see
+:ref:`posix_multi_process_design`) is optional, which shapes the implementation in several ways:
 
-No processes
-   Zephyr has a single process, so a ``pid_t`` is either the value returned by :c:func:`getpid`,
-   which names the calling thread, or the ``pthread_t`` of a specific thread. Sending a signal to
-   a process group is not supported and fails with ``ESRCH``.
+Signals are process-directed or thread-directed
+   :c:func:`kill` is process-directed and ``pthread_kill()`` is thread-directed. With process
+   support, a positive ``pid`` names a process, ``0`` the caller's process group, and a negative
+   ``pid`` another process group; a process-directed signal is delivered to one member thread
+   that has it unblocked, or pends at process scope until a member unblocks or waits for it.
+   Broadcast (``pid == -1``) is not supported and fails with ``ESRCH``. In a single-process
+   configuration the process's own pid, ``0``, and ``-1`` all name the single process, and the
+   signal is queued to the calling thread.
 
 Dispositions are per-thread
    POSIX associates a signal action with the process, but the kernel action database is keyed by
@@ -696,8 +920,8 @@ registration is armed in the kernel, so the empty-to-non-empty transition is det
 atomically with the send rather than by sampling the queue depth around it; it fires exactly
 once and is consumed as it fires, after which a new registration may be armed. Arming while
 one is already armed reports ``EBUSY``; removing one that was never armed succeeds, matching
-Linux. ``SIGEV_SIGNAL`` targets the registering thread until Zephyr gains process support and
-delivers ``si_code`` ``SI_MESGQ``. ``SIGEV_THREAD`` maps onto the kernel's function
+Linux. ``SIGEV_SIGNAL`` targets the registering thread rather than the process
+:ref:`†<posix_undefined_behaviour>` and delivers ``si_code`` ``SI_MESGQ``. ``SIGEV_THREAD`` maps onto the kernel's function
 notification dispatch (see :c:member:`sys_msgq_notify.fn`): each arrival runs the
 notification function in a fresh detached system-pool thread, spawned by a kernel dispatcher
 woken through a reserved signal number past ``SIGRTMAX`` that applications can neither send,
@@ -852,11 +1076,14 @@ caller knowing which.
 Zephyr kernel caveats
 ---------------------
 
-These reflect Zephyr's single-process kernel model rather than the file system.
+These reflect the Zephyr kernel model rather than the file system.
 
 Working directory
-   The current working directory is a single, process-wide string maintained by ZVFS, matching
-   the POSIX per-process model on a single-process system. Every path operation resolves its
+   The current working directory is a single, system-wide string maintained by ZVFS. In a
+   single-process configuration that matches the POSIX per-process model exactly; with
+   :ref:`POSIX_MULTI_PROCESS <posix_option_group_multi_process>` it is shared by all processes
+   rather than copied into a child at :c:func:`fork` :ref:`†<posix_undefined_behaviour>`.
+   Every path operation resolves its
    argument against it, so relative paths work throughout - including through ISO C
    :c:func:`fopen` and POSIX :c:func:`open`, which share the same ZVFS entry point.
    :c:func:`chdir`, :c:func:`fchdir`, and :c:func:`getcwd` read and update it. Resolution is
@@ -869,8 +1096,8 @@ Temporary files
    :c:func:`tmpfile` and :c:func:`tmpnam` are provided by the common C library
    (:kconfig:option:`CONFIG_COMMON_LIBC_TMPFILE`) for every libc, and require ``/tmp`` to exist
    on a mounted file system. ISO C removes the :c:func:`tmpfile` stream when it is closed or at
-   normal program termination; Zephyr runs as a single process with no such termination boundary
-   at which to reclaim it, so the file is left in place - a documented deviation.
+   normal program termination; Zephyr does not track the stream for reclamation at either
+   boundary, so the file is left in place - a documented deviation.
 
 Zephyr FS subsystem caveats
 ---------------------------
