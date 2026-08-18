@@ -10,6 +10,7 @@ POSIX-next
    conformance/index.rst
    aep/index.rst
    implementation/index.rst
+   design/index.rst
    option_groups/index.rst
    options/index.rst
    kconfig/index.rst
