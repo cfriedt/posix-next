@@ -86,7 +86,6 @@ int posix_spawn(pid_t *pid, const char *path, const posix_spawn_file_actions_t *
 	args.entry = img->entry;
 	args.p1 = (void *)argv;
 	args.p2 = (void *)envp;
-	args.stack_size = CONFIG_POSIX_SPAWN_STACK_SIZE;
 	args.prio = k_thread_priority_get(k_current_get());
 
 	if ((attrp != NULL) && ((attrp->flags & POSIX_SPAWN_SETSCHEDPARAM) != 0)) {
