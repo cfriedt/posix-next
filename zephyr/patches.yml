@@ -1962,3 +1962,24 @@ patches:
       loaders terminate the old image's threads and continue on the calling
       thread. The abort loop drops and retakes the process lock around
       k_thread_abort(), which cannot run under it.
+  - path: zephyr/sys-thread-restart.patch
+    sha256sum: 6a57e83b39358e438696c5e0b328bc56820e8c010ee8eee81efdcd979c4a8a08
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-18
+    upstreamable: true
+    comments: |
+      The exec() model with the thread and stack reused in place, as in
+      Linux: arch_stack_jump() (ARCH_HAS_STACK_JUMP; three-instruction
+      shims for Cortex-M, arm64, riscv32/64, x86, and x86-64) resets the
+      calling thread's stack pointer and enters a function that never
+      returns, abandoning every live frame. sys_thread_stack_stage()
+      reserves a block at the top of the calling thread's own stack for
+      data that must survive - the argument vectors, Linux's
+      setup_arg_pages() analog - and sys_thread_restart() resets SP to
+      just below it, Linux's start_thread() analog for kernel-mode
+      callers. No new thread, no pool draw, no reaping: same thread, same
+      stack, pid trivially preserved, signal mask and priority naturally
+      retained. Architectures without the shim (native_sim: host pthread
+      stacks) report -ENOSYS and callers fall back to running in place.
