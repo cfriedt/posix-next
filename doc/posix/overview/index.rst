@@ -44,7 +44,9 @@ While Zephyr supports running multiple :ref:`threads <threads_v2>` (possibly in 
 common address space that is partitioned into separate :ref:`Memory Domains <memory_domain>`. The
 Zephyr kernel executable code and the application executable code are typically compiled into the
 same binary artifact. From that perspective, Zephyr apps can be seen as running in the context of
-a single process.
+a single process by default; the optional
+:ref:`POSIX_MULTI_PROCESS <posix_option_group_multi_process>` Option Group adds processes as
+kernel thread groups (see :ref:`posix_multi_process_design`).
 
 While multi-purpose operating systems (OS) offer full POSIX conformance, Real-Time Operating
 Systems (RTOS) such as Zephyr typically serve a fixed-purpose, have limited hardware resources,
