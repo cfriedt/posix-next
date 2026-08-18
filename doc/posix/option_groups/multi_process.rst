@@ -12,27 +12,29 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_MULTI_PROCESS`.
     :c:func:`_Exit`, yes
     :c:func:`_exit`, yes
     :c:func:`assert`, yes
-    :c:func:`atexit`,:ref:`†<posix_undefined_behaviour>`
+    :c:func:`atexit`,yes
     :c:func:`clock`,
-    :c:func:`execl`,:ref:`†<posix_undefined_behaviour>`
-    :c:func:`execle`,:ref:`†<posix_undefined_behaviour>`
-    :c:func:`execlp`,:ref:`†<posix_undefined_behaviour>`
-    :c:func:`execv`,:ref:`†<posix_undefined_behaviour>`
-    :c:func:`execve`,:ref:`†<posix_undefined_behaviour>`
-    :c:func:`execvp`,:ref:`†<posix_undefined_behaviour>`
+    :c:func:`execl`,yes
+    :c:func:`execle`,yes
+    :c:func:`execlp`,yes
+    :c:func:`execv`,yes
+    :c:func:`execve`,yes
+    :c:func:`execvp`,yes
     :c:func:`exit`, yes
-    :c:func:`fork`,:ref:`†<posix_undefined_behaviour>`
-    :c:func:`getpgrp`,:ref:`†<posix_undefined_behaviour>`
-    :c:func:`getpgid`,:ref:`†<posix_undefined_behaviour>`
-    :c:func:`getpid`, yes :ref:`†<posix_undefined_behaviour>`
-    :c:func:`getppid`,:ref:`†<posix_undefined_behaviour>`
-    :c:func:`getsid`,:ref:`†<posix_undefined_behaviour>`
-    :c:func:`setsid`,:ref:`†<posix_undefined_behaviour>`
+    :c:func:`fork`,yes
+    :c:func:`getpgrp`,yes
+    :c:func:`getpgid`,yes
+    :c:func:`getpid`, yes
+    :c:func:`getppid`,yes
+    :c:func:`getsid`,yes
+    :c:func:`setsid`,yes
     :c:func:`sleep`,yes
     :c:func:`times`,yes
-    :c:func:`wait`,:ref:`†<posix_undefined_behaviour>`
-    :c:func:`waitid`,:ref:`†<posix_undefined_behaviour>`
-    :c:func:`waitpid`,:ref:`†<posix_undefined_behaviour>`
+    :c:func:`wait`,yes
+    :c:func:`waitid`,yes
+    :c:func:`waitpid`,yes
+
+See :ref:`posix_multi_process_design` for implementation details.
 
 .. doxygengroup:: posix_option_group_multi_process
    :project: posix
