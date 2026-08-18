@@ -10,9 +10,13 @@ Unlike other multi-purpose POSIX operating systems
 
 - Zephyr is not "a POSIX OS". The Zephyr kernel was not designed around the POSIX standard, and
   POSIX support is an opt-in feature
-- Zephyr apps are not linked separately, nor do they execute as subprocesses
-- Zephyr, libraries, and application code are compiled and linked together, running similarly to
-  a single-process application, in a single (possibly virtual) address space
+- Zephyr, libraries, and application code are compiled and linked together into one artifact,
+  running by default like a single-process application, in a single (possibly virtual) address
+  space
+- Processes are opt-in: with :ref:`POSIX_MULTI_PROCESS <posix_option_group_multi_process>`, a
+  process is a kernel thread group, additional process images are prelinked into the same
+  artifact or loaded from the file system as ELF extensions, and :c:func:`fork` duplicates an
+  address space where the hardware supports it (see :ref:`posix_multi_process_design`)
 - Zephyr does not provide a POSIX shell, compiler, utilities, and is not self-hosting.
 
 .. note::
@@ -340,12 +344,18 @@ Note that only the six ISO C signal numbers can be assumed: a C library is free 
 other signal however it likes, and the numbering shipped with a given toolchain need not match
 the Linux-aligned numbering used by the kernel and the POSIX option group.
 
-Zephyr does not support processes, which shapes the implementation in several ways:
+Process support (:ref:`POSIX_MULTI_PROCESS <posix_option_group_multi_process>`, over the
+kernel's :kconfig:option:`CONFIG_PROCESS` thread-group substrate - see
+:ref:`posix_multi_process_design`) is optional, which shapes the implementation in several ways:
 
-No processes
-   Zephyr has a single process, so a ``pid_t`` is either the value returned by :c:func:`getpid`,
-   which names the calling thread, or the ``pthread_t`` of a specific thread. Sending a signal to
-   a process group is not supported and fails with ``ESRCH``.
+Signals are process-directed or thread-directed
+   :c:func:`kill` is process-directed and ``pthread_kill()`` is thread-directed. With process
+   support, a positive ``pid`` names a process, ``0`` the caller's process group, and a negative
+   ``pid`` another process group; a process-directed signal is delivered to one member thread
+   that has it unblocked, or pends at process scope until a member unblocks or waits for it.
+   Broadcast (``pid == -1``) is not supported and fails with ``ESRCH``. In a single-process
+   configuration the process's own pid, ``0``, and ``-1`` all name the single process, and the
+   signal is queued to the calling thread.
 
 Dispositions are per-thread
    POSIX associates a signal action with the process, but the kernel action database is keyed by
@@ -667,8 +677,8 @@ registration is armed in the kernel, so the empty-to-non-empty transition is det
 atomically with the send rather than by sampling the queue depth around it; it fires exactly
 once and is consumed as it fires, after which a new registration may be armed. Arming while
 one is already armed reports ``EBUSY``; removing one that was never armed succeeds, matching
-Linux. ``SIGEV_SIGNAL`` targets the registering thread until Zephyr gains process support and
-delivers ``si_code`` ``SI_MESGQ``. ``SIGEV_THREAD`` maps onto the kernel's function
+Linux. ``SIGEV_SIGNAL`` targets the registering thread rather than the process
+:ref:`†<posix_undefined_behaviour>` and delivers ``si_code`` ``SI_MESGQ``. ``SIGEV_THREAD`` maps onto the kernel's function
 notification dispatch (see :c:member:`sys_msgq_notify.fn`): each arrival runs the
 notification function in a fresh detached system-pool thread, spawned by a kernel dispatcher
 woken through a reserved signal number past ``SIGRTMAX`` that applications can neither send,
@@ -823,11 +833,14 @@ caller knowing which.
 Zephyr kernel caveats
 ---------------------
 
-These reflect Zephyr's single-process kernel model rather than the file system.
+These reflect the Zephyr kernel model rather than the file system.
 
 Working directory
-   The current working directory is a single, process-wide string maintained by ZVFS, matching
-   the POSIX per-process model on a single-process system. Every path operation resolves its
+   The current working directory is a single, system-wide string maintained by ZVFS. In a
+   single-process configuration that matches the POSIX per-process model exactly; with
+   :ref:`POSIX_MULTI_PROCESS <posix_option_group_multi_process>` it is shared by all processes
+   rather than copied into a child at :c:func:`fork` :ref:`†<posix_undefined_behaviour>`.
+   Every path operation resolves its
    argument against it, so relative paths work throughout - including through ISO C
    :c:func:`fopen` and POSIX :c:func:`open`, which share the same ZVFS entry point.
    :c:func:`chdir`, :c:func:`fchdir`, and :c:func:`getcwd` read and update it. Resolution is
@@ -840,8 +853,8 @@ Temporary files
    :c:func:`tmpfile` and :c:func:`tmpnam` are provided by the common C library
    (:kconfig:option:`CONFIG_COMMON_LIBC_TMPFILE`) for every libc, and require ``/tmp`` to exist
    on a mounted file system. ISO C removes the :c:func:`tmpfile` stream when it is closed or at
-   normal program termination; Zephyr runs as a single process with no such termination boundary
-   at which to reclaim it, so the file is left in place - a documented deviation.
+   normal program termination; Zephyr does not track the stream for reclamation at either
+   boundary, so the file is left in place - a documented deviation.
 
 Zephyr FS subsystem caveats
 ---------------------------
