@@ -2222,3 +2222,23 @@ patches:
       and the userspace scenario sizes the kernel-object permission
       bitmap for SMP platforms, whose per-CPU statics still exceed the
       default 16-thread bitmap.
+  - path: zephyr/k-process-fork-tls-same-va.patch
+    sha256sum: 7f4a6a22849b61c755bcc0709b27fd39ed8164b65bcdd2c355babf56007a283e
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-18
+    upstreamable: true
+    comments: |
+      A forked child's TLS is the parent's address, retiring the last
+      fork deviation: the clone already copies that region (the child
+      resumes on the parent's stack address, and TLS lives above it), so
+      captured TLS-variable addresses and register-relative accesses
+      agree, as fork demands. The own-block machinery - the TLS content
+      copy, the cached-current-thread fix, the child-stack domain
+      partition - deletes. Enabling condition: PROCESS_VM now excludes
+      CURRENT_THREAD_USE_TLS (the current thread resolves through the
+      per-CPU arch path), since kernel-mode reads of the TLS-cached
+      current thread would alias the parent's physical memory through
+      the shared kernel page tables - the bug the own-block design was
+      built to dodge.
