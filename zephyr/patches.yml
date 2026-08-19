@@ -2242,3 +2242,21 @@ patches:
       current thread would alias the parent's physical memory through
       the shared kernel page tables - the bug the own-block design was
       built to dodge.
+  - path: zephyr/sys-thread-ids.patch
+    sha256sum: a39456e8e770f250232c0401c43b055e7220353a5b4929d810e518dfc68c6185
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-18
+    upstreamable: true
+    comments: |
+      Thread-granular numbering in the same number space as process IDs,
+      the Linux model: a thread-group leader's thread ID is its process
+      ID (a member promoted to leader by clone keeps its number - the
+      pid entry adopts it), member numbers retire at thread death while
+      a leader's persists until reap, and thread numbers start above the
+      three reserved process identities. sys_thread_id() and
+      sys_thread_find() extend the numbering surface; the sizing knob is
+      CONFIG_SYS_THREAD_IDS (0 disables member numbering; leaders still
+      resolve). This is the gettid()/tgkill() substrate for the Linux
+      syscall gate and deliberately adds no POSIX consumer.
