@@ -2006,3 +2006,21 @@ patches:
       and the userspace scenario sizes the kernel-object permission
       bitmap for SMP platforms, whose per-CPU statics still exceed the
       default 16-thread bitmap.
+  - path: zephyr/sys-thread-ids.patch
+    sha256sum: d818a60a78bd42a71ab1c3cba7e27d0b00ca53a1a3f09f6d4bad37941211694b
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-18
+    upstreamable: true
+    comments: |
+      Thread-granular numbering in the same number space as process IDs:
+      a thread-group leader's thread ID is its process
+      ID (a member promoted to leader by clone keeps its number - the
+      pid entry adopts it), member numbers retire at thread death while
+      a leader's persists until reap, and thread numbers start above the
+      three reserved process identities. sys_thread_id() and
+      sys_thread_find() extend the numbering surface; the sizing knob is
+      CONFIG_SYS_THREAD_IDS (0 disables member numbering; leaders still
+      resolve). Deliberately adds no POSIX consumer:
+      pthread_t remains a handle.
