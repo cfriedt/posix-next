@@ -11,6 +11,7 @@ POSIX-next
    aep/index.rst
    implementation/index.rst
    design/index.rst
+   design/linux_gate.rst
    option_groups/index.rst
    options/index.rst
    kconfig/index.rst
