@@ -89,10 +89,11 @@ callee-saved registers are saved alongside the frame precisely because the C
 convention would otherwise leave a forked child with no history to restore
 them from - and the child's first run enters the common syscall exit path
 from a staged copy of that frame with the return-value register zeroed. The
-child keeps its own TLS block (a kernel-visible identity; the parent's TLS
-address would alias parent physical memory from kernel mode), inherits the
-parent's TLS contents, and has its cached thread identity fixed - the TCB
-self-pointer fix every fork performs. fork() is therefore a user-mode
+child's TLS is the parent's address: the clone already copied that region,
+so captured TLS-variable addresses and register-relative accesses agree,
+as fork demands. This is possible because ``CONFIG_PROCESS_VM`` excludes
+:kconfig:option:`CONFIG_CURRENT_THREAD_USE_TLS`, leaving kernel mode with
+no reason to dereference user TLS. fork() is therefore a user-mode
 operation: a kernel-mode caller has no syscall frame to resume and receives
 ``ENOSYS``.
 
@@ -182,8 +183,11 @@ Each is expected to be retired as the corresponding substrate lands.
    * - :c:func:`fork`
      - Requires :kconfig:option:`CONFIG_PROCESS_VM` and a kernel-assisted
        resume architecture (x86-64, ia32, arm64); returns ``ENOSYS``
-       otherwise. The child's TLS block occupies a different address than
-       its parent's.
+       otherwise. ``CONFIG_PROCESS_VM`` excludes
+       :kconfig:option:`CONFIG_CURRENT_THREAD_USE_TLS` (the current thread
+       resolves through the per-CPU arch path instead), since kernel-mode
+       reads of user TLS would alias the parent's physical memory through
+       the shared kernel page tables.
    * - :c:func:`execve` family
      - A path names a prelinked image or, with
        :kconfig:option:`CONFIG_POSIX_EXEC_LLEXT`, a filesystem ELF
