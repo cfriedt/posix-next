@@ -34,7 +34,10 @@ static struct fs_mount_t fs_mnt = {
 	.fs_data = &fat_fs,
 };
 
-static K_THREAD_STACK_DEFINE(exec_child_stack, 2048);
+/* execve() loads the extension on the caller's stack; 64-bit frames need room */
+#define EXEC_CHILD_STACK_SIZE (IS_ENABLED(CONFIG_64BIT) ? 4096 : 2048)
+
+static K_THREAD_STACK_DEFINE(exec_child_stack, EXEC_CHILD_STACK_SIZE);
 static struct k_thread exec_child_thread;
 
 static char *const exec_argv[] = {"hello", "x", NULL};
@@ -57,7 +60,7 @@ static pid_t exec_spawn(char *const argv[])
 		.p1 = (void *)argv,
 		.thread = &exec_child_thread,
 		.stack = exec_child_stack,
-		.stack_size = 2048,
+		.stack_size = EXEC_CHILD_STACK_SIZE,
 		.prio = k_thread_priority_get(k_current_get()),
 	};
 

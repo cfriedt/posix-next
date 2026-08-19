@@ -27,6 +27,9 @@ static struct {
 	k_pid_t pid;
 	int num;
 	struct llext *ext;
+#if defined(CONFIG_USERSPACE) && defined(CONFIG_MPU)
+	struct k_mem_domain domain;
+#endif
 } exec_images[CONFIG_POSIX_EXEC_LLEXT_MAX];
 static struct k_spinlock exec_images_lock;
 
@@ -68,7 +71,7 @@ static int exec_image_register(struct llext *ext, k_pid_t self)
 	int num = sys_process_id(self);
 
 	for (int pass = 0; pass < 2; pass++) {
-		bool claimed = false;
+		int claimed = -1;
 
 		K_SPINLOCK(&exec_images_lock) {
 			for (size_t i = 0; i < ARRAY_SIZE(exec_images); i++) {
@@ -76,13 +79,13 @@ static int exec_image_register(struct llext *ext, k_pid_t self)
 					exec_images[i].pid = self;
 					exec_images[i].num = num;
 					exec_images[i].ext = ext;
-					claimed = true;
+					claimed = (int)i;
 					K_SPINLOCK_BREAK;
 				}
 			}
 		}
-		if (claimed) {
-			return 0;
+		if (claimed >= 0) {
+			return claimed;
 		}
 
 		/* full: sweep slots whose pid retired without a waitpid() */
@@ -110,6 +113,46 @@ static int exec_image_register(struct llext *ext, k_pid_t self)
 	return -ENOMEM;
 }
 
+static void exec_image_release(int slot)
+{
+	K_SPINLOCK(&exec_images_lock) {
+		exec_images[slot].ext = NULL;
+	}
+}
+
+#if defined(CONFIG_USERSPACE) && defined(CONFIG_MPU)
+/*
+ * MPU parts map RAM execute-never when XIP: the image's RX partitions,
+ * programmed as dynamic regions via the caller's memory domain, override the
+ * static map. MMU parts need none of this - kernel mappings are executable.
+ */
+static int exec_domain_enter(int slot, struct llext *ext)
+{
+	int ret;
+
+	k_mem_domain_init(&exec_images[slot].domain, 0, NULL);
+	ret = llext_add_domain(ext, &exec_images[slot].domain);
+	if (ret != 0) {
+		return ret;
+	}
+
+	ret = k_mem_domain_add_thread(&exec_images[slot].domain, k_current_get());
+	if (ret == 0) {
+		/* domain changes program the MPU on context switch, so take one */
+		k_sleep(K_TICKS(1));
+	}
+
+	return ret;
+}
+#else
+static int exec_domain_enter(int slot, struct llext *ext)
+{
+	ARG_UNUSED(slot);
+	ARG_UNUSED(ext);
+	return 0;
+}
+#endif /* CONFIG_USERSPACE && CONFIG_MPU */
+
 int z_posix_exec_llext(const char *path, char *const argv[], char *const envp[])
 {
 	struct llext_fs_loader fldr = LLEXT_FS_LOADER(path);
@@ -118,6 +161,7 @@ int z_posix_exec_llext(const char *path, char *const argv[], char *const envp[])
 	struct llext *prior;
 	int (*ext_main)(int argc, char **argv, char **envp);
 	const char *name;
+	int slot;
 	int ret;
 
 	/* the extension's name is the path's last component */
@@ -143,8 +187,16 @@ int z_posix_exec_llext(const char *path, char *const argv[], char *const envp[])
 		return -1;
 	}
 
-	ret = exec_image_register(ext, k_getpid());
+	slot = exec_image_register(ext, k_getpid());
+	if (slot < 0) {
+		(void)llext_unload(&ext);
+		errno = ENOMEM;
+		return -1;
+	}
+
+	ret = exec_domain_enter(slot, ext);
 	if (ret != 0) {
+		exec_image_release(slot);
 		(void)llext_unload(&ext);
 		errno = ENOMEM;
 		return -1;

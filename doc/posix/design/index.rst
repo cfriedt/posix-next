@@ -161,6 +161,11 @@ and environment vectors are staged at the top of the thread's own stack
 stack pointer just below them and enters the image
 (``arch_stack_jump()``, the ``start_thread()`` analog) - same thread,
 same stack, pid, signal mask, and priority all trivially preserved.
+Memory protection composes per class: MMU platforms map kernel RAM
+executable and PMP does not constrain machine-mode execution, so both
+run images as-is; XIP MPU platforms map RAM execute-never, so under
+``CONFIG_USERSPACE`` the image's llext partitions enter a per-image
+memory domain that the exec'ing thread joins before the jump.
 Remaining deviations: architectures without stack-jump support
 (native_sim, whose threads run on host stacks) run the image on the
 calling thread's live frames instead, and a child that is never
