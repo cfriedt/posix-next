@@ -2162,3 +2162,23 @@ patches:
       parent/child stack and data isolation. AArch32 Cortex-A has an MMU
       but no userspace support in Zephyr yet; a 32-bit resume flavor slots
       in here once that substrate exists.
+  - path: zephyr/zvfs-fd-descriptor-split.patch
+    sha256sum: 13c1a158a62ca4242e6662c93eb81f67e8b78a70777ff9a822f52ce4e66733e9
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-19
+    upstreamable: true
+    comments: |
+      Split file descriptors from open file descriptions, the POSIX (and
+      Linux) model the single fd table conflated: a descriptor is now a
+      slot pairing a number with a description pointer and the
+      descriptor's own FD_CLOEXEC flag, while descriptions - obj,
+      vtable, offset, mode, and the I/O lock - live in a system-wide
+      pool whose refcount now counts referencing descriptors. dup() and
+      dup2() share the source's description instead of copying it, so
+      dup'd descriptors share one file offset as POSIX requires and the
+      offset-broadcast workaround in zvfs_fd_offset_set() is deleted.
+      Slot exhaustion is EMFILE, pool exhaustion ENFILE. One boot
+      descriptor table serves every thread; hanging per-process tables
+      off the process record builds on this split.
