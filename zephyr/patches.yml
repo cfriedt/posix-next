@@ -2262,3 +2262,38 @@ patches:
       Slot exhaustion is EMFILE, pool exhaustion ENFILE. One boot
       descriptor table serves every thread; hanging per-process tables
       off the process record builds on this split.
+  - path: zephyr/zvfs-per-process-fds.patch
+    sha256sum: 2f290ef7cdb43a5282b184bf45689fef430148e549f8109d841ac66f1e7f1f90
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-19
+    upstreamable: true
+    comments: |
+      Per-process file descriptor tables over the descriptor/description
+      split, gated implicitly by PROCESS - no feature Kconfig. A cloned
+      process's table is a copy of its parent's (descriptors share the
+      descriptions, per-descriptor FD_CLOEXEC copied), built by
+      sys_clone() before k_process_init() so failures unwind cleanly;
+      the record's fds pointer is opaque to the kernel like the VM
+      context, and NULL shares the boot table - kernel processes and
+      k_process_init()-only callers need no hook. Exit closes the dying
+      process's descriptors in k_exit()'s own sleepable context (POSIX:
+      at termination, not reap); reap detaches the table under the
+      process lock onto a graveyard whose closes and frees run at the
+      next table allocation. Tables come from an elastipool whose static
+      slab rides the process-record sizing (SYS_PROCESS_MIN, with heap
+      growth beyond), so static configurations spawn without a heap. zvfs_fds_cloexec() sweeps the caller's own
+      table for exec - the POSIX layer's fcntl loop was bounded by
+      POSIX_OPEN_MAX, whose ZVFS default (3) never reached a real fd.
+      posix_spawn() file actions get child-table operations (set, dup2,
+      close on the paused child), replacing the parent-side application
+      that was only valid in a global fd space. CONFIG_ZVFS_PROC_OPEN_MAX
+      sizes each table (0 = the system-wide size; must not exceed it -
+      fd_set bitsets are system-sized). Library-side user-mode callers
+      (fileno, FILE locking) resolve the boot table: they cannot read the
+      thread struct or a dynamically placed table; per-process resolution happens
+      kernel-side in syscalls. The kernel.process init-scenario test
+      orders its two-thread start deterministically - the exiting leader
+      could abort its sibling before the sibling recorded its pid, a
+      latent race made more visible by the k_exit() close sweep.
