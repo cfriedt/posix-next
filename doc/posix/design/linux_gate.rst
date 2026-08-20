@@ -134,8 +134,8 @@ independently testable.
    * - 3 - pidfd
      - ``CLONE_PIDFD``, ``pidfd_open``, ``pidfd_send_signal``,
        ``waitid(P_PIDFD)``
-     - ``k_pid_t`` wrapped as a ``K_OBJ_FILE`` descriptor. **Depends on
-       per-process fd tables.**
+     - ``k_pid_t`` wrapped as a ``K_OBJ_FILE`` descriptor over the
+       per-process descriptor tables.
    * - later
      - ``futex``, ``nanosleep``/``clock_*``, ``mmap`` subset
      - ``k_futex`` (already user-address-capable), the clock/timer layer,
@@ -187,9 +187,9 @@ Dependencies and sequencing
 ===========================
 
 #. Numeric-tid extension of the sys-layer numbering (unblocks tier 0's
-   ``gettid`` and tier 2's ``tgkill``).
-#. Per-process descriptor tables in zvfs (unblocks tier 3, and is
-   independently the last declared POSIX deviation).
+   ``gettid`` and tier 2's ``tgkill``). *Done.*
+#. Per-process descriptor tables in zvfs (unblocks tier 3, and was
+   independently the last declared POSIX deviation). *Done.*
 #. Clone unification (the thread tier on ``sys_clone()``), so tier 1 maps
    onto one primitive instead of two.
 #. The gate itself, tier by tier, each tier landing with a

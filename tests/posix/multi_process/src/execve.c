@@ -5,8 +5,10 @@
  */
 
 #include <errno.h>
+#include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/eventfd.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -24,19 +26,31 @@
 #include "image_registry.h"
 
 static char *const exec_argv[] = {"execme", NULL};
+static volatile int exec_keep_fd = -1;
+static volatile int exec_close_fd = -1;
 
 static void execme_entry(void *p1, void *p2, void *p3)
 {
 	char *const *argv = p1;
+	bool argv_ok;
 
 	ARG_UNUSED(p2);
 	ARG_UNUSED(p3);
 
 	/* the previous image's argv arrives by value: exec copies the vectors */
-	_exit(((argv != NULL) && (argv[0] != NULL) && (strcmp(argv[0], "execme") == 0) &&
-	       (argv[1] == NULL))
-		      ? 42
-		      : 43);
+	argv_ok = (argv != NULL) && (argv[0] != NULL) && (strcmp(argv[0], "execme") == 0) &&
+		  (argv[1] == NULL);
+	if (!argv_ok) {
+		_exit(43);
+	}
+	/* FD_CLOEXEC closed across exec; the plain descriptor survived */
+	if ((fcntl(exec_close_fd, F_GETFD) != -1) || (errno != EBADF)) {
+		_exit(44);
+	}
+	if (eventfd_write(exec_keep_fd, 1) != 0) {
+		_exit(45);
+	}
+	_exit(42);
 }
 
 IMAGE_REGISTRY_ENTRY_DEFINE(img_execme, "/bin/execme", execme_entry);
@@ -49,6 +63,13 @@ static void exec_child_entry(void *p1, void *p2, void *p3)
 	ARG_UNUSED(p1);
 	ARG_UNUSED(p2);
 	ARG_UNUSED(p3);
+
+	exec_keep_fd = eventfd(0, 0);
+	exec_close_fd = eventfd(0, 0);
+	if ((exec_keep_fd < 0) || (exec_close_fd < 0) ||
+	    (fcntl(exec_close_fd, F_SETFD, FD_CLOEXEC) != 0)) {
+		_exit(98);
+	}
 
 	(void)execve("/bin/execme", exec_argv, NULL);
 	_exit(99);
@@ -92,7 +113,7 @@ ZTEST_USER(posix_multi_process, test_execve)
 		zassert_true(pid > 0);
 		zassert_equal(waitpid(pid, &status, 0), pid);
 		zassert_true(WIFEXITED(status));
-		zassert_equal(WEXITSTATUS(status), 42, "exec image did not run");
+		zassert_equal(WEXITSTATUS(status), 42, "exec image status %d", WEXITSTATUS(status));
 	}
 #endif /* !CONFIG_USERSPACE */
 }

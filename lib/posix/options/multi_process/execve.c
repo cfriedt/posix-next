@@ -11,6 +11,7 @@
 
 #include <zephyr/kernel.h>
 #include <zephyr/kernel/signal.h>
+#include <zephyr/sys/internal/fdtable_priv.h>
 
 #include "multi_process_internal.h"
 #include "posix_image.h"
@@ -33,23 +34,11 @@ static void exec_reset_signals(void)
 }
 #endif /* CONFIG_SIGNAL */
 
-#if defined(CONFIG_POSIX_FD_MGMT) && defined(CONFIG_POSIX_DEVICE_IO)
 static void exec_close_cloexec(void)
 {
-	/* descriptors marked FD_CLOEXEC are closed across exec */
-	for (int fd = 0; fd < CONFIG_POSIX_OPEN_MAX; fd++) {
-		int flags = fcntl(fd, F_GETFD);
-
-		if ((flags >= 0) && ((flags & FD_CLOEXEC) != 0)) {
-			(void)close(fd);
-		}
-	}
+	/* descriptors marked FD_CLOEXEC in the caller's own table are closed */
+	zvfs_fds_cloexec();
 }
-#else
-static void exec_close_cloexec(void)
-{
-}
-#endif /* CONFIG_POSIX_FD_MGMT && CONFIG_POSIX_DEVICE_IO */
 
 int execve(const char *path, char *const argv[], char *const envp[])
 {

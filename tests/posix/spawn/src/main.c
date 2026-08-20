@@ -8,6 +8,7 @@
 #include <fcntl.h>
 #include <spawn.h>
 #include <string.h>
+#include <sys/eventfd.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -73,6 +74,25 @@ ZTEST(posix_spawn, test_posix_spawn)
 		zassert_true(WIFEXITED(status));
 		zassert_equal(WEXITSTATUS(status), 7);
 	}
+
+	/* file actions act on the child's descriptor table, never the caller's */
+	posix_spawn_file_actions_t fa;
+	eventfd_t val = 0;
+	int efd = eventfd(0, 0);
+
+	zassert_true(efd >= 0, "eventfd failed: %d", errno);
+	zassert_ok(posix_spawn_file_actions_init(&fa));
+	zassert_ok(posix_spawn_file_actions_addclose(&fa, efd));
+	zassert_ok(posix_spawn(&pid, "/bin/child", &fa, NULL, spawn_argv, spawn_envp));
+	zassert_ok(posix_spawn_file_actions_destroy(&fa));
+	zassert_equal(waitpid(pid, &status, 0), pid);
+	zassert_true(WIFEXITED(status) && (WEXITSTATUS(status) == 7));
+
+	/* the addclose hit only the child's copy of the descriptor */
+	zassert_ok(eventfd_write(efd, 9));
+	zassert_ok(eventfd_read(efd, &val));
+	zassert_equal(val, 9);
+	zassert_ok(close(efd));
 }
 
 ZTEST(posix_spawn, test_posix_spawnp)

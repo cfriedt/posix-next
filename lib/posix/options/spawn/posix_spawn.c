@@ -14,15 +14,12 @@
 #include <unistd.h>
 
 #include <zephyr/kernel.h>
+#include <zephyr/sys/internal/fdtable_priv.h>
 #include <zephyr/sys/process.h>
 
-static int spawn_file_actions_apply(const posix_spawn_file_actions_t *fa)
+static int spawn_file_actions_apply(k_pid_t child, const posix_spawn_file_actions_t *fa)
 {
-	/*
-	 * Before per-process descriptor tables exist (exec/M3), the fd space
-	 * is global: applying the child-scope actions here is equivalent to
-	 * applying them in the child.
-	 */
+	/* the paused child has its own descriptor table: act on it, not ours */
 	for (int i = 0; i < fa->num; i++) {
 		const struct posix_spawn_file_action *act = &fa->actions[i];
 		int ret = 0;
@@ -34,21 +31,19 @@ static int spawn_file_actions_apply(const posix_spawn_file_actions_t *fa)
 			if (fd < 0) {
 				return errno;
 			}
-			if (fd != act->fildes) {
-				ret = dup2(fd, act->fildes);
-				(void)close(fd);
-			}
+			ret = z_zvfs_fds_child_set(child, act->fildes, fd);
+			(void)close(fd);
 			break;
 		}
 		case POSIX_SPAWN_FILE_ACTION_CLOSE:
-			ret = close(act->fildes);
+			ret = z_zvfs_fds_child_close(child, act->fildes);
 			break;
 		case POSIX_SPAWN_FILE_ACTION_DUP2:
-			ret = dup2(act->fildes, act->newfildes);
+			ret = z_zvfs_fds_child_dup2(child, act->fildes, act->newfildes);
 			break;
 		}
 		if (ret < 0) {
-			return errno;
+			return EBADF;
 		}
 	}
 
@@ -75,12 +70,6 @@ int posix_spawn(pid_t *pid, const char *path, const posix_spawn_file_actions_t *
 		return ENOENT;
 	}
 
-	if (file_actions != NULL) {
-		ret = spawn_file_actions_apply(file_actions);
-		if (ret != 0) {
-			return ret;
-		}
-	}
 
 	args.flags = SYS_CLONE_PAUSED;
 	args.entry = img->entry;
@@ -112,7 +101,15 @@ int posix_spawn(pid_t *pid, const char *path, const posix_spawn_file_actions_t *
 		return (ret == -EINVAL) ? EINVAL : EAGAIN;
 	}
 
-	/* the child is stopped: apply the attributes, then start it */
+	/* the child is stopped: apply file actions and attributes, then start it */
+	if (file_actions != NULL) {
+		ret = spawn_file_actions_apply(child, file_actions);
+		if (ret != 0) {
+			k_thread_abort(child);
+			return ret;
+		}
+	}
+
 	if (attrp != NULL) {
 		if ((attrp->flags & POSIX_SPAWN_SETPGROUP) != 0) {
 			/* pgroup 0 starts a new group led by the child (POSIX) */

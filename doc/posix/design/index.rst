@@ -203,8 +203,9 @@ Each is expected to be retired as the corresponding substrate lands.
        :kconfig:option:`CONFIG_POSIX_EXEC_PATH_PREFIX` rather than a
        ``PATH`` environment variable.
    * - ``posix_spawn``
-     - File actions apply in the parent (the descriptor space is global
-       until per-process descriptor tables exist).
+     - File actions apply to the paused child's own descriptor table
+       before it starts; the caller's descriptors are untouched, as POSIX
+       requires.
    * - Process-directed pending signals
      - Held at process scope and claimed by the first member to unblock or
        wait; conforms to POSIX.
