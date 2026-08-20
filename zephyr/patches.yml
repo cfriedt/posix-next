@@ -2924,3 +2924,23 @@ patches:
       ESI (the syscall id register) needs a per-thread stash, and the
       resume stages the argument-slot/iret-frame block and re-enters the
       iret-based exit path with EAX zeroed.
+  - path: zephyr/zvfs-fd-descriptor-split.patch
+    sha256sum: 50760f5d391cdce619fcab6a828789a79f0a84e95f7b389c022243b1f98eb9be
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-19
+    upstreamable: true
+    comments: |
+      Split file descriptors from open file descriptions, the POSIX (and
+      Linux) model the single fd table conflated: a descriptor is now a
+      slot pairing a number with a description pointer and the
+      descriptor's own FD_CLOEXEC flag, while descriptions - obj,
+      vtable, offset, mode, and the I/O lock - live in a system-wide
+      pool whose refcount now counts referencing descriptors. dup() and
+      dup2() share the source's description instead of copying it, so
+      dup'd descriptors share one file offset as POSIX requires and the
+      offset-broadcast workaround in zvfs_fd_offset_set() is deleted.
+      Slot exhaustion is EMFILE, pool exhaustion ENFILE. One boot
+      descriptor table serves every thread; hanging per-process tables
+      off the process record builds on this split.
