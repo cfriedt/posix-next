@@ -609,6 +609,20 @@ patches:
     upstreamable: true
     comments: |
       lib: os: add sys_thread api for pooled condvar, mutex, thread, and stack
+  - path: zephyr/sys-thread-paused-delay.patch
+    sha256sum: c8a7505ddd7e71ea9bc468cb88398ecdbd4fa3eb692fbf9bb3c68d059717c237
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-16
+    upstreamable: true
+    comments: |
+      Fix sys_thread_create_common(): the user-syscall branch passed
+      K_NO_WAIT to z_vrfy_k_thread_create() instead of the caller's delay,
+      so paused creation (sys_thread_create_paused(), K_FOREVER) silently
+      started the thread immediately when reached inside a user syscall.
+      sys_clone() depends on paused creation to adopt the leader thread
+      into the new process before it runs.
   - path: zephyr/kernel-dyn-stack-priv-placement.patch
     sha256sum: b03443cf0eeb6f3885c794cb3def2cef46042a41978c62c7727d4033371165fd
     module: zephyr
@@ -1748,3 +1762,554 @@ patches:
 
       This lifts the static-allocation restriction from sys_sem and
       everything built on it, notably POSIX sem_t.
+  - path: zephyr/k-process-core.patch
+    sha256sum: d0d10b0d6ca9f7e4d885c3121d578d457bcc31137deb3cdfa7423c75b24dff75
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-10
+    upstreamable: true
+    comments: |
+      Introduce the kernel process (thread group) API surface: one
+      schedulable entity, a process identified by its thread group leader,
+      so a process handle (k_pid_t) is a thread handle. struct k_process is
+      the kernel-owned record of one thread group; process groups
+      (k_pgrp_t) and sessions (k_session_t) are first-class handles over
+      member-list cells, existing exactly as long as they have members.
+      kernel/process.h carries types, constants, and macros only
+      (K_PROCESS_DEFINE composing K_THREAD_DEFINE, K_PROCESS_DEFINE_EXT,
+      K_SESSION_DEFINE, K_PROCESS_GROUP_DEFINE, K_THREAD_DEFINE_EXT); the
+      __syscall declarations live in zephyr/kernel.h under CONFIG_PROCESS,
+      with handle types visible in every configuration for the generated
+      syscall prototypes. Static topology is wired at build time -
+      intra-file by C initializers, cross-TU by the mandatory
+      gen_process_topology.py post-link pass. Handles resolve by
+      identity-value scans and are never dereferenced; only caller-provided
+      records passed to k_process_init() are kernel objects
+      (K_OBJ_PROCESS), validated like thread objects.
+  - path: zephyr/k-process-exit-wait.patch
+    sha256sum: 3c62233314618a8479bda089bee068c0ce61c33f1b671dae1a4dd8b4635a46ce
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-10
+    upstreamable: true
+    comments: |
+      Implement the k_process lifecycle over the core API: threads join
+      their creator's process at creation (z_process_init_thread) and leave
+      in the scheduler halt epilogue (z_process_exit_thread); the idle
+      threads and the boot thread belong to the idle process, boot-time
+      kernel threads to the kthread process, and user threads descend from
+      init; the reserved trio is wired at build time. The kernel neither
+      allocates nor calls an allocator: k_process_init() initializes
+      caller-provided records (-EBUSY on busy records or leaders) and a
+      live-record registry resolves them. Everything allocation-adjacent
+      lives in lib/os/process.c under CONFIG_SYS_PROCESS: elastipool
+      records and group/session cells with graveyard-deferred heap
+      reclamation, the sys_process_id() numbering tables, and the
+      pool-backed sys_clone(). Provider frees error (-EINVAL) on memory the
+      provider does not own - static or caller memory recycles in place.
+      k_exit()/k_waitpid() implement zombie/reap with process_lock nested
+      inside the scheduler lock (z_sched_waitq_pend_if); SIGCHLD emission
+      defers to a notifier thread.
+  - path: zephyr/k-process-sigchld.patch
+    sha256sum: ab670674260a8f0f4a22dfa673be7af8babcf4931f8b5b499a8534136abff709
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-11
+    upstreamable: true
+    comments: |
+      Extend struct k_sig_info with pid/status fields and add the
+      K_SI_CLD_EXITED / K_SI_CLD_KILLED codes (gated on CONFIG_PROCESS);
+      widen the internal z_sig_queue_common() to carry them and add
+      z_sig_queue_chld() (declared in the lifecycle patch). kernel/process.c
+      emits K_SIG_CHLD to a zombie's parent from a notifier thread, since
+      signal generation cannot run in the scheduler's thread-halt path.
+  - path: zephyr/k-process-pgrp-session.patch
+    sha256sum: 7da304101f24092ce007ea5831cd942d339f13d3400f5a9c93a477d28429e01c
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-11
+    upstreamable: true
+    comments: |
+      Complete process-group and session control: k_setpgid() joins live
+      groups (session rules; the user-mode handler validates the group and
+      every member record via z_pgrp_validate);
+      k_process_group_init()/k_session_init() initialize caller-provided
+      cells, erroring -EBUSY first on busy cells; sys_setpgid()/sys_setsid()
+      are the pool-backed tiers in lib/os, numbering the new group or
+      session once the kernel primitive succeeds. k_kill() is
+      process-directed via identity resolution (leader handles first, then
+      any live member's handle); k_kill_pgrp() fans out to every member
+      process in bounded batches with the lock dropped between them;
+      k_waitpid_pgrp() waits on a group's children. Process-directed
+      delivery picks an unblocked member thread (process_sig_target),
+      preferring the caller for self-signals; z_syscall_sig_check() skips
+      delivery while a user syscall is in progress so wrappers reached in
+      kernel context cannot corrupt the syscall return frame.
+  - path: zephyr/libc-multi-process-headers.patch
+    sha256sum: 687c2961e0579d1048f9bd28e4ec05dd9d160fb190770c2a84197a312d600825
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-10
+    upstreamable: true
+    comments: |
+      Add <sys/wait.h> forwarder shims for picolibc and newlib so that
+      the header resolves to the Zephyr POSIX <zephyr/posix/sys/wait.h>
+      rather than the partial toolchain copy, which declares only wait()
+      and waitpid() and lacks waitid(), idtype_t, id_t, and the P_*
+      constants, and whose W* macros would conflict with the
+      Zephyr-native K_WSTATUS_*-derived definitions. Full replacement
+      rather than include_next, following the sys/select.h and
+      sys/statvfs.h precedents: independent C library headers must be
+      independent.
+  - path: zephyr/libc-common-exit.patch
+    sha256sum: f7dd5aafa3c190c06c09b42a1bc0170c1dc45a710f56a22acffe9aeb18e00bc1
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-10
+    upstreamable: true
+    comments: |
+      Promote exit() and atexit() from the minimal libc into the common C
+      library (COMMON_LIBC_EXIT, following the COMMON_LIBC_TMPFILE
+      precedent), with the registry sized by COMMON_LIBC_ATEXIT_MAX
+      (default 32, the ISO C minimum, replacing minimal's 8 fixed slots).
+
+      This also makes the ISO C exit sequence real for picolibc: the
+      prebuilt (SDK) picolibc registers atexit() handlers into a stub and
+      its exit() runs only __libc_fini_array before _exit, so handlers
+      never execute. With COMMON_LIBC_EXIT (default y for minimal libc
+      and picolibc), exit() runs registered handlers in reverse
+      registration order and then _exit() terminates the program.
+
+      Documented deviations, unchanged from the minimal libc behaviour:
+      open streams are not flushed on exit and fini-array functions do
+      not run (nothing on Zephyr registers them at exit today; newlib
+      keeps its own complete exit machinery and is not affected).
+  - path: zephyr/libc-common-under-exit.patch
+    sha256sum: ce5bdf1382ac2465196311ff33f90aec60e727faafaf4d39fa6bc61e84825629
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-10
+    upstreamable: true
+    comments: |
+      Route _exit() to k_exit() when CONFIG_PROCESS is enabled, so exit()
+      and _exit() terminate the calling thread's process rather than
+      spinning forever. Provided as a common C library unit
+      (COMMON_LIBC_UNDERSCORE_EXIT, default y when PROCESS is set): the
+      strong definition overrides the weak picolibc and newlib stubs, and
+      the minimal libc's non-weak stub is gated out at build time. Without
+      CONFIG_PROCESS the common _exit() reproduces the prior
+      report-and-halt behaviour, and the per-C-library stubs are used as
+      before.
+  - path: zephyr/sys-clone-pool-leader.patch
+    sha256sum: 2146231ae4297115396036d366d65610ee5ed683d20cf2583fbe6d3d0a7532f6
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-16
+    upstreamable: true
+    comments: |
+      sys_clone() gains the pool-drawn leader tier: when the caller provides
+      no thread object, the leader thread and its stack come from the system
+      thread pools via sys_thread_create_paused(), and the record is marked
+      K_PROCESS_FLAG_LEADER_POOLED. At reap the kernel calls
+      z_process_leader_release() (static-inline no-op without
+      CONFIG_SYS_PROCESS) for pool-owned leaders only; lib/os parks the dead
+      leader on a release list drained at the next spawn, where
+      sys_thread_destroy() returns thread and stack to the pools - reap can
+      run under the scheduler lock, where the pools' heap tier is off
+      limits. The user-mode sys_clone() handler validates caller-provided
+      thread/stack objects only when they are supplied; the pool path needs
+      no caller objects.
+  - path: zephyr/k-process-perms.patch
+    sha256sum: 14fe22e9a728ae24c6762bd562314d2c166eb29deac449753caaaca96e81373e
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-16
+    upstreamable: true
+    comments: |
+      With CONFIG_PROCESS, the process - not the thread - is the kernel-object
+      permission principal: every thread of a process can already write every
+      other member's data, so per-thread object permissions within a process
+      add no isolation. Each kernel object's permission bitmap shrinks from
+      one bit per thread (CONFIG_MAX_THREAD_BYTES) to one bit per process
+      (CONFIG_MAX_PROCESS_BYTES), the permission-principal index lives once
+      in struct k_process (claimed at record initialization, released at
+      reap), and permission checks resolve through the calling thread's
+      process. Granting to any member thread grants the process. Thread death
+      no longer walks the object table - a single sweep at process reap
+      replaces it, which also lets dynamically allocated leader thread
+      objects persist to reap as the identity design requires. sys_clone()
+      re-grants the leader its own thread and stack objects after the child
+      is re-homed out of the caller's process. Configurations without
+      CONFIG_PROCESS keep the thread-indexed scheme unchanged.
+  - path: zephyr/k-process-prune.patch
+    sha256sum: b77b6a19b1524539e2884c08ea27abcb30ba96264aba560ecf36b769a98b6acb
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-16
+    upstreamable: true
+    comments: |
+      Add k_process_prune(): abort every other member thread of the calling
+      process, leaving the caller as the sole member with the process's
+      identity, parent, and group membership unchanged. This is the kernel
+      substrate for replacing a process's image in place - exec-style
+      loaders terminate the old image's threads and continue on the calling
+      thread. The abort loop drops and retakes the process lock around
+      k_thread_abort(), which cannot run under it.
+  - path: zephyr/sys-clone-fork-tier.patch
+    sha256sum: 32de624f26deb1783260ce4945c426605f6385bc140889ae1acf29aac5c08970
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-16
+    upstreamable: true
+    comments: |
+      Define the fork model over sys_clone(): SYS_CLONE_VM_COPY asks for a
+      child that receives copies of the caller's writable memory at the same
+      virtual addresses and resumes at the clone point, and sys_fork() is
+      the resume-style wrapper (returns the child handle to the parent, NULL
+      to the child). Copied memory is what makes the model sound where vfork
+      was not - the child cannot disturb the parent's stack, and a plain
+      setjmp/longjmp resumes the child because every address it restores is
+      valid in its own copy. The record and pipeline are in place down to
+      process_vm_clone(), which returns -ENOSYS until per-process virtual
+      address spaces (per-domain tables mapping fresh frames at the caller's
+      addresses) exist; undefined flags are -EINVAL, distinguishing them
+      from the awaiting-substrate path.
+  - path: zephyr/k-signal-process-scope.patch
+    sha256sum: 0cc35cbdd9be83ed4a534b3c9def12b8cc5a8d0e36a5d168b0baec643462c267
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-16
+    upstreamable: true
+    comments: |
+      Process-directed signals with no eligible recipient now pend at
+      PROCESS scope instead of being pinned to a thread at generation time:
+      the fifo element carries a process target, any member thread's
+      pending-set, sigwait matching, and return-to-user delivery consider
+      its process's pending signals alongside its own (a per-process
+      pending counter extends the fast path), and whichever member first
+      unmasks or waits claims the signal - strict POSIX semantics for
+      fully-masked processes. k_kill(), k_kill_pgrp(), and the SIGCHLD
+      notifier queue at process scope when process_sig_target() finds no
+      unmasked member; process-scoped entries are dropped at reap.
+  - path: zephyr/libc-spawn-header-shims.patch
+    sha256sum: 87fa3d5bdfef5351d1e656e29da6db953a036abff0ecf8b7564fbe059dd97dc5
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-16
+    upstreamable: true
+    comments: |
+      Route <spawn.h> to <zephyr/posix/spawn.h> for picolibc and newlib,
+      following the existing shim pattern (<aio.h>, <dirent.h>, ...): the
+      toolchain libcs ship their own <spawn.h> whose types do not match the
+      Zephyr implementation, and the shim directories override the
+      toolchain headers.
+  - path: zephyr/sys-clone-paused.patch
+    sha256sum: f77e8a48da368a847f479eb46cb09fd25c9a58cf82c51ae7d259b2fc1d588c4e
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-17
+    upstreamable: true
+    comments: |
+      Add SYS_CLONE_PAUSED: the child is fully constructed but its initial
+      thread is left stopped, so the caller can complete setup - process
+      group, signal state, priority - and start it with k_thread_start() on
+      the child handle. posix_spawn() uses this to apply spawn attributes
+      race-free before the child first runs.
+      The clone args also carry an optional initial signal mask for the
+      leader: NULL keeps the thread-creation inheritance rules; a
+      non-NULL mask is vrfy-copied and seeded into the paused leader
+      before it first runs, scrubbing K_SIG_KILL and K_SIG_STOP exactly
+      as k_sig_mask() does. It is invalid with SYS_CLONE_VM_COPY - a
+      forked child always inherits the caller's mask. This lets
+      posix_spawn() implement POSIX_SPAWN_SETSIGMASK uniformly for
+      kernel- and user-mode callers.
+  - path: zephyr/k-signal-scope-queue-lock.patch
+    sha256sum: af2d10fb92ba838ea8028880be65fc2a2644dd3effdb6ba66d4c79b039c9c4db
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-17
+    upstreamable: true
+    comments: |
+      Queue process-scoped pending signals while still holding the process
+      lock, in k_kill(), k_kill_pgrp(), and the SIGCHLD notifier: the
+      process lock -> signal lock order is already established by the
+      reap-time drop, and queueing under it closes the window where a
+      process could be reaped between target resolution and the queue,
+      leaving an element aimed at a retired record. k_kill() also now
+      distinguishes an empty (zombie) process (-ESRCH) from a fully-masked
+      one (pend at process scope).
+  - path: zephyr/process-vm.patch
+    sha256sum: 5286ae9f9616e23dc25f12da591689ea5dd4d681e552223ffbd21e9863d5856a
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-17
+    upstreamable: true
+    comments: |
+      Experimental per-process virtual address spaces for the fork() model
+      (CONFIG_PROCESS_VM, default n, x86 only). Adds the arch hook
+      z_mem_domain_clone_remap() (x86: repoint a domain's page-table entries
+      at fresh frames, no TLB flush since the child is not yet live), the
+      system-layer process_vm_clone() that builds the child's memory domain
+      (parent partitions mirrored, writable ones and the stack copied onto
+      fresh frames), the clone/leader/perms-inherit path, and reap-time
+      teardown. sys_clone(SYS_CLONE_VM_COPY) and POSIX fork() resume the
+      child via setjmp/longjmp on its stack copy. Also folds a real fix
+      exposed by exercising process-directed signals under userspace:
+      k_kill()/k_kill_pgrp() deliver to a kernel-resolved thread through
+      z_sig_queue_thread(), which bypasses the per-thread-object sender
+      permission check (kill() authorization is process-level, already
+      established by identity resolution). CONFIRMED: fork returns twice,
+      the child diverges its stack and exits, the parent reaps it. KNOWN
+      GAP: writable app-data partitions are not yet isolated on x86 (a
+      child write is visible in the parent); the frame remap for
+      globally-mapped partitions needs follow-up.
+  - path: zephyr/k-process-free-guard.patch
+    sha256sum: dfec80d221286142194d846e2c5dd50f969b8a04efc3b8f5c2dffb2f3d945ee2
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-17
+    upstreamable: true
+    comments: |
+      Refuse k_object_free() of a K_OBJ_PROCESS record that is still active
+      or an unreaped zombie: a dynamically allocated process record must
+      live until the process is reaped, when its memory is reclaimed, so
+      user code cannot free it out from under the kernel's live-record
+      lists.
+  - path: zephyr/k-process-times.patch
+    sha256sum: ce81d8891879e02b5c4805048e3dcc898a97783a6b37239345e743281dcb2fc0
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-17
+    upstreamable: true
+    comments: |
+      Per-process CPU accounting for times(): struct k_process gains
+      self_cycles (accumulated as member threads exit) and child_cycles
+      (rolled up from reaped children and their children) under
+      CONFIG_SCHED_THREAD_USAGE. k_process_cpu_stats() returns the calling
+      process's cycles (live members plus exited members) and its reaped
+      children's cycles, letting POSIX times() fill tms_utime and tms_cutime
+      correctly (Zephyr has no user/system split, so tms_stime/tms_cstime
+      are zero).
+  - path: zephyr/k-process-fork-resume.patch
+    sha256sum: 5ad38ccc5f785b395a44e7dff19b9952315853ff55622b3b4a27c18d1c74ce1c
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-17
+    upstreamable: true
+    comments: |
+      Kernel-assisted fork resume, generic layer (ARCH_HAS_FORK_RESUME):
+      the forked child's first run returns to user mode from its parent's
+      captured syscall frame instead of longjmping through userspace. The
+      clone path creates the child's leader as a supervisor pool thread via
+      a trusted create (kernel-generated pool objects skip user-syscall
+      revalidation, which would demand K_USER), stages the resume through
+      arch_fork_frame_init()/arch_fork_resume(), and marks the child a user
+      thread before its first instruction. The child keeps its OWN TLS
+      block - a kernel-visible identity, since the parent's TLS address
+      would alias parent physical memory from kernel mode - with the
+      parent's TLS contents copied in (per-arch variant-I/II layouts
+      handled) and the cached thread identity fixed to the child, the TCB
+      self-pointer fix every fork performs. POSIX fork() is a plain
+      sys_fork() call; a kernel-mode caller has no syscall frame and keeps
+      -ENOSYS. Per-architecture support lands in k-process-fork-x86.patch
+      and k-process-fork-arm.patch.
+  - path: zephyr/k-process-fork-x86.patch
+    sha256sum: 7a2a843fa3d6348e22b9b753f8e32be3c34be8d338edcc83fe79b0194b393115
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-17
+    upstreamable: true
+    comments: |
+      x86 fork resume, 32- and 64-bit. intel64: the syscall entry also
+      saves the callee-saved registers (the C convention preserves them
+      through the kernel, so the exit path never restores them, but a
+      forked child has no such history), gives the signal-delivery RAX
+      stash a dedicated frame slot, and pads the frame so the fxsave area
+      stays 16-byte aligned; arch_fork_frame_init() stages a copy at the
+      top of the child's privilege stack - exactly where a live syscall
+      would build it - and z_x86_fork_resume() loads the callee-saved
+      registers, zeroes RAX, and enters the common syscall exit path
+      (page-table switch and sysret included). ia32 is smaller: the syscall
+      convention passes arguments in the callee-saved registers, so the
+      entry's argument slots already bank the caller's complete state; only
+      ESI (the syscall id register) needs a per-thread stash, and the
+      resume stages the argument-slot/iret-frame block and re-enters the
+      iret-based exit path with EAX zeroed.
+  - path: zephyr/k-process-fork-arm.patch
+    sha256sum: d452a1d983ba6ff21e30a62adcbb2677d7d221949b6d6d3324633a3ed642c9a2
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-17
+    upstreamable: true
+    comments: |
+      arm64 fork support: memory substrate and resume. ARMv8-A/ARMv9-A with
+      the MMU select ARCH_HAS_PROCESS_VM and ARCH_HAS_FORK_RESUME.
+      z_mem_domain_clone_remap() is a thin wrapper over private_map(),
+      which privatizes the leaf translation tables before installing the
+      copy-frame mapping, so cloned writable ranges isolate per domain. The
+      resume needs no new exit path: every arm64 thread is born through
+      z_arm64_exit_exc popping a synthetic ESF, so arch_fork_frame_init()
+      rewrites the paused child's birth ESF with the parent's captured
+      syscall frame (x0 zeroed, EL0 SPSR) and seeds callee_saved.x19-x28 -
+      captured by a small SVC-dispatch block while they still hold the
+      caller's values - plus sp_el0; the context switch and eret deliver
+      the child straight to user mode at the fork call site with complete
+      parent/child stack and data isolation. AArch32 Cortex-A has an MMU
+      but no userspace support in Zephyr yet; a 32-bit resume flavor slots
+      in here once that substrate exists.
+  - path: zephyr/sys-thread-restart.patch
+    sha256sum: f8f284423590a7b4c8f188d8c866e324fac69b94e1214110bfbfbf93609ec681
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-18
+    upstreamable: true
+    comments: |
+      The exec() model with the thread and stack reused in place, as in
+      Linux: arch_stack_jump() (ARCH_HAS_STACK_JUMP; three-instruction
+      shims for Cortex-M, arm64, riscv32/64, x86, and x86-64) resets the
+      calling thread's stack pointer and enters a function that never
+      returns, abandoning every live frame. sys_thread_stack_stage()
+      reserves a block at the top of the calling thread's own stack for
+      data that must survive - the argument vectors, Linux's
+      setup_arg_pages() analog - and sys_thread_restart() resets SP to
+      just below it, Linux's start_thread() analog for kernel-mode
+      callers. No new thread, no pool draw, no reaping: same thread, same
+      stack, pid trivially preserved, signal mask and priority naturally
+      retained. Architectures without the shim (native_sim: host pthread
+      stacks) report -ENOSYS and callers fall back to running in place.
+  - path: zephyr/k-process-native-topology.patch
+    sha256sum: c5b4ede7b0b4e8c69f6045e88e86c94713236b5ff8c6268de64fb59da929127e
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-18
+    upstreamable: true
+    comments: |
+      Native binaries are host-linked after the Zephyr link, so the
+      post-build static-topology assembler sees a relocatable object -
+      no loadable segments, section-relative symbols, membership
+      pointers still in relocations - and cannot patch it (nor could a
+      pass over the final host executable: RELA architectures keep
+      pointer initializers in relocation addends). Skip the hook under
+      CONFIG_NATIVE_BUILD and assemble the K_SESSION_DEFINE /
+      K_PROCESS_GROUP_DEFINE membership lists at PRE_KERNEL_1 boot
+      instead, where every pointer is real; ROMable targets keep the
+      link-time-only assembly. The suite's per-test child fixtures also
+      consolidate into one shared trio (tests run sequentially and reap
+      their children, so dedicated objects per test bought nothing),
+      and the userspace scenario sizes the kernel-object permission
+      bitmap for SMP platforms, whose per-CPU statics still exceed the
+      default 16-thread bitmap.
+  - path: zephyr/k-process-fork-tls-same-va.patch
+    sha256sum: 7f4a6a22849b61c755bcc0709b27fd39ed8164b65bcdd2c355babf56007a283e
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-18
+    upstreamable: true
+    comments: |
+      A forked child's TLS is the parent's address, retiring the last
+      fork deviation: the clone already copies that region (the child
+      resumes on the parent's stack address, and TLS lives above it), so
+      captured TLS-variable addresses and register-relative accesses
+      agree, as fork demands. The own-block machinery - the TLS content
+      copy, the cached-current-thread fix, the child-stack domain
+      partition - deletes. Enabling condition: PROCESS_VM now excludes
+      CURRENT_THREAD_USE_TLS (the current thread resolves through the
+      per-CPU arch path), since kernel-mode reads of the TLS-cached
+      current thread would alias the parent's physical memory through
+      the shared kernel page tables - the bug the own-block design was
+      built to dodge.
+  - path: zephyr/sys-thread-ids.patch
+    sha256sum: a39456e8e770f250232c0401c43b055e7220353a5b4929d810e518dfc68c6185
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-18
+    upstreamable: true
+    comments: |
+      Thread-granular numbering in the same number space as process IDs,
+      the Linux model: a thread-group leader's thread ID is its process
+      ID (a member promoted to leader by clone keeps its number - the
+      pid entry adopts it), member numbers retire at thread death while
+      a leader's persists until reap, and thread numbers start above the
+      three reserved process identities. sys_thread_id() and
+      sys_thread_find() extend the numbering surface; the sizing knob is
+      CONFIG_SYS_THREAD_IDS (0 disables member numbering; leaders still
+      resolve). This is the gettid()/tgkill() substrate for the Linux
+      syscall gate and deliberately adds no POSIX consumer.
+  - path: zephyr/zvfs-fd-descriptor-split.patch
+    sha256sum: 13c1a158a62ca4242e6662c93eb81f67e8b78a70777ff9a822f52ce4e66733e9
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-19
+    upstreamable: true
+    comments: |
+      Split file descriptors from open file descriptions, the POSIX (and
+      Linux) model the single fd table conflated: a descriptor is now a
+      slot pairing a number with a description pointer and the
+      descriptor's own FD_CLOEXEC flag, while descriptions - obj,
+      vtable, offset, mode, and the I/O lock - live in a system-wide
+      pool whose refcount now counts referencing descriptors. dup() and
+      dup2() share the source's description instead of copying it, so
+      dup'd descriptors share one file offset as POSIX requires and the
+      offset-broadcast workaround in zvfs_fd_offset_set() is deleted.
+      Slot exhaustion is EMFILE, pool exhaustion ENFILE. One boot
+      descriptor table serves every thread; hanging per-process tables
+      off the process record builds on this split.
+  - path: zephyr/zvfs-per-process-fds.patch
+    sha256sum: ba1e3e47ec03a38ea4bd600a0cc3056bbf6c9157afba3ea56f3bc65ddd458bab
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-19
+    upstreamable: true
+    comments: |
+      Per-process file descriptor tables over the descriptor/description
+      split, gated implicitly by PROCESS - no feature Kconfig. A cloned
+      process's table is a copy of its parent's (descriptors share the
+      descriptions, per-descriptor FD_CLOEXEC copied), built by
+      sys_clone() before k_process_init() so failures unwind cleanly;
+      the record's fds pointer is opaque to the kernel like the VM
+      context, and NULL shares the boot table - kernel processes and
+      k_process_init()-only callers need no hook. Exit closes the dying
+      process's descriptors in k_exit()'s own sleepable context (POSIX:
+      at termination, not reap); reap detaches the table under the
+      process lock onto a graveyard whose closes and frees run at the
+      next table allocation. zvfs_fds_cloexec() sweeps the caller's own
+      table for exec - the POSIX layer's fcntl loop was bounded by
+      POSIX_OPEN_MAX, whose ZVFS default (3) never reached a real fd.
+      posix_spawn() file actions get child-table operations (set, dup2,
+      close on the paused child), replacing the parent-side application
+      that was only valid in a global fd space. CONFIG_ZVFS_PROC_OPEN_MAX
+      sizes each table (0 = the system-wide size; must not exceed it -
+      fd_set bitsets are system-sized). Library-side user-mode callers
+      (fileno, FILE locking) resolve the boot table: they cannot read the
+      thread struct or a heap table; per-process resolution happens
+      kernel-side in syscalls. The kernel.process init-scenario test
+      orders its two-thread start deterministically - the exiting leader
+      could abort its sibling before the sibling recorded its pid, a
+      latent race made more visible by the k_exit() close sweep.

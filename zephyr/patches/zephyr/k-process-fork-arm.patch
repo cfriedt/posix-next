@@ -1,0 +1,172 @@
+diff --git a/arch/arm64/core/Kconfig b/arch/arm64/core/Kconfig
+index e90f6e0f667..9a4d0f17356 100644
+--- a/arch/arm64/core/Kconfig
++++ b/arch/arm64/core/Kconfig
+@@ -230,6 +230,8 @@ config ARMV8_A
+ 	select ATOMIC_OPERATIONS_BUILTIN
+ 	select CPU_HAS_MMU
+ 	select ARCH_HAS_USERSPACE if ARM_MMU
++	select ARCH_HAS_PROCESS_VM if ARM_MMU
++	select ARCH_HAS_FORK_RESUME if ARM_MMU
+ 	select ARCH_HAS_NOCACHE_MEMORY_SUPPORT if ARM_MMU
+ 	help
+ 	  This option signifies the use of an ARMv8-A processor
+@@ -251,6 +253,8 @@ config ARMV9_A
+ 	select ATOMIC_OPERATIONS_BUILTIN
+ 	select CPU_HAS_MMU
+ 	select ARCH_HAS_USERSPACE if ARM_MMU
++	select ARCH_HAS_PROCESS_VM if ARM_MMU
++	select ARCH_HAS_FORK_RESUME if ARM_MMU
+ 	select ARCH_HAS_NOCACHE_MEMORY_SUPPORT if ARM_MMU
+ 	imply ARM64_SVE if FPU_SHARING
+ 	help
+diff --git a/arch/arm64/core/mmu.c b/arch/arm64/core/mmu.c
+index 5d716ba91d8..1755a4fed2e 100644
+--- a/arch/arm64/core/mmu.c
++++ b/arch/arm64/core/mmu.c
+@@ -1276,6 +1276,28 @@ static int reset_map(struct arm_mmu_ptables *ptables, const char *name,
+ 	return ret;
+ }
+ 
++#ifdef CONFIG_PROCESS_VM
++/*
++ * Repoint the mappings of [virt, virt+size) in @a domain at fresh physical
++ * memory starting at @a phys, as writable user memory. private_map()
++ * privatizes the leaf translation tables first, so the remap is local to
++ * this domain (unlike a raw entry rewrite). The domain is not live on any
++ * CPU when this runs (a forking child before its first start).
++ */
++int z_mem_domain_clone_remap(struct k_mem_domain *domain, void *virt, size_t size, uintptr_t phys)
++{
++	struct arm_mmu_ptables *ptables = &domain->arch.ptables;
++
++	if ((((uintptr_t)virt | size | phys) % CONFIG_MMU_PAGE_SIZE) != 0U) {
++		return -EINVAL;
++	}
++
++	/* private_map() takes xlat_lock internally (add_map / privatize_page_range) */
++	return private_map(ptables, "vm-clone", phys, (uintptr_t)virt, size,
++			   MT_P_RW_U_RW | MT_NORMAL);
++}
++#endif /* CONFIG_PROCESS_VM */
++
+ int arch_mem_domain_partition_add(struct k_mem_domain *domain,
+ 				  uint32_t partition_id)
+ {
+diff --git a/arch/arm64/core/offsets/offsets.c b/arch/arm64/core/offsets/offsets.c
+index 183d34bc7dc..d0204ee7018 100644
+--- a/arch/arm64/core/offsets/offsets.c
++++ b/arch/arm64/core/offsets/offsets.c
+@@ -33,6 +33,10 @@
+ 
+ GEN_OFFSET_SYM(_thread_arch_t, exception_depth);
+ 
++#ifdef CONFIG_PROCESS_VM
++GEN_ABSOLUTE_SYM(__thread_fork_x_OFFSET, offsetof(struct k_thread, arch.fork_x));
++#endif
++
+ #if defined(CONFIG_SIGNAL) && defined(CONFIG_USERSPACE)
+ GEN_ABSOLUTE_SYM(__thread_sig_user_x_OFFSET,
+ 		 offsetof(struct k_thread, base.sig.user.x));
+diff --git a/arch/arm64/core/thread.c b/arch/arm64/core/thread.c
+index 956f3160b5a..0323033a438 100644
+--- a/arch/arm64/core/thread.c
++++ b/arch/arm64/core/thread.c
+@@ -216,3 +216,40 @@ int arch_coprocessors_disable(struct k_thread *thread)
+ 	return -ENOTSUP;
+ #endif
+ }
++
++#ifdef CONFIG_PROCESS_VM
++/*
++ * A forked child resumes through the same path every arm64 thread is born
++ * on: the context switch restores callee_saved (including sp_el0 and the
++ * captured x19..x28) and "returns" to z_arm64_exit_exc, which pops the
++ * child's initial ESF - a copy of the parent's syscall frame with x0 zeroed
++ * (the child's fork return) and an EL0 SPSR - and erets straight into user
++ * mode at the fork call site. No dedicated resume stub is needed.
++ */
++void *arch_fork_frame_init(struct k_thread *child, void *parent_ssf)
++{
++	struct arch_esf *esf = (struct arch_esf *)child->callee_saved.sp_elx;
++	const struct arch_esf *pesf = parent_ssf;
++
++	*esf = *pesf;
++	esf->x0 = 0;
++
++	(void)memcpy(&child->callee_saved.x19, _current->arch.fork_x,
++		     sizeof(_current->arch.fork_x));
++#ifdef CONFIG_ARM64_SAFE_EXCEPTION_STACK
++	child->callee_saved.sp_el0 = pesf->sp;
++#else
++	child->callee_saved.sp_el0 = read_sysreg(sp_el0);
++#endif /* CONFIG_ARM64_SAFE_EXCEPTION_STACK */
++
++	return esf;
++}
++
++FUNC_NORETURN void arch_fork_resume(void *frame)
++{
++	/* never reached: the child's birth context IS the resume (see above) */
++	ARG_UNUSED(frame);
++	k_panic();
++	CODE_UNREACHABLE;
++}
++#endif /* CONFIG_PROCESS_VM */
+diff --git a/arch/arm64/core/userspace.S b/arch/arm64/core/userspace.S
+index 63dd15763e3..8c6507a8375 100644
+--- a/arch/arm64/core/userspace.S
++++ b/arch/arm64/core/userspace.S
+@@ -116,6 +116,23 @@ SECTION_FUNC(TEXT, z_arm64_do_syscall)
+ 	/* Use the ESF as SSF */
+ 	mov	x6, sp
+ 
++#ifdef CONFIG_PROCESS_VM
++	/* Callee-saved registers still hold the caller's values here (the C
++	 * convention preserves them through the kernel, so the exit path
++	 * never restores them); capture them so fork() can seed the child's
++	 * resume context with the caller's complete register state.
++	 */
++	get_cpu	x9
++	ldr	x9, [x9, #___cpu_t_current_OFFSET]
++	ldr	x10, =__thread_fork_x_OFFSET
++	add	x9, x9, x10
++	stp	x19, x20, [x9, #0]
++	stp	x21, x22, [x9, #16]
++	stp	x23, x24, [x9, #32]
++	stp	x25, x26, [x9, #48]
++	stp	x27, x28, [x9, #64]
++#endif /* CONFIG_PROCESS_VM */
++
+ 	/* Recover the syscall ID */
+ 	ldr	x8, [sp, ___esf_t_x8_x9_OFFSET]
+ 
+diff --git a/include/zephyr/arch/arm64/arm_mmu.h b/include/zephyr/arch/arm64/arm_mmu.h
+index 450a8238faa..dd935c11e88 100644
+--- a/include/zephyr/arch/arm64/arm_mmu.h
++++ b/include/zephyr/arch/arm64/arm_mmu.h
+@@ -212,6 +212,9 @@ struct arm_mmu_ptables {
+ /* Execution-allowed attributes */
+ #define K_MEM_PARTITION_P_RX_U_RX ((k_mem_partition_attr_t) \
+ 			{MT_P_RX_U_RX})
++/* True if the partition grants write access (used by CONFIG_PROCESS_VM) */
++#define K_MEM_PARTITION_IS_WRITABLE(attr) (((attr).attrs & MT_RW) != 0)
++
+ /* Typedef for the k_mem_partition attribute */
+ typedef struct { uint32_t attrs; } k_mem_partition_attr_t;
+ 
+diff --git a/include/zephyr/arch/arm64/thread.h b/include/zephyr/arch/arm64/thread.h
+index f60e63c0eee..9c7ecac4b24 100644
+--- a/include/zephyr/arch/arm64/thread.h
++++ b/include/zephyr/arch/arm64/thread.h
+@@ -79,6 +79,10 @@ struct _thread_arch {
+ 	uint64_t stack_limit;
+ #endif
+ 	uint8_t exception_depth;
++#ifdef CONFIG_PROCESS_VM
++	/* caller's x19..x28 captured at syscall entry (fork frame seed) */
++	uint64_t fork_x[10];
++#endif /* CONFIG_PROCESS_VM */
+ 	/* Keep large structures at the end to avoid offset issues */
+ #ifdef CONFIG_FPU_SHARING
+ 	struct z_arm64_fp_context saved_fp_context;

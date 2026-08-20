@@ -148,3 +148,14 @@ module-str = POSIX thread-specific data
 source "subsys/logging/Kconfig.template.log_config"
 
 endif # POSIX_THREADS
+
+# defined outside of the POSIX_THREADS block: the registry also serves
+# fork() when only POSIX_MULTI_PROCESS is enabled
+config POSIX_THREAD_ATFORK_MAX
+	int "Maximum number of pthread_atfork() registrations"
+	default 0
+	help
+	  Maximum number of handler sets that can be registered with
+	  pthread_atfork(). When 0, the table is sized to the largest
+	  POSIX_THREAD_ATFORK_MIN_* value contributed by enabled subsystems
+	  (possibly zero, in which case pthread_atfork() fails with ENOMEM).

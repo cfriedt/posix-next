@@ -1,0 +1,165 @@
+diff --git a/include/zephyr/sys/process.h b/include/zephyr/sys/process.h
+index 5afd3d92038..f31a9628333 100644
+--- a/include/zephyr/sys/process.h
++++ b/include/zephyr/sys/process.h
+@@ -84,6 +84,14 @@ __syscall k_session_t sys_session_find(int id);
+  * The initial thread becomes the new process's thread group leader: its
+  * handle is the new process's @ref k_pid_t.
+  */
++/**
++ * @brief Duplicate the caller's writable memory into the child
++ *
++ * The child receives copies of the calling process's writable memory at the
++ * same virtual addresses and resumes at the clone point (the fork() model).
++ */
++#define SYS_CLONE_VM_COPY BIT64(0)
++
+ struct sys_clone_args {
+ 	/** SYS_CLONE_* flags; zero clones nothing from the caller */
+ 	uint64_t flags;
+@@ -146,6 +154,21 @@ __syscall k_session_t sys_setsid(void);
+  */
+ __syscall int sys_setpgid(k_pid_t pid, k_pgrp_t pgrp);
+ 
++/**
++ * @brief Create a child process that resumes at the call site (fork)
++ *
++ * Equivalent to sys_clone() with SYS_CLONE_VM_COPY and no entry point: the
++ * child is a copy of the calling process resuming from this call, which
++ * returns twice - the child handle to the parent, NULL to the child.
++ *
++ * @param child parent-side storage for the child's handle
++ *
++ * @retval 0 on success, in both the parent and the child
++ * @retval -ENOSYS until the address-space duplication substrate is available
++ * @retval -EAGAIN if no process record is available
++ */
++__syscall int sys_fork(k_pid_t *child);
++
+ /**
+  * @brief Reclaim pool resources of reaped processes
+  *
+diff --git a/lib/os/process.c b/lib/os/process.c
+index e6f218afc50..7d5dba507c2 100644
+--- a/lib/os/process.c
++++ b/lib/os/process.c
+@@ -654,6 +654,54 @@ void sys_process_release_gc(void)
+ #endif /* CONFIG_SYS_THREAD */
+ }
+ 
++/*
++ * Duplicate the calling process's writable memory into a child domain at
++ * identical virtual addresses. This is the M4 address-space substrate: with
++ * copied memory the child's execution cannot disturb the parent (the vfork
++ * shared-stack hazard does not exist), and a plain setjmp/longjmp resumes
++ * the child at the clone point because every stack address it restores is
++ * valid in its own copy. Until per-process virtual address spaces exist
++ * (per-domain page tables mapping fresh frames at the caller's addresses),
++ * there is nothing to duplicate onto.
++ */
++static int process_vm_clone(struct k_process *parent, struct k_process *proc)
++{
++	ARG_UNUSED(parent);
++	ARG_UNUSED(proc);
++
++	return -ENOSYS;
++}
++
++static int process_clone_vm_copy(const struct sys_clone_args *args, k_pid_t *child)
++{
++	int ret;
++	struct k_process *proc;
++
++	ARG_UNUSED(args);
++
++	proc = record_alloc();
++	if (proc == NULL) {
++		return -EAGAIN;
++	}
++
++	ret = process_vm_clone(_current->process, proc);
++	if (ret < 0) {
++		(void)z_process_record_free(proc);
++		return ret;
++	}
++
++	/*
++	 * The remainder of the fork model (blocked on process_vm_clone):
++	 * create the child's leader on the copied stack, seed it with a
++	 * longjmp trampoline into the jmp_buf sys_fork() captured, and start
++	 * it; both sides then return from sys_fork() - the parent with the
++	 * child's handle, the child with NULL.
++	 */
++	(void)z_process_record_free(proc);
++
++	return -ENOSYS;
++}
++
+ int z_impl_sys_clone(const struct sys_clone_args *args, k_pid_t *child)
+ {
+ 	int ret;
+@@ -661,7 +709,17 @@ int z_impl_sys_clone(const struct sys_clone_args *args, k_pid_t *child)
+ 	struct k_process *proc;
+ 	bool pooled = false;
+ 
+-	if ((args == NULL) || (args->entry == NULL) || (args->flags != 0U)) {
++	if ((args == NULL) || ((args->flags & ~SYS_CLONE_VM_COPY) != 0U)) {
++		return -EINVAL;
++	}
++	if ((args->flags & SYS_CLONE_VM_COPY) != 0U) {
++		/* the fork model: no entry point, the child resumes in place */
++		if (args->entry != NULL) {
++			return -EINVAL;
++		}
++		return process_clone_vm_copy(args, child);
++	}
++	if (args->entry == NULL) {
+ 		return -EINVAL;
+ 	}
+ 	if (args->thread == NULL) {
+@@ -781,6 +839,26 @@ static inline int z_vrfy_sys_clone(const struct sys_clone_args *args, k_pid_t *c
+ #include <zephyr/syscalls/sys_clone_mrsh.c>
+ #endif /* CONFIG_USERSPACE */
+ 
++int z_impl_sys_fork(k_pid_t *child)
++{
++	struct sys_clone_args args = {
++		.flags = SYS_CLONE_VM_COPY,
++	};
++
++	return z_impl_sys_clone(&args, child);
++}
++
++#ifdef CONFIG_USERSPACE
++static inline int z_vrfy_sys_fork(k_pid_t *child)
++{
++	if (child != NULL) {
++		K_OOPS(K_SYSCALL_MEMORY_WRITE(child, sizeof(*child)));
++	}
++	return z_impl_sys_fork(child);
++}
++#include <zephyr/syscalls/sys_fork_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
+ k_session_t z_impl_sys_setsid(void)
+ {
+ 	int ret;
+diff --git a/tests/kernel/process/src/main.c b/tests/kernel/process/src/main.c
+index b9c8cd25dd5..dc59d92f85d 100644
+--- a/tests/kernel/process/src/main.c
++++ b/tests/kernel/process/src/main.c
+@@ -310,6 +310,14 @@ ZTEST(kernel_process, test_spawn_invalid)
+ 
+ 	zassert_equal(sys_clone(NULL, NULL), -EINVAL);
+ 	zassert_equal(sys_clone(&args, NULL), -EINVAL);
++
++	/* undefined flags are invalid; the fork model awaits its substrate */
++	args.flags = BIT64(63);
++	zassert_equal(sys_clone(&args, NULL), -EINVAL);
++	args.flags = SYS_CLONE_VM_COPY;
++	args.entry = NULL;
++	zassert_equal(sys_clone(&args, NULL), -ENOSYS);
++	zassert_equal(sys_fork(NULL), -ENOSYS);
+ }
+ 
+ #if (CONFIG_SYS_PROCESS_MAX >= 4) && (CONFIG_HEAP_MEM_POOL_SIZE > 0)
