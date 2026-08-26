@@ -21,6 +21,7 @@
 
 #if defined(_POSIX_C_SOURCE) || defined(__DOXYGEN__)
 
+#include <zephyr/kernel/signal.h>
 #include <zephyr/toolchain.h>
 #include <zephyr/sys/util.h>
 
@@ -655,13 +656,13 @@ int sigwaitinfo(const sigset_t *ZRESTRICT set, siginfo_t *ZRESTRICT info);
 #define TRAP_TRACE 24 /**< Process trace trap */
 #endif
 
-/* SIGCHLD */
-#define CLD_EXITED    25 /**< Child has exited */
-#define CLD_KILLED    26 /**< Child has terminated abnormally and did not create a core file */
-#define CLD_DUMPED    27 /**< Child has terminated abnormally and created a core file */
-#define CLD_TRAPPED   28 /**< Traced child has trapped */
-#define CLD_STOPPED   29 /**< Child has stopped */
-#define CLD_CONTINUED 30 /**< Stopped child has continued */
+/* SIGCHLD si_code values */
+#define CLD_EXITED    K_SI_CLD_EXITED    /**< Child has exited */
+#define CLD_KILLED    K_SI_CLD_KILLED    /**< Child has terminated abnormally and did not create a core file */
+#define CLD_DUMPED    K_SI_CLD_DUMPED    /**< Child has terminated abnormally and created a core file */
+#define CLD_TRAPPED   K_SI_CLD_TRAPPED   /**< Traced child has trapped */
+#define CLD_STOPPED   K_SI_CLD_STOPPED   /**< Child has stopped */
+#define CLD_CONTINUED K_SI_CLD_CONTINUED /**< Stopped child has continued */
 
 #if defined(_XOPEN_STREAMS) || defined(__DOXYGEN__)
 /* SIGPOLL */

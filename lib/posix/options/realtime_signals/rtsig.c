@@ -14,6 +14,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/kernel/signal.h>
 #include <zephyr/sys/timeutil.h>
+#include <zephyr/sys/process.h>
 
 static int ksigno_to_posix(int ksigno)
 {
@@ -64,6 +65,18 @@ int sigqueue(pid_t pid, int signo, union sigval value)
 		return -1;
 	}
 
+#ifdef CONFIG_PROCESS
+	{
+		k_pid_t proc = sys_process_find(pid);
+
+		if (proc == NULL) {
+			errno = ESRCH;
+			return -1;
+		}
+		/* the handle is the group leader; prefer the caller for self */
+		tid = (proc == k_getpid()) ? k_current_get() : proc;
+	}
+#else
 	if (pid == POSIX_THIS_PID) {
 		/* as with kill(), "this process" means the calling thread */
 		tid = k_current_get();
@@ -72,8 +85,9 @@ int sigqueue(pid_t pid, int signo, union sigval value)
 
 		tid = to_k_thread(&th);
 	}
+#endif /* CONFIG_PROCESS */
 
-	ret = k_sig_queue((k_pid_t)tid, signo, val);
+	ret = k_sig_queue(tid, signo, val);
 	if (ret < 0) {
 		errno = -ret;
 		return -1;
