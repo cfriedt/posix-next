@@ -1822,3 +1822,30 @@ patches:
 
       This lifts the static-allocation restriction from sys_sem and
       everything built on it, notably POSIX sem_t.
+  - path: zephyr/k-process-core.patch
+    sha256sum: efb1a24af3df95221b585d3bc4cfdddf19c255378cbfaedfdd9ea11efae48113
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-10
+    upstreamable: true
+    comments: |
+      Introduce the kernel process (thread group) API surface: one
+      schedulable entity, a process identified by its thread group leader,
+      so a process handle (k_pid_t) is a thread handle. struct k_process is
+      the kernel-owned record of one thread group; process groups
+      (k_pgrp_t) and sessions (k_session_t) are first-class handles over
+      member-list cells, existing exactly as long as they have members.
+      kernel/process.h carries types, constants, and macros only
+      (K_PROCESS_DEFINE composing K_THREAD_DEFINE, K_PROCESS_DEFINE_EXT,
+      K_SESSION_DEFINE, K_PROCESS_GROUP_DEFINE, K_THREAD_DEFINE_EXT); the
+      __syscall declarations live in zephyr/kernel.h under CONFIG_PROCESS,
+      with handle types visible in every configuration for the generated
+      syscall prototypes. Static topology is wired at build time -
+      intra-file by C initializers, cross-TU by the mandatory
+      gen_process_topology.py post-link pass. Handles resolve by
+      identity-value scans and are never dereferenced; only caller-provided
+      records passed to k_process_init() are kernel objects
+      (K_OBJ_PROCESS), validated like thread objects; k_object_free()
+      refuses to free a live or unreaped record - its memory is
+      reclaimed at reap.
