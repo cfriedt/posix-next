@@ -1,0 +1,1034 @@
+diff --git a/cmake/linker_script/common/common-ram.cmake b/cmake/linker_script/common/common-ram.cmake
+index 210ab4be1af..2e65d592536 100644
+--- a/cmake/linker_script/common/common-ram.cmake
++++ b/cmake/linker_script/common/common-ram.cmake
+@@ -86,6 +86,13 @@ if(CONFIG_ARM_SCMI)
+   zephyr_iterable_section(NAME scmi_protocol GROUP ${K_OBJECTS_GROUP} ${XIP_ALIGN_WITH_INPUT})
+ endif()
+ 
++if(CONFIG_PROCESS)
++  zephyr_iterable_section(NAME k_process GROUP ${K_OBJECTS_GROUP} ${XIP_ALIGN_WITH_INPUT})
++  zephyr_iterable_section(NAME k_process_group GROUP ${K_OBJECTS_GROUP} ${XIP_ALIGN_WITH_INPUT})
++  zephyr_iterable_section(NAME k_session GROUP ${K_OBJECTS_GROUP} ${XIP_ALIGN_WITH_INPUT})
++  zephyr_iterable_section(NAME k_process_thread_preset GROUP ${K_OBJECTS_GROUP} ${XIP_ALIGN_WITH_INPUT})
++endif()
++
+ if(CONFIG_SENSING)
+   zephyr_iterable_section(NAME sensing_sensor GROUP ${K_OBJECTS_GROUP} ${XIP_ALIGN_WITH_INPUT})
+ endif()
+diff --git a/include/zephyr/kernel.h b/include/zephyr/kernel.h
+index 0167b67d3d3..5fb31117683 100644
+--- a/include/zephyr/kernel.h
++++ b/include/zephyr/kernel.h
+@@ -8091,6 +8091,219 @@ __syscall void k_thread_exit(void *result);
+ 
+ #endif /* CONFIG_SIGNAL */
+ 
++#include <zephyr/kernel/process.h>
++
++#if defined(CONFIG_PROCESS) || defined(__DOXYGEN__)
++/**
++ * @addtogroup k_process_apis
++ * @{
++ */
++
++/**
++ * @brief Obtain the process ID of the calling thread's process
++ *
++ * Every thread belongs to a process (thread group); this returns the handle
++ * identifying that group: its thread group leader's handle.
++ *
++ * @return the calling thread's process handle
++ */
++__syscall k_pid_t k_getpid(void);
++
++/**
++ * @brief Obtain the parent of the calling thread's process
++ *
++ * @return the parent process handle; the idle process for init
++ */
++__syscall k_pid_t k_getppid(void);
++
++/**
++ * @brief Obtain the process group of a process
++ *
++ * @param pid process handle, or NULL for the calling thread's process
++ * @return the process-group handle, or NULL if @a pid is invalid
++ */
++__syscall k_pgrp_t k_getpgid(k_pid_t pid);
++
++/**
++ * @brief Obtain the session of a process
++ *
++ * @param pid process handle, or NULL for the calling thread's process
++ * @return the session handle, or NULL if @a pid is invalid
++ */
++__syscall k_session_t k_getsid(k_pid_t pid);
++
++/**
++ * @brief Set the process group of a process
++ *
++ * Moves the process named by @a pid into the live process group @a pgrp. The
++ * target must be the calling process or one of its children in the same
++ * session, and must not be a session leader. Creating a new group takes
++ * caller-provided memory: see k_process_group_init().
++ *
++ * @param pid process to move, or NULL for the calling process
++ * @param pgrp process group to join
++ *
++ * @retval 0 on success
++ * @retval -ESRCH if @a pid names no process
++ * @retval -EPERM if the target is a session leader
++ * @retval -EINVAL if @a pgrp is NULL or not a live group in the target's session
++ */
++__syscall int k_setpgid(k_pid_t pid, k_pgrp_t pgrp);
++
++/**
++ * @brief Queue a signal to every process in a process group
++ *
++ * Delivers kernel signal @a signo to one eligible thread of each member
++ * process of @a pgrp.
++ *
++ * @param pgrp target process group, or NULL for the calling process's group
++ * @param signo kernel signal number
++ *
++ * @retval 0 on success
++ * @retval -ESRCH if the process group has no members
++ * @retval -EINVAL if @a signo is invalid or @a pgrp is not a process group
++ */
++__syscall int k_kill_pgrp(k_pgrp_t pgrp, int signo);
++
++/**
++ * @brief Send a signal to a process
++ *
++ * Delivers kernel signal @a signo to one thread of the process named by
++ * @a pid that has the signal unblocked (process-directed delivery). Numeric
++ * POSIX kill() encodings (0, -1, negative group IDs) are a system/POSIX layer
++ * concern and are decoded above the kernel; group delivery is k_kill_pgrp().
++ *
++ * @param pid process handle
++ * @param signo kernel signal number, or 0 to check for existence only
++ *
++ * @retval 0 on success
++ * @retval -ESRCH if @a pid names no process
++ * @retval -EINVAL if @a signo is invalid
++ */
++__syscall int k_kill(k_pid_t pid, int signo);
++
++/**
++ * @brief Terminate the calling thread's process
++ *
++ * Terminates every thread in the calling thread's process (thread group) and
++ * latches @a code as the process's exit status for collection via k_waitpid().
++ * No user callbacks run; C library exit handling happens above this call.
++ *
++ * @param code exit code; the low 8 bits are preserved in the wait status
++ *
++ * @note Does not return. Not declared FUNC_NORETURN because system call
++ *       stub generation cannot marshal a noreturn return type.
++ */
++__syscall void k_exit(int code);
++
++/**
++ * @brief Wait for a child process to terminate
++ *
++ * Waits for a state change in a child of the calling thread's process:
++ * the child named by @a pid, or any child when @a pid is NULL.
++ *
++ * Reaping retires the child's handle: the leader thread object may be reused
++ * as a new process leader only after this call returns it.
++ *
++ * @param pid child process handle, or NULL for any child
++ * @param[out] reaped on success, the handle of the reaped child; may be NULL
++ * @param[out] wstatus on success, the child's wait status (K_WSTATUS_*); may be NULL
++ * @param options K_PROCESS_W* option flags
++ * @param timeout maximum time to wait for a state change
++ *
++ * @retval 0 on success
++ * @retval -ECHILD if the calling process has no matching children
++ * @retval -EAGAIN if K_PROCESS_WNOHANG was given and no child has changed state,
++ *         or the @a timeout expired
++ * @retval -ENOTSUP if an unsupported option was given
++ */
++__syscall int k_waitpid(k_pid_t pid, k_pid_t *reaped, int *wstatus, uint32_t options,
++			k_timeout_t timeout);
++
++/**
++ * @brief Wait for a child process in a process group to terminate
++ *
++ * As k_waitpid(), with matching confined to children of the calling process
++ * that are members of @a pgrp (POSIX waitpid(-pgid): the group a child
++ * belongs to, not a group it leads).
++ *
++ * @param pgrp process group to match, or NULL for the calling process's group
++ * @param[out] reaped on success, the handle of the reaped child; may be NULL
++ * @param[out] wstatus on success, the child's wait status (K_WSTATUS_*); may be NULL
++ * @param options K_PROCESS_W* option flags
++ * @param timeout maximum time to wait for a state change
++ *
++ * @retval 0 on success
++ * @retval -ECHILD if the calling process has no matching children
++ * @retval -EAGAIN if K_PROCESS_WNOHANG was given and no child has changed state,
++ *         or the @a timeout expired
++ * @retval -ENOTSUP if an unsupported option was given
++ */
++__syscall int k_waitpid_pgrp(k_pgrp_t pgrp, k_pid_t *reaped, int *wstatus, uint32_t options,
++			     k_timeout_t timeout);
++
++/**
++ * @brief Initialize a process from caller-provided memory
++ *
++ * Initializes the non-initialized process record @a proc (zeroed memory, or a
++ * record already reaped via k_waitpid()) and adopts the listed threads as its
++ * members; @a threads[0] becomes the thread group leader and its handle the
++ * process handle. The threads must have been created but not yet started
++ * (k_thread_create() with a delay of K_FOREVER). The new process is a child
++ * of the calling thread's process and joins its process group.
++ *
++ * The kernel never allocates: callers provide the record, statically or
++ * from memory they manage themselves, and may reuse it once reaped.
++ *
++ * From user mode, @a proc must be a process record the caller has been
++ * granted access to - statically defined, or allocated with
++ * k_object_alloc() - and the caller must hold permission on every listed
++ * thread object.
++ *
++ * @retval 0 on success
++ * @retval -EINVAL if an argument is invalid
++ * @retval -EBUSY if @a proc is already initialized (in use, or an unreaped
++ *         zombie) or a listed thread still leads an unreaped process
++ */
++__syscall int k_process_init(struct k_process *proc, const k_tid_t *threads,
++			     size_t num_threads);
++
++/**
++ * @brief Initialize a process group from caller-provided memory
++ *
++ * Initializes the non-initialized group cell @a grp (zeroed, or retired) as a
++ * new process group led by process @a pid (NULL for the calling process) in
++ * that process's session, and moves the process into it.
++ *
++ * @retval 0 on success
++ * @retval -ESRCH if @a pid names no process, or names one that is neither the
++ *         caller nor a child of the caller
++ * @retval -EPERM if the process is a session leader
++ * @retval -EALREADY if the process already leads its own group (@a grp unused)
++ * @retval -EBUSY if @a grp is already an active process group
++ */
++int k_process_group_init(struct k_process_group *grp, k_pid_t pid);
++
++/**
++ * @brief Initialize a session from caller-provided memory
++ *
++ * Initializes the non-initialized cells @a session and @a grp (zeroed, or
++ * retired) as a new session containing a new process group, both led by the
++ * calling process, and moves the calling process into them.
++ *
++ * @retval 0 on success
++ * @retval -EINVAL if an argument is NULL
++ * @retval -EPERM if the calling process is a process-group leader
++ * @retval -EBUSY if @a session or @a grp is already active
++ */
++int k_session_init(struct k_session *session, struct k_process_group *grp);
++
++
++/**
++ * @}
++ */
++#endif /* defined(CONFIG_PROCESS) || defined(__DOXYGEN__) */
++
+ /**
+  * @addtogroup k_thread_cleanup_apis
+  * @{
+diff --git a/include/zephyr/kernel/process.h b/include/zephyr/kernel/process.h
+new file mode 100644
+index 00000000000..a4272c61730
+--- /dev/null
++++ b/include/zephyr/kernel/process.h
+@@ -0,0 +1,367 @@
++/*
++ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_INCLUDE_ZEPHYR_KERNEL_PROCESS_H_
++#define ZEPHYR_INCLUDE_ZEPHYR_KERNEL_PROCESS_H_
++
++/*
++ * Not a standalone header; include <zephyr/kernel.h> instead. Types referenced
++ * here (k_thread, k_pid_t, k_timeout_t, _wait_q_t) are provided by
++ * <zephyr/kernel.h> prior to its inclusion of this file.
++ */
++
++#include <zephyr/sys/dlist.h>
++#include <zephyr/sys/iterable_sections.h>
++#include <zephyr/sys/util.h>
++#include <zephyr/toolchain.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/* handle types stay visible in every configuration: the generated syscall
++ * prototypes in <zephyr/syscalls/kernel.h> reference them unconditionally
++ */
++struct k_process;
++struct k_process_group;
++struct k_session;
++
++/** @brief Process group handle */
++typedef struct k_process_group *k_pgrp_t;
++/** @brief Session handle */
++typedef struct k_session *k_session_t;
++
++#if defined(CONFIG_PROCESS) || defined(__DOXYGEN__)
++
++/**
++ * @brief Kernel Process APIs
++ * @defgroup k_process_apis Kernel Process APIs
++ *
++ * A process is a thread group: its identity is its thread
++ * group leader, so a process handle is a thread handle (@ref k_pid_t). The
++ * kernel-owned @ref k_process record carries the group state and remains the
++ * anchor of the process's identity from creation until the process is reaped
++ * with k_waitpid() - including after the leader thread itself has exited.
++ *
++ * A process handle held after its leader thread exited is an identity value:
++ * it may be passed to the process APIs (which never dereference it), but it
++ * must not be passed to thread APIs such as k_thread_join().
++ *
++ * Process groups and sessions are first-class kernel objects (@ref k_pgrp_t,
++ * @ref k_session_t): a group is a list of member processes, a session a list
++ * of member groups, each created on demand and existing exactly as long as it
++ * has members. The kernel deals only in these handles; numeric process and
++ * group IDs are not a kernel concern.
++ *
++ * @ingroup kernel_apis
++ * @{
++ */
++
++struct k_thread;
++
++/**
++ * @name Process states
++ * @{
++ */
++/** @brief Slot is not associated with any process */
++#define K_PROCESS_UNUSED 0
++/** @brief Process has at least one live thread */
++#define K_PROCESS_ACTIVE 1
++/** @brief Process is terminating; threads are being aborted */
++#define K_PROCESS_EXITING 2
++/** @brief Process has terminated but has not yet been reaped via k_waitpid() */
++#define K_PROCESS_ZOMBIE 3
++/** @} */
++
++/** @cond INTERNAL_HIDDEN */
++/** A K_SIG_CHLD notification for this zombie has not yet been emitted */
++#define K_PROCESS_FLAG_SIGCHLD BIT(0)
++/** @endcond */
++
++/**
++ * @name Wait status encoding
++ *
++ * The kernel-native wait status layout. Normal exit stores the low 8 bits of
++ * the exit code in bits [15:8]; termination by signal stores the (kernel)
++ * signal number in bits [6:0].
++ *
++ * @{
++ */
++/** @brief Encode a normal-exit wait status from @a code */
++#define K_WSTATUS_EXITED(code) (((code) & 0xff) << 8)
++/** @brief Encode a killed-by-signal wait status from kernel signal @a signo */
++#define K_WSTATUS_SIGNALED(signo) ((signo) & 0x7f)
++/** @brief True if the process exited normally */
++#define K_WIFEXITED(wstatus) (((wstatus) & 0x7f) == 0)
++/** @brief Exit code of a normally exited process */
++#define K_WEXITSTATUS(wstatus) (((wstatus) >> 8) & 0xff)
++/** @brief True if the process was terminated by a signal */
++#define K_WIFSIGNALED(wstatus) ((((signed char)(((wstatus) & 0x7f) + 1)) >> 1) > 0)
++/** @brief Kernel signal number that terminated the process */
++#define K_WTERMSIG(wstatus) ((wstatus) & 0x7f)
++/** @} */
++
++/**
++ * @name Wait option flags
++ * @{
++ */
++/** @brief Do not block if no child has changed state */
++#define K_PROCESS_WNOHANG BIT(0)
++/** @brief Report status without reaping the child */
++#define K_PROCESS_WNOWAIT BIT(24)
++/** @brief Report stopped children (reserved; stop/continue is unsupported) */
++#define K_PROCESS_WUNTRACED BIT(1)
++/** @brief Report continued children (reserved; stop/continue is unsupported) */
++#define K_PROCESS_WCONTINUED BIT(3)
++/** @brief Report exited children (the default; accepted for waitid() compatibility) */
++#define K_PROCESS_WEXITED BIT(2)
++/** @} */
++
++
++/**
++ * @brief Session
++ *
++ * A list of member process groups. Created by k_setsid(); exists exactly as
++ * long as it has member groups. Public only for build-time cell emission;
++ * fields are kernel-internal.
++ */
++struct k_session {
++	/** @cond INTERNAL_HIDDEN */
++	/** Member process groups (k_process_group.session_node) */
++	sys_dlist_t pgrps;
++	/** Creating (leader) process's handle: an identity value, never dereferenced */
++	k_pid_t leader;
++	/** Node in the system layer's free list while unused */
++	sys_dnode_t cell_node;
++	/** K_SESSION_FLAG_* bits */
++	uint8_t flags;
++	/** @endcond */
++};
++
++/** @cond INTERNAL_HIDDEN */
++/** Set by K_SESSION_DEFINE(): the session persists even when empty */
++#define K_SESSION_FLAG_STATIC BIT(0)
++/** @endcond */
++
++/**
++ * @brief Process group
++ *
++ * A list of member processes within one session. Created by k_setsid() or
++ * k_setpgid(); exists exactly as long as it has member processes, so a group
++ * (and its identity) naturally survives its creator's exit and reap. Public
++ * only for build-time cell emission; fields are kernel-internal.
++ */
++struct k_process_group {
++	/** @cond INTERNAL_HIDDEN */
++	/** Member processes (k_process.pgrp_node) */
++	sys_dlist_t members;
++	/** Creating (leader) process's handle: an identity value, never dereferenced */
++	k_pid_t leader;
++	/** Session this group belongs to; preset (non-NULL) marks a static group */
++	struct k_session *session;
++	/** Node in the session's group list */
++	sys_dnode_t session_node;
++	/** @endcond */
++};
++
++/**
++ * @brief Process (thread group) record
++ *
++ * Kernel-owned state of one thread group, anchored by the group leader's
++ * handle. The definition is public only so that K_PROCESS_DEFINE() can
++ * instantiate records at build time; fields are kernel-internal - use the
++ * k_*() process APIs.
++ */
++struct k_process {
++	/** @cond INTERNAL_HIDDEN */
++	/**
++	 * Thread group leader handle: the process's identity from creation to
++	 * reap. After the leader thread exits this is a value compared and
++	 * returned by the process APIs, never dereferenced.
++	 */
++	k_tid_t leader;
++	/** Parent process record; NULL only for the idle process */
++	struct k_process *parent;
++	/** Node in the parent's list of children (reused for deferred frees) */
++	sys_dnode_t sibling_node;
++	/** Child process records */
++	sys_dlist_t children;
++	/** Live member threads (the thread group) */
++	sys_dlist_t threads;
++	/** Process group this process belongs to */
++	struct k_process_group *pgrp;
++	/** Node in the process group's member list */
++	sys_dnode_t pgrp_node;
++	/** One of K_PROCESS_UNUSED / ACTIVE / EXITING / ZOMBIE */
++	uint8_t state;
++	/** Internal K_PROCESS_FLAG_* state bits */
++	uint8_t flags;
++	/** Latched wait status (K_WSTATUS_*), valid in K_PROCESS_ZOMBIE */
++	int wstatus;
++	/** Threads pending in k_waitpid() on this process's children */
++	_wait_q_t waitq;
++	/** Node in the kernel's registry of live process records */
++	sys_dnode_t active_node;
++	/** @endcond */
++};
++
++/**
++ * @brief Statically define and initialize a process
++ *
++ * Defines the process's thread group leader with K_THREAD_DEFINE() semantics
++ * (autostarted after @a delay; K_TICKS_FOREVER defines it without starting)
++ * plus the process record binding it. @a name is the leader's k_tid_t and
++ * therefore directly the process's @ref k_pid_t handle.
++ *
++ * @param name name of the process; also the leader thread's k_tid_t symbol
++ * @param stack_size stack size of the leader thread, in bytes
++ * @param entry entry point of the leader thread
++ * @param p1 first entry parameter
++ * @param p2 second entry parameter
++ * @param p3 third entry parameter
++ * @param prio priority of the leader thread
++ * @param options options of the leader thread (e.g. K_USER)
++ * @param delay scheduling delay of the leader thread in milliseconds, zero for
++ *              no delay, or K_TICKS_FOREVER to define it without starting it
++ */
++#define K_PROCESS_DEFINE(name, stack_size, entry, p1, p2, p3, prio, options, delay)                \
++	K_THREAD_DEFINE(name, stack_size, entry, p1, p2, p3, prio, options, delay);                \
++	static STRUCT_SECTION_ITERABLE(k_process_group, _k_pgrp_cell_##name);                               \
++	static STRUCT_SECTION_ITERABLE(k_session, _k_session_cell_##name);                         \
++	static STRUCT_SECTION_ITERABLE(k_process, _k_process_ctx_##name) = {                       \
++		.leader = &_k_thread_obj_##name,                                                   \
++	}
++
++/**
++ * @brief Grant the leader thread of a statically defined process access to kernel objects
++ *
++ * @param name name of the process passed to K_PROCESS_DEFINE()
++ */
++#define K_PROCESS_ACCESS_GRANT(name, ...) K_THREAD_ACCESS_GRANT(name, __VA_ARGS__)
++
++/**
++ * @brief Statically define a session
++ *
++ * Statically defined sessions persist even when empty. Process groups are
++ * placed in the session with K_PROCESS_GROUP_DEFINE(); the membership lists
++ * are assembled at link time.
++ *
++ * @param name symbol name of the session (a struct k_session)
++ */
++#define K_SESSION_DEFINE(name)                                                                     \
++	STRUCT_SECTION_ITERABLE(k_session, name) = {                                               \
++		.flags = K_SESSION_FLAG_STATIC,                                                    \
++	}
++
++/**
++ * @brief Statically define a process group within a session
++ *
++ * Statically defined groups persist even when empty. Processes are placed
++ * in the group with K_PROCESS_DEFINE_EXT(); the membership lists are
++ * assembled at link time.
++ *
++ * @param name symbol name of the process group (a struct k_process_group)
++ * @param session session the group belongs to (a struct k_session *)
++ */
++#define K_PROCESS_GROUP_DEFINE(name, session_)                                                     \
++	STRUCT_SECTION_ITERABLE(k_process_group, name) = {                                         \
++		.session = (session_),                                                             \
++	}
++
++/**
++ * @brief Statically define and initialize a process in a specific process group
++ *
++ * As K_PROCESS_DEFINE(), with the process placed in @a pgrp (a group defined
++ * with K_PROCESS_GROUP_DEFINE()) instead of the boot-default group; the
++ * group's membership list is assembled at link time.
++ *
++ * @param name name of the process; also the leader thread's k_tid_t symbol
++ * @param pgrp process group (a struct k_process_group *)
++ * @param stack_size stack size of the leader thread, in bytes
++ * @param entry entry point of the leader thread
++ * @param p1 first entry parameter
++ * @param p2 second entry parameter
++ * @param p3 third entry parameter
++ * @param prio priority of the leader thread
++ * @param options options of the leader thread (e.g. K_USER)
++ * @param delay scheduling delay of the leader thread in milliseconds, zero for
++ *              no delay, or K_TICKS_FOREVER to define it without starting it
++ */
++#define K_PROCESS_DEFINE_EXT(name, pgrp_, stack_size, entry, p1, p2, p3, prio, options, delay)     \
++	K_THREAD_DEFINE(name, stack_size, entry, p1, p2, p3, prio, options, delay);                \
++	static STRUCT_SECTION_ITERABLE(k_process, _k_process_ctx_##name) = {                       \
++		.leader = &_k_thread_obj_##name,                                                   \
++		.pgrp = (pgrp_),                                                                   \
++	}
++
++/**
++ * @brief Build-time thread-to-process membership preset
++ *
++ * Emitted by K_THREAD_DEFINE_EXT(); consumed once at thread start to place the
++ * thread in a statically defined process instead of inheriting its creator's.
++ */
++struct k_process_thread_preset {
++	/** @cond INTERNAL_HIDDEN */
++	/** The statically defined thread */
++	struct k_thread *thread;
++	/** Handle (leader) of the statically defined process to join */
++	k_tid_t pid;
++	/** @endcond */
++};
++
++/**
++ * @brief Statically define a thread as a member of a statically defined process
++ *
++ * As K_THREAD_DEFINE(), with the thread placed in the process defined by
++ * K_PROCESS_DEFINE()/K_PROCESS_DEFINE_EXT() as @a process instead of the
++ * process of the thread that starts it.
++ *
++ * @param name name of the thread
++ * @param process name of the process passed to K_PROCESS_DEFINE()
++ * @param stack_size stack size of the thread, in bytes
++ * @param entry thread entry point
++ * @param p1 first entry parameter
++ * @param p2 second entry parameter
++ * @param p3 third entry parameter
++ * @param prio thread priority
++ * @param options thread options (e.g. K_USER)
++ * @param delay scheduling delay in milliseconds, or K_TICKS_FOREVER
++ */
++#define K_THREAD_DEFINE_EXT(name, process, stack_size, entry, p1, p2, p3, prio, options, delay)    \
++	K_THREAD_DEFINE(name, stack_size, entry, p1, p2, p3, prio, options, delay);                \
++	static STRUCT_SECTION_ITERABLE(k_process_thread_preset, _k_thread_preset_##name) = {       \
++		.thread = &_k_thread_obj_##name,                                                   \
++		.pid = (process),                                                                  \
++	}
++
++#if defined(CONFIG_PROCESS_INIT) || defined(__DOXYGEN__)
++/**
++ * @brief Entry point of the init process
++ *
++ * With @kconfig{CONFIG_PROCESS_INIT}, the init process gains an initial member
++ * thread at boot running this function. It is a weak symbol whose default
++ * implementation sleeps forever; define it in the application to act as the
++ * system's init process. It must not return.
++ *
++ * @param p1 unused
++ * @param p2 unused
++ * @param p3 unused
++ */
++void z_process_init_entry(void *p1, void *p2, void *p3);
++#endif /* CONFIG_PROCESS_INIT || __DOXYGEN__ */
++
++
++/**
++ * @}
++ */
++
++#endif /* defined(CONFIG_PROCESS) || defined(__DOXYGEN__) */
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* ZEPHYR_INCLUDE_ZEPHYR_KERNEL_PROCESS_H_ */
+diff --git a/include/zephyr/linker/common-ram.ld b/include/zephyr/linker/common-ram.ld
+index c85bdce6c70..ad17c781024 100644
+--- a/include/zephyr/linker/common-ram.ld
++++ b/include/zephyr/linker/common-ram.ld
+@@ -17,6 +17,13 @@
+ ITERABLE_SECTION_RAM(scmi_protocol, Z_LINK_ITERABLE_SUBALIGN)
+ #endif /* CONFIG_ARM_SCMI */
+ 
++#ifdef CONFIG_PROCESS
++ITERABLE_SECTION_RAM(k_process, Z_LINK_ITERABLE_SUBALIGN)
++ITERABLE_SECTION_RAM(k_process_group, Z_LINK_ITERABLE_SUBALIGN)
++ITERABLE_SECTION_RAM(k_session, Z_LINK_ITERABLE_SUBALIGN)
++ITERABLE_SECTION_RAM(k_process_thread_preset, Z_LINK_ITERABLE_SUBALIGN)
++#endif /* CONFIG_PROCESS */
++
+ #if defined(CONFIG_GEN_SW_ISR_TABLE) && defined(CONFIG_SRAM_SW_ISR_TABLE)
+ 	SECTION_DATA_PROLOGUE(sw_isr_table,,)
+ 	{
+diff --git a/include/zephyr/linker/common-rom/common-rom-kernel-devices.ld b/include/zephyr/linker/common-rom/common-rom-kernel-devices.ld
+index 1efafe842a3..f7e5294d810 100644
+--- a/include/zephyr/linker/common-rom/common-rom-kernel-devices.ld
++++ b/include/zephyr/linker/common-rom/common-rom-kernel-devices.ld
+@@ -87,6 +87,9 @@
+ 
+ 	ITERABLE_SECTION_ROM(k_p4wq_initparam, Z_LINK_ITERABLE_SUBALIGN)
+ 
++#if defined(CONFIG_PROCESS)
++#endif /* CONFIG_PROCESS */
++
+ 	ITERABLE_SECTION_ROM(_static_thread_data, Z_LINK_ITERABLE_SUBALIGN)
+ 
+ #if defined(CONFIG_PCIE)
+diff --git a/kernel/CMakeLists.txt b/kernel/CMakeLists.txt
+index 29837a6d201..65304555d3d 100644
+--- a/kernel/CMakeLists.txt
++++ b/kernel/CMakeLists.txt
+@@ -80,5 +80,17 @@ zephyr_compile_definitions(SIGNAL_ACTION_DB_SIZE=${sigaction_min_size})
+ 
+ # This file cannot be compiled with __ZEPHYR_SUPERVISOR__ when userspace is enabled
+ zephyr_sources_ifdef(CONFIG_SIGNAL signal.c)
++zephyr_sources_ifdef(CONFIG_PROCESS process.c)
++
++if(CONFIG_PROCESS)
++  # Assemble the static process topology (K_SESSION_DEFINE /
++  # K_PROCESS_GROUP_DEFINE / K_PROCESS_DEFINE_EXT membership lists) directly
++  # into the ELF. Mandatory for static topology, like gen_kobject_list for
++  # user-mode kernel objects: there is no boot-time fallback.
++  set_property(GLOBAL APPEND PROPERTY extra_post_build_commands
++    COMMAND ${PYTHON_EXECUTABLE} ${ZEPHYR_BASE}/scripts/build/gen_process_topology.py
++            ${PROJECT_BINARY_DIR}/${KERNEL_ELF_NAME}
++  )
++endif()
+ zephyr_sources_ifdef(CONFIG_THREAD_CLEANUP cleanup.c)
+ zephyr_sources_ifdef(CONFIG_THREAD_SPECIFIC_STORAGE tss.c)
+diff --git a/kernel/Kconfig b/kernel/Kconfig
+index a04289da1f3..2a2c2c90751 100644
+--- a/kernel/Kconfig
++++ b/kernel/Kconfig
+@@ -1305,6 +1305,7 @@ config HW_SHADOW_STACK_ALLOW_REUSE
+ endmenu
+ 
+ rsource "Kconfig.mem_domain"
++rsource "Kconfig.process"
+ rsource "Kconfig.smp"
+ 
+ config TICKLESS_KERNEL
+diff --git a/kernel/Kconfig.process b/kernel/Kconfig.process
+new file mode 100644
+index 00000000000..9f9a0559bff
+--- /dev/null
++++ b/kernel/Kconfig.process
+@@ -0,0 +1,76 @@
++# Copyright The Zephyr Project Contributors
++# SPDX-License-Identifier: Apache-2.0
++
++menu "Process support"
++
++config PROCESS
++	bool "Process (thread group) support [EXPERIMENTAL]"
++	select EXPERIMENTAL
++	help
++	  Select 'y' to enable kernel process (thread group) support: every
++	  thread belongs to a process, processes form a parent/child tree
++	  rooted in the three kernel-reserved processes (swapper, init,
++	  kthreadd), and process termination can be observed with k_waitpid().
++
++	  Process support does not require CONFIG_USERSPACE: without it,
++	  processes provide identity, lifetime, and wait semantics for
++	  supervisor-mode threads; memory isolation between processes
++	  additionally requires CONFIG_USERSPACE.
++
++if PROCESS
++
++config PROCESS_INIT
++	bool "Start the init process with an initial thread"
++	help
++	  Give the reserved init process a running initial thread at boot,
++	  independent of the image main(). The thread runs
++	  z_process_init_entry(), a weak function the application overrides to
++	  act as the system's init process; the default implementation sleeps
++	  forever. Without this option, the init process exists but has no
++	  thread of its own until one is created in it.
++
++config PROCESS_INIT_STACK_SIZE
++	int "init process initial thread stack size"
++	depends on PROCESS_INIT
++	default 1024
++	help
++	  Stack size of the init process's initial thread.
++
++config PROCESS_INIT_PRIORITY
++	int "init process initial thread priority"
++	depends on PROCESS_INIT
++	default 0
++	help
++	  Scheduling priority of the init process's initial thread.
++
++config PROCESS_SIGCHLD_NOTIFIER_STACK_SIZE
++	int "SIGCHLD notifier thread stack size"
++	depends on SIGNAL
++	default 1024
++	help
++	  Stack size of the thread that emits K_SIG_CHLD to a parent process
++	  when one of its children becomes a zombie. Signal generation cannot
++	  run in the scheduler's thread-halt path, so it is deferred to this
++	  thread.+
++config SIGNAL_SET_SIZE_MIN_PROCESS
++	int
++	depends on SIGNAL
++	default 18
++	help
++	  Child-status notification uses K_SIG_CHLD (17), which must be
++	  representable in the kernel signal set: processes require a set of
++	  at least 18 signals.
++
++config SIGNAL_QUEUE_SIZE_ADD_PROCESS
++	int
++	depends on SIGNAL
++	default 4
++	help
++	  Queue headroom for child-status signals: each zombie child may hold
++	  one pending K_SIG_CHLD element alongside ordinary signal traffic,
++	  so a queue sized only for the latter can drop signals or leave
++	  sigtimedwait() callers hung.
++
++endif # PROCESS
++
++endmenu
+diff --git a/kernel/include/kernel_internal.h b/kernel/include/kernel_internal.h
+index a2a404c9d86..87c2ac41e2e 100644
+--- a/kernel/include/kernel_internal.h
++++ b/kernel/include/kernel_internal.h
+@@ -14,6 +14,8 @@
+ #ifndef ZEPHYR_KERNEL_INCLUDE_KERNEL_INTERNAL_H_
+ #define ZEPHYR_KERNEL_INCLUDE_KERNEL_INTERNAL_H_
+ 
++#include <errno.h>
++
+ #include <zephyr/kernel.h>
+ #include <kernel_arch_interface.h>
+ #include <kthread.h>
+@@ -111,6 +113,23 @@ extern int z_stack_adjust_initialized;
+ 
+ extern struct k_thread z_main_thread;
+ 
++#ifdef CONFIG_PROCESS
++/* the three kernel-reserved processes: idle, init, and the kthread process */
++extern struct k_process z_proc_idle;
++extern struct k_process z_proc_init;
++extern struct k_process z_proc_kth;
++
++/* initialize a record and place it in the process tree (under the process lock) */
++void z_kernel_process_init_one(struct k_process *proc, struct k_process *parent);
++
++/* Add a new thread to its creator's process (thread group) */
++void z_process_init_thread(struct k_thread *thread);
++
++/* Remove a dying thread from its process; zombifies the process on last exit */
++void z_process_exit_thread(struct k_thread *thread);
++
++#endif /* CONFIG_PROCESS */
++
+ 
+ K_KERNEL_PINNED_STACK_ARRAY_DECLARE(z_interrupt_stacks, CONFIG_MP_MAX_NUM_CPUS,
+ 				    CONFIG_ISR_STACK_SIZE);
+diff --git a/scripts/build/gen_kobject_list.py b/scripts/build/gen_kobject_list.py
+index acdf93f3b6a..1ee85b3ce19 100755
+--- a/scripts/build/gen_kobject_list.py
++++ b/scripts/build/gen_kobject_list.py
+@@ -97,6 +97,7 @@ kobjects = OrderedDict(
+         ("k_pipe", (None, False, True)),
+         ("k_queue", (None, False, True)),
+         ("k_poll_signal", (None, False, True)),
++        ("k_process", ("CONFIG_PROCESS", False, True)),
+         ("k_sem", (None, False, True)),
+         ("k_stack", (None, False, True)),
+         ("k_thread", (None, False, True)),  # But see #
+diff --git a/scripts/build/gen_process_topology.py b/scripts/build/gen_process_topology.py
+new file mode 100644
+index 00000000000..4d823ac6ffb
+--- /dev/null
++++ b/scripts/build/gen_process_topology.py
+@@ -0,0 +1,169 @@
++#!/usr/bin/env python3
++#
++# Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++#
++# SPDX-License-Identifier: Apache-2.0
++
++"""Assemble the static process topology into the ELF at link time.
++
++K_SESSION_DEFINE(), K_PROCESS_GROUP_DEFINE(), and K_PROCESS_DEFINE_EXT() carry
++only child->parent backreferences in their C initializers (group.session,
++process.pgrp): the reverse-direction membership lists (session.pgrps,
++group.members) are circular doubly-linked lists spanning translation units,
++which no C initializer can express. This pass patches them directly into
++.data, so the topology is valid in the ELF image before any C runs.
++
++This pass is mandatory for builds that declare static topology, exactly as
++gen_kobject_list.py is mandatory for user-mode kernel objects: there is no
++boot-time fallback.
++
++Struct member offsets are taken from the DWARF debug info, so the pass adapts
++to configuration-dependent layouts without a generated header.
++"""
++
++import argparse
++import struct
++import sys
++
++from elftools.elf.elffile import ELFFile
++
++K_SESSION_FLAG_STATIC = 0x01
++
++
++def parse_args():
++    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
++    parser.add_argument("elf", help="zephyr.elf to patch in place")
++    parser.add_argument("-v", "--verbose", action="store_true")
++    return parser.parse_args()
++
++
++class Image:
++    """Minimal address-space view over the ELF file, with write-back."""
++
++    def __init__(self, path):
++        self.path = path
++        self.f = open(path, "r+b")
++        self.elf = ELFFile(self.f)
++        self.ptr_size = self.elf.elfclass // 8
++        self.endian = "<" if self.elf.little_endian else ">"
++        self.segments = [
++            (seg["p_vaddr"], seg["p_filesz"], seg["p_offset"])
++            for seg in self.elf.iter_segments()
++            if seg["p_type"] == "PT_LOAD"
++        ]
++        self.symtab = self.elf.get_section_by_name(".symtab")
++
++    def sym(self, name):
++        syms = self.symtab.get_symbol_by_name(name)
++        if not syms:
++            return None
++        return syms[0]["st_value"]
++
++    def offset_of(self, vaddr):
++        for base, size, off in self.segments:
++            if base <= vaddr < base + size:
++                return off + (vaddr - base)
++        raise ValueError(f"address 0x{vaddr:x} is not file-backed")
++
++    def read_ptr(self, vaddr):
++        self.f.seek(self.offset_of(vaddr))
++        raw = self.f.read(self.ptr_size)
++        return struct.unpack(self.endian + ("I" if self.ptr_size == 4 else "Q"), raw)[0]
++
++    def write_ptr(self, vaddr, value):
++        self.f.seek(self.offset_of(vaddr))
++        self.f.write(struct.pack(self.endian + ("I" if self.ptr_size == 4 else "Q"), value))
++
++    def read_u8(self, vaddr):
++        self.f.seek(self.offset_of(vaddr))
++        return self.f.read(1)[0]
++
++    def struct_layout(self, tag):
++        """(size, {member: offset}) for a DWARF structure type named tag."""
++        dwarf = self.elf.get_dwarf_info()
++        for cu in dwarf.iter_CUs():
++            for die in cu.iter_DIEs():
++                if die.tag != "DW_TAG_structure_type":
++                    continue
++                name = die.attributes.get("DW_AT_name")
++                if name is None or name.value.decode() != tag:
++                    continue
++                size_attr = die.attributes.get("DW_AT_byte_size")
++                if size_attr is None:
++                    continue
++                members = {}
++                for child in die.iter_children():
++                    if child.tag != "DW_TAG_member":
++                        continue
++                    mname = child.attributes["DW_AT_name"].value.decode()
++                    members[mname] = child.attributes["DW_AT_data_member_location"].value
++                if members:
++                    return size_attr.value, members
++        raise KeyError(f"struct {tag} not found in DWARF")
++
++
++def section_array(img, name, size):
++    start = img.sym(f"_{name}_list_start")
++    end = img.sym(f"_{name}_list_end")
++    if start is None or end is None or end <= start:
++        return []
++    return list(range(start, end, size))
++
++
++def link_dlist(img, head_vaddr, node_vaddrs, verbose, what):
++    """Write a circular sys_dlist: head {head, tail} plus each node {next, prev}."""
++    if not node_vaddrs:
++        return
++    chain = [head_vaddr] + node_vaddrs
++    n = len(chain)
++    for i, node in enumerate(chain):
++        nxt = chain[(i + 1) % n]
++        prv = chain[(i - 1) % n]
++        img.write_ptr(node, nxt)
++        img.write_ptr(node + img.ptr_size, prv)
++    if verbose:
++        print(f"  {what}: {len(node_vaddrs)} member(s)")
++
++
++def main():
++    args = parse_args()
++    img = Image(args.elf)
++
++    try:
++        sess_size, sess = img.struct_layout("k_session")
++        grp_size, grp = img.struct_layout("k_process_group")
++        proc_size, proc = img.struct_layout("k_process")
++    except KeyError:
++        # CONFIG_PROCESS is off (or debug info is absent): nothing to assemble
++        return 0
++
++    sessions = section_array(img, "k_session", sess_size)
++    groups = section_array(img, "k_process_group", grp_size)
++    processes = section_array(img, "k_process", proc_size)
++
++    static_sessions = [
++        s for s in sessions if img.read_u8(s + sess["flags"]) & K_SESSION_FLAG_STATIC
++    ]
++    topo_groups = [g for g in groups if img.read_ptr(g + grp["session"]) in static_sessions]
++
++    if args.verbose and (static_sessions or topo_groups):
++        print(f"{args.elf}: assembling static process topology")
++
++    for s in static_sessions:
++        members = [
++            g + grp["session_node"] for g in topo_groups if img.read_ptr(g + grp["session"]) == s
++        ]
++        link_dlist(img, s + sess["pgrps"], members, args.verbose, f"session @0x{s:x}")
++
++    for g in topo_groups:
++        members = [
++            p + proc["pgrp_node"] for p in processes if img.read_ptr(p + proc["pgrp"]) == g
++        ]
++        link_dlist(img, g + grp["members"], members, args.verbose, f"group @0x{g:x}")
++
++    img.f.close()
++    return 0
++
++
++if __name__ == "__main__":
++    sys.exit(main())
+diff --git a/tests/kernel/process/Kconfig b/tests/kernel/process/Kconfig
+new file mode 100644
+--- /dev/null
++++ b/tests/kernel/process/Kconfig
+@@ -0,0 +1,21 @@
++# SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++# SPDX-License-Identifier: Apache-2.0
++
++# Sane suite defaults for ad-hoc CONFIG_SIGNAL=y builds: the signal-enabled
++# tests need headroom for per-member group kills and per-zombie SIGCHLD
++# elements, and test_kill installs one signal handler.
++
++if SIGNAL
++
++config SIGNAL_SET_SIZE
++	default 40
++
++config SIGNAL_QUEUE_SIZE
++	default 8
++
++config SIGNAL_ACTION_DB_SIZE
++	default 2
++
++endif # SIGNAL
++
++source "Kconfig.zephyr"
+diff --git a/kernel/userspace.c b/kernel/userspace.c
+index 9faa5e36b6f..fbf80b2ef2b 100644
+--- a/kernel/userspace.c
++++ b/kernel/userspace.c
+@@ -485,6 +485,16 @@ void k_object_free(void *obj)
+ 
+ 	dyn = dyn_object_find(obj);
+ 	if (dyn != NULL) {
++#ifdef CONFIG_PROCESS
++		if ((dyn->kobj.type == K_OBJ_PROCESS) &&
++		    (((struct k_process *)obj)->state != K_PROCESS_UNUSED)) {
++			/* a live or unreaped process record must not be freed;
++			 * its memory is reclaimed at reap
++			 */
++			k_spin_unlock(&objfree_lock, key);
++			return;
++		}
++#endif /* CONFIG_PROCESS */
+ 		sys_dlist_remove(&dyn->dobj_list);
+ 
+ 		if (dyn->kobj.type == K_OBJ_THREAD) {
