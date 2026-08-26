@@ -2863,6 +2863,26 @@ patches:
       that never sigwaits from pinning queue slots.
       The thread-scoped drop at thread setup leaves process-scoped entries
       alone: those go with the process record.
+  - path: zephyr/k-signal-scope-queue-lock.patch
+    sha256sum: 0cbd382fcf4df3c1b02564516f838c314527dd6be1eb34d9c8980ee97b59d87b
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-17
+    upstreamable: true
+    comments: |
+      Queue process-scoped pending signals while still holding the process
+      lock, in k_kill(), k_kill_pgrp(), and the SIGCHLD notifier: the
+      process lock -> signal lock order is already established by the
+      reap-time drop, and queueing under it closes the window where a
+      process could be reaped between target resolution and the queue,
+      leaving an element aimed at a retired record. Thread-targeted
+      queueing happens under the lock as well: a member thread is live
+      only while the lock is held, and a target that exited between
+      resolution and the queue left the element aimed at a retired thread
+      object (k_kill_pgrp() loses its batched resolve-then-signal loop).
+      k_kill() also now distinguishes an empty (zombie) process (-ESRCH)
+      from a fully-masked one (pend at process scope).
   - path: zephyr/libc-sys-stat-utime-markers.patch
     sha256sum: 8edfcf83058522bb80d601e92c4a9e6be14baec04cf8253ffbd344fbadf05b78
     module: zephyr
