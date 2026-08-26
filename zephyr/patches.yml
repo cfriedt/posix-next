@@ -1947,3 +1947,19 @@ patches:
       with any unclaimed K_SIG_CHLD notification about the reaped child -
       its status has been collected, and retiring the entry keeps a parent
       that never sigwaits from pinning queue slots.
+  - path: zephyr/k-signal-scope-queue-lock.patch
+    sha256sum: a305bc6e0bd86cc69d0f7058a295aba262348126ce44621ba26bece900f3c4aa
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-17
+    upstreamable: true
+    comments: |
+      Queue process-scoped pending signals while still holding the process
+      lock, in k_kill(), k_kill_pgrp(), and the SIGCHLD notifier: the
+      process lock -> signal lock order is already established by the
+      reap-time drop, and queueing under it closes the window where a
+      process could be reaped between target resolution and the queue,
+      leaving an element aimed at a retired record. k_kill() also now
+      distinguishes an empty (zombie) process (-ESRCH) from a fully-masked
+      one (pend at process scope).
