@@ -3008,6 +3008,36 @@ patches:
       that never sigwaits from pinning queue slots.
       The thread-scoped drop at thread setup leaves process-scoped entries
       alone: those go with the process record.
+  - path: zephyr/k-signal-scope-queue-lock.patch
+    sha256sum: 2b556520baba39463593b2f8fdbc405ce876a890f4ca3c6e55578cd00c5e9f9d
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-17
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/k-signal-process-scope.patch
+    comments: |
+      Queue process-scoped pending signals while still holding the process
+      lock, in k_kill(), k_kill_pgrp(), and the SIGCHLD notifier: the
+      process lock -> signal lock order is already established by the
+      reap-time drop, and queueing under it closes the window where a
+      process could be reaped between target resolution and the queue,
+      leaving an element aimed at a retired record. Thread-targeted
+      queueing happens under the lock as well: a member thread is live
+      only while the lock is held, and a target that exited between
+      resolution and the queue left the element aimed at a retired thread
+      object (k_kill_pgrp() loses its batched resolve-then-signal loop).
+      k_kill() also now distinguishes an empty (zombie) process (-ESRCH)
+      from a fully-masked one (pend at process scope).
+
+      k_kill() and k_sigqueue() refused a zombie with -ESRCH for every signal but 0. A
+      zombie exists until it is reaped (kill(2): "an existing process might be a
+      zombie"), so a signal to one is discarded and reported as sent. stress-ng's sigrt
+      parent queues to children that its own stop alarm has already ended and treats
+      ESRCH as a failure.
   - path: zephyr/libc-sys-stat-utime-markers.patch
     sha256sum: 8edfcf83058522bb80d601e92c4a9e6be14baec04cf8253ffbd344fbadf05b78
     module: zephyr
