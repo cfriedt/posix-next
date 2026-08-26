@@ -53,6 +53,7 @@
 #include <sys/time.h>
 #include <sys/times.h>
 #include <sys/utsname.h>
+#include <sys/wait.h>
 #include <syslog.h>
 #include <time.h>
 #include <unistd.h>
@@ -237,10 +238,25 @@ EXPORT_SYMBOL(munmap);
 EXPORT_SYMBOL(_Exit);
 EXPORT_SYMBOL(_exit);
 EXPORT_SYMBOL(atexit);
+EXPORT_SYMBOL(execl);
+EXPORT_SYMBOL(execle);
+EXPORT_SYMBOL(execlp);
+EXPORT_SYMBOL(execv);
+EXPORT_SYMBOL(execve);
+EXPORT_SYMBOL(execvp);
 EXPORT_SYMBOL(exit);
+EXPORT_SYMBOL(fork);
+EXPORT_SYMBOL(getpgid);
+EXPORT_SYMBOL(getpgrp);
 EXPORT_SYMBOL(getpid);
+EXPORT_SYMBOL(getppid);
+EXPORT_SYMBOL(getsid);
+EXPORT_SYMBOL(setsid);
 EXPORT_SYMBOL(sleep);
 EXPORT_SYMBOL(times);
+EXPORT_SYMBOL(wait);
+EXPORT_SYMBOL(waitid);
+EXPORT_SYMBOL(waitpid);
 #endif /* CONFIG_POSIX_MULTI_PROCESS */
 
 /* NETWORKING: htonl(), htons(), ntohl(), and ntohs() are macros over
