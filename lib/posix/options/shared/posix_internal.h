@@ -11,6 +11,7 @@
 #ifndef ZEPHYR_LIB_POSIX_POSIX_INTERNAL_H_
 #define ZEPHYR_LIB_POSIX_POSIX_INTERNAL_H_
 
+#include <zephyr/sys/process.h>
 #include <errno.h>
 #include <limits.h>
 #include <sched.h>
@@ -42,6 +43,21 @@
  * process groups via kill(), so an arbitrary value >= 2 is used.
  */
 #define POSIX_THIS_PID 42
+
+/*
+ * The PID of the calling thread's process. With CONFIG_PROCESS this is the
+ * numeric id of the kernel process object; otherwise Zephyr is effectively
+ * single-process and the constant above is returned. Shared so that
+ * POSIX_SIGNALS (which does not require CONFIG_PROCESS) resolves it uniformly.
+ */
+static inline pid_t z_posix_this_pid(void)
+{
+#ifdef CONFIG_PROCESS
+	return sys_process_id(k_getpid());
+#else
+	return POSIX_THIS_PID;
+#endif
+}
 
 struct posix_condattr {
 	/* leaves room for CLOCK_REALTIME (1, default) and CLOCK_MONOTONIC (4) */
@@ -300,6 +316,15 @@ struct k_sig_set *z_sig_set_from_posix_slow(const sigset_t *set, struct k_sig_se
 sigset_t *z_sig_set_to_posix_slow(const struct k_sig_set *kset, sigset_t *buf);
 int z_sig_from_posix(int sig);
 int z_sig_to_posix(int sig);
+
+enum posix_atfork_stage {
+	POSIX_ATFORK_PREPARE,
+	POSIX_ATFORK_PARENT,
+	POSIX_ATFORK_CHILD,
+};
+
+int z_posix_atfork_register(void (*prepare)(void), void (*parent)(void), void (*child)(void));
+void z_posix_atfork_run(enum posix_atfork_stage stage);
 /* kernel si_code values differ from the libc's SI_* constants */
 static inline int z_si_code_to_posix(int code)
 {
@@ -317,6 +342,7 @@ static inline int z_si_code_to_posix(int code)
 		return SI_ASYNCIO;
 #endif /* CONFIG_SYS_AIO */
 	default:
+		/* K_SI_CLD_* equal their CLD_* aliases; the default is identity */
 		return code;
 	}
 }

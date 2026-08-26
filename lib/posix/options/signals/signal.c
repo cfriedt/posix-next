@@ -14,12 +14,44 @@
 
 #include <zephyr/kernel.h>
 #include <zephyr/kernel/signal.h>
+#include <zephyr/sys/process.h>
 #include <zephyr/sys/util.h>
 
 #define SIGNO_WORD_IDX(_signo) ((_signo - 1) / BITS_PER_LONG)
 #define SIGNO_WORD_BIT(_signo) ((_signo - 1) & BIT_MASK(LOG2(BITS_PER_LONG)))
 
 #define SIGSET_NLONGS (sizeof(sigset_t) / sizeof(unsigned long))
+
+#ifdef CONFIG_PROCESS
+/* POSIX kill() pid encodings decode here; the kernel is handle-domain only */
+static int posix_kill_multi(pid_t pid, int ksigno)
+{
+	if (pid > 0) {
+		k_pid_t proc = sys_process_find((int)pid);
+
+		return (proc == NULL) ? -ESRCH : k_kill(proc, ksigno);
+	}
+	if (pid == 0) {
+		/* the caller's own process group */
+		return k_kill_pgrp(NULL, ksigno);
+	}
+	if (pid == -1) {
+		/* broadcast to all processes is not supported */
+		return -ESRCH;
+	}
+
+	k_pgrp_t grp = sys_pgrp_find((int)-pid);
+
+	return (grp == NULL) ? -ESRCH : k_kill_pgrp(grp, ksigno);
+}
+#else
+static inline int posix_kill_multi(pid_t pid, int ksigno)
+{
+	ARG_UNUSED(pid);
+	ARG_UNUSED(ksigno);
+	return -ESRCH;
+}
+#endif /* CONFIG_PROCESS */
 
 static inline bool posix_sig_is_reserved(int signo)
 {
@@ -153,6 +185,15 @@ static void kinfo_to_siginfo(siginfo_t *dst, const struct k_sig_info *src, int s
 	dst->si_signo = signo;
 	dst->si_code = z_si_code_to_posix(src->code);
 	dst->si_value.sival_ptr = src->value.sival_ptr;
+#ifdef CONFIG_PROCESS
+	/* identity handle -> numeric id; 0 if the child was already reaped */
+	dst->si_pid = (pid_t)MAX(sys_process_id(src->pid), 0);
+	if (src->code == K_SI_CLD_EXITED) {
+		dst->si_status = K_WEXITSTATUS(src->status);
+	} else if (src->code == K_SI_CLD_KILLED) {
+		dst->si_status = z_sig_to_posix(K_WTERMSIG(src->status));
+	}
+#endif /* CONFIG_PROCESS */
 }
 
 /* handle a POSIX sigaction from a kernel signal handler */
@@ -380,8 +421,6 @@ int kill(pid_t pid, int sig)
 {
 	int ret;
 	int ksigno;
-	k_tid_t tid;
-	pthread_t th = (pthread_t)(uintptr_t)pid;
 
 	if (sig == 0) {
 		ksigno = 0;
@@ -398,22 +437,30 @@ int kill(pid_t pid, int sig)
 		}
 	}
 
-	/*
-	 * Compare against the shared internal PID constant rather than calling
-	 * getpid(): POSIX_SIGNALS and POSIX_MULTI_PROCESS are independent
-	 * Subprofiling Option Groups, so getpid() may not be available here.
-	 */
-	if (pid == POSIX_THIS_PID) {
-		tid = k_current_get();
-	} else if (pid > 0) {
-		tid = to_k_thread(&th);
+	if (IS_ENABLED(CONFIG_POSIX_MULTI_PROCESS)) {
+		/* multi-process: decode the pid encodings onto the handle-domain kernel */
+		ret = posix_kill_multi(pid, ksigno);
+	} else if (IS_ENABLED(CONFIG_POSIX_SINGLE_PROCESS) && ((pid == POSIX_THIS_PID) || (pid == 0)
+		|| (pid == -1))) {
+		/* single-process: its pid, 0, and -1 all name it; else ESRCH.
+		 *
+		 * caveat: Zephyr's implementation "provides extended security controls" and therefore
+		 * we "impose further implementation-defined restrictions on the sending of signals."
+		 *
+		 * Specifically, in single-process mode, user & kernel threads coexist within one
+		 * (figurative) process; typical process infrastructure is not compiled-in, objects are
+		 * granted explicit permissions, etc. Thus, we bypass kernel pid routing logic and
+		 * directly queue the signal to the calling thread (which may or may not have blocked
+		 * the specified signal). This is a more efficient and deterministic alternative to
+		 * signalling a possibly unrelated or unsuspecting thread.
+		 *
+		 * Note: The better tool for signalling individual threads is pthread_kill().
+		 */
+		ret = k_sig_queue(k_current_get(), ksigno, (union k_sig_val){0});
 	} else {
-		/* Zephyr does not yet support process groups (pid <= 0) */
-		errno = ESRCH;
-		return -1;
+		ret = -ESRCH;
 	}
 
-	ret = k_sig_queue(tid, ksigno, (union k_sig_val){0});
 	if (ret < 0) {
 		errno = -ret;
 		return -1;
