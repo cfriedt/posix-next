@@ -1,0 +1,186 @@
+diff --git a/kernel/process.c b/kernel/process.c
+--- a/kernel/process.c
++++ b/kernel/process.c
+@@ -815,78 +815,46 @@ int z_impl_k_kill_pgrp(k_pgrp_t pgrp, int signo)
+ {
+ 	int ret = -ESRCH;
+ 	int found = 0;
+-	size_t skip = 0;
+-	bool done = false;
+-	struct k_thread *targets[8];
+-	struct k_process *scopes[8];
+-
+-	/*
+-	 * Resolve deliverable threads (one per member process) under the lock
+-	 * in bounded batches, and signal between batches with the lock dropped:
+-	 * k_sig_queue() allocates and takes its own locks, and group size is
+-	 * unbounded at kernel build time. The skip cursor keeps each position
+-	 * visited once; members joining or leaving between batches are the
+-	 * usual signal-delivery TOCTOU.
+-	 */
++	struct k_process *proc;
+ 	k_spinlock_key_t key = k_spin_lock(&process_lock);
+ 
+ 	if (pgrp == NULL) {
+ 		pgrp = process_self()->pgrp;
+ 	}
+ 
+-	while (!done) {
+-		int n = 0;
+-		size_t pos = 0;
+-		struct k_process *proc;
+-
+-		done = true;
+-		SYS_DLIST_FOR_EACH_CONTAINER(&pgrp->members, proc, pgrp_node) {
+-			k_tid_t tgt;
++	/*
++	 * Resolve each member's deliverable thread and queue to it under the
++	 * lock: a member thread is live only while the lock is held, and reap
++	 * cannot race the queue. k_sig_queue() allocates without waiting and
++	 * takes only its own locks, which nest below process_lock.
++	 */
++	SYS_DLIST_FOR_EACH_CONTAINER(&pgrp->members, proc, pgrp_node) {
++		int err;
++		k_tid_t tgt;
+ 
+-			if (pos++ < skip) {
+-				continue;
+-			}
+-			if (n >= (int)ARRAY_SIZE(targets)) {
+-				done = false;
+-				break;
+-			}
+-			skip++;
+-			if ((proc->state == K_PROCESS_UNUSED) ||
+-			    sys_dlist_is_empty(&proc->threads)) {
+-				continue;
+-			}
+-#ifdef CONFIG_SIGNAL
+-			tgt = process_sig_target(proc, signo);
+-#else
+-			tgt = SYS_DLIST_PEEK_HEAD_CONTAINER(&proc->threads, tgt, process_node);
+-#endif /* CONFIG_SIGNAL */
+-			/* NULL target: every member masked, pend at process scope */
+-			targets[n] = tgt;
+-			scopes[n] = (tgt == NULL) ? proc : NULL;
+-			n++;
++		if ((proc->state == K_PROCESS_UNUSED) ||
++		    sys_dlist_is_empty(&proc->threads)) {
++			continue;
+ 		}
+-		k_spin_unlock(&process_lock, key);
+-
+-		found += n;
++		found++;
+ #ifdef CONFIG_SIGNAL
+-		for (int i = 0; i < n; i++) {
+-			int err = (targets[i] == NULL)
+-					  ? z_sig_queue_process(scopes[i], signo)
+-					  : k_sig_queue(targets[i], signo, (union k_sig_val){0});
+-
+-			if (err == -EINVAL) {
+-				return -EINVAL;
+-			}
+-			if (err == 0) {
+-				ret = 0;
+-			}
++		tgt = process_sig_target(proc, signo);
++		/* NULL target: every member masked, pend at process scope */
++		err = (tgt == NULL) ? z_sig_queue_process(proc, signo)
++				    : k_sig_queue(tgt, signo, (union k_sig_val){0});
++		if (err == -EINVAL) {
++			k_spin_unlock(&process_lock, key);
++			return -EINVAL;
+ 		}
+-#endif /* CONFIG_SIGNAL */
+-
+-		if (!done) {
+-			key = k_spin_lock(&process_lock);
++		if (err == 0) {
++			ret = 0;
+ 		}
++#else
++		ARG_UNUSED(err);
++		ARG_UNUSED(tgt);
++#endif /* CONFIG_SIGNAL */
+ 	}
++	k_spin_unlock(&process_lock, key);
+ 
+ #ifndef CONFIG_SIGNAL
+ 	ARG_UNUSED(signo);
+@@ -910,6 +878,8 @@ static inline int z_vrfy_k_kill_pgrp(k_pgrp_t pgrp, int signo)
+ int z_impl_k_kill(k_pid_t pid, int signo)
+ {
+ 	bool found = false;
++	bool live = false;
++	int ret = 0;
+ #ifdef CONFIG_SIGNAL
+ 	k_tid_t tid = NULL;
+ #endif /* CONFIG_SIGNAL */
+@@ -917,12 +887,22 @@ int z_impl_k_kill(k_pid_t pid, int signo)
+ 
+ 	K_SPINLOCK(&process_lock) {
+ 		proc = (pid == NULL) ? process_self() : process_ctx_resolve_locked(pid);
+-		if (proc != NULL) {
+-			found = true;
++		if (proc == NULL) {
++			K_SPINLOCK_BREAK;
++		}
++		found = true;
++		live = !sys_dlist_is_empty(&proc->threads);
+ #ifdef CONFIG_SIGNAL
++		if ((signo != 0) && live) {
+ 			tid = process_sig_target(proc, signo);
+-#endif /* CONFIG_SIGNAL */
++			/* under the lock: the target cannot exit and reap cannot race
++			 * the queue. NULL target: every member masked, pend at
++			 * process scope.
++			 */
++			ret = (tid == NULL) ? z_sig_queue_process(proc, signo)
++					    : k_sig_queue(tid, signo, (union k_sig_val){0});
+ 		}
++#endif /* CONFIG_SIGNAL */
+ 	}
+ 
+ 	if (!found) {
+@@ -932,16 +912,13 @@ int z_impl_k_kill(k_pid_t pid, int signo)
+ 		/* existence check only; zombies exist until reaped */
+ 		return 0;
+ 	}
+-#ifdef CONFIG_SIGNAL
+-	if (tid == NULL) {
++	if (!live) {
+ 		return -ESRCH;
+ 	}
+-	if (tid == NULL) {
+-		/* every member has the signal masked: pend at process scope */
+-		return z_sig_queue_process(proc, signo);
+-	}
+-	return k_sig_queue(tid, signo, (union k_sig_val){0});
++#ifdef CONFIG_SIGNAL
++	return ret;
+ #else
++	ARG_UNUSED(ret);
+ 	return -ENOTSUP;
+ #endif /* CONFIG_SIGNAL */
+ }
+@@ -1364,13 +1341,15 @@ static void sigchld_notifier(void *p1, void *p2, void *p3)
+ 		exited = K_WIFEXITED(status);
+ 		parent = child->parent;
+ 		target = (parent == NULL) ? NULL : process_sig_target(parent, K_SIG_CHLD);
+-		k_spin_unlock(&process_lock, key);
+-
+-		if ((target != NULL) || (parent != NULL)) {
+-			/* best effort: the target may exit, or the queue may be full */
++		if (parent != NULL) {
++			/* under the lock: the target cannot exit and reap cannot race
++			 * the queue; a NULL target pends at the parent's process
++			 * scope. Best effort: the queue may be full.
++			 */
+ 			(void)z_sig_queue_chld(target, (target == NULL) ? parent : NULL, pid,
+ 					       status, exited);
+ 		}
++		k_spin_unlock(&process_lock, key);
+ 	}
+ }
+ 
