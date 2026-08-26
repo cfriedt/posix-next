@@ -50,7 +50,7 @@ static void *raise_entry(void *arg)
 {
 	sigset_t empty;
 	struct sigaction act = {
-		.sa_handler = SIG_IGN,
+		.sa_handler = child_ignores ? SIG_IGN : SIG_DFL,
 		.sa_flags = 0,
 	};
 
@@ -60,10 +60,13 @@ static void *raise_entry(void *arg)
 	(void)sigemptyset(&empty);
 	(void)sigprocmask(SIG_SETMASK, &empty, NULL);
 
-	if (child_ignores) {
-		(void)sigemptyset(&act.sa_mask);
-		(void)sigaction(child_signo, &act, NULL);
-	}
+	/*
+	 * Dispositions are process-wide, so the ignore left installed by
+	 * test_signals_reset() applies here too: install the disposition this
+	 * case asserts on explicitly.
+	 */
+	(void)sigemptyset(&act.sa_mask);
+	(void)sigaction(child_signo, &act, NULL);
 
 	(void)raise(child_signo);
 
