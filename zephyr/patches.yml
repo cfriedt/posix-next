@@ -1908,3 +1908,19 @@ patches:
       limits. The user-mode sys_clone() handler validates caller-provided
       thread/stack objects only when they are supplied; the pool path needs
       no caller objects.
+  - path: zephyr/sys-clone-sigmask.patch
+    sha256sum: 32f9e8da19d32a64771995848fe7b981f51ad108bc27b698b4b18b230b899ef0
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-17
+    upstreamable: true
+    comments: |
+      The clone args take an optional initial signal mask for the new
+      thread or leader: NULL keeps the thread-creation inheritance
+      rules; a non-NULL mask is vrfy-copied and seeded before the
+      thread first runs. As with k_sig_mask(), a user-mode request
+      cannot mask K_SIG_KILL or K_SIG_STOP, while a kernel-mode
+      caller's mask is honored verbatim. k_clone() carries the same
+      field with the same rule. This gives posix_spawn() a
+      caller-mode-independent way to implement POSIX_SPAWN_SETSIGMASK.

@@ -1,0 +1,257 @@
+diff --git a/lib/os/process.c b/lib/os/process.c
+index e3844ddf4d1..b7ac96bc702 100644
+--- a/lib/os/process.c
++++ b/lib/os/process.c
+@@ -701,6 +701,19 @@ int z_sys_clone_process(const struct sys_clone_args *args, k_pid_t *child)
+ 		proc->flags |= K_PROCESS_FLAG_LEADER_RELEASE;
+ 	}
+ 
++#ifdef CONFIG_SIGNAL
++	if (args->sigmask != NULL) {
++		tid->base.sig.mask = *args->sigmask;
++#ifdef CONFIG_USERSPACE
++		if (k_is_in_user_syscall()) {
++			/* as k_sig_mask(): user-mode requests cannot mask KILL or STOP */
++			tid->base.sig.mask.sig[0] &=
++				~(BIT64(K_SIG_KILL - 1) | BIT64(K_SIG_STOP - 1));
++		}
++#endif /* CONFIG_USERSPACE */
++	}
++#endif /* CONFIG_SIGNAL */
++
+ 	if (child != NULL) {
+ 		*child = tid;
+ 	}
+diff --git a/include/zephyr/kernel.h b/include/zephyr/kernel.h
+index fe0551e89dc..ce9af4ab749 100644
+--- a/include/zephyr/kernel.h
++++ b/include/zephyr/kernel.h
+@@ -8374,9 +8374,10 @@ __syscall int k_process_init(struct k_process *proc, const k_tid_t *threads,
+  * @ref K_CLONE_THREAD the thread becomes the leader of a new process
+  * initialized into the caller-provided record @a args->process, as
+  * k_process_init(); with @ref K_CLONE_THREAD it joins the calling process
+- * instead. The thread is started unless @ref K_CLONE_PAUSED is given. The
+- * kernel never allocates: every object is the caller's. sys_clone() layers
+- * pooled resources and numbering over this primitive.
++ * instead. An optional signal mask is seeded before the thread first runs,
++ * and the thread is started unless @ref K_CLONE_PAUSED is given. The kernel
++ * never allocates: every object is the caller's. sys_clone() layers pooled
++ * resources and numbering over this primitive.
+  *
+  * @param args creation arguments
+  * @param child filled with the new thread's handle (the process handle for a
+diff --git a/include/zephyr/kernel/process.h b/include/zephyr/kernel/process.h
+index 4585f644674..124c1dc45d7 100644
+--- a/include/zephyr/kernel/process.h
++++ b/include/zephyr/kernel/process.h
+@@ -34,6 +34,7 @@ typedef struct k_process_group *k_pgrp_t;
+ /** @brief Session handle */
+ typedef struct k_session *k_session_t;
+ 
++struct k_sig_set;
+ struct k_thread;
+ 
+ /**
+@@ -75,6 +76,13 @@ struct k_clone_args {
+ 	uint32_t options;
+ 	/** Process record led by the new thread; NULL with @ref K_CLONE_THREAD */
+ 	struct k_process *process;
++	/**
++	 * Initial signal mask of the new thread, or NULL for the
++	 * thread-creation inheritance rules. As with k_sig_mask(), a
++	 * user-mode request cannot mask K_SIG_KILL or K_SIG_STOP; a
++	 * kernel-mode caller may. Requires @kconfig{CONFIG_SIGNAL}.
++	 */
++	const struct k_sig_set *sigmask;
+ };
+ 
+ #if defined(CONFIG_PROCESS) || defined(__DOXYGEN__)
+diff --git a/include/zephyr/sys/thread.h b/include/zephyr/sys/thread.h
+index 64fd170bea2..d4bcd77ed59 100644
+--- a/include/zephyr/sys/thread.h
++++ b/include/zephyr/sys/thread.h
+@@ -19,6 +19,7 @@ extern "C" {
+ struct k_condvar;
+ struct k_mutex;
+ struct k_thread;
++struct k_sig_set;
+ 
+ /**
+  * @brief Create the child stopped
+@@ -64,6 +65,13 @@ struct sys_clone_args {
+ 	int prio;
+ 	/** Initial thread options (e.g. K_USER) */
+ 	uint32_t options;
++	/**
++	 * Initial signal mask of the created thread, or NULL for the
++	 * thread-creation inheritance rules. As with k_sig_mask(), a
++	 * user-mode request cannot mask K_SIG_KILL or K_SIG_STOP; a
++	 * kernel-mode caller may. Requires CONFIG_SIGNAL.
++	 */
++	const struct k_sig_set *sigmask;
+ };
+ 
+ /**
+diff --git a/kernel/process.c b/kernel/process.c
+index d9a6554d678..690e70cb54d 100644
+--- a/kernel/process.c
++++ b/kernel/process.c
+@@ -1222,6 +1222,9 @@ int z_impl_k_clone(const struct k_clone_args *args, k_tid_t *child)
+ 	if (thread_tier != (args->process == NULL)) {
+ 		return -EINVAL;
+ 	}
++	if ((args->sigmask != NULL) && !IS_ENABLED(CONFIG_SIGNAL)) {
++		return -EINVAL;
++	}
+ 
+ 	tid = k_thread_create(args->thread, args->stack, args->stack_size, args->entry, args->p1,
+ 			      args->p2, args->p3, args->prio, args->options, K_FOREVER);
+@@ -1234,6 +1237,19 @@ int z_impl_k_clone(const struct k_clone_args *args, k_tid_t *child)
+ 		}
+ 	}
+ 
++#ifdef CONFIG_SIGNAL
++	if (args->sigmask != NULL) {
++		tid->base.sig.mask = *args->sigmask;
++#ifdef CONFIG_USERSPACE
++		if (k_is_in_user_syscall()) {
++			/* as k_sig_mask(): user-mode requests cannot mask KILL or STOP */
++			tid->base.sig.mask.sig[0] &=
++				~(BIT64(K_SIG_KILL - 1) | BIT64(K_SIG_STOP - 1));
++		}
++#endif /* CONFIG_USERSPACE */
++	}
++#endif /* CONFIG_SIGNAL */
++
+ 	if (child != NULL) {
+ 		*child = tid;
+ 	}
+@@ -1251,11 +1267,20 @@ static inline int z_vrfy_k_clone(const struct k_clone_args *args, k_tid_t *child
+ 	struct k_clone_args copy;
+ 	size_t total_size, stack_obj_size;
+ 	struct k_object *stack_object;
++#ifdef CONFIG_SIGNAL
++	struct k_sig_set mask_copy;
++#endif /* CONFIG_SIGNAL */
+ 
+ 	K_OOPS(k_usermode_from_copy(&copy, args, sizeof(copy)));
+ 	if (child != NULL) {
+ 		K_OOPS(K_SYSCALL_MEMORY_WRITE(child, sizeof(*child)));
+ 	}
++#ifdef CONFIG_SIGNAL
++	if (copy.sigmask != NULL) {
++		K_OOPS(k_usermode_from_copy(&mask_copy, copy.sigmask, sizeof(mask_copy)));
++		copy.sigmask = &mask_copy;
++	}
++#endif /* CONFIG_SIGNAL */
+ 
+ 	if (copy.process != NULL) {
+ 		K_OOPS(K_SYSCALL_OBJ_NEVER_INIT(copy.process, K_OBJ_PROCESS));
+diff --git a/lib/os/clone.c b/lib/os/clone.c
+index deb49255d41..b9cfce56f26 100644
+--- a/lib/os/clone.c
++++ b/lib/os/clone.c
+@@ -69,6 +69,19 @@ static int clone_thread(const struct sys_clone_args *args, k_pid_t *child)
+ #endif /* CONFIG_USERSPACE */
+ 	}
+ 
++#ifdef CONFIG_SIGNAL
++	if (args->sigmask != NULL) {
++		tid->base.sig.mask = *args->sigmask;
++#ifdef CONFIG_USERSPACE
++		if (k_is_in_user_syscall()) {
++			/* as k_sig_mask(): user-mode requests cannot mask KILL or STOP */
++			tid->base.sig.mask.sig[0] &=
++				~(BIT64(K_SIG_KILL - 1) | BIT64(K_SIG_STOP - 1));
++		}
++#endif /* CONFIG_USERSPACE */
++	}
++#endif /* CONFIG_SIGNAL */
++
+ 	if (child != NULL) {
+ 		*child = tid;
+ 	}
+@@ -86,6 +99,9 @@ int z_impl_sys_clone(const struct sys_clone_args *args, k_pid_t *child)
+ 	    ((args->flags & ~(SYS_CLONE_PAUSED | SYS_CLONE_THREAD)) != 0U)) {
+ 		return -EINVAL;
+ 	}
++	if ((args->sigmask != NULL) && !IS_ENABLED(CONFIG_SIGNAL)) {
++		return -EINVAL;
++	}
+ 	if (args->entry == NULL) {
+ 		return -EINVAL;
+ 	}
+@@ -114,11 +130,20 @@ static inline int z_vrfy_sys_clone(const struct sys_clone_args *args, k_pid_t *c
+ 	struct sys_clone_args copy;
+ 	size_t total_size, stack_obj_size;
+ 	struct k_object *stack_object;
++#ifdef CONFIG_SIGNAL
++	struct k_sig_set mask_copy;
++#endif /* CONFIG_SIGNAL */
+ 
+ 	K_OOPS(k_usermode_from_copy(&copy, args, sizeof(copy)));
+ 	if (child != NULL) {
+ 		K_OOPS(K_SYSCALL_MEMORY_WRITE(child, sizeof(*child)));
+ 	}
++#ifdef CONFIG_SIGNAL
++	if (copy.sigmask != NULL) {
++		K_OOPS(k_usermode_from_copy(&mask_copy, copy.sigmask, sizeof(mask_copy)));
++		copy.sigmask = &mask_copy;
++	}
++#endif /* CONFIG_SIGNAL */
+ 
+ 	if (copy.thread == NULL) {
+ 		/* pool-drawn thread: no caller objects to validate */
+diff --git a/tests/kernel/process/src/main.c b/tests/kernel/process/src/main.c
+index eda72dfdbdb..7d472bfed27 100644
+--- a/tests/kernel/process/src/main.c
++++ b/tests/kernel/process/src/main.c
+@@ -245,6 +245,28 @@ ZTEST(kernel_process, test_spawn)
+ 	zassert_ok(sys_clone(&args, NULL));
+ 	zassert_ok(k_waitpid(child, NULL, NULL, 0, K_FOREVER));
+ 
++#ifdef CONFIG_SIGNAL
++	/* a kernel caller's explicit mask is honored verbatim, KILL included */
++	struct sys_clone_args pargs = {
++		.flags = SYS_CLONE_PAUSED,
++		.entry = spawn_entry_exit,
++		.p1 = (void *)(intptr_t)4,
++		.thread = &spawn_thread_b,
++		.stack = spawn_stack_b,
++		.stack_size = STATIC_PROC_STACK_SIZE,
++		.prio = K_LOWEST_APPLICATION_THREAD_PRIO,
++	};
++	struct k_sig_set spawn_fill;
++
++	k_sig_fillset(&spawn_fill);
++	pargs.sigmask = &spawn_fill;
++	zassert_ok(sys_clone(&pargs, NULL));
++	zassert_equal(k_sig_ismember(&spawn_thread_b.base.sig.mask, K_SIG_KILL), 1);
++	zassert_equal(k_sig_ismember(&spawn_thread_b.base.sig.mask, K_SIG_STOP), 1);
++	k_thread_start(&spawn_thread_b);
++	zassert_ok(k_waitpid(&spawn_thread_b, NULL, NULL, 0, K_FOREVER));
++#endif /* CONFIG_SIGNAL */
++
+ 	/* the thread tier: a member of this process, not a new process */
+ 	k_pid_t seen = NULL;
+ 	k_tid_t member = NULL;
+@@ -922,8 +944,19 @@ ZTEST(kernel_process, test_k_clone)
+ 		.stack_size = STATIC_PROC_STACK_SIZE,
+ 		.prio = K_LOWEST_APPLICATION_THREAD_PRIO,
+ 	};
++#ifdef CONFIG_SIGNAL
++	/* a kernel caller's explicit mask is honored verbatim, KILL included */
++	struct k_sig_set fill;
++
++	k_sig_fillset(&fill);
++	bad.sigmask = &fill;
++#endif /* CONFIG_SIGNAL */
+ 	zassert_ok(k_clone(&bad, &child));
+ 	zassert_equal(child, &child_b);
++#ifdef CONFIG_SIGNAL
++	zassert_equal(k_sig_ismember(&child->base.sig.mask, K_SIG_KILL), 1);
++	zassert_equal(k_sig_ismember(&child->base.sig.mask, K_SIG_STOP), 1);
++#endif /* CONFIG_SIGNAL */
+ 	k_thread_start(child);
+ 	zassert_ok(k_thread_join(child, K_SECONDS(5)));
+ 	zassert_equal(seen, k_getpid());
