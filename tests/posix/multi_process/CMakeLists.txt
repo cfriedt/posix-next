@@ -5,6 +5,11 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(posix_multi_process)
 
 FILE(GLOB app_sources src/*.c)
-target_sources(app PRIVATE ${app_sources} ../shared/msleep.c)
+target_sources(app PRIVATE ${app_sources} ../shared/msleep.c ../spawn/src/image_registry.c)
+target_include_directories(app PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/../spawn/src
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../../lib/posix/options/shared
+)
+zephyr_linker_sources(DATA_SECTIONS ${CMAKE_CURRENT_SOURCE_DIR}/../spawn/iterables.ld)
 
 target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)

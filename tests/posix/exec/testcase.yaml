@@ -1,0 +1,34 @@
+common:
+  tags:
+    - posix
+    - exec
+    - llext
+  extra_configs:
+    # MMU targets round every llext region up to a 4 KiB-aligned block
+    - platform:qemu_cortex_a53/qemu_cortex_a53:CONFIG_LLEXT_HEAP_SIZE=64
+    - platform:qemu_x86/atom:CONFIG_LLEXT_HEAP_SIZE=64
+    - platform:qemu_x86_64/atom:CONFIG_LLEXT_HEAP_SIZE=64
+tests:
+  # execute-from-RAM with memory protection off; MMU/PMP platforms map kernel
+  # RAM executable and need no protection carve-out at all
+  portability.posix.exec.llext:
+    platform_allow:
+      - mps2/an385
+      - qemu_cortex_a53
+      - qemu_riscv32
+      - qemu_riscv64
+      - qemu_x86
+      - qemu_x86_64
+    integration_platforms:
+      - mps2/an385
+  # XIP MPU platforms map RAM execute-never: the image's partitions enter the
+  # caller's memory domain as dynamic regions, which need CONFIG_USERSPACE
+  portability.posix.exec.llext.mpu:
+    platform_allow:
+      - mps2/an385
+    integration_platforms:
+      - mps2/an385
+    extra_configs:
+      - CONFIG_ARM_MPU=y
+      - CONFIG_USERSPACE=y
+      - CONFIG_TEST_USERSPACE_WITHOUT_HW_STACK_PROTECTION=y
