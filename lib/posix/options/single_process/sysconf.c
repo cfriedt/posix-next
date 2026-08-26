@@ -66,7 +66,7 @@ long sysconf(int name)
 	case _SC_SHELL:
 		return -1L;
 	case _SC_SPAWN:
-		return -1L;
+		return COND_CODE_1(CONFIG_POSIX_SPAWN, (_POSIX_VERSION), (-1L));
 	case _SC_SPIN_LOCKS:
 		return COND_CODE_1(CONFIG_POSIX_SPIN_LOCKS, (_POSIX_VERSION), (-1L));
 	case _SC_SPORADIC_SERVER:
