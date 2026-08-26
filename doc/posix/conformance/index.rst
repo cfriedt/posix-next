@@ -53,7 +53,7 @@ POSIX System Interfaces
    :header: Symbol, Support, Remarks
    :widths: 50, 10, 50
 
-    _POSIX_JOB_CONTROL, -1, :ref:`†<posix_undefined_behaviour>`
+    _POSIX_JOB_CONTROL, 200809L, :kconfig:option:`CONFIG_POSIX_MULTI_PROCESS`
     _POSIX_REGEXP, -1, :ref:`†<posix_undefined_behaviour>`
     _POSIX_SAVED_IDS, -1, :ref:`†<posix_undefined_behaviour>`
     _POSIX_SHELL, -1, :ref:`†<posix_undefined_behaviour>`
