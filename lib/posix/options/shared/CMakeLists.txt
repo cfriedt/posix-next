@@ -65,3 +65,38 @@ if(CONFIG_POSIX_DEVICE_IO AND NOT CONFIG_TC_PROVIDES_POSIX_DEVICE_IO)
   zephyr_library_sources(timeval_to_timespec.c)
 endif()
 
+
+set(NEED_POSIX_ATFORK FALSE)
+if(CONFIG_POSIX_THREADS AND NOT CONFIG_TC_PROVIDES_POSIX_THREADS)
+  set(NEED_POSIX_ATFORK TRUE)
+endif()
+if(CONFIG_POSIX_MULTI_PROCESS AND NOT CONFIG_TC_PROVIDES_POSIX_MULTI_PROCESS)
+  set(NEED_POSIX_ATFORK TRUE)
+endif()
+if(NEED_POSIX_ATFORK)
+  zephyr_library_sources(atfork_common.c)
+
+  # Import all custom POSIX_THREAD_ATFORK_MIN_ requirements
+  import_kconfig(CONFIG_POSIX_THREAD_ATFORK_MIN_ ${DOTCONFIG} atfork_min_keys)
+
+  set(atfork_max 0)
+  foreach(min_size ${atfork_min_keys})
+    if(${min_size} GREATER ${atfork_max})
+      set(atfork_max ${${min_size}})
+    endif()
+  endforeach()
+
+  if(CONFIG_POSIX_THREAD_ATFORK_MAX LESS "${atfork_max}")
+    # Only warn if default value 0 has been modified
+    if(NOT CONFIG_POSIX_THREAD_ATFORK_MAX EQUAL 0)
+      message(WARNING "
+        CONFIG_POSIX_THREAD_ATFORK_MAX is less than requested minimum:
+          ${CONFIG_POSIX_THREAD_ATFORK_MAX} < ${atfork_max}
+        Setting the pthread_atfork() table size to ${atfork_max}")
+    endif()
+  else()
+    set(atfork_max ${CONFIG_POSIX_THREAD_ATFORK_MAX})
+  endif()
+
+  zephyr_compile_definitions(POSIX_THREAD_ATFORK_MAX=${atfork_max})
+endif()
