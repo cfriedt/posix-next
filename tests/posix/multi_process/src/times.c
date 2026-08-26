@@ -1,14 +1,60 @@
 /*
- * Copyright (c) 2025 Tenstorrent AI ULC
+ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include <stdlib.h>
 #include <sys/times.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 #include <zephyr/kernel.h>
+#include <zephyr/sys/process.h>
 #include <zephyr/sys/util.h>
 #include <zephyr/ztest.h>
+
+static K_THREAD_STACK_DEFINE(burner_stack, 1024);
+static struct k_thread burner_thread;
+
+static void burner_entry(void *p1, void *p2, void *p3)
+{
+	ARG_UNUSED(p1);
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	/* burn a measurable slice of CPU, then exit; k_busy_wait() also
+	 * advances simulated time, which a compute loop does not
+	 */
+	k_busy_wait(20U * USEC_PER_MSEC);
+	k_exit(0);
+}
+
+static void spawn_burner_check(void)
+{
+	struct tms before = {0};
+	struct tms after = {0};
+	struct sys_clone_args args = {
+		.entry = burner_entry,
+		.thread = &burner_thread,
+		.stack = burner_stack,
+		.stack_size = 1024,
+		.prio = k_thread_priority_get(k_current_get()),
+	};
+	k_pid_t child = NULL;
+	pid_t pid;
+
+	(void)times(&before);
+	zassert_ok(sys_clone(&args, &child));
+	pid = (pid_t)sys_process_id(child);
+	zassert_true(pid > 0);
+	zassert_equal(waitpid(pid, NULL, 0), pid);
+	(void)times(&after);
+
+	zassert_true(after.tms_cutime > before.tms_cutime,
+		     "cutime did not grow after reaping a busy child: %ld -> %ld",
+		     (long)before.tms_cutime, (long)after.tms_cutime);
+}
 
 ZTEST(posix_multi_process, test_times)
 {
@@ -59,5 +105,10 @@ ZTEST(posix_multi_process, test_times)
 
 		zexpect_true(t1 >= t0, "time moved backward for tms_%s: t0: %ld t1: %ld", name, t0,
 			     t1);
+	}
+
+	if (!IS_ENABLED(CONFIG_NATIVE_LIBC) && !k_is_user_context()) {
+		/* a reaped CPU-burning child must add to the parent's cutime */
+		spawn_burner_check();
 	}
 }
