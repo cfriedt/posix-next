@@ -38,6 +38,7 @@
 #include <semaphore.h>
 #include <setjmp.h>
 #include <signal.h>
+#include <spawn.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -553,6 +554,31 @@ EXPORT_SYMBOL(sched_setscheduler);
 EXPORT_SYMBOL(shm_open);
 EXPORT_SYMBOL(shm_unlink);
 #endif /* CONFIG_POSIX_SHARED_MEMORY_OBJECTS */
+
+/* SPAWN */
+#ifdef CONFIG_POSIX_SPAWN
+EXPORT_SYMBOL(posix_spawn);
+EXPORT_SYMBOL(posix_spawn_file_actions_addclose);
+EXPORT_SYMBOL(posix_spawn_file_actions_adddup2);
+EXPORT_SYMBOL(posix_spawn_file_actions_addopen);
+EXPORT_SYMBOL(posix_spawn_file_actions_destroy);
+EXPORT_SYMBOL(posix_spawn_file_actions_init);
+EXPORT_SYMBOL(posix_spawnattr_destroy);
+EXPORT_SYMBOL(posix_spawnattr_getflags);
+EXPORT_SYMBOL(posix_spawnattr_getpgroup);
+EXPORT_SYMBOL(posix_spawnattr_getschedparam);
+EXPORT_SYMBOL(posix_spawnattr_getschedpolicy);
+EXPORT_SYMBOL(posix_spawnattr_getsigdefault);
+EXPORT_SYMBOL(posix_spawnattr_getsigmask);
+EXPORT_SYMBOL(posix_spawnattr_init);
+EXPORT_SYMBOL(posix_spawnattr_setflags);
+EXPORT_SYMBOL(posix_spawnattr_setpgroup);
+EXPORT_SYMBOL(posix_spawnattr_setschedparam);
+EXPORT_SYMBOL(posix_spawnattr_setschedpolicy);
+EXPORT_SYMBOL(posix_spawnattr_setsigdefault);
+EXPORT_SYMBOL(posix_spawnattr_setsigmask);
+EXPORT_SYMBOL(posix_spawnp);
+#endif /* CONFIG_POSIX_SPAWN */
 
 /* SYNCHRONIZED_IO */
 #ifdef CONFIG_POSIX_SYNCHRONIZED_IO
