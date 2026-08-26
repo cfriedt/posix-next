@@ -75,7 +75,7 @@ POSIX System Interfaces
     :ref:`_POSIX_PRIORITY_SCHEDULING<posix_option_priority_scheduling>`, 200809L, :kconfig:option:`CONFIG_POSIX_PRIORITY_SCHEDULING`
     :ref:`_POSIX_RAW_SOCKETS<posix_option_raw_sockets>`, 200809L, :kconfig:option:`CONFIG_POSIX_RAW_SOCKETS`
     :ref:`_POSIX_SHARED_MEMORY_OBJECTS <posix_option_shared_memory_objects>`, 200809L, :kconfig:option:`CONFIG_POSIX_SHARED_MEMORY_OBJECTS`
-    :ref:`_POSIX_SPAWN <posix_option_spawn>`, -1, :ref:`†<posix_undefined_behaviour>`
+    :ref:`_POSIX_SPAWN <posix_option_spawn>`, 200809L, :kconfig:option:`CONFIG_POSIX_SPAWN`
     _POSIX_SPORADIC_SERVER, -1, :ref:`†<posix_undefined_behaviour>`
     :ref:`_POSIX_SYNCHRONIZED_IO <posix_option_synchronized_io>`, 200809L, :kconfig:option:`CONFIG_POSIX_SYNCHRONIZED_IO`
     :ref:`_POSIX_THREAD_ATTR_STACKADDR<posix_option_thread_attr_stackaddr>`, 200809L, :kconfig:option:`CONFIG_POSIX_THREAD_ATTR_STACKADDR`
