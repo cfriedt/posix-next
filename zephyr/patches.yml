@@ -2883,6 +2883,36 @@ patches:
       object (k_kill_pgrp() loses its batched resolve-then-signal loop).
       k_kill() also now distinguishes an empty (zombie) process (-ESRCH)
       from a fully-masked one (pend at process scope).
+  - path: zephyr/sys-clone-pool-leader.patch
+    sha256sum: 50886a9d6f29f3d8a2146ad1efa6992ed5e0f9cf04f4cdff76091bf494753fd9
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-16
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/k-signal-process-scope.patch
+    comments: |
+      Rebased onto v4.5.0-rc1: the join epilogue lives in kernel/thread.c there.
+      sys_clone() gains the pool-drawn leader tier: when the caller provides
+      no thread object, the leader thread and its stack come from the system
+      thread pools via sys_thread_create_paused(), and the record is marked
+      K_PROCESS_FLAG_LEADER_RELEASE. A pool leader's TCB remains the
+      process's pid identity until reap, so the destruction paths reached
+      by k_thread_rejoin() and detached exit first ask
+      z_process_leader_pinned() (under the process lock): joining a dead
+      leader is synchronization only, and the release stays with the reap
+      path. At reap the kernel calls z_process_leader_release()
+      (static-inline no-op without CONFIG_SYS_PROCESS) for pool-owned
+      leaders only; lib/os parks the dead leader on a release list drained
+      at the next spawn, where
+      sys_thread_destroy() returns thread and stack to the pools - reap can
+      run under the scheduler lock, where the pools' heap tier is off
+      limits. The user-mode sys_clone() handler validates caller-provided
+      thread/stack objects only when they are supplied; the pool path needs
+      no caller objects.
   - path: zephyr/libc-sys-stat-utime-markers.patch
     sha256sum: 8edfcf83058522bb80d601e92c4a9e6be14baec04cf8253ffbd344fbadf05b78
     module: zephyr
