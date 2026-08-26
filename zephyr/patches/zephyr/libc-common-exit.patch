@@ -1,0 +1,170 @@
+diff --git a/lib/libc/common/CMakeLists.txt b/lib/libc/common/CMakeLists.txt
+index a7adcea58a8..6d380a0385c 100644
+--- a/lib/libc/common/CMakeLists.txt
++++ b/lib/libc/common/CMakeLists.txt
+@@ -24,6 +24,8 @@ zephyr_library_sources_ifdef(CONFIG_COMMON_LIBC_THRD
+ zephyr_library_sources_ifdef(CONFIG_COMMON_LIBC_REMOVE source/stdio/remove.c)
+ zephyr_library_sources_ifdef(CONFIG_COMMON_LIBC_FCLOSE source/stdio/fclose.c)
+ zephyr_library_sources_ifdef(CONFIG_COMMON_LIBC_FOPEN source/stdio/fopen.c)
++zephyr_library_sources_ifdef(CONFIG_COMMON_LIBC_UNDERSCORE_EXIT source/stdlib/_exit.c)
++zephyr_library_sources_ifdef(CONFIG_COMMON_LIBC_EXIT source/stdlib/exit.c)
+ zephyr_library_sources_ifdef(CONFIG_COMMON_LIBC_TMPFILE source/stdio/tmpfile.c)
+ 
+ # Prevent compiler from optimizing calloc into an infinite recursive call
+diff --git a/lib/libc/common/Kconfig b/lib/libc/common/Kconfig
+index a3f2cc179a8..991d74c1a71 100644
+--- a/lib/libc/common/Kconfig
++++ b/lib/libc/common/Kconfig
+@@ -160,6 +160,36 @@ config COMMON_LIBC_FOPEN
+ 	  C library FILE to the descriptor with zvfs_libc_fdopen(), whose storage comes from the
+ 	  statically-allocated ZVFS FILE store (no dynamic allocation).
+ 
++config COMMON_LIBC_UNDERSCORE_EXIT
++	bool "Common C library _exit()"
++	default y if PROCESS
++	help
++	  Common implementation of _exit(). With CONFIG_PROCESS it terminates
++	  the calling thread's process via k_exit(); otherwise it reports and
++	  halts, as the per-C-library stubs do. Overrides the weak picolibc and
++	  newlib stubs and replaces the minimal libc stub.
++
++config COMMON_LIBC_EXIT
++	bool "Common C library exit() and atexit()"
++	depends on MINIMAL_LIBC || PICOLIBC
++	default y
++	help
++	  Common implementation of exit() and atexit(): registered handlers run
++	  in reverse registration order, then _exit() terminates the program.
++	  For picolibc this replaces the prebuilt library's exit path, whose
++	  atexit() registers handlers into a stub, so the ISO C exit sequence
++	  is observable. Deviation from ISO C: open streams are not flushed and
++	  functions registered via the fini-array mechanism do not run.
++
++config COMMON_LIBC_ATEXIT_MAX
++	int "Maximum number of atexit() registrations"
++	depends on COMMON_LIBC_EXIT
++	range 1 4096
++	default 32
++	help
++	  Maximum number of handlers that can be registered with atexit().
++	  ISO C requires support for at least 32 registrations.
++
+ config COMMON_LIBC_TMPFILE
+ 	bool "Common C library tmpfile()/tmpnam()"
+ 	depends on !SEMIHOST
+diff --git a/lib/libc/common/source/stdlib/exit.c b/lib/libc/common/source/stdlib/exit.c
+new file mode 100644
+index 00000000000..80c8acd0f27
+--- /dev/null
++++ b/lib/libc/common/source/stdlib/exit.c
+@@ -0,0 +1,52 @@
++/*
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <stdlib.h>
++
++#include <zephyr/sys/atomic.h>
++#include <zephyr/sys/libc-hooks.h>
++#include <zephyr/toolchain.h>
++
++/* not declared by every C library's stdlib.h */
++extern FUNC_NORETURN void _exit(int status);
++
++/*
++ * Lock-free and callable from user mode: a slot is reserved by atomically
++ * incrementing the count, then the handler pointer is stored; exit() skips
++ * slots whose store has not yet landed.
++ */
++Z_LIBC_DATA static void (*atexit_handlers[CONFIG_COMMON_LIBC_ATEXIT_MAX])(void);
++Z_LIBC_DATA static atomic_t atexit_count;
++
++int atexit(void (*func)(void))
++{
++	atomic_val_t slot;
++
++	if (func == NULL) {
++		return -1;
++	}
++
++	do {
++		slot = atomic_get(&atexit_count);
++		if (slot >= CONFIG_COMMON_LIBC_ATEXIT_MAX) {
++			return -1;
++		}
++	} while (!atomic_cas(&atexit_count, slot, slot + 1));
++
++	atexit_handlers[slot] = func;
++
++	return 0;
++}
++
++FUNC_NORETURN void exit(int status)
++{
++	for (int i = (int)atomic_get(&atexit_count) - 1; i >= 0; i--) {
++		if (atexit_handlers[i] != NULL) {
++			atexit_handlers[i]();
++		}
++	}
++
++	_exit(status);
++}
+diff --git a/lib/libc/minimal/CMakeLists.txt b/lib/libc/minimal/CMakeLists.txt
+index edc7bf624bd..8df19dfce1c 100644
+--- a/lib/libc/minimal/CMakeLists.txt
++++ b/lib/libc/minimal/CMakeLists.txt
+@@ -22,8 +22,6 @@ zephyr_library_sources(
+   source/stdlib/strtoll.c
+   source/stdlib/strtoull.c
+   source/stdlib/bsearch.c
+-  source/stdlib/atexit.c
+-  source/stdlib/exit.c
+   source/stdlib/qsort.c
+   source/string/strerror.c
+   source/string/strstr.c
+@@ -42,6 +40,7 @@ zephyr_library_sources(
+ )
+ 
+ zephyr_library_sources_ifdef(CONFIG_ZVFS source/stdio/zvfs_libc.c)
++zephyr_library_sources_ifndef(CONFIG_COMMON_LIBC_UNDERSCORE_EXIT source/stdlib/exit.c)
+ 
+ if(CONFIG_STD_C23)
+   # pull in from posix-next, since the libc must provide this for c23
+diff --git a/lib/libc/common/source/stdlib/_exit.c b/lib/libc/common/source/stdlib/_exit.c
+new file mode 100644
+index 00000000000..d3ff8515c64
+--- /dev/null
++++ b/lib/libc/common/source/stdlib/_exit.c
+@@ -0,0 +1,31 @@
++/*
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <stdlib.h>
++
++#include <zephyr/kernel.h>
++#include <zephyr/sys/printk.h>
++#include <zephyr/toolchain.h>
++
++/*
++ * Common _exit(): with process support, terminate the calling thread's
++ * process; otherwise there is no process to end, so report and spin as the
++ * per-libc stubs did. This strong definition overrides the weak picolibc and
++ * newlib stubs; the minimal libc's non-weak stub is gated out at build time.
++ */
++FUNC_NORETURN void _exit(int status)
++{
++#ifdef CONFIG_PROCESS
++	k_exit(status);
++#else
++	ARG_UNUSED(status);
++
++	printk("exit\n");
++#endif
++
++	while (1) {
++		Z_SPIN_DELAY(100);
++	}
++}
