@@ -78,7 +78,7 @@ are listed below, for reference, in terms that agree with the current POSIX-1 st
 
           :ref:`POSIX_DEVICE_IO <posix_option_group_device_io>`, yes, :kconfig:option:`CONFIG_POSIX_DEVICE_IO`
           :ref:`POSIX_FILE_LOCKING <posix_option_group_file_locking>`, yes, :kconfig:option:`CONFIG_POSIX_FILE_LOCKING`
-          :ref:`POSIX_SIGNALS <posix_option_group_signals>`, yes, :kconfig:option:`CONFIG_POSIX_SIGNALS` :ref:`†<posix_undefined_behaviour>`
+          :ref:`POSIX_SIGNALS <posix_option_group_signals>`, yes, :kconfig:option:`CONFIG_POSIX_SIGNALS`
           :ref:`POSIX_SINGLE_PROCESS <posix_option_group_single_process>`, yes, :kconfig:option:`CONFIG_POSIX_SINGLE_PROCESS`
           :ref:`POSIX_THREADS_EXT <posix_option_group_posix_threads_ext>`, yes, :kconfig:option:`CONFIG_POSIX_THREADS_EXT`
 
@@ -176,7 +176,7 @@ are listed below, for reference, in terms that agree with the current POSIX-1 st
          :header: Symbol, Support, Remarks
          :widths: 50, 10, 50
 
-          :ref:`POSIX_MULTI_PROCESS <posix_option_group_multi_process>`,, :kconfig:option:`CONFIG_POSIX_MULTI_PROCESS` :ref:`†<posix_undefined_behaviour>`
+          :ref:`POSIX_MULTI_PROCESS <posix_option_group_multi_process>`,yes, :kconfig:option:`CONFIG_POSIX_MULTI_PROCESS`
           :ref:`POSIX_NETWORKING <posix_option_group_networking>`,yes, :kconfig:option:`CONFIG_POSIX_NETWORKING` :ref:`†<posix_undefined_behaviour>`
           :ref:`POSIX_PIPE <posix_option_group_pipe>`,,
           :ref:`POSIX_SIGNAL_JUMP <posix_option_group_signal_jump>`,,
