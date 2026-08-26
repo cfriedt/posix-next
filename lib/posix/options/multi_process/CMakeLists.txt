@@ -14,5 +14,30 @@ zephyr_library_compile_options(-U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
 zephyr_library_compile_options_ifdef(CONFIG_XSI -U_XOPEN_SOURCE -D_XOPEN_SOURCE=700)
 
 if(NOT CONFIG_TC_PROVIDES_POSIX_MULTI_PROCESS)
-  zephyr_library_sources(sleep.c multi_process.c)
+  zephyr_library_sources(
+    exec_resolve.c
+    execl.c
+    execl_argv.c
+    execle.c
+    execlp.c
+    execv.c
+    execve.c
+    exec_run.c
+    execvp.c
+    fork.c
+    posix_spawn_image.c
+    getpgid.c
+    getpgrp.c
+    getpid.c
+    getppid.c
+    getsid.c
+    setpgid.c
+    setsid.c
+    sleep.c
+    times.c
+    wait.c
+    waitid.c
+    waitpid.c
+  )
+  zephyr_library_sources_ifdef(CONFIG_POSIX_EXEC_LLEXT exec_llext.c)
 endif()
