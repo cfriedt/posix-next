@@ -1,18 +1,67 @@
-# Copyright (c) 2024 Tenstorrent AI ULC
-#
+# SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
 # SPDX-License-Identifier: Apache-2.0
 
 menuconfig POSIX_MULTI_PROCESS
 	bool "POSIX multi-process support"
+	select PROCESS
+	select SYS_PROCESS
 	select SCHED_THREAD_USAGE # times()
 	select THREAD_RUNTIME_STATS
 	help
 	  Support for multi-processing.
 
-	  Note: Currently Zephyr does not support multiple processes and therefore much of this option
-	  group is not implemented and is considered undefined behaviour.
+	  The kernel process object (CONFIG_PROCESS) provides process identity,
+	  the process/session hierarchy, exit status, and wait semantics.
 
 if POSIX_MULTI_PROCESS
+
+config POSIX_EXEC_LLEXT
+	bool "exec loads ELF extensions from the filesystem"
+	depends on LLEXT && FILE_SYSTEM
+	help
+	  When a path passed to the exec family does not name a prelinked
+	  image, load it from the filesystem as a linkable loadable extension
+	  (llext) and run its exported main() as the new process image; the
+	  return value of main() becomes the process's exit status.
+
+config POSIX_EXEC_LLEXT_MAX
+	int "Maximum concurrently loaded exec'd extensions"
+	depends on POSIX_EXEC_LLEXT
+	default 4
+	help
+	  Size of the table tracking which loaded extension backs each exec'd
+	  process, so the extension can be unloaded when the process is
+	  reaped. exec fails with ENOMEM when the table is full.
+
+config POSIX_EXEC_ARG_BYTES
+	int "Combined argv/envp string budget across exec"
+	default 256
+	help
+	  Total bytes of argument and environment strings copied into the
+	  exec'd image. Longer combined vectors fail with E2BIG.
+
+config POSIX_EXEC_PATH_MAX
+	int "Maximum resolved executable path length"
+	default 64
+	help
+	  Buffer size for resolving a bare execvp()/execlp() name against the
+	  default path prefix.
+
+config POSIX_EXEC_PATH_PREFIX
+	string "Default path prefix for bare execvp()/execlp() names"
+	default "/bin/"
+	help
+	  Prefix prepended to a bare (slash-free) name by execvp()/execlp()
+	  before image resolution, a stand-in for PATH until an environment
+	  and a filesystem of executable images exist.
+
+config POSIX_EXEC_ARGS_MAX
+	int "Maximum argument count for the execl() family"
+	default 16
+	help
+	  Bound on the number of arguments the execl()/execle()/execlp()
+	  variadic wrappers collect before handing off to execve(). Longer
+	  argument lists fail with E2BIG.
 
 # These options are intended to be used for compatibility with external POSIX
 # implementations such as those in Newlib or Picolibc.
