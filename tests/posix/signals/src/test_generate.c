@@ -43,13 +43,6 @@ ZTEST_USER(posix_signals, test_kill)
 	zassert_equal(-1, kill(getpid(), -1));
 	zassert_equal(EINVAL, errno);
 
-	/*
-	 * TODO (processes): kill() can only name the calling thread, via getpid(), or a specific
-	 * thread, via a pthread_t cast to pid_t. Delivery to another process, to a process group
-	 * (pid <= 0), and the ESRCH/EPERM cases that go with them are untestable until Zephyr has
-	 * processes.
-	 */
-
 	/* signal 0 performs error checking but delivers nothing */
 	test_signals_install(SIGUSR1, test_signals_handler, 0);
 	zassert_ok(kill(getpid(), 0));
@@ -60,6 +53,32 @@ ZTEST_USER(posix_signals, test_kill)
 	zassert_true(test_signals_wait_for_delivery(1), "the handler ran %d times, expected 1",
 		     test_signals_state.calls);
 	zassert_equal(SIGUSR1, test_signals_state.signo);
+
+	/* Skip on the host libc, where kill(0, ...) would signal the real process group */
+	if (IS_ENABLED(CONFIG_PROCESS) && !IS_ENABLED(CONFIG_NATIVE_LIBC)) {
+		test_signals_reset(SIGUSR1);
+		test_signals_install(SIGUSR1, test_signals_handler, 0);
+		zassert_ok(kill(0, 0));
+		zassert_equal(0, test_signals_state.calls, "group signal 0 was delivered");
+	}
+
+	/* single implicit process: 0 and -1 name it; skip host libc (real kill) */
+	if (IS_ENABLED(CONFIG_POSIX_SINGLE_PROCESS) && !IS_ENABLED(CONFIG_POSIX_MULTI_PROCESS) &&
+	    !IS_ENABLED(CONFIG_NATIVE_LIBC)) {
+		for (pid_t self = 0; self >= -1; self--) {
+			test_signals_reset(SIGUSR1);
+			test_signals_install(SIGUSR1, test_signals_handler, 0);
+			zassert_ok(kill(self, SIGUSR1));
+			zassert_true(test_signals_wait_for_delivery(1),
+				     "kill(%d) handler ran %d times, expected 1", (int)self,
+				     test_signals_state.calls);
+			zassert_equal(SIGUSR1, test_signals_state.signo);
+		}
+
+		errno = 0;
+		zassert_equal(-1, kill(getpid() + 1, 0));
+		zassert_equal(ESRCH, errno);
+	}
 
 	/*
 	 * Blocking is not exercised here. It is a property of the calling thread, and kill() is
