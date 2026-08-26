@@ -189,7 +189,7 @@ are listed below, for reference, in terms that agree with the current POSIX-1 st
           :ref:`_POSIX_PRIORITIZED_IO <posix_option_prioritized_io>`, 200809L, :kconfig:option:`CONFIG_POSIX_PRIORITIZED_IO`
           :ref:`_POSIX_PRIORITY_SCHEDULING <posix_option_priority_scheduling>`, 200809L, :kconfig:option:`CONFIG_POSIX_PRIORITY_SCHEDULING`
           :ref:`_POSIX_RAW_SOCKETS <posix_option_raw_sockets>`, 200809L, :kconfig:option:`CONFIG_POSIX_RAW_SOCKETS`
-          _POSIX_SPAWN, -1, :ref:`†<posix_undefined_behaviour>`
+          _POSIX_SPAWN, 200809L, :kconfig:option:`CONFIG_POSIX_SPAWN`
           _POSIX_SPORADIC_SERVER, -1, :ref:`†<posix_undefined_behaviour>`
 
 
