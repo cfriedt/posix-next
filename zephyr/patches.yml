@@ -2263,3 +2263,37 @@ patches:
       rather than include_next, following the sys/select.h and
       sys/statvfs.h precedents: independent C library headers must be
       independent.
+  - path: zephyr/libc-common-exit.patch
+    sha256sum: 842c3d6603b9a8edc09e25f8c58058993d4fd1243994e9a46b747b1a0768e10b
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-10
+    upstreamable: true
+    comments: |
+      Promote exit() and atexit() from the minimal libc into the common C
+      library (COMMON_LIBC_EXIT, following the COMMON_LIBC_TMPFILE
+      precedent), with the registry sized by COMMON_LIBC_ATEXIT_MAX
+      (default 32, the ISO C minimum, replacing minimal's 8 fixed slots).
+
+      This also makes the ISO C exit sequence real for picolibc: the
+      prebuilt (SDK) picolibc registers atexit() handlers into a stub and
+      its exit() runs only __libc_fini_array before _exit, so handlers
+      never execute. With COMMON_LIBC_EXIT (default y for minimal libc
+      and picolibc), exit() runs registered handlers in reverse
+      registration order and then _exit() terminates the program.
+
+      Documented deviations, unchanged from the minimal libc behaviour:
+      open streams are not flushed on exit and fini-array functions do
+      not run (nothing on Zephyr registers them at exit today; newlib
+      keeps its own complete exit machinery and is not affected).
+
+      Route _exit() to k_exit() when CONFIG_PROCESS is enabled, so exit()
+      and _exit() terminate the calling thread's process rather than
+      spinning forever. Provided as a common C library unit
+      (COMMON_LIBC_UNDERSCORE_EXIT, default y when PROCESS is set): the
+      strong definition overrides the weak picolibc and newlib stubs, and
+      the minimal libc's non-weak stub is gated out at build time. Without
+      CONFIG_PROCESS the common _exit() reproduces the prior
+      report-and-halt behaviour, and the per-C-library stubs are used as
+      before.
