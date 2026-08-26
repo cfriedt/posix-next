@@ -11,7 +11,7 @@
 
 #include <zephyr/sys/util.h>
 
-#define Z_CS_PATH "/bin:/usr/bin"
+#define Z_CS_PATH CONFIG_POSIX_DEFAULT_PATH
 #define Z_CS_ENV "POSIXLY_CORRECT=1"
 #define Z_CS_EMPTY ""
 

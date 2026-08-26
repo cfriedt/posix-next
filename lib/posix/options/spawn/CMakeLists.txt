@@ -15,7 +15,6 @@ zephyr_library_compile_options(-U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
 if(NOT CONFIG_TC_PROVIDES_POSIX_SPAWN)
   zephyr_library_sources(
     posix_spawn.c
-    posix_spawn_image.c
     posix_spawnp.c
     posix_spawn_file_actions_addclose.c
     posix_spawn_file_actions_adddup2.c
