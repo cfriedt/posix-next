@@ -5,8 +5,9 @@ XSI_ADVANCED_REALTIME
 
 The ``XSI_ADVANCED_REALTIME`` option group indicates that the
 :ref:`_POSIX_CLOCK_SELECTION<posix_option_group_clock_selection>`,
-:ref:`_POSIX_CPUTIME<posix_option_cputime>`, and
-:ref:`_POSIX_MONOTONIC_CLOCK<posix_option_monotonic_clock>` options are enabled.
+:ref:`_POSIX_CPUTIME<posix_option_cputime>`,
+:ref:`_POSIX_MONOTONIC_CLOCK<posix_option_monotonic_clock>`, and
+``_POSIX_SPAWN`` options are enabled.
 
 Enable this option group with :kconfig:option:`CONFIG_XSI_ADVANCED_REALTIME`.
 
