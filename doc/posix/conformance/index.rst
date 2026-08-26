@@ -53,7 +53,7 @@ POSIX System Interfaces
    :header: Symbol, Support, Remarks
    :widths: 50, 10, 50
 
-    _POSIX_JOB_CONTROL, -1, :ref:`†<posix_undefined_behaviour>`
+    _POSIX_JOB_CONTROL, 200809L, :kconfig:option:`CONFIG_POSIX_MULTI_PROCESS`
     _POSIX_REGEXP, -1, :ref:`†<posix_undefined_behaviour>`
     _POSIX_SAVED_IDS, -1, :ref:`†<posix_undefined_behaviour>`
     _POSIX_SHELL, -1, :ref:`†<posix_undefined_behaviour>`
@@ -143,13 +143,12 @@ X/Open System Interfaces
 
 .. note::
    Some features may exhibit undefined behaviour as they fall beyond the scope of Zephyr's current
-   design and capabilities. For example, multi-processing, ad-hoc memory-mapping, multiple users,
-   or regular expressions are features that are uncommon in low-footprint embedded systems.
-   Other symbols are marked with the † (obelus) when they appeared in an earlier POSIX edition
-   (for example IEEE 1003.13) but were later removed from the specification and are not treated as
-   current profile requirements in this documentation.
-   Such undefined behaviour is denoted with the † (obelus) symbol. Additional details in
-   :ref:`POSIX Option Groups <posix_option_groups>` and :ref:`POSIX Options <posix_options>`.
+   design and capabilities. For example, multiple users, regular expressions, and a conformant
+   shell are features that are uncommon in low-footprint embedded systems.
+   Other symbols are marked with the † (obelus) if they appeared in an earlier POSIX edition
+   (for example IEEE 1003.13) but were later removed from the specification.
+   Such undefined behaviour is denoted with the † (obelus) symbol. For implementation details and
+   known deviations, please see :ref:`Implementation Details <posix_details>`.
 
 .. _posix_libc_provided:
 
