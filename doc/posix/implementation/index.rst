@@ -447,13 +447,21 @@ Signals
 -------
 
 Signals are delivered either to a specific thread (:c:func:`pthread_kill`) or to
-a process (:c:func:`kill`). A process-directed signal is delivered to one member
-thread that has it unblocked, preferring the caller for a self-signal. When
-every member has the signal masked it pends at **process scope** and is claimed
-by whichever member first unblocks or waits for it - strict POSIX semantics for
-fully-masked processes. Kernel-resolved process delivery bypasses the
-per-thread-object permission check, since :c:func:`kill` authorization is
-process-level.
+a process (:c:func:`kill`, :c:func:`sigqueue`, and the ``k_kill_all()``
+broadcast behind ``kill(-1, ...)``). A process-directed signal is delivered to
+one member thread that has it unblocked, preferring the caller for a
+self-signal. When every member has the signal masked it pends at **process
+scope** and is claimed by whichever member first unblocks or waits for it -
+strict POSIX semantics for fully-masked processes. Kernel-resolved process
+delivery bypasses the per-thread-object permission check, since :c:func:`kill`
+authorization is process-level.
+
+Signal dispositions are likewise a property of the process: installed by any
+member thread, in force for every member, and purged when the process is
+reaped. ``sys_clone()`` duplicates the parent's dispositions into a new
+process - every disposition for the fork tier, only ignored dispositions for a
+fresh image (fork+exec semantics) - and :c:func:`execve` reverts handled
+dispositions to default in place.
 
 Exec
 ----
@@ -526,6 +534,14 @@ Each is expected to be retired as the corresponding substrate lands.
        ``execvp``/``execlp`` resolve bare names against
        :kconfig:option:`CONFIG_POSIX_EXEC_PATH_PREFIX` rather than a
        ``PATH`` environment variable.
+   * - Kernel-staged user memory in a fork child
+     - The kernel stages user memory through the shared kernel page tables,
+       which map the child's user addresses to the parent's frames. A fork
+       child must therefore use scalar-only system calls (no pointer
+       copy-outs) and cannot take user-mode signal-handler delivery (the
+       trampoline frame is kernel-staged); an inherited ignored disposition
+       is honored, since discard happens kernel-side. Lifted when copy-outs
+       learn to resolve through the child's mappings.
 
 .. _posix_implementation_signals:
 
@@ -563,18 +579,23 @@ kernel's :kconfig:option:`CONFIG_PROCESS` thread-group substrate - see
 :ref:`posix_multi_process_design`) is optional, which shapes the implementation in several ways:
 
 Signals are process-directed or thread-directed
-   :c:func:`kill` is process-directed and ``pthread_kill()`` is thread-directed. With process
-   support, a positive ``pid`` names a process, ``0`` the caller's process group, and a negative
-   ``pid`` another process group; a process-directed signal is delivered to one member thread
-   that has it unblocked, or pends at process scope until a member unblocks or waits for it.
-   Broadcast (``pid == -1``) is not supported and fails with ``ESRCH``. In a single-process
-   configuration the process's own pid, ``0``, and ``-1`` all name the single process, and the
-   signal is queued to the calling thread.
+   :c:func:`kill` and :c:func:`sigqueue` are process-directed and ``pthread_kill()`` is
+   thread-directed. With process support, a positive ``pid`` names a process, ``0`` the caller's
+   process group, a negative ``pid`` another process group, and ``-1`` every other process
+   (excluding the reserved system processes and the caller's own); a process-directed signal is
+   delivered to one member thread that has it unblocked, or pends at process scope until a member
+   unblocks or waits for it. In a single-process configuration the process's own pid, ``0``, and
+   ``-1`` all name the single (figurative) process, with the same process-directed delivery: the
+   caller takes the signal when it has it unblocked, and it otherwise pends at system scope for
+   the first thread that unblocks or waits for it.
 
-Dispositions are per-thread
-   POSIX associates a signal action with the process, but the kernel action database is keyed by
-   (signal, thread), so an action installed by one thread is not in force for another. A thread
-   that needs to catch a signal must install the action itself.
+Dispositions are per-process with process support
+   With :kconfig:option:`CONFIG_PROCESS`, a signal action is a property of the process, as POSIX
+   specifies: installed by any member thread, in force for every member, and outliving its
+   installer. A forked child inherits every disposition, a freshly created process image inherits
+   only ignored dispositions (fork+exec semantics), and ``exec`` reverts handled dispositions to
+   default. Without process support the action database is keyed by (signal, thread), so an
+   action installed by one thread is not in force for another and dies with its installer.
 
 Kernel threads block all signals by default
    A kernel thread must opt in to signal delivery, with :c:func:`sigprocmask` or
