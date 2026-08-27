@@ -2401,3 +2401,19 @@ patches:
       in force for the claiming thread, decrements the counter matching
       the entry's scope, and z_sig_handle() includes process and system
       scope in its entry gate.
+  - path: zephyr/zvfs-unlink-on-close-tmpfile.patch
+    sha256sum: 5f0b66daba85d2424d624425145455c294c3a0cc4fca75cae8c62b0f7934f833
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-27
+    upstreamable: true
+    comments: |
+      ZVFS unlink-on-close: zvfs_unlink_on_close() marks an open file
+      description so that its path is removed on the description's final
+      close, wherever that close happens - an explicit close or the
+      descriptor sweep at process exit. tmpfile() marks its descriptor,
+      restoring the ISO C semantics: the file is removed when the stream
+      is closed and, with CONFIG_PROCESS, when the process terminates.
+      Without process support a stream that is never closed leaves its
+      file in place, as there is no process termination to remove it at.
