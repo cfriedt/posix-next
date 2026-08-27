@@ -9,7 +9,7 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_REALTIME_SIGNALS`.
    :header: API, Supported
    :widths: 50,10
 
-    :c:func:`sigqueue`,yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`sigqueue`,yes
     :c:func:`sigtimedwait`,yes
     :c:func:`sigwaitinfo`,yes
 
