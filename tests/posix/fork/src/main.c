@@ -5,6 +5,7 @@
  */
 
 #include <errno.h>
+#include <signal.h>
 #include <stdlib.h>
 #include <sys/eventfd.h>
 #include <sys/wait.h>
@@ -21,6 +22,61 @@
 
 static ZTEST_DMEM volatile int fork_shared = 10;
 static Z_THREAD_LOCAL volatile int fork_tls = 30;
+
+static void fork_handler(int signo)
+{
+	ARG_UNUSED(signo);
+}
+
+/* the child inherits every parent disposition across fork (POSIX) */
+static void fork_dispositions(void)
+{
+	pid_t pid;
+	int status = -1;
+	struct sigaction oact;
+	struct sigaction act = {
+		.sa_handler = fork_handler,
+		.sa_flags = 0,
+	};
+
+	zassert_ok(sigemptyset(&act.sa_mask));
+	zassert_ok(sigaction(SIGUSR1, &act, NULL));
+	act.sa_handler = SIG_IGN;
+	zassert_ok(sigaction(SIGUSR2, &act, NULL));
+
+	/* in force for the parent before the fork */
+	zassert_ok(sigaction(SIGUSR1, NULL, &oact));
+	zassert_equal(fork_handler, oact.sa_handler);
+	zassert_ok(sigaction(SIGUSR2, NULL, &oact));
+	zassert_equal(SIG_IGN, oact.sa_handler);
+
+	pid = fork();
+	zassert_true(pid >= 0, "fork failed: %d", errno);
+	if (pid == 0) {
+		/*
+		 * Kernel-staged user memory (syscall copy-outs, the signal
+		 * trampoline frame) aliases the parent's frames in the fork
+		 * child, so neither sigaction() queries nor handler delivery
+		 * can run here. The inherited ignore is still observable end
+		 * to end: were the disposition not inherited, the default
+		 * action for SIGUSR2 would end this thread before _exit(9).
+		 */
+		if (raise(SIGUSR2) != 0) {
+			_exit(6);
+		}
+		_exit(9);
+	}
+
+	zassert_equal(waitpid(pid, &status, 0), pid);
+	zassert_true(WIFEXITED(status));
+	zassert_equal(WEXITSTATUS(status), 9,
+		      "the child did not inherit the parent's dispositions (exit %d)",
+		      WEXITSTATUS(status));
+
+	act.sa_handler = SIG_DFL;
+	zassert_ok(sigaction(SIGUSR1, &act, NULL));
+	zassert_ok(sigaction(SIGUSR2, &act, NULL));
+}
 
 ZTEST_USER(posix_fork, test_fork)
 {
@@ -81,6 +137,8 @@ ZTEST_USER(posix_fork, test_fork)
 	zassert_ok(eventfd_read(efd, &val));
 	zassert_equal(val, 5);
 	zassert_ok(close(efd));
+
+	fork_dispositions();
 }
 
 ZTEST_SUITE(posix_fork, NULL, NULL, NULL, NULL, NULL);

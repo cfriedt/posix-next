@@ -6,6 +6,7 @@
 #include "_main.h"
 
 #include <errno.h>
+#include <pthread.h>
 #include <signal.h>
 
 #include <zephyr/sys/util.h>
@@ -14,6 +15,49 @@
 static void other_handler(int signo)
 {
 	ARG_UNUSED(signo);
+}
+
+static void *sigaction_installer(void *arg)
+{
+	struct sigaction act = {
+		.sa_handler = other_handler,
+		.sa_flags = 0,
+	};
+
+	ARG_UNUSED(arg);
+
+	zassert_ok(sigemptyset(&act.sa_mask));
+	zassert_ok(sigaction(SIGUSR2, &act, NULL));
+
+	return NULL;
+}
+
+/*
+ * With CONFIG_PROCESS an action is a property of the process: installed by any
+ * member thread, in force for every member, outliving the installer. Without
+ * it, actions are per-thread and die with the installing thread.
+ */
+static void sigaction_process_scope(void)
+{
+	pthread_t th;
+	struct sigaction oact;
+
+	test_signals_reset(SIGUSR2);
+
+	zassert_ok(pthread_create(&th, NULL, sigaction_installer, NULL));
+	zassert_ok(pthread_join(th, NULL));
+
+	zassert_ok(sigaction(SIGUSR2, NULL, &oact));
+	if (IS_ENABLED(CONFIG_PROCESS)) {
+		zassert_equal(other_handler, oact.sa_handler,
+			      "another thread's install is not in force for this thread");
+	} else {
+		/* the reset's ignore, keyed to this thread, is unaffected */
+		zassert_equal(SIG_IGN, oact.sa_handler,
+			      "a per-thread action leaked across threads");
+	}
+
+	test_signals_reset(SIGUSR2);
 }
 
 ZTEST_USER(posix_signals, test_sigaction)
@@ -100,11 +144,7 @@ ZTEST_USER(posix_signals, test_sigaction)
 	zassert_ok(raise(SIGUSR1));
 	zassert_equal(0, test_signals_state.calls, "an ignored signal invoked a handler");
 
-	/*
-	 * TODO (processes): POSIX associates an action with the process, but Zephyr keys it by
-	 * (signal, thread), so nothing here can check that an action installed by one thread is in
-	 * force for another. That becomes testable once processes exist.
-	 */
+	sigaction_process_scope();
 
 	/* a caught signal invokes the handler with the signal number */
 	test_signals_install(SIGUSR1, test_signals_handler, 0);
