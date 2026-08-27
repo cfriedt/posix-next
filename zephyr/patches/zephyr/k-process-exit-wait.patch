@@ -1,0 +1,3133 @@
+diff --git a/include/zephyr/kernel/thread.h b/include/zephyr/kernel/thread.h
+index f186e9967db..6b801c5ded5 100644
+--- a/include/zephyr/kernel/thread.h
++++ b/include/zephyr/kernel/thread.h
+@@ -358,6 +358,13 @@ struct k_thread {
+ 	struct _thread_stack_info stack_info;
+ #endif /* CONFIG_THREAD_STACK_INFO */
+ 
++#if defined(CONFIG_PROCESS)
++	/** process (thread group) this thread belongs to */
++	struct k_process *process;
++	/** node in the process's member-thread list */
++	sys_dnode_t process_node;
++#endif /* CONFIG_PROCESS */
++
+ #if defined(CONFIG_USERSPACE)
+ 	/** memory domain info of the thread */
+ 	struct _mem_domain_info mem_domain_info;
+diff --git a/include/zephyr/sys/process.h b/include/zephyr/sys/process.h
+new file mode 100644
+index 00000000000..ac784fc88d4
+--- /dev/null
++++ b/include/zephyr/sys/process.h
+@@ -0,0 +1,94 @@
++/*
++ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_INCLUDE_SYS_PROCESS_H_
++#define ZEPHYR_INCLUDE_SYS_PROCESS_H_
++
++#include <zephyr/kernel.h>
++#include <zephyr/sys/thread.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++#if defined(CONFIG_SYS_PROCESS) || defined(__DOXYGEN__)
++
++/**
++ * @brief System-layer process, process-group, and session numbering
++ * @defgroup sys_process_apis System process numbering APIs
++ *
++ * The kernel identifies processes, process groups, and sessions purely by
++ * handle; integer identities imply a namespace, and namespaces are an
++ * allocation-domain concern, so the number tables live here. Numbers are
++ * assigned lowest-free at creation (the reserved idle, init, and kthread
++ * processes receive 0, 1, and 2 by boot order) and retired with their object;
++ * a group or session is numbered after its creating process.
++ *
++ * @ingroup os_services
++ * @{
++ */
++
++/**
++ * @brief Obtain the numeric ID of a process
++ *
++ * @param pid process handle (or the handle of any live member thread)
++ * @return the numeric process ID, or -ESRCH if @a pid names no process
++ */
++__syscall int sys_process_id(k_pid_t pid);
++
++/**
++ * @brief Look up a process handle by numeric ID
++ *
++ * @param id numeric process ID
++ * @return the process handle, or NULL if no such process exists
++ */
++__syscall k_pid_t sys_process_find(int id);
++
++/**
++ * @brief Obtain the numeric ID of a process group
++ *
++ * @param pgrp process group handle
++ * @return the numeric group ID, or -ESRCH if @a pgrp names no group
++ */
++__syscall int sys_pgrp_id(k_pgrp_t pgrp);
++
++/**
++ * @brief Look up a process group by numeric ID
++ *
++ * @param id numeric process group ID
++ * @return the group handle, or NULL if no such group exists
++ */
++__syscall k_pgrp_t sys_pgrp_find(int id);
++
++/**
++ * @brief Obtain the numeric ID of a session
++ *
++ * @param session session handle
++ * @return the numeric session ID, or -ESRCH if @a session names no session
++ */
++__syscall int sys_session_id(k_session_t session);
++
++/**
++ * @brief Look up a session by numeric ID
++ *
++ * @param id numeric session ID
++ * @return the session handle, or NULL if no such session exists
++ */
++__syscall k_session_t sys_session_find(int id);
++
++/**
++ * @}
++ */
++
++#include <zephyr/syscalls/process.h>
++
++#endif /* defined(CONFIG_SYS_PROCESS) || defined(__DOXYGEN__) */
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* ZEPHYR_INCLUDE_SYS_PROCESS_H_ */
+diff --git a/kernel/include/kernel_internal.h b/kernel/include/kernel_internal.h
+index 87c2ac41e2e..9469218c46b 100644
+--- a/kernel/include/kernel_internal.h
++++ b/kernel/include/kernel_internal.h
+@@ -128,6 +128,41 @@ void z_process_init_thread(struct k_thread *thread);
+ /* Remove a dying thread from its process; zombifies the process on last exit */
+ void z_process_exit_thread(struct k_thread *thread);
+ 
++/*
++ * Release-side providers and the number query, implemented by lib/os. The
++ * kernel never calls an allocator: it hands memory back to the provider that
++ * owns it (the sys_thread_destroy() precedent), and -EINVAL identifies
++ * memory the provider does not own (static or caller-provided; reusable
++ * where it lives). Called
++ * under the process lock; may also run under the scheduler lock and must
++ * defer heap reclamation.
++ */
++#ifdef CONFIG_SYS_PROCESS
++int z_process_record_free(struct k_process *proc);
++int z_pgrp_cell_free(struct k_process_group *grp);
++int z_session_cell_free(struct k_session *session);
++#else
++static inline int z_process_record_free(struct k_process *proc)
++{
++	ARG_UNUSED(proc);
++	return -EINVAL;
++}
++
++static inline int z_pgrp_cell_free(struct k_process_group *grp)
++{
++	ARG_UNUSED(grp);
++	return -EINVAL;
++}
++
++static inline int z_session_cell_free(struct k_session *session)
++{
++	ARG_UNUSED(session);
++	return -EINVAL;
++}
++#endif /* CONFIG_SYS_PROCESS */
++
++/* validate a user-supplied group handle and every member record (under lock) */
++int z_pgrp_validate(k_pgrp_t pgrp);
+ #endif /* CONFIG_PROCESS */
+ 
+ 
+@@ -343,6 +385,11 @@ int z_sig_queue_msgq(k_pid_t pid, int signo, union k_sig_val value);
+ int z_sig_queue_aio(k_pid_t pid, int signo, union k_sig_val value);
+ #endif /* CONFIG_SYS_AIO && CONFIG_SIGNAL */
+ 
++#if defined(CONFIG_PROCESS) && defined(CONFIG_SIGNAL)
++/* generation-side plumbing between kernel/process.c and kernel/signal.c (internal) */
++int z_sig_queue_chld(k_tid_t tid, k_pid_t child_pid, int child_status, bool exited);
++#endif /* CONFIG_PROCESS && CONFIG_SIGNAL */
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/kernel/include/ksched.h b/kernel/include/ksched.h
+index f7cedb01eb2..1c537abb442 100644
+--- a/kernel/include/ksched.h
++++ b/kernel/include/ksched.h
+@@ -249,6 +249,15 @@ bool z_sched_wake(_wait_q_t *wait_q, int swap_retval, void *swap_data);
+  */
+ void z_sched_wake_thread_locked(struct k_thread *thread);
+ 
++/*
++ * Pend the current thread on @a wait_q under the scheduler lock alone, unless
++ * *gen no longer equals @a expected (returns 1: the condition may have changed,
++ * rescan). For waiters whose wakers run in the thread-halt path and thus
++ * already hold the scheduler lock when taking the condition lock.
++ */
++int z_sched_waitq_pend_if(_wait_q_t *wait_q, k_timeout_t timeout, atomic_t *gen,
++			  atomic_val_t expected);
++
+ /**
+  * Wake up all threads pending on the provided wait queue
+  *
+diff --git a/kernel/process.c b/kernel/process.c
+new file mode 100644
+index 00000000000..8509e29aec7
+--- /dev/null
++++ b/kernel/process.c
+@@ -0,0 +1,942 @@
++/*
++ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <errno.h>
++#include <string.h>
++
++#include <zephyr/init.h>
++#include <zephyr/internal/syscall_handler.h>
++#include <zephyr/kernel.h>
++#include <zephyr/logging/log.h>
++#include <zephyr/sys/math_extras.h>
++#include <ksched.h>
++#include <wait_q.h>
++
++LOG_MODULE_DECLARE(os, CONFIG_KERNEL_LOG_LEVEL);
++
++/*
++ * The three kernel-reserved processes: the idle process (per-CPU idle threads
++ * and the boot thread), the init process (parent of user threads and orphaned
++ * children), and the kthread process (parent of kernel threads). Their leader
++ * handles are self-anchored sentinels (no single thread anchors these groups):
++ * valid identity values, never dereferenced. Tentative definitions; the
++ * build-time-wired definitions follow the group/session types below.
++ */
++struct k_process z_proc_idle;
++struct k_process z_proc_init;
++struct k_process z_proc_kth;
++
++STRUCT_SECTION_START_EXTERN(k_process);
++STRUCT_SECTION_END_EXTERN(k_process);
++STRUCT_SECTION_START_EXTERN(k_process_group);
++STRUCT_SECTION_END_EXTERN(k_process_group);
++STRUCT_SECTION_START_EXTERN(k_session);
++STRUCT_SECTION_END_EXTERN(k_session);
++
++enum { RESERVED_IDLE, RESERVED_INIT, RESERVED_KTH, RESERVED_NUM };
++
++/* every live session, via k_session.cell_node; the ground truth for validation */
++static sys_dlist_t session_active = SYS_DLIST_STATIC_INIT(&session_active);
++
++/* every live process record, wired at build time for the reserved trio */
++static sys_dlist_t process_active;
++
++/*
++ * The reserved topology is wired entirely at build time: every reference is
++ * intra-file, so C initializers express the circular lists directly - the
++ * single-TU analog of what gen_process_topology.py does across the image.
++ * Each reserved process leads its own group in its own session; init and the
++ * kthread process are children of idle.
++ */
++static struct k_process_group z_pgrp_reserved[RESERVED_NUM];
++static struct k_session z_session_reserved[RESERVED_NUM];
++
++#define RESERVED_SESSION(i, proc)                                                                  \
++	[i] = {                                                                                    \
++		.pgrps = {.head = &z_pgrp_reserved[i].session_node,                                \
++			  .tail = &z_pgrp_reserved[i].session_node},                               \
++		.leader = (k_tid_t)&(proc),                                                        \
++	}
++
++#define RESERVED_PGRP(i, proc)                                                                     \
++	[i] = {                                                                                    \
++		.members = {.head = &(proc).pgrp_node, .tail = &(proc).pgrp_node},                 \
++		.leader = (k_tid_t)&(proc),                                                        \
++		.session = &z_session_reserved[i],                                                 \
++		.session_node = {.next = &z_session_reserved[i].pgrps,                             \
++				 .prev = &z_session_reserved[i].pgrps},                            \
++	}
++
++/* the fields every reserved process shares; parent/children/siblings differ */
++#define RESERVED_PROCESS(i, proc)                                                                  \
++	.leader = (k_tid_t)&(proc), .threads = SYS_DLIST_STATIC_INIT(&(proc).threads),             \
++	.pgrp = &z_pgrp_reserved[i],                                                               \
++	.pgrp_node = {.next = &z_pgrp_reserved[i].members, .prev = &z_pgrp_reserved[i].members},   \
++	.state = K_PROCESS_ACTIVE, .waitq = Z_WAIT_Q_INIT(&(proc).waitq)
++
++static struct k_session z_session_reserved[RESERVED_NUM] = {
++	RESERVED_SESSION(RESERVED_IDLE, z_proc_idle),
++	RESERVED_SESSION(RESERVED_INIT, z_proc_init),
++	RESERVED_SESSION(RESERVED_KTH, z_proc_kth),
++};
++
++static struct k_process_group z_pgrp_reserved[RESERVED_NUM] = {
++	RESERVED_PGRP(RESERVED_IDLE, z_proc_idle),
++	RESERVED_PGRP(RESERVED_INIT, z_proc_init),
++	RESERVED_PGRP(RESERVED_KTH, z_proc_kth),
++};
++
++struct k_process z_proc_idle = {
++	RESERVED_PROCESS(RESERVED_IDLE, z_proc_idle),
++	.children = {.head = &z_proc_init.sibling_node, .tail = &z_proc_kth.sibling_node},
++	.active_node = {.next = &z_proc_init.active_node, .prev = &process_active},
++};
++
++struct k_process z_proc_init = {
++	RESERVED_PROCESS(RESERVED_INIT, z_proc_init),
++	.parent = &z_proc_idle,
++	.sibling_node = {.next = &z_proc_kth.sibling_node, .prev = &z_proc_idle.children},
++	.children = SYS_DLIST_STATIC_INIT(&z_proc_init.children),
++	.active_node = {.next = &z_proc_kth.active_node, .prev = &z_proc_idle.active_node},
++};
++
++struct k_process z_proc_kth = {
++	RESERVED_PROCESS(RESERVED_KTH, z_proc_kth),
++	.parent = &z_proc_idle,
++	.sibling_node = {.next = &z_proc_idle.children, .prev = &z_proc_init.sibling_node},
++	.children = SYS_DLIST_STATIC_INIT(&z_proc_kth.children),
++	.active_node = {.next = &process_active, .prev = &z_proc_init.active_node},
++};
++
++static sys_dlist_t process_active = {
++	.head = &z_proc_idle.active_node,
++	.tail = &z_proc_kth.active_node,
++};
++
++static bool pgrp_is_static(const struct k_process_group *grp)
++{
++	if ((grp >= z_pgrp_reserved) && (grp < &z_pgrp_reserved[ARRAY_SIZE(z_pgrp_reserved)])) {
++		return true;
++	}
++
++	/* a group cell carries no marker; topology groups preset .session */
++	return (grp >= STRUCT_SECTION_START(k_process_group)) &&
++	       (grp < STRUCT_SECTION_END(k_process_group)) && (grp->session != NULL) &&
++	       ((grp->session->flags & K_SESSION_FLAG_STATIC) != 0U);
++}
++
++static bool session_is_static(const struct k_session *session)
++{
++	if ((session >= z_session_reserved) &&
++	    (session < &z_session_reserved[ARRAY_SIZE(z_session_reserved)])) {
++		return true;
++	}
++
++	return (session->flags & K_SESSION_FLAG_STATIC) != 0U;
++}
++
++static void pgrp_join_locked(struct k_process *proc, struct k_process_group *grp)
++{
++	proc->pgrp = grp;
++	sys_dlist_append(&grp->members, &proc->pgrp_node);
++}
++
++/* a group or session exists exactly as long as it has members; statics persist */
++static void pgrp_leave_locked(struct k_process *proc)
++{
++	struct k_process_group *grp = proc->pgrp;
++	struct k_session *session;
++
++	if (grp == NULL) {
++		return;
++	}
++
++	sys_dlist_remove(&proc->pgrp_node);
++	proc->pgrp = NULL;
++
++	if (!sys_dlist_is_empty(&grp->members) || pgrp_is_static(grp)) {
++		return;
++	}
++
++	session = grp->session;
++	sys_dlist_remove(&grp->session_node);
++	grp->session = NULL;
++	/* -EINVAL means caller-owned memory: reusable as-is */
++	(void)z_pgrp_cell_free(grp);
++
++	if (!sys_dlist_is_empty(&session->pgrps) || session_is_static(session)) {
++		return;
++	}
++
++	sys_dlist_remove(&session->cell_node);
++	(void)z_session_cell_free(session);
++}
++
++static struct k_spinlock process_lock;
++/*
++ * Lock order: process_lock nests inside the scheduler lock (the thread-halt
++ * path holds the scheduler lock when it takes process_lock), so nothing may
++ * hold process_lock while entering the scheduler. Blocking waiters therefore
++ * drop process_lock and pend via z_sched_waitq_pend_if(), with this
++ * generation counter closing the dropped-lock window.
++ */
++static atomic_t process_wait_gen;
++
++static struct k_process *process_self(void)
++{
++	struct k_process *proc = _current->process;
++
++	return (proc == NULL) ? &z_proc_idle : proc;
++}
++
++/*
++ * Resolve a handle to its record without dereferencing it: leader identity
++ * first (it persists until reap), then any live member thread's handle.
++ */
++static struct k_process *process_ctx_resolve_locked(k_pid_t pid)
++{
++	struct k_process *proc;
++
++	SYS_DLIST_FOR_EACH_CONTAINER(&process_active, proc, active_node) {
++		if (proc->leader == pid) {
++			return proc;
++		}
++	}
++
++	SYS_DLIST_FOR_EACH_CONTAINER(&process_active, proc, active_node) {
++		struct k_thread *t;
++
++		SYS_DLIST_FOR_EACH_CONTAINER(&proc->threads, t, process_node) {
++			if (t == pid) {
++				return proc;
++			}
++		}
++	}
++
++	return NULL;
++}
++
++/* the caller holds process_lock (or is the single-threaded boot path) */
++void z_kernel_process_init_one(struct k_process *proc, struct k_process *parent)
++{
++	proc->parent = parent;
++	sys_dlist_init(&proc->children);
++	sys_dlist_init(&proc->threads);
++	z_waitq_init(&proc->waitq);
++	proc->state = K_PROCESS_ACTIVE;
++	k_object_init(proc);
++	sys_dlist_append(&process_active, &proc->active_node);
++	if (parent != NULL) {
++		sys_dlist_append(&parent->children, &proc->sibling_node);
++	}
++	if (proc->pgrp != NULL) {
++		/* K_PROCESS_DEFINE_EXT: membership was assembled at link time */
++	} else if (parent != NULL) {
++		pgrp_join_locked(proc, parent->pgrp);
++	}
++}
++
++static void thread_join_group(struct k_process *proc, struct k_thread *thread)
++{
++	K_SPINLOCK(&process_lock) {
++		thread->process = proc;
++		sys_dlist_append(&proc->threads, &thread->process_node);
++	}
++}
++
++void z_process_init_thread(struct k_thread *thread)
++{
++	struct k_process *proc = NULL;
++
++	if (z_proc_idle.state == K_PROCESS_UNUSED) {
++		/* before process_boot_init(); adopted there */
++		thread->process = NULL;
++		sys_dnode_init(&thread->process_node);
++		return;
++	}
++
++	if (z_is_idle_thread_object(thread) || (thread == &z_main_thread)) {
++		/* the idle process owns exactly the idle threads and the boot thread */
++		proc = &z_proc_idle;
++	} else {
++		/* a statically defined process's leader anchors its own record */
++		STRUCT_SECTION_FOREACH(k_process, ctx) {
++			if ((ctx->leader == thread) && (ctx->state == K_PROCESS_ACTIVE)) {
++				proc = ctx;
++				break;
++			}
++		}
++		if (proc == NULL) {
++			/* K_THREAD_DEFINE_EXT: membership preset to a static process */
++			STRUCT_SECTION_FOREACH(k_process_thread_preset, preset) {
++				if (preset->thread != thread) {
++					continue;
++				}
++				STRUCT_SECTION_FOREACH(k_process, ctx) {
++					if ((ctx->leader == preset->pid) &&
++					    (ctx->state == K_PROCESS_ACTIVE)) {
++						proc = ctx;
++						break;
++					}
++				}
++				break;
++			}
++		}
++		if (proc == NULL) {
++			proc = (_current == NULL) ? NULL : _current->process;
++			if ((proc == NULL) || (proc == &z_proc_idle)) {
++				/*
++				 * The idle process never parents created threads:
++				 * kernel threads belong to the kthread process, user
++				 * threads to init.
++				 */
++				proc = ((thread->base.user_options & K_USER) != 0U)
++					       ? &z_proc_init
++					       : &z_proc_kth;
++			}
++		}
++	}
++
++	sys_dnode_init(&thread->process_node);
++	thread_join_group(proc, thread);
++}
++
++#ifdef CONFIG_SIGNAL
++static _wait_q_t sigchld_notify_wq;
++#endif /* CONFIG_SIGNAL */
++
++/* release a reaped process; the caller has already unlinked it */
++static void process_free_locked(struct k_process *proc)
++{
++	pgrp_leave_locked(proc);
++	sys_dlist_remove(&proc->active_node);
++#ifdef CONFIG_USERSPACE
++	k_object_uninit(proc);
++#endif /* CONFIG_USERSPACE */
++	proc->state = K_PROCESS_UNUSED;
++	/* the single pid-retirement point: the leader handle may be reused now */
++	proc->leader = NULL;
++	proc->wstatus = 0;
++
++	/* -EINVAL means static or caller-owned memory: reusable as-is */
++	(void)z_process_record_free(proc);
++}
++
++static void process_reap_locked(struct k_process *proc)
++{
++	sys_dlist_remove(&proc->sibling_node);
++	process_free_locked(proc);
++}
++
++void z_process_exit_thread(struct k_thread *thread)
++{
++	bool last;
++	struct k_process *proc = thread->process;
++
++	if (proc == NULL) {
++		return;
++	}
++
++	K_SPINLOCK(&process_lock) {
++		sys_dlist_remove(&thread->process_node);
++		thread->process = NULL;
++		/* proc->leader stays: the identity until reap, never dereferenced */
++		last = sys_dlist_is_empty(&proc->threads);
++		if (!last || (proc == &z_proc_idle) || (proc == &z_proc_init) ||
++		    (proc == &z_proc_kth)) {
++			K_SPINLOCK_BREAK;
++		}
++
++		proc->state = K_PROCESS_ZOMBIE;
++		atomic_inc(&process_wait_gen);
++
++		/* orphaned children and zombies are reparented to init */
++		while (!sys_dlist_is_empty(&proc->children)) {
++			sys_dnode_t *n = sys_dlist_get(&proc->children);
++			struct k_process *child =
++				CONTAINER_OF(n, struct k_process, sibling_node);
++
++			child->parent = &z_proc_init;
++			if (child->state == K_PROCESS_ZOMBIE) {
++				/* init auto-reaps; already unlinked by sys_dlist_get() */
++				process_free_locked(child);
++			} else {
++				sys_dlist_append(&z_proc_init.children,
++						 &child->sibling_node);
++			}
++		}
++
++		/*
++		 * Runs in the halt path with the scheduler lock held: only
++		 * lock-held scheduler internals may be used here. Wake every
++		 * waiter with a zero return value so k_waitpid() re-scans (it
++		 * distinguishes a real timeout, -EAGAIN, from a wake).
++		 */
++		for (struct k_thread *w = z_waitq_head(&proc->parent->waitq);
++		     w != NULL; w = z_waitq_head(&proc->parent->waitq)) {
++			arch_thread_return_value_set(w, 0);
++			z_sched_wake_thread_locked(w);
++		}
++
++#ifdef CONFIG_SIGNAL
++		/*
++		 * Signal generation cannot run here (scheduler lock held);
++		 * defer K_SIG_CHLD emission to the notifier thread. The flag
++		 * check and pend in the notifier are under process_lock, so
++		 * this set-then-wake cannot be lost.
++		 */
++		proc->flags |= K_PROCESS_FLAG_SIGCHLD;
++		for (struct k_thread *w = z_waitq_head(&sigchld_notify_wq);
++		     w != NULL; w = z_waitq_head(&sigchld_notify_wq)) {
++			arch_thread_return_value_set(w, 0);
++			z_sched_wake_thread_locked(w);
++		}
++#endif /* CONFIG_SIGNAL */
++	}
++}
++
++static int process_boot_init(void)
++{
++	/* single-threaded boot path: the _locked helpers run without the lock */
++#ifdef CONFIG_SIGNAL
++	z_waitq_init(&sigchld_notify_wq);
++#endif /* CONFIG_SIGNAL */
++
++	STRUCT_SECTION_FOREACH(k_session, session) {
++		if ((session->flags & K_SESSION_FLAG_STATIC) != 0U) {
++			sys_dlist_append(&session_active, &session->cell_node);
++		}
++	}
++	for (size_t i = 0; i < RESERVED_NUM; i++) {
++		sys_dlist_append(&session_active, &z_session_reserved[i].cell_node);
++	}
++
++	STRUCT_SECTION_FOREACH(k_process, proc) {
++		z_kernel_process_init_one(proc, &z_proc_init);
++	}
++
++	return 0;
++}
++
++SYS_INIT(process_boot_init, PRE_KERNEL_1, 0);
++
++#ifdef CONFIG_PROCESS_INIT
++/*
++ * Default entry point of the init process. Applications override this
++ * weak function to run as the system's init process. init must not return on a
++ * real system, so the default simply sleeps.
++ */
++__weak void z_process_init_entry(void *p1, void *p2, void *p3)
++{
++	ARG_UNUSED(p1);
++	ARG_UNUSED(p2);
++	ARG_UNUSED(p3);
++
++	k_sleep(K_FOREVER);
++}
++
++static K_THREAD_STACK_DEFINE(init_process_stack, CONFIG_PROCESS_INIT_STACK_SIZE);
++static struct k_thread init_process_thread;
++static int process_init_start(void)
++{
++	k_tid_t tid = k_thread_create(&init_process_thread, init_process_stack,
++				      CONFIG_PROCESS_INIT_STACK_SIZE, z_process_init_entry, NULL,
++				      NULL, NULL, CONFIG_PROCESS_INIT_PRIORITY, 0, K_FOREVER);
++
++	/* a member of init, not its leader: init's identity stays its sentinel */
++	K_SPINLOCK(&process_lock) {
++		sys_dlist_remove(&tid->process_node);
++		tid->process = NULL;
++	}
++	thread_join_group(&z_proc_init, tid);
++
++	k_thread_start(tid);
++
++	return 0;
++}
++
++SYS_INIT(process_init_start, APPLICATION, 0);
++#endif /* CONFIG_PROCESS_INIT */
++
++k_pid_t z_impl_k_getpid(void)
++{
++	return process_self()->leader;
++}
++
++#ifdef CONFIG_USERSPACE
++static inline k_pid_t z_vrfy_k_getpid(void)
++{
++	return z_impl_k_getpid();
++}
++#include <zephyr/syscalls/k_getpid_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++k_pid_t z_impl_k_getppid(void)
++{
++	struct k_process *proc = process_self();
++
++	return (proc->parent == NULL) ? proc->leader : proc->parent->leader;
++}
++
++#ifdef CONFIG_USERSPACE
++static inline k_pid_t z_vrfy_k_getppid(void)
++{
++	return z_impl_k_getppid();
++}
++#include <zephyr/syscalls/k_getppid_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++k_pgrp_t z_impl_k_getpgid(k_pid_t pid)
++{
++	struct k_process *proc;
++	k_pgrp_t ret = NULL;
++
++	K_SPINLOCK(&process_lock) {
++		proc = (pid == NULL) ? process_self() : process_ctx_resolve_locked(pid);
++		if (proc != NULL) {
++			ret = proc->pgrp;
++		}
++	}
++
++	return ret;
++}
++
++#ifdef CONFIG_USERSPACE
++static inline k_pgrp_t z_vrfy_k_getpgid(k_pid_t pid)
++{
++	return z_impl_k_getpgid(pid);
++}
++#include <zephyr/syscalls/k_getpgid_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++k_session_t z_impl_k_getsid(k_pid_t pid)
++{
++	struct k_process *proc;
++	k_session_t ret = NULL;
++
++	K_SPINLOCK(&process_lock) {
++		proc = (pid == NULL) ? process_self() : process_ctx_resolve_locked(pid);
++		if ((proc != NULL) && (proc->pgrp != NULL)) {
++			ret = proc->pgrp->session;
++		}
++	}
++
++	return ret;
++}
++
++#ifdef CONFIG_USERSPACE
++static inline k_session_t z_vrfy_k_getsid(k_pid_t pid)
++{
++	return z_impl_k_getsid(pid);
++}
++#include <zephyr/syscalls/k_getsid_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++/* is @a grp a live process group? the caller holds process_lock */
++#ifdef CONFIG_SIGNAL
++/*
++ * Pick one thread of a process to receive a process-directed signal: the first
++ * member that has the signal unblocked, but
++ * prefer the calling thread when it is an eligible member so that a signal a
++ * process sends to itself is observed by the caller. Falls back to the first
++ * live member, which holds the signal pending for the group when every member
++ * currently blocks it. The caller must hold process_lock (the member list is
++ * walked here).
++ */
++static k_tid_t process_sig_target(struct k_process *proc, int signo)
++{
++	struct k_thread *t;
++	k_tid_t self = k_current_get();
++
++	if ((self->process == proc) && (k_sig_ismember(&self->base.sig.mask, signo) == 0)) {
++		return self;
++	}
++
++	SYS_DLIST_FOR_EACH_CONTAINER(&proc->threads, t, process_node) {
++		if (k_sig_ismember(&t->base.sig.mask, signo) == 0) {
++			return t;
++		}
++	}
++
++	/* all masked: pend on a non-leader member when one exists */
++	SYS_DLIST_FOR_EACH_CONTAINER(&proc->threads, t, process_node) {
++		if ((k_tid_t)t != proc->leader) {
++			return t;
++		}
++	}
++
++	t = SYS_DLIST_PEEK_HEAD_CONTAINER(&proc->threads, t, process_node);
++	return t;
++}
++#endif /* CONFIG_SIGNAL */
++
++void z_impl_k_exit(int code)
++{
++	struct k_thread *victim;
++	struct k_process *proc = process_self();
++
++	k_spinlock_key_t key = k_spin_lock(&process_lock);
++
++	if (proc->state == K_PROCESS_ACTIVE) {
++		proc->state = K_PROCESS_EXITING;
++		proc->wstatus = K_WSTATUS_EXITED(code);
++	}
++
++	/* abort every other member; each drops out via z_process_exit_thread() */
++	while (true) {
++		struct k_thread *t;
++
++		victim = NULL;
++		SYS_DLIST_FOR_EACH_CONTAINER(&proc->threads, t, process_node) {
++			if (t != _current) {
++				victim = t;
++				break;
++			}
++		}
++		if (victim == NULL) {
++			break;
++		}
++		k_spin_unlock(&process_lock, key);
++		k_thread_abort(victim);
++		key = k_spin_lock(&process_lock);
++	}
++
++	/* zombification happens in the halt path when the last member exits */
++	proc->state = K_PROCESS_EXITING;
++	k_spin_unlock(&process_lock, key);
++
++	k_thread_abort(k_current_get());
++
++	CODE_UNREACHABLE;
++}
++
++#ifdef CONFIG_USERSPACE
++static inline void z_vrfy_k_exit(int code)
++{
++	z_impl_k_exit(code);
++}
++#include <zephyr/syscalls/k_exit_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++static bool waitpid_selects(struct k_process *child, k_pid_t pid, k_pgrp_t pgrp, bool by_pgrp)
++{
++	if (by_pgrp) {
++		return child->pgrp == pgrp;
++	}
++	return (pid == NULL) || (child->leader == pid);
++}
++
++static int waitpid_common(k_pid_t pid, k_pgrp_t pgrp, bool by_pgrp, k_pid_t *reaped, int *wstatus,
++			  uint32_t options, k_timeout_t timeout)
++{
++	int ret;
++	struct k_process *child;
++	struct k_process *self = process_self();
++	k_timepoint_t end = sys_timepoint_calc(timeout);
++
++	if ((options & (K_PROCESS_WUNTRACED | K_PROCESS_WCONTINUED)) != 0) {
++		return -ENOTSUP;
++	}
++
++	while (true) {
++		bool have_match = false;
++		struct k_process *zombie = NULL;
++		atomic_val_t gen = atomic_get(&process_wait_gen);
++		k_spinlock_key_t key = k_spin_lock(&process_lock);
++
++		SYS_DLIST_FOR_EACH_CONTAINER(&self->children, child, sibling_node) {
++			if (!waitpid_selects(child, pid, pgrp, by_pgrp)) {
++				continue;
++			}
++			have_match = true;
++			if (child->state == K_PROCESS_ZOMBIE) {
++				zombie = child;
++				break;
++			}
++		}
++
++		if (zombie != NULL) {
++			if (reaped != NULL) {
++				*reaped = zombie->leader;
++			}
++			if (wstatus != NULL) {
++				*wstatus = zombie->wstatus;
++			}
++			if ((options & K_PROCESS_WNOWAIT) == 0) {
++				process_reap_locked(zombie);
++			}
++			ret = 0;
++		} else if (!have_match) {
++			ret = -ECHILD;
++		} else if ((options & K_PROCESS_WNOHANG) != 0) {
++			ret = -EAGAIN;
++		} else {
++			ret = 1;
++		}
++
++		k_spin_unlock(&process_lock, key);
++
++		if (ret <= 0) {
++			return ret;
++		}
++
++		/* pend without process_lock (see the lock-order comment above) */
++		ret = z_sched_waitq_pend_if(&self->waitq, sys_timepoint_timeout(end),
++					    &process_wait_gen, gen);
++		if (ret == -EAGAIN) {
++			return ret;
++		}
++	}
++}
++
++int z_impl_k_waitpid(k_pid_t pid, k_pid_t *reaped, int *wstatus, uint32_t options,
++		     k_timeout_t timeout)
++{
++	return waitpid_common(pid, NULL, false, reaped, wstatus, options, timeout);
++}
++
++#ifdef CONFIG_USERSPACE
++static inline int z_vrfy_k_waitpid(k_pid_t pid, k_pid_t *reaped, int *wstatus, uint32_t options,
++				   k_timeout_t timeout)
++{
++	/*
++	 * The child selector is an identity value that is never dereferenced,
++	 * and the child scan is confined to the caller's own children, so no
++	 * object validation is required.
++	 */
++	if (reaped != NULL) {
++		K_OOPS(K_SYSCALL_MEMORY_WRITE(reaped, sizeof(*reaped)));
++	}
++	if (wstatus != NULL) {
++		K_OOPS(K_SYSCALL_MEMORY_WRITE(wstatus, sizeof(*wstatus)));
++	}
++
++	return z_impl_k_waitpid(pid, reaped, wstatus, options, timeout);
++}
++#include <zephyr/syscalls/k_waitpid_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++int z_impl_k_process_init(struct k_process *proc, const k_tid_t *threads, size_t num_threads)
++{
++	int ret = 0;
++
++	if ((proc == NULL) || (threads == NULL) || (num_threads == 0)) {
++		return -EINVAL;
++	}
++	for (size_t i = 0; i < num_threads; i++) {
++		if (threads[i] == NULL) {
++			return -EINVAL;
++		}
++	}
++
++	K_SPINLOCK(&process_lock) {
++		struct k_process *p;
++		/* an unreaped record, or one never reaped, is busy */
++		bool busy = proc->state != K_PROCESS_UNUSED;
++
++		if (!busy) {
++			/* an unreaped process still owns its leader handle */
++			SYS_DLIST_FOR_EACH_CONTAINER(&process_active, p, active_node) {
++				for (size_t i = 0; i < num_threads; i++) {
++					if (p->leader == threads[i]) {
++						busy = true;
++						break;
++					}
++				}
++				if (busy) {
++					break;
++				}
++			}
++		}
++		if (busy) {
++			ret = -EBUSY;
++			K_SPINLOCK_BREAK;
++		}
++
++		proc->leader = threads[0];
++		proc->pgrp = NULL;
++		proc->flags = 0;
++		proc->wstatus = 0;
++		z_kernel_process_init_one(proc, process_self());
++
++		/* adopt the listed threads out of their creation-inherited groups */
++		for (size_t i = 0; i < num_threads; i++) {
++			struct k_thread *t = threads[i];
++
++			if (t->process != NULL) {
++				sys_dlist_remove(&t->process_node);
++			}
++			t->process = proc;
++			sys_dlist_append(&proc->threads, &t->process_node);
++		}
++	}
++
++	return ret;
++}
++
++#ifdef CONFIG_USERSPACE
++/* bounds the on-stack copy of the caller's thread list */
++#define PROCESS_INIT_USER_THREADS_MAX 16
++
++static inline int z_vrfy_k_process_init(struct k_process *proc, const k_tid_t *threads,
++					size_t num_threads)
++{
++	k_tid_t copy[PROCESS_INIT_USER_THREADS_MAX];
++
++	K_OOPS(K_SYSCALL_OBJ_NEVER_INIT(proc, K_OBJ_PROCESS));
++	K_OOPS(K_SYSCALL_VERIFY_MSG((num_threads > 0) && (num_threads <= ARRAY_SIZE(copy)),
++				    "invalid thread count %zu", num_threads));
++	K_OOPS(k_usermode_from_copy(copy, threads, num_threads * sizeof(k_tid_t)));
++	for (size_t i = 0; i < num_threads; i++) {
++		/* the caller must hold permission on every listed thread */
++		K_OOPS(K_SYSCALL_OBJ(copy[i], K_OBJ_THREAD));
++	}
++
++	return z_impl_k_process_init(proc, copy, num_threads);
++}
++#include <zephyr/syscalls/k_process_init_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++int z_impl_k_clone(const struct k_clone_args *args, k_tid_t *child)
++{
++	int ret;
++	k_tid_t tid;
++	bool thread_tier;
++
++	if ((args == NULL) || (args->entry == NULL) || (args->thread == NULL) ||
++	    (args->stack == NULL) || (args->stack_size == 0) ||
++	    ((args->flags & ~(K_CLONE_THREAD | K_CLONE_PAUSED)) != 0U)) {
++		return -EINVAL;
++	}
++	thread_tier = (args->flags & K_CLONE_THREAD) != 0U;
++	if (thread_tier != (args->process == NULL)) {
++		return -EINVAL;
++	}
++
++	tid = k_thread_create(args->thread, args->stack, args->stack_size, args->entry, args->p1,
++			      args->p2, args->p3, args->prio, args->options, K_FOREVER);
++
++	if (!thread_tier) {
++		ret = z_impl_k_process_init(args->process, &tid, 1);
++		if (ret < 0) {
++			k_thread_abort(tid);
++			return ret;
++		}
++	}
++
++	if (child != NULL) {
++		*child = tid;
++	}
++
++	if ((args->flags & K_CLONE_PAUSED) == 0U) {
++		k_thread_start(tid);
++	}
++
++	return 0;
++}
++
++#ifdef CONFIG_USERSPACE
++static inline int z_vrfy_k_clone(const struct k_clone_args *args, k_tid_t *child)
++{
++	struct k_clone_args copy;
++	size_t total_size, stack_obj_size;
++	struct k_object *stack_object;
++
++	K_OOPS(k_usermode_from_copy(&copy, args, sizeof(copy)));
++	if (child != NULL) {
++		K_OOPS(K_SYSCALL_MEMORY_WRITE(child, sizeof(*child)));
++	}
++
++	if (copy.process != NULL) {
++		K_OOPS(K_SYSCALL_OBJ_NEVER_INIT(copy.process, K_OBJ_PROCESS));
++	}
++
++	/* mirror z_vrfy_k_thread_create(): the thread is created via k_thread_create() */
++	K_OOPS(K_SYSCALL_OBJ_NEVER_INIT(copy.thread, K_OBJ_THREAD));
++	stack_object = k_object_find(copy.stack);
++	K_OOPS(K_SYSCALL_VERIFY_MSG(k_object_validation_check(stack_object, copy.stack,
++							      K_OBJ_THREAD_STACK_ELEMENT,
++							      _OBJ_INIT_FALSE) == 0,
++				    "bad stack object"));
++	K_OOPS(K_SYSCALL_VERIFY_MSG(!size_add_overflow(K_THREAD_STACK_RESERVED, copy.stack_size,
++						       &total_size),
++				    "stack size overflow (%zu+%zu)", copy.stack_size,
++				    K_THREAD_STACK_RESERVED));
++#ifdef CONFIG_GEN_PRIV_STACKS
++	stack_obj_size = stack_object->data.stack_data->size;
++#else
++	stack_obj_size = stack_object->data.stack_size;
++#endif /* CONFIG_GEN_PRIV_STACKS */
++	K_OOPS(K_SYSCALL_VERIFY_MSG(total_size <= stack_obj_size,
++				    "stack size %zu is too big, max is %zu", total_size,
++				    stack_obj_size));
++	K_OOPS(K_SYSCALL_VERIFY(copy.options & K_USER));
++	K_OOPS(K_SYSCALL_VERIFY(!(copy.options & K_ESSENTIAL)));
++	K_OOPS(K_SYSCALL_VERIFY(_is_valid_prio(copy.prio, NULL)));
++	K_OOPS(K_SYSCALL_VERIFY(z_is_prio_lower_or_equal(copy.prio, _current->base.prio)));
++
++	return z_impl_k_clone(&copy, child);
++}
++#include <zephyr/syscalls/k_clone_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++#ifdef CONFIG_SIGNAL
++static struct k_process *sigchld_pending_get_locked(void)
++{
++	struct k_process *proc;
++
++	SYS_DLIST_FOR_EACH_CONTAINER(&process_active, proc, active_node) {
++		if ((proc->flags & K_PROCESS_FLAG_SIGCHLD) != 0) {
++			return proc;
++		}
++	}
++
++	return NULL;
++}
++
++static void sigchld_notifier(void *p1, void *p2, void *p3)
++{
++	ARG_UNUSED(p1);
++	ARG_UNUSED(p2);
++	ARG_UNUSED(p3);
++
++	while (true) {
++		k_pid_t pid;
++		int status;
++		bool exited;
++		k_tid_t target;
++		struct k_process *child;
++		atomic_val_t gen = atomic_get(&process_wait_gen);
++
++		k_spinlock_key_t key = k_spin_lock(&process_lock);
++
++		child = sigchld_pending_get_locked();
++		if (child == NULL) {
++			k_spin_unlock(&process_lock, key);
++			/* pend without process_lock (see the lock-order comment) */
++			(void)z_sched_waitq_pend_if(&sigchld_notify_wq, K_FOREVER,
++						    &process_wait_gen, gen);
++			continue;
++		}
++
++		child->flags &= (uint8_t)~K_PROCESS_FLAG_SIGCHLD;
++		pid = child->leader;
++		status = child->wstatus;
++		exited = K_WIFEXITED(status);
++		target = (child->parent == NULL) ? NULL
++						 : process_sig_target(child->parent, K_SIG_CHLD);
++		k_spin_unlock(&process_lock, key);
++
++		if (target != NULL) {
++			/* best-effort: the target may have exited, or the queue may be full */
++			(void)z_sig_queue_chld(target, pid, status, exited);
++		}
++	}
++}
++
++K_THREAD_DEFINE(z_process_sigchld_notifier, CONFIG_PROCESS_SIGCHLD_NOTIFIER_STACK_SIZE,
++		sigchld_notifier, NULL, NULL, NULL, 0, 0, 0);
++#endif /* CONFIG_SIGNAL */
+diff --git a/kernel/sched.c b/kernel/sched.c
+index 2311874e2fc..951e6e79ee9 100644
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -711,6 +711,22 @@ int z_pend_curr(struct k_spinlock *lock, k_spinlock_key_t key,
+ 	return z_swap(&_sched_spinlock, key);
+ }
+ 
++int z_sched_waitq_pend_if(_wait_q_t *wait_q, k_timeout_t timeout, atomic_t *gen,
++			  atomic_val_t expected)
++{
++#if defined(CONFIG_TIMESLICING) && defined(CONFIG_SWAP_NONATOMIC)
++	pending_current = _current;
++#endif /* CONFIG_TIMESLICING && CONFIG_SWAP_NONATOMIC */
++	k_spinlock_key_t key = k_spin_lock(&_sched_spinlock);
++
++	if (atomic_get(gen) != expected) {
++		k_spin_unlock(&_sched_spinlock, key);
++		return 1;
++	}
++	pend_locked(_current, wait_q, timeout);
++	return z_swap(&_sched_spinlock, key);
++}
++
+ struct k_thread *z_unpend1_no_timeout(_wait_q_t *wait_q)
+ {
+ 	struct k_thread *thread = NULL;
+@@ -1398,6 +1414,10 @@ static ALWAYS_INLINE void halt_thread(struct k_thread *thread, uint8_t new_state
+ 		k_object_uninit(thread);
+ #endif /* CONFIG_USERSPACE */
+ 
++#ifdef CONFIG_PROCESS
++		z_process_exit_thread(thread);
++#endif /* CONFIG_PROCESS */
++
+ #ifdef CONFIG_THREAD_ABORT_NEED_CLEANUP
+ 		k_thread_abort_cleanup(thread);
+ #endif /* CONFIG_THREAD_ABORT_NEED_CLEANUP */
+diff --git a/kernel/thread.c b/kernel/thread.c
+index 9517dcd2bfd..7daa52d016d 100644
+--- a/kernel/thread.c
++++ b/kernel/thread.c
+@@ -699,6 +699,17 @@ char *z_setup_new_thread(struct k_thread *new_thread,
+ 		k_thread_perms_inherit(_current, new_thread);
+ 	}
+ #endif /* CONFIG_USERSPACE */
++#ifdef CONFIG_PROCESS
++	z_process_init_thread(new_thread);
++#if defined(CONFIG_USERSPACE)
++	/*
++	 * The self-grant above resolved to the thread's process, which was not
++	 * yet assigned; now that it is, grant the thread its own object so a
++	 * member can act on itself (e.g. raise() a signal).
++	 */
++	k_object_access_grant(new_thread, new_thread);
++#endif /* CONFIG_USERSPACE */
++#endif /* CONFIG_PROCESS */
+ #ifdef CONFIG_SCHED_DEADLINE
+ 	new_thread->base.prio_deadline = 0;
+ #endif /* CONFIG_SCHED_DEADLINE */
+@@ -1397,6 +1400,9 @@ void z_dummy_thread_init(struct k_thread *dummy_thread)
+ #ifdef CONFIG_USERSPACE
+ 	dummy_thread->mem_domain_info.mem_domain = &k_mem_domain_default;
+ #endif /* CONFIG_USERSPACE */
++#ifdef CONFIG_PROCESS
++	dummy_thread->process = NULL;
++#endif /* CONFIG_PROCESS */
+ #if (K_HEAP_MEM_POOL_SIZE > 0)
+ 	k_thread_system_pool_assign(dummy_thread);
+ #else
+diff --git a/lib/os/CMakeLists.txt b/lib/os/CMakeLists.txt
+index 3b001a447e3..eddf3360237 100644
+--- a/lib/os/CMakeLists.txt
++++ b/lib/os/CMakeLists.txt
+@@ -82,9 +82,27 @@ zephyr_syscall_header_ifdef(CONFIG_ZVFS_FDTABLE
+ )
+ zephyr_syscall_header_ifdef(CONFIG_ZVFS_FS ${ZEPHYR_BASE}/include/zephyr/sys/zvfs_fs.h)
+ 
++zephyr_sources_ifdef(CONFIG_SYS_PROCESS process.c)
++zephyr_syscall_header_ifdef(CONFIG_SYS_PROCESS ${ZEPHYR_BASE}/include/zephyr/sys/process.h)
++if(CONFIG_SYS_PROCESS)
++  # Sum CONFIG_SYS_PROCESS_MIN with any CONFIG_SYS_PROCESS_MIN_ADD_* additions:
++  # the accumulated minimum is the statically guaranteed record count.
++  import_kconfig(CONFIG_SYS_PROCESS_MIN_ADD_ ${DOTCONFIG} _sys_process_min_add_keys)
++  set(_sys_process_min ${CONFIG_SYS_PROCESS_MIN})
++  foreach(_add ${_sys_process_min_add_keys})
++    math(EXPR _sys_process_min "${_sys_process_min} + ${${_add}}")
++  endforeach()
++  zephyr_compile_definitions(SYS_PROCESS_MIN=${_sys_process_min})
++endif()
+ zephyr_sources_ifdef(CONFIG_SYS_THREAD thread.c)
++if(CONFIG_SYS_THREAD OR CONFIG_SYS_PROCESS)
++  # the clone dispatch: thread tier here, process tiers from process.c
++  zephyr_sources(clone.c)
++endif()
+ zephyr_syscall_header_ifdef(CONFIG_ZVFS_EVENTFD ${ZEPHYR_BASE}/include/zephyr/zvfs/eventfd.h)
+-zephyr_syscall_header_ifdef(CONFIG_SYS_THREAD ${ZEPHYR_BASE}/include/zephyr/sys/thread.h)
++if(CONFIG_SYS_THREAD OR CONFIG_SYS_PROCESS)
++  zephyr_syscall_header(${ZEPHYR_BASE}/include/zephyr/sys/thread.h)
++endif()
+ 
+ if(CONFIG_SYS_THREAD)
+   foreach(_pool CONDVAR MUTEX STACK THREAD)
+diff --git a/lib/os/Kconfig b/lib/os/Kconfig
+index 40d89f3b25f..dde7e0048da 100644
+--- a/lib/os/Kconfig
++++ b/lib/os/Kconfig
+@@ -144,6 +144,8 @@ config POWEROFF
+ 	  Enable support for system power off.
+ 
+ rsource "Kconfig.cbprintf"
++rsource "Kconfig.sys_process"
++
+ rsource "Kconfig.sys_thread"
+ 
+ rsource "Kconfig.sys_timer"
+diff --git a/lib/os/Kconfig.sys_process b/lib/os/Kconfig.sys_process
+new file mode 100644
+index 00000000000..2038bc24ac2
+--- /dev/null
++++ b/lib/os/Kconfig.sys_process
+@@ -0,0 +1,57 @@
++# Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++# SPDX-License-Identifier: Apache-2.0
++
++config SYS_PROCESS
++	bool "System-layer process services"
++	depends on PROCESS
++	select SYS_ELASTIPOOL
++	imply SYS_HASH_MAP
++	imply SYS_HASH_FUNC32
++	help
++	  Everything allocation-adjacent that kernel process support
++	  deliberately does not own: integer process/group/session numbering
++	  (sys_process_id() and friends), dynamic process records beyond the
++	  kernel's static minimum, and the group/session cell pools backing
++	  runtime k_setsid()/k_setpgid(). Without this option the kernel serves
++	  statically defined processes only: records up to the built-in
++	  minimum, build-time topology, no runtime group or session creation,
++	  and no numeric IDs.
++
++if SYS_PROCESS
++
++config SYS_PROCESS_MIN
++	int "Minimum size of the process record pool"
++	default 4
++	help
++	  Minimum number of process records guaranteed to be allocatable for
++	  k_spawn() children (including zombies not yet reaped), provided to
++	  the kernel from a static pool in the system layer. Applications and
++	  libraries contribute additional guaranteed records by defining int
++	  symbols named CONFIG_SYS_PROCESS_MIN_ADD_<NAME>; the build system
++	  sums this option with all such contributions and, for technical
++	  reasons, provides the result to code as the un-prefixed
++	  SYS_PROCESS_MIN compile definition.
++
++config SYS_PROCESS_MAX
++	int "Maximum number of heap-provided process records"
++	default 0
++	help
++	  Number of process records that may be provided to the kernel from the
++	  heap, in addition to the statically guaranteed minimum (the sum of
++	  CONFIG_SYS_PROCESS_MIN and all CONFIG_SYS_PROCESS_MIN_ADD_*
++	  contributions).
++	  The kernel itself never allocates: records beyond the minimum come
++	  from the system layer (lib/os), without guarantees, and require a
++	  system heap. The default (0) disables dynamic process records
++	  entirely.
++
++config SYS_PROCESS_IDS
++	int "Maximum number of simultaneously numbered processes"
++	default 16
++	help
++	  Size of the system-layer numbering tables behind sys_process_id(),
++	  sys_pgrp_id(), and sys_session_id(). Must cover the three reserved
++	  processes plus every statically defined and runtime process that can
++	  exist at once (including zombies not yet reaped).
++
++endif # SYS_PROCESS
+diff --git a/lib/os/process.c b/lib/os/process.c
+new file mode 100644
+index 00000000000..4e65800a620
+--- /dev/null
++++ b/lib/os/process.c
+@@ -0,0 +1,610 @@
++/*
++ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++/*
++ * System-layer process support: everything the kernel deliberately does not
++ * own because it involves runtime allocation or integer namespaces. Records
++ * and group/session cells are handed to the kernel already numbered; the
++ * frees retire the number. Frees may run in the thread-halt path (under the
++ * scheduler lock, where the heap must not be used), so heap reclamation is
++ * deferred to graveyards drained on the next allocation.
++ */
++
++#include <errno.h>
++#include <string.h>
++
++#include <zephyr/init.h>
++#include <zephyr/kernel.h>
++#include <zephyr/internal/syscall_handler.h>
++#include <zephyr/sys/math_extras.h>
++#include <zephyr/sys/elastipool.h>
++#include <zephyr/sys/process.h>
++#include <kernel_internal.h>
++#include <ksched.h>
++
++STRUCT_SECTION_START_EXTERN(k_process);
++STRUCT_SECTION_END_EXTERN(k_process);
++STRUCT_SECTION_START_EXTERN(k_process_group);
++STRUCT_SECTION_END_EXTERN(k_process_group);
++STRUCT_SECTION_START_EXTERN(k_session);
++STRUCT_SECTION_END_EXTERN(k_session);
++
++/*
++ * Numbering tables. Entries hold record pointers, dereferenced only while
++ * live: pooled entries are removed at free, strictly before the record can
++ * be recycled; static records never recycle, and their entries die with the
++ * record's K_PROCESS_UNUSED state at reap.
++ */
++struct sys_process_id_entry {
++	struct k_process *proc;
++	int id;
++};
++
++struct sys_pgrp_id_entry {
++	struct k_process_group *grp;
++	int id;
++};
++
++struct sys_session_id_entry {
++	struct k_session *session;
++	int id;
++};
++
++static struct k_spinlock id_lock;
++static struct sys_process_id_entry process_ids[CONFIG_SYS_PROCESS_IDS];
++static struct sys_pgrp_id_entry pgrp_ids[CONFIG_SYS_PROCESS_IDS];
++static struct sys_session_id_entry session_ids[CONFIG_SYS_PROCESS_IDS];
++
++static bool process_entry_live(const struct sys_process_id_entry *entry)
++{
++	return (entry->proc != NULL) && (entry->proc->state != K_PROCESS_UNUSED);
++}
++
++static int lowest_free_process_id_locked(void)
++{
++	for (int id = 0;; id++) {
++		bool used = false;
++
++		for (size_t i = 0; i < ARRAY_SIZE(process_ids); i++) {
++			if (process_entry_live(&process_ids[i]) && (process_ids[i].id == id)) {
++				used = true;
++				break;
++			}
++		}
++		if (!used) {
++			return id;
++		}
++	}
++}
++
++static void process_id_assign(struct k_process *proc)
++{
++	K_SPINLOCK(&id_lock) {
++		struct sys_process_id_entry *entry = NULL;
++
++		for (size_t i = 0; i < ARRAY_SIZE(process_ids); i++) {
++			if (!process_entry_live(&process_ids[i])) {
++				entry = &process_ids[i];
++				if (entry->proc == NULL) {
++					break;
++				}
++			}
++		}
++		if (entry != NULL) {
++			entry->id = lowest_free_process_id_locked();
++			entry->proc = proc;
++		}
++	}
++}
++
++static void process_id_retire(struct k_process *proc)
++{
++	K_SPINLOCK(&id_lock) {
++		for (size_t i = 0; i < ARRAY_SIZE(process_ids); i++) {
++			if (process_ids[i].proc == proc) {
++				process_ids[i].proc = NULL;
++				break;
++			}
++		}
++	}
++}
++
++static int process_number(struct k_process *proc)
++{
++	int ret = 0;
++
++	K_SPINLOCK(&id_lock) {
++		for (size_t i = 0; i < ARRAY_SIZE(process_ids); i++) {
++			if (process_ids[i].proc == proc) {
++				ret = process_ids[i].id;
++				break;
++			}
++		}
++	}
++
++	return ret;
++}
++
++static void pgrp_id_assign(struct k_process_group *grp, int id)
++{
++	K_SPINLOCK(&id_lock) {
++		for (size_t i = 0; i < ARRAY_SIZE(pgrp_ids); i++) {
++			if (pgrp_ids[i].grp == NULL) {
++				pgrp_ids[i].id = id;
++				pgrp_ids[i].grp = grp;
++				break;
++			}
++		}
++	}
++}
++
++static void pgrp_id_retire(struct k_process_group *grp)
++{
++	K_SPINLOCK(&id_lock) {
++		for (size_t i = 0; i < ARRAY_SIZE(pgrp_ids); i++) {
++			if (pgrp_ids[i].grp == grp) {
++				pgrp_ids[i].grp = NULL;
++				break;
++			}
++		}
++	}
++}
++
++static void session_id_assign(struct k_session *session, int id)
++{
++	K_SPINLOCK(&id_lock) {
++		for (size_t i = 0; i < ARRAY_SIZE(session_ids); i++) {
++			if (session_ids[i].session == NULL) {
++				session_ids[i].id = id;
++				session_ids[i].session = session;
++				break;
++			}
++		}
++	}
++}
++
++static void session_id_retire(struct k_session *session)
++{
++	K_SPINLOCK(&id_lock) {
++		for (size_t i = 0; i < ARRAY_SIZE(session_ids); i++) {
++			if (session_ids[i].session == session) {
++				session_ids[i].session = NULL;
++				break;
++			}
++		}
++	}
++}
++
++int z_impl_sys_process_id(k_pid_t pid)
++{
++	int ret = -ESRCH;
++
++	if (pid == NULL) {
++		return -ESRCH;
++	}
++
++	K_SPINLOCK(&id_lock) {
++		for (size_t i = 0; i < ARRAY_SIZE(process_ids); i++) {
++			if (process_entry_live(&process_ids[i]) &&
++			    (process_ids[i].proc->leader == pid)) {
++				ret = process_ids[i].id;
++				break;
++			}
++		}
++	}
++
++	if (ret == -ESRCH) {
++		/* a live member thread's handle names its group */
++		K_SPINLOCK(&id_lock) {
++			bool found = false;
++
++			for (size_t i = 0; i < ARRAY_SIZE(process_ids); i++) {
++				struct k_thread *t;
++
++				if (!process_entry_live(&process_ids[i])) {
++					continue;
++				}
++				SYS_DLIST_FOR_EACH_CONTAINER(&process_ids[i].proc->threads, t,
++							     process_node) {
++					if (t == pid) {
++						ret = process_ids[i].id;
++						found = true;
++						break;
++					}
++				}
++				if (found) {
++					break;
++				}
++			}
++		}
++	}
++
++	return ret;
++}
++
++#ifdef CONFIG_USERSPACE
++static inline int z_vrfy_sys_process_id(k_pid_t pid)
++{
++	return z_impl_sys_process_id(pid);
++}
++#include <zephyr/syscalls/sys_process_id_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++k_pid_t z_impl_sys_process_find(int id)
++{
++	k_pid_t ret = NULL;
++
++	K_SPINLOCK(&id_lock) {
++		for (size_t i = 0; i < ARRAY_SIZE(process_ids); i++) {
++			if (process_entry_live(&process_ids[i]) && (process_ids[i].id == id)) {
++				ret = process_ids[i].proc->leader;
++				break;
++			}
++		}
++	}
++
++	return ret;
++}
++
++#ifdef CONFIG_USERSPACE
++static inline k_pid_t z_vrfy_sys_process_find(int id)
++{
++	return z_impl_sys_process_find(id);
++}
++#include <zephyr/syscalls/sys_process_find_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++int z_impl_sys_pgrp_id(k_pgrp_t pgrp)
++{
++	int ret = -ESRCH;
++
++	K_SPINLOCK(&id_lock) {
++		for (size_t i = 0; i < ARRAY_SIZE(pgrp_ids); i++) {
++			if ((pgrp_ids[i].grp != NULL) && (pgrp_ids[i].grp == pgrp)) {
++				ret = pgrp_ids[i].id;
++				break;
++			}
++		}
++	}
++
++	return ret;
++}
++
++#ifdef CONFIG_USERSPACE
++static inline int z_vrfy_sys_pgrp_id(k_pgrp_t pgrp)
++{
++	return z_impl_sys_pgrp_id(pgrp);
++}
++#include <zephyr/syscalls/sys_pgrp_id_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++k_pgrp_t z_impl_sys_pgrp_find(int id)
++{
++	k_pgrp_t ret = NULL;
++
++	K_SPINLOCK(&id_lock) {
++		for (size_t i = 0; i < ARRAY_SIZE(pgrp_ids); i++) {
++			if ((pgrp_ids[i].grp != NULL) && (pgrp_ids[i].id == id)) {
++				ret = pgrp_ids[i].grp;
++				break;
++			}
++		}
++	}
++
++	return ret;
++}
++
++#ifdef CONFIG_USERSPACE
++static inline k_pgrp_t z_vrfy_sys_pgrp_find(int id)
++{
++	return z_impl_sys_pgrp_find(id);
++}
++#include <zephyr/syscalls/sys_pgrp_find_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++int z_impl_sys_session_id(k_session_t session)
++{
++	int ret = -ESRCH;
++
++	K_SPINLOCK(&id_lock) {
++		for (size_t i = 0; i < ARRAY_SIZE(session_ids); i++) {
++			if ((session_ids[i].session != NULL) && (session_ids[i].session == session)) {
++				ret = session_ids[i].id;
++				break;
++			}
++		}
++	}
++
++	return ret;
++}
++
++#ifdef CONFIG_USERSPACE
++static inline int z_vrfy_sys_session_id(k_session_t session)
++{
++	return z_impl_sys_session_id(session);
++}
++#include <zephyr/syscalls/sys_session_id_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++k_session_t z_impl_sys_session_find(int id)
++{
++	k_session_t ret = NULL;
++
++	K_SPINLOCK(&id_lock) {
++		for (size_t i = 0; i < ARRAY_SIZE(session_ids); i++) {
++			if ((session_ids[i].session != NULL) && (session_ids[i].id == id)) {
++				ret = session_ids[i].session;
++				break;
++			}
++		}
++	}
++
++	return ret;
++}
++
++#ifdef CONFIG_USERSPACE
++static inline k_session_t z_vrfy_sys_session_find(int id)
++{
++	return z_impl_sys_session_find(id);
++}
++#include <zephyr/syscalls/sys_session_find_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++/*
++ * Pools: elastipool provides the static minimums and the heap tier, and the
++ * companion cells K_PROCESS_DEFINE() emits into the iterable sections extend
++ * the group/session pools. Frees may run under the scheduler lock, where the
++ * heap is off limits, so pool releases pass through graveyards drained on the
++ * next allocation.
++ */
++#define CELL_POOL_MIN (SYS_PROCESS_MIN + 3)
++#define CELL_POOL_MAX (CELL_POOL_MIN + CONFIG_SYS_PROCESS_MAX)
++#define RECORD_POOL_MAX (SYS_PROCESS_MIN + CONFIG_SYS_PROCESS_MAX)
++
++__aligned(WB_UP(__alignof(struct k_process))) static uint8_t
++	record_pool_storage[ROUND_UP(sizeof(struct k_process), __alignof(struct k_process)) *
++			    SYS_PROCESS_MIN];
++SYS_ELASTIPOOL_DEFINE_ADVANCED(record_pool, sizeof(struct k_process), __alignof(struct k_process),
++			       SYS_PROCESS_MIN, RECORD_POOL_MAX,
++			       SYS_ELASTIPOOL_KERNEL_HEAP_ALLOC_FN(SYS_PROCESS_MIN,
++								   RECORD_POOL_MAX),
++			       record_pool_storage, static);
++
++__aligned(WB_UP(__alignof(struct k_process_group))) static uint8_t
++	pgrp_pool_storage[ROUND_UP(sizeof(struct k_process_group),
++				   __alignof(struct k_process_group)) *
++			  CELL_POOL_MIN];
++SYS_ELASTIPOOL_DEFINE_ADVANCED(pgrp_pool, sizeof(struct k_process_group),
++			       __alignof(struct k_process_group), CELL_POOL_MIN, CELL_POOL_MAX,
++			       SYS_ELASTIPOOL_KERNEL_HEAP_ALLOC_FN(CELL_POOL_MIN, CELL_POOL_MAX),
++			       pgrp_pool_storage, static);
++
++__aligned(WB_UP(__alignof(struct k_session))) static uint8_t
++	session_pool_storage[ROUND_UP(sizeof(struct k_session), __alignof(struct k_session)) *
++			     CELL_POOL_MIN];
++SYS_ELASTIPOOL_DEFINE_ADVANCED(session_pool, sizeof(struct k_session),
++			       __alignof(struct k_session), CELL_POOL_MIN, CELL_POOL_MAX,
++			       SYS_ELASTIPOOL_KERNEL_HEAP_ALLOC_FN(CELL_POOL_MIN, CELL_POOL_MAX),
++			       session_pool_storage, static);
++
++static struct k_spinlock pool_lock;
++static sys_dlist_t record_graveyard = SYS_DLIST_STATIC_INIT(&record_graveyard);
++static sys_dlist_t pgrp_graveyard = SYS_DLIST_STATIC_INIT(&pgrp_graveyard);
++static sys_dlist_t session_graveyard = SYS_DLIST_STATIC_INIT(&session_graveyard);
++/* free cells emitted into the iterable sections by K_PROCESS_DEFINE() */
++static sys_dlist_t pgrp_section_cells = SYS_DLIST_STATIC_INIT(&pgrp_section_cells);
++static sys_dlist_t session_section_cells = SYS_DLIST_STATIC_INIT(&session_section_cells);
++
++static void graveyards_drain_locked(void)
++{
++	sys_dnode_t *n;
++
++	for (n = sys_dlist_get(&record_graveyard); n != NULL;
++	     n = sys_dlist_get(&record_graveyard)) {
++		(void)sys_elastipool_free(&record_pool,
++					  CONTAINER_OF(n, struct k_process, sibling_node));
++	}
++	for (n = sys_dlist_get(&pgrp_graveyard); n != NULL; n = sys_dlist_get(&pgrp_graveyard)) {
++		(void)sys_elastipool_free(&pgrp_pool,
++					  CONTAINER_OF(n, struct k_process_group, session_node));
++	}
++	for (n = sys_dlist_get(&session_graveyard); n != NULL;
++	     n = sys_dlist_get(&session_graveyard)) {
++		(void)sys_elastipool_free(&session_pool,
++					  CONTAINER_OF(n, struct k_session, cell_node));
++	}
++}
++
++static struct k_process *record_alloc(void)
++{
++	void *obj = NULL;
++
++	K_SPINLOCK(&pool_lock) {
++		graveyards_drain_locked();
++		(void)sys_elastipool_alloc(&record_pool, &obj);
++	}
++	if (obj == NULL) {
++		return NULL;
++	}
++
++	memset(obj, 0, sizeof(struct k_process));
++	process_id_assign(obj);
++
++	return obj;
++}
++
++int z_process_record_free(struct k_process *proc)
++{
++	int ret = 0;
++
++	K_SPINLOCK(&pool_lock) {
++		if (sys_elastipool_check(&record_pool, proc) != 0) {
++			ret = -EINVAL;
++			K_SPINLOCK_BREAK;
++		}
++		process_id_retire(proc);
++		sys_dlist_append(&record_graveyard, &proc->sibling_node);
++	}
++
++	return ret;
++}
++
++int z_pgrp_cell_free(struct k_process_group *grp)
++{
++	int ret = 0;
++
++	K_SPINLOCK(&pool_lock) {
++		if ((grp >= STRUCT_SECTION_START(k_process_group)) &&
++		    (grp < STRUCT_SECTION_END(k_process_group))) {
++			pgrp_id_retire(grp);
++			sys_dlist_append(&pgrp_section_cells, &grp->session_node);
++			K_SPINLOCK_BREAK;
++		}
++		if (sys_elastipool_check(&pgrp_pool, grp) != 0) {
++			ret = -EINVAL;
++			K_SPINLOCK_BREAK;
++		}
++		pgrp_id_retire(grp);
++		sys_dlist_append(&pgrp_graveyard, &grp->session_node);
++	}
++
++	return ret;
++}
++
++int z_session_cell_free(struct k_session *session)
++{
++	int ret = 0;
++
++	K_SPINLOCK(&pool_lock) {
++		if ((session >= STRUCT_SECTION_START(k_session)) &&
++		    (session < STRUCT_SECTION_END(k_session))) {
++			session_id_retire(session);
++			sys_dlist_append(&session_section_cells, &session->cell_node);
++			K_SPINLOCK_BREAK;
++		}
++		if (sys_elastipool_check(&session_pool, session) != 0) {
++			ret = -EINVAL;
++			K_SPINLOCK_BREAK;
++		}
++		session_id_retire(session);
++		sys_dlist_append(&session_graveyard, &session->cell_node);
++	}
++
++	return ret;
++}
++
++static int process_sys_init(void)
++{
++	static struct k_process *const boot_order[] = {&z_proc_idle, &z_proc_init, &z_proc_kth};
++
++	STRUCT_SECTION_FOREACH(k_session, session) {
++		if ((session->flags & K_SESSION_FLAG_STATIC) == 0U) {
++			sys_dlist_append(&session_section_cells, &session->cell_node);
++		}
++	}
++	STRUCT_SECTION_FOREACH(k_process_group, grp) {
++		if (grp->session == NULL) {
++			sys_dlist_append(&pgrp_section_cells, &grp->session_node);
++		}
++	}
++
++	/* boot order gives the reserved processes the IDs 0, 1, and 2 */
++	for (size_t i = 0; i < ARRAY_SIZE(boot_order); i++) {
++		struct k_process *proc = boot_order[i];
++
++		process_id_assign(proc);
++		pgrp_id_assign(proc->pgrp, process_number(proc));
++		session_id_assign(proc->pgrp->session, process_number(proc));
++	}
++	STRUCT_SECTION_FOREACH(k_process, proc) {
++		process_id_assign(proc);
++	}
++
++	/*
++	 * Number link-time topology by its lowest-numbered member:
++	 * deterministic regardless of the linker's section ordering.
++	 */
++	STRUCT_SECTION_FOREACH(k_process_group, grp) {
++		struct k_process *proc;
++		struct k_process *lowest = NULL;
++
++		if (grp->session == NULL) {
++			continue;
++		}
++		SYS_DLIST_FOR_EACH_CONTAINER(&grp->members, proc, pgrp_node) {
++			if ((lowest == NULL) ||
++			    (process_number(proc) < process_number(lowest))) {
++				lowest = proc;
++			}
++		}
++		if (lowest != NULL) {
++			grp->leader = lowest->leader;
++			pgrp_id_assign(grp, process_number(lowest));
++		}
++	}
++	STRUCT_SECTION_FOREACH(k_session, session) {
++		struct k_process_group *grp;
++		struct k_process *lowest = NULL;
++
++		if ((session->flags & K_SESSION_FLAG_STATIC) == 0U) {
++			continue;
++		}
++		SYS_DLIST_FOR_EACH_CONTAINER(&session->pgrps, grp, session_node) {
++			struct k_process *proc;
++
++			SYS_DLIST_FOR_EACH_CONTAINER(&grp->members, proc, pgrp_node) {
++				if ((lowest == NULL) ||
++				    (process_number(proc) < process_number(lowest))) {
++					lowest = proc;
++				}
++			}
++		}
++		if (lowest != NULL) {
++			session->leader = lowest->leader;
++			session_id_assign(session, process_number(lowest));
++		}
++	}
++
++	return 0;
++}
++
++/* after the kernel's process_boot_init() (PRE_KERNEL_1, 0) */
++SYS_INIT(process_sys_init, PRE_KERNEL_1, 1);
++
++/* the process tier of sys_clone(); the dispatch has validated args */
++int z_sys_clone_process(const struct sys_clone_args *args, k_pid_t *child)
++{
++	int ret;
++	k_tid_t tid;
++	struct k_process *proc;
++
++	proc = record_alloc();
++	if (proc == NULL) {
++		return -EAGAIN;
++	}
++
++	/* create the leader paused; k_process_init() re-homes it */
++	tid = k_thread_create(args->thread, args->stack, args->stack_size, args->entry, args->p1,
++			      args->p2, args->p3, args->prio, args->options, K_FOREVER);
++
++	ret = k_process_init(proc, &tid, 1);
++	if (ret < 0) {
++		k_thread_abort(tid);
++		(void)z_process_record_free(proc);
++		return ret;
++	}
++
++	if (child != NULL) {
++		*child = tid;
++	}
++
++	if ((args->flags & SYS_CLONE_PAUSED) == 0U) {
++		k_thread_start(tid);
++	}
++
++	return 0;
++}
++
+diff --git a/tests/kernel/process/CMakeLists.txt b/tests/kernel/process/CMakeLists.txt
+new file mode 100644
+index 00000000000..ed6062d2a03
+--- /dev/null
++++ b/tests/kernel/process/CMakeLists.txt
+@@ -0,0 +1,7 @@
++# SPDX-License-Identifier: Apache-2.0
++
++cmake_minimum_required(VERSION 3.20.0)
++find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
++project(kernel_process)
++
++target_sources(app PRIVATE src/main.c)
+diff --git a/tests/kernel/process/prj.conf b/tests/kernel/process/prj.conf
+new file mode 100644
+index 00000000000..9cebd24dc09
+--- /dev/null
++++ b/tests/kernel/process/prj.conf
+@@ -0,0 +1,3 @@
++CONFIG_ZTEST=y
++CONFIG_PROCESS=y
++CONFIG_SYS_PROCESS=y
+diff --git a/tests/kernel/process/src/main.c b/tests/kernel/process/src/main.c
+new file mode 100644
+index 00000000000..3c3bd62bcc6
+--- /dev/null
++++ b/tests/kernel/process/src/main.c
+@@ -0,0 +1,638 @@
++/*
++ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <stdlib.h>
++
++#include <zephyr/kernel.h>
++#include <zephyr/sys/process.h>
++#include <zephyr/ztest.h>
++
++#define STATIC_PROC_STACK_SIZE 1024
++#define EXIT_CODE 42
++
++static K_SEM_DEFINE(static_exits_ran, 0, 1);
++static K_SEM_DEFINE(static_returns_ran, 0, 1);
++static volatile k_pid_t static_exits_self;
++static volatile k_pid_t static_exits_parent;
++static volatile k_pid_t static_returns_self;
++static volatile k_pid_t static_returns_parent;
++
++static void proc_entry_exit_code(void *p1, void *p2, void *p3)
++{
++	ARG_UNUSED(p1);
++	ARG_UNUSED(p2);
++	ARG_UNUSED(p3);
++
++	static_exits_self = k_getpid();
++	static_exits_parent = k_getppid();
++	k_sem_give(&static_exits_ran);
++
++	k_exit(EXIT_CODE);
++}
++
++static void proc_entry_return(void *p1, void *p2, void *p3)
++{
++	ARG_UNUSED(p1);
++	ARG_UNUSED(p2);
++	ARG_UNUSED(p3);
++
++	static_returns_self = k_getpid();
++	static_returns_parent = k_getppid();
++	k_sem_give(&static_returns_ran);
++}
++
++K_PROCESS_DEFINE(proc_exits, STATIC_PROC_STACK_SIZE, proc_entry_exit_code, NULL, NULL, NULL,
++		 K_LOWEST_APPLICATION_THREAD_PRIO, 0, 0);
++K_PROCESS_DEFINE(proc_returns, STATIC_PROC_STACK_SIZE, proc_entry_return, NULL, NULL, NULL,
++		 K_LOWEST_APPLICATION_THREAD_PRIO, 0, 0);
++
++ZTEST(kernel_process, test_reserved_processes)
++{
++	k_pid_t idle = sys_process_find(0);
++	k_pid_t init = sys_process_find(1);
++	k_pid_t kth = sys_process_find(2);
++
++	zassert_not_null(idle);
++	zassert_not_null(init);
++	zassert_not_null(kth);
++	zassert_true((idle != init) && (init != kth) && (idle != kth));
++
++	zassert_equal(sys_process_id(idle), 0);
++	zassert_equal(sys_process_id(init), 1);
++	zassert_equal(sys_process_id(kth), 2);
++
++	/* each reserved process leads its own process group and session */
++	zassert_not_null(k_getpgid(idle));
++	zassert_true((k_getpgid(idle) != k_getpgid(init)) &&
++		     (k_getpgid(init) != k_getpgid(kth)));
++	zassert_true((k_getsid(idle) != k_getsid(init)) && (k_getsid(init) != k_getsid(kth)));
++	zassert_equal(sys_pgrp_id(k_getpgid(idle)), 0);
++	zassert_equal(sys_session_id(k_getsid(idle)), 0);
++	zassert_equal(sys_pgrp_id(k_getpgid(init)), 1);
++	zassert_equal(sys_session_id(k_getsid(init)), 1);
++	zassert_equal(sys_pgrp_id(k_getpgid(kth)), 2);
++	zassert_equal(sys_session_id(k_getsid(kth)), 2);
++}
++
++ZTEST(kernel_process, test_static_pids)
++{
++	int pid_a = sys_process_id(proc_exits);
++	int pid_b = sys_process_id(proc_returns);
++
++	zassert_true(pid_a >= 3);
++	zassert_true(pid_b >= 3);
++	zassert_not_equal(pid_a, pid_b);
++	zassert_equal(sys_process_find(pid_a), proc_exits);
++	zassert_equal(sys_process_find(pid_b), proc_returns);
++
++	zassert_is_null(sys_process_find(-1));
++	zassert_is_null(sys_process_find(1000000));
++	zassert_equal(sys_process_id(NULL), -ESRCH);
++}
++
++ZTEST(kernel_process, test_membership)
++{
++	k_pid_t self = k_getpid();
++
++	/* ztest threads are kernel threads created during boot: the kthread process */
++	zassert_equal(self, sys_process_find(2));
++	zassert_equal(sys_process_id(self), 2);
++	zassert_equal(k_getppid(), sys_process_find(0));
++	zassert_equal(k_getpgid(NULL), k_getpgid(self));
++	zassert_equal(k_getsid(NULL), k_getsid(self));
++
++	/* Linux-style: a live member thread's handle names its group */
++	zassert_equal(sys_process_id(k_current_get()), 2);
++}
++
++static void child_thread_entry(void *p1, void *p2, void *p3)
++{
++	k_pid_t *out = p1;
++
++	ARG_UNUSED(p2);
++	ARG_UNUSED(p3);
++
++	*out = k_getpid();
++}
++
++static K_THREAD_STACK_DEFINE(child_stack_a, STATIC_PROC_STACK_SIZE);
++static struct k_thread child_a;
++
++ZTEST(kernel_process, test_membership_inherit)
++{
++	k_pid_t seen = NULL;
++
++	k_tid_t tid = k_thread_create(&child_a, child_stack_a, STATIC_PROC_STACK_SIZE,
++				      child_thread_entry, &seen, NULL, NULL,
++				      K_LOWEST_APPLICATION_THREAD_PRIO, 0, K_NO_WAIT);
++
++	zassert_ok(k_thread_join(tid, K_SECONDS(5)));
++	zassert_equal(seen, k_getpid());
++}
++
++ZTEST(kernel_process, test_static_process_lifecycle)
++{
++	zassert_ok(k_sem_take(&static_exits_ran, K_SECONDS(5)));
++	zassert_ok(k_sem_take(&static_returns_ran, K_SECONDS(5)));
++
++	/* each static process runs as its own process, parented by init */
++	zassert_equal(static_exits_self, proc_exits);
++	zassert_equal(static_exits_parent, sys_process_find(1));
++	zassert_equal(static_returns_self, proc_returns);
++	zassert_equal(static_returns_parent, sys_process_find(1));
++
++	/*
++	 * Wait for both leaders to exit. Joining is safe here: these leader
++	 * thread objects are static and are never reaped or recycled in this
++	 * test, so the handles stay valid thread objects throughout.
++	 */
++	zassert_ok(k_thread_join(proc_exits, K_SECONDS(5)));
++	zassert_ok(k_thread_join(proc_returns, K_SECONDS(5)));
++
++	/* an unreaped (zombie) process keeps its identity and still exists */
++	zassert_equal(sys_process_find(sys_process_id(proc_exits)), proc_exits);
++	zassert_equal(sys_process_find(sys_process_id(proc_returns)), proc_returns);
++}
++
++ZTEST(kernel_process, test_waitpid)
++{
++	int ws;
++	k_pid_t reaped;
++
++	/* the test's process (kthreadd) has no children */
++	zassert_equal(k_waitpid(NULL, &reaped, &ws, 0, K_NO_WAIT), -ECHILD);
++	zassert_equal(k_waitpid(NULL, &reaped, &ws, K_PROCESS_WNOHANG, K_NO_WAIT),
++		      -ECHILD);
++	zassert_equal(k_waitpid(NULL, &reaped, &ws, K_PROCESS_WUNTRACED, K_NO_WAIT),
++		      -ENOTSUP);
++	/* positive reap paths are covered once sys_clone() creates children */
++}
++
++static K_THREAD_STACK_DEFINE(spawn_stack_a, STATIC_PROC_STACK_SIZE);
++static K_THREAD_STACK_DEFINE(spawn_stack_b, STATIC_PROC_STACK_SIZE);
++static struct k_thread spawn_thread_a;
++static struct k_thread spawn_thread_b;
++
++static K_THREAD_STACK_DEFINE(child_stack_b, STATIC_PROC_STACK_SIZE);
++static struct k_thread child_b;
++
++static volatile k_pid_t spawn_seen_ppid;
++
++static void spawn_entry_exit(void *p1, void *p2, void *p3)
++{
++	int code = (int)(intptr_t)p1;
++
++	ARG_UNUSED(p2);
++	ARG_UNUSED(p3);
++
++	spawn_seen_ppid = k_getppid();
++	k_exit(code);
++}
++
++ZTEST(kernel_process, test_spawn)
++{
++	int ws = 0;
++	int pid;
++	k_pid_t reaped = NULL;
++	k_pid_t child = &spawn_thread_a;
++	struct sys_clone_args args = {
++		.entry = spawn_entry_exit,
++		.p1 = (void *)(intptr_t)7,
++		.thread = &spawn_thread_a,
++		.stack = spawn_stack_a,
++		.stack_size = STATIC_PROC_STACK_SIZE,
++		.prio = K_LOWEST_APPLICATION_THREAD_PRIO,
++	};
++
++	spawn_seen_ppid = NULL;
++	zassert_ok(sys_clone(&args, NULL));
++
++	/* the initial thread's handle is the process handle */
++	pid = sys_process_id(child);
++	zassert_true(pid >= 3);
++	zassert_equal(sys_process_find(pid), child);
++
++	/* observe the zombie without reaping: the handle is still owned */
++	zassert_ok(k_waitpid(child, NULL, NULL, K_PROCESS_WNOWAIT, K_FOREVER));
++	zassert_equal(sys_clone(&args, NULL), -EBUSY);
++	zassert_equal(spawn_seen_ppid, k_getpid());
++
++	/* blocking reap retires the handle */
++	zassert_ok(k_waitpid(child, &reaped, &ws, 0, K_FOREVER));
++	zassert_equal(reaped, child);
++	zassert_true(K_WIFEXITED(ws));
++	zassert_equal(K_WEXITSTATUS(ws), 7);
++	zassert_equal(sys_process_id(child), -ESRCH);
++	zassert_is_null(sys_process_find(pid));
++
++	/* the leader thread object is reusable as a new leader after reap */
++	zassert_ok(sys_clone(&args, NULL));
++	zassert_ok(k_waitpid(child, NULL, NULL, 0, K_FOREVER));
++
++	/* the thread tier: a member of this process, not a new process */
++	k_pid_t seen = NULL;
++	k_tid_t member = NULL;
++	struct sys_clone_args targs = {
++		.flags = SYS_CLONE_THREAD,
++		.entry = child_thread_entry,
++		.p1 = &seen,
++		.thread = &child_b,
++		.stack = child_stack_b,
++		.stack_size = STATIC_PROC_STACK_SIZE,
++		.prio = K_LOWEST_APPLICATION_THREAD_PRIO,
++	};
++
++	zassert_ok(sys_clone(&targs, &member));
++	zassert_equal(member, (k_pid_t)&child_b);
++	zassert_ok(k_thread_join(&child_b, K_SECONDS(5)));
++	zassert_equal(seen, k_getpid());
++}
++
++ZTEST(kernel_process, test_spawn_waitpid_selectors)
++{
++	int ws = 0;
++	k_pid_t reaped = NULL;
++	k_pid_t child = &spawn_thread_b;
++	struct sys_clone_args args = {
++		.entry = spawn_entry_exit,
++		.p1 = (void *)(intptr_t)3,
++		.thread = &spawn_thread_b,
++		.stack = spawn_stack_b,
++		.stack_size = STATIC_PROC_STACK_SIZE,
++		.prio = K_LOWEST_APPLICATION_THREAD_PRIO,
++	};
++
++	zassert_ok(sys_clone(&args, NULL));
++
++	/* WNOHANG returns EAGAIN while the child still runs, 0 once it exits */
++	int ret;
++
++	do {
++		ret = k_waitpid(NULL, &reaped, &ws, K_PROCESS_WNOHANG, K_NO_WAIT);
++		if (ret == -EAGAIN) {
++			k_sleep(K_MSEC(10));
++		}
++	} while (ret == -EAGAIN);
++
++	zassert_ok(ret);
++	zassert_equal(reaped, child);
++	zassert_equal(K_WEXITSTATUS(ws), 3);
++}
++
++static K_THREAD_STACK_DEFINE(spawn_stack_c, STATIC_PROC_STACK_SIZE);
++static struct k_thread spawn_thread_c;
++
++static void spawn_entry_libc_exit(void *p1, void *p2, void *p3)
++{
++	ARG_UNUSED(p1);
++	ARG_UNUSED(p2);
++	ARG_UNUSED(p3);
++
++	/* libc exit(): runs atexit handlers, then _exit() -> k_exit() */
++	exit(5);
++}
++
++ZTEST(kernel_process, test_spawn_libc_exit)
++{
++	int ws = 0;
++
++	if (IS_ENABLED(CONFIG_NATIVE_LIBC) || !IS_ENABLED(CONFIG_COMMON_LIBC_EXIT)) {
++		/* exit() only reaches k_exit() through the common libc exit path */
++		ztest_test_skip();
++		return;
++	}
++
++	struct sys_clone_args args = {
++		.entry = spawn_entry_libc_exit,
++		.thread = &spawn_thread_c,
++		.stack = spawn_stack_c,
++		.stack_size = STATIC_PROC_STACK_SIZE,
++		.prio = K_LOWEST_APPLICATION_THREAD_PRIO,
++	};
++
++	zassert_ok(sys_clone(&args, NULL));
++	zassert_ok(k_waitpid(&spawn_thread_c, NULL, &ws, 0, K_FOREVER));
++	zassert_true(K_WIFEXITED(ws));
++	zassert_equal(K_WEXITSTATUS(ws), 5);
++}
++
++ZTEST(kernel_process, test_spawn_invalid)
++{
++	struct sys_clone_args args = {0};
++
++	zassert_equal(sys_clone(NULL), -EINVAL);
++	zassert_equal(sys_clone(&args, NULL), -EINVAL);
++}
++
++#if (CONFIG_SYS_PROCESS_MAX >= 4) && (CONFIG_HEAP_MEM_POOL_SIZE > 0)
++#define HEAP_KIDS 6
++
++static K_THREAD_STACK_ARRAY_DEFINE(heap_stacks, HEAP_KIDS, STATIC_PROC_STACK_SIZE);
++static struct k_thread heap_threads[HEAP_KIDS];
++static K_SEM_DEFINE(heap_gate, 0, HEAP_KIDS);
++
++static void heap_child_entry(void *p1, void *p2, void *p3)
++{
++	ARG_UNUSED(p1);
++	ARG_UNUSED(p2);
++	ARG_UNUSED(p3);
++
++	k_sem_take(&heap_gate, K_FOREVER);
++	k_exit(0);
++}
++
++ZTEST(kernel_process, test_spawn_heap_growth)
++{
++	struct sys_clone_args args = {
++		.entry = heap_child_entry,
++		.stack_size = STATIC_PROC_STACK_SIZE,
++		.prio = K_LOWEST_APPLICATION_THREAD_PRIO,
++	};
++
++	/* more concurrent processes than the static minimum: the tail is heap-grown */
++	for (int i = 0; i < HEAP_KIDS; i++) {
++		args.thread = &heap_threads[i];
++		args.stack = heap_stacks[i];
++		zassert_ok(sys_clone(&args, NULL), "spawn %d", i);
++	}
++	for (int i = 0; i < HEAP_KIDS; i++) {
++		k_sem_give(&heap_gate);
++	}
++	for (int i = 0; i < HEAP_KIDS; i++) {
++		int ws = 1;
++		k_pid_t reaped = NULL;
++
++		zassert_ok(k_waitpid(NULL, &reaped, &ws, 0, K_FOREVER));
++		zassert_not_null(reaped);
++		zassert_true(K_WIFEXITED(ws) && (K_WEXITSTATUS(ws) == 0));
++	}
++	zassert_equal(k_waitpid(NULL, NULL, NULL, 0, K_NO_WAIT), -ECHILD);
++}
++#endif /* CONFIG_SYS_PROCESS_MAX >= 4 && CONFIG_HEAP_MEM_POOL_SIZE > 0 */
++
++#ifdef CONFIG_SIGNAL
++static K_THREAD_STACK_DEFINE(sig_parent_stack, STATIC_PROC_STACK_SIZE);
++static K_THREAD_STACK_DEFINE(sig_child_stack, STATIC_PROC_STACK_SIZE);
++static struct k_thread sig_parent_thread;
++static struct k_thread sig_child_thread;
++
++#define SIGCHLD_OK	   0x51
++#define SIGCHLD_BAD_SPAWN  0x52
++#define SIGCHLD_BAD_WAIT   0x53
++#define SIGCHLD_BAD_INFO   0x54
++
++/*
++ * K_SIG_CHLD is delivered to an eligible thread of the parent process, so the
++ * assertions run inside a spawned parent process; the result is reported
++ * through the parent's own exit status.
++ */
++static void sig_parent_entry(void *p1, void *p2, void *p3)
++{
++	int ws;
++	struct k_sig_set set;
++	struct k_sig_info info;
++	k_pid_t child = &sig_child_thread;
++	struct sys_clone_args args = {
++		.entry = spawn_entry_exit,
++		.p1 = (void *)(intptr_t)9,
++		.thread = &sig_child_thread,
++		.stack = sig_child_stack,
++		.stack_size = STATIC_PROC_STACK_SIZE,
++		.prio = K_LOWEST_APPLICATION_THREAD_PRIO,
++	};
++
++	ARG_UNUSED(p1);
++	ARG_UNUSED(p2);
++	ARG_UNUSED(p3);
++
++	k_sig_emptyset(&set);
++	k_sig_addset(&set, K_SIG_CHLD);
++
++	if (sys_clone(&args, NULL) != 0) {
++		k_exit(SIGCHLD_BAD_SPAWN);
++	}
++
++	{
++		/*
++		 * k_sig_timedwait() can return before its full timeout when no
++		 * signal is queued yet; poll in finite chunks as the POSIX
++		 * sigwait() implementation does.
++		 */
++		int ret;
++		int64_t deadline = k_uptime_get() + 5000;
++
++		do {
++			ret = k_sig_timedwait(&set, &info, K_MSEC(100));
++		} while ((ret < 0) && (k_uptime_get() < deadline));
++
++		if (ret != K_SIG_CHLD) {
++			k_exit(SIGCHLD_BAD_WAIT);
++		}
++	}
++
++	if ((info.signo != K_SIG_CHLD) || (info.code != K_SI_CLD_EXITED) ||
++	    (info.pid != child) || !K_WIFEXITED(info.status) ||
++	    (K_WEXITSTATUS(info.status) != 9)) {
++		k_exit(SIGCHLD_BAD_INFO);
++	}
++
++	/* the child is still reapable after notification */
++	if (k_waitpid(child, NULL, &ws, 0, K_FOREVER) != 0) {
++		k_exit(SIGCHLD_BAD_WAIT);
++	}
++
++	k_exit(SIGCHLD_OK);
++}
++
++ZTEST(kernel_process, test_sigchld)
++{
++	int ws = 0;
++	struct sys_clone_args args = {
++		.entry = sig_parent_entry,
++		.thread = &sig_parent_thread,
++		.stack = sig_parent_stack,
++		.stack_size = STATIC_PROC_STACK_SIZE,
++		.prio = K_LOWEST_APPLICATION_THREAD_PRIO,
++	};
++
++	zassert_ok(sys_clone(&args, NULL));
++	zassert_ok(k_waitpid(&sig_parent_thread, NULL, &ws, 0, K_FOREVER));
++	zassert_true(K_WIFEXITED(ws));
++	zassert_equal(K_WEXITSTATUS(ws), SIGCHLD_OK, "parent reported 0x%x", K_WEXITSTATUS(ws));
++}
++#endif /* CONFIG_SIGNAL */
++
++#ifdef CONFIG_PROCESS_INIT
++static K_SEM_DEFINE(init_ran, 0, 1);
++static volatile k_pid_t init_self;
++static volatile k_pid_t init_parent;
++
++void z_process_init_entry(void *p1, void *p2, void *p3)
++{
++	ARG_UNUSED(p1);
++	ARG_UNUSED(p2);
++	ARG_UNUSED(p3);
++
++	init_self = k_getpid();
++	init_parent = k_getppid();
++	k_sem_give(&init_ran);
++
++	k_sleep(K_FOREVER);
++}
++
++ZTEST(kernel_process, test_init_process)
++{
++	zassert_ok(k_sem_take(&init_ran, K_SECONDS(5)), "init thread did not run");
++
++	/* the init thread runs in the init process (pid 1), parented by idle */
++	zassert_equal(init_self, sys_process_find(1));
++	zassert_equal(sys_process_id(init_self), 1);
++	zassert_equal(init_parent, sys_process_find(0));
++}
++#endif /* CONFIG_PROCESS_INIT */
++
++static K_THREAD_STACK_DEFINE(pi_stack_a, STATIC_PROC_STACK_SIZE);
++static K_THREAD_STACK_DEFINE(pi_stack_b, STATIC_PROC_STACK_SIZE);
++static struct k_thread pi_thread_a;
++static struct k_thread pi_thread_b;
++static struct k_process pi_record;
++static struct k_process pi_record2;
++
++ZTEST(kernel_process, test_k_clone)
++{
++	int ws = 0;
++	k_tid_t child = NULL;
++	k_pid_t seen = NULL;
++	struct k_clone_args args = {
++		.entry = spawn_entry_exit,
++		.p1 = (void *)(intptr_t)9,
++		.thread = &child_a,
++		.stack = child_stack_a,
++		.stack_size = STATIC_PROC_STACK_SIZE,
++		.prio = K_LOWEST_APPLICATION_THREAD_PRIO,
++		.process = &pi_record,
++	};
++	struct k_clone_args bad;
++
++	zassert_equal(k_clone(NULL, NULL), -EINVAL);
++	bad = args;
++	bad.entry = NULL;
++	zassert_equal(k_clone(&bad, NULL), -EINVAL);
++	bad = args;
++	bad.flags = K_CLONE_THREAD;
++	/* the thread tier and a process record are mutually exclusive */
++	zassert_equal(k_clone(&bad, NULL), -EINVAL);
++	bad = args;
++	bad.process = NULL;
++	zassert_equal(k_clone(&bad, NULL), -EINVAL);
++
++	/* new process from caller-provided record, thread, and stack: no allocation */
++	zassert_ok(k_clone(&args, &child));
++	zassert_equal(child, &child_a);
++	zassert_ok(k_waitpid(child, NULL, &ws, 0, K_FOREVER));
++	zassert_true(K_WIFEXITED(ws));
++	zassert_equal(K_WEXITSTATUS(ws), 9);
++
++	/* thread tier, paused: the new thread is a member of this process */
++	bad = (struct k_clone_args){
++		.flags = K_CLONE_THREAD | K_CLONE_PAUSED,
++		.entry = child_thread_entry,
++		.p1 = &seen,
++		.thread = &child_b,
++		.stack = child_stack_b,
++		.stack_size = STATIC_PROC_STACK_SIZE,
++		.prio = K_LOWEST_APPLICATION_THREAD_PRIO,
++	};
++	zassert_ok(k_clone(&bad, &child));
++	zassert_equal(child, &child_b);
++	k_thread_start(child);
++	zassert_ok(k_thread_join(child, K_SECONDS(5)));
++	zassert_equal(seen, k_getpid());
++}
++static volatile k_pid_t pi_seen_pid_a;
++static volatile k_pid_t pi_seen_pid_b;
++
++static void pi_entry_exit(void *p1, void *p2, void *p3)
++{
++	ARG_UNUSED(p2);
++	ARG_UNUSED(p3);
++
++	pi_seen_pid_a = k_getpid();
++	k_exit((int)(intptr_t)p1);
++}
++
++static void pi_entry_wait(void *p1, void *p2, void *p3)
++{
++	ARG_UNUSED(p1);
++	ARG_UNUSED(p2);
++	ARG_UNUSED(p3);
++
++	pi_seen_pid_b = k_getpid();
++	k_sleep(K_FOREVER);
++}
++
++static void process_init_invalid(void)
++{
++	k_tid_t list[1] = {NULL};
++
++	zassert_equal(k_process_init(NULL, list, 1), -EINVAL);
++	zassert_equal(k_process_init(&pi_record, NULL, 1), -EINVAL);
++	zassert_equal(k_process_init(&pi_record, list, 0), -EINVAL);
++	zassert_equal(k_process_init(&pi_record, list, 1), -EINVAL);
++}
++
++static void process_init_two_threads(void)
++{
++	int ws = 0;
++	k_tid_t list[2];
++
++	list[0] = k_thread_create(&pi_thread_a, pi_stack_a, STATIC_PROC_STACK_SIZE, pi_entry_exit,
++				  (void *)(intptr_t)5, NULL, NULL,
++				  K_LOWEST_APPLICATION_THREAD_PRIO, 0, K_FOREVER);
++	list[1] = k_thread_create(&pi_thread_b, pi_stack_b, STATIC_PROC_STACK_SIZE, pi_entry_wait,
++				  NULL, NULL, NULL, K_LOWEST_APPLICATION_THREAD_PRIO, 0,
++				  K_FOREVER);
++
++	/* caller-provided record: the kernel initializes, callers allocate */
++	zassert_ok(k_process_init(&pi_record, list, 2));
++
++	/* re-initializing a busy record, or reusing a busy leader, errors */
++	zassert_equal(k_process_init(&pi_record, list, 2), -EBUSY);
++	zassert_equal(k_process_init(&pi_record2, list, 1), -EBUSY);
++
++	/* both listed threads are members and observe the leader handle as pid */
++	k_thread_start(list[1]);
++	k_thread_start(list[0]);
++	zassert_ok(k_waitpid(list[0], NULL, &ws, 0, K_FOREVER));
++	zassert_true(K_WIFEXITED(ws));
++	zassert_equal(K_WEXITSTATUS(ws), 5);
++	zassert_equal(pi_seen_pid_a, list[0]);
++	zassert_equal(pi_seen_pid_b, list[0]);
++}
++
++static void process_init_reuse(void)
++{
++	int ws = 0;
++	k_tid_t tid = k_thread_create(&pi_thread_a, pi_stack_a, STATIC_PROC_STACK_SIZE,
++				      pi_entry_exit, (void *)(intptr_t)6, NULL, NULL,
++				      K_LOWEST_APPLICATION_THREAD_PRIO, 0, K_FOREVER);
++
++	/* a reaped record and a reaped leader are both reusable */
++	zassert_ok(k_process_init(&pi_record, &tid, 1));
++	k_thread_start(tid);
++	zassert_ok(k_waitpid(tid, NULL, &ws, 0, K_FOREVER));
++	zassert_true(K_WIFEXITED(ws));
++	zassert_equal(K_WEXITSTATUS(ws), 6);
++}
++
++ZTEST(kernel_process, test_process_init)
++{
++	process_init_invalid();
++	process_init_two_threads();
++	process_init_reuse();
++}
++
++ZTEST_SUITE(kernel_process, NULL, NULL, NULL, NULL, NULL);
+diff --git a/tests/kernel/process/testcase.yaml b/tests/kernel/process/testcase.yaml
+new file mode 100644
+index 00000000000..fd5b28e7fa5
+--- /dev/null
++++ b/tests/kernel/process/testcase.yaml
+@@ -0,0 +1,60 @@
++common:
++  tags:
++    - kernel
++    - process
++tests:
++  kernel.process:
++    integration_platforms:
++      - qemu_cortex_m3
++      - qemu_x86
++  kernel.process.sigchld:
++    filter: not CONFIG_USERSPACE
++    integration_platforms:
++      - qemu_cortex_m3
++      - qemu_x86
++    extra_configs:
++      - CONFIG_SIGNAL=y
++      - CONFIG_SIGNAL_SET_SIZE=40
++      # k_kill_pgrp queues one signal per group member simultaneously, and each
++      # spawned child that exits leaves a best-effort SIGCHLD queued to the
++      # (kernel) test process, which keeps it masked; size the queue with
++      # headroom for both. test_kill installs one signal handler.
++      - CONFIG_SIGNAL_QUEUE_SIZE=8
++      - CONFIG_SIGNAL_ACTION_DB_SIZE=2
++  kernel.process.init:
++    filter: not CONFIG_USERSPACE
++    integration_platforms:
++      - qemu_cortex_m3
++      - qemu_x86
++    extra_configs:
++      - CONFIG_PROCESS_INIT=y
++  kernel.process.userspace:
++    filter: CONFIG_ARCH_HAS_USERSPACE
++    tags: userspace
++    integration_platforms:
++      - qemu_cortex_m3
++      - qemu_x86
++    extra_configs:
++      - CONFIG_TEST_USERSPACE=y
++      - CONFIG_USERSPACE=y
++  kernel.process.heap:
++    integration_platforms:
++      - qemu_cortex_m3
++      - qemu_x86
++    extra_configs:
++      - CONFIG_SYS_PROCESS_MAX=4
++      - CONFIG_HEAP_MEM_POOL_SIZE=8192
++  kernel.process.heap.userspace:
++    filter: CONFIG_ARCH_HAS_USERSPACE
++    tags: userspace
++    integration_platforms:
++      - qemu_cortex_m3
++      - qemu_x86
++    extra_configs:
++      - CONFIG_TEST_USERSPACE=y
++      - CONFIG_USERSPACE=y
++      - CONFIG_SYS_PROCESS_MAX=4
++      - CONFIG_HEAP_MEM_POOL_SIZE=8192
++      # 6 heap-growth children + the suite's other thread objects exceed the
++      # 16-thread kobject permission bitmap
++      - CONFIG_MAX_THREAD_BYTES=4
+diff --git a/include/zephyr/kernel.h b/include/zephyr/kernel.h
+index 35eaad9ec35..fe0551e89dc 100644
+--- a/include/zephyr/kernel.h
++++ b/include/zephyr/kernel.h
+@@ -8367,6 +8367,28 @@ __syscall int k_waitpid_pgrp(k_pgrp_t pgrp, k_pid_t *reaped, int *wstatus, uint3
+ __syscall int k_process_init(struct k_process *proc, const k_tid_t *threads,
+ 			     size_t num_threads);
+ 
++/**
++ * @brief The kernel clone primitive: a new process, or a thread in this one
++ *
++ * Creates @a args->thread on @a args->stack, stopped. Without
++ * @ref K_CLONE_THREAD the thread becomes the leader of a new process
++ * initialized into the caller-provided record @a args->process, as
++ * k_process_init(); with @ref K_CLONE_THREAD it joins the calling process
++ * instead. The thread is started unless @ref K_CLONE_PAUSED is given. The
++ * kernel never allocates: every object is the caller's. sys_clone() layers
++ * pooled resources and numbering over this primitive.
++ *
++ * @param args creation arguments
++ * @param child filled with the new thread's handle (the process handle for a
++ *              new process), or NULL
++ *
++ * @retval 0 on success
++ * @retval -EINVAL if an argument is invalid
++ * @retval -EBUSY if @a args->process is already initialized or @a
++ *         args->thread still leads an unreaped process
++ */
++__syscall int k_clone(const struct k_clone_args *args, k_tid_t *child);
++
+ /**
+  * @brief Initialize a process group from caller-provided memory
+  *
+diff --git a/include/zephyr/kernel/process.h b/include/zephyr/kernel/process.h
+index c5c05cbf4a9..d40ff8e9830 100644
+--- a/include/zephyr/kernel/process.h
++++ b/include/zephyr/kernel/process.h
+@@ -34,6 +34,49 @@ typedef struct k_process_group *k_pgrp_t;
+ /** @brief Session handle */
+ typedef struct k_session *k_session_t;
+ 
++struct k_thread;
++
++/**
++ * @brief Create the new thread in the calling process, not a new process
++ *
++ * The thread joins the caller's thread group; @a process must be NULL.
++ */
++#define K_CLONE_THREAD BIT64(0)
++
++/**
++ * @brief Create the thread stopped
++ *
++ * The caller completes setup and starts it with k_thread_start().
++ */
++#define K_CLONE_PAUSED BIT64(1)
++
++/**
++ * @brief Arguments for k_clone()
++ *
++ * The caller provides every object: the thread, its stack, and - for a new
++ * process - the process record. The kernel never allocates.
++ */
++struct k_clone_args {
++	/** K_CLONE_* flags */
++	uint64_t flags;
++	/** Entry point of the new thread */
++	k_thread_entry_t entry;
++	/** Entry parameters */
++	void *p1, *p2, *p3;
++	/** Thread object */
++	struct k_thread *thread;
++	/** Thread stack */
++	k_thread_stack_t *stack;
++	/** Thread stack size, in bytes */
++	size_t stack_size;
++	/** Thread priority */
++	int prio;
++	/** Thread options (e.g. K_USER) */
++	uint32_t options;
++	/** Process record led by the new thread; NULL with @ref K_CLONE_THREAD */
++	struct k_process *process;
++};
++
+ #if defined(CONFIG_PROCESS) || defined(__DOXYGEN__)
+ 
+ /**
+@@ -112,6 +155,7 @@ struct k_thread;
+ #define K_PROCESS_WNOHANG BIT(0)
+ /** @brief Report status without reaping the child */
+ #define K_PROCESS_WNOWAIT BIT(24)
++
+ /** @brief Report stopped children (reserved; stop/continue is unsupported) */
+ #define K_PROCESS_WUNTRACED BIT(1)
+ /** @brief Report continued children (reserved; stop/continue is unsupported) */
+@@ -119,8 +163,6 @@ struct k_thread;
+ /** @brief Report exited children (the default; accepted for waitid() compatibility) */
+ #define K_PROCESS_WEXITED BIT(2)
+ /** @} */
+-
+-
+ /**
+  * @brief Session
+  *
+diff --git a/include/zephyr/sys/thread.h b/include/zephyr/sys/thread.h
+index c6f2ce485f3..64fd170bea2 100644
+--- a/include/zephyr/sys/thread.h
++++ b/include/zephyr/sys/thread.h
+@@ -16,12 +16,78 @@
+ extern "C" {
+ #endif
+ 
+-#if defined(CONFIG_SYS_THREAD) || defined(__DOXYGEN__)
+-
+ struct k_condvar;
+ struct k_mutex;
+ struct k_thread;
+ 
++/**
++ * @brief Create the child stopped
++ *
++ * The child is fully constructed but its initial thread is not started; the
++ * caller completes setup (process group, signal state, priority) and starts
++ * it with k_thread_start() on the returned child handle.
++ */
++#define SYS_CLONE_PAUSED BIT64(1)
++
++/**
++ * @brief Create a thread in the calling process, not a new process
++ *
++ * The new thread joins the caller's thread group instead of leading a new
++ * process; without @kconfig{CONFIG_PROCESS} it is simply a new thread. The
++ * handle returned through @a child is the thread handle.
++ * sys_thread_create() is a convenience wrapper over this tier.
++ */
++#define SYS_CLONE_THREAD BIT64(2)
++
++/**
++ * @brief Arguments for sys_clone()
++ *
++ * Without @ref SYS_CLONE_THREAD the initial thread becomes the new process's
++ * thread group leader: its handle is the new process's @ref k_pid_t.
++ */
++struct sys_clone_args {
++	/** SYS_CLONE_* flags; zero clones nothing from the caller */
++	uint64_t flags;
++	/** Entry point of the initial thread */
++	k_thread_entry_t entry;
++	/** Entry parameters */
++	void *p1, *p2, *p3;
++	/** Initial thread object, or NULL to draw one from the system pool */
++	struct k_thread *thread;
++	/** Initial thread stack (pool-drawn threads may pass NULL for a pool stack) */
++	k_thread_stack_t *stack;
++	/** Initial thread stack size, in bytes */
++	size_t stack_size;
++	/** Stack guard size for pool-drawn stacks, in bytes */
++	size_t guard_size;
++	/** Initial thread priority */
++	int prio;
++	/** Initial thread options (e.g. K_USER) */
++	uint32_t options;
++};
++
++/**
++ * @brief The creation primitive: a new process, or a thread in this one
++ *
++ * Without @ref SYS_CLONE_THREAD, allocates a process record from the system
++ * pool, creates the initial thread from @a args, and starts it as the leader
++ * of the new process - a child of the caller, joining the caller's process
++ * group. @a args->flags selects what the child clones from the caller; zero
++ * clones nothing (a fresh process). With @ref SYS_CLONE_THREAD, creates a
++ * thread in the calling process instead. Higher-level thread and process
++ * creation APIs are library constructs over this call.
++ *
++ * @retval 0 on success
++ * @retval -EINVAL if @a args is invalid (including unsupported flags)
++ * @retval -EAGAIN if no process record is available
++ * @retval -EBUSY if @a args->thread still leads an unreaped process
++ * @retval -ENOTSUP for a process-tier clone without @kconfig{CONFIG_SYS_PROCESS}
++ */
++__syscall int sys_clone(const struct sys_clone_args *args, k_pid_t *child);
++
++
++#if defined(CONFIG_SYS_THREAD) || defined(__DOXYGEN__)
++
+ /**
+  * @defgroup sys_thread_apis System Thread Pool APIs
+  * @ingroup kernel_apis
+@@ -243,12 +309,12 @@ __syscall int sys_thread_destroy(struct k_thread *th);
+ 
+ /** @} */
+ 
++#endif /* defined(CONFIG_SYS_THREAD) || defined(__DOXYGEN__) */
++
+ #ifdef __cplusplus
+ }
+ #endif
+ 
+ #include <zephyr/syscalls/thread.h>
+ 
+-#endif /* defined(CONFIG_SYS_THREAD) || defined(__DOXYGEN__) */
+-
+ #endif /* ZEPHYR_INCLUDE_ZEPHYR_SYS_THREAD_H_ */
+diff --git a/lib/os/Kconfig.sys_msgq b/lib/os/Kconfig.sys_msgq
+index 2fdce6140b8..28e4efca892 100644
+--- a/lib/os/Kconfig.sys_msgq
++++ b/lib/os/Kconfig.sys_msgq
+@@ -32,7 +32,7 @@ config SYS_MSGQ_DISPATCH_PRIO
+ config SYS_MSGQ_DISPATCH_STACK_SIZE
+ 	int "Stack size of the function-notification dispatcher thread"
+ 	depends on SIGNAL && SYS_THREAD && THREAD_DETACH
+-	default 1024
++	default 2048
+ 	help
+ 	  Stack size of the system message queue dispatcher, the kernel
+ 	  service thread that accepts function-notification message arrivals
+diff --git a/lib/os/Kconfig.sys_timer b/lib/os/Kconfig.sys_timer
+index 6aad9d986b6..eea26f8d1fa 100644
+--- a/lib/os/Kconfig.sys_timer
++++ b/lib/os/Kconfig.sys_timer
+@@ -29,7 +29,7 @@ config SYS_TIMER_DISPATCH_PRIO
+ config SYS_TIMER_DISPATCH_STACK_SIZE
+ 	int "Stack size of the function-notification dispatcher thread"
+ 	depends on TIMER_SIGNAL && SYS_THREAD && THREAD_DETACH
+-	default 1024
++	default 2048
+ 	help
+ 	  Stack size of the system timer dispatcher, the kernel service thread
+ 	  that accepts function-notification timer expiries and spawns one
+diff --git a/lib/os/clone.c b/lib/os/clone.c
+new file mode 100644
+index 00000000000..4034fdddd68
+--- /dev/null
++++ b/lib/os/clone.c
+@@ -0,0 +1,159 @@
++/*
++ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++/*
++ * The clone dispatch: one creation primitive with a thread tier and process
++ * tiers. The thread tier lives here so it exists
++ * without CONFIG_SYS_PROCESS; the process tiers are provided by process.c.
++ */
++
++#include <errno.h>
++
++#include <zephyr/kernel.h>
++#include <zephyr/internal/syscall_handler.h>
++#include <zephyr/sys/process.h>
++#include <zephyr/sys/thread.h>
++#include <ksched.h>
++
++/* process-tier provider (process.c); this dispatch is its only consumer */
++#ifdef CONFIG_SYS_PROCESS
++int z_sys_clone_process(const struct sys_clone_args *args, k_pid_t *child);
++#else
++static inline int z_sys_clone_process(const struct sys_clone_args *args, k_pid_t *child)
++{
++	ARG_UNUSED(args);
++	ARG_UNUSED(child);
++	return -ENOTSUP;
++}
++#endif /* CONFIG_SYS_PROCESS */
++
++/* pooled creation (thread.c); stubbed when there is no pool to draw from */
++#ifdef CONFIG_SYS_THREAD
++int z_sys_thread_create_common(struct k_thread **th, k_thread_stack_t *stack, uint32_t stack_size,
++			       uint32_t guard_size, k_thread_entry_t entry, void *p1, void *p2,
++			       void *p3, int prio, uint32_t options, k_timeout_t delay);
++#else
++static inline int z_sys_thread_create_common(struct k_thread **th, k_thread_stack_t *stack,
++					     uint32_t stack_size, uint32_t guard_size,
++					     k_thread_entry_t entry, void *p1, void *p2, void *p3,
++					     int prio, uint32_t options, k_timeout_t delay)
++{
++	return -EINVAL;
++}
++#endif /* CONFIG_SYS_THREAD */
++
++static int clone_thread(const struct sys_clone_args *args, k_pid_t *child)
++{
++	int ret;
++	k_tid_t tid;
++
++	if (args->thread == NULL) {
++		ret = z_sys_thread_create_common(&tid, args->stack, args->stack_size,
++						 args->guard_size, args->entry, args->p1, args->p2,
++						 args->p3, args->prio, args->options, K_FOREVER);
++		if (ret < 0) {
++			return ret;
++		}
++	} else {
++		tid = k_thread_create(args->thread, args->stack, args->stack_size, args->entry,
++				      args->p1, args->p2, args->p3, args->prio, args->options,
++				      K_FOREVER);
++#ifdef CONFIG_USERSPACE
++		if (k_is_in_user_syscall()) {
++			k_object_access_grant(tid, tid);
++			k_object_access_grant(tid->stack_obj, tid);
++		}
++#endif /* CONFIG_USERSPACE */
++	}
++
++	if (child != NULL) {
++		*child = tid;
++	}
++
++	if ((args->flags & SYS_CLONE_PAUSED) == 0U) {
++		k_thread_start(tid);
++	}
++
++	return 0;
++}
++
++int z_impl_sys_clone(const struct sys_clone_args *args, k_pid_t *child)
++{
++	if ((args == NULL) ||
++	    ((args->flags & ~(SYS_CLONE_PAUSED | SYS_CLONE_THREAD)) != 0U)) {
++		return -EINVAL;
++	}
++	if (args->entry == NULL) {
++		return -EINVAL;
++	}
++	if ((args->thread != NULL) && ((args->stack == NULL) || (args->stack_size == 0))) {
++		return -EINVAL;
++	}
++	if ((args->flags & SYS_CLONE_THREAD) != 0U) {
++		/* a pool-drawn thread may still use a caller-provided stack */
++		if ((args->thread == NULL) && !IS_ENABLED(CONFIG_SYS_THREAD)) {
++			return -EINVAL;
++		}
++		return clone_thread(args, child);
++	}
++	if (args->thread == NULL) {
++		return -EINVAL;
++	}
++
++	return z_sys_clone_process(args, child);
++}
++
++#ifdef CONFIG_USERSPACE
++static inline int z_vrfy_sys_clone(const struct sys_clone_args *args, k_pid_t *child)
++{
++	struct sys_clone_args copy;
++	size_t total_size, stack_obj_size;
++	struct k_object *stack_object;
++
++	K_OOPS(k_usermode_from_copy(&copy, args, sizeof(copy)));
++	if (child != NULL) {
++		K_OOPS(K_SYSCALL_MEMORY_WRITE(child, sizeof(*child)));
++	}
++
++	if (copy.thread == NULL) {
++		/* pool-drawn thread: no caller objects to validate */
++		K_OOPS(K_SYSCALL_VERIFY(copy.stack == NULL));
++		K_OOPS(K_SYSCALL_VERIFY(copy.options & K_USER));
++		K_OOPS(K_SYSCALL_VERIFY(!(copy.options & K_ESSENTIAL)));
++		K_OOPS(K_SYSCALL_VERIFY(_is_valid_prio(copy.prio, NULL)));
++		K_OOPS(K_SYSCALL_VERIFY(z_is_prio_lower_or_equal(copy.prio, _current->base.prio)));
++
++		return z_impl_sys_clone(&copy, child);
++	}
++
++	/* mirror z_vrfy_k_thread_create(): the thread is created via k_thread_create() */
++	K_OOPS(K_SYSCALL_OBJ_NEVER_INIT(copy.thread, K_OBJ_THREAD));
++	stack_object = k_object_find(copy.stack);
++	K_OOPS(K_SYSCALL_VERIFY_MSG(k_object_validation_check(stack_object, copy.stack,
++							      K_OBJ_THREAD_STACK_ELEMENT,
++							      _OBJ_INIT_FALSE) == 0,
++				    "bad stack object"));
++	K_OOPS(K_SYSCALL_VERIFY_MSG(!size_add_overflow(K_THREAD_STACK_RESERVED,
++						       copy.stack_size, &total_size),
++				    "stack size overflow (%zu+%zu)", copy.stack_size,
++				    K_THREAD_STACK_RESERVED));
++#ifdef CONFIG_GEN_PRIV_STACKS
++	stack_obj_size = stack_object->data.stack_data->size;
++#else
++	stack_obj_size = stack_object->data.stack_size;
++#endif /* CONFIG_GEN_PRIV_STACKS */
++	K_OOPS(K_SYSCALL_VERIFY_MSG(total_size <= stack_obj_size,
++				    "stack size %zu is too big, max is %zu", total_size,
++				    stack_obj_size));
++	K_OOPS(K_SYSCALL_VERIFY(copy.options & K_USER));
++	K_OOPS(K_SYSCALL_VERIFY(!(copy.options & K_ESSENTIAL)));
++	K_OOPS(K_SYSCALL_VERIFY(_is_valid_prio(copy.prio, NULL)));
++	K_OOPS(K_SYSCALL_VERIFY(z_is_prio_lower_or_equal(copy.prio, _current->base.prio)));
++
++	return z_impl_sys_clone(&copy, child);
++}
++#include <zephyr/syscalls/sys_clone_mrsh.c>
++#endif /* CONFIG_USERSPACE */
+diff --git a/lib/os/thread.c b/lib/os/thread.c
+index b37ee0b5eb6..49ec16171ae 100644
+--- a/lib/os/thread.c
++++ b/lib/os/thread.c
+@@ -615,7 +615,7 @@ __maybe_unused static void sys_thread_recycle(void)
+ 	}
+ }
+ 
+-static int sys_thread_create_common(struct k_thread **th, k_thread_stack_t *stack,
++int z_sys_thread_create_common(struct k_thread **th, k_thread_stack_t *stack,
+ 				    uint32_t stack_size, uint32_t guard_size,
+ 				    k_thread_entry_t entry, void *p1, void *p2, void *p3, int prio,
+ 				    uint32_t options, k_timeout_t delay)
+@@ -672,12 +672,40 @@ static int sys_thread_create_common(struct k_thread **th, k_thread_stack_t *stac
+ 	return 0;
+ }
+ 
++static int thread_create_clone(struct k_thread **th, k_thread_stack_t *stack,
++			       uint32_t stack_size, uint32_t guard_size, k_thread_entry_t entry,
++			       void *p1, void *p2, void *p3, int prio, uint32_t options,
++			       uint64_t clone_flags)
++{
++	int ret;
++	k_pid_t child = NULL;
++	struct sys_clone_args args = {
++		.flags = SYS_CLONE_THREAD | clone_flags,
++		.entry = entry,
++		.p1 = p1,
++		.p2 = p2,
++		.p3 = p3,
++		.stack = stack,
++		.stack_size = stack_size,
++		.guard_size = guard_size,
++		.prio = prio,
++		.options = options,
++	};
++
++	ret = z_impl_sys_clone(&args, &child);
++	if (ret == 0) {
++		*th = child;
++	}
++
++	return ret;
++}
++
+ int z_impl_sys_thread_create(struct k_thread **th, k_thread_stack_t *stack, uint32_t stack_size,
+ 			     uint32_t guard_size, k_thread_entry_t entry, void *p1, void *p2,
+ 			     void *p3, int prio, uint32_t options)
+ {
+-	return sys_thread_create_common(th, stack, stack_size, guard_size, entry, p1, p2, p3, prio,
+-					options, K_NO_WAIT);
++	return thread_create_clone(th, stack, stack_size, guard_size, entry, p1, p2, p3, prio,
++				   options, 0);
+ }
+ 
+ int sys_thread_create_paused(struct k_thread **th, k_thread_stack_t *stack, uint32_t stack_size,
+@@ -685,8 +713,8 @@ int sys_thread_create_paused(struct k_thread **th, k_thread_stack_t *stack, uint
+ 			     void *p3, int prio, uint32_t options)
+ {
+ 	/* kernel-mode only: there is no system call for deferred-start creation */
+-	return sys_thread_create_common(th, stack, stack_size, guard_size, entry, p1, p2, p3, prio,
+-					options, K_FOREVER);
++	return thread_create_clone(th, stack, stack_size, guard_size, entry, p1, p2, p3, prio,
++				   options, SYS_CLONE_PAUSED);
+ }
+ 
+ #ifdef CONFIG_USERSPACE

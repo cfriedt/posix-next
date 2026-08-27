@@ -1774,3 +1774,43 @@ patches:
       (K_OBJ_PROCESS), validated like thread objects; k_object_free()
       refuses to free a live or unreaped record - its memory is
       reclaimed at reap.
+  - path: zephyr/k-process-exit-wait.patch
+    sha256sum: 2a5645a77bebd1fd1b1f9ff9ea1f641a6bff15f842029fb38a95f3c0037c3957
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-10
+    upstreamable: true
+    comments: |
+      Implement the k_process lifecycle over the core API: threads join
+      their creator's process at creation (z_process_init_thread) and leave
+      in the scheduler halt epilogue (z_process_exit_thread); the idle
+      threads and the boot thread belong to the idle process, boot-time
+      kernel threads to the kthread process, and user threads descend from
+      init; the reserved trio is wired at build time. The kernel neither
+      allocates nor calls an allocator: k_process_init() initializes
+      caller-provided records (-EBUSY on busy records or leaders) and a
+      live-record registry resolves them. Everything allocation-adjacent
+      lives in lib/os/process.c under CONFIG_SYS_PROCESS: elastipool
+      records and group/session cells with graveyard-deferred heap
+      reclamation and the sys_process_id() numbering tables. Creation is
+      one primitive with tiers: sys_clone() without flags makes a new
+      process from a caller-provided leader thread, and SYS_CLONE_THREAD
+      makes a thread in the calling process - a plain new thread without
+      CONFIG_PROCESS, so process-less behavior is identical -
+      with sys_thread_create() a thin wrapper packing the tier and
+      SYS_CLONE_PAUSED deferring the start. The dispatch and thread tier
+      live in a new lib/os/clone.c, built (and the sys/thread.h syscall
+      surface generated) whenever SYS_THREAD or SYS_PROCESS is enabled;
+      the process tier stays in process.c as z_sys_clone_process(), with
+      an ENOTSUP stub, forward-declared at its single consumer. Beneath
+      it, k_clone() is the public no-alloc kernel primitive: the caller
+      provides the thread, stack, and process record; both tiers,
+      K_CLONE_PAUSED, full userspace verification. Struct and flag
+      definitions sit outside the config guards because generated
+      syscall prototypes reference them unconditionally, the established
+      handle-type rule. Provider frees error (-EINVAL) on memory the
+      provider does not own - static or caller memory recycles in place.
+      k_exit()/k_waitpid() implement zombie/reap with process_lock nested
+      inside the scheduler lock (z_sched_waitq_pend_if); SIGCHLD emission
+      defers to a notifier thread.
