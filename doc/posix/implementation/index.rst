@@ -1088,8 +1088,10 @@ Temporary files
    :c:func:`tmpfile` and :c:func:`tmpnam` are provided by the common C library
    (:kconfig:option:`CONFIG_COMMON_LIBC_TMPFILE`) for every libc, and require ``/tmp`` to exist
    on a mounted file system. ISO C removes the :c:func:`tmpfile` stream when it is closed or at
-   normal program termination; Zephyr does not track the stream for reclamation at either
-   boundary, so the file is left in place - a documented deviation.
+   normal program termination; the file is removed on the final close of its descriptor -
+   :c:func:`fclose`, or the descriptor sweep at process exit when process support
+   (:kconfig:option:`CONFIG_PROCESS`) is enabled. Without process support a stream that is never
+   closed leaves its file in place, as there is no process termination at which to remove it.
 
 Zephyr FS subsystem caveats
 ---------------------------
