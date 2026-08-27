@@ -135,13 +135,21 @@ Signals
 =======
 
 Signals are delivered either to a specific thread (:c:func:`pthread_kill`) or to
-a process (:c:func:`kill`). A process-directed signal is delivered to one member
-thread that has it unblocked, preferring the caller for a self-signal. When
-every member has the signal masked it pends at **process scope** and is claimed
-by whichever member first unblocks or waits for it - strict POSIX semantics for
-fully-masked processes. Kernel-resolved process delivery bypasses the
-per-thread-object permission check, since :c:func:`kill` authorization is
-process-level.
+a process (:c:func:`kill`, :c:func:`sigqueue`, and the ``k_kill_all()``
+broadcast behind ``kill(-1, ...)``). A process-directed signal is delivered to
+one member thread that has it unblocked, preferring the caller for a
+self-signal. When every member has the signal masked it pends at **process
+scope** and is claimed by whichever member first unblocks or waits for it -
+strict POSIX semantics for fully-masked processes. Kernel-resolved process
+delivery bypasses the per-thread-object permission check, since :c:func:`kill`
+authorization is process-level.
+
+Signal dispositions are likewise a property of the process: installed by any
+member thread, in force for every member, and purged when the process is
+reaped. ``sys_clone()`` duplicates the parent's dispositions into a new
+process - every disposition for the fork tier, only ignored dispositions for a
+fresh image (fork+exec semantics) - and :c:func:`execve` reverts handled
+dispositions to default in place.
 
 Exec
 ====
@@ -221,3 +229,11 @@ Each is expected to be retired as the corresponding substrate lands.
    * - Process-directed pending signals
      - Held at process scope and claimed by the first member to unblock or
        wait; conforms to POSIX.
+   * - Kernel-staged user memory in a fork child
+     - The kernel stages user memory through the shared kernel page tables,
+       which map the child's user addresses to the parent's frames. A fork
+       child must therefore use scalar-only system calls (no pointer
+       copy-outs) and cannot take user-mode signal-handler delivery (the
+       trampoline frame is kernel-staged); an inherited ignored disposition
+       is honored, since discard happens kernel-side. Lifted when copy-outs
+       learn to resolve through the child's mappings.

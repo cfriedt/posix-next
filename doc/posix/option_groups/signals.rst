@@ -11,16 +11,16 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_SIGNALS`.
 
     :c:func:`abort`,yes
     :c:func:`alarm`,yes
-    :c:func:`kill`,yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`kill`,yes
     :c:func:`pause`,yes
     :c:func:`raise`,yes
-    :c:func:`sigaction`,yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`sigaction`,yes
     :c:func:`sigaddset`,yes
     :c:func:`sigdelset`,yes
     :c:func:`sigemptyset`,yes
     :c:func:`sigfillset`,yes
     :c:func:`sigismember`,yes
-    :c:func:`signal`,yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`signal`,yes
     :c:func:`sigpending`,yes
     :c:func:`sigprocmask`,yes
     :c:func:`sigsuspend`,yes

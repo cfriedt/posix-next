@@ -349,18 +349,23 @@ kernel's :kconfig:option:`CONFIG_PROCESS` thread-group substrate - see
 :ref:`posix_multi_process_design`) is optional, which shapes the implementation in several ways:
 
 Signals are process-directed or thread-directed
-   :c:func:`kill` is process-directed and ``pthread_kill()`` is thread-directed. With process
-   support, a positive ``pid`` names a process, ``0`` the caller's process group, and a negative
-   ``pid`` another process group; a process-directed signal is delivered to one member thread
-   that has it unblocked, or pends at process scope until a member unblocks or waits for it.
-   Broadcast (``pid == -1``) is not supported and fails with ``ESRCH``. In a single-process
-   configuration the process's own pid, ``0``, and ``-1`` all name the single process, and the
-   signal is queued to the calling thread.
+   :c:func:`kill` and :c:func:`sigqueue` are process-directed and ``pthread_kill()`` is
+   thread-directed. With process support, a positive ``pid`` names a process, ``0`` the caller's
+   process group, a negative ``pid`` another process group, and ``-1`` every other process
+   (excluding the reserved system processes and the caller's own); a process-directed signal is
+   delivered to one member thread that has it unblocked, or pends at process scope until a member
+   unblocks or waits for it. In a single-process configuration the process's own pid, ``0``, and
+   ``-1`` all name the single (figurative) process, with the same process-directed delivery: the
+   caller takes the signal when it has it unblocked, and it otherwise pends at system scope for
+   the first thread that unblocks or waits for it.
 
-Dispositions are per-thread
-   POSIX associates a signal action with the process, but the kernel action database is keyed by
-   (signal, thread), so an action installed by one thread is not in force for another. A thread
-   that needs to catch a signal must install the action itself.
+Dispositions are per-process with process support
+   With :kconfig:option:`CONFIG_PROCESS`, a signal action is a property of the process, as POSIX
+   specifies: installed by any member thread, in force for every member, and outliving its
+   installer. A forked child inherits every disposition, a freshly created process image inherits
+   only ignored dispositions (fork+exec semantics), and ``exec`` reverts handled dispositions to
+   default. Without process support the action database is keyed by (signal, thread), so an
+   action installed by one thread is not in force for another and dies with its installer.
 
 Kernel threads block all signals by default
    A kernel thread must opt in to signal delivery, with :c:func:`sigprocmask` or
