@@ -51,10 +51,10 @@ static ZTEST_BMEM bool rt_sigset_usable;
 static ZTEST_BMEM int rt_nsigs;
 
 /*
- * On Zephyr, signals are per-thread and the thread id doubles as the pid argument for
- * sigqueue(). With the host libc, a process-directed signal may be delivered to any of
- * the simulator's host threads (with terminating default action), so queue directly to
- * the test thread instead.
+ * sigqueue() is process-directed. With the host libc, a process-directed signal may be
+ * delivered to any of the simulator's host threads (with terminating default action), so
+ * queue directly to the test thread there. On Zephyr the callers queue from the target
+ * thread itself, so the caller's own process is the target.
  */
 static int queue_rt_signal(pthread_t target, int signo, union sigval value)
 {
@@ -72,7 +72,9 @@ static int queue_rt_signal(pthread_t target, int signo, union sigval value)
 
 	return 0;
 #else
-	return sigqueue((pid_t)target, signo, value);
+	ARG_UNUSED(target);
+
+	return sigqueue(getpid(), signo, value);
 #endif
 }
 
@@ -93,7 +95,7 @@ static ZTEST_BMEM sigset_t rt_sigset;
 
 static ZTEST_BMEM struct sigqueue_work {
 	struct k_work_delayable dwork;
-	pthread_t target;
+	pid_t pid;
 } sigq_work;
 
 static void do_queue(struct k_work *work)
@@ -101,14 +103,15 @@ static void do_queue(struct k_work *work)
 	struct sigqueue_work *sq_work = CONTAINER_OF(
 		CONTAINER_OF(work, struct k_work_delayable, work), struct sigqueue_work, dwork);
 
-	zassert_ok(queue_rt_signal(sq_work->target, SIGRTMIN, (union sigval){0}));
+	/* the work queue thread may belong to another process: use the captured pid */
+	zassert_ok(sigqueue(sq_work->pid, SIGRTMIN, (union sigval){0}));
 }
 
 /* unused with the host libc, where blocking in a host call stalls the k_work queue */
-__maybe_unused static void queue_signal_after_ms(pthread_t target, int delay_ms)
+__maybe_unused static void queue_signal_after_ms(int delay_ms)
 {
 	(void)k_work_cancel_delayable(&sigq_work.dwork);
-	sigq_work.target = target;
+	sigq_work.pid = getpid();
 	k_work_init_delayable(&sigq_work.dwork, do_queue);
 	k_work_schedule(&sigq_work.dwork, K_MSEC(delay_ms));
 }
@@ -202,7 +205,7 @@ static void test_sigqueue(void)
 
 	/* the host queue depth is governed by RLIMIT_SIGPENDING, not SIGQUEUE_MAX */
 	IF_NOT_NATIVE_LIBC({
-		zassert_not_ok(sigqueue((pid_t)pthread_self(), SIGRTMIN, (union sigval){0}));
+		zassert_not_ok(sigqueue(getpid(), SIGRTMIN, (union sigval){0}));
 		zassert_equal(errno, EAGAIN);
 	})
 
@@ -317,7 +320,7 @@ static void test_sigtimedwait(void)
 		};
 
 		begin_ms = now_ms();
-		queue_signal_after_ms(pthread_self(), 100);
+		queue_signal_after_ms(100);
 		zassert_equal(SIGRTMIN, sigtimedwait(&set, NULL, &wait_300ms));
 		end_ms = now_ms();
 		delta_ms = end_ms - begin_ms;
@@ -382,7 +385,7 @@ static void test_sigwaitinfo(void)
 		uint32_t begin_ms, delta_ms, end_ms;
 
 		begin_ms = now_ms();
-		queue_signal_after_ms(pthread_self(), 100);
+		queue_signal_after_ms(100);
 		zassert_equal(SIGRTMIN, sigwaitinfo(&set, NULL));
 		end_ms = now_ms();
 		delta_ms = end_ms - begin_ms;
