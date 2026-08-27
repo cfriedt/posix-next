@@ -3484,6 +3484,30 @@ patches:
       CONFIG_PROCESS the common _exit() reproduces the prior
       report-and-halt behaviour, and the per-C-library stubs are used as
       before.
+  - path: zephyr/k-signal-process-conformance.patch
+    sha256sum: 5fb2a44e03141f25245638c6ad43fa26893404ae12c70e0a7fb5df79666d9803
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-27
+    upstreamable: true
+    comments: |
+      Process-directed signal conformance over CONFIG_PROCESS: signal
+      dispositions become a property of the process (installed by any
+      member, in force for every member, purged at reap), duplicated into
+      new processes by sys_clone() - every disposition for the fork tier,
+      ignored dispositions only for a fresh image (fork+exec semantics).
+      k_sigqueue() carries a value with k_kill()'s process-directed
+      delivery, and k_kill_all() broadcasts to every process except the
+      caller's and the reserved system records, batched like
+      k_kill_pgrp(). Without CONFIG_PROCESS the system is the single
+      (figurative) process: k_kill()/k_sigqueue() prefer an eligible
+      caller and otherwise pend at system scope, claimable by the first
+      thread to unblock or wait for the signal. Also corrects
+      process-scope pending delivery: the claim path resolves the action
+      in force for the claiming thread, decrements the counter matching
+      the entry's scope, and z_sig_handle() includes process and system
+      scope in its entry gate.
   - path: zephyr/libc-sys-stat-utime-markers.patch
     sha256sum: 8edfcf83058522bb80d601e92c4a9e6be14baec04cf8253ffbd344fbadf05b78
     module: zephyr
