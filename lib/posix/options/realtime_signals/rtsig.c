@@ -36,57 +36,47 @@ static void kinfo_to_siginfo(siginfo_t *dst, const struct k_sig_info *src)
 
 int sigqueue(pid_t pid, int signo, union sigval value)
 {
-	struct k_thread *tid;
+	int ret;
+	int ksig;
 	union k_sig_val val = {
 		.sival_ptr = value.sival_ptr,
 	};
-	int ret;
 
-	if ((signo < 0) || (signo > SIGNAL_SET_SIZE)) {
-		errno = EINVAL;
-		return -1;
+	if (signo == 0) {
+		/* error checking is performed, but no signal is sent */
+		ksig = 0;
+	} else {
+		if ((signo < 0) || (signo > SIGNAL_SET_SIZE)) {
+			errno = EINVAL;
+			return -1;
+		}
+
+		ksig = z_sig_from_posix(signo);
+		if (ksig <= 0) {
+			errno = EINVAL;
+			return -1;
+		}
 	}
 
-	/*
-	 * Zephyr maps pid to pthread_t (a k_thread pointer). On 32-bit targets
-	 * that handle is often >= 0x80000000, so casting to signed pid_t is
-	 * negative even though the thread is valid. Reject only explicit invalid
-	 * targets; k_sig_queue() validates the resolved thread.
-	 */
-	if ((pid == 0) || (pid == (pid_t)-1)) {
-		errno = ESRCH;
-		return -1;
-	}
-
-	signo = z_sig_from_posix(signo);
-	if (signo < 0) {
-		errno = EINVAL;
-		return -1;
-	}
-
+	/* process-directed, like kill(), carrying the value */
 #ifdef CONFIG_PROCESS
 	{
-		k_pid_t proc = sys_process_find(pid);
+		k_pid_t proc = sys_process_find((int)pid);
 
 		if (proc == NULL) {
 			errno = ESRCH;
 			return -1;
 		}
-		/* the handle is the group leader; prefer the caller for self */
-		tid = (proc == k_getpid()) ? k_current_get() : proc;
+		ret = k_sigqueue(proc, ksig, val);
 	}
 #else
-	if (pid == POSIX_THIS_PID) {
-		/* as with kill(), "this process" means the calling thread */
-		tid = k_current_get();
-	} else {
-		pthread_t th = (pthread_t)(uintptr_t)pid;
-
-		tid = to_k_thread(&th);
+	if (pid != POSIX_THIS_PID) {
+		errno = ESRCH;
+		return -1;
 	}
+	ret = k_sigqueue(NULL, ksig, val);
 #endif /* CONFIG_PROCESS */
 
-	ret = k_sig_queue(tid, signo, val);
 	if (ret < 0) {
 		errno = -ret;
 		return -1;
