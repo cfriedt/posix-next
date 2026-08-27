@@ -15,6 +15,24 @@
 #include <zephyr/sys/util.h>
 #include <zephyr/ztest.h>
 
+#include "../../shared/linux_compat_test.h"
+
+#ifndef CONFIG_NATIVE_LIBC
+/* SIGUSR1 is blocked on entry */
+static void sigpending_process_directed(const sigset_t *set)
+{
+	int accepted = 0;
+	sigset_t pending;
+
+	zassert_ok(kill(getpid(), SIGUSR1));
+	zassert_ok(sigpending(&pending));
+	zassert_equal(1, sigismember(&pending, SIGUSR1),
+		      "a blocked process-directed signal is not reported as pending");
+	zassert_ok(sigwait(set, &accepted));
+	zassert_equal(SIGUSR1, accepted);
+}
+#endif /* !CONFIG_NATIVE_LIBC */
+
 ZTEST_USER(posix_signals, test_sigpending)
 {
 	int accepted = 0;
@@ -50,6 +68,13 @@ ZTEST_USER(posix_signals, test_sigpending)
 	zassert_ok(sigpending(&pending));
 	zassert_equal(0, sigismember(&pending, SIGUSR1),
 		      "%s is still pending after it was accepted", "SIGUSR1");
+
+	/*
+	 * A process-directed signal that every thread blocks pends for the process and is
+	 * reported by any of its threads.
+	 */
+	/* the host delivers a process-directed signal to any of the simulator's threads */
+	IF_NOT_NATIVE_LIBC(sigpending_process_directed(&set);)
 
 	zassert_ok(sigprocmask(SIG_SETMASK, &previous, NULL));
 }

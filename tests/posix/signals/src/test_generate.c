@@ -80,6 +80,13 @@ ZTEST_USER(posix_signals, test_kill)
 		zassert_equal(ESRCH, errno);
 	}
 
+	/* [ESRCH] broadcast excludes the caller: no other process exists to signal */
+	if (IS_ENABLED(CONFIG_PROCESS) && !IS_ENABLED(CONFIG_NATIVE_LIBC)) {
+		errno = 0;
+		zassert_equal(-1, kill(-1, 0));
+		zassert_equal(ESRCH, errno);
+	}
+
 	/*
 	 * Blocking is not exercised here. It is a property of the calling thread, and kill() is
 	 * directed at the process, so holding a signal pending this way only works where the two
