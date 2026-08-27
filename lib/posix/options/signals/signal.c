@@ -36,8 +36,8 @@ static int posix_kill_multi(pid_t pid, int ksigno)
 		return k_kill_pgrp(NULL, ksigno);
 	}
 	if (pid == -1) {
-		/* broadcast to all processes is not supported */
-		return -ESRCH;
+		/* every process the caller may signal, except itself */
+		return k_kill_all(ksigno);
 	}
 
 	k_pgrp_t grp = sys_pgrp_find((int)-pid);
@@ -437,26 +437,18 @@ int kill(pid_t pid, int sig)
 		}
 	}
 
-	if (IS_ENABLED(CONFIG_POSIX_MULTI_PROCESS)) {
+	if (IS_ENABLED(CONFIG_PROCESS)) {
 		/* multi-process: decode the pid encodings onto the handle-domain kernel */
 		ret = posix_kill_multi(pid, ksigno);
-	} else if (IS_ENABLED(CONFIG_POSIX_SINGLE_PROCESS) && ((pid == POSIX_THIS_PID) || (pid == 0)
-		|| (pid == -1))) {
-		/* single-process: its pid, 0, and -1 all name it; else ESRCH.
-		 *
-		 * caveat: Zephyr's implementation "provides extended security controls" and therefore
-		 * we "impose further implementation-defined restrictions on the sending of signals."
-		 *
-		 * Specifically, in single-process mode, user & kernel threads coexist within one
-		 * (figurative) process; typical process infrastructure is not compiled-in, objects are
-		 * granted explicit permissions, etc. Thus, we bypass kernel pid routing logic and
-		 * directly queue the signal to the calling thread (which may or may not have blocked
-		 * the specified signal). This is a more efficient and deterministic alternative to
-		 * signalling a possibly unrelated or unsuspecting thread.
-		 *
-		 * Note: The better tool for signalling individual threads is pthread_kill().
+	} else if ((pid == POSIX_THIS_PID) || (pid == 0) || (pid == -1)) {
+		/*
+		 * single-process: its pid, 0, and -1 all name the one (figurative)
+		 * process, and the kernel performs process-directed delivery over
+		 * it - the caller takes the signal when it has it unblocked, and
+		 * it otherwise pends at system scope for the first thread that
+		 * unblocks or waits for it.
 		 */
-		ret = k_sig_queue(k_current_get(), ksigno, (union k_sig_val){0});
+		ret = k_kill(NULL, ksigno);
 	} else {
 		ret = -ESRCH;
 	}
