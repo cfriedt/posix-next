@@ -184,7 +184,7 @@ defined only while all of them remain enabled.
           :ref:`POSIX_MULTI_PROCESS <posix_option_group_multi_process>`,yes, :kconfig:option:`CONFIG_POSIX_MULTI_PROCESS`
           :ref:`POSIX_NETWORKING <posix_option_group_networking>`,yes, :kconfig:option:`CONFIG_POSIX_NETWORKING` :ref:`†<posix_undefined_behaviour>`
           :ref:`POSIX_PIPE <posix_option_group_pipe>`,yes, :kconfig:option:`CONFIG_POSIX_PIPE`
-          :ref:`POSIX_SIGNAL_JUMP <posix_option_group_signal_jump>`,,
+          :ref:`POSIX_SIGNAL_JUMP <posix_option_group_signal_jump>`,yes, :kconfig:option:`CONFIG_POSIX_SIGNAL_JUMP`
 
       .. csv-table:: PSE53 Option Requirements
          :header: Symbol, Support, Remarks
