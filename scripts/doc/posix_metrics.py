@@ -374,17 +374,8 @@ def _attribute_file(rel_path: str, aliases: dict) -> str | None:
     sub = rel.split(_IMPL_PREFIX, 1)[1].split("/")
     if len(sub) < 2:
         return None
-    if sub[0] == "options":
-        if len(sub) < 3:
-            return None
-        table = aliases.get("option_dirs") or {}
-        key = sub[1]
-    else:
-        table = aliases.get("lib_dirs") or {}
-        key = sub[0]
-        if key not in table:
-            return None
-    return table.get(key, key)  # missing -> identity, explicit null -> None
+    table = aliases.get("lib_dirs") or {}
+    return table.get(sub[0], sub[0])  # missing -> identity, explicit null -> None
 
 
 def group_coverage(coverage_json: dict, aliases: dict) -> dict:
@@ -527,11 +518,7 @@ def load_static_analysis(path: Path, aliases: dict):
     def keys_for(rel: str) -> tuple[str | None, str | None]:
         gkey = _attribute_file("modules/lib/posix/" + rel, aliases)
         parts = rel.split("/")
-        okey = (
-            parts[3]
-            if len(parts) > 4 and parts[:3] == ["lib", "posix", "options"]
-            else None
-        )
+        okey = parts[2] if len(parts) > 3 and parts[:2] == ["lib", "posix"] else None
         return gkey, okey
 
     group_files: dict[str, set] = {}
@@ -763,7 +750,7 @@ def load_metrics(repo_root: Path | None = None) -> PosixMetrics:
             paths = [pfx for pfx, _ in comp]
         else:
             # option with its own implementation dir but no component
-            own = f"lib/posix/options/{stem}"
+            own = f"lib/posix/{stem}"
             if any(
                 rel == own or rel.startswith(own + "/") for rel, _, _ in files_index
             ):
