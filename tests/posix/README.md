@@ -6,7 +6,7 @@ group-like option), as defined in the
 of IEEE Std 1003.1-2017 (POSIX Issue 7). A function's tests live in the suite of the Option
 Group that owns the function — e.g. `nanosleep()` is tested in `timers`, while
 `clock_nanosleep()` is tested in `clock_selection`. Implementations follow the same layout
-under [lib/posix/options](../../lib/posix/options).
+under [lib/posix](../../lib/posix).
 
 The `shared` directory holds common test helpers; it is not itself a testsuite.
 

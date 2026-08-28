@@ -31,7 +31,7 @@ Output shape::
     {
       "schema_version": 1,
       "provenance": {..., "analysis": {"ctu": bool, "z3": bool, ...}},
-      "analyzed_files": ["lib/posix/options/mqueue/mqueue.c", ...],
+      "analyzed_files": ["lib/posix/mqueue/mqueue.c", ...],
       "findings": [
         {"file": "lib/posix/...", "line": 42, "function": "mq_notify",
          "checker": "core.NullDereference", "description": "..."}
