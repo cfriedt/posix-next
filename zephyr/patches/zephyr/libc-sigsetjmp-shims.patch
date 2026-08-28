@@ -1,0 +1,62 @@
+diff --git a/Kconfig.zephyr b/Kconfig.zephyr
+index 1d5f8b83e60..fd4ba86b694 100644
+--- a/Kconfig.zephyr
++++ b/Kconfig.zephyr
+@@ -477,6 +477,7 @@ config NATIVE_LIBC
+ 	select FULL_LIBC_SUPPORTED
+ 	select TC_PROVIDES_POSIX_C_LANG_SUPPORT_R
+ 	select TC_PROVIDES_POSIX_C_LIB_EXT
++	select TC_PROVIDES_POSIX_SIGNAL_JUMP
+ 	help
+ 	  Zephyr will use the host system C library.
+ 
+diff --git a/lib/libc/newlib/include/setjmp.h b/lib/libc/newlib/include/setjmp.h
+new file mode 100644
+index 00000000000..17d3ecaa397
+--- /dev/null
++++ b/lib/libc/newlib/include/setjmp.h
+@@ -0,0 +1,19 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_SETJMP_H_
++#define ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_SETJMP_H_
++
++/*
++ * Newlib's <setjmp.h> only declares sigsetjmp() and siglongjmp() for Cygwin
++ * and RTEMS targets, so the POSIX_SIGNAL_JUMP declarations come from the
++ * POSIX header below.
++ */
++#include_next <setjmp.h>
++
++#include <zephyr/posix/posix_setjmp.h>
++
++#endif /* ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_SETJMP_H_ */
+diff --git a/lib/libc/picolibc/include/setjmp.h b/lib/libc/picolibc/include/setjmp.h
+new file mode 100644
+index 00000000000..7851c8fe8d3
+--- /dev/null
++++ b/lib/libc/picolibc/include/setjmp.h
+@@ -0,0 +1,19 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SETJMP_H_
++#define ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SETJMP_H_
++
++/*
++ * Picolibc's <setjmp.h> (shared with newlib) only declares sigsetjmp() and
++ * siglongjmp() for Cygwin and RTEMS targets, so the POSIX_SIGNAL_JUMP
++ * declarations come from the POSIX header below.
++ */
++#include_next <setjmp.h>
++
++#include <zephyr/posix/posix_setjmp.h>
++
++#endif /* ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SETJMP_H_ */
