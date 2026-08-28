@@ -865,7 +865,7 @@ def _cli_report(metrics: PosixMetrics, root: Path) -> None:
     defined: set[str] = set()
     for path in (root / "lib" / "posix").rglob("*.c"):
         text = strip_c_comments(path.read_text(errors="replace"))
-        defined.update(name for name, _ in _iter_functions(text))
+        defined.update(name for name, *_ in _iter_functions(text))
     rosters = parse_group_tables(root / "doc" / "posix" / "option_groups")
     for stem in sorted(rosters):
         missing = [
