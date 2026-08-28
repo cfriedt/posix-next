@@ -264,9 +264,14 @@ With the Thread Sporadic Server option
 (:kconfig:option:`CONFIG_POSIX_THREAD_SPORADIC_SERVER`), Zephyr accepts ``SCHED_SPORADIC`` and
 validates the sporadic server scheduling parameters, but does not enforce execution-time
 budgets: a thread scheduled under ``SCHED_SPORADIC`` executes as if scheduled under
-``SCHED_RR`` at ``sched_priority``. This deviation is denoted with the
-:ref:`† (obelus) <posix_undefined_behaviour>` wherever the option is listed. The process-level
-option, ``_POSIX_SPORADIC_SERVER``, is reported as unsupported (``-1``).
+``SCHED_RR`` at ``sched_priority``. With the process-level Sporadic Server option
+(:kconfig:option:`CONFIG_POSIX_SPORADIC_SERVER`), the same symbols become available to the
+process scheduling interfaces of
+:ref:`_POSIX_PRIORITY_SCHEDULING <posix_option_priority_scheduling>`:
+``sched_get_priority_min()`` and ``sched_get_priority_max()`` accept ``SCHED_SPORADIC``, while
+the process-addressed scheduling functions (``sched_setparam()`` and ``sched_setscheduler()``)
+remain stubs that fail, setting ``errno`` to ``ENOSYS``. These deviations are denoted with the
+:ref:`† (obelus) <posix_undefined_behaviour>` wherever the options are listed.
 
 The decision not to implement the sporadic server algorithm itself is deliberate:
 

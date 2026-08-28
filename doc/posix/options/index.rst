@@ -82,6 +82,7 @@ functionality provided elsewhere.
    monotonic_clock
    prioritized_io
    raw_sockets
+   sporadic_server
    thread_sporadic_server
 
 :ref:`_POSIX_IPV6 <posix_option_ipv6>`
@@ -104,6 +105,13 @@ functionality provided elsewhere.
    Raw sockets are supported by the
    :ref:`POSIX_NETWORKING <posix_option_group_networking>` interfaces. Enable
    with :kconfig:option:`CONFIG_POSIX_RAW_SOCKETS`.
+
+:ref:`_POSIX_SPORADIC_SERVER <posix_option_sporadic_server>`
+   The ``SCHED_SPORADIC`` scheduling policy is accepted by the
+   :ref:`_POSIX_PRIORITY_SCHEDULING <posix_option_priority_scheduling>`
+   interfaces, though execution-time budgets are not enforced
+   :ref:`†<posix_undefined_behaviour>`. Enable with
+   :kconfig:option:`CONFIG_POSIX_SPORADIC_SERVER`.
 
 :ref:`_POSIX_THREAD_SPORADIC_SERVER <posix_option_thread_sporadic_server>`
    The ``SCHED_SPORADIC`` scheduling policy is accepted by the
