@@ -322,6 +322,11 @@ EXPORT_SYMBOL(pthread_timedjoin_np);
 EXPORT_SYMBOL(pthread_tryjoin_np);
 #endif /* CONFIG_POSIX_NON_PORTABLE */
 
+/* PIPE */
+#ifdef CONFIG_POSIX_PIPE
+EXPORT_SYMBOL(pipe);
+#endif /* CONFIG_POSIX_PIPE */
+
 /* POSIX_THREADS_EXT */
 #ifdef CONFIG_POSIX_THREADS_EXT
 EXPORT_SYMBOL(pthread_attr_getguardsize);
