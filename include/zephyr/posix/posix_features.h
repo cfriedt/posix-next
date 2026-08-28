@@ -189,8 +189,13 @@
 #define _POSIX_SPIN_LOCKS _POSIX_VERSION
 #endif
 
+/* always defined: keeps SCHED_SPORADIC and sched_ss_* visibility config-independent */
 #undef _POSIX_SPORADIC_SERVER
+#ifdef CONFIG_POSIX_SPORADIC_SERVER
+#define _POSIX_SPORADIC_SERVER _POSIX_VERSION
+#else
 #define _POSIX_SPORADIC_SERVER (-1L)
+#endif
 
 #undef _POSIX_SYNCHRONIZED_IO
 #ifdef CONFIG_POSIX_SYNCHRONIZED_IO
