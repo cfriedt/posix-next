@@ -1,0 +1,2907 @@
+diff --git a/arch/riscv/Kconfig b/arch/riscv/Kconfig
+index b82dff76cf6..fb0afb474c5 100644
+--- a/arch/riscv/Kconfig
++++ b/arch/riscv/Kconfig
+@@ -369,7 +369,7 @@ config RISCV_PMP
+ 	select THREAD_LOCAL_STORAGE if USERSPACE
+ 	select ARCH_MEM_DOMAIN_SUPPORTS_ISOLATED_STACKS
+ 	select MEM_DOMAIN_ISOLATED_STACKS
+-	select PMP_KERNEL_MODE_DYNAMIC if MEM_ATTR
++	select PMP_KERNEL_MODE_DYNAMIC if MEM_ATTR && !RISCV_MMU
+ 	help
+ 	  MCU implements Physical Memory Protection.
+ 
+@@ -420,7 +420,7 @@ config PMP_GRANULARITY
+ 
+ config PMP_NO_LOCK_GLOBAL
+ 	bool "Do not lock the global PMP entries"
+-	select PMP_KERNEL_MODE_DYNAMIC
++	select PMP_KERNEL_MODE_DYNAMIC if !RISCV_MMU
+ 	help
+ 	  Configure the PMP entries as unlocked (L=0) to implement PMP relative
+ 	  features. This allows application to dynamically reconfigure PMP
+@@ -438,9 +438,13 @@ config PMP_UNLOCK_ROM_FOR_DEBUG
+ 
+ endif #RISCV_PMP
+ 
++config RISCV_MMU_STACK_GUARD
++	def_bool y
++	depends on HW_STACK_PROTECTION && RISCV_MMU
++
+ config PMP_STACK_GUARD
+-	bool
+-	depends on HW_STACK_PROTECTION
++	def_bool y
++	depends on HW_STACK_PROTECTION && !RISCV_MMU_STACK_GUARD
+ 	select PMP_KERNEL_MODE_DYNAMIC if MULTITHREADING
+ 
+ config PMP_STACK_GUARD_MIN_SIZE
+@@ -460,9 +464,12 @@ config PMP_STACK_GUARD_MIN_SIZE
+ 
+ config PMP_KERNEL_MODE_DYNAMIC
+ 	bool
++	depends on !RISCV_MMU
+ 	help
+ 	  Enable this to dynamically reconfigure and activate PMP entries for
+ 	  Machine mode when switching between kernel (ISR, syscall) and threads.
++	  Not applicable when RISCV_MMU is enabled, as the MMU handles memory
++	  protection in S-mode instead of PMP-based machine-mode switching.
+ 
+ # Implement the null pointer detection using the Physical Memory Protection
+ # (PMP) Unit.
+@@ -533,7 +540,7 @@ config RISCV_STACK_PROTECTION
+ 	bool
+ 	default y if HW_STACK_PROTECTION
+ 	imply CUSTOM_STACK_GUARD if RISCV_HAS_CUSTOM_STACK_GUARD
+-	select PMP_STACK_GUARD if (!CUSTOM_STACK_GUARD && RISCV_PMP)
++	select PMP_STACK_GUARD if (!CUSTOM_STACK_GUARD && RISCV_PMP && !RISCV_MMU_STACK_GUARD)
+ 	help
+ 	  This option enables either:
+ 	  - The custom stack guard, or
+@@ -647,6 +654,99 @@ config RISCV_M_MODE_STACK_SIZE
+ 	  runtime handler. Increase this if the handler is extended with
+ 	  functionality that requires more stack space.
+ 
++menu "RISC-V MMU Options"
++
++RISCV_MMU_TYPE_PROP := mmu-type
++RISCV_MMU_TYPE_NONE := riscv,none
++RISCV_MMU_TYPE_SV39 := riscv,sv39
++RISCV_MMU_TYPE_SV48 := riscv,sv48
++
++config RISCV_MMU
++	bool "RISC-V MMU Support"
++	default y
++	depends on RISCV_PRIVILEGED
++	depends on RISCV_S_MODE
++	depends on 64BIT
++	# All enabled harts must declare an mmu-type ...
++	depends on $(dt_compat_all_has_prop,riscv,$(RISCV_MMU_TYPE_PROP))
++	# ... that is not "riscv,none".
++	depends on !$(dt_compat_all_has_prop,riscv,$(RISCV_MMU_TYPE_PROP),$(RISCV_MMU_TYPE_NONE))
++	select CPU_HAS_MMU
++	select MMU
++	select KERNEL_VM_SUPPORT
++	select ARCH_HAS_USERSPACE
++	select ARCH_HAS_STACK_PROTECTION
++	select ARCH_MEM_DOMAIN_DATA if USERSPACE
++	select ARCH_MEM_DOMAIN_SYNCHRONOUS_API if USERSPACE
++	select ARCH_HAS_RESERVED_PAGE_FRAMES
++	select THREAD_LOCAL_STORAGE if USERSPACE
++	help
++	  Enable Memory Management Unit (MMU) support for RISC-V.
++	  This enables virtual memory management and is required for
++	  demand paging and advanced memory protection features.
++
++	  Only enable this if your RISC-V processor supports Supervisor
++	  mode and has an MMU (supports Sv39, Sv48, or Sv57).
++
++if RISCV_MMU
++
++choice RISCV_MMU_MODE
++	prompt "RISC-V MMU Address Translation Mode"
++
++config RISCV_MMU_SV39
++	bool "Sv39 - 39-bit Virtual Address"
++	depends on $(dt_compat_all_has_prop,riscv,$(RISCV_MMU_TYPE_PROP),$(RISCV_MMU_TYPE_SV39))
++	help
++	  Use Sv39 mode with 39-bit virtual addresses and 3-level page tables.
++	  This is the most common MMU mode for RISC-V and supports up to
++	  512GB of virtual address space.
++
++config RISCV_MMU_SV48
++	bool "Sv48 - 48-bit Virtual Address"
++	depends on $(dt_compat_all_has_prop,riscv,$(RISCV_MMU_TYPE_PROP),$(RISCV_MMU_TYPE_SV48))
++	help
++	  Use Sv48 mode with 48-bit virtual addresses and 4-level page tables.
++	  This supports up to 256TB of virtual address space but requires
++	  more memory for page tables.
++
++endchoice
++
++config MAX_XLAT_TABLES
++	int "Maximum number of translation tables"
++	default 32 if USERSPACE && TEST
++	default 20 if USERSPACE && RISCV_MMU_SV48
++	default 16 if USERSPACE
++	default 12 if RISCV_MMU_SV48
++	default 8
++	help
++	  Maximum number of translation tables available for MMU.
++	  Each table is 4KB in size. Increase this if you get
++	  "CONFIG_MAX_XLAT_TABLES is too small" errors.
++
++config PRIVILEGED_STACK_SIZE
++	# Must be a multiple of CONFIG_MMU_PAGE_SIZE; the guard-page plus
++	# privileged-stack reservation at the base of every user thread stack
++	# is page-rounded, so anything less than a full page wastes the
++	# remainder of the reserved page.
++	default 4096
++
++config RISCV_MMU_ASID_BITS
++	int "Number of implemented ASID bits"
++	default 16
++	range 1 16
++	help
++	  Number of ASID bits implemented by the SoC's MMU (ASIDLEN in the
++	  RISC-V privileged spec). The architecture reserves 16 bits for the
++	  ASID field in satp, but an implementation may support fewer;
++	  unimplemented bits are read-only zero in hardware. Override this
++	  for your SoC if it implements fewer than 16 ASID bits, otherwise
++	  software may hand out ASID values that alias onto the same
++	  hardware ASID as another address space.
++
++endif # RISCV_MMU
++
++endmenu
++
+ rsource "Kconfig.isa"
+ 
+ rsource "custom/Kconfig"
+diff --git a/arch/riscv/core/CMakeLists.txt b/arch/riscv/core/CMakeLists.txt
+index a75f222fd1a..77c0d630fb7 100644
+--- a/arch/riscv/core/CMakeLists.txt
++++ b/arch/riscv/core/CMakeLists.txt
+@@ -28,6 +28,7 @@ zephyr_library_sources_ifdef(CONFIG_DEBUG_COREDUMP coredump.c)
+ zephyr_library_sources_ifdef(CONFIG_IRQ_OFFLOAD irq_offload.c)
+ zephyr_library_sources_ifdef(CONFIG_USE_ISR_WRAPPER isr.S)
+ zephyr_library_sources_ifdef(CONFIG_RISCV_S_MODE sbi.S)
++zephyr_library_sources_ifdef(CONFIG_RISCV_MMU mmu.c)
+ zephyr_library_sources_ifdef(CONFIG_RISCV_PMP pmp.c pmp.S)
+ zephyr_linker_sources_ifdef(CONFIG_RISCV_PMP ROM_SECTIONS pmp.ld)
+ zephyr_library_sources_ifdef(CONFIG_THREAD_LOCAL_STORAGE tls.c)
+diff --git a/arch/riscv/core/fatal.c b/arch/riscv/core/fatal.c
+index d2d3fdeabc2..dce43a554d5 100644
+--- a/arch/riscv/core/fatal.c
++++ b/arch/riscv/core/fatal.c
+@@ -219,6 +219,26 @@ static bool bad_stack_pointer(struct arch_esf *esf)
+ 
+ void z_riscv_fault(struct arch_esf *esf)
+ {
++#ifdef CONFIG_RISCV_MMU
++	{
++		unsigned long mcause;
++
++		mcause = csr_read(scause);
++		mcause &= CONFIG_RISCV_MCAUSE_EXCEPTION_MASK;
++
++		if (mcause == RISCV_EXC_INST_PAGE_FAULT ||
++		    mcause == RISCV_EXC_LOAD_PAGE_FAULT ||
++		    mcause == RISCV_EXC_STORE_PAGE_FAULT) {
++			/*
++			 * TODO: demand paging - pass the faulting address (stval)
++			 * to z_page_fault() to allow the kernel to resolve the
++			 * fault on-demand. For now fall through to fatal error
++			 * handling.
++			 */
++		}
++	}
++#endif /* CONFIG_RISCV_MMU */
++
+ #ifdef CONFIG_USERSPACE
+ 	/*
+ 	 * Perform an assessment whether an PMP fault shall be
+diff --git a/arch/riscv/core/isr.S b/arch/riscv/core/isr.S
+index 430dacbac25..80bd1755892 100644
+--- a/arch/riscv/core/isr.S
++++ b/arch/riscv/core/isr.S
+@@ -121,6 +121,9 @@ GTEXT(z_riscv_fatal_error)
+ GTEXT(z_get_next_switch_handle)
+ GTEXT(z_riscv_switch)
+ GTEXT(z_riscv_thread_start)
++#ifdef CONFIG_RISCV_MMU
++GTEXT(z_riscv_userspace_enter)
++#endif
+ 
+ #ifdef CONFIG_TRACING
+ GTEXT(sys_trace_isr_enter)
+@@ -200,6 +203,14 @@ SECTION_FUNC(exception.entry, _isr_wrapper)
+ 	 * later but it is safe to store our saved user sp here. */
+ 	sr t0, (-__struct_arch_esf_SIZEOF + __struct_arch_esf_sp_OFFSET)(sp)
+ 
++#ifdef CONFIG_RISCV_MMU
++	/* Switch to kernel address space before touching any kernel data. */
++	la t1, z_riscv_kernel_satp_val
++	lr t1, 0(t1)
++	csrw satp, t1
++	sfence.vma
++#endif /* CONFIG_RISCV_MMU */
++
+ 	/* Make sure tls pointer is sane */
+ 	lr t0, ___cpu_t_current_OFFSET(s0)
+ 	lr tp, _thread_offset_to_tls(t0)
+@@ -949,6 +960,16 @@ fp_trap_exit:
+ 	add t0, sp, __struct_arch_esf_SIZEOF
+ 	sr t0, _curr_cpu_arch_user_exc_sp(s0)
+ 
++#ifdef CONFIG_RISCV_MMU
++	/* Switch to the thread's domain SATP before returning to user mode.
++	 * This code runs from the exception.entry section which has PTE_USER=0
++	 * in the domain page tables, so S-mode can safely execute it. */
++	lr t0, ___cpu_t_current_OFFSET(s0)
++	lr t0, _thread_offset_to_satp(t0)
++	csrw satp, t0
++	sfence.vma
++#endif /* CONFIG_RISCV_MMU */
++
+ 	j 2f
+ 1:
+ 	/*
+@@ -980,3 +1001,25 @@ fp_trap_exit:
+ #endif /* CONFIG_RISCV_SOC_HAS_ISR_STACKING */
+ 
+ 	TRAP_RET
++
++#ifdef CONFIG_RISCV_MMU
++/*
++ * z_riscv_userspace_enter - switch to domain SATP and SRET to user mode
++ *
++ * Called from arch_user_mode_enter() once sepc and sstatus are configured.
++ * Prototype:
++ *   void z_riscv_userspace_enter(k_thread_entry_t entry, void *p1,
++ *                                void *p2, void *p3,
++ *                                unsigned long user_sp,
++ *                                uintptr_t domain_satp);
++ * Arguments: a0=entry, a1=p1, a2=p2, a3=p3, a4=user_sp, a5=domain_satp
++ *
++ * MUST live in exception.entry so that the csrw+sfence.vma+sret sequence
++ * executes from a page with PTE_USER=0 in the domain SATP.
++ */
++SECTION_FUNC(exception.entry, z_riscv_userspace_enter)
++	csrw satp, a5
++	sfence.vma
++	mv sp, a4
++	TRAP_RET
++#endif /* CONFIG_RISCV_MMU */
+diff --git a/arch/riscv/core/mmu.c b/arch/riscv/core/mmu.c
+new file mode 100644
+index 00000000000..f9034d08a9c
+--- /dev/null
++++ b/arch/riscv/core/mmu.c
+@@ -0,0 +1,1573 @@
++/*
++ * Copyright (c) 2026 Alexios Lyrakis <alexios.lyrakis@gmail.com>
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <string.h>
++
++#include <zephyr/arch/riscv/csr.h>
++#include <zephyr/cache.h>
++#include <zephyr/device.h>
++#include <zephyr/devicetree.h>
++#include <zephyr/init.h>
++#include <zephyr/kernel.h>
++#include <zephyr/kernel/mm/demand_paging.h>
++#include <zephyr/linker/linker-defs.h>
++#include <zephyr/logging/log.h>
++#include <zephyr/spinlock.h>
++#include <zephyr/sys/util.h>
++
++#include <kernel_arch_func.h>
++#include <kernel_arch_interface.h>
++#include <kernel_internal.h>
++#include <mmu.h>
++
++#include "mmu.h"
++
++LOG_MODULE_DECLARE(os, CONFIG_KERNEL_LOG_LEVEL);
++
++/* Page table storage and management */
++static uint64_t xlat_tables[CONFIG_MAX_XLAT_TABLES * RISCV_PGTABLE_ENTRIES] __aligned(PAGE_SIZE);
++static int32_t xlat_use_count[CONFIG_MAX_XLAT_TABLES];
++static struct k_spinlock xlat_lock;
++
++/*
++ * Pointer to the kernel root page table.  Allocated once during
++ * arch_mem_init() and kept here so that mapping functions can access it
++ * before the MMU is enabled (i.e. before SATP is written).
++ */
++static uint64_t *kernel_root_table;
++
++#ifdef CONFIG_USERSPACE
++/*
++ * Cached kernel SATP value.  Written once by arch_mem_init() and read
++ * by isr.S on every trap entry from user mode to restore the kernel
++ * address space before executing any kernel code beyond the trap page.
++ */
++uintptr_t z_riscv_kernel_satp_val;
++#endif /* CONFIG_USERSPACE */
++
++/* ASID management */
++#define ASID_INVALID    0 /* Invalid ASID (reserved) */
++#define KERNEL_ASID     1 /* Kernel always uses ASID 1 */
++#define ASID_FIRST_USER 2U
++/*
++ * ASIDLEN (the number of ASID bits actually implemented) is SoC-defined;
++ * unimplemented bits are read-only zero in hardware, so handing out ASID
++ * values outside the implemented range would alias distinct address
++ * spaces onto the same hardware ASID. CONFIG_RISCV_MMU_ASID_BITS lets a
++ * SoC declare its real ASIDLEN; it defaults to the architectural max.
++ */
++#define ASID_MAX BIT(CONFIG_RISCV_MMU_ASID_BITS)
++
++#ifdef CONFIG_USERSPACE
++static atomic_t next_asid = ASID_FIRST_USER;
++
++/*
++ * List of all active memory domains.  Protected by xlat_lock.
++ * Used by sync_domains() to propagate new kernel mappings to all
++ * domain private page tables.
++ */
++static sys_slist_t domain_list;
++
++/* Forward declarations */
++static int domain_privatize_kernel_text(uint64_t *domain_root);
++static void sync_domains(void);
++
++/*
++ * Allocate a unique ASID for a new memory domain.  ASIDs allow the TLB to
++ * cache entries for multiple address spaces simultaneously, avoiding a full
++ * TLB flush on every domain switch.
++ */
++static uint16_t alloc_asid(void)
++{
++	atomic_val_t asid;
++
++	do {
++		asid = atomic_get(&next_asid);
++
++		/*
++		 * TODO: implement ASID recycling with global TLB flush when
++		 * the space is exhausted. For now just panic.
++		 */
++		if (asid >= ASID_MAX) {
++			LOG_ERR("unable to claim ASID beyond %ld", asid);
++			k_panic();
++		}
++	} while (!atomic_cas(&next_asid, asid, asid + 1));
++
++	return (uint16_t)asid;
++}
++#endif /* CONFIG_USERSPACE */
++
++/* Usage count tracking */
++#define XLAT_PTE_COUNT_MASK GENMASK(15, 0)
++#define XLAT_REF_COUNT_UNIT (1 << 16)
++
++/*
++ * Allocate a free page table from the static xlat_tables pool and return a
++ * pointer to it, zeroed and ready for use.  The use count is left at 0 -
++ * the caller must call inc_table_ref() (or rely on set_pte() to do so) before
++ * installing the table into a parent PTE.  Must be called with xlat_lock held.
++ */
++static uint64_t *new_table(void)
++{
++	uint64_t *table;
++	unsigned int i;
++
++	/* Look for a free table. */
++	for (i = 0U; i < CONFIG_MAX_XLAT_TABLES; i++) {
++		if (xlat_use_count[i] != 0) {
++			continue;
++		}
++
++		table = &xlat_tables[i * RISCV_PGTABLE_ENTRIES];
++		/*
++		 * Leave the initial use count at 0.  The caller is
++		 * responsible for incrementing the reference count via
++		 * inc_table_ref() before the table becomes reachable
++		 * from any parent PTE (done automatically by set_pte()
++		 * for non-root tables, or explicitly for root tables).
++		 * This prevents the double-count bug where new_table()
++		 * set XLAT_REF_COUNT_UNIT and set_pte() added another
++		 * XLAT_REF_COUNT_UNIT, making dec_table_ref() unable
++		 * to reach 0.
++		 */
++		LOG_DBG("allocating table [%d]%p", i, table);
++
++		/* Clear the new table */
++		memset(table, 0, PAGE_SIZE);
++		return table;
++	}
++
++	LOG_ERR("CONFIG_MAX_XLAT_TABLES (%d) is too small", CONFIG_MAX_XLAT_TABLES);
++	k_panic();
++	return NULL;
++}
++
++/*
++ * Return the index of a page table in the xlat_tables pool.
++ */
++static inline unsigned int table_index(uint64_t *pte)
++{
++	unsigned int i = (pte - xlat_tables) / RISCV_PGTABLE_ENTRIES;
++
++	__ASSERT(i < CONFIG_MAX_XLAT_TABLES, "table %p out of range", pte);
++	return i;
++}
++
++/*
++ * Adjust the combined use count of a page table and return the new value.
++ * The 32-bit counter encodes two fields:
++ *   bits [31:16] - reference count: number of parent PTEs pointing to this table
++ *   bits [15:0]  - PTE count: number of valid entries within this table
++ * XLAT_REF_COUNT_UNIT (1 << 16) adjusts the reference count field.
++ * A plain ±1 adjustment modifies the PTE count field.
++ * Must be called with xlat_lock held.
++ */
++static int32_t adjust_table_usage(uint64_t *table, int32_t adjustment)
++{
++	unsigned int i = table_index(table);
++	int32_t prev_count = xlat_use_count[i];
++	int32_t new_count = prev_count + adjustment;
++
++	LOG_DBG("table [%d]%p: usage %#x -> %#x", i, table, prev_count, new_count);
++
++	__ASSERT(new_count >= 0, "table use count underflow");
++	__ASSERT(new_count == 0 || new_count >= XLAT_REF_COUNT_UNIT,
++		 "table in use with no reference to it");
++	__ASSERT((new_count & XLAT_PTE_COUNT_MASK) <= RISCV_PGTABLE_ENTRIES,
++		 "table PTE count overflow");
++
++	xlat_use_count[i] = new_count;
++	return new_count;
++}
++
++/* Increment the reference count of a table (one more parent PTE points to it). */
++static inline void inc_table_ref(uint64_t *table)
++{
++	adjust_table_usage(table, XLAT_REF_COUNT_UNIT);
++}
++
++/* Decrement the reference count of a table (one parent PTE removed). */
++static inline void dec_table_ref(uint64_t *table)
++{
++	adjust_table_usage(table, -XLAT_REF_COUNT_UNIT);
++}
++
++/* Increment the count of valid PTEs within a table. */
++static inline void inc_pte_count(uint64_t *table)
++{
++	adjust_table_usage(table, 1);
++}
++
++/* Decrement the count of valid PTEs within a table. */
++static inline void dec_pte_count(uint64_t *table)
++{
++	adjust_table_usage(table, -1);
++}
++
++/*
++ * Write a PTE into a page table at the given index, maintaining reference and
++ * PTE counts.  Installing a table PTE increments the child table's reference
++ * count; removing one decrements it.  A PTE value of 0 clears the entry.
++ * Must be called with xlat_lock held.
++ */
++static void set_pte(uint64_t *table, unsigned int index, pte_t pte)
++{
++	__ASSERT(index < RISCV_PGTABLE_ENTRIES, "PTE index %u out of range", index);
++
++	pte_t old_pte = table[index];
++
++	table[index] = pte;
++
++	/* Update reference counts */
++	if (!pte_is_valid(old_pte) && pte_is_valid(pte)) {
++		/* Adding new PTE */
++		inc_pte_count(table);
++		if (pte_is_table(pte)) {
++			/* new PTE points to another table - increment its reference */
++			uint64_t *child_table = (uint64_t *)pte_to_phys(pte);
++
++			inc_table_ref(child_table);
++		}
++	} else if (pte_is_valid(old_pte) && !pte_is_valid(pte)) {
++		/* Removing PTE */
++		if (pte_is_table(old_pte)) {
++			/* Old PTE pointed to another table - decrement its reference */
++			uint64_t *child_table = (uint64_t *)pte_to_phys(old_pte);
++
++			dec_table_ref(child_table);
++		}
++		dec_pte_count(table);
++	} else if (pte_is_valid(old_pte) && pte_is_valid(pte)) {
++		/* Updating existing PTE */
++		if (pte_is_table(old_pte) && pte_is_table(pte)) {
++			/* Both are table PTEs - update references */
++			uint64_t *old_table = (uint64_t *)pte_to_phys(old_pte);
++			uint64_t *new_table = (uint64_t *)pte_to_phys(pte);
++
++			if (old_table != new_table) {
++				dec_table_ref(old_table);
++				inc_table_ref(new_table);
++			}
++		}
++		/* Note: Leaf PTE updates don't affect reference counts */
++	}
++
++	LOG_DBG("%s: table[%u] = %#llx (was %#llx)", __func__, index, pte, old_pte);
++}
++
++/*
++ * Convert Zephyr generic memory permission flags (K_MEM_PERM_*) to the
++ * corresponding RISC-V leaf PTE permission bits (PTE_READ/WRITE/EXEC/USER).
++ */
++static pte_t flags_to_pte(uint32_t flags)
++{
++	pte_t pte_flags = PTE_VALID | PTE_ACCESSED | PTE_READ;
++
++	/* Permission flags */
++	if (flags & K_MEM_PERM_RW) {
++		pte_flags |= PTE_WRITE | PTE_DIRTY;
++	}
++
++	if (flags & K_MEM_PERM_EXEC) {
++		pte_flags |= PTE_EXEC;
++	}
++
++	if (flags & K_MEM_PERM_USER) {
++		pte_flags |= PTE_USER;
++	}
++
++	return pte_flags;
++}
++
++/*
++ * Return a pointer to the kernel root page table.
++ */
++static inline uint64_t *get_root_page_table(void)
++{
++	return kernel_root_table;
++}
++
++uintptr_t z_riscv_kernel_satp(void)
++{
++	return ((uintptr_t)SATP_MODE << SATP_MODE_SHIFT) |
++	       ((uintptr_t)KERNEL_ASID << SATP_ASID_SHIFT) |
++	       ((uintptr_t)kernel_root_table >> PAGE_SIZE_SHIFT);
++}
++
++/*
++ * After unmapping a page at @va, walk the page table hierarchy from the root
++ * and free any intermediate tables that have become empty (PTE count == 0).
++ * Operates bottom-up: checks the deepest table first, then its parent.
++ * Must be called with xlat_lock held.
++ */
++static void cleanup_unused_tables(uintptr_t va)
++{
++	uint64_t *table = get_root_page_table();
++	uint64_t *tables[PGTABLE_LEVELS];
++	unsigned int indices[PGTABLE_LEVELS];
++	int level;
++
++	for (level = 0; level < PGTABLE_LEVELS - 1; level++) {
++		unsigned int index = VPN(va, level);
++		pte_t pte = table[index];
++
++		tables[level] = table;
++		indices[level] = index;
++
++		if (!pte_is_valid(pte) || pte_is_leaf(pte)) {
++			return;
++		}
++
++		table = (uint64_t *)pte_to_phys(pte);
++	}
++
++	for (level = PGTABLE_LEVELS - 2; level >= 0; level--) {
++		unsigned int index = indices[level];
++		uint64_t *current_table = (uint64_t *)pte_to_phys(tables[level][index]);
++		unsigned int table_idx = table_index(current_table);
++
++		if ((xlat_use_count[table_idx] & XLAT_PTE_COUNT_MASK) == 0) {
++			set_pte(tables[level], index, 0);
++			LOG_DBG("freed empty table [%d]%p at level %d", table_idx,
++				  current_table, level + 1);
++		} else {
++			break;
++		}
++	}
++}
++
++/*
++ * Map a contiguous physical range [@phys, @phys+@size) to virtual address @va
++ * in the page table rooted at @root, using leaf PTE flags @pte_flags.
++ * Intermediate tables are allocated from the pool as needed.
++ * @size and addresses must be PAGE_SIZE-aligned.
++ * Must be called with xlat_lock held.
++ */
++static void map_pages_into(uint64_t *root, uintptr_t va, uintptr_t phys, size_t size,
++			   pte_t pte_flags)
++{
++	size_t mapped = 0;
++
++	while (mapped < size) {
++		uint64_t *table = root;
++		int level;
++
++		for (level = 0; level < PGTABLE_LEVELS - 1; level++) {
++			unsigned int index = VPN(va, level);
++			pte_t pte = table[index];
++
++			if (!pte_is_valid(pte)) {
++				uint64_t *new_child_table = new_table();
++
++				pte = pte_create((uintptr_t)new_child_table, PTE_TYPE_TABLE);
++				set_pte(table, index, pte);
++			}
++
++			__ASSERT(pte_is_table(pte), "Expected table PTE at level %d", level);
++			table = (uint64_t *)pte_to_phys(pte);
++		}
++
++		unsigned int leaf_index = VPN(va, PGTABLE_LEVELS - 1);
++		pte_t leaf_pte = pte_create(phys, pte_flags);
++
++		set_pte(table, leaf_index, leaf_pte);
++		SFENCE_VMA_ADDR((void *)va);
++
++		va += PAGE_SIZE;
++		phys += PAGE_SIZE;
++		mapped += PAGE_SIZE;
++	}
++}
++
++/*
++ * Unmap the virtual range [@va, @va+@size) from the page table rooted at
++ * @root by zeroing the corresponding leaf PTEs and issuing sfence.vma for
++ * each unmapped page.  Empty intermediate tables are freed via
++ * cleanup_unused_tables().  @size and @va must be PAGE_SIZE-aligned.
++ * Must be called with xlat_lock held.
++ */
++static void unmap_pages_from(uint64_t *root, uintptr_t va, size_t size)
++{
++	size_t unmapped = 0;
++
++	while (unmapped < size) {
++		uint64_t *table = root;
++		int level;
++
++		for (level = 0; level < PGTABLE_LEVELS - 1; level++) {
++			unsigned int index = VPN(va, level);
++			pte_t pte = table[index];
++
++			if (!pte_is_valid(pte)) {
++				LOG_DBG("No mapping at level %d for VA:%p", level, (void *)va);
++				goto next_page;
++			}
++
++			if (pte_is_leaf(pte)) {
++				LOG_DBG("Hugepage found at level %d - skipping", level);
++				goto next_page;
++			}
++
++			table = (uint64_t *)pte_to_phys(pte);
++		}
++
++		{
++			unsigned int leaf_index = VPN(va, PGTABLE_LEVELS - 1);
++			pte_t leaf_pte = table[leaf_index];
++
++			if (pte_is_valid(leaf_pte)) {
++				set_pte(table, leaf_index, 0);
++				LOG_DBG("unmapped VA:%p -> PA:%p", (void *)va,
++					  (void *)pte_to_phys(leaf_pte));
++				SFENCE_VMA_ADDR((void *)va);
++				cleanup_unused_tables(va);
++			}
++		}
++
++next_page:
++		va += PAGE_SIZE;
++		unmapped += PAGE_SIZE;
++	}
++}
++
++/**
++ * Map physical pages into virtual address space
++ *
++ * @param virt Page-aligned virtual address
++ * @param phys Page-aligned physical address
++ * @param size Size in bytes (page-aligned)
++ * @param flags Permission and caching flags
++ */
++void arch_mem_map(void *virt, uintptr_t phys, size_t size, uint32_t flags)
++{
++	k_spinlock_key_t key;
++
++	__ASSERT(IS_ALIGNED((uintptr_t)virt, PAGE_SIZE), "Virtual address not page aligned");
++	__ASSERT(IS_ALIGNED(phys, PAGE_SIZE), "Physical address not page aligned");
++	__ASSERT(IS_ALIGNED(size, PAGE_SIZE), "Size not page aligned");
++
++	key = k_spin_lock(&xlat_lock);
++
++	LOG_DBG("mapping VA:%p -> PA:%p size:%zu flags:%#x", virt, (void *)phys, size, flags);
++
++	map_pages_into(kernel_root_table, (uintptr_t)virt, phys, size, flags_to_pte(flags));
++
++#ifdef CONFIG_USERSPACE
++	/*
++	 * Propagate any new kernel L0/L1 entries to all active domain
++	 * page tables that carry a private copy of the relevant L1.
++	 */
++	sync_domains();
++#endif
++
++	k_spin_unlock(&xlat_lock, key);
++
++	/*
++	 * TODO: SMP TLB shootdown - broadcast an IPI to all other CPUs so
++	 * they flush their local TLBs for the affected address range.
++	 * sfence.vma only flushes the local TLB.
++	 */
++}
++
++/**
++ * Remove mappings for a provided virtual address range
++ *
++ * @param addr Virtual address to unmap
++ * @param size Size in bytes to unmap
++ */
++void arch_mem_unmap(void *addr, size_t size)
++{
++	k_spinlock_key_t key;
++
++	__ASSERT(IS_ALIGNED((uintptr_t)addr, PAGE_SIZE), "Virtual address not page aligned");
++	__ASSERT(IS_ALIGNED(size, PAGE_SIZE), "Size not page aligned");
++
++	key = k_spin_lock(&xlat_lock);
++
++	LOG_DBG("unmapping VA:%p size:%zu", addr, size);
++
++	unmap_pages_from(kernel_root_table, (uintptr_t)addr, size);
++
++	k_spin_unlock(&xlat_lock, key);
++
++	/*
++	 * TODO: SMP TLB shootdown - broadcast an IPI to all other CPUs so
++	 * they flush their local TLBs for the affected address range.
++	 * sfence.vma only flushes the local TLB.
++	 */
++}
++
++/**
++ * Get the mapped physical memory address from virtual address.
++ *
++ * The function only needs to query the current set of page tables as
++ * the information it reports must be common to all of them if multiple
++ * page tables are in use. If multiple page tables are active it is unnecessary
++ * to iterate over all of them.
++ *
++ * Unless otherwise specified, virtual pages have the same mappings
++ * across all page tables. Calling this function on data pages that are
++ * exceptions to this rule (such as the scratch page) is undefined behavior.
++ * Just check the currently installed page tables and return the information
++ * in that.
++ *
++ * @param virt Page-aligned virtual address
++ * @param[out] phys Mapped physical address (can be NULL if only checking
++ *                  if virtual address is mapped)
++ *
++ * @retval 0 if mapping is found and valid
++ * @retval -EFAULT if virtual address is not mapped
++ */
++int arch_page_phys_get(void *virt, uintptr_t *phys)
++{
++	uintptr_t va = (uintptr_t)virt;
++	uint64_t *table;
++	k_spinlock_key_t key;
++	uintptr_t result;
++	int level;
++
++	/* Don't need page alignment - can lookup any address */
++
++	key = k_spin_lock(&xlat_lock);
++
++	table = get_root_page_table();
++	if (!table) {
++		LOG_DBG("No root page table for VA:%p", virt);
++		result = -EFAULT;
++		goto unlock_and_return;
++	}
++
++	/* Walk page table hierarchy */
++	for (level = 0; level < PGTABLE_LEVELS; level++) {
++		unsigned int index = VPN(va, level);
++		pte_t pte = table[index];
++
++		if (!pte_is_valid(pte)) {
++			/* No mapping exists */
++			LOG_DBG("No mapping at level %d for VA:%p", level, virt);
++			result = -EFAULT;
++			goto unlock_and_return;
++		}
++
++		if (pte_is_leaf(pte)) {
++			/* Found the page - extract physical address */
++			uintptr_t page_phys = pte_to_phys(pte);
++			unsigned int page_offset_bits = RISCV_PGLEVEL_SHIFT(level);
++			uintptr_t page_offset = va & ((1UL << page_offset_bits) - 1);
++			uintptr_t final_phys = page_phys + page_offset;
++
++			/* Store result if caller provided output pointer */
++			if (phys != NULL) {
++				*phys = final_phys;
++			}
++
++			LOG_DBG("VA:%p -> PA:%p (level %d page)", virt, (void *)final_phys,
++				  level);
++			result = 0; /* SUCCESS */
++			goto unlock_and_return;
++		}
++
++		/* Continue to next level */
++		table = (uint64_t *)pte_to_phys(pte);
++	}
++
++	/* Should never reach here if page table levels are correct */
++	LOG_DBG("Page table walk completed without finding leaf for VA:%p", virt);
++	result = -EFAULT;
++
++unlock_and_return:
++	k_spin_unlock(&xlat_lock, key);
++	return result;
++}
++
++/**
++ * Create platform-specific memory mappings
++ *
++ * This function provides a hook for platform-specific code to add
++ * device register mappings that the kernel needs access to.
++ * Platform code can override this function to add their mappings.
++ *
++ * @return 0 on success, negative error code on failure
++ */
++__weak int create_platform_mappings(void)
++{
++#if DT_HAS_CHOSEN(zephyr_console)
++	/*
++	 * Map the console UART so that printk works after the MMU is
++	 * enabled.  Platforms that need additional device mappings should
++	 * override this weak function.
++	 */
++	uintptr_t uart_base = DT_REG_ADDR(DT_CHOSEN(zephyr_console));
++	size_t uart_size = ROUND_UP(DT_REG_SIZE(DT_CHOSEN(zephyr_console)), PAGE_SIZE);
++
++	LOG_DBG("Mapping console UART: %p size:%zu", (void *)uart_base, uart_size);
++	arch_mem_map((void *)uart_base, uart_base, uart_size, K_MEM_PERM_RW);
++#endif
++	return 0;
++}
++
++/**
++ * Create essential kernel memory mappings
++ *
++ * Sets up identity mappings for kernel code, data, and other essential regions
++ * that must be accessible when the MMU is enabled.
++ *
++ * @return 0 on success, negative error code on failure
++ */
++static int create_kernel_mappings(void)
++{
++	int ret;
++
++	/*
++	 * Map the ROM region (exception vectors + text + rodata) as RX.
++	 * For non-XIP builds this is a range within RAM; the MMU enforces
++	 * the read-only + executable permission on top of the physical RAM.
++	 */
++	uintptr_t rom_start = ROUND_DOWN((uintptr_t)__rom_region_start, PAGE_SIZE);
++	uintptr_t rom_end = ROUND_UP((uintptr_t)__rom_region_end, PAGE_SIZE);
++	size_t rom_size = rom_end - rom_start;
++
++	LOG_DBG("Mapping kernel ROM region: %p-%p (%zu bytes)", (void *)rom_start,
++		  (void *)rom_end, rom_size);
++
++	/*
++	 * Map the ROM region (exception vectors + text + rodata) as RX
++	 * for supervisor mode.  Domain page tables add PTE_USER to this
++	 * region (except the ISR trap-entry page) so that user threads can
++	 * execute kernel text (z_thread_entry, syscall wrappers, etc.).
++	 */
++	arch_mem_map((void *)rom_start, rom_start, rom_size, K_MEM_PERM_EXEC | K_MEM_CACHE_WB);
++
++	/*
++	 * Map the RAM region (app_smem partitions + data + BSS + noinit,
++	 * including the page table pool) as RW.  With CONFIG_USERSPACE the
++	 * app_smem section immediately follows the ROM region and precedes
++	 * __kernel_ram_start, so use _app_smem_start (== rom_end) as the
++	 * actual RAM region start to avoid leaving an unmapped gap.
++	 */
++#ifdef CONFIG_USERSPACE
++	extern char _app_smem_start[];
++	uintptr_t ram_start = ROUND_DOWN((uintptr_t)_app_smem_start, PAGE_SIZE);
++#else
++	uintptr_t ram_start = ROUND_DOWN((uintptr_t)__kernel_ram_start, PAGE_SIZE);
++#endif
++	uintptr_t ram_end = ROUND_UP((uintptr_t)__kernel_ram_end, PAGE_SIZE);
++	size_t ram_size = ram_end - ram_start;
++
++	LOG_DBG("Mapping kernel RAM region: %p-%p (%zu bytes)", (void *)ram_start,
++		  (void *)ram_end, ram_size);
++
++	arch_mem_map((void *)ram_start, ram_start, ram_size, K_MEM_PERM_RW | K_MEM_CACHE_WB);
++
++	ret = create_platform_mappings();
++
++	if (ret != 0) {
++		return ret;
++	}
++
++	return 0;
++}
++
++/**
++ * Initialize the RISC-V MMU subsystem
++ *
++ * This function sets up the initial memory mappings required for the kernel
++ * to operate with the MMU enabled. It creates identity mappings for essential
++ * kernel sections and initializes the page table management structures.
++ *
++ * @return 0 on success, negative error code on failure
++ */
++static int arch_mem_init(void)
++{
++	uint64_t satp_val;
++	uint64_t mode;
++	uint64_t new_satp;
++	int ret;
++
++	LOG_DBG("Initializing RISC-V MMU");
++
++	/*
++	 * Do NOT reinitialise xlat_tables or xlat_use_count here.
++	 * arch_mem_domain_init() for k_mem_domain_default runs at the same
++	 * PRE_KERNEL_1 priority and may execute first, pre-allocating a slot
++	 * in the table pool (and setting its use count to XLAT_REF_COUNT_UNIT).
++	 * Zeroing xlat_use_count would reset that count to 0, causing
++	 * new_table() below to re-allocate the same slot for kernel_root_table,
++	 * making kernel_root_table == domain->arch.ptables - a shared pointer
++	 * that breaks domain isolation.
++	 *
++	 * Both arrays are in BSS (zero-initialised at C startup) and
++	 * new_table() already zeroes each slot it allocates, so no
++	 * explicit reset is needed here.
++	 */
++
++	/*
++	 * If the MMU was already enabled by earlier boot stages (e.g. a
++	 * bootloader or OpenSBI), recover the root table pointer from the
++	 * current SATP value and leave the existing mappings in place.
++	 */
++	satp_val = csr_read(satp);
++	mode = (satp_val >> SATP_MODE_SHIFT) & 0xF;
++
++	if (mode != SATP_MODE_OFF) {
++		kernel_root_table = (uint64_t *)((satp_val & SATP_PPN_MASK) << PAGE_SIZE_SHIFT);
++		LOG_DBG("MMU already enabled (mode=%llu), root table at %p", mode,
++			  kernel_root_table);
++#ifdef CONFIG_USERSPACE
++		z_riscv_kernel_satp_val = satp_val;
++#endif
++		return 0;
++	}
++
++	/*
++	 * Allocate the root page table first so that create_kernel_mappings()
++	 * can populate it while the MMU is still disabled.  The MMU is only
++	 * turned on once all mappings are ready.
++	 *
++	 * Root tables have no parent PTE so set_pte() will never call
++	 * inc_table_ref() for them.  Increment manually to mark the table
++	 * as alive; arch_mem_domain_destroy() undoes this with a direct
++	 * zero-out for domain roots.
++	 */
++	kernel_root_table = new_table();
++	inc_table_ref(kernel_root_table);
++
++	ret = create_kernel_mappings();
++	if (ret != 0) {
++		LOG_ERR("Failed to create kernel mappings: %d", ret);
++		return ret;
++	}
++
++	/*
++	 * Enable the MMU.  PPN = physical address of root table / PAGE_SIZE,
++	 * stored in SATP bits 43:0 (Sv39/Sv48) or 21:0 (Sv32).
++	 */
++	new_satp = ((uint64_t)SATP_MODE << SATP_MODE_SHIFT) |
++		   ((uint64_t)KERNEL_ASID << SATP_ASID_SHIFT) |
++		   ((uintptr_t)kernel_root_table >> PAGE_SIZE_SHIFT);
++
++	LOG_DBG("Enabling MMU: SATP=0x%llx, root_table=%p, ASID=%d", new_satp,
++		  kernel_root_table, KERNEL_ASID);
++
++	csr_write(satp, new_satp);
++	SFENCE_VMA_ALL();
++
++#ifdef CONFIG_USERSPACE
++	z_riscv_kernel_satp_val = new_satp;
++#endif
++
++	/*
++	 * Set sstatus.SUM so that S-mode code can access pages that have the
++	 * U-bit set.  This is required because domain partitions are mapped
++	 * with PTE_USER in shared intermediate tables, and kernel threads
++	 * running in S-mode must still be able to read/write those pages.
++	 */
++	csr_set(sstatus, SSTATUS_SUM);
++
++	LOG_DBG("RISC-V MMU initialized successfully");
++
++#ifdef CONFIG_ARCH_MEM_DOMAIN_DATA
++	/*
++	 * The default memory domain (k_mem_domain_default) is created by
++	 * init_mem_domain_module() which runs at the same PRE_KERNEL_1 level
++	 * as us.  If it happened to run first, arch_mem_domain_init() found
++	 * kernel_root_table == NULL and left the domain's page table empty.
++	 * Patch it now that kernel_root_table is set.
++	 */
++	extern struct k_mem_domain k_mem_domain_default;
++
++	if (k_mem_domain_default.arch.ptables != NULL) {
++		memcpy(k_mem_domain_default.arch.ptables, kernel_root_table, PAGE_SIZE);
++		domain_privatize_kernel_text(k_mem_domain_default.arch.ptables);
++	}
++#endif
++
++	return 0;
++}
++
++#ifdef CONFIG_RISCV_MMU_STACK_GUARD
++/*
++ * Make the guard page at the bottom of a thread's stack object read-only in
++ * the kernel page tables.  Any store to this page causes a page fault which
++ * is then reported as a stack overflow.  The page stays mapped (V=1) so that
++ * arch_page_phys_get() still resolves it: mem-mapped (dynamically allocated)
++ * stack objects are torn down with k_mem_unmap_phys_guard(), which requires
++ * every page of the object to be mapped in order to recover and free its
++ * page frame.
++ */
++void z_riscv_mmu_map_guard_page(const struct k_thread *thread)
++{
++#if defined(CONFIG_USERSPACE)
++	uintptr_t guard = (uintptr_t)thread->stack_obj;
++#else
++	uintptr_t guard = thread->stack_info.start - ARCH_KERNEL_STACK_RESERVED;
++#endif
++	k_spinlock_key_t key = k_spin_lock(&xlat_lock);
++	uint64_t *table = kernel_root_table;
++	int level;
++
++	for (level = 0; level < PGTABLE_LEVELS - 1; level++) {
++		pte_t pte = table[VPN(guard, level)];
++
++		if (!pte_is_valid(pte) || pte_is_leaf(pte)) {
++			table = NULL;
++			break;
++		}
++
++		table = (uint64_t *)pte_to_phys(pte);
++	}
++
++	if (table != NULL) {
++		unsigned int leaf_index = VPN(guard, PGTABLE_LEVELS - 1);
++		pte_t leaf_pte = table[leaf_index];
++
++		if (pte_is_valid(leaf_pte)) {
++			leaf_pte &= ~((pte_t)(PTE_WRITE | PTE_EXEC | PTE_USER));
++			set_pte(table, leaf_index, leaf_pte);
++			SFENCE_VMA_ADDR((void *)guard);
++		}
++	}
++
++	k_spin_unlock(&xlat_lock, key);
++}
++#endif /* CONFIG_RISCV_MMU_STACK_GUARD */
++
++#ifdef CONFIG_USERSPACE
++
++/*
++ * Translate a k_mem_partition_attr_t (PMP-style bits) into PTE flags.
++ * PMP_R=0x01, PMP_W=0x02, PMP_X=0x04 map directly to PTE_READ/WRITE/EXEC.
++ * If the user bits are set, add PTE_USER so the page is accessible from
++ * user mode.
++ */
++static pte_t partition_attr_to_pte(k_mem_partition_attr_t attr)
++{
++	pte_t pte = PTE_VALID | PTE_ACCESSED;
++
++	if (attr.pmp_attr & PMP_R) {
++		pte |= PTE_READ | PTE_USER;
++	}
++	if (attr.pmp_attr & PMP_W) {
++		pte |= PTE_WRITE | PTE_DIRTY;
++	}
++	if (attr.pmp_attr & PMP_X) {
++		pte |= PTE_EXEC;
++	}
++
++	return pte;
++}
++
++/* Each L1 table entry maps 2^RISCV_PGLEVEL_SHIFT(1) bytes */
++#define L1_MAP_SIZE BIT(RISCV_PGLEVEL_SHIFT(1))
++
++/*
++ * Privatize the L1/L2 page tables that cover the kernel .text/.rodata
++ * region for a domain page table, then add PTE_USER to pages in
++ * [__text_region_start, __rom_region_end) so that user mode can execute
++ * kernel text (z_thread_entry, syscall stubs, etc.).
++ *
++ * Pages below __text_region_start (reset + exception.entry sections) keep
++ * PTE_USER=0 so that S-mode can fetch instructions from them while the
++ * domain SATP is active - this is required during SATP switch at trap
++ * exit / arch_user_mode_enter just before SRET.
++ */
++static int domain_privatize_kernel_text(uint64_t *domain_root)
++{
++	extern char __rom_region_start[];
++	extern char __text_region_start[];
++	extern char __rom_region_end[];
++
++	const uintptr_t rom_start = ROUND_DOWN((uintptr_t)__rom_region_start, PAGE_SIZE);
++	const uintptr_t text_start = (uintptr_t)__text_region_start;
++	const uintptr_t rom_end = ROUND_UP((uintptr_t)__rom_region_end, PAGE_SIZE);
++	const unsigned int l0_idx = VPN(rom_start, 0);
++	uint64_t *private_l1;
++	pte_t l0_pte;
++	uintptr_t l1_base = 0;
++
++	l0_pte = domain_root[l0_idx];
++	if (!pte_is_valid(l0_pte) || pte_is_leaf(l0_pte)) {
++		/* No intermediate table for kernel ROM - nothing to privatize. */
++		return 0;
++	}
++
++	/*
++	 * Create a private copy of the L1 table so modifications to domain
++	 * leaf PTEs do not affect the kernel page tables (which share the
++	 * same L1 via the root-table memcpy in arch_mem_domain_init).
++	 */
++	private_l1 = new_table();
++	if (!private_l1) {
++		return -ENOMEM;
++	}
++	inc_table_ref(private_l1);
++	memcpy(private_l1, (void *)pte_to_phys(l0_pte), PAGE_SIZE);
++	domain_root[l0_idx] = pte_create((uintptr_t)private_l1, PTE_TYPE_TABLE);
++
++	/*
++	 * Walk ALL valid intermediate L1 entries and privatize their L2
++	 * tables.  This prevents partition mappings from one domain from
++	 * leaking into another domain that shares the same L2 table.
++	 *
++	 * For L1 entries that intersect [text_start, rom_end), also stamp
++	 * PTE_USER on the leaf entries so that user threads can execute
++	 * kernel text (z_thread_entry, syscall stubs, etc.) while the
++	 * domain SATP is active.
++	 */
++	for (unsigned int l1_idx = 0; l1_idx < RISCV_PGTABLE_ENTRIES; l1_idx++) {
++		pte_t l1_pte = private_l1[l1_idx];
++		uint64_t *private_l2;
++		unsigned int i;
++
++		if (!pte_is_valid(l1_pte) || pte_is_leaf(l1_pte)) {
++			continue;
++		}
++
++		private_l2 = new_table();
++		if (!private_l2) {
++			return -ENOMEM;
++		}
++		inc_table_ref(private_l2);
++		memcpy(private_l2, (void *)pte_to_phys(l1_pte), PAGE_SIZE);
++		private_l1[l1_idx] = pte_create((uintptr_t)private_l2, PTE_TYPE_TABLE);
++
++		/*
++		 * Initialize the PTE count to match the entries we copied
++		 * so that dec_pte_count() stays balanced when partitions
++		 * are unmapped later.
++		 */
++		for (i = 0; i < RISCV_PGTABLE_ENTRIES; i++) {
++			if (pte_is_valid(private_l2[i])) {
++				adjust_table_usage(private_l2, 1);
++			}
++		}
++
++		l1_base = ((uintptr_t)l0_idx << RISCV_PGLEVEL_SHIFT(0)) |
++			  ((uintptr_t)l1_idx << RISCV_PGLEVEL_SHIFT(1));
++
++#if PGTABLE_LEVELS == 4
++		/*
++		 * Sv48: L2 entries are still intermediate nodes (VPN[1]).
++		 * Descend one more level: privatise each L2→L3 table and
++		 * stamp PTE_USER on the L3 leaf PTEs that cover kernel text.
++		 */
++		for (i = 0; i < RISCV_PGTABLE_ENTRIES; i++) {
++			pte_t l2_pte = private_l2[i];
++			uint64_t *private_l3;
++			unsigned int j;
++			uintptr_t l2_base;
++
++			if (!pte_is_valid(l2_pte) || pte_is_leaf(l2_pte)) {
++				continue;
++			}
++
++			private_l3 = new_table();
++			if (!private_l3) {
++				return -ENOMEM;
++			}
++			inc_table_ref(private_l3);
++			memcpy(private_l3, (void *)pte_to_phys(l2_pte), PAGE_SIZE);
++			private_l2[i] = pte_create((uintptr_t)private_l3, PTE_TYPE_TABLE);
++
++			for (j = 0; j < RISCV_PGTABLE_ENTRIES; j++) {
++				if (pte_is_valid(private_l3[j])) {
++					adjust_table_usage(private_l3, 1);
++				}
++			}
++
++			l2_base = l1_base | ((uintptr_t)i << RISCV_PGLEVEL_SHIFT(2));
++
++			for (j = 0; j < RISCV_PGTABLE_ENTRIES; j++) {
++				uintptr_t page_va =
++					l2_base + ((uintptr_t)j << PAGE_SIZE_SHIFT);
++				pte_t pte = private_l3[j];
++
++				if (!pte_is_valid(pte) || !pte_is_leaf(pte)) {
++					continue;
++				}
++				if (page_va >= text_start && page_va < rom_end) {
++					private_l3[j] = pte | PTE_USER;
++				}
++			}
++		}
++#else
++		/* Sv39: L2 entries are leaf PTEs - stamp PTE_USER directly. */
++		for (i = 0; i < RISCV_PGTABLE_ENTRIES; i++) {
++			uintptr_t page_va = l1_base + ((uintptr_t)i << PAGE_SIZE_SHIFT);
++			pte_t pte = private_l2[i];
++
++			if (!pte_is_valid(pte) || !pte_is_leaf(pte)) {
++				continue;
++			}
++			if (page_va >= text_start && page_va < rom_end) {
++				private_l2[i] = pte | PTE_USER;
++			}
++		}
++#endif
++	}
++
++	return 0;
++}
++
++#if PGTABLE_LEVELS == 4
++/*
++ * Sv48 helper for sync_domains(): propagate missing kernel L2 entries into a
++ * domain's private L2 table.  Called when both the kernel and the domain have
++ * private (diverged) L1 tables; the L1-level sync in sync_domains() cannot
++ * reach inside an already-present L1 entry, so we descend one extra level.
++ */
++static void sync_l2_from_kernel(uint64_t *k_l1, uint64_t *d_l1)
++{
++	unsigned int j;
++
++	for (j = 0; j < RISCV_PGTABLE_ENTRIES; j++) {
++		pte_t k_l1j = k_l1[j];
++		pte_t d_l1j = d_l1[j];
++		uint64_t *k_l2, *d_l2;
++		unsigned int k;
++
++		if (!pte_is_valid(k_l1j) || !pte_is_table(k_l1j) ||
++		    !pte_is_valid(d_l1j) || !pte_is_table(d_l1j)) {
++			continue;
++		}
++
++		k_l2 = (uint64_t *)pte_to_phys(k_l1j);
++		d_l2 = (uint64_t *)pte_to_phys(d_l1j);
++
++		if (k_l2 == d_l2) {
++			continue;
++		}
++
++		for (k = 0; k < RISCV_PGTABLE_ENTRIES; k++) {
++			if (pte_is_valid(k_l2[k]) && !pte_is_valid(d_l2[k])) {
++				d_l2[k] = k_l2[k];
++			}
++		}
++	}
++}
++#endif
++
++/*
++ * Propagate new kernel root-table entries to all active domain page tables.
++ *
++ * When arch_mem_map() adds a new mapping to the kernel root table it may
++ * create a new L1 entry in an L1 table that a domain has already privatised
++ * (via domain_privatize_kernel_text()).  The private copy was taken at domain
++ * creation time and will be missing the new entry.  Walk every domain in
++ * domain_list and copy any kernel L0/L1 entries that the domain does not yet
++ * have.
++ *
++ * Must be called with xlat_lock held.
++ */
++static void sync_domains(void)
++{
++	sys_snode_t *node;
++
++	SYS_SLIST_FOR_EACH_NODE(&domain_list, node) {
++		struct arch_mem_domain *arch_domain =
++			CONTAINER_OF(node, struct arch_mem_domain, node);
++		uint64_t *domain_root = arch_domain->ptables;
++		unsigned int i;
++
++		for (i = 0; i < RISCV_PGTABLE_ENTRIES; i++) {
++			pte_t k_pte = kernel_root_table[i];
++			pte_t d_pte = domain_root[i];
++
++			if (!pte_is_valid(k_pte)) {
++				continue;
++			}
++
++			if (!pte_is_valid(d_pte)) {
++				/* Domain missing this L0 entry entirely. */
++				domain_root[i] = k_pte;
++				continue;
++			}
++
++			if (!pte_is_table(k_pte) || !pte_is_table(d_pte)) {
++				/* Leaf (huge page) mapping - no sub-table to sync. */
++				continue;
++			}
++
++			{
++				uint64_t *k_l1 = (uint64_t *)pte_to_phys(k_pte);
++				uint64_t *d_l1 = (uint64_t *)pte_to_phys(d_pte);
++				unsigned int j;
++
++				if (k_l1 == d_l1) {
++					/* Shared L1 - already in sync. */
++					continue;
++				}
++
++				/*
++				 * Domain has a private L1 copy.  Copy any
++				 * kernel L1 entries that are absent in the
++				 * private copy.
++				 */
++				for (j = 0; j < RISCV_PGTABLE_ENTRIES; j++) {
++					if (pte_is_valid(k_l1[j]) &&
++					    !pte_is_valid(d_l1[j])) {
++						d_l1[j] = k_l1[j];
++					}
++				}
++
++#if PGTABLE_LEVELS == 4
++				sync_l2_from_kernel(k_l1, d_l1);
++#endif
++			}
++		}
++	}
++}
++
++int arch_mem_domain_max_partitions_get(void)
++{
++	return CONFIG_MAX_DOMAIN_PARTITIONS;
++}
++
++int arch_mem_domain_init(struct k_mem_domain *domain)
++{
++	k_spinlock_key_t key;
++
++	key = k_spin_lock(&xlat_lock);
++
++	domain->arch.ptables = new_table();
++	if (!domain->arch.ptables) {
++		k_spin_unlock(&xlat_lock, key);
++		return -ENOMEM;
++	}
++	/* Root table: no parent PTE, so add the initial reference manually. */
++	inc_table_ref(domain->arch.ptables);
++
++	/*
++	 * Copy kernel root table entries so the domain shares all
++	 * current kernel mappings. Partitions are mapped on top of
++	 * this snapshot when added.
++	 *
++	 * kernel_root_table is NULL if arch_mem_init() has not yet run.
++	 * Guard defensively; arch_mem_init() will patch the table afterwards.
++	 */
++	if (kernel_root_table != NULL) {
++		int ret;
++
++		memcpy(domain->arch.ptables, kernel_root_table, PAGE_SIZE);
++
++		/*
++		 * Create private copies of the L1/L2 tables for the kernel
++		 * ROM region and add PTE_USER to .text/.rodata pages.
++		 * This lets user threads execute kernel text (z_thread_entry,
++		 * syscall stubs) while the domain SATP is active, without
++		 * affecting the kernel SATP (PTE_USER=0 everywhere).
++		 */
++		ret = domain_privatize_kernel_text(domain->arch.ptables);
++		if (ret != 0) {
++			k_spin_unlock(&xlat_lock, key);
++			return ret;
++		}
++	}
++
++	domain->arch.asid = alloc_asid();
++
++	sys_slist_append(&domain_list, &domain->arch.node);
++
++	k_spin_unlock(&xlat_lock, key);
++
++	return 0;
++}
++
++/*
++ * For each leaf-adjacent-level slot (always 2MB, regardless of
++ * PGTABLE_LEVELS) covering [va, va+size), walk every intermediate table
++ * level from the root down to (but not including) the leaf level and
++ * ensure each one is a private copy (not shared with the kernel).  Shared
++ * tables would cause partition map/unmap operations to silently modify
++ * kernel mappings as a side-effect.
++ *
++ * Must be called with xlat_lock held.
++ */
++static int ensure_private_tables(uint64_t *domain_root, uintptr_t va, size_t size)
++{
++	/* The table one level above the leaf always covers 2MB: the shift is
++	 * PAGE_SIZE_SHIFT + RISCV_PGLEVEL_BITS * 1, independent of how many
++	 * levels exist above it.
++	 */
++	const uintptr_t step_size = BIT(RISCV_PGLEVEL_SHIFT(PGTABLE_LEVELS - 2));
++	uintptr_t cur = ROUND_DOWN(va, step_size);
++	uintptr_t end = va + size;
++
++	for (; cur < end; cur += step_size) {
++		uint64_t *d_tbl = domain_root;
++		uint64_t *k_tbl = kernel_root_table;
++		int lv;
++
++		for (lv = 0; lv < PGTABLE_LEVELS - 1; lv++) {
++			unsigned int idx = VPN(cur, lv);
++			pte_t d_pte = d_tbl[idx];
++			uint64_t *d_next, *k_next = NULL;
++			unsigned int i;
++
++			if (!pte_is_valid(d_pte) || !pte_is_table(d_pte)) {
++				break;
++			}
++			d_next = (uint64_t *)pte_to_phys(d_pte);
++
++			if (k_tbl != NULL) {
++				pte_t k_pte = k_tbl[idx];
++
++				if (pte_is_valid(k_pte) && pte_is_table(k_pte)) {
++					k_next = (uint64_t *)pte_to_phys(k_pte);
++				}
++			}
++
++			/* If domain shares this table with the kernel, privatize it. */
++			if (k_next != NULL && d_next == k_next) {
++				uint64_t *priv = new_table();
++
++				if (!priv) {
++					return -ENOMEM;
++				}
++				inc_table_ref(priv);
++				memcpy(priv, k_next, PAGE_SIZE);
++				for (i = 0; i < RISCV_PGTABLE_ENTRIES; i++) {
++					if (pte_is_valid(priv[i])) {
++						adjust_table_usage(priv, 1);
++					}
++				}
++				/* Raw write: intermediate domain tables are
++				 * not set_pte()-tracked.
++				 */
++				d_tbl[idx] = pte_create((uintptr_t)priv, PTE_TYPE_TABLE);
++				d_next = priv;
++			}
++
++			d_tbl = d_next;
++			k_tbl = k_next;
++		}
++	}
++	return 0;
++}
++
++int arch_mem_domain_partition_add(struct k_mem_domain *domain, uint32_t partition_id)
++{
++	struct k_mem_partition *part = &domain->partitions[partition_id];
++	pte_t pte_flags = partition_attr_to_pte(part->attr);
++	k_spinlock_key_t key;
++	int ret;
++
++	key = k_spin_lock(&xlat_lock);
++
++	/*
++	 * Privatize any L1/L2 tables shared with the kernel that cover
++	 * this partition's range.  Without private copies, map_pages_into()
++	 * would modify the shared intermediate tables, corrupting kernel
++	 * mappings as a side-effect, and restore_kernel_ptes() in
++	 * partition_remove() would be unable to recover them.
++	 */
++	ret = ensure_private_tables(domain->arch.ptables, part->start, part->size);
++	if (ret != 0) {
++		k_spin_unlock(&xlat_lock, key);
++		return ret;
++	}
++
++	map_pages_into(domain->arch.ptables, part->start, part->start, part->size, pte_flags);
++
++	SFENCE_VMA_ASID(domain->arch.asid);
++
++	k_spin_unlock(&xlat_lock, key);
++
++	return 0;
++}
++
++/*
++ * After arch_mem_domain_partition_remove() zeros domain leaf PTEs via
++ * unmap_pages_from(), the kernel (running S-mode with the domain SATP and
++ * SUM=1) can no longer access the revoked partition's backing memory.
++ * Restore the kernel's original PTEs into the domain's page tables so that
++ * S-mode access is preserved while U-mode access is removed.
++ *
++ * Must be called with xlat_lock held.
++ */
++static void restore_kernel_ptes(uint64_t *domain_root, uintptr_t va, size_t size)
++{
++	uintptr_t end = va + size;
++
++	for (; va < end; va += PAGE_SIZE) {
++		uint64_t *k_tbl = kernel_root_table;
++		uint64_t *d_tbl = domain_root;
++		int lv;
++
++		for (lv = 0; lv < PGTABLE_LEVELS - 1; lv++) {
++			unsigned int idx = VPN(va, lv);
++			pte_t kp = k_tbl[idx];
++			pte_t dp = d_tbl[idx];
++
++			if (!pte_is_valid(kp) || !pte_is_table(kp)) {
++				goto next_page;
++			}
++			if (!pte_is_valid(dp) || !pte_is_table(dp)) {
++				goto next_page;
++			}
++			k_tbl = (uint64_t *)pte_to_phys(kp);
++			d_tbl = (uint64_t *)pte_to_phys(dp);
++		}
++
++		{
++			unsigned int li = VPN(va, PGTABLE_LEVELS - 1);
++			pte_t kp = k_tbl[li];
++
++			if (pte_is_valid(kp) && !pte_is_valid(d_tbl[li])) {
++				set_pte(d_tbl, li, kp);
++			}
++		}
++next_page:;
++	}
++}
++
++int arch_mem_domain_partition_remove(struct k_mem_domain *domain, uint32_t partition_id)
++{
++	struct k_mem_partition *part = &domain->partitions[partition_id];
++	k_spinlock_key_t key;
++
++	key = k_spin_lock(&xlat_lock);
++
++	unmap_pages_from(domain->arch.ptables, part->start, part->size);
++
++	/*
++	 * Restore kernel RW mappings into the domain's page tables for the
++	 * revoked range.  unmap_pages_from() zeroed all PTEs, including the
++	 * kernel entries that S-mode needs when running with the domain SATP.
++	 */
++	restore_kernel_ptes(domain->arch.ptables, part->start, part->size);
++
++	SFENCE_VMA_ASID(domain->arch.asid);
++
++	k_spin_unlock(&xlat_lock, key);
++
++	return 0;
++}
++
++int arch_mem_domain_thread_add(struct k_thread *thread)
++{
++	struct k_mem_domain *domain = thread->mem_domain_info.mem_domain;
++
++	thread->arch.satp = ((uintptr_t)SATP_MODE << SATP_MODE_SHIFT) |
++			    ((uintptr_t)domain->arch.asid << SATP_ASID_SHIFT) |
++			    ((uintptr_t)domain->arch.ptables >> PAGE_SIZE_SHIFT);
++
++	/*
++	 * Ensure the thread's user stack is mapped with PTE_USER in the
++	 * new domain's page tables.  This handles migration: if a user thread
++	 * is moved to a different domain after already entering user mode,
++	 * the new domain must have the stack accessible.  The call is
++	 * idempotent if the stack is already mapped.
++	 */
++	if ((thread->base.user_options & K_USER) && thread->stack_info.start != 0) {
++		z_riscv_mmu_map_user_stack(thread);
++	}
++
++	return 0;
++}
++
++int arch_mem_domain_thread_remove(struct k_thread *thread)
++{
++	/* Revert to kernel page tables */
++	thread->arch.satp = z_riscv_kernel_satp();
++
++	return 0;
++}
++
++int arch_mem_domain_destroy(struct k_mem_domain *domain)
++{
++	k_spinlock_key_t key;
++	uint64_t *ptables = domain->arch.ptables;
++	int i;
++
++	if (!ptables) {
++		return 0;
++	}
++
++	key = k_spin_lock(&xlat_lock);
++
++	sys_slist_find_and_remove(&domain_list, &domain->arch.node);
++
++	/*
++	 * Release intermediate tables that are exclusively owned by this
++	 * domain (ref_count == XLAT_REF_COUNT_UNIT means only the domain
++	 * root points to them).  Tables shared with the kernel page table
++	 * have a higher ref count and must not be freed.
++	 *
++	 * TODO: recurse into deeper levels for partitions that required
++	 * multi-level exclusive sub-tables.
++	 */
++	for (i = 0; i < RISCV_PGTABLE_ENTRIES; i++) {
++		pte_t pte = ptables[i];
++
++		if (pte_is_valid(pte) && pte_is_table(pte)) {
++			uint64_t *child = (uint64_t *)pte_to_phys(pte);
++			unsigned int idx = table_index(child);
++
++			if (xlat_use_count[idx] == XLAT_REF_COUNT_UNIT) {
++				xlat_use_count[idx] = 0;
++			}
++		}
++	}
++
++	/* Free the domain root table */
++	xlat_use_count[table_index(ptables)] = 0;
++	domain->arch.ptables = NULL;
++
++	k_spin_unlock(&xlat_lock, key);
++
++	return 0;
++}
++
++void z_riscv_mmu_map_user_stack(struct k_thread *thread)
++{
++	struct k_mem_domain *domain = thread->mem_domain_info.mem_domain;
++	k_spinlock_key_t key;
++
++	if (!domain || !domain->arch.ptables) {
++		return;
++	}
++
++	uintptr_t stack_start = thread->stack_info.start;
++	size_t stack_size = ROUND_UP(thread->stack_info.size, PAGE_SIZE);
++
++	if (stack_start == 0 || stack_size == 0) {
++		return;
++	}
++
++	key = k_spin_lock(&xlat_lock);
++	/*
++	 * Privatize shared intermediate tables before installing PTE_USER
++	 * entries.  Without this, map_pages_into() would modify a shared L2,
++	 * which also changes the kernel's mapping for the same pages.
++	 */
++	ensure_private_tables(domain->arch.ptables, stack_start, stack_size);
++	map_pages_into(domain->arch.ptables, stack_start, stack_start, stack_size,
++		       PTE_VALID | PTE_READ | PTE_WRITE | PTE_USER |
++		       PTE_ACCESSED | PTE_DIRTY);
++	SFENCE_VMA_ASID(domain->arch.asid);
++	k_spin_unlock(&xlat_lock, key);
++}
++
++#ifdef CONFIG_MEM_DOMAIN_ISOLATED_STACKS
++/*
++ * Called at every context switch when MEM_DOMAIN_ISOLATED_STACKS is active.
++ * Clears PTE_USER from the outgoing thread's stack pages in its domain page
++ * tables and sets PTE_USER on the incoming thread's stack pages in its domain
++ * page tables.  This ensures that within a shared domain, each thread can only
++ * access its own stack from U-mode.
++ *
++ * This relies on PTE_USER toggling which only affects U-mode accesses, so it
++ * requires CONFIG_USERSPACE to have any effect.
++ */
++void z_riscv_mmu_switch_stack_perms(struct k_thread *old_thread,
++				    struct k_thread *new_thread)
++{
++	struct k_mem_domain *old_domain = old_thread->mem_domain_info.mem_domain;
++	struct k_mem_domain *new_domain = new_thread->mem_domain_info.mem_domain;
++	k_spinlock_key_t key;
++
++	key = k_spin_lock(&xlat_lock);
++
++	/* Remove PTE_USER from the outgoing thread's stack */
++	if ((old_thread->base.user_options & K_USER) &&
++	    old_thread->stack_info.start != 0 &&
++	    old_domain && old_domain->arch.ptables) {
++		uintptr_t start = old_thread->stack_info.start;
++		size_t size = ROUND_UP(old_thread->stack_info.size, PAGE_SIZE);
++
++		map_pages_into(old_domain->arch.ptables, start, start, size,
++			       PTE_VALID | PTE_READ | PTE_WRITE |
++			       PTE_ACCESSED | PTE_DIRTY);
++		SFENCE_VMA_ASID(old_domain->arch.asid);
++	}
++
++	/* Grant PTE_USER on the incoming thread's stack */
++	if ((new_thread->base.user_options & K_USER) &&
++	    new_thread->stack_info.start != 0 &&
++	    new_domain && new_domain->arch.ptables) {
++		uintptr_t start = new_thread->stack_info.start;
++		size_t size = ROUND_UP(new_thread->stack_info.size, PAGE_SIZE);
++
++		map_pages_into(new_domain->arch.ptables, start, start, size,
++			       PTE_VALID | PTE_READ | PTE_WRITE | PTE_USER |
++			       PTE_ACCESSED | PTE_DIRTY);
++		SFENCE_VMA_ASID(new_domain->arch.asid);
++	}
++
++	k_spin_unlock(&xlat_lock, key);
++}
++#endif /* CONFIG_MEM_DOMAIN_ISOLATED_STACKS */
++
++#endif /* CONFIG_USERSPACE */
++
++#ifdef CONFIG_USERSPACE
++
++#define IS_WITHIN(inner_start, inner_size, outer_start, outer_size) \
++	((inner_start) >= (outer_start) && (inner_size) <= (outer_size) && \
++	 ((inner_start) - (outer_start)) <= ((outer_size) - (inner_size)))
++
++int arch_buffer_validate(const void *addr, size_t size, int write)
++{
++	uintptr_t start = (uintptr_t)addr;
++	int ret = -1;
++
++	if (IS_WITHIN(start, size,
++		      _current->stack_info.start, _current->stack_info.size)) {
++		return 0;
++	}
++
++	if (!write) {
++		uintptr_t ro_start = (uintptr_t)__rom_region_start;
++		size_t ro_size = (size_t)__rom_region_size;
++
++		if (IS_WITHIN(start, size, ro_start, ro_size)) {
++			return 0;
++		}
++	}
++
++	struct k_mem_domain *domain = _current->mem_domain_info.mem_domain;
++	int p_idx, remaining_partitions;
++	k_spinlock_key_t key = k_spin_lock(&z_mem_domain_lock);
++
++	remaining_partitions = domain->num_partitions;
++	for (p_idx = 0; remaining_partitions > 0; p_idx++) {
++		struct k_mem_partition *part = &domain->partitions[p_idx];
++
++		if (part->size == 0) {
++			continue;
++		}
++
++		remaining_partitions--;
++
++		if (!IS_WITHIN(start, size, part->start, part->size)) {
++			continue;
++		}
++
++		if ((part->attr.pmp_attr & (write ? PMP_W : PMP_R)) != 0) {
++			ret = 0;
++		}
++		break;
++	}
++
++	k_spin_unlock(&z_mem_domain_lock, key);
++	return ret;
++}
++
++#endif /* CONFIG_USERSPACE (arch_buffer_validate) */
++
++void arch_reserved_pages_update(void)
++{
++	/*
++	 * xlat_tables is a static array in BSS - it is already within the
++	 * kernel image range [z_mapped_start, z_mapped_end] and will be
++	 * automatically pinned by z_mem_manage_init().  No additional pages
++	 * need to be marked reserved on this platform.
++	 */
++}
++
++SYS_INIT(arch_mem_init, PRE_KERNEL_1, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
+diff --git a/arch/riscv/core/mmu.h b/arch/riscv/core/mmu.h
+new file mode 100644
+index 00000000000..503d448504b
+--- /dev/null
++++ b/arch/riscv/core/mmu.h
+@@ -0,0 +1,227 @@
++/*
++ * Copyright (c) 2026 Alexios Lyrakis <alexios.lyrakis@gmail.com>
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_ARCH_RISCV_CORE_MMU_H_
++#define ZEPHYR_ARCH_RISCV_CORE_MMU_H_
++
++#include <zephyr/sys/util.h>
++#include <zephyr/toolchain.h>
++#include <zephyr/arch/riscv/csr.h>
++#include <stdbool.h>
++
++/*
++ * RISC-V Virtual Memory Layout (assumes 4KB page size)
++ *
++ * Sv39 (39-bit virtual address):
++ * +------------+------------+------------+-----------+
++ * | VA [38:30] | VA [29:21] | VA [20:12] | VA [11:0] |
++ * +------------------------------------------------+
++ * |    L0      |    L1      |    L2      | page off  |
++ * +------------+------------+------------+-----------+
++ *
++ * Sv48 (48-bit virtual address):
++ * +------------+------------+------------+------------+-----------+
++ * | VA [47:39] | VA [38:30] | VA [29:21] | VA [20:12] | VA [11:0] |
++ * +-----------------------------------------------------------+
++ * |    L0      |    L1      |    L2      |    L3      | page off  |
++ * +------------+------------+------------+------------+-----------+
++ */
++
++/*
++ * SATP (Supervisor Address Translation and Protection) Register Layout
++ *
++ * RV64 SATP (64-bit):
++ * +--------+--------+-------------------------------------+
++ * | 63:60  | 59:44  |               43:0                  |
++ * |  MODE  |  ASID  |               PPN                   |
++ * +--------+--------+-------------------------------------+
++ *
++ * RV32 SATP (32-bit):
++ * +----+--------+---------------------------+
++ * | 31 | 30:22  |          21:0             |
++ * |MODE|  ASID  |          PPN              |
++ * +----+--------+---------------------------+
++ *
++ * MODE: Translation mode (Off, Sv32, Sv39, Sv48, Sv57)
++ * ASID: Address Space Identifier (process/context ID)
++ * PPN:  Physical Page Number of root page table.
++ *       Stores physical_address / PAGE_SIZE (a page frame number).
++ *       Physical address of root table = PPN * PAGE_SIZE.
++ *       RV64: 44-bit field (bits 43:0), RV32: 22-bit field (bits 21:0).
++ */
++
++/*
++ * PTE (Page Table Entry) Layout - RISC-V 64-bit
++ *
++ * +----------+---------------------+-----+---+---+---+---+---+---+---+---+
++ * | 63:54    |       53:10         | 9:8 | 7 | 6 | 5 | 4 | 3 | 2 | 1 | 0 |
++ * | RESERVED |        PPN          | RSW | D | A | G | U | X | W | R | V |
++ * +----------+---------------------+-----+---+---+---+---+---+---+---+---+
++ *
++ * V: Valid - PTE is valid
++ * R: Read - Page is readable
++ * W: Write - Page is writable
++ * X: Execute - Page is executable
++ * U: User - Page is accessible in User mode
++ * G: Global - Translation is valid for all address spaces (ignores ASID)
++ * A: Accessed - Page has been accessed (read/written/executed)
++ * D: Dirty - Page has been written to
++ * RSW: Reserved for Software Use (bits 8-9)
++ * PPN: Physical Page Number (44-bit, supports up to 56-bit physical addresses)
++ * RESERVED: Reserved for future RISC-V extensions
++ *
++ * PTE Types:
++ * - Leaf PTE (page): V=1, and at least one of R/W/X is 1
++ * - Non-leaf PTE (table): V=1, R=W=X=0 (points to next page table level)
++ * - Invalid PTE: V=0
++ */
++
++/* RISC-V supports multiple page sizes; starting with 4KB base pages */
++#define PAGE_SIZE_SHIFT 12U
++#define PAGE_SIZE       BIT(PAGE_SIZE_SHIFT)
++#define PAGE_MASK       (PAGE_SIZE - 1)
++
++/* RISC-V page table constants */
++#define RISCV_PGLEVEL_BITS    9U
++#define RISCV_PGTABLE_ENTRIES BIT(RISCV_PGLEVEL_BITS) /* 512 entries */
++
++/* SATP register definitions */
++#if defined(CONFIG_64BIT)
++
++#define SATP_PPN_SHIFT  0U
++#define SATP_ASID_SHIFT 44U
++#define SATP_MODE_SHIFT 60U
++#define SATP_ASID_MASK  GENMASK64(59, 44)
++#define SATP_PPN_MASK   GENMASK64(43, 0)
++
++#else /* !CONFIG_64BIT */
++
++#define SATP_PPN_SHIFT  0U
++#define SATP_ASID_SHIFT 22U
++#define SATP_MODE_SHIFT 31U
++#define SATP_ASID_MASK  GENMASK(30, 22)
++#define SATP_PPN_MASK   GENMASK(21, 0)
++
++#endif /* CONFIG_64BIT */
++
++/* Current SATP mode based on configuration */
++#if defined(CONFIG_RISCV_MMU_SV39)
++#define SATP_MODE      SATP_MODE_SV39
++#define VA_BITS        39
++#define PGTABLE_LEVELS 3
++#elif defined(CONFIG_RISCV_MMU_SV48)
++#define SATP_MODE      SATP_MODE_SV48
++#define VA_BITS        48
++#define PGTABLE_LEVELS 4
++#else
++/* Default to SV39 if MMU is enabled but mode not specified */
++#define SATP_MODE      SATP_MODE_SV39
++#define VA_BITS        39
++#define PGTABLE_LEVELS 3
++#endif
++
++/* Calculate level shift based on page level */
++#define RISCV_PGLEVEL_SHIFT(level)                                                                 \
++	(PAGE_SIZE_SHIFT + RISCV_PGLEVEL_BITS * (PGTABLE_LEVELS - 1 - (level)))
++
++/* Extract VPN (Virtual Page Number) at specific level */
++#define VPN_MASK         GENMASK(RISCV_PGLEVEL_BITS - 1, 0)
++#define VPN(addr, level) (((addr) >> RISCV_PGLEVEL_SHIFT(level)) & VPN_MASK)
++
++/* Page Table Entry (PTE) definitions */
++#define PTE_VALID    BIT(0)
++#define PTE_READ     BIT(1)
++#define PTE_WRITE    BIT(2)
++#define PTE_EXEC     BIT(3)
++#define PTE_USER     BIT(4)
++#define PTE_GLOBAL   BIT(5)
++#define PTE_ACCESSED BIT(6)
++#define PTE_DIRTY    BIT(7)
++
++/* Software-defined PTE bits (bits 8-9 are reserved for software use) */
++#define PTE_SW_WRITABLE BIT(8) /* Actually writable (for demand paging) */
++#define PTE_SW_RESERVED BIT(9) /* Reserved for future use */
++
++/* PTE permission combinations */
++#define PTE_TYPE_TABLE (PTE_VALID) /* flags for a non-leaf (table) PTE */
++#define PTE_PAGE_READ  (PTE_VALID | PTE_READ | PTE_ACCESSED)
++#define PTE_PAGE_WRITE (PTE_VALID | PTE_READ | PTE_WRITE | PTE_ACCESSED | PTE_DIRTY)
++#define PTE_PAGE_EXEC  (PTE_VALID | PTE_EXEC | PTE_ACCESSED)
++#define PTE_PAGE_RW    (PTE_VALID | PTE_READ | PTE_WRITE | PTE_ACCESSED | PTE_DIRTY)
++#define PTE_PAGE_RX    (PTE_VALID | PTE_READ | PTE_EXEC | PTE_ACCESSED)
++#define PTE_PAGE_RWX   (PTE_VALID | PTE_READ | PTE_WRITE | PTE_EXEC | PTE_ACCESSED | PTE_DIRTY)
++
++/* Check if PTE is a leaf (page) or branch (table) */
++#define PTE_IS_LEAF(pte)  ((pte) & (PTE_READ | PTE_WRITE | PTE_EXEC))
++#define PTE_IS_TABLE(pte) (((pte) & PTE_VALID) && !PTE_IS_LEAF(pte))
++
++/* Extract/create PPN (Physical Page Number) */
++/* PTE_PPN_SHIFT (10) is defined in csr.h */
++#define PTE_PPN_MASK      GENMASK64(53, 10)
++#define PTE_TO_PPN(pte)   (((pte) & PTE_PPN_MASK) >> PTE_PPN_SHIFT)
++#define PPN_TO_PTE(ppn)   (((ppn) << PTE_PPN_SHIFT) & PTE_PPN_MASK)
++#define PTE_TO_PHYS(pte)  (PTE_TO_PPN(pte) << PAGE_SIZE_SHIFT)
++#define PHYS_TO_PTE(phys) PPN_TO_PTE((phys) >> PAGE_SIZE_SHIFT)
++
++/* Address conversion macros */
++#define VA_TO_VPN_INDEX(va, level) VPN(va, level)
++#define PA_TO_PPN(pa)              ((pa) >> PAGE_SIZE_SHIFT)
++#define PPN_TO_PA(ppn)             ((ppn) << PAGE_SIZE_SHIFT)
++
++/* TLB flush operations */
++#define SFENCE_VMA_ALL()      __asm__ volatile("sfence.vma" ::: "memory")
++#define SFENCE_VMA_ADDR(addr) __asm__ volatile("sfence.vma %0" ::"r"(addr) : "memory")
++#define SFENCE_VMA_ASID(asid) __asm__ volatile("sfence.vma zero, %0" ::"r"(asid) : "memory")
++#define SFENCE_VMA_ADDR_ASID(addr, asid)                                                           \
++	__asm__ volatile("sfence.vma %0, %1" ::"r"(addr), "r"(asid) : "memory")
++
++/* RISC-V CSR access macros */
++#define READ_SATP()     csr_read(satp)
++#define WRITE_SATP(val) csr_write(satp, val)
++
++/* Page table entry type - 64-bit on both RV32 and RV64 for Sv32+ modes */
++typedef uint64_t pte_t;
++
++#ifndef _ASMLANGUAGE
++
++/* Number of page table entries per table */
++#define PTRS_PER_PTE RISCV_PGTABLE_ENTRIES
++
++/* Convert between various address formats */
++static inline uintptr_t pte_to_phys(pte_t pte)
++{
++	return PTE_TO_PHYS(pte);
++}
++
++static inline pte_t phys_to_pte(uintptr_t phys)
++{
++	return PHYS_TO_PTE(phys);
++}
++
++static inline pte_t pte_create(uintptr_t phys, uint64_t flags)
++{
++	return phys_to_pte(phys) | flags;
++}
++
++/* Check PTE status */
++static inline bool pte_is_valid(pte_t pte)
++{
++	return !!(pte & PTE_VALID);
++}
++
++static inline bool pte_is_leaf(pte_t pte)
++{
++	return PTE_IS_LEAF(pte);
++}
++
++static inline bool pte_is_table(pte_t pte)
++{
++	return PTE_IS_TABLE(pte);
++}
++
++#endif /* !_ASMLANGUAGE */
++
++#endif /* ZEPHYR_ARCH_RISCV_CORE_MMU_H_ */
+diff --git a/arch/riscv/core/offsets/offsets.c b/arch/riscv/core/offsets/offsets.c
+index 11108f442f8..bbeb9eac394 100644
+--- a/arch/riscv/core/offsets/offsets.c
++++ b/arch/riscv/core/offsets/offsets.c
+@@ -95,6 +95,10 @@ GEN_OFFSET_SYM(_thread_arch_t, exception_depth);
+ 
+ #endif /* CONFIG_FPU_SHARING */
+ 
++#ifdef CONFIG_RISCV_MMU
++GEN_OFFSET_SYM(_thread_arch_t, satp);
++#endif
++
+ /* esf member offsets */
+ GEN_OFFSET_STRUCT(arch_esf, ra);
+ GEN_OFFSET_STRUCT(arch_esf, t0);
+diff --git a/arch/riscv/core/pmp.c b/arch/riscv/core/pmp.c
+index 648617829e7..556f27ff00f 100644
+--- a/arch/riscv/core/pmp.c
++++ b/arch/riscv/core/pmp.c
+@@ -1124,7 +1124,6 @@ int arch_mem_domain_thread_remove(struct k_thread *thread)
+ 
+ 	return 0;
+ }
+-
+ #define IS_WITHIN(inner_start, inner_size, outer_start, outer_size) \
+ 	((inner_start) >= (outer_start) && (inner_size) <= (outer_size) && \
+ 	 ((inner_start) - (outer_start)) <= ((outer_size) - (inner_size)))
+diff --git a/arch/riscv/core/switch.S b/arch/riscv/core/switch.S
+index 723b5b6f01c..1e884ae6dcf 100644
+--- a/arch/riscv/core/switch.S
++++ b/arch/riscv/core/switch.S
+@@ -91,12 +91,27 @@ SECTION_FUNC(TEXT, z_riscv_switch)
+ 	mv a0, s0
+ #endif
+ 
++#if defined(CONFIG_RISCV_MMU) && defined(CONFIG_MEM_DOMAIN_ISOLATED_STACKS) && \
++	defined(CONFIG_USERSPACE)
++	/*
++	 * Update PTE_USER on stack pages: remove from outgoing thread,
++	 * grant to incoming thread.  a0 = new thread, a1 = old thread.
++	 */
++	mv s0, a0
++	mv s1, a1
++	mv a0, a1		/* old_thread = first arg */
++	mv a1, s0		/* new_thread = second arg */
++	call z_riscv_mmu_switch_stack_perms
++	mv a0, s0
++	mv a1, s1
++#endif
++
+ #ifdef CONFIG_PMP_KERNEL_MODE_DYNAMIC
+ 	/* Kernel mode has priority over user space for PMP usage. */
+ 	mv s0, a0
+ 	call z_riscv_pmp_kernelmode_enable
+ 	mv a0, s0
+-#elif defined(CONFIG_USERSPACE)
++#elif defined(CONFIG_USERSPACE) && !defined(CONFIG_RISCV_MMU)
+ 	/*
+ 	 * When kernel mode dynamic configuration is not enabled, we need to
+ 	 * configure the PMP only at context switch time as the PMP is not
+diff --git a/arch/riscv/core/thread.c b/arch/riscv/core/thread.c
+index 7c8608d53b9..3e91a31c8b3 100644
+--- a/arch/riscv/core/thread.c
++++ b/arch/riscv/core/thread.c
+@@ -74,7 +74,9 @@ void arch_new_thread(struct k_thread *thread, k_thread_stack_t *stack,
+ 
+ #if defined(CONFIG_USERSPACE)
+ 	/* Clear user thread context */
++#ifdef CONFIG_RISCV_PMP
+ 	z_riscv_pmp_usermode_init(thread);
++#endif
+ 	thread->arch.priv_stack_start = 0;
+ #endif /* CONFIG_USERSPACE */
+ 
+@@ -119,6 +121,14 @@ void arch_new_thread(struct k_thread *thread, k_thread_stack_t *stack,
+ 	/* where to go when returning from z_riscv_switch() */
+ 	thread->callee_saved.ra = (unsigned long)z_riscv_thread_start;
+ 
++#ifdef CONFIG_RISCV_MMU
++	thread->arch.satp = z_riscv_kernel_satp();
++#endif
++
++#ifdef CONFIG_RISCV_MMU_STACK_GUARD
++	z_riscv_mmu_map_guard_page(thread);
++#endif
++
+ 	/* our switch handle is the thread pointer itself */
+ 	thread->switch_handle = thread;
+ }
+@@ -153,9 +163,17 @@ FUNC_NORETURN void arch_user_mode_enter(k_thread_entry_t user_entry,
+ 					      CONFIG_PRIVILEGED_STACK_SIZE);
+ 
+ #ifdef CONFIG_INIT_STACKS
+-	/* Initialize the privileged stack */
+-	(void)memset((void *)_current->arch.priv_stack_start, 0xaa,
+-		     Z_STACK_PTR_ALIGN(K_KERNEL_STACK_RESERVED + CONFIG_PRIVILEGED_STACK_SIZE));
++	/*
++	 * Initialize the privileged stack, skipping the guard region at the
++	 * bottom (K_KERNEL_STACK_RESERVED bytes).  With CONFIG_RISCV_MMU the
++	 * guard page is unmapped (V=0) and writing to it would fault; with
++	 * PMP the region is hardware-protected and does not need sentinel
++	 * bytes.  Either way, only the actual priv-stack bytes above the
++	 * guard need initialisation.
++	 */
++	(void)memset((void *)((uintptr_t)_current->arch.priv_stack_start +
++			      K_KERNEL_STACK_RESERVED),
++		     0xaa, Z_STACK_PTR_ALIGN(CONFIG_PRIVILEGED_STACK_SIZE));
+ #endif /* CONFIG_INIT_STACKS */
+ 
+ 	top_of_user_stack = Z_STACK_PTR_ALIGN(
+@@ -191,8 +209,10 @@ FUNC_NORETURN void arch_user_mode_enter(k_thread_entry_t user_entry,
+ #endif
+ 
+ 	/* Set up Physical Memory Protection */
++#ifdef CONFIG_RISCV_PMP
+ 	z_riscv_pmp_usermode_prepare(_current);
+ 	z_riscv_pmp_usermode_enable(_current);
++#endif
+ 
+ 	/* preserve stack pointer for next exception entry */
+ 	arch_curr_cpu()->arch.user_exc_sp = top_of_priv_stack;
+@@ -204,6 +224,25 @@ FUNC_NORETURN void arch_user_mode_enter(k_thread_entry_t user_entry,
+ 	z_riscv_custom_stack_guard_disable();
+ #endif /* CONFIG_CUSTOM_STACK_GUARD */
+ 
++#ifdef CONFIG_RISCV_MMU
++	/*
++	 * Map the thread's stack with PTE_USER=1 in the domain page tables.
++	 * This is needed here (not just in arch_mem_domain_thread_add) because
++	 * a kernel thread that drops to user mode via k_thread_user_mode_enter
++	 * is not created with K_USER, so thread_add skips the stack mapping.
++	 * This call is idempotent for threads already mapped via thread_add.
++	 */
++	z_riscv_mmu_map_user_stack(_current);
++
++	/*
++	 * Switch to domain SATP and SRET into user mode via the helper
++	 * that lives in the exception.entry section.  That section has
++	 * PTE_USER=0 in the domain page tables, allowing S-mode to execute
++	 * the csrw satp/sfence.vma/sret sequence safely.
++	 */
++	z_riscv_userspace_enter(user_entry, p1, p2, p3,
++				top_of_user_stack, _current->arch.satp);
++#else
+ 	register void *a0 __asm__("a0") = user_entry;
+ 	register void *a1 __asm__("a1") = p1;
+ 	register void *a2 __asm__("a2") = p2;
+@@ -222,6 +261,7 @@ FUNC_NORETURN void arch_user_mode_enter(k_thread_entry_t user_entry,
+ 	: "r" (a0), "r" (a1), "r" (a2), "r" (a3), "r" (top_of_user_stack)
+ 	: "memory");
+ #endif
++#endif /* CONFIG_RISCV_MMU */
+ 
+ 	CODE_UNREACHABLE;
+ }
+diff --git a/arch/riscv/include/kernel_arch_func.h b/arch/riscv/include/kernel_arch_func.h
+index 3fdcae803ef..657d4e67062 100644
+--- a/arch/riscv/include/kernel_arch_func.h
++++ b/arch/riscv/include/kernel_arch_func.h
+@@ -89,6 +89,25 @@ arch_switch(void *switch_to, void **switched_from)
+ void z_riscv_fatal_error(unsigned int reason,
+ 				       const struct arch_esf *esf);
+ 
++#ifdef CONFIG_RISCV_MMU
++uintptr_t z_riscv_kernel_satp(void);
++#ifdef CONFIG_RISCV_MMU_STACK_GUARD
++void z_riscv_mmu_map_guard_page(const struct k_thread *thread);
++#endif
++#ifdef CONFIG_USERSPACE
++void z_riscv_mmu_map_user_stack(struct k_thread *thread);
++#ifdef CONFIG_MEM_DOMAIN_ISOLATED_STACKS
++void z_riscv_mmu_switch_stack_perms(struct k_thread *old_thread,
++				    struct k_thread *new_thread);
++#endif /* CONFIG_MEM_DOMAIN_ISOLATED_STACKS */
++__attribute__((noreturn)) void z_riscv_userspace_enter(k_thread_entry_t entry,
++						       void *p1, void *p2,
++						       void *p3,
++						       unsigned long user_sp,
++						       uintptr_t domain_satp);
++#endif /* CONFIG_USERSPACE */
++#endif /* CONFIG_RISCV_MMU */
++
+ static inline bool arch_is_in_isr(void)
+ {
+ #ifdef CONFIG_SMP
+@@ -102,10 +121,6 @@ static inline bool arch_is_in_isr(void)
+ #endif
+ }
+ 
+-extern FUNC_NORETURN void z_riscv_userspace_enter(k_thread_entry_t user_entry,
+-						 void *p1, void *p2, void *p3,
+-						 uint32_t stack_end,
+-						 uint32_t stack_start);
+ 
+ #ifdef CONFIG_IRQ_OFFLOAD
+ int z_irq_do_offload(void);
+diff --git a/arch/riscv/include/offsets_short_arch.h b/arch/riscv/include/offsets_short_arch.h
+index 27c01a77461..13aa4edb6e5 100644
+--- a/arch/riscv/include/offsets_short_arch.h
++++ b/arch/riscv/include/offsets_short_arch.h
+@@ -61,6 +61,11 @@
+ 
+ #endif
+ 
++#ifdef CONFIG_RISCV_MMU
++#define _thread_offset_to_satp \
++	(___thread_t_arch_OFFSET + ___thread_arch_t_satp_OFFSET)
++#endif
++
+ #ifdef CONFIG_USERSPACE
+ 
+ #define _curr_cpu_arch_user_exc_sp \
+diff --git a/boards/qemu/riscv64/board.cmake b/boards/qemu/riscv64/board.cmake
+index a37562f79d2..df383887f65 100644
+--- a/boards/qemu/riscv64/board.cmake
++++ b/boards/qemu/riscv64/board.cmake
+@@ -26,7 +26,12 @@ else()
+ endif()
+ 
+ if(CONFIG_RISCV_S_MODE)
+-  string(APPEND qemu_riscv_cpu ",s=on,u=on,pmp=on,priv_spec=v1.12.0,sv39=on")
++  # rv64i with sv39=on is broken in QEMU 10.x; use the full rv64 model instead.
++  if(CONFIG_RISCV_MMU_SV48)
++    set(qemu_riscv_cpu "rv64,s=on,u=on,pmp=on,priv_spec=v1.12.0,sv48=on")
++  else()
++    set(qemu_riscv_cpu "rv64,s=on,u=on,pmp=on,priv_spec=v1.12.0,sv39=on")
++  endif()
+ endif()
+ 
+ set(QEMU_CPU_TYPE_${ARCH} "${qemu_riscv_cpu}")
+diff --git a/boards/qemu/riscv64/board.yml b/boards/qemu/riscv64/board.yml
+index 9fd3946f130..4583c1400b0 100644
+--- a/boards/qemu/riscv64/board.yml
++++ b/boards/qemu/riscv64/board.yml
+@@ -7,3 +7,4 @@ board:
+       variants:
+         - name: smp
+         - name: smode
++        - name: sv48
+diff --git a/boards/qemu/riscv64/qemu_riscv64_qemu_virt_riscv64_smode.dts b/boards/qemu/riscv64/qemu_riscv64_qemu_virt_riscv64_smode.dts
+index 75a5405644a..f46a838f88f 100644
+--- a/boards/qemu/riscv64/qemu_riscv64_qemu_virt_riscv64_smode.dts
++++ b/boards/qemu/riscv64/qemu_riscv64_qemu_virt_riscv64_smode.dts
+@@ -15,34 +15,42 @@
+ 
+ &{/cpus/cpu@0} {
+ 	riscv,privilege-modes = "m", "s", "u";
++	mmu-type = "riscv,sv39";
+ };
+ 
+ &{/cpus/cpu@1} {
+ 	riscv,privilege-modes = "m", "s", "u";
++	mmu-type = "riscv,sv39";
+ };
+ 
+ &{/cpus/cpu@2} {
+ 	riscv,privilege-modes = "m", "s", "u";
++	mmu-type = "riscv,sv39";
+ };
+ 
+ &{/cpus/cpu@3} {
+ 	riscv,privilege-modes = "m", "s", "u";
++	mmu-type = "riscv,sv39";
+ };
+ 
+ &{/cpus/cpu@4} {
+ 	riscv,privilege-modes = "m", "s", "u";
++	mmu-type = "riscv,sv39";
+ };
+ 
+ &{/cpus/cpu@5} {
+ 	riscv,privilege-modes = "m", "s", "u";
++	mmu-type = "riscv,sv39";
+ };
+ 
+ &{/cpus/cpu@6} {
+ 	riscv,privilege-modes = "m", "s", "u";
++	mmu-type = "riscv,sv39";
+ };
+ 
+ &{/cpus/cpu@7} {
+ 	riscv,privilege-modes = "m", "s", "u";
++	mmu-type = "riscv,sv39";
+ };
+ 
+ &uart0 {
+diff --git a/boards/qemu/riscv64/qemu_riscv64_qemu_virt_riscv64_smode_defconfig b/boards/qemu/riscv64/qemu_riscv64_qemu_virt_riscv64_smode_defconfig
+index eac2c5dd69e..fb65c1003af 100644
+--- a/boards/qemu/riscv64/qemu_riscv64_qemu_virt_riscv64_smode_defconfig
++++ b/boards/qemu/riscv64/qemu_riscv64_qemu_virt_riscv64_smode_defconfig
+@@ -6,6 +6,7 @@ CONFIG_UART_CONSOLE=y
+ CONFIG_STACK_SENTINEL=y
+ CONFIG_XIP=n
+ CONFIG_RISCV_S_MODE=y
++CONFIG_QEMU_ICOUNT=y
+ # The PLIC driver configures PLIC context 0 (M-mode) for hart 0.  In S-mode
+ # Zephyr the correct context is 1 (supervisor mode), so external device
+ # interrupts via the PLIC do not reach the CPU.  Disable interrupt-driven
+diff --git a/boards/qemu/riscv64/qemu_riscv64_qemu_virt_riscv64_sv48.dts b/boards/qemu/riscv64/qemu_riscv64_qemu_virt_riscv64_sv48.dts
+new file mode 100644
+index 00000000000..caefe84d1f8
+--- /dev/null
++++ b/boards/qemu/riscv64/qemu_riscv64_qemu_virt_riscv64_sv48.dts
+@@ -0,0 +1,58 @@
++/* Copyright (c) 2026 Alexios Lyrakis */
++/* SPDX-License-Identifier: Apache-2.0 */
++
++/dts-v1/;
++
++#include <qemu/virt-riscv64.dtsi>
++
++/ {
++	chosen {
++		zephyr,console = &uart0;
++		zephyr,shell-uart = &uart0;
++		zephyr,sram = &ram0;
++	};
++};
++
++&{/cpus/cpu@0} {
++	riscv,privilege-modes = "m", "s", "u";
++	mmu-type = "riscv,sv48";
++};
++
++&{/cpus/cpu@1} {
++	riscv,privilege-modes = "m", "s", "u";
++	mmu-type = "riscv,sv48";
++};
++
++&{/cpus/cpu@2} {
++	riscv,privilege-modes = "m", "s", "u";
++	mmu-type = "riscv,sv48";
++};
++
++&{/cpus/cpu@3} {
++	riscv,privilege-modes = "m", "s", "u";
++	mmu-type = "riscv,sv48";
++};
++
++&{/cpus/cpu@4} {
++	riscv,privilege-modes = "m", "s", "u";
++	mmu-type = "riscv,sv48";
++};
++
++&{/cpus/cpu@5} {
++	riscv,privilege-modes = "m", "s", "u";
++	mmu-type = "riscv,sv48";
++};
++
++&{/cpus/cpu@6} {
++	riscv,privilege-modes = "m", "s", "u";
++	mmu-type = "riscv,sv48";
++};
++
++&{/cpus/cpu@7} {
++	riscv,privilege-modes = "m", "s", "u";
++	mmu-type = "riscv,sv48";
++};
++
++&uart0 {
++	status = "okay";
++};
+diff --git a/boards/qemu/riscv64/qemu_riscv64_qemu_virt_riscv64_sv48.yaml b/boards/qemu/riscv64/qemu_riscv64_qemu_virt_riscv64_sv48.yaml
+new file mode 100644
+index 00000000000..8246d3c1b35
+--- /dev/null
++++ b/boards/qemu/riscv64/qemu_riscv64_qemu_virt_riscv64_sv48.yaml
+@@ -0,0 +1,15 @@
++identifier: qemu_riscv64/qemu_virt_riscv64/sv48
++name: QEMU Emulation for RISC-V 64-bit Sv48 MMU
++type: qemu
++simulation:
++  - name: qemu
++arch: riscv
++toolchain:
++  - zephyr
++ram: 262144
++flash: 32768
++testing:
++  default: true
++  ignore_tags:
++    - net
++    - bluetooth
+diff --git a/boards/qemu/riscv64/qemu_riscv64_qemu_virt_riscv64_sv48_defconfig b/boards/qemu/riscv64/qemu_riscv64_qemu_virt_riscv64_sv48_defconfig
+new file mode 100644
+index 00000000000..fb65c1003af
+--- /dev/null
++++ b/boards/qemu/riscv64/qemu_riscv64_qemu_virt_riscv64_sv48_defconfig
+@@ -0,0 +1,14 @@
++# SPDX-License-Identifier: Apache-2.0
++
++CONFIG_CONSOLE=y
++CONFIG_SERIAL=y
++CONFIG_UART_CONSOLE=y
++CONFIG_STACK_SENTINEL=y
++CONFIG_XIP=n
++CONFIG_RISCV_S_MODE=y
++CONFIG_QEMU_ICOUNT=y
++# The PLIC driver configures PLIC context 0 (M-mode) for hart 0.  In S-mode
++# Zephyr the correct context is 1 (supervisor mode), so external device
++# interrupts via the PLIC do not reach the CPU.  Disable interrupt-driven
++# UART TX so the shell backend falls back to polling, which works correctly.
++CONFIG_SHELL_BACKEND_SERIAL_INTERRUPT_DRIVEN=n
+diff --git a/doc/hardware/arch/risc-v.rst b/doc/hardware/arch/risc-v.rst
+index 63fe6a7d198..4256da2b60b 100644
+--- a/doc/hardware/arch/risc-v.rst
++++ b/doc/hardware/arch/risc-v.rst
+@@ -9,7 +9,7 @@ Currently, there's support for some boards, as well as Qemu support
+ and support for some FPGA implementations such as neorv32 and
+ litex_vexriscv.
+ 
+-Zephyr support includes PMP, :ref:`user mode<usermode_api>`, several
++Zephyr support includes PMP, MMU, :ref:`user mode<usermode_api>`, several
+ ISA extensions as well as :ref:`semihosting<semihost_guide>`.
+ 
+ User mode and PMP support
+@@ -101,6 +101,72 @@ Two concrete examples in this port:
+ Support for using an external SBI implementation such as `OpenSBI`_ as a
+ West module is left as future work.
+ 
++Memory Management Unit (MMU)
++*****************************
++
++When :kconfig:option:`CONFIG_RISCV_MMU` is enabled (requires
++:kconfig:option:`CONFIG_RISCV_S_MODE`), Zephyr uses hardware page-table
++address translation.  The following virtual addressing modes are supported:
++
++- **Sv39** (:kconfig:option:`CONFIG_RISCV_MMU_SV39`): 39-bit virtual
++  addresses, 3-level page tables.  Suitable for most 64-bit embedded
++  targets.
++- **Sv48** (:kconfig:option:`CONFIG_RISCV_MMU_SV48`): 48-bit virtual
++  addresses, 4-level page tables.  For platforms requiring a larger
++  virtual address space.
++
++The addressing mode is selected automatically from devicetree: it is derived
++from the ``mmu-type`` property of the RISC-V CPU node(s) (for example
++``mmu-type = "riscv,sv39"`` or ``"riscv,sv48"``), which selects the matching
++:kconfig:option:`CONFIG_RISCV_MMU_SV39` / :kconfig:option:`CONFIG_RISCV_MMU_SV48`
++option.  :kconfig:option:`CONFIG_RISCV_MMU` itself is only available when every
++enabled hart declares an ``mmu-type`` other than ``riscv,none``.
++
++The kernel maintains an identity mapping (VA = PA) for its own code and
++data so that the transition from physical to virtual addressing is seamless
++at boot.
++
++Userspace (:kconfig:option:`CONFIG_USERSPACE`) and memory domains
++(:kconfig:option:`CONFIG_MEM_DOMAIN_ISOLATED_STACKS`) are fully supported
++with the MMU.  Each memory domain gets a private root page table.  The
++kernel ``.text`` and ``.rodata`` regions are mapped with ``PTE_USER=1``
++in domain page tables so user threads can execute kernel entry points
++(``z_thread_entry``, syscall stubs), while the reset vector and exception
++entry pages keep ``PTE_USER=0``.  16-bit ASIDs are used for efficient
++per-domain TLB management, avoiding full TLB flushes on domain switches.
++MMU-based stack guard pages are supported via
++:kconfig:option:`CONFIG_HW_STACK_PROTECTION`.
++
++MMU and S-mode current limitations
++************************************
++
++The following limitations apply to the current
++:kconfig:option:`CONFIG_RISCV_MMU` and :kconfig:option:`CONFIG_RISCV_S_MODE`
++implementation:
++
++- **No SMP support in S-mode**: Secondary harts are not brought up in S-mode.
++  ``arch_proc_id()`` always returns 0.  S-mode SMP requires passing the hart
++  ID via ``a0`` at boot and per-hart initialisation of the SBI stack and
++  page tables.  TLB shootdown on mapping changes is also not implemented;
++  ``sfence.vma`` only flushes the local hart's TLB.
++
++- **No demand paging**: All virtual memory mappings are established at boot.
++  Page-fault driven demand paging (``CONFIG_DEMAND_PAGING``) is not
++  implemented.
++
++- **No huge pages**: Only 4 KB leaf pages are used.  2 MB (megapage) and
++  1 GB (gigapage) superpage mappings are not supported.
++
++- **Static page table pool**: The number of page tables is fixed at build
++  time via :kconfig:option:`CONFIG_MAX_XLAT_TABLES`.  There is no dynamic
++  allocation of page table memory at runtime.
++
++- **ASID exhaustion**: ASID values are allocated monotonically and never
++  recycled.  Creating more than 65533 memory domains triggers a kernel
++  panic.  This is sufficient for all practical embedded workloads but a
++  future improvement should implement ASID recycling with a generation
++  counter and full TLB flush.
++
+ SMP support
+ ***********
+ 
+diff --git a/include/zephyr/arch/riscv/arch.h b/include/zephyr/arch/riscv/arch.h
+index e26672998f4..a8f97eb7623 100644
+--- a/include/zephyr/arch/riscv/arch.h
++++ b/include/zephyr/arch/riscv/arch.h
+@@ -73,11 +73,40 @@
+  */
+ #define ARCH_KERNEL_STACK_RESERVED	Z_RISCV_STACK_GUARD_SIZE
+ 
+-#else /* !CONFIG_PMP_STACK_GUARD */
++#elif defined(CONFIG_RISCV_MMU)
++/* MMU guard page: one page unmapped at the bottom of every stack object */
++#define Z_RISCV_STACK_GUARD_SIZE	CONFIG_MMU_PAGE_SIZE
++#define ARCH_KERNEL_STACK_OBJ_ALIGN	CONFIG_MMU_PAGE_SIZE
++#define ARCH_KERNEL_STACK_RESERVED	Z_RISCV_STACK_GUARD_SIZE
++
++#else /* !CONFIG_PMP_STACK_GUARD && !CONFIG_RISCV_MMU */
+ #define Z_RISCV_STACK_GUARD_SIZE 0
+ #endif
+ 
+-#ifdef CONFIG_PMP_POWER_OF_TWO_ALIGNMENT
++#ifdef CONFIG_RISCV_MMU
++
++/* MMU thread stack layout:
++ *
++ * +------------+ <- thread.stack_obj
++ * | Guard page | } PAGE_SIZE (unmapped in kernel page tables)
++ * +------------+
++ * | Priv Stack | } CONFIG_PRIVILEGED_STACK_SIZE
++ * +------------+ <- thread.stack_info.start
++ * | Thread     |
++ * | stack      |
++ * |            |
++ * +............|
++ * | TLS        | } thread.stack_info.delta
++ * +------------+ <- thread.stack_info.start + thread.stack_info.size
++ */
++#define ARCH_THREAD_STACK_RESERVED \
++	ROUND_UP(Z_RISCV_STACK_GUARD_SIZE + CONFIG_PRIVILEGED_STACK_SIZE, \
++		 CONFIG_MMU_PAGE_SIZE)
++#define ARCH_THREAD_STACK_SIZE_ADJUST(size) \
++	ROUND_UP(size, CONFIG_MMU_PAGE_SIZE)
++#define ARCH_THREAD_STACK_OBJ_ALIGN(size)	CONFIG_MMU_PAGE_SIZE
++
++#elif defined(CONFIG_PMP_POWER_OF_TWO_ALIGNMENT)
+ /* The privilege elevation stack is located in another area of memory
+  * generated at build time by gen_kobject_list.py
+  *
+@@ -186,9 +215,15 @@
+  * In S-mode (CONFIG_RISCV_S_MODE), use the sstatus equivalents:
+  * - SPP=1 so that sret returns to S-mode (not U-mode)
+  * - SPIE=1 so that interrupts are enabled after sret
++ * - SUM=1 (when MMU is enabled) so S-mode can access user-mapped pages
+  */
+ #ifdef CONFIG_RISCV_S_MODE
++/* When MMU is enabled, set SUM so S-mode can access user-mapped pages */
++#if defined(CONFIG_RISCV_MMU)
++#define RV_STATUS_DEF_RESTORE (SSTATUS_SPP | SSTATUS_SPIE | SSTATUS_SUM)
++#else
+ #define RV_STATUS_DEF_RESTORE (SSTATUS_SPP | SSTATUS_SPIE)
++#endif
+ #else
+ #define RV_STATUS_DEF_RESTORE (MSTATUS_MPP_M | MSTATUS_MPIE_EN)
+ #endif
+@@ -255,7 +290,13 @@ typedef struct {
+ } k_mem_partition_attr_t;
+ 
+ struct arch_mem_domain {
++#ifdef CONFIG_RISCV_MMU
++	uint64_t *ptables; /* root page table for this domain */
++	uint16_t asid; /* ASID assigned to this domain */
++	sys_snode_t node; /* domain list linkage for kernel mapping sync */
++#else
+ 	unsigned int pmp_update_nr;
++#endif
+ };
+ 
+ extern void z_irq_spurious(const void *unused);
+diff --git a/include/zephyr/arch/riscv/common/linker.ld b/include/zephyr/arch/riscv/common/linker.ld
+index 2f87e4a828d..df6aaf11c58 100644
+--- a/include/zephyr/arch/riscv/common/linker.ld
++++ b/include/zephyr/arch/riscv/common/linker.ld
+@@ -150,6 +150,16 @@ SECTIONS
+     GROUP_START(ROMABLE_REGION)
+     __rom_region_start = ROM_BASE;
+ 
++#if !defined(CONFIG_XIP) && defined(CONFIG_MMU)
++    /*
++     * z_mapped_start must cover the very first byte of the image so that
++     * the pre-.text sections (reset vector, exception entry) are included
++     * in the pinned range tracked by z_mem_manage_init().  ROM_BASE is
++     * always page-aligned, so no extra alignment is needed here.
++     */
++    z_mapped_start = ROM_BASE;
++#endif
++
+     SECTION_PROLOGUE(rom_start,,)
+     {
+ 		. = ALIGN(16);
+@@ -180,12 +190,17 @@ SECTIONS
+ 		KEEP(*(.openocd_debug))
+ 		KEEP(*(".openocd_debug.*"))
+ 
++#if defined(CONFIG_MMU)
++		/* z_mapped_start must be page-aligned for the MMU page frame iterator */
++		. = ALIGN(CONFIG_MMU_PAGE_SIZE);
++#endif
+ 		__text_region_start = .;
+ 
+ 		*(.text)
+ 		*(".text.*")
+ 		*(.gnu.linkonce.t.*)
+ #include <zephyr/linker/kobject-text.ld>
++#include <snippets-text-sections.ld>
+ 	} GROUP_LINK_IN(ROMABLE_REGION)
+ 
+     __text_region_end = .;
+@@ -256,8 +271,20 @@ SECTIONS
+ #include <snippets-ram-sections.ld>
+ 
+ #if defined(CONFIG_USERSPACE)
++#if defined(CONFIG_RISCV_MMU)
++/*
++ * With MMU enabled the unit of protection is a page.  Each partition
++ * must start and end on a page boundary so that no two partitions
++ * share a page; otherwise adding one partition to a domain would
++ * inadvertently grant access to data belonging to another partition
++ * on the same page.
++ */
++#define APP_SHARED_ALIGN      . = ALIGN(CONFIG_MMU_PAGE_SIZE);
++#define SMEM_PARTITION_ALIGN(size) . = ALIGN(CONFIG_MMU_PAGE_SIZE)
++#else
+ #define APP_SHARED_ALIGN MPU_MIN_SIZE_ALIGN
+ #define SMEM_PARTITION_ALIGN MPU_ALIGN
++#endif /* CONFIG_RISCV_MMU */
+ 
+ #include <app_smem.ld>
+ 
+diff --git a/include/zephyr/arch/riscv/irq.h b/include/zephyr/arch/riscv/irq.h
+index 390061ef283..1d8425e4f6e 100644
+--- a/include/zephyr/arch/riscv/irq.h
++++ b/include/zephyr/arch/riscv/irq.h
+@@ -36,6 +36,12 @@ extern "C" {
+ #define RISCV_EXC_ECALLS  9
+ /** Environment Call from M-mode */
+ #define RISCV_EXC_ECALLM 11
++/** Instruction page fault */
++#define RISCV_EXC_INST_PAGE_FAULT  12
++/** Load page fault */
++#define RISCV_EXC_LOAD_PAGE_FAULT  13
++/** Store/AMO page fault */
++#define RISCV_EXC_STORE_PAGE_FAULT 15
+ 
+ /* IRQs 0-15 (MCAUSE interrupt=1) */
+ 
+diff --git a/include/zephyr/arch/riscv/thread.h b/include/zephyr/arch/riscv/thread.h
+index dd8e23ad643..4bfc07610a9 100644
+--- a/include/zephyr/arch/riscv/thread.h
++++ b/include/zephyr/arch/riscv/thread.h
+@@ -82,8 +82,11 @@ struct _thread_arch {
+ 	unsigned long m_mode_pmpaddr_regs[CONFIG_PMP_SLOTS];
+ 	unsigned long m_mode_pmpcfg_regs[CONFIG_PMP_SLOTS / (__riscv_xlen / 8)];
+ #endif
+-#if defined(CONFIG_CPP) && !defined(CONFIG_FPU_SHARING) && !defined(CONFIG_USERSPACE) &&           \
+-	!defined(CONFIG_PMP_STACK_GUARD)
++#ifdef CONFIG_RISCV_MMU
++	uintptr_t satp; /* SATP value for this thread's address space */
++#endif
++#if defined(CONFIG_CPP) && !defined(CONFIG_FPU_SHARING) && !defined(CONFIG_USERSPACE) && \
++	!defined(CONFIG_PMP_STACK_GUARD) && !defined(CONFIG_RISCV_MMU)
+ 	/* Empty struct has size 0 in C, size 1 in C++. Force them to be the same. */
+ 	uint8_t unused_cpp_size_compatibility;
+ #endif
+diff --git a/tests/arch/common/interrupt/testcase.yaml b/tests/arch/common/interrupt/testcase.yaml
+index f7390fc0f40..896a19c40cf 100644
+--- a/tests/arch/common/interrupt/testcase.yaml
++++ b/tests/arch/common/interrupt/testcase.yaml
+@@ -44,6 +44,7 @@ tests:
+       # In S-mode only SSIP (IRQ 1) can be triggered from software; the
+       # shared interrupt test requires two independent triggerable IRQ lines.
+       - qemu_riscv64/qemu_virt_riscv64/smode
++      - qemu_riscv64/qemu_virt_riscv64/sv48
+     arch_exclude:
+       # test needs 2 working interrupt lines
+       - xtensa
+@@ -69,6 +70,7 @@ tests:
+       # In S-mode only SSIP (IRQ 1) can be triggered from software; the
+       # shared interrupt test requires two independent triggerable IRQ lines.
+       - qemu_riscv64/qemu_virt_riscv64/smode
++      - qemu_riscv64/qemu_virt_riscv64/sv48
+     arch_exclude:
+       # test needs 2 working interrupt lines
+       - xtensa
+diff --git a/tests/kernel/mem_protect/mem_map/boards/qemu_riscv64_qemu_virt_riscv64_smode.conf b/tests/kernel/mem_protect/mem_map/boards/qemu_riscv64_qemu_virt_riscv64_smode.conf
+new file mode 100644
+index 00000000000..b1588550116
+--- /dev/null
++++ b/tests/kernel/mem_protect/mem_map/boards/qemu_riscv64_qemu_virt_riscv64_smode.conf
+@@ -0,0 +1,6 @@
++# Copyright (c) 2026 Alexios Lyrakis <alexios.lyrakis@gmail.com>
++# SPDX-License-Identifier: Apache-2.0
++
++# Enable MMU support for RISC-V virtual memory testing.
++CONFIG_RISCV_MMU=y
++CONFIG_MAX_XLAT_TABLES=128
+diff --git a/tests/kernel/mem_protect/mem_map/boards/qemu_riscv64_qemu_virt_riscv64_sv48.conf b/tests/kernel/mem_protect/mem_map/boards/qemu_riscv64_qemu_virt_riscv64_sv48.conf
+new file mode 100644
+index 00000000000..b1588550116
+--- /dev/null
++++ b/tests/kernel/mem_protect/mem_map/boards/qemu_riscv64_qemu_virt_riscv64_sv48.conf
+@@ -0,0 +1,6 @@
++# Copyright (c) 2026 Alexios Lyrakis <alexios.lyrakis@gmail.com>
++# SPDX-License-Identifier: Apache-2.0
++
++# Enable MMU support for RISC-V virtual memory testing.
++CONFIG_RISCV_MMU=y
++CONFIG_MAX_XLAT_TABLES=128
+diff --git a/tests/kernel/mem_protect/mem_map/testcase.yaml b/tests/kernel/mem_protect/mem_map/testcase.yaml
+index b13181a0d0b..bbe5263024d 100644
+--- a/tests/kernel/mem_protect/mem_map/testcase.yaml
++++ b/tests/kernel/mem_protect/mem_map/testcase.yaml
+@@ -5,8 +5,10 @@ common:
+     - mmu
+ tests:
+   kernel.memory_protection.mem_map:
++    timeout: 90
+     arch_allow:
+       - arm
++      - riscv
+       - x86
+     filter: CONFIG_MMU and not CONFIG_X86_64 and not CONFIG_SOC_FAMILY_INTEL_ADSP
+     extra_sections: _TRANSPLANTED_FUNC
+@@ -17,6 +19,8 @@ tests:
+       - qemu_x86_64
+       - intel_adsp/ace30/ptl
+     integration_platforms:
++      - qemu_riscv64/qemu_virt_riscv64/smode
++      - qemu_riscv64/qemu_virt_riscv64/sv48
+       - qemu_x86
+   kernel.memory_protection.mem_map.x86_64:
+     filter: CONFIG_MMU and CONFIG_X86_64 and not CONFIG_COVERAGE
+diff --git a/tests/kernel/mem_protect/mem_protect/boards/qemu_riscv64_qemu_virt_riscv64_smode.conf b/tests/kernel/mem_protect/mem_protect/boards/qemu_riscv64_qemu_virt_riscv64_smode.conf
+new file mode 100644
+index 00000000000..b1588550116
+--- /dev/null
++++ b/tests/kernel/mem_protect/mem_protect/boards/qemu_riscv64_qemu_virt_riscv64_smode.conf
+@@ -0,0 +1,6 @@
++# Copyright (c) 2026 Alexios Lyrakis <alexios.lyrakis@gmail.com>
++# SPDX-License-Identifier: Apache-2.0
++
++# Enable MMU support for RISC-V virtual memory testing.
++CONFIG_RISCV_MMU=y
++CONFIG_MAX_XLAT_TABLES=128
+diff --git a/tests/kernel/mem_protect/mem_protect/boards/qemu_riscv64_qemu_virt_riscv64_sv48.conf b/tests/kernel/mem_protect/mem_protect/boards/qemu_riscv64_qemu_virt_riscv64_sv48.conf
+new file mode 100644
+index 00000000000..b1588550116
+--- /dev/null
++++ b/tests/kernel/mem_protect/mem_protect/boards/qemu_riscv64_qemu_virt_riscv64_sv48.conf
+@@ -0,0 +1,6 @@
++# Copyright (c) 2026 Alexios Lyrakis <alexios.lyrakis@gmail.com>
++# SPDX-License-Identifier: Apache-2.0
++
++# Enable MMU support for RISC-V virtual memory testing.
++CONFIG_RISCV_MMU=y
++CONFIG_MAX_XLAT_TABLES=128
+diff --git a/tests/kernel/mem_protect/mem_protect/src/mem_protect.h b/tests/kernel/mem_protect/mem_protect/src/mem_protect.h
+index db6d448219f..a466a5dd3e4 100644
+--- a/tests/kernel/mem_protect/mem_protect/src/mem_protect.h
++++ b/tests/kernel/mem_protect/mem_protect/src/mem_protect.h
+@@ -64,6 +64,8 @@ static inline void set_fault_valid(bool valid)
+ #elif defined(CONFIG_RISCV)
+ #if defined(CONFIG_RISCV_PMP)
+ #define MEM_REGION_ALLOC (CONFIG_PMP_GRANULARITY)
++#elif defined(CONFIG_RISCV_MMU)
++#define MEM_REGION_ALLOC (CONFIG_MMU_PAGE_SIZE)
+ #else
+ #define MEM_REGION_ALLOC (4)
+ #endif
+diff --git a/tests/kernel/mem_protect/mem_protect/testcase.yaml b/tests/kernel/mem_protect/mem_protect/testcase.yaml
+index e061729e302..bd4a4a9b810 100644
+--- a/tests/kernel/mem_protect/mem_protect/testcase.yaml
++++ b/tests/kernel/mem_protect/mem_protect/testcase.yaml
+@@ -7,6 +7,7 @@ common:
+ tests:
+   kernel.memory_protection:
+     filter: CONFIG_ARCH_HAS_USERSPACE
++    timeout: 120
+     arch_exclude:
+       - posix
+     platform_exclude:
+diff --git a/tests/kernel/mem_protect/userspace/boards/qemu_riscv64_qemu_virt_riscv64_smode.conf b/tests/kernel/mem_protect/userspace/boards/qemu_riscv64_qemu_virt_riscv64_smode.conf
+new file mode 100644
+index 00000000000..3ecb5f264cb
+--- /dev/null
++++ b/tests/kernel/mem_protect/userspace/boards/qemu_riscv64_qemu_virt_riscv64_smode.conf
+@@ -0,0 +1,9 @@
++# Copyright (c) 2026 Alexios Lyrakis <alexios.lyrakis@gmail.com>
++# SPDX-License-Identifier: Apache-2.0
++
++# Enable MMU support for RISC-V virtual memory testing.
++CONFIG_RISCV_MMU=y
++CONFIG_MAX_XLAT_TABLES=128
++# QEMU icount mode: jump to next timer deadline on wfi (needed for k_sleep)
++CONFIG_QEMU_ICOUNT_SLEEP=y
++CONFIG_USERSPACE_SWITCHING_TESTS=y
+diff --git a/tests/kernel/mem_protect/userspace/boards/qemu_riscv64_qemu_virt_riscv64_sv48.conf b/tests/kernel/mem_protect/userspace/boards/qemu_riscv64_qemu_virt_riscv64_sv48.conf
+new file mode 100644
+index 00000000000..3ecb5f264cb
+--- /dev/null
++++ b/tests/kernel/mem_protect/userspace/boards/qemu_riscv64_qemu_virt_riscv64_sv48.conf
+@@ -0,0 +1,9 @@
++# Copyright (c) 2026 Alexios Lyrakis <alexios.lyrakis@gmail.com>
++# SPDX-License-Identifier: Apache-2.0
++
++# Enable MMU support for RISC-V virtual memory testing.
++CONFIG_RISCV_MMU=y
++CONFIG_MAX_XLAT_TABLES=128
++# QEMU icount mode: jump to next timer deadline on wfi (needed for k_sleep)
++CONFIG_QEMU_ICOUNT_SLEEP=y
++CONFIG_USERSPACE_SWITCHING_TESTS=y
+diff --git a/tests/kernel/mem_protect/userspace/testcase.yaml b/tests/kernel/mem_protect/userspace/testcase.yaml
+index d553038b285..89e83ab3f70 100644
+--- a/tests/kernel/mem_protect/userspace/testcase.yaml
++++ b/tests/kernel/mem_protect/userspace/testcase.yaml
+@@ -9,6 +9,7 @@ common:
+ tests:
+   kernel.memory_protection.userspace:
+     filter: CONFIG_ARCH_HAS_USERSPACE
++    timeout: 120
+     extra_configs:
+       - CONFIG_TEST_HW_STACK_PROTECTION=n
+       - CONFIG_COMMON_LIBC_MALLOC_ARENA_SIZE=0

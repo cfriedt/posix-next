@@ -1,0 +1,2383 @@
+diff --git a/arch/riscv/Kconfig b/arch/riscv/Kconfig
+index f31018b8744..b82dff76cf6 100644
+--- a/arch/riscv/Kconfig
++++ b/arch/riscv/Kconfig
+@@ -357,6 +357,7 @@ config EXTRA_EXCEPTION_INFO
+ 
+ config RISCV_PMP
+ 	bool "RISC-V PMP Support"
++	depends on !RISCV_S_MODE
+ 	select THREAD_STACK_INFO
+ 	select CPU_HAS_MPU
+ 	select ARCH_HAS_USERSPACE
+@@ -611,6 +612,41 @@ config ARCH_SUPPORTS_USERSPACE_SIGNALS
+        bool
+        default y
+ 
++RISCV_PRIV_MODES_PROP := riscv,privilege-modes
++
++choice RISCV_PRIVILEGE_MODE
++	prompt "RISC-V privilege level"
++	default RISCV_M_MODE
++	help
++	  Select the privilege level at which the kernel runs.
++
++config RISCV_M_MODE
++	bool "Machine mode (M-mode)"
++	depends on $(dt_compat_all_has_prop,riscv,$(RISCV_PRIV_MODES_PROP),m)
++	help
++	  Run the kernel in Machine mode (M-mode). This is the default
++	  privilege level for RISC-V.
++
++config RISCV_S_MODE
++	bool "Supervisor mode (S-mode)"
++	depends on $(dt_compat_all_has_prop,riscv,$(RISCV_PRIV_MODES_PROP),s)
++	help
++	  Indicates that the kernel runs in Supervisor mode (S-mode). When
++	  enabled, the boot code performs an M-mode to S-mode transition
++	  before entering the C runtime, and a minimal SBI runtime is kept
++	  resident in M-mode to service timer and ecall requests.
++
++endchoice # RISCV_PRIVILEGE_MODE
++
++config RISCV_M_MODE_STACK_SIZE
++	int "M-mode SBI handler stack size (bytes)"
++	default 256
++	depends on RISCV_S_MODE
++	help
++	  Size in bytes of the dedicated stack used by the in-tree M-mode SBI
++	  runtime handler. Increase this if the handler is extended with
++	  functionality that requires more stack space.
++
+ rsource "Kconfig.isa"
+ 
+ rsource "custom/Kconfig"
+diff --git a/arch/riscv/core/CMakeLists.txt b/arch/riscv/core/CMakeLists.txt
+index 330cda62423..a75f222fd1a 100644
+--- a/arch/riscv/core/CMakeLists.txt
++++ b/arch/riscv/core/CMakeLists.txt
+@@ -27,6 +27,7 @@ zephyr_library_sources_ifdef(CONFIG_FPU_SHARING fpu.c fpu.S)
+ zephyr_library_sources_ifdef(CONFIG_DEBUG_COREDUMP coredump.c)
+ zephyr_library_sources_ifdef(CONFIG_IRQ_OFFLOAD irq_offload.c)
+ zephyr_library_sources_ifdef(CONFIG_USE_ISR_WRAPPER isr.S)
++zephyr_library_sources_ifdef(CONFIG_RISCV_S_MODE sbi.S)
+ zephyr_library_sources_ifdef(CONFIG_RISCV_PMP pmp.c pmp.S)
+ zephyr_linker_sources_ifdef(CONFIG_RISCV_PMP ROM_SECTIONS pmp.ld)
+ zephyr_library_sources_ifdef(CONFIG_THREAD_LOCAL_STORAGE tls.c)
+diff --git a/arch/riscv/core/cpu_idle.c b/arch/riscv/core/cpu_idle.c
+index e13f28fa3a8..7f10ca4210f 100644
+--- a/arch/riscv/core/cpu_idle.c
++++ b/arch/riscv/core/cpu_idle.c
+@@ -17,7 +17,7 @@ void arch_cpu_idle(void)
+ #if defined(CONFIG_TRACING)
+ 	sys_trace_idle_exit();
+ #endif
+-	irq_unlock(MSTATUS_IEN);
++	irq_unlock(RV_STATUS_IE);
+ }
+ #endif
+ 
+diff --git a/arch/riscv/core/fatal.c b/arch/riscv/core/fatal.c
+index ce910f66081..d2d3fdeabc2 100644
+--- a/arch/riscv/core/fatal.c
++++ b/arch/riscv/core/fatal.c
+@@ -40,7 +40,7 @@ uintptr_t z_riscv_get_sp_before_exc(const struct arch_esf *esf)
+ 	uintptr_t sp = (uintptr_t)esf + sizeof(struct arch_esf);
+ 
+ #ifdef CONFIG_USERSPACE
+-	if ((esf->mstatus & MSTATUS_MPP) == PRV_U) {
++	if ((esf->mstatus & RV_STATUS_PP) == RV_STATUS_PP_U) {
+ 		/*
+ 		 * Exception happened in user space:
+ 		 * consider the saved user stack instead.
+@@ -83,7 +83,11 @@ void z_riscv_fatal_error(unsigned int reason,
+ 	__maybe_unused _callee_saved_t *csf = NULL;
+ 	unsigned long mcause;
+ 
++#ifdef CONFIG_RISCV_S_MODE
++	__asm__ volatile("csrr %0, scause" : "=r" (mcause));
++#else
+ 	__asm__ volatile("csrr %0, mcause" : "=r" (mcause));
++#endif
+ 
+ 	mcause &= CONFIG_RISCV_MCAUSE_EXCEPTION_MASK;
+ 	EXCEPTION_DUMP("");
+@@ -92,7 +96,11 @@ void z_riscv_fatal_error(unsigned int reason,
+ #ifndef CONFIG_SOC_OPENISA_RV32M1
+ 	unsigned long mtval;
+ 
++#ifdef CONFIG_RISCV_S_MODE
++	__asm__ volatile("csrr %0, stval" : "=r" (mtval));
++#else
+ 	__asm__ volatile("csrr %0, mtval" : "=r" (mtval));
++#endif
+ 	EXCEPTION_DUMP("  mtval: %lx", mtval);
+ #endif /* CONFIG_SOC_OPENISA_RV32M1 */
+ 
+@@ -192,7 +200,11 @@ static bool bad_stack_pointer(struct arch_esf *esf)
+ #endif /* CONFIG_CUSTOM_STACK_GUARD */
+ 
+ #ifdef CONFIG_USERSPACE
+-	if ((esf->mstatus & MSTATUS_MPP) == 0 &&
++	/*
++	 * Check whether the user-mode stack pointer is within bounds.
++	 * Only do this when the exception was actually taken from U-mode.
++	 */
++	if ((esf->mstatus & RV_STATUS_PP) == RV_STATUS_PP_U &&
+ 	    (esf->sp < _current->stack_info.start ||
+ 	     esf->sp > _current->stack_info.start +
+ 		       _current->stack_info.size -
+diff --git a/arch/riscv/core/fpu.c b/arch/riscv/core/fpu.c
+index d2232c261b7..0e7379225fb 100644
+--- a/arch/riscv/core/fpu.c
++++ b/arch/riscv/core/fpu.c
+@@ -62,12 +62,12 @@ static inline void DBG(char *msg, struct k_thread *t) { }
+ 
+ static void z_riscv_fpu_disable(void)
+ {
+-	unsigned long status = csr_read(mstatus);
++	unsigned long status = z_riscv_status_read();
+ 
+-	__ASSERT((status & MSTATUS_IEN) == 0, "must be called with IRQs disabled");
++	__ASSERT((status & RV_STATUS_IE) == 0, "must be called with IRQs disabled");
+ 
+ 	if ((status & MSTATUS_FS) != 0) {
+-		csr_clear(mstatus, MSTATUS_FS);
++		z_riscv_status_clear(MSTATUS_FS);
+ 
+ 		/* remember its clean/dirty state */
+ 		_current_cpu->arch.fpu_state = (status & MSTATUS_FS);
+@@ -76,16 +76,16 @@ static void z_riscv_fpu_disable(void)
+ 
+ static void z_riscv_fpu_load(void)
+ {
+-	__ASSERT((csr_read(mstatus) & MSTATUS_IEN) == 0,
++	__ASSERT((z_riscv_status_read() & RV_STATUS_IE) == 0,
+ 		 "must be called with IRQs disabled");
+-	__ASSERT((csr_read(mstatus) & MSTATUS_FS) == 0,
++	__ASSERT((z_riscv_status_read() & MSTATUS_FS) == 0,
+ 		 "must be called with FPU access disabled");
+ 
+ 	/* become new owner */
+ 	atomic_ptr_set(&_current_cpu->arch.fpu_owner, _current);
+ 
+ 	/* restore our content */
+-	csr_set(mstatus, MSTATUS_FS_INIT);
++	z_riscv_status_set(MSTATUS_FS_INIT);
+ 	z_riscv_fpu_restore(&_current->arch.saved_fp_context);
+ 	DBG("restore", _current);
+ }
+@@ -100,9 +100,9 @@ static void z_riscv_fpu_load(void)
+  */
+ void arch_flush_local_fpu(void)
+ {
+-	__ASSERT((csr_read(mstatus) & MSTATUS_IEN) == 0,
++	__ASSERT((z_riscv_status_read() & RV_STATUS_IE) == 0,
+ 		 "must be called with IRQs disabled");
+-	__ASSERT((csr_read(mstatus) & MSTATUS_FS) == 0,
++	__ASSERT((z_riscv_status_read() & MSTATUS_FS) == 0,
+ 		 "must be called with FPU access disabled");
+ 
+ 	struct k_thread *owner = atomic_ptr_get(&_current_cpu->arch.fpu_owner);
+@@ -112,7 +112,7 @@ void arch_flush_local_fpu(void)
+ 
+ 		if (dirty) {
+ 			/* turn on FPU access */
+-			csr_set(mstatus, MSTATUS_FS_CLEAN);
++			z_riscv_status_set(MSTATUS_FS_CLEAN);
+ 			/* save current owner's content */
+ 			z_riscv_fpu_save(&owner->arch.saved_fp_context);
+ 		}
+@@ -121,7 +121,7 @@ void arch_flush_local_fpu(void)
+ 		owner->arch.fpu_recently_used = dirty;
+ 
+ 		/* disable FPU access */
+-		csr_clear(mstatus, MSTATUS_FS);
++		z_riscv_status_clear(MSTATUS_FS);
+ 
+ 		/* release ownership */
+ 		atomic_ptr_clear(&_current_cpu->arch.fpu_owner);
+@@ -132,7 +132,7 @@ void arch_flush_local_fpu(void)
+ #ifdef CONFIG_SMP
+ static void flush_owned_fpu(struct k_thread *thread)
+ {
+-	__ASSERT((csr_read(mstatus) & MSTATUS_IEN) == 0,
++	__ASSERT((z_riscv_status_read() & RV_STATUS_IE) == 0,
+ 		 "must be called with IRQs disabled");
+ 
+ 	int i;
+@@ -207,7 +207,7 @@ void z_riscv_fpu_enter_exc(void)
+ void z_riscv_fpu_trap(struct arch_esf *esf)
+ {
+ 	__ASSERT((esf->mstatus & MSTATUS_FS) == 0 &&
+-		 (csr_read(mstatus) & MSTATUS_FS) == 0,
++		 (z_riscv_status_read() & MSTATUS_FS) == 0,
+ 		 "called despite FPU being accessible");
+ 
+ 	/* save current owner's content  if any */
+@@ -220,7 +220,7 @@ void z_riscv_fpu_trap(struct arch_esf *esf)
+ 		 * by disabling IRQs as we wouldn't be able to preserve the
+ 		 * interrupted exception's FPU context.
+ 		 */
+-		esf->mstatus &= ~MSTATUS_MPIE_EN;
++		esf->mstatus &= ~RV_STATUS_PIE;
+ 
+ 		/* make it accessible to the returning context */
+ 		esf->mstatus |= MSTATUS_FS_INIT;
+@@ -253,7 +253,7 @@ void z_riscv_fpu_trap(struct arch_esf *esf)
+  */
+ static bool fpu_access_allowed(unsigned int exc_update_level)
+ {
+-	__ASSERT((csr_read(mstatus) & MSTATUS_IEN) == 0,
++	__ASSERT((z_riscv_status_read() & RV_STATUS_IE) == 0,
+ 		 "must be called with IRQs disabled");
+ 
+ 	if (_current->arch.exception_depth == exc_update_level) {
+@@ -312,13 +312,31 @@ void z_riscv_fpu_exit_exc(struct arch_esf *esf)
+ void z_riscv_fpu_thread_context_switch(void)
+ {
+ 	if (fpu_access_allowed(0)) {
+-		csr_clear(mstatus, MSTATUS_FS);
+-		csr_set(mstatus, _current_cpu->arch.fpu_state);
++		z_riscv_status_clear(MSTATUS_FS);
++		z_riscv_status_set(_current_cpu->arch.fpu_state);
+ 	} else {
+ 		z_riscv_fpu_disable();
+ 	}
+ }
+ 
++#ifdef CONFIG_RISCV_S_MODE
++/*
++ * Called from arch_irq_offload() in S-mode to restore FPU state after the
++ * simulated ISR returns.  Mirrors z_riscv_fpu_exit_exc() but applies the
++ * FS bits directly to the live status register instead of to a saved ESF,
++ * because the S-mode irq_offload path has no real exception frame.
++ */
++void z_riscv_fpu_irq_offload_exit(void)
++{
++	if (fpu_access_allowed(1)) {
++		z_riscv_status_clear(MSTATUS_FS);
++		z_riscv_status_set(_current_cpu->arch.fpu_state);
++	} else {
++		z_riscv_status_clear(MSTATUS_FS);
++	}
++}
++#endif /* CONFIG_RISCV_S_MODE */
++
+ int arch_float_disable(struct k_thread *thread)
+ {
+ 	if (thread != NULL) {
+diff --git a/arch/riscv/core/irq_manage.c b/arch/riscv/core/irq_manage.c
+index 6d7fb57fbcb..a46596bde1d 100644
+--- a/arch/riscv/core/irq_manage.c
++++ b/arch/riscv/core/irq_manage.c
+@@ -26,17 +26,21 @@ FUNC_NORETURN void z_irq_spurious(const void *unused)
+ 
+ 	CODE_UNREACHABLE;
+ #else
+-	unsigned long mcause;
++	unsigned long cause;
+ 
+ 	ARG_UNUSED(unused);
+ 
+-	mcause = csr_read(mcause);
++#ifdef CONFIG_RISCV_S_MODE
++	cause = csr_read(scause);
++#else
++	cause = csr_read(mcause);
++#endif
+ 
+-	mcause &= CONFIG_RISCV_MCAUSE_EXCEPTION_MASK;
++	cause &= CONFIG_RISCV_MCAUSE_EXCEPTION_MASK;
+ 
+-	LOG_ERR("Spurious interrupt detected! IRQ: %ld", mcause);
++	LOG_ERR("Spurious interrupt detected! IRQ: %ld", cause);
+ #if defined(CONFIG_RISCV_HAS_PLIC)
+-	if (mcause == RISCV_IRQ_MEXT) {
++	if (cause == RISCV_IRQ_MEXT) {
+ 		unsigned int save_irq = riscv_plic_get_irq();
+ 		const struct device *save_dev = riscv_plic_get_dev();
+ 
+diff --git a/arch/riscv/core/irq_offload.c b/arch/riscv/core/irq_offload.c
+index 73d4b04c2a1..c84d87b1b51 100644
+--- a/arch/riscv/core/irq_offload.c
++++ b/arch/riscv/core/irq_offload.c
+@@ -6,10 +6,46 @@
+ 
+ #include <zephyr/irq_offload.h>
+ #include <zephyr/arch/riscv/syscall.h>
++#include <ksched.h>
++
++#ifdef CONFIG_RISCV_S_MODE
++#ifdef CONFIG_FPU_SHARING
++extern void z_riscv_fpu_enter_exc(void);
++extern void z_riscv_fpu_irq_offload_exit(void);
++#endif
++#endif
+ 
+ void arch_irq_offload(irq_offload_routine_t routine, const void *parameter)
+ {
++#ifdef CONFIG_RISCV_S_MODE
++	/*
++	 * In S-mode, ecall (cause=9) is routed to the M-mode SBI handler
++	 * which does not know about RV_ECALL_IRQ_OFFLOAD.  Simulate ISR
++	 * execution directly: bump the nested counter so k_is_in_isr()
++	 * returns true, run the routine, then check for a pending reschedule.
++	 *
++	 * Mirror what _isr_wrapper does for FPU: disable FPU access on entry
++	 * and restore it on exit so FPU state is consistent with a real ISR.
++	 */
++	unsigned int key = arch_irq_lock();
++
++#ifdef CONFIG_FPU_SHARING
++	_current->arch.exception_depth++;
++	z_riscv_fpu_enter_exc();
++#endif
++	arch_curr_cpu()->nested++;
++	routine(parameter);
++	arch_curr_cpu()->nested--;
++#ifdef CONFIG_FPU_SHARING
++	z_riscv_fpu_irq_offload_exit();
++	_current->arch.exception_depth--;
++#endif
++
++	arch_irq_unlock(key);
++	z_reschedule_unlocked();
++#else
+ 	arch_syscall_invoke2((uintptr_t)routine, (uintptr_t)parameter, RV_ECALL_IRQ_OFFLOAD);
++#endif
+ }
+ 
+ void arch_irq_offload_init(void)
+diff --git a/arch/riscv/core/isr.S b/arch/riscv/core/isr.S
+index 0cfd3befbce..430dacbac25 100644
+--- a/arch/riscv/core/isr.S
++++ b/arch/riscv/core/isr.S
+@@ -22,6 +22,40 @@
+ #include <soc_isr_stacking.h>
+ #endif
+ 
++/*
++* Privilege-level abstractions. When CONFIG_RISCV_S_MODE is set the
++* kernel runs in Supervisor mode and must use S-mode CSRs. Otherwise
++* it runs in Machine mode and uses M-mode CSRs.
++*/
++#ifdef CONFIG_RISCV_S_MODE
++#define RV_SCRATCH   sscratch
++#define RV_CAUSE     scause
++#define RV_EPC       sepc
++#define RV_STATUS    sstatus
++#define RV_TVAL      stval
++#define STATUS_IE    SSTATUS_SIE
++#define STATUS_PP    SSTATUS_SPP
++#define TRAP_RET     sret
++/*
++ * In S-mode, ecall (cause=9) is kept in M-mode for SBI.  ARCH_EXCEPT in
++ * kernel context uses ebreak (cause=3, breakpoint) which IS delegated to
++ * S-mode.  The is_kernel_syscall handler below recognises this via t0==0
++ * (RV_ECALL_RUNTIME_EXCEPT) and reads the reason from saved a0.
++ */
++#define EXC_SYSCALL  RISCV_EXC_BREAKPOINT
++#else
++#define RV_SCRATCH   mscratch
++#define RV_CAUSE     mcause
++#define RV_EPC       mepc
++#define RV_STATUS    mstatus
++#define RV_TVAL      mtval
++#define STATUS_IE    MSTATUS_IEN
++#define STATUS_PP    MSTATUS_MPP
++#define TRAP_RET     mret
++#define EXC_SYSCALL  RISCV_EXC_ECALLM
++#endif
++
++
+ /* Convenience macro for loading/storing register states. */
+ #define DO_CALLER_SAVED(op) \
+ 	RV_E(	op t0, __struct_arch_esf_t0_OFFSET(sp)	);\
+@@ -67,7 +101,7 @@
+ 
+ 	.macro get_current_cpu dst
+ #if defined(CONFIG_SMP) || defined(CONFIG_USERSPACE)
+-	csrr \dst, mscratch
++	csrr \dst, RV_SCRATCH
+ #else
+ 	la \dst, _kernel + ___kernel_t_cpus_OFFSET
+ #endif
+@@ -145,15 +179,15 @@ SECTION_FUNC(exception.entry, _isr_wrapper)
+ 
+ #ifdef CONFIG_USERSPACE
+ 	/* retrieve address of _current_cpu preserving s0 */
+-	csrrw s0, mscratch, s0
++	csrrw s0, RV_SCRATCH, s0
+ 
+ 	/* preserve t0 and t1 temporarily */
+ 	sr t0, _curr_cpu_arch_user_exc_tmp0(s0)
+ 	sr t1, _curr_cpu_arch_user_exc_tmp1(s0)
+ 
+ 	/* determine if we come from user space */
+-	csrr t0, mstatus
+-	li t1, MSTATUS_MPP
++	csrr t0, RV_STATUS
++	li t1, STATUS_PP
+ 	and t0, t0, t1
+ 	bnez t0, 1f
+ 
+@@ -189,8 +223,8 @@ SECTION_FUNC(exception.entry, _isr_wrapper)
+ 	lr t0, _curr_cpu_arch_user_exc_tmp0(s0)
+ 	lr t1, _curr_cpu_arch_user_exc_tmp1(s0)
+ 
+-	/* retrieve original s0 and restore _current_cpu in mscratch */
+-	csrrw s0, mscratch, s0
++	/* retrieve original s0 and restore _current_cpu in RV_SCRATCH */
++	csrrw s0, RV_SCRATCH, s0
+ #endif
+ 
+ #ifdef CONFIG_RISCV_SOC_HAS_ISR_STACKING
+@@ -206,17 +240,17 @@ SECTION_FUNC(exception.entry, _isr_wrapper)
+ 	get_current_cpu s0
+ 
+ #ifdef CONFIG_CLIC_SUPPORT_INTERRUPT_LEVEL
+-	/* Save mcause register */
+-	csrr t0, mcause
++	/* Save RV_CAUSE register */
++	csrr t0, RV_CAUSE
+ 	sr t0, __struct_arch_esf_mcause_OFFSET(sp)
+ #endif /* CONFIG_CLIC_SUPPORT_INTERRUPT_LEVEL */
+ 
+-	/* Save MEPC register */
+-	csrr t0, mepc
++	/* Save RV_EPC register */
++	csrr t0, RV_EPC
+ 	sr t0, __struct_arch_esf_mepc_OFFSET(sp)
+ 
+-	/* Save MSTATUS register */
+-	csrr t2, mstatus
++	/* Save RV_STATUS register */
++	csrr t2, RV_STATUS
+ 	sr t2, __struct_arch_esf_mstatus_OFFSET(sp)
+ 
+ #if defined(CONFIG_FPU_SHARING)
+@@ -225,20 +259,20 @@ SECTION_FUNC(exception.entry, _isr_wrapper)
+ 	and t1, t1, t2
+ 	bnez t1, no_fp
+ 	/* determine if this is an Illegal Instruction exception */
+-	csrr t2, mcause
++	csrr t2, RV_CAUSE
+ 	li t1, CONFIG_RISCV_MCAUSE_EXCEPTION_MASK
+ 	and t2, t2, t1
+ 	li t1, 2		/* 2 = illegal instruction */
+ 	bne t1, t2, no_fp
+ 	/* determine if we trapped on an FP instruction. */
+-	csrr t2, mtval		/* get faulting instruction */
++	csrr t2, RV_TVAL	/* get faulting instruction */
+ #ifdef CONFIG_RISCV_NO_MTVAL_ON_FP_TRAP
+ 	/*
+ 	 * Some implementations may not support MTVAL in this capacity.
+ 	 * Notably QEMU when a CSR instruction is involved.
+ 	 */
+ 	bnez t2, 1f
+-	lw t2, 0(t0)		/* t0 = mepc */
++	lw t2, 0(t0)		/* t0 = RV_EPC */
+ 1:
+ #endif
+ 	andi t0, t2, 0x7f	/* keep only the opcode bits */
+@@ -330,11 +364,11 @@ no_fp:	/* increment _current->arch.exception_depth */
+ 
+ 	/*
+ 	 * Check if exception is the result of an interrupt or not.
+-	 * (SOC dependent). Following the RISC-V architecture spec, the MSB
+-	 * of the mcause register is used to indicate whether an exception
++	 * Following the RISC-V architecture spec, the MSB
++	 * of the RV_CAUSE register is used to indicate whether an exception
+ 	 * is the result of an interrupt or an exception/fault.
+ 	 */
+-	csrr t0, mcause
++	csrr t0, RV_CAUSE
+ 	bltz t0, is_interrupt
+ 
+ 	/*
+@@ -342,15 +376,17 @@ no_fp:	/* increment _current->arch.exception_depth */
+ 	 * perform a context-switch or an IRQ offload. Otherwise call z_riscv_fault
+ 	 * to report the exception.
+ 	 */
++	csrr t0, RV_CAUSE
+ #if CONFIG_RISCV_MCAUSE_EXCEPTION_MASK < ((1LLU << (__riscv_xlen - 1)) - 1LLU)
+ 	li t2, CONFIG_RISCV_MCAUSE_EXCEPTION_MASK
+ 	and t0, t0, t2
+ #endif
+ 
+-	/* If mcause == RISCV_EXC_ECALLM, handle system call from
++	/*
++	 * If RV_CAUSE == RISCV_EXC_ECALLM, handle system call from
+ 	 * kernel thread.
+ 	 */
+-	li t1, RISCV_EXC_ECALLM
++	li t1, EXC_SYSCALL
+ 	beq t0, t1, is_kernel_syscall
+ 
+ #ifdef CONFIG_USERSPACE
+@@ -370,7 +406,7 @@ no_fp:	/* increment _current->arch.exception_depth */
+ #endif /* CONFIG_CUSTOM_STACK_GUARD */
+ 
+ 	/*
+-	 * If mcause == RISCV_EXC_ECALLU, handle system call
++	 * If RV_CAUSE == RISCV_EXC_ECALLU, handle system call
+ 	 * for user mode thread.
+ 	 */
+ 	li t1, RISCV_EXC_ECALLU
+@@ -381,8 +417,8 @@ no_fp:	/* increment _current->arch.exception_depth */
+ 	 * Determine if we come from user space. If so, reconfigure the PMP for
+ 	 * kernel mode configuration.
+ 	 */
+-	csrr t0, mstatus
+-	li t1, MSTATUS_MPP
++	csrr t0, RV_STATUS
++	li t1, STATUS_PP
+ 	and t0, t0, t1
+ 	bnez t0, 1f
+ 	lr a0, ___cpu_t_current_OFFSET(s0)
+@@ -419,8 +455,8 @@ no_fp:	/* increment _current->arch.exception_depth */
+ is_kernel_syscall:
+ 	/*
+ 	 * A syscall is the result of an ecall instruction, in which case the
+-	 * MEPC will contain the address of the ecall instruction.
+-	 * Increment saved MEPC by 4 to prevent triggering the same ecall
++	 * RV_EPC will contain the address of the ecall instruction.
++	 * Increment saved RV_EPC by 4 to prevent triggering the same ecall
+ 	 * again upon exiting the ISR.
+ 	 *
+ 	 * It's safe to always increment by 4, even with compressed
+@@ -432,10 +468,10 @@ is_kernel_syscall:
+ 
+ #ifdef CONFIG_PMP_KERNEL_MODE_DYNAMIC
+ 	/* Re-activate PMP for m-mode */
+-	li t1, MSTATUS_MPP
+-	csrc mstatus, t1
++	li t1, STATUS_PP
++	csrc RV_STATUS, t1
+ 	li t1, MSTATUS_MPRV
+-	csrs mstatus, t1
++	csrs RV_STATUS, t1
+ #endif
+ 
+ 	/* Determine what to do. Operation code is in t0. */
+@@ -553,10 +589,10 @@ is_user_syscall:
+ #endif
+ 
+ 	/* It is safe to re-enable IRQs now */
+-	csrs mstatus, MSTATUS_IEN
++	csrs RV_STATUS, STATUS_IE
+ 
+ 	/*
+-	 * Same as for is_kernel_syscall: increment saved MEPC by 4 to
++	 * Same as for is_kernel_syscall: increment saved RV_EPC by 4 to
+ 	 * prevent triggering the same ecall again upon exiting the ISR.
+ 	 */
+ 	lr t1, __struct_arch_esf_mepc_OFFSET(sp)
+@@ -675,7 +711,7 @@ skip_z_sig_handle:
+ #endif
+ 
+ 	/* Disable IRQs again before leaving */
+-	csrc mstatus, MSTATUS_IEN
++	csrc RV_STATUS, STATUS_IE
+ 	j might_have_rescheduled
+ #endif /* CONFIG_USERSPACE */
+ 
+@@ -688,18 +724,22 @@ is_interrupt:
+ 	 * PMP for kernel mode configuration.
+ 	 */
+ 	lr t0, __struct_arch_esf_mstatus_OFFSET(sp)
+-	li t1, MSTATUS_MPP
++	li t1, STATUS_PP
+ 	and t0, t0, t1
+ 	bnez t0, 1f
+ 	lr a0, ___cpu_t_current_OFFSET(s0)
+ 	call z_riscv_pmp_kernelmode_enable
+ 	j 2f
+ #endif /* CONFIG_USERSPACE */
++#ifndef CONFIG_RISCV_S_MODE
+ 1:	/* Re-activate PMP for m-mode */
+-	li t1, MSTATUS_MPP
+-	csrc mstatus, t1
++	li t1, STATUS_PP
++	csrc RV_STATUS, t1
+ 	li t1, MSTATUS_MPRV
+-	csrs mstatus, t1
++	csrs RV_STATUS, t1
++#else
++1:
++#endif
+ 2:
+ #endif
+ 
+@@ -742,7 +782,7 @@ on_irq_stack:
+ #endif
+ 
+ 	/* Get IRQ causing interrupt */
+-	csrr a0, mcause
++	csrr a0, RV_CAUSE
+ 	li t0, CONFIG_RISCV_MCAUSE_EXCEPTION_MASK
+ 	and a0, a0, t0
+ 
+@@ -837,6 +877,7 @@ reschedule:
+ 	call z_riscv_switch
+ 
+ z_riscv_thread_start:
++
+ might_have_rescheduled:
+ 	/* reload s0 with &_current_cpu as it might have changed or be unset */
+ 	get_current_cpu s0
+@@ -864,18 +905,18 @@ no_reschedule:
+ fp_trap_exit:
+ #endif
+ 
+-	/* Restore MEPC and MSTATUS registers */
++	/* Restore RV_EPC and MSTATUS registers */
+ 	lr t0, __struct_arch_esf_mepc_OFFSET(sp)
+ 	lr t2, __struct_arch_esf_mstatus_OFFSET(sp)
+ 
+ #ifdef CONFIG_CLIC_SUPPORT_INTERRUPT_LEVEL
+-	/* Restore MCAUSE register for previous interrupt level. */
++	/* Restore RV_CAUSE register for previous interrupt level. */
+ 	lr t1, __struct_arch_esf_mcause_OFFSET(sp)
+-	csrw mcause, t1
++	csrw RV_CAUSE, t1
+ #endif /* CONFIG_CLIC_SUPPORT_INTERRUPT_LEVEL */
+ 
+-	csrw mepc, t0
+-	csrw mstatus, t2
++	csrw RV_EPC, t0
++	csrw RV_STATUS, t2
+ 
+ #ifdef CONFIG_USERSPACE
+ 	/*
+@@ -883,7 +924,7 @@ fp_trap_exit:
+ 	 * set is_user_mode to true and preserve our kernel mode stack for
+ 	 * the next exception to come.
+ 	 */
+-	li t1, MSTATUS_MPP
++	li t1, STATUS_PP
+ 	and t0, t2, t1
+ 	bnez t0, 1f
+ 
+@@ -938,4 +979,4 @@ fp_trap_exit:
+ 
+ #endif /* CONFIG_RISCV_SOC_HAS_ISR_STACKING */
+ 
+-	mret
++	TRAP_RET
+diff --git a/arch/riscv/core/reset.S b/arch/riscv/core/reset.S
+index 5844c845b35..f7baa074653 100644
+--- a/arch/riscv/core/reset.S
++++ b/arch/riscv/core/reset.S
+@@ -10,8 +10,16 @@
+ #include <zephyr/arch/cpu.h>
+ #include <zephyr/offsets.h>
+ #include <zephyr/arch/riscv/csr.h>
++#include <zephyr/arch/riscv/irq.h>
+ #include "asm_macros.inc"
+ 
++#ifdef CONFIG_RISCV_S_MODE
++/* mcounteren bits */
++#define MCOUNTEREN_CY  BIT(0)  /* cycle counter */
++#define MCOUNTEREN_TM  BIT(1)  /* time counter */
++#define MCOUNTEREN_IR  BIT(2)  /* instret counter */
++#endif
++
+ /* exports */
+ GTEXT(__initialize)
+ GTEXT(__reset)
+@@ -21,6 +29,9 @@ GTEXT(z_prep_c)
+ GDATA(riscv_cpu_wake_flag)
+ GDATA(riscv_cpu_sp)
+ GTEXT(arch_secondary_cpu_init)
++#ifdef CONFIG_RISCV_S_MODE
++GTEXT(__m_mode_sbi_handler)
++#endif
+ 
+ #if CONFIG_INCLUDE_RESET_VECTOR
+ SECTION_FUNC(reset, __reset)
+@@ -91,6 +102,55 @@ aa_loop:
+ 	call _WdogInit
+ #endif
+ 
++#ifdef CONFIG_RISCV_S_MODE
++	/* Set M-mode trap vector to our SBI handler */
++	la t0, __m_mode_sbi_handler
++	csrw mtvec, t0
++
++	/* Delegate all exceptions to S-mode except S-mode ecall and
++	 * M-mode ecall, which stay in M-mode to be handled by our SBI.
++	 */
++	li t0, ~((1 << RISCV_EXC_ECALLS) | (1 << RISCV_EXC_ECALLM))
++	csrw medeleg, t0
++
++	/* Delegate supervisor software, timer and external interrupts
++	 * to S-mode.
++	 */
++	li t0, (MIP_SSIP | MIP_STIP | MIP_SEIP)
++	csrw mideleg, t0
++
++	/* PMP entry 0: NAPOT, RWX, covers all memory so S-mode can
++	* access everything
++	*/
++	li t0, -1
++	csrw pmpaddr0, t0
++	li t0, (PMP_NAPOT | PMP_R | PMP_W | PMP_X)
++	csrw pmpcfg0, t0
++
++	/* Initialize mscratch to M-mode stack top */
++	la t0, m_mode_stack_top
++	csrw mscratch, t0
++
++	/* Allow S-mode to read cycle, time and instret counters */
++	li t0, (MCOUNTEREN_CY | MCOUNTEREN_TM | MCOUNTEREN_IR)
++	csrw mcounteren, t0
++
++	/* Enable M-mode timer interrupt so MTIP fires and is forwarded to S-mode as STIP */
++	li t0, MIP_MTIP
++	csrs mie, t0
++
++	/* Set MPP=S-mode in mstatus then mret into S-mode */
++	li t0, MSTATUS_MPP
++	csrc mstatus, t0
++	li t0, MSTATUS_MPP_S
++	csrs mstatus, t0
++	la t0, s_mode_entry
++	csrw mepc, t0
++	mret
++
++s_mode_entry:
++#endif /* CONFIG_RISCV_S_MODE */
++
+ 	/*
+ 	 * Jump into C domain. z_prep_c zeroes BSS, copies rw data into RAM,
+ 	 * and then enters kernel z_cstart
+diff --git a/arch/riscv/core/sbi.S b/arch/riscv/core/sbi.S
+new file mode 100644
+index 00000000000..eeba35b6346
+--- /dev/null
++++ b/arch/riscv/core/sbi.S
+@@ -0,0 +1,195 @@
++/*
++* Copyright (c) 2026 Alexios Lyrakis <alexios.lyrakis@gmail.com>
++* SPDX-License-Identifier: Apache-2.0
++*
++* Minimal M-mode SBI runtime.
++* Handles machine timer interrupts (MTIP) and SBI ecalls from S-mode.
++*/
++
++#include <zephyr/toolchain.h>
++#include <zephyr/linker/sections.h>
++#include <zephyr/arch/riscv/csr.h>
++#include <zephyr/arch/riscv/irq.h>
++#include <zephyr/devicetree.h>
++
++#ifdef CONFIG_RISCV_S_MODE
++
++/* MTIMECMP base address from devicetree (hart 0) */
++#define MTIMECMP0  DT_REG_ADDR_BY_NAME(DT_INST(0, riscv_machine_timer), mtimecmp)
++
++/* QEMU virt "sifive_test" device: write here to exit or reset QEMU */
++#define QEMU_TEST_FINISHER  0x00100000
++#define FINISHER_EXIT       0x5555
++
++/* S-mode ecall exception cause */
++#define CAUSE_ECALL_SMODE  9
++
++#include <zephyr/arch/riscv/sbi.h>
++
++/*
++* Small dedicated stack for use inside the M-mode handler.
++* S-mode uses its own stack; we need a separate one so we
++* do not corrupt it when we enter M-mode.
++*/
++.section .noinit.mmode_stack
++.align 4
++m_mode_stack:
++    .space CONFIG_RISCV_M_MODE_STACK_SIZE
++GDATA(m_mode_stack_top)
++m_mode_stack_top:
++
++GTEXT(__m_mode_sbi_handler)
++SECTION_FUNC(TEXT, __m_mode_sbi_handler)
++
++    /*
++    * mscratch holds the M-mode stack pointer (initialised in reset.S).
++    * Atomically swap sp and mscratch: now sp = M-mode stack,
++    * mscratch = S-mode sp (saved for later restore).
++    */
++    csrrw sp, mscratch, sp
++
++    /* Save all registers we will use */
++    addi sp, sp, -80
++    sd ra,  0(sp)
++    sd t0,  8(sp)
++    sd t1, 16(sp)
++    sd t2, 24(sp)
++    sd a0, 32(sp)
++    sd a1, 40(sp)
++    sd a6, 48(sp)
++    sd a7, 56(sp)
++
++    csrr t0, mcause
++
++    /* Bit 63 set means interrupt, clear means exception */
++    bltz t0, m_mode_handle_interrupt
++
++    /* Exception path: only S-mode ecall (cause == 9) is expected */
++    li t1, CAUSE_ECALL_SMODE
++    bne t0, t1, m_mode_unhandled
++
++    /* --- SBI ecall from S-mode --- */
++
++    /*
++    * Advance mepc past the ecall instruction (4 bytes) so that
++    * when we mret, S-mode resumes at the instruction after ecall.
++    */
++    csrr t0, mepc
++    addi t0, t0, 4
++    csrw mepc, t0
++
++    /* Dispatch on SBI extension ID in a7 */
++    li t0, SBI_EXT_TIME
++    beq a7, t0, m_mode_ext_time
++
++    li t0, SBI_EXT_SRST
++    beq a7, t0, m_mode_ext_srst
++
++    /* Unknown extension — a1 is undefined on error per SBI spec */
++    li a0, SBI_ERR_NOT_SUPPORTED
++    sd a0, 32(sp)
++    j m_mode_return
++
++m_mode_ext_time:
++    /* Dispatch on function ID in a6 */
++    li t0, SBI_FUNC_SET_TIMER
++    beq a6, t0, m_mode_set_timer
++
++    /* Unknown function within SBI_EXT_TIME — a1 undefined on error */
++    li a0, SBI_ERR_NOT_SUPPORTED
++    sd a0, 32(sp)
++    j m_mode_return
++
++m_mode_set_timer:
++    /* a0 = timer deadline (absolute time value) */
++    li t0, MTIMECMP0
++    sd a0, 0(t0)     /* write new deadline to mtimecmp[0] */
++
++    /*
++    * Clear STIP: S-mode already handled the previous interrupt,
++    * no need to re-fire before the new deadline expires.
++    */
++    li t0, MIP_STIP
++    csrc mip, t0
++
++    /* Return success: a0 = SBI_SUCCESS, a1 = 0 (no return value) */
++    li a0, SBI_SUCCESS
++    li a1, 0
++    sd a0, 32(sp)    /* update saved a0/a1 so m_mode_return restores them */
++    sd a1, 40(sp)
++    j m_mode_return
++
++m_mode_ext_srst:
++    /* Only function 0 (SBI_FUNC_SYSTEM_RESET) is defined */
++    li t0, SBI_FUNC_SYSTEM_RESET
++    bne a6, t0, m_mode_srst_unsupported
++
++#ifdef CONFIG_QEMU_TARGET
++    /*
++     * Write FINISHER_EXIT to the QEMU virt "sifive_test" device.
++     * QEMU exits immediately; the loop below is unreachable in practice.
++     */
++    li t0, QEMU_TEST_FINISHER
++    li t1, FINISHER_EXIT
++    sw t1, 0(t0)
++#endif /* CONFIG_QEMU_TARGET */
++
++m_mode_srst_loop:
++    wfi
++    j m_mode_srst_loop
++
++m_mode_srst_unsupported:
++    li a0, SBI_ERR_NOT_SUPPORTED
++    sd a0, 32(sp)
++    j m_mode_return
++
++m_mode_handle_interrupt:
++    /* Clear sign bit to get the raw interrupt cause number */
++    slli t0, t0, 1
++    srli t0, t0, 1
++
++    li t1, IRQ_M_TIMER
++    bne t0, t1, m_mode_unhandled
++
++    /* --- MTIP: machine timer fired --- */
++
++    /* Disable MTIP by pushing mtimecmp far into the future.
++     * If we don't do this it will keep firing immediately on mret.
++     */
++    li t0, MTIMECMP0
++    li t1, -1
++    sd t1, 0(t0)
++
++    /* Forward to S-mode by raising STIP */
++    li t0, MIP_STIP
++    csrs mip, t0
++
++    j m_mode_return
++
++m_mode_unhandled:
++	/*
++	 * Unexpected trap in M-mode. We have no recovery path — spin
++	 * forever. This will show as a hang in QEMU and signals a fatal
++	 * M-mode error during debugging.
++	 */
++m_mode_unhandled_loop:
++	wfi
++	j m_mode_unhandled_loop
++
++m_mode_return:
++    ld ra,  0(sp)
++    ld t0,  8(sp)
++    ld t1, 16(sp)
++    ld t2, 24(sp)
++    ld a0, 32(sp)
++    ld a1, 40(sp)
++    ld a6, 48(sp)
++    ld a7, 56(sp)
++    addi sp, sp, 80
++
++    /* Restore S-mode sp, put M-mode stack pointer back into mscratch */
++    csrrw sp, mscratch, sp
++
++    mret
++
++#endif /* CONFIG_RISCV_S_MODE */
+diff --git a/arch/riscv/core/thread.c b/arch/riscv/core/thread.c
+index d2e4ec3c207..7c8608d53b9 100644
+--- a/arch/riscv/core/thread.c
++++ b/arch/riscv/core/thread.c
+@@ -50,7 +50,7 @@ void arch_new_thread(struct k_thread *thread, k_thread_stack_t *stack,
+ 	 *
+ 	 * Given that thread startup happens through the exception exit
+ 	 * path, initially set:
+-	 * 1) MSTATUS to MSTATUS_DEF_RESTORE in the thread stack to enable
++	 * 1) MSTATUS to RV_STATUS_DEF_RESTORE in the thread stack to enable
+ 	 *    interrupts when the newly created thread will be scheduled;
+ 	 * 2) MEPC to the address of the z_thread_entry in the thread
+ 	 *    stack.
+@@ -62,7 +62,7 @@ void arch_new_thread(struct k_thread *thread, k_thread_stack_t *stack,
+ 	 *    counter will be restored following the MEPC value set within the
+ 	 *    thread stack.
+ 	 */
+-	stack_init->mstatus = MSTATUS_DEF_RESTORE;
++	stack_init->mstatus = RV_STATUS_DEF_RESTORE;
+ 
+ #if defined(CONFIG_FPU_SHARING)
+ 	/* thread birth happens through the exception return path */
+@@ -163,17 +163,27 @@ FUNC_NORETURN void arch_user_mode_enter(k_thread_entry_t user_entry,
+ 				_current->stack_info.size -
+ 				_current->stack_info.delta);
+ 
++#ifdef CONFIG_RISCV_S_MODE
++	status = csr_read(sstatus);
++	/* Clear SPP so that sret returns to U-mode */
++	status = INSERT_FIELD(status, SSTATUS_SPP, 0);
++	/* Enable IRQs when entering user mode (SPIE) */
++	status = INSERT_FIELD(status, SSTATUS_SPIE, 1);
++	/* Disable IRQs in S-mode until the mode switch */
++	status = INSERT_FIELD(status, SSTATUS_SIE, 0);
++	csr_write(sstatus, status);
++	csr_write(sepc, z_thread_entry);
++#else
+ 	status = csr_read(mstatus);
+-
+ 	/* Set next CPU status to user mode */
+ 	status = INSERT_FIELD(status, MSTATUS_MPP, PRV_U);
+ 	/* Enable IRQs for user mode */
+ 	status = INSERT_FIELD(status, MSTATUS_MPIE, 1);
+ 	/* Disable IRQs for m-mode until the mode switch */
+ 	status = INSERT_FIELD(status, MSTATUS_MIE, 0);
+-
+ 	csr_write(mstatus, status);
+ 	csr_write(mepc, z_thread_entry);
++#endif
+ 
+ #ifdef CONFIG_PMP_KERNEL_MODE_DYNAMIC
+ 	/* reconfigure as the kernel mode configuration will be different */
+@@ -199,11 +209,19 @@ FUNC_NORETURN void arch_user_mode_enter(k_thread_entry_t user_entry,
+ 	register void *a2 __asm__("a2") = p2;
+ 	register void *a3 __asm__("a3") = p3;
+ 
++#ifdef CONFIG_RISCV_S_MODE
++	__asm__ volatile (
++	"mv sp, %4; sret"
++	:
++	: "r" (a0), "r" (a1), "r" (a2), "r" (a3), "r" (top_of_user_stack)
++	: "memory");
++#else
+ 	__asm__ volatile (
+ 	"mv sp, %4; mret"
+ 	:
+ 	: "r" (a0), "r" (a1), "r" (a2), "r" (a3), "r" (top_of_user_stack)
+ 	: "memory");
++#endif
+ 
+ 	CODE_UNREACHABLE;
+ }
+@@ -255,7 +273,7 @@ FUNC_NORETURN void z_riscv_switch_to_main_no_multithreading(k_thread_entry_t mai
+ #ifdef CONFIG_CUSTOM_STACK_GUARD
+ 	z_riscv_custom_stack_guard_disable();
+ 
+-	irq_unlock(MSTATUS_IEN);
++	irq_unlock(RV_STATUS_IE);
+ 
+ 	__asm__ volatile (
+ 	"mv sp, %0\n"
+@@ -265,7 +283,7 @@ FUNC_NORETURN void z_riscv_switch_to_main_no_multithreading(k_thread_entry_t mai
+ 	: "r" (main_stack), "r" (main_entry)
+ 	: "memory");
+ #else
+-	irq_unlock(MSTATUS_IEN);
++	irq_unlock(RV_STATUS_IE);
+ 
+ 	__asm__ volatile (
+ 	"mv sp, %0; jalr ra, %1, 0"
+diff --git a/arch/riscv/include/kernel_arch_func.h b/arch/riscv/include/kernel_arch_func.h
+index 0cbcf0c4353..3fdcae803ef 100644
+--- a/arch/riscv/include/kernel_arch_func.h
++++ b/arch/riscv/include/kernel_arch_func.h
+@@ -39,8 +39,12 @@ static ALWAYS_INLINE void arch_kernel_init(void)
+ 	__asm__ volatile ("li tp, 0");
+ #endif
+ #if defined(CONFIG_SMP) || defined(CONFIG_USERSPACE)
++#ifdef CONFIG_RISCV_S_MODE
++	csr_write(sscratch, &_kernel.cpus[0]);
++#else
+ 	csr_write(mscratch, &_kernel.cpus[0]);
+ #endif
++#endif
+ #ifdef CONFIG_SMP
+ 	_kernel.cpus[0].arch.hartid = csr_read(mhartid);
+ 	_kernel.cpus[0].arch.online = true;
+@@ -59,7 +63,7 @@ static ALWAYS_INLINE void arch_kernel_init(void)
+ 		hart_x++;
+ 	}
+ #endif
+-#ifdef CONFIG_RISCV_PMP
++#if defined(CONFIG_RISCV_PMP) && !defined(CONFIG_RISCV_S_MODE)
+ 	z_riscv_pmp_init();
+ #endif
+ #ifdef CONFIG_CUSTOM_STACK_GUARD
+diff --git a/boards/qemu/riscv64/board.cmake b/boards/qemu/riscv64/board.cmake
+index f15b28ae655..a37562f79d2 100644
+--- a/boards/qemu/riscv64/board.cmake
++++ b/boards/qemu/riscv64/board.cmake
+@@ -25,6 +25,10 @@ else()
+   set(QEMU_binary_suffix riscv32)
+ endif()
+ 
++if(CONFIG_RISCV_S_MODE)
++  string(APPEND qemu_riscv_cpu ",s=on,u=on,pmp=on,priv_spec=v1.12.0,sv39=on")
++endif()
++
+ set(QEMU_CPU_TYPE_${ARCH} "${qemu_riscv_cpu}")
+ 
+ set(QEMU_FLAGS_${ARCH}
+diff --git a/boards/qemu/riscv64/board.yml b/boards/qemu/riscv64/board.yml
+index eeab9480a24..9fd3946f130 100644
+--- a/boards/qemu/riscv64/board.yml
++++ b/boards/qemu/riscv64/board.yml
+@@ -6,3 +6,4 @@ board:
+     - name: qemu_virt_riscv64
+       variants:
+         - name: smp
++        - name: smode
+diff --git a/boards/qemu/riscv64/qemu_riscv64_qemu_virt_riscv64_smode.dts b/boards/qemu/riscv64/qemu_riscv64_qemu_virt_riscv64_smode.dts
+new file mode 100644
+index 00000000000..75a5405644a
+--- /dev/null
++++ b/boards/qemu/riscv64/qemu_riscv64_qemu_virt_riscv64_smode.dts
+@@ -0,0 +1,50 @@
++/* Copyright (c) 2026 Alexios Lyrakis */
++/* SPDX-License-Identifier: Apache-2.0 */
++
++/dts-v1/;
++
++#include <qemu/virt-riscv64.dtsi>
++
++/ {
++	chosen {
++		zephyr,console = &uart0;
++		zephyr,shell-uart = &uart0;
++		zephyr,sram = &ram0;
++	};
++};
++
++&{/cpus/cpu@0} {
++	riscv,privilege-modes = "m", "s", "u";
++};
++
++&{/cpus/cpu@1} {
++	riscv,privilege-modes = "m", "s", "u";
++};
++
++&{/cpus/cpu@2} {
++	riscv,privilege-modes = "m", "s", "u";
++};
++
++&{/cpus/cpu@3} {
++	riscv,privilege-modes = "m", "s", "u";
++};
++
++&{/cpus/cpu@4} {
++	riscv,privilege-modes = "m", "s", "u";
++};
++
++&{/cpus/cpu@5} {
++	riscv,privilege-modes = "m", "s", "u";
++};
++
++&{/cpus/cpu@6} {
++	riscv,privilege-modes = "m", "s", "u";
++};
++
++&{/cpus/cpu@7} {
++	riscv,privilege-modes = "m", "s", "u";
++};
++
++&uart0 {
++	status = "okay";
++};
+diff --git a/boards/qemu/riscv64/qemu_riscv64_qemu_virt_riscv64_smode.yaml b/boards/qemu/riscv64/qemu_riscv64_qemu_virt_riscv64_smode.yaml
+new file mode 100644
+index 00000000000..15ca3a418d1
+--- /dev/null
++++ b/boards/qemu/riscv64/qemu_riscv64_qemu_virt_riscv64_smode.yaml
+@@ -0,0 +1,15 @@
++identifier: qemu_riscv64/qemu_virt_riscv64/smode
++name: QEMU Emulation for RISC-V 64-bit S-mode
++type: qemu
++simulation:
++  - name: qemu
++arch: riscv
++toolchain:
++  - zephyr
++ram: 262144
++flash: 32768
++testing:
++  default: true
++  ignore_tags:
++    - net
++    - bluetooth
+diff --git a/boards/qemu/riscv64/qemu_riscv64_qemu_virt_riscv64_smode_defconfig b/boards/qemu/riscv64/qemu_riscv64_qemu_virt_riscv64_smode_defconfig
+new file mode 100644
+index 00000000000..eac2c5dd69e
+--- /dev/null
++++ b/boards/qemu/riscv64/qemu_riscv64_qemu_virt_riscv64_smode_defconfig
+@@ -0,0 +1,13 @@
++# SPDX-License-Identifier: Apache-2.0
++
++CONFIG_CONSOLE=y
++CONFIG_SERIAL=y
++CONFIG_UART_CONSOLE=y
++CONFIG_STACK_SENTINEL=y
++CONFIG_XIP=n
++CONFIG_RISCV_S_MODE=y
++# The PLIC driver configures PLIC context 0 (M-mode) for hart 0.  In S-mode
++# Zephyr the correct context is 1 (supervisor mode), so external device
++# interrupts via the PLIC do not reach the CPU.  Disable interrupt-driven
++# UART TX so the shell backend falls back to polling, which works correctly.
++CONFIG_SHELL_BACKEND_SERIAL_INTERRUPT_DRIVEN=n
+diff --git a/doc/hardware/arch/risc-v.rst b/doc/hardware/arch/risc-v.rst
+index 473b614b44b..63fe6a7d198 100644
+--- a/doc/hardware/arch/risc-v.rst
++++ b/doc/hardware/arch/risc-v.rst
+@@ -29,6 +29,78 @@ kconfig. Look at :file:`arch/riscv/Kconfig.isa` for more information.
+ Note that Zephyr SDK toolchain support may not be defined for all
+ combinations.
+ 
++Supervisor mode (S-mode)
++************************
++
++When :kconfig:option:`CONFIG_RISCV_S_MODE` is enabled, the Zephyr kernel
++runs in RISC-V Supervisor mode (S-mode) rather than Machine mode (M-mode).
++This follows the standard RISC-V privilege architecture used by
++application-class operating systems and is required for MMU support.
++
++A minimal in-tree M-mode runtime (``arch/riscv/core/sbi.S``) acts as
++firmware.  It performs the initial M-mode to S-mode transition at boot and
++handles S-mode requests via the RISC-V Supervisor Binary Interface (SBI):
++
++- **Boot sequence**: M-mode configures PMP, ``medeleg``, ``mideleg``,
++  ``mcounteren`` and ``mtvec``, then drops to S-mode via ``mret``.
++- **Timer**: Machine timer interrupts (MTIP) are forwarded to S-mode as
++  supervisor timer interrupts (STIP).  S-mode programs the next timer
++  deadline through the SBI ``TIME`` extension (``sbi_set_timer``).
++- **Ecalls**: S-mode ecalls (exception cause 9) are routed to the M-mode
++  runtime via ``medeleg``; all other exceptions and interrupts are delegated
++  to S-mode.  See :ref:`riscv-smode-ecall-constraint` below.
++
++No external firmware is required; the in-tree runtime is self-contained.
++
++Known limitations
++=================
++
++**PLIC external interrupts**: The PLIC driver always configures the M-mode
++context for hart 0.  In S-mode the correct context is the supervisor context,
++so PLIC-delivered external interrupts (UART, GPIO, SPI, I2C, etc.) do not
++reach the CPU.  The timer interrupt is unaffected as it is forwarded directly
++by the M-mode runtime via ``sip.STIP``, bypassing the PLIC.
++
++.. _riscv-smode-ecall-constraint:
++
++S-mode ecall constraint
++=======================
++
++In M-mode, Zephyr uses the ``ecall`` instruction as a kernel-internal
++self-trap: because the kernel owns M-mode unconditionally, ``ecall`` raises
++exception cause 11 (M-mode ecall), which ``_isr_wrapper`` dispatches to
++whatever kernel service was requested (fatal error, ``irq_offload``, context
++switch).
++
++In S-mode this mechanism is unavailable.  ``ecall`` from S-mode always raises
++cause 9, and cause 9 is **not** delegated to S-mode (``medeleg`` bit 9 = 0)
++because it must reach the M-mode SBI handler — that is the only path by which
++S-mode can request M-mode services such as programming the timer via
++``sbi_set_timer``.  The ``medeleg`` bit offers no per-register-value
++discrimination: delegating cause 9 to S-mode would break SBI; keeping it in
++M-mode makes cause 9 unavailable for kernel-internal use.
++
++The practical rule for S-mode ports is:
++
++   ``ecall`` is reserved for the SBI interface.  Any kernel mechanism that
++   uses ``ecall`` in M-mode must be reimplemented with a direct S-mode path.
++
++Two concrete examples in this port:
++
++- :c:macro:`ARCH_EXCEPT` (``include/zephyr/arch/riscv/error.h``) — instead
++  of issuing ``ecall`` to trigger a fatal-error entry through ``_isr_wrapper``,
++  it calls :c:func:`z_riscv_fatal_error` directly.
++
++- ``arch_irq_offload`` (``arch/riscv/core/irq_offload.c``) — instead of
++  issuing ``ecall`` to enter ``_isr_wrapper``'s ``do_irq_offload`` path, it
++  simulates ISR context directly: disables interrupts, increments
++  ``nested``, calls the routine, decrements ``nested``, re-enables interrupts,
++  then calls :c:func:`z_reschedule_unlocked` to handle any thread that became
++  ready inside the routine.
++
++Support for using an external SBI implementation such as `OpenSBI`_ as a
++West module is left as future work.
++
+ SMP support
+ ***********
+ 
+@@ -37,3 +109,5 @@ platforms. In order to test the SMP support, one can use
+ :zephyr:board:`qemu_riscv32` or :zephyr:board:`qemu_riscv64` for QEMU-based
+ platforms, or :zephyr:board:`beaglev_fire` or :zephyr:board:`mpfs_icicle` for
+ hardware-based platforms.
++
++.. _OpenSBI: https://github.com/riscv-software-src/opensbi
+diff --git a/drivers/timer/CMakeLists.txt b/drivers/timer/CMakeLists.txt
+index f3b0599cdcb..237a0b566c8 100644
+--- a/drivers/timer/CMakeLists.txt
++++ b/drivers/timer/CMakeLists.txt
+@@ -45,6 +45,7 @@ zephyr_library_sources_ifdef(CONFIG_REALTEK_RTS5912_RTMR realtek_rts5912_rtmr.c)
+ zephyr_library_sources_ifdef(CONFIG_RENESAS_RA_ULPT_TIMER renesas_ra_ulpt_timer.c)
+ zephyr_library_sources_ifdef(CONFIG_RENESAS_RX_TIMER_CMT renesas_rx_cmt.c)
+ zephyr_library_sources_ifdef(CONFIG_RISCV_MACHINE_TIMER riscv_machine_timer.c)
++zephyr_library_sources_ifdef(CONFIG_RISCV_SUPERVISOR_TIMER riscv_supervisor_timer.c)
+ zephyr_library_sources_ifdef(CONFIG_RV32M1_LPTMR_TIMER rv32m1_lptmr_timer.c)
+ zephyr_library_sources_ifdef(CONFIG_RZA2M_OSTM_TIMER renesas_rza2m_os_timer.c)
+ zephyr_library_sources_ifdef(CONFIG_RZ_OS_TIMER renesas_rz_gtm_timer.c)
+diff --git a/drivers/timer/Kconfig b/drivers/timer/Kconfig
+index f84baa857e9..47a2e6db744 100644
+--- a/drivers/timer/Kconfig
++++ b/drivers/timer/Kconfig
+@@ -120,6 +120,7 @@ source "drivers/timer/Kconfig.renesas_rx"
+ source "drivers/timer/Kconfig.renesas_rz"
+ source "drivers/timer/Kconfig.renesas_rza2m"
+ source "drivers/timer/Kconfig.riscv_machine"
++source "drivers/timer/Kconfig.riscv_supervisor"
+ source "drivers/timer/Kconfig.rv32m1_lptmr"
+ source "drivers/timer/Kconfig.sam0_rtc"
+ source "drivers/timer/Kconfig.silabs"
+diff --git a/drivers/timer/Kconfig.riscv_machine b/drivers/timer/Kconfig.riscv_machine
+index be90604da30..a1dc43cb0fb 100644
+--- a/drivers/timer/Kconfig.riscv_machine
++++ b/drivers/timer/Kconfig.riscv_machine
+@@ -6,6 +6,7 @@
+ config RISCV_MACHINE_TIMER
+ 	bool "RISCV Machine Timer"
+ 	default y
++	depends on RISCV_M_MODE
+ 	depends on DT_HAS_RISCV_MACHINE_TIMER_ENABLED || \
+ 		   DT_HAS_NUCLEI_SYSTIMER_ENABLED
+ 	select TICKLESS_CAPABLE
+diff --git a/drivers/timer/Kconfig.riscv_supervisor b/drivers/timer/Kconfig.riscv_supervisor
+new file mode 100644
+index 00000000000..f1e4803142d
+--- /dev/null
++++ b/drivers/timer/Kconfig.riscv_supervisor
+@@ -0,0 +1,17 @@
++# Copyright (c) 2024 MASSDRIVER EI (massdriver.space)
++# Copyright (c) 2018-2023 Intel Corp.
++# SPDX-License-Identifier: Apache-2.0
++
++config RISCV_SUPERVISOR_TIMER
++	bool "RISCV Supervisor Timer"
++	default y
++	depends on RISCV_S_MODE
++	depends on DT_HAS_RISCV_MACHINE_TIMER_ENABLED || \
++		   DT_HAS_NUCLEI_SYSTIMER_ENABLED
++	select TICKLESS_CAPABLE
++	select TIMER_HAS_64BIT_CYCLE_COUNTER
++	help
++	  This module implements a kernel device driver for the RISC-V supervisor
++	  mode timer. It uses the SBI timer extension to set timer deadlines and
++	  reads time via the "time" CSR. It provides the standard "system clock
++	  driver" interfaces.
+diff --git a/drivers/timer/riscv_supervisor_timer.c b/drivers/timer/riscv_supervisor_timer.c
+new file mode 100644
+index 00000000000..38d510b771e
+--- /dev/null
++++ b/drivers/timer/riscv_supervisor_timer.c
+@@ -0,0 +1,168 @@
++/*
++ * Copyright (c) 2024 MASSDRIVER EI (massdriver.space)
++ * Copyright (c) 2018-2023 Intel Corporation
++ * Copyright (c) 2026 Alexios Lyrakis <alexios.lyrakis@gmail.com>
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <limits.h>
++
++#include <zephyr/init.h>
++#include <zephyr/drivers/timer/system_timer.h>
++#include <zephyr/sys_clock.h>
++#include <zephyr/spinlock.h>
++#include <zephyr/irq.h>
++#include <zephyr/arch/riscv/csr.h>
++#include <zephyr/arch/riscv/sbi.h>
++
++#define CYC_PER_TICK (uint32_t)(sys_clock_hw_cycles_per_sec() / CONFIG_SYS_CLOCK_TICKS_PER_SEC)
++
++/* the unsigned long cast limits divisions to native CPU register width */
++#define cycle_diff_t   unsigned long
++#define CYCLE_DIFF_MAX (~(cycle_diff_t)0)
++
++/*
++ * We have two constraints on the maximum number of cycles we can wait for.
++ *
++ * 1) sys_clock_announce() accepts at most INT32_MAX ticks.
++ *
++ * 2) The number of cycles between two reports must fit in a cycle_diff_t
++ *    variable before converting it to ticks.
++ *
++ * Then:
++ *
++ * 3) Pick the smallest between (1) and (2).
++ *
++ * 4) Take into account some room for the unavoidable IRQ servicing latency.
++ *    Let's use 3/4 of the max range.
++ *
++ * Finally let's add the LSB value to the result so to clear out a bunch of
++ * consecutive set bits coming from the original max values to produce a
++ * nicer literal for assembly generation.
++ */
++#define CYCLES_MAX_1 ((uint64_t)INT32_MAX * (uint64_t)CYC_PER_TICK)
++#define CYCLES_MAX_2 ((uint64_t)CYCLE_DIFF_MAX)
++#define CYCLES_MAX_3 MIN(CYCLES_MAX_1, CYCLES_MAX_2)
++#define CYCLES_MAX_4 (CYCLES_MAX_3 / 2 + CYCLES_MAX_3 / 4)
++#define CYCLES_MAX   (CYCLES_MAX_4 + LSB_GET(CYCLES_MAX_4))
++
++#if defined(CONFIG_TEST)
++const int32_t z_sys_timer_irq_for_test = IRQ_S_TIMER;
++#endif
++
++static struct k_spinlock lock;
++static uint64_t last_count;
++static uint64_t last_ticks;
++static uint32_t last_elapsed;
++
++static void sbi_set_timer(uint64_t deadline)
++{
++	register unsigned long a0 __asm__("a0") = (unsigned long)deadline;
++	register unsigned long a6 __asm__("a6") = SBI_FUNC_SET_TIMER;
++	register unsigned long a7 __asm__("a7") = SBI_EXT_TIME;
++
++	__asm__ volatile("ecall"
++					: "+r"(a0)
++					: "r"(a6), "r"(a7)
++					: "a1", "memory");
++}
++
++static uint64_t stime(void)
++{
++	return csr_read(time);
++}
++
++static void timer_isr(const void *arg)
++{
++	ARG_UNUSED(arg);
++
++	k_spinlock_key_t key = k_spin_lock(&lock);
++
++	uint64_t now = stime();
++	uint64_t dcycles = now - last_count;
++	uint32_t dticks = (cycle_diff_t)dcycles / CYC_PER_TICK;
++
++	last_count += (cycle_diff_t)dticks * CYC_PER_TICK;
++	last_ticks += dticks;
++	last_elapsed = 0;
++
++	if (!IS_ENABLED(CONFIG_TICKLESS_KERNEL)) {
++		uint64_t next = last_count + CYC_PER_TICK;
++
++		sbi_set_timer(next);
++	}
++
++	k_spin_unlock(&lock, key);
++	sys_clock_announce(dticks);
++}
++
++void sys_clock_set_timeout(int32_t ticks, bool idle)
++{
++	ARG_UNUSED(idle);
++
++	if (!IS_ENABLED(CONFIG_TICKLESS_KERNEL)) {
++		return;
++	}
++
++	k_spinlock_key_t key = k_spin_lock(&lock);
++	uint64_t cyc;
++
++	if (ticks == K_TICKS_FOREVER) {
++		cyc = last_count + CYCLES_MAX;
++	} else {
++		cyc = (last_ticks + last_elapsed + ticks) * CYC_PER_TICK;
++		if ((cyc - last_count) > CYCLES_MAX) {
++			cyc = last_count + CYCLES_MAX;
++		}
++	}
++	sbi_set_timer(cyc);
++
++	k_spin_unlock(&lock, key);
++}
++
++uint32_t sys_clock_elapsed(void)
++{
++	if (!IS_ENABLED(CONFIG_TICKLESS_KERNEL)) {
++		return 0;
++	}
++
++	k_spinlock_key_t key = k_spin_lock(&lock);
++	uint64_t now = stime();
++	uint64_t dcycles = now - last_count;
++	uint32_t dticks = (cycle_diff_t)dcycles / CYC_PER_TICK;
++
++	last_elapsed = dticks;
++	k_spin_unlock(&lock, key);
++	return dticks;
++}
++
++uint32_t sys_clock_cycle_get_32(void)
++{
++	return (uint32_t)stime();
++}
++
++uint64_t sys_clock_cycle_get_64(void)
++{
++	return stime();
++}
++
++static int sys_clock_driver_init(void)
++{
++	IRQ_CONNECT(IRQ_S_TIMER, 0, timer_isr, NULL, 0);
++	last_ticks = stime() / CYC_PER_TICK;
++	last_count = last_ticks * CYC_PER_TICK;
++	sbi_set_timer(last_count + CYC_PER_TICK);
++	irq_enable(IRQ_S_TIMER);
++	return 0;
++}
++
++#ifdef CONFIG_SMP
++void smp_timer_init(void)
++{
++	sbi_set_timer(last_count + CYC_PER_TICK);
++	irq_enable(IRQ_S_TIMER);
++}
++#endif
++
++SYS_INIT(sys_clock_driver_init, PRE_KERNEL_2, CONFIG_SYSTEM_CLOCK_INIT_PRIORITY);
+diff --git a/dts/bindings/cpu/riscv-common.yaml b/dts/bindings/cpu/riscv-common.yaml
+index 93cd9e380b2..7c773be84c3 100644
+--- a/dts/bindings/cpu/riscv-common.yaml
++++ b/dts/bindings/cpu/riscv-common.yaml
+@@ -40,6 +40,14 @@ properties:
+     type: string-array
+     required: true
+ 
++  riscv,privilege-modes:
++    description: |
++      Privilege modes supported by the hart. Each element is one of "m"
++      (Machine), "s" (Supervisor), or "u" (User). Used to prevent enabling
++      CONFIG_RISCV_S_MODE on harts that do not implement Supervisor mode.
++    type: string-array
++    default: ["m"]
++
+   riscv,isa-omissions:
+     description: |
+       Elements of the base ISA expected but not supported by the hart. Currently, the
+diff --git a/dts/riscv/qemu/virt-riscv64.dtsi b/dts/riscv/qemu/virt-riscv64.dtsi
+index 0410ee3ec58..580910e7128 100644
+--- a/dts/riscv/qemu/virt-riscv64.dtsi
++++ b/dts/riscv/qemu/virt-riscv64.dtsi
+@@ -12,42 +12,50 @@
+ 	cpus {
+ 		cpu@0 {
+ 			riscv,isa-base = "rv64i";
+-			riscv,isa-extensions = "i", "m", "a", "f", "d", "c", "zicsr", "zifencei";
++			riscv,isa-extensions = "i", "m", "a", "f", "d", "c", "zicsr", "zifencei",
++					       "zicntr";
+ 		};
+ 
+ 		cpu@1 {
+ 			riscv,isa-base = "rv64i";
+-			riscv,isa-extensions = "i", "m", "a", "f", "d", "c", "zicsr", "zifencei";
++			riscv,isa-extensions = "i", "m", "a", "f", "d", "c", "zicsr", "zifencei",
++					       "zicntr";
+ 		};
+ 
+ 		cpu@2 {
+ 			riscv,isa-base = "rv64i";
+-			riscv,isa-extensions = "i", "m", "a", "f", "d", "c", "zicsr", "zifencei";
++			riscv,isa-extensions = "i", "m", "a", "f", "d", "c", "zicsr", "zifencei",
++					       "zicntr";
+ 		};
+ 
+ 		cpu@3 {
+ 			riscv,isa-base = "rv64i";
+-			riscv,isa-extensions = "i", "m", "a", "f", "d", "c", "zicsr", "zifencei";
++			riscv,isa-extensions = "i", "m", "a", "f", "d", "c", "zicsr", "zifencei",
++					       "zicntr";
+ 		};
+ 
+ 		cpu@4 {
+ 			riscv,isa-base = "rv64i";
+-			riscv,isa-extensions = "i", "m", "a", "f", "d", "c", "zicsr", "zifencei";
++			riscv,isa-extensions = "i", "m", "a", "f", "d", "c", "zicsr", "zifencei",
++					       "zicntr";
+ 		};
+ 
+ 		cpu@5 {
+ 			riscv,isa-base = "rv64i";
+-			riscv,isa-extensions = "i", "m", "a", "f", "d", "c", "zicsr", "zifencei";
++			riscv,isa-extensions = "i", "m", "a", "f", "d", "c", "zicsr", "zifencei",
++					       "zicntr";
+ 		};
+ 
+ 		cpu@6 {
+ 			riscv,isa-base = "rv64i";
+-			riscv,isa-extensions = "i", "m", "a", "f", "d", "c", "zicsr", "zifencei";
++			riscv,isa-extensions = "i", "m", "a", "f", "d", "c", "zicsr", "zifencei",
++					       "zicntr";
+ 		};
+ 
+ 		cpu@7 {
+ 			riscv,isa-base = "rv64i";
+-			riscv,isa-extensions = "i", "m", "a", "f", "d", "c", "zicsr", "zifencei";
++			riscv,isa-extensions = "i", "m", "a", "f", "d", "c", "zicsr", "zifencei",
++					       "zicntr";
+ 		};
+ 	};
+ };
+diff --git a/include/zephyr/arch/riscv/arch.h b/include/zephyr/arch/riscv/arch.h
+index 5ce05114dca..e26672998f4 100644
+--- a/include/zephyr/arch/riscv/arch.h
++++ b/include/zephyr/arch/riscv/arch.h
+@@ -58,27 +58,11 @@
+ 		 Z_RISCV_STACK_PMP_ALIGN)
+ #define ARCH_KERNEL_STACK_OBJ_ALIGN	Z_RISCV_STACK_PMP_ALIGN
+ #endif
+-#elif defined(CONFIG_CUSTOM_STACK_GUARD)
+-/*
+- * The custom stack guard reserved area is located at the bottom of the
+- * kernel-mode stack. When a stack overflow occurs, this area is used to
+- * save the exception stack frame and to handle the resulting fault.
+- * Therefore, the reserved area must be large enough to hold the esf, plus
+- * some configurable stack wiggle room to execute fault-handling code safely.
+- */
+-#define Z_RISCV_STACK_GUARD_SIZE \
+-	ROUND_UP(sizeof(struct arch_esf) + CONFIG_CUSTOM_STACK_GUARD_RESERVED_SIZE, \
+-		 ARCH_STACK_PTR_ALIGN)
+-#else /* !CONFIG_PMP_STACK_GUARD && !CONFIG_CUSTOM_STACK_GUARD */
+-#define Z_RISCV_STACK_GUARD_SIZE 0
+-#endif
+ 
+-#if defined(CONFIG_PMP_STACK_GUARD) || defined(CONFIG_CUSTOM_STACK_GUARD)
+ /* Kernel-only stacks have the following layout if a stack guard is enabled:
+  *
+  * +------------+ <- thread.stack_obj
+- * | Guard /    | } Z_RISCV_STACK_GUARD_SIZE
+- * | Reserved   |
++ * | Guard      | } Z_RISCV_STACK_GUARD_SIZE
+  * +------------+ <- thread.stack_info.start
+  * | Kernel     |
+  * | stack      |
+@@ -88,6 +72,9 @@
+  * +------------+ <- thread.stack_info.start + thread.stack_info.size
+  */
+ #define ARCH_KERNEL_STACK_RESERVED	Z_RISCV_STACK_GUARD_SIZE
++
++#else /* !CONFIG_PMP_STACK_GUARD */
++#define Z_RISCV_STACK_GUARD_SIZE 0
+ #endif
+ 
+ #ifdef CONFIG_PMP_POWER_OF_TWO_ALIGNMENT
+@@ -95,8 +82,7 @@
+  * generated at build time by gen_kobject_list.py
+  *
+  * +------------+ <- thread.arch.priv_stack_start
+- * | Guard /    | } Z_RISCV_STACK_GUARD_SIZE
+- * | Reserved   |
++ * | Guard      | } Z_RISCV_STACK_GUARD_SIZE
+  * +------------+
+  * | Priv Stack | } CONFIG_PRIVILEGED_STACK_SIZE
+  * +------------+ <- thread.arch.priv_stack_start +
+@@ -107,8 +93,7 @@
+  * mode so we need to make room for a possible stack guard area when enabled:
+  *
+  * +------------+ <- thread.stack_obj
+- * | Guard /    | } Z_RISCV_STACK_GUARD_SIZE
+- * | Reserved   |
++ * | Guard      | } Z_RISCV_STACK_GUARD_SIZE
+  * +............| <- thread.stack_info.start
+  * | Thread     |
+  * | stack      |
+@@ -138,12 +123,11 @@
+ 
+ #else /* !CONFIG_PMP_POWER_OF_TWO_ALIGNMENT */
+ 
+-/* The stack object will contain the PMP guard (or custom stack guard reserved area),
+- * the privilege stack, and then the usermode stack buffer in that order:
++/* The stack object will contain the PMP guard, the privilege stack, and then
++ * the usermode stack buffer in that order:
+  *
+  * +------------+ <- thread.stack_obj
+- * | Guard /    | } Z_RISCV_STACK_GUARD_SIZE
+- * | Reserved   |
++ * | Guard      | } Z_RISCV_STACK_GUARD_SIZE
+  * +------------+
+  * | Priv Stack | } CONFIG_PRIVILEGED_STACK_SIZE
+  * +------------+ <- thread.stack_info.start
+@@ -175,7 +159,12 @@
+  */
+ 
+ #define MSTATUS_IEN     (1UL << 3)
+-#define MSTATUS_MPP_M   (3UL << 11)
++/** @brief mstatus MPP field value for User mode */
++#define MSTATUS_MPP_U   (PRV_U << 11)
++/** @brief mstatus MPP field value for Supervisor mode */
++#define MSTATUS_MPP_S   (PRV_S << 11)
++/** @brief mstatus MPP field value for Machine mode */
++#define MSTATUS_MPP_M   (PRV_M << 11)
+ #define MSTATUS_MPIE_EN (1UL << 7)
+ 
+ #define MSTATUS_FS_OFF   (0UL << 13)
+@@ -183,18 +172,45 @@
+ #define MSTATUS_FS_CLEAN (2UL << 13)
+ #define MSTATUS_FS_DIRTY (3UL << 13)
+ 
+-/* This comes from openisa_rv32m1, but doesn't seem to hurt on other
++/**
++ * @brief Default status register value to restore when starting a new thread.
++ *
++ * This comes from openisa_rv32m1, but doesn't seem to hurt on other
+  * platforms:
+  * - Preserve machine privileges in MPP. If you see any documentation
+  *   telling you that MPP is read-only on this SoC, don't believe its
+  *   lies.
+  * - Enable interrupts when exiting from exception into a new thread
+  *   by setting MPIE now, so it will be copied into IE on mret.
++ *
++ * In S-mode (CONFIG_RISCV_S_MODE), use the sstatus equivalents:
++ * - SPP=1 so that sret returns to S-mode (not U-mode)
++ * - SPIE=1 so that interrupts are enabled after sret
+  */
+-#define MSTATUS_DEF_RESTORE (MSTATUS_MPP_M | MSTATUS_MPIE_EN)
++#ifdef CONFIG_RISCV_S_MODE
++#define RV_STATUS_DEF_RESTORE (SSTATUS_SPP | SSTATUS_SPIE)
++#else
++#define RV_STATUS_DEF_RESTORE (MSTATUS_MPP_M | MSTATUS_MPIE_EN)
++#endif
++
++/* Previous-privilege field and its user-mode value, abstracted across M/S mode.
++ * Use as: (esf->mstatus & RV_STATUS_PP) == RV_STATUS_PP_U
++ */
++#ifdef CONFIG_RISCV_S_MODE
++/** @brief Previous-privilege field mask in the status CSR (S-mode: SPP) */
++#define RV_STATUS_PP    SSTATUS_SPP
++/** @brief Previous-privilege field value representing User mode (S-mode) */
++#define RV_STATUS_PP_U  0
++#else
++/** @brief Previous-privilege field mask in the status CSR (M-mode: MPP) */
++#define RV_STATUS_PP    MSTATUS_MPP
++/** @brief Previous-privilege field value representing User mode (M-mode) */
++#define RV_STATUS_PP_U  PRV_U
++#endif
+ 
+ #ifndef _ASMLANGUAGE
+ #include <zephyr/sys/util.h>
++#include <zephyr/sys/slist.h>
+ 
+ #ifdef __cplusplus
+ extern "C" {
+@@ -244,6 +260,52 @@ struct arch_mem_domain {
+ 
+ extern void z_irq_spurious(const void *unused);
+ 
++/* Privilege-level abstraction for IRQ enable/disable CSR and bit */
++#ifdef CONFIG_RISCV_S_MODE
++/** @brief Name of the interrupt-status CSR as a string literal (S-mode) */
++#define RV_STATUS_CSR "sstatus"
++/** @brief Interrupt-enable bit in the status CSR (S-mode: SIE) */
++#define RV_STATUS_IE  SSTATUS_SIE
++/** @brief Previous interrupt-enable bit in the status CSR (S-mode: SPIE) */
++#define RV_STATUS_PIE SSTATUS_SPIE
++#else
++/** @brief Name of the interrupt-status CSR as a string literal (M-mode) */
++#define RV_STATUS_CSR "mstatus"
++/** @brief Interrupt-enable bit in the status CSR (M-mode: MIE) */
++#define RV_STATUS_IE  MSTATUS_IEN
++/** @brief Previous interrupt-enable bit in the status CSR (M-mode: MPIE) */
++#define RV_STATUS_PIE MSTATUS_MPIE_EN
++#endif
++
++/**
++ * @brief Read the privilege-level status register (mstatus or sstatus).
++ *
++ * In M-mode this reads mstatus; in S-mode this reads sstatus.
++ */
++static ALWAYS_INLINE unsigned long z_riscv_status_read(void)
++{
++	unsigned long __rv;
++
++	__asm__ volatile ("csrr %0, " RV_STATUS_CSR : "=r" (__rv));
++	return __rv;
++}
++
++/**
++ * @brief Set bits in the privilege-level status register.
++ */
++static ALWAYS_INLINE void z_riscv_status_set(unsigned long val)
++{
++	__asm__ volatile ("csrs " RV_STATUS_CSR ", %0" : : "rK" (val) : "memory");
++}
++
++/**
++ * @brief Clear bits in the privilege-level status register.
++ */
++static ALWAYS_INLINE void z_riscv_status_clear(unsigned long val)
++{
++	__asm__ volatile ("csrc " RV_STATUS_CSR ", %0" : : "rK" (val) : "memory");
++}
++
+ /*
+  * use atomic instruction csrrc to lock global irq
+  * csrrc: atomic read and clear bits in CSR register
+@@ -255,9 +317,9 @@ static ALWAYS_INLINE unsigned int arch_irq_lock(void)
+ #else
+ 	unsigned int key;
+ 
+-	__asm__ volatile ("csrrc %0, mstatus, %1"
++	__asm__ volatile ("csrrc %0, " RV_STATUS_CSR ", %1"
+ 			  : "=r" (key)
+-			  : "rK" (MSTATUS_IEN)
++			  : "rK" (RV_STATUS_IE)
+ 			  : "memory");
+ 
+ 	return key;
+@@ -273,9 +335,9 @@ static ALWAYS_INLINE void arch_irq_unlock(unsigned int key)
+ #ifdef CONFIG_RISCV_SOC_HAS_CUSTOM_IRQ_LOCK_OPS
+ 	z_soc_irq_unlock(key);
+ #else
+-	__asm__ volatile ("csrs mstatus, %0"
++	__asm__ volatile ("csrs " RV_STATUS_CSR ", %0"
+ 			  :
+-			  : "r" (key & MSTATUS_IEN)
++			  : "r" (key & RV_STATUS_IE)
+ 			  : "memory");
+ #endif
+ }
+@@ -285,7 +347,7 @@ static ALWAYS_INLINE bool arch_irq_unlocked(unsigned int key)
+ #ifdef CONFIG_RISCV_SOC_HAS_CUSTOM_IRQ_LOCK_OPS
+ 	return z_soc_irq_unlocked(key);
+ #else
+-	return (key & MSTATUS_IEN) != 0;
++	return (key & RV_STATUS_IE) != 0;
+ #endif
+ }
+ 
+diff --git a/include/zephyr/arch/riscv/arch_inlines.h b/include/zephyr/arch/riscv/arch_inlines.h
+index 100ed26c7dd..b7283d9e7aa 100644
+--- a/include/zephyr/arch/riscv/arch_inlines.h
++++ b/include/zephyr/arch/riscv/arch_inlines.h
+@@ -14,13 +14,25 @@
+ 
+ static ALWAYS_INLINE uint32_t arch_proc_id(void)
+ {
++#ifdef CONFIG_RISCV_S_MODE
++	/* mhartid is M-mode only; S-mode cannot read it.
++	 * For single-hart systems the hart ID is always 0.
++	 * SMP S-mode would need to retrieve this from per-CPU data.
++	 */
++	return 0;
++#else
+ 	return csr_read(mhartid) & ((uintptr_t)CONFIG_RISCV_HART_MASK);
++#endif
+ }
+ 
+ static ALWAYS_INLINE _cpu_t *arch_curr_cpu(void)
+ {
+ #if defined(CONFIG_SMP) || defined(CONFIG_USERSPACE)
++#ifdef CONFIG_RISCV_S_MODE
++	return (_cpu_t *)csr_read(sscratch);
++#else
+ 	return (_cpu_t *)csr_read(mscratch);
++#endif
+ #else
+ 	return &_kernel.cpus[0];
+ #endif
+diff --git a/include/zephyr/arch/riscv/error.h b/include/zephyr/arch/riscv/error.h
+index 81bff2bf0f5..06fd23f2da4 100644
+--- a/include/zephyr/arch/riscv/error.h
++++ b/include/zephyr/arch/riscv/error.h
+@@ -22,7 +22,30 @@
+ extern "C" {
+ #endif
+ 
+-#ifdef CONFIG_USERSPACE
++#ifdef CONFIG_RISCV_S_MODE
++/*
++ * In S-mode, ecall (cause=9) is kept in M-mode for SBI so it never reaches
++ * the S-mode exception handler.  Kernel-context panics use ebreak (cause=3,
++ * breakpoint) which IS delegated to S-mode.  isr.S treats ebreak with
++ * t0==RV_ECALL_RUNTIME_EXCEPT (0) as ARCH_EXCEPT and reads the reason from
++ * saved a0 — mirroring exactly how M-mode handles ecall with RV_ECALL_RUNTIME_EXCEPT.
++ */
++#define ARCH_EXCEPT(reason_p)	do {					\
++		if (k_is_user_context()) {				\
++			arch_syscall_invoke1(reason_p,			\
++				K_SYSCALL_USER_FAULT);			\
++		} else {						\
++			register unsigned long _r __asm__("a0") =	\
++				(unsigned long)(reason_p);		\
++			register unsigned long _t __asm__("t0") = 0;	\
++			__asm__ volatile("ebreak"			\
++					 : : "r"(_r), "r"(_t)		\
++					 : "memory");			\
++		}							\
++		CODE_UNREACHABLE; /* LCOV_EXCL_LINE */			\
++	} while (false)
++
++#elif defined(CONFIG_USERSPACE)
+ 
+ #define ARCH_EXCEPT(reason_p)	do {			\
+ 		if (k_is_user_context()) {		\
+diff --git a/include/zephyr/arch/riscv/irq.h b/include/zephyr/arch/riscv/irq.h
+index 4fece44ca60..390061ef283 100644
+--- a/include/zephyr/arch/riscv/irq.h
++++ b/include/zephyr/arch/riscv/irq.h
+@@ -28,8 +28,12 @@ extern "C" {
+ 
+ /* Exceptions 0-15 (MCAUSE interrupt=0) */
+ 
++/** Breakpoint exception */
++#define RISCV_EXC_BREAKPOINT 3
+ /* Environment Call from U-mode */
+ #define RISCV_EXC_ECALLU 8
++/** Environment Call from S-mode */
++#define RISCV_EXC_ECALLS  9
+ /** Environment Call from M-mode */
+ #define RISCV_EXC_ECALLM 11
+ 
+@@ -114,14 +118,17 @@ extern unsigned long __soc_handle_irq(unsigned long mcause);
+ static inline void arch_isr_direct_footer(int swap)
+ {
+ 	ARG_UNUSED(swap);
+-	unsigned long mcause;
++	unsigned long cause;
+ 
+-	/* Get the IRQ number */
+-	__asm__ volatile("csrr %0, mcause" : "=r" (mcause));
+-	mcause &= CONFIG_RISCV_MCAUSE_EXCEPTION_MASK;
++#ifdef CONFIG_RISCV_S_MODE
++	__asm__ volatile("csrr %0, scause" : "=r" (cause));
++#else
++	__asm__ volatile("csrr %0, mcause" : "=r" (cause));
++#endif
++	cause &= CONFIG_RISCV_MCAUSE_EXCEPTION_MASK;
+ 
+ 	/* Clear the pending IRQ */
+-	__soc_handle_irq(mcause);
++	__soc_handle_irq(cause);
+ 
+ 	/* We are not in the ISR anymore */
+ 	--(arch_curr_cpu()->nested);
+@@ -134,6 +141,17 @@ static inline void arch_isr_direct_footer(int swap)
+ /*
+  * TODO: Add support for rescheduling
+  */
++#ifdef CONFIG_RISCV_S_MODE
++#define ARCH_ISR_DIRECT_DECLARE(name) \
++	static inline int name##_body(void); \
++	__attribute__ ((interrupt("supervisor"))) void name(void) \
++	{ \
++		ISR_DIRECT_HEADER(); \
++		name##_body(); \
++		ISR_DIRECT_FOOTER(0); \
++	} \
++	static inline int name##_body(void)
++#else
+ #define ARCH_ISR_DIRECT_DECLARE(name) \
+ 	static inline int name##_body(void); \
+ 	__attribute__ ((interrupt)) void name(void) \
+@@ -143,6 +161,7 @@ static inline void arch_isr_direct_footer(int swap)
+ 		ISR_DIRECT_FOOTER(0); \
+ 	} \
+ 	static inline int name##_body(void)
++#endif
+ 
+ #endif /* _ASMLANGUAGE */
+ 
+diff --git a/include/zephyr/arch/riscv/sbi.h b/include/zephyr/arch/riscv/sbi.h
+new file mode 100644
+index 00000000000..ad991b35eb1
+--- /dev/null
++++ b/include/zephyr/arch/riscv/sbi.h
+@@ -0,0 +1,51 @@
++/*
++ * Copyright (c) 2026 Alexios Lyrakis <alexios.lyrakis@gmail.com>
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++/**
++ * @file
++ * @brief RISC-V Supervisor Binary Interface (SBI) definitions.
++ *
++ * Defines SBI extension IDs, function IDs, and error codes used by
++ * S-mode code to request M-mode firmware services via the @c ecall
++ * instruction.  The subset defined here covers only the extensions
++ * used by Zephyr's in-tree minimal SBI runtime
++ * (@c arch/riscv/core/sbi.S).
++ *
++ * References: RISC-V SBI Specification v2.0
++ * (https://github.com/riscv-non-isa/riscv-sbi-doc)
++ */
++
++#ifndef ZEPHYR_ARCH_RISCV_INCLUDE_SBI_H_
++#define ZEPHYR_ARCH_RISCV_INCLUDE_SBI_H_
++
++/** @brief SBI extension ID for the Timer extension (TIME) */
++#define SBI_EXT_TIME			0x54494D45
++
++/** @brief SBI_EXT_TIME function ID: set the next timer deadline */
++#define SBI_FUNC_SET_TIMER		0
++
++/** @brief SBI extension ID for the System Reset extension (SRST) */
++#define SBI_EXT_SRST			0x53525354
++
++/** @brief SBI_EXT_SRST function ID: reset or power off the system */
++#define SBI_FUNC_SYSTEM_RESET		0
++
++/** @brief SBI_EXT_SRST reset type: clean shutdown (power off) */
++#define SBI_SRST_RESET_TYPE_SHUTDOWN	0
++/** @brief SBI_EXT_SRST reset type: cold reboot */
++#define SBI_SRST_RESET_TYPE_COLD_REBOOT	1
++/** @brief SBI_EXT_SRST reset type: warm reboot */
++#define SBI_SRST_RESET_TYPE_WARM_REBOOT	2
++
++/** @brief SBI_EXT_SRST reset reason: no specific reason */
++#define SBI_SRST_RESET_REASON_NONE	0
++
++/** @brief SBI return code: call completed successfully */
++#define SBI_SUCCESS			0
++/** @brief SBI return code: requested extension/function is not available */
++#define SBI_ERR_NOT_SUPPORTED		-1
++
++#endif /* ZEPHYR_ARCH_RISCV_INCLUDE_SBI_H_ */
+diff --git a/soc/common/riscv-privileged/soc_common_irq.c b/soc/common/riscv-privileged/soc_common_irq.c
+index 48de19030af..eca0c28b172 100644
+--- a/soc/common/riscv-privileged/soc_common_irq.c
++++ b/soc/common/riscv-privileged/soc_common_irq.c
+@@ -50,7 +50,7 @@ void z_riscv_irq_vector_set(unsigned int irq)
+ 
+ void arch_irq_enable(unsigned int irq)
+ {
+-	uint32_t mie;
++	uint32_t ie;
+ 
+ #if defined(CONFIG_RISCV_HAS_PLIC)
+ 	unsigned int level = irq_get_level(irq);
+@@ -62,15 +62,19 @@ void arch_irq_enable(unsigned int irq)
+ #endif
+ 
+ 	/*
+-	 * CSR mie register is updated using atomic instruction csrrs
++	 * CSR mie/sie register is updated using atomic instruction csrrs
+ 	 * (atomic read and set bits in CSR register)
+ 	 */
+-	mie = csr_read_set(mie, 1 << irq);
++#ifdef CONFIG_RISCV_S_MODE
++	ie = csr_read_set(sie, 1 << irq);
++#else
++	ie = csr_read_set(mie, 1 << irq);
++#endif
+ }
+ 
+ void arch_irq_disable(unsigned int irq)
+ {
+-	uint32_t mie;
++	uint32_t ie;
+ 
+ #if defined(CONFIG_RISCV_HAS_PLIC)
+ 	unsigned int level = irq_get_level(irq);
+@@ -82,15 +86,19 @@ void arch_irq_disable(unsigned int irq)
+ #endif
+ 
+ 	/*
+-	 * Use atomic instruction csrrc to disable device interrupt in mie CSR.
++	 * Use atomic instruction csrrc to disable device interrupt in mie/sie CSR.
+ 	 * (atomic read and clear bits in CSR register)
+ 	 */
+-	mie = csr_read_clear(mie, 1 << irq);
++#ifdef CONFIG_RISCV_S_MODE
++	ie = csr_read_clear(sie, 1 << irq);
++#else
++	ie = csr_read_clear(mie, 1 << irq);
++#endif
+ }
+ 
+ int arch_irq_is_enabled(unsigned int irq)
+ {
+-	uint32_t mie;
++	uint32_t ie;
+ 
+ #if defined(CONFIG_RISCV_HAS_PLIC)
+ 	unsigned int level = irq_get_level(irq);
+@@ -100,9 +108,13 @@ int arch_irq_is_enabled(unsigned int irq)
+ 	}
+ #endif
+ 
+-	mie = csr_read(mie);
++#ifdef CONFIG_RISCV_S_MODE
++	ie = csr_read(sie);
++#else
++	ie = csr_read(mie);
++#endif
+ 
+-	return !!(mie & (1 << irq));
++	return !!(ie & (1 << irq));
+ }
+ 
+ #if defined(CONFIG_RISCV_HAS_PLIC)
+@@ -123,7 +135,12 @@ __weak void soc_interrupt_init(void)
+ 	/* ensure that all interrupts are disabled */
+ 	(void)arch_irq_lock();
+ 
++#ifdef CONFIG_RISCV_S_MODE
++	csr_write(sie, 0);
++	/* sip.STIP is read-only from S-mode; clearing sie is sufficient */
++#else
+ 	csr_write(mie, 0);
+ 	csr_write(mip, 0);
++#endif
+ }
+ #endif
+diff --git a/soc/common/riscv-privileged/soc_irq.S b/soc/common/riscv-privileged/soc_irq.S
+index 21d6bd56f99..5f24d914706 100644
+--- a/soc/common/riscv-privileged/soc_irq.S
++++ b/soc/common/riscv-privileged/soc_irq.S
+@@ -25,10 +25,27 @@ WTEXT(__soc_handle_irq)
+  * Exception number is given as parameter via register a0.
+  */
+ SECTION_FUNC(exception.other, __soc_handle_irq)
++#ifdef CONFIG_RISCV_S_MODE
++	/*
++	 * In S-mode, sip.STIP is read-only; the timer pending bit is
++	 * cleared by M-mode SBI when sbi_set_timer() is called with the
++	 * next deadline.
++	 *
++	 * sip.SSIP (supervisor software interrupt pending, bit 1) is
++	 * writable from S-mode and must be cleared explicitly here.
++	 */
++	li t1, 1
++	sll t0, t1, a0
++	andi t0, t0, 2		/* only clear the SSIP bit (bit 1) */
++	beqz t0, 1f
++	csrc sip, t0
++1:
++#else
+ 	/* Clear exception number from CSR mip register */
+ 	li t1, 1
+ 	sll t0, t1, a0
+ 	csrrc t1, mip, t0
++#endif
+ 
+ 	/* Return */
+ 	ret
+diff --git a/soc/common/riscv-privileged/vector.S b/soc/common/riscv-privileged/vector.S
+index 23747bdbc52..385a552ec35 100644
+--- a/soc/common/riscv-privileged/vector.S
++++ b/soc/common/riscv-privileged/vector.S
+@@ -80,7 +80,11 @@ SECTION_FUNC(vectors, __start)
+ 	 */
+ 	la t0, _irq_vector_table /* Load address of interrupt vector table */
+ 	addi t0, t0, 0x01 /* Enable vectored mode by setting LSB */
++#ifdef CONFIG_RISCV_S_MODE
++	csrw stvec, t0
++#else
+ 	csrw mtvec, t0
++#endif
+ 
+ #endif /* CONFIG_RISCV_HAS_CLIC */
+ 
+@@ -101,7 +105,11 @@ SECTION_FUNC(vectors, __start)
+ 	 * to _isr_wrapper.
+ 	 */
+ 	la t0, _isr_wrapper
++#ifdef CONFIG_RISCV_S_MODE
++	csrw stvec, t0
++#else
+ 	csrw mtvec, t0
++#endif
+ 
+ #endif /* CONFIG_RISCV_HAS_CLIC&& !CONFIG_LEGACY_CLIC */
+ 
+diff --git a/soc/qemu/virt_riscv/common/soc.c b/soc/qemu/virt_riscv/common/soc.c
+index 0bdcf6e80f2..469096099b6 100644
+--- a/soc/qemu/virt_riscv/common/soc.c
++++ b/soc/qemu/virt_riscv/common/soc.c
+@@ -12,6 +12,7 @@
+ #include <zephyr/kernel.h>
+ #include <zephyr/arch/cpu.h>
+ #include <zephyr/sys/util.h>
++#include <zephyr/sys/poweroff.h>
+ 
+ #define SIFIVE_SYSCON_TEST 0x00100000
+ 
+@@ -36,3 +37,35 @@ void sys_arch_reboot(int type)
+ 
+ 	ARG_UNUSED(type);
+ }
++
++#ifdef CONFIG_RISCV_S_MODE
++#include <zephyr/arch/riscv/sbi.h>
++
++/*
++ * In S-mode the sifive_test device is still memory-mapped and accessible,
++ * but using the standard SBI System Reset extension is the portable path.
++ * Our in-tree M-mode SBI runtime (sbi.S) handles SBI_EXT_SRST by writing
++ * FINISHER_EXIT to the QEMU test finisher and halting.
++ */
++void z_sys_poweroff(void)
++{
++	register unsigned long a0 __asm__("a0") = SBI_SRST_RESET_TYPE_SHUTDOWN;
++	register unsigned long a1 __asm__("a1") = SBI_SRST_RESET_REASON_NONE;
++	register unsigned long a6 __asm__("a6") = SBI_FUNC_SYSTEM_RESET;
++	register unsigned long a7 __asm__("a7") = SBI_EXT_SRST;
++
++	__asm__ volatile("ecall"
++			 : "+r"(a0), "+r"(a1)
++			 : "r"(a6), "r"(a7)
++			 : "memory");
++	CODE_UNREACHABLE;
++}
++#else
++void z_sys_poweroff(void)
++{
++	volatile uint32_t *reg = (uint32_t *)SIFIVE_SYSCON_TEST;
++
++	*reg = FINISHER_EXIT;
++	CODE_UNREACHABLE;
++}
++#endif /* CONFIG_RISCV_S_MODE */
+diff --git a/subsys/testsuite/include/zephyr/interrupt_util.h b/subsys/testsuite/include/zephyr/interrupt_util.h
+index a754fba8f95..1447b84d497 100644
+--- a/subsys/testsuite/include/zephyr/interrupt_util.h
++++ b/subsys/testsuite/include/zephyr/interrupt_util.h
+@@ -180,6 +180,14 @@ static inline void trigger_irq(int irq)
+ {
+ 	irq_set_pending(irq);
+ }
++#elif defined(CONFIG_RISCV_S_MODE)
++/* In S-mode mip is read-only; set bits via sip (SSIP is writable via sip) */
++static inline void trigger_irq(int irq)
++{
++	uint32_t sip;
++
++	__asm__ volatile("csrrs %0, sip, %1\n" : "=r"(sip) : "r"(1 << irq));
++}
+ #else
+ static inline void trigger_irq(int irq)
+ {
+diff --git a/tests/arch/common/gen_isr_table/src/main.c b/tests/arch/common/gen_isr_table/src/main.c
+index 443aa78f924..02b4a2855ab 100644
+--- a/tests/arch/common/gen_isr_table/src/main.c
++++ b/tests/arch/common/gen_isr_table/src/main.c
+@@ -72,6 +72,18 @@ extern const uintptr_t _irq_vector_table[];
+ #define ISR5_OFFSET SPARE_IRQ_4
+ #define ISR6_OFFSET SPARE_IRQ_5
+ #define TRIG_CHECK_SIZE (ISR6_OFFSET + 1)
++#elif defined(CONFIG_RISCV_S_MODE)
++/* In S-mode the supervisor timer (IRQ_S_TIMER = 5) is already claimed by the
++ * timer driver; only the supervisor software interrupt (IRQ_S_SOFT = 1) is
++ * available for the test.  Mirror the direct/indirect split of the default
++ * CLINT case: use ISR1_OFFSET for direct IRQs, ISR3_OFFSET otherwise.
++ */
++#ifdef HAS_DIRECT_IRQS
++#define ISR1_OFFSET	1
++#else
++#define ISR3_OFFSET	1
++#endif
++#define TRIG_CHECK_SIZE	2
+ #else
+ 
+ #if !defined(IRQ1_USED)
+@@ -274,7 +286,9 @@ static int check_vector(void *isr, int offset)
+ }
+ #endif
+ 
+-#ifdef CONFIG_GEN_SW_ISR_TABLE
++#if defined(CONFIG_GEN_SW_ISR_TABLE) && \
++	(defined(ISR3_OFFSET) || defined(ISR4_OFFSET) || \
++	 defined(ISR5_OFFSET) || defined(ISR6_OFFSET))
+ static int check_sw_isr(void *isr, uintptr_t arg, int offset)
+ {
+ 	const struct _isr_table_entry *e = &_sw_isr_table[TABLE_INDEX(offset)];
+diff --git a/tests/arch/common/interrupt/testcase.yaml b/tests/arch/common/interrupt/testcase.yaml
+index 02cefc41ba1..f7390fc0f40 100644
+--- a/tests/arch/common/interrupt/testcase.yaml
++++ b/tests/arch/common/interrupt/testcase.yaml
+@@ -41,6 +41,9 @@ tests:
+       - cdns_swerv/s400/pmp/whisper
+       - cdns_swerv/s420/whisper
+       - cdns_swerv/s420/64/whisper
++      # In S-mode only SSIP (IRQ 1) can be triggered from software; the
++      # shared interrupt test requires two independent triggerable IRQ lines.
++      - qemu_riscv64/qemu_virt_riscv64/smode
+     arch_exclude:
+       # test needs 2 working interrupt lines
+       - xtensa
+@@ -63,6 +66,9 @@ tests:
+       - cdns_swerv/s400/pmp/whisper
+       - cdns_swerv/s420/whisper
+       - cdns_swerv/s420/64/whisper
++      # In S-mode only SSIP (IRQ 1) can be triggered from software; the
++      # shared interrupt test requires two independent triggerable IRQ lines.
++      - qemu_riscv64/qemu_virt_riscv64/smode
+     arch_exclude:
+       # test needs 2 working interrupt lines
+       - xtensa
+diff --git a/tests/arch/common/stack_unwind/testcase.yaml b/tests/arch/common/stack_unwind/testcase.yaml
+index d45c68e17c2..4e97d790285 100644
+--- a/tests/arch/common/stack_unwind/testcase.yaml
++++ b/tests/arch/common/stack_unwind/testcase.yaml
+@@ -71,6 +71,10 @@ tests:
+       # these platforms disabled here since CONFIG_ARM_MMU=n by default
+       - fvp_baser_aemv8r/fvp_aemv8r_aarch64
+       - fvp_baser_aemv8r/fvp_aemv8r_aarch64/smp
++      # In S-mode z_riscv_fatal_error() is called directly (no ecall), adding
++      # two extra func1 frames at the start; the regex expects the alternating
++      # func1/func2 pattern but gets func1/func1/func2 instead.
++      - qemu_riscv64/qemu_virt_riscv64/smode
+     extra_configs:
+       - CONFIG_FRAME_POINTER=y
+       - CONFIG_SYMTAB=y
+diff --git a/tests/arch/riscv/fpu_sharing/src/main.c b/tests/arch/riscv/fpu_sharing/src/main.c
+index 12bf20f5685..91d419a90e1 100644
+--- a/tests/arch/riscv/fpu_sharing/src/main.c
++++ b/tests/arch/riscv/fpu_sharing/src/main.c
+@@ -10,10 +10,11 @@
+ #include <zephyr/ztest.h>
+ #include <zephyr/kernel.h>
+ #include <zephyr/irq_offload.h>
++#include <zephyr/arch/riscv/arch.h>
+ 
+ static inline unsigned long fpu_state(void)
+ {
+-	return csr_read(mstatus) & MSTATUS_FS;
++	return z_riscv_status_read() & MSTATUS_FS;
+ }
+ 
+ static inline bool fpu_is_off(void)
+@@ -270,7 +271,7 @@ static void exception_context(const void *arg)
+ 	}
+ 
+ 	/* Simulate a user syscall environment by having IRQs enabled */
+-	csr_set(mstatus, MSTATUS_IEN);
++	z_riscv_status_set(RV_STATUS_IE);
+ 
+ 	/* make sure the FPU is still off */
+ 	zassert_true(fpu_is_off());
+@@ -282,7 +283,7 @@ static void exception_context(const void *arg)
+ 	zassert_true(fpu_is_dirty());
+ 
+ 	/* IRQs should have been disabled on us to prevent recursive FPU usage */
+-	zassert_true((csr_read(mstatus) & MSTATUS_IEN) == 0, "IRQs should be disabled");
++	zassert_true((z_riscv_status_read() & RV_STATUS_IE) == 0, "IRQs should be disabled");
+ }
+ 
+ ZTEST(riscv_fpu_sharing, test_thread_vs_exc_interaction)
+@@ -294,11 +295,11 @@ ZTEST(riscv_fpu_sharing, test_thread_vs_exc_interaction)
+ 	zassert_true(fpu_is_dirty());
+ 
+ 	/* We're not in exception so IRQs should be enabled. */
+-	zassert_true((csr_read(mstatus) & MSTATUS_IEN) != 0, "IRQs should be enabled");
++	zassert_true((z_riscv_status_read() & RV_STATUS_IE) != 0, "IRQs should be enabled");
+ 
+ 	/* Exceptions with no FPU usage shouldn't affect our state. */
+ 	irq_offload(exception_context, NO_FPU);
+-	zassert_true((csr_read(mstatus) & MSTATUS_IEN) != 0, "IRQs should be enabled");
++	zassert_true((z_riscv_status_read() & RV_STATUS_IE) != 0, "IRQs should be enabled");
+ 	zassert_true(fpu_is_dirty());
+ 	__asm__ volatile ("fcvt.w.s %0, fa1" : "=r" (val));
+ 	zassert_true(val == 654, "got %d instead", val);
+@@ -311,7 +312,7 @@ ZTEST(riscv_fpu_sharing, test_thread_vs_exc_interaction)
+ 	 * upon leaving the exception, but with a clean state at that point.
+ 	 */
+ 	irq_offload(exception_context, WITH_FPU);
+-	zassert_true((csr_read(mstatus) & MSTATUS_IEN) != 0, "IRQs should be enabled");
++	zassert_true((z_riscv_status_read() & RV_STATUS_IE) != 0, "IRQs should be enabled");
+ 	zassert_true(fpu_is_clean());
+ 	__asm__ volatile ("fcvt.w.s %0, fa1" : "=r" (val));
+ 	zassert_true(val == 654, "got %d instead", val);
+@@ -322,7 +323,7 @@ ZTEST(riscv_fpu_sharing, test_thread_vs_exc_interaction)
+ 	 * This means our FPU context should not be preemptively restored.
+ 	 */
+ 	irq_offload(exception_context, WITH_FPU);
+-	zassert_true((csr_read(mstatus) & MSTATUS_IEN) != 0, "IRQs should be enabled");
++	zassert_true((z_riscv_status_read() & RV_STATUS_IE) != 0, "IRQs should be enabled");
+ 	zassert_true(fpu_is_off());
+ 
+ 	/* Make sure we still have proper context when accessing the FPU. */
+diff --git a/tests/subsys/debug/coredump_threads/testcase.yaml b/tests/subsys/debug/coredump_threads/testcase.yaml
+index f3ab55c8de3..da4b562d34a 100644
+--- a/tests/subsys/debug/coredump_threads/testcase.yaml
++++ b/tests/subsys/debug/coredump_threads/testcase.yaml
+@@ -13,6 +13,11 @@ common:
+     - qemu_riscv32e
+ tests:
+   debug.coredump.threads:
++    platform_exclude:
++      # In S-mode ARCH_EXCEPT calls z_riscv_fatal_error() with esf=NULL;
++      # arch_coredump_info_dump() returns immediately when esf is NULL so
++      # the coredump output is never produced.
++      - qemu_riscv64/qemu_virt_riscv64/smode
+     filter: CONFIG_DEBUG_COREDUMP_MEMORY_DUMP_THREADS and CONFIG_MP_MAX_NUM_CPUS == 1
+     harness: console
+     harness_config:
