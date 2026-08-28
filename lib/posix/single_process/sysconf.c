@@ -70,7 +70,11 @@ long sysconf(int name)
 	case _SC_SPIN_LOCKS:
 		return COND_CODE_1(CONFIG_POSIX_SPIN_LOCKS, (_POSIX_VERSION), (-1L));
 	case _SC_SPORADIC_SERVER:
+#ifdef CONFIG_POSIX_SPORADIC_SERVER
+		return _POSIX_VERSION;
+#else
 		return -1L;
+#endif
 	case _SC_SS_REPL_MAX:
 		return _POSIX_SS_REPL_MAX;
 	case _SC_SYNCHRONIZED_IO:
