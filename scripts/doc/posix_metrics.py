@@ -763,7 +763,7 @@ def load_metrics(repo_root: Path | None = None) -> PosixMetrics:
             paths = [pfx for pfx, _ in comp]
         else:
             # option with its own implementation dir but no component
-            own = f"lib/posix/options/{stem}"
+            own = f"lib/posix/{stem}"
             if any(
                 rel == own or rel.startswith(own + "/") for rel, _, _ in files_index
             ):
