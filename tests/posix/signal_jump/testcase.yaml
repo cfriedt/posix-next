@@ -1,0 +1,42 @@
+common:
+  tags:
+    - posix_signal_jump
+  # 1 tier0 platform per supported architecture
+  platform_key:
+    - arch
+    - simulation
+  min_flash: 64
+  min_ram: 32
+tests:
+  # no .minimal variant: minimal libc has no setjmp(). Non-native-libc
+  # scenarios exclude native (posix-arch) builds: there setjmp()/longjmp()
+  # resolve to the host's symbols, whose jmp_buf does not match the
+  # configured libc's, so only the linux_compat variant runs on native_sim.
+  portability.posix.signal_jump:
+    arch_exclude: posix
+    filter: not CONFIG_NATIVE_LIBC
+  portability.posix.signal_jump.userspace:
+    filter: (not CONFIG_NATIVE_LIBC) and CONFIG_ARCH_SUPPORTS_USERSPACE_SIGNALS
+    tags: userspace
+    extra_configs:
+      - CONFIG_TEST_USERSPACE=y
+      - CONFIG_USERSPACE=y
+  portability.posix.signal_jump.newlib:
+    arch_exclude: posix
+    filter: (not CONFIG_NATIVE_LIBC) and (TOOLCHAIN_HAS_NEWLIB == 1)
+    extra_configs:
+      - CONFIG_NEWLIB_LIBC=y
+  portability.posix.signal_jump.picolibc:
+    arch_exclude: posix
+    tags: picolibc
+    filter: (not CONFIG_NATIVE_LIBC) and CONFIG_PICOLIBC_SUPPORTED
+    extra_configs:
+      - CONFIG_PICOLIBC=y
+  portability.posix.signal_jump.linux_compat:
+    tags: native
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    filter: CONFIG_NATIVE_LIBC
+    extra_configs:
+      - CONFIG_POSIX_TEST_LINUX_COMPAT=y
