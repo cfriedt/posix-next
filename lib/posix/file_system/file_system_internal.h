@@ -60,12 +60,13 @@ static inline long posix_pathconf_value(int name, const struct zvfs_statvfs *zv)
 		return 1;
 	case _PC_MAX_CANON:
 	case _PC_MAX_INPUT:
-	case _PC_PIPE_BUF:
 	case _PC_PRIO_IO:
 	case _PC_SYMLINK_MAX:
 	case _PC_VDISABLE:
 		/* no association for this implementation */
 		return -1;
+	case _PC_PIPE_BUF:
+		return IS_ENABLED(CONFIG_POSIX_PIPE) ? PIPE_BUF : -1;
 	case _PC_NAME_MAX:
 		return (zv != NULL && zv->f_namemax > 0) ? (long)zv->f_namemax : -1;
 	case _PC_NO_TRUNC:
