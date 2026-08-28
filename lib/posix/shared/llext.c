@@ -65,6 +65,7 @@
 
 #include <zephyr/getopt.h>
 #include <zephyr/llext/symbol.h>
+#include <zephyr/posix/posix_setjmp.h>
 
 /* BARRIERS */
 #ifdef CONFIG_POSIX_BARRIERS
@@ -380,6 +381,13 @@ EXPORT_SYMBOL(sem_trywait);
 EXPORT_SYMBOL(sem_unlink);
 EXPORT_SYMBOL(sem_wait);
 #endif /* CONFIG_POSIX_SEMAPHORES */
+
+/* SIGNAL_JUMP */
+#ifdef CONFIG_POSIX_SIGNAL_JUMP
+EXPORT_SYMBOL(siglongjmp);
+/* sigsetjmp() expands to this plus setjmp() */
+EXPORT_SYMBOL(__sigjmp_save);
+#endif /* CONFIG_POSIX_SIGNAL_JUMP */
 
 /* SIGNALS */
 #ifdef CONFIG_POSIX_SIGNALS
