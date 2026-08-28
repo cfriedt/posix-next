@@ -2379,3 +2379,24 @@ patches:
       overflow, and mem-mapped dynamic stack objects stay fully resolvable so
       k_mem_unmap_phys_guard() can free their page frames at thread destroy
       (V=0 tripped its "cannot unmap an unmapped address" assert).
+  - path: zephyr/zvfs-pipe.patch
+    sha256sum: 951a85972bb5c0cb999e562f1af50026efb6b90b8888be2b0141f939c7a900f3
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-28
+    upstreamable: true
+    comments: |
+      Add zvfs_pipe(): a unidirectional byte channel between two file
+      descriptors, modeled on zvfs_eventfd. Each pipe pairs distinct
+      read-end and write-end objects over a shared ring buffer so per-end
+      close semantics work with the description refcount: closing the last
+      write descriptor raises end-of-file (and POLLHUP) at the read end,
+      and closing the last read descriptor fails subsequent writes with
+      EPIPE (raising K_SIG_PIPE at the writer under CONFIG_SIGNAL) and
+      POLLERR at the write end. Writes of at most ZVFS_PIPE_BUF_SIZE bytes
+      are atomic. Registered with ZVFS_MODE_IFIFO so poll routes through
+      ZFD_IOCTL_POLL_PREPARE/UPDATE; ZVFS_F_GETFL/SETFL, FIONBIO, and
+      FIONREAD are supported. Also defines ZVFS_O_CLOEXEC, which
+      zvfs_pipe() accepts alongside ZVFS_O_NONBLOCK to apply to both
+      descriptors at creation.
