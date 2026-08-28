@@ -55,7 +55,12 @@
 #endif
 
 #undef _POSIX_AEP_REALTIME_DEDICATED
-#ifdef CONFIG_POSIX_AEP_REALTIME_DEDICATED
+#if defined(_POSIX_AEP_REALTIME_CONTROLLER) && defined(CONFIG_POSIX_MULTI_PROCESS) &&              \
+	defined(CONFIG_POSIX_NETWORKING) && defined(CONFIG_POSIX_PIPE) &&                          \
+	defined(CONFIG_POSIX_SIGNAL_JUMP) && defined(CONFIG_POSIX_CPUTIME) &&                      \
+	defined(CONFIG_POSIX_PRIORITIZED_IO) && defined(CONFIG_POSIX_PRIORITY_SCHEDULING) &&       \
+	defined(CONFIG_POSIX_RAW_SOCKETS) && defined(CONFIG_POSIX_SPAWN) &&                        \
+	defined(CONFIG_POSIX_SPORADIC_SERVER)
 #define _POSIX_AEP_REALTIME_DEDICATED 200312L
 #endif
 
