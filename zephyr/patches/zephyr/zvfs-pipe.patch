@@ -1,0 +1,642 @@
+diff --git a/include/zephyr/sys/fdtable.h b/include/zephyr/sys/fdtable.h
+index 50821cd7017..3b742bda347 100644
+--- a/include/zephyr/sys/fdtable.h
++++ b/include/zephyr/sys/fdtable.h
+@@ -34,6 +34,8 @@
+ 
+ #define ZVFS_O_DIRECTORY 0x80000
+ 
++#define ZVFS_O_CLOEXEC 0x100000
++
+ #define ZVFS_O_DSYNC 0x10000
+ #define ZVFS_O_RSYNC 0x20000
+ #define ZVFS_O_SYNC  0x40000
+diff --git a/include/zephyr/zvfs/pipe.h b/include/zephyr/zvfs/pipe.h
+new file mode 100644
+index 00000000000..6bc6ce8ac81
+--- /dev/null
++++ b/include/zephyr/zvfs/pipe.h
+@@ -0,0 +1,44 @@
++/*
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_INCLUDE_ZEPHYR_ZVFS_PIPE_H_
++#define ZEPHYR_INCLUDE_ZEPHYR_ZVFS_PIPE_H_
++
++#include <zephyr/kernel.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/**
++ * @brief Create a unidirectional ZVFS pipe
++ *
++ * On success, @a fildes[0] refers to the read end of the pipe and @a fildes[1]
++ * refers to the write end. Data written to the write end is buffered (up to
++ * @kconfig{CONFIG_ZVFS_PIPE_BUF_SIZE} bytes) until read from the read end.
++ * Both file descriptors support read/write, poll, and fcntl-style status
++ * flags through the ZVFS layer.
++ *
++ * Writes of at most @kconfig{CONFIG_ZVFS_PIPE_BUF_SIZE} bytes are atomic.
++ * Reading from an empty pipe whose write end has been closed returns
++ * end-of-file; writing to a pipe whose read end has been closed fails with
++ * EPIPE.
++ *
++ * @param fildes Array of two ints in which the file descriptors are returned
++ * @param flags 0, or a combination of ZVFS_O_NONBLOCK and ZVFS_O_CLOEXEC to
++ *              apply to both file descriptors
++ *
++ * @return 0 on success, -1 on error with errno set
++ */
++__syscall int zvfs_pipe(int *fildes, int flags);
++
++#ifdef __cplusplus
++}
++#endif
++
++#include <zephyr/syscalls/pipe.h>
++
++#endif /* ZEPHYR_INCLUDE_ZEPHYR_ZVFS_PIPE_H_ */
+diff --git a/lib/os/CMakeLists.txt b/lib/os/CMakeLists.txt
+index eddf3360237..2e961b52b19 100644
+--- a/lib/os/CMakeLists.txt
++++ b/lib/os/CMakeLists.txt
+@@ -100,6 +100,7 @@ if(CONFIG_SYS_THREAD OR CONFIG_SYS_PROCESS)
+   zephyr_sources(clone.c)
+ endif()
+ zephyr_syscall_header_ifdef(CONFIG_ZVFS_EVENTFD ${ZEPHYR_BASE}/include/zephyr/zvfs/eventfd.h)
++zephyr_syscall_header_ifdef(CONFIG_ZVFS_PIPE ${ZEPHYR_BASE}/include/zephyr/zvfs/pipe.h)
+ if(CONFIG_SYS_THREAD OR CONFIG_SYS_PROCESS)
+   zephyr_syscall_header(${ZEPHYR_BASE}/include/zephyr/sys/thread.h)
+ endif()
+diff --git a/lib/os/zvfs/CMakeLists.txt b/lib/os/zvfs/CMakeLists.txt
+index eaa5b82d39e..03d4a65b917 100644
+--- a/lib/os/zvfs/CMakeLists.txt
++++ b/lib/os/zvfs/CMakeLists.txt
+@@ -25,5 +25,6 @@ zephyr_library_sources_ifdef(CONFIG_ZVFS_FS
+   zvfs_record_lock.c
+ )
+ zephyr_library_sources_ifdef(CONFIG_ZVFS_EVENTFD zvfs_eventfd.c)
++zephyr_library_sources_ifdef(CONFIG_ZVFS_PIPE zvfs_pipe.c)
+ zephyr_library_sources_ifdef(CONFIG_ZVFS_POLL zvfs_poll.c)
+ zephyr_library_sources_ifdef(CONFIG_ZVFS_SELECT zvfs_select.c)
+diff --git a/lib/os/zvfs/Kconfig b/lib/os/zvfs/Kconfig
+index 6fd4dfc7c34..0bc0b0719a8 100644
+--- a/lib/os/zvfs/Kconfig
++++ b/lib/os/zvfs/Kconfig
+@@ -192,6 +192,43 @@ config ZVFS_OPEN_ADD_SIZE_EVENTFD
+ 
+ endif # ZVFS_EVENTFD
+ 
++config ZVFS_PIPE
++	bool "ZVFS pipe support"
++	imply ZVFS_POLL
++	select ZVFS_FDTABLE
++	select RING_BUFFER
++	help
++	  Enable support for ZVFS pipes. A pipe is a unidirectional byte
++	  channel between a pair of file descriptors, usable with read, write,
++	  and poll.
++
++if ZVFS_PIPE
++
++config ZVFS_PIPE_MAX
++	int "Maximum number of ZVFS pipes"
++	default 1
++	range 1 2048
++	help
++	  The maximum number of concurrently open pipes.
++
++config ZVFS_PIPE_BUF_SIZE
++	int "ZVFS pipe buffer size"
++	default 512
++	range 512 65536
++	help
++	  The capacity, in bytes, of each pipe's buffer. Writes of up to this
++	  many bytes are atomic.
++
++config ZVFS_OPEN_ADD_SIZE_PIPE
++	int "Amount of file descriptors used by ZVFS pipes"
++	default 2
++	help
++	  Number of file descriptors reserved for pipes in the ZVFS fd table
++	  size calculation. Each open pipe uses two file descriptors, so this
++	  should usually be 2 * ZVFS_PIPE_MAX.
++
++endif # ZVFS_PIPE
++
+ config ZVFS_POLL
+ 	bool "ZVFS poll"
+ 	select POLL
+diff --git a/lib/os/zvfs/zvfs_pipe.c b/lib/os/zvfs/zvfs_pipe.c
+new file mode 100644
+index 00000000000..bbefa7671d3
+--- /dev/null
++++ b/lib/os/zvfs/zvfs_pipe.c
+@@ -0,0 +1,502 @@
++/*
++ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <errno.h>
++
++#include <zephyr/kernel.h>
++#include <zephyr/sys/bitarray.h>
++#include <zephyr/sys/fdtable.h>
++#include <zephyr/sys/ring_buffer.h>
++#include <zephyr/sys/util.h>
++#include <zephyr/sys/zvfs.h>
++#include <zephyr/zvfs/pipe.h>
++#include <zephyr/internal/syscall_handler.h>
++
++#define ZVFS_PIPE_END_OPEN     BIT(0)
++#define ZVFS_PIPE_END_NONBLOCK BIT(1)
++
++#define ZVFS_PIPE_FLAGS_SET (ZVFS_O_NONBLOCK | ZVFS_O_CLOEXEC)
++
++struct zvfs_pipe;
++
++struct zvfs_pipe_end {
++	struct zvfs_pipe *pipe;
++	uint32_t flags;
++};
++
++struct zvfs_pipe {
++	/* end[0] is the read end, end[1] the write end */
++	struct zvfs_pipe_end end[2];
++	struct k_poll_signal read_sig;
++	struct k_poll_signal write_sig;
++	struct k_spinlock lock;
++	struct ring_buf rb;
++	uint8_t buf[CONFIG_ZVFS_PIPE_BUF_SIZE];
++};
++
++SYS_BITARRAY_DEFINE_STATIC(pipes_bitarray, CONFIG_ZVFS_PIPE_MAX);
++static struct zvfs_pipe pipes[CONFIG_ZVFS_PIPE_MAX];
++static const struct fd_op_vtable zvfs_pipe_fd_vtable;
++
++static inline bool zvfs_pipe_end_is_open(const struct zvfs_pipe_end *end)
++{
++	return (end->flags & ZVFS_PIPE_END_OPEN) != 0;
++}
++
++static inline struct zvfs_pipe_end *zvfs_pipe_peer(struct zvfs_pipe_end *end)
++{
++	struct zvfs_pipe *p = end->pipe;
++
++	return (end == &p->end[0]) ? &p->end[1] : &p->end[0];
++}
++
++/* wake any thread blocked on the description associated with @a end */
++static void zvfs_pipe_wake(struct zvfs_pipe_end *end)
++{
++	struct k_mutex *lock = NULL;
++	struct k_condvar *cond = NULL;
++
++	if (!zvfs_get_obj_lock_and_cond(end, &zvfs_pipe_fd_vtable, &lock, &cond)) {
++		return;
++	}
++
++	k_condvar_broadcast(cond);
++}
++
++static int zvfs_pipe_wait(struct zvfs_pipe_end *end)
++{
++	int err;
++	struct k_mutex *lock = NULL;
++	struct k_condvar *cond = NULL;
++
++	if (!zvfs_get_obj_lock_and_cond(end, &zvfs_pipe_fd_vtable, &lock, &cond)) {
++		return -EBADF;
++	}
++
++	err = k_condvar_wait(cond, lock, K_FOREVER);
++	__ASSERT(err == 0, "k_condvar_wait() failed: %d", err);
++
++	return err;
++}
++
++static ssize_t zvfs_pipe_read_op(void *obj, void *buf, size_t sz)
++{
++	uint32_t n;
++	k_spinlock_key_t key;
++	struct zvfs_pipe_end *end = obj;
++	struct zvfs_pipe *p = end->pipe;
++
++	if (end != &p->end[0]) {
++		errno = EBADF;
++		return -1;
++	}
++
++	if (sz == 0) {
++		return 0;
++	}
++
++	if (buf == NULL) {
++		errno = EFAULT;
++		return -1;
++	}
++
++	while (true) {
++		key = k_spin_lock(&p->lock);
++
++		if (!zvfs_pipe_end_is_open(end)) {
++			k_spin_unlock(&p->lock, key);
++			errno = EBADF;
++			return -1;
++		}
++
++		n = ring_buf_get(&p->rb, buf, (uint32_t)MIN(sz, (size_t)UINT32_MAX));
++		if (n > 0) {
++			if (ring_buf_is_empty(&p->rb) && zvfs_pipe_end_is_open(&p->end[1])) {
++				k_poll_signal_reset(&p->read_sig);
++			}
++			k_poll_signal_raise(&p->write_sig, 0);
++			k_spin_unlock(&p->lock, key);
++			zvfs_pipe_wake(&p->end[1]);
++			return n;
++		}
++
++		if (!zvfs_pipe_end_is_open(&p->end[1])) {
++			/* write end closed and buffer drained: end-of-file */
++			k_spin_unlock(&p->lock, key);
++			return 0;
++		}
++
++		if ((end->flags & ZVFS_PIPE_END_NONBLOCK) != 0) {
++			k_spin_unlock(&p->lock, key);
++			errno = EAGAIN;
++			return -1;
++		}
++
++		if (k_is_in_isr()) {
++			k_spin_unlock(&p->lock, key);
++			errno = EWOULDBLOCK;
++			return -1;
++		}
++
++		k_spin_unlock(&p->lock, key);
++
++		if (zvfs_pipe_wait(end) < 0) {
++			errno = EBADF;
++			return -1;
++		}
++	}
++}
++
++static ssize_t zvfs_pipe_write_op(void *obj, const void *buf, size_t sz)
++{
++	uint32_t n;
++	uint32_t space;
++	k_spinlock_key_t key;
++	size_t written = 0;
++	struct zvfs_pipe_end *end = obj;
++	struct zvfs_pipe *p = end->pipe;
++	const bool atomic = sz <= sizeof(p->buf);
++
++	if (end != &p->end[1]) {
++		errno = EBADF;
++		return -1;
++	}
++
++	if (sz == 0) {
++		return 0;
++	}
++
++	if (buf == NULL) {
++		errno = EFAULT;
++		return -1;
++	}
++
++	while (true) {
++		key = k_spin_lock(&p->lock);
++
++		if (!zvfs_pipe_end_is_open(end)) {
++			k_spin_unlock(&p->lock, key);
++			errno = EBADF;
++			return -1;
++		}
++
++		if (!zvfs_pipe_end_is_open(&p->end[0])) {
++			k_spin_unlock(&p->lock, key);
++			if (written > 0) {
++				return written;
++			}
++#ifdef CONFIG_SIGNAL
++			if (!k_is_in_isr()) {
++				(void)k_sig_queue(k_current_get(), K_SIG_PIPE,
++						  (union k_sig_val){0});
++			}
++#endif
++			errno = EPIPE;
++			return -1;
++		}
++
++		space = ring_buf_space_get(&p->rb);
++		if ((atomic && space >= sz) || (!atomic && space > 0)) {
++			n = ring_buf_put(&p->rb, (const uint8_t *)buf + written,
++					 (uint32_t)MIN(sz - written, (size_t)space));
++			written += n;
++			k_poll_signal_raise(&p->read_sig, 0);
++			if (ring_buf_space_get(&p->rb) == 0) {
++				k_poll_signal_reset(&p->write_sig);
++			}
++			k_spin_unlock(&p->lock, key);
++			zvfs_pipe_wake(&p->end[0]);
++			if (written == sz) {
++				return written;
++			}
++			if ((end->flags & ZVFS_PIPE_END_NONBLOCK) != 0) {
++				return written;
++			}
++			continue;
++		}
++
++		if ((end->flags & ZVFS_PIPE_END_NONBLOCK) != 0) {
++			k_spin_unlock(&p->lock, key);
++			if (written > 0) {
++				return written;
++			}
++			errno = EAGAIN;
++			return -1;
++		}
++
++		if (k_is_in_isr()) {
++			k_spin_unlock(&p->lock, key);
++			if (written > 0) {
++				return written;
++			}
++			errno = EWOULDBLOCK;
++			return -1;
++		}
++
++		k_spin_unlock(&p->lock, key);
++
++		if (zvfs_pipe_wait(end) < 0) {
++			if (written > 0) {
++				return written;
++			}
++			errno = EBADF;
++			return -1;
++		}
++	}
++}
++
++static int zvfs_pipe_close_op(void *obj)
++{
++	int err;
++	bool last;
++	k_spinlock_key_t key;
++	struct zvfs_pipe_end *end = obj;
++	struct zvfs_pipe *p = end->pipe;
++	struct zvfs_pipe_end *peer = zvfs_pipe_peer(end);
++
++	if (k_is_in_isr()) {
++		errno = EWOULDBLOCK;
++		return -1;
++	}
++
++	key = k_spin_lock(&p->lock);
++
++	if (!zvfs_pipe_end_is_open(end)) {
++		k_spin_unlock(&p->lock, key);
++		errno = EBADF;
++		return -1;
++	}
++
++	end->flags &= ~ZVFS_PIPE_END_OPEN;
++	last = !zvfs_pipe_end_is_open(peer);
++
++	if (last) {
++		end->flags = 0;
++		peer->flags = 0;
++		err = sys_bitarray_free(&pipes_bitarray, 1, p - pipes);
++		__ASSERT(err == 0, "sys_bitarray_free() failed: %d", err);
++	} else if (end == &p->end[0]) {
++		/* no readers left: writers and write-pollers must not block */
++		k_poll_signal_raise(&p->write_sig, 0);
++	} else {
++		/* no writers left: readers and read-pollers must not block */
++		k_poll_signal_raise(&p->read_sig, 0);
++	}
++
++	k_spin_unlock(&p->lock, key);
++
++	zvfs_pipe_wake(end);
++	if (!last) {
++		zvfs_pipe_wake(peer);
++	}
++
++	return 0;
++}
++
++static int zvfs_pipe_poll_prepare(struct zvfs_pipe_end *end, struct zvfs_pollfd *pfd,
++				  struct k_poll_event **pev, struct k_poll_event *pev_end)
++{
++	struct zvfs_pipe *p = end->pipe;
++
++	ARG_UNUSED(pfd);
++
++	if (*pev == pev_end) {
++		errno = ENOMEM;
++		return -1;
++	}
++
++	(*pev)->obj = (end == &p->end[0]) ? &p->read_sig : &p->write_sig;
++	(*pev)->type = K_POLL_TYPE_SIGNAL;
++	(*pev)->mode = K_POLL_MODE_NOTIFY_ONLY;
++	(*pev)->state = K_POLL_STATE_NOT_READY;
++	(*pev)++;
++
++	return 0;
++}
++
++static int zvfs_pipe_poll_update(struct zvfs_pipe_end *end, struct zvfs_pollfd *pfd,
++				 struct k_poll_event **pev)
++{
++	struct zvfs_pipe *p = end->pipe;
++
++	if (end == &p->end[0]) {
++		if (!ring_buf_is_empty(&p->rb)) {
++			pfd->revents |= pfd->events & ZVFS_POLLIN;
++		}
++		if (!zvfs_pipe_end_is_open(&p->end[1])) {
++			pfd->revents |= ZVFS_POLLHUP;
++		}
++	} else {
++		if (!zvfs_pipe_end_is_open(&p->end[0])) {
++			pfd->revents |= ZVFS_POLLERR;
++		} else if (ring_buf_space_get(&p->rb) > 0) {
++			pfd->revents |= pfd->events & ZVFS_POLLOUT;
++		}
++	}
++
++	(*pev)++;
++
++	return 0;
++}
++
++static int zvfs_pipe_ioctl_op(void *obj, unsigned int request, va_list args)
++{
++	int ret;
++	k_spinlock_key_t key;
++	struct zvfs_pipe_end *end = obj;
++	struct zvfs_pipe *p = end->pipe;
++
++	key = k_spin_lock(&p->lock);
++
++	if (!zvfs_pipe_end_is_open(end)) {
++		k_spin_unlock(&p->lock, key);
++		errno = EBADF;
++		return -1;
++	}
++
++	switch (request) {
++	case ZVFS_F_GETFL:
++		ret = (end == &p->end[1]) ? ZVFS_O_WRONLY : ZVFS_O_RDONLY;
++		if ((end->flags & ZVFS_PIPE_END_NONBLOCK) != 0) {
++			ret |= ZVFS_O_NONBLOCK;
++		}
++		break;
++
++	case ZVFS_F_SETFL: {
++		int flags = va_arg(args, int);
++
++		/* the file access mode is ignored, as required by POSIX */
++		flags &= ~(ZVFS_O_RDONLY | ZVFS_O_WRONLY | ZVFS_O_RDWR);
++
++		if ((flags & ~ZVFS_O_NONBLOCK) != 0) {
++			errno = EINVAL;
++			ret = -1;
++		} else {
++			if ((flags & ZVFS_O_NONBLOCK) != 0) {
++				end->flags |= ZVFS_PIPE_END_NONBLOCK;
++			} else {
++				end->flags &= ~ZVFS_PIPE_END_NONBLOCK;
++			}
++			ret = 0;
++		}
++	} break;
++
++	case ZFD_IOCTL_FIONBIO:
++		end->flags |= ZVFS_PIPE_END_NONBLOCK;
++		ret = 0;
++		break;
++
++	case ZFD_IOCTL_FIONREAD: {
++		int *avail = va_arg(args, int *);
++
++		*avail = ring_buf_size_get(&p->rb);
++		ret = 0;
++	} break;
++
++	case ZFD_IOCTL_POLL_PREPARE: {
++		struct zvfs_pollfd *pfd = va_arg(args, struct zvfs_pollfd *);
++		struct k_poll_event **pev = va_arg(args, struct k_poll_event **);
++		struct k_poll_event *pev_end = va_arg(args, struct k_poll_event *);
++
++		ret = zvfs_pipe_poll_prepare(end, pfd, pev, pev_end);
++	} break;
++
++	case ZFD_IOCTL_POLL_UPDATE: {
++		struct zvfs_pollfd *pfd = va_arg(args, struct zvfs_pollfd *);
++		struct k_poll_event **pev = va_arg(args, struct k_poll_event **);
++
++		ret = zvfs_pipe_poll_update(end, pfd, pev);
++	} break;
++
++	default:
++		errno = EOPNOTSUPP;
++		ret = -1;
++		break;
++	}
++
++	k_spin_unlock(&p->lock, key);
++
++	return ret;
++}
++
++static const struct fd_op_vtable zvfs_pipe_fd_vtable = {
++	.read = zvfs_pipe_read_op,
++	.write = zvfs_pipe_write_op,
++	.close = zvfs_pipe_close_op,
++	.ioctl = zvfs_pipe_ioctl_op,
++};
++
++int z_impl_zvfs_pipe(int *fildes, int flags)
++{
++	int fd[2];
++	size_t offset;
++	uint32_t end_flags;
++	struct zvfs_pipe *p;
++
++	if ((flags & ~ZVFS_PIPE_FLAGS_SET) != 0) {
++		errno = EINVAL;
++		return -1;
++	}
++
++	if (sys_bitarray_alloc(&pipes_bitarray, 1, &offset) < 0) {
++		errno = ENFILE;
++		return -1;
++	}
++
++	p = &pipes[offset];
++
++	fd[0] = zvfs_reserve_fd();
++	if (fd[0] < 0) {
++		goto free_pipe;
++	}
++
++	fd[1] = zvfs_reserve_fd();
++	if (fd[1] < 0) {
++		zvfs_free_fd(fd[0]);
++		goto free_pipe;
++	}
++
++	ring_buf_init(&p->rb, sizeof(p->buf), p->buf);
++
++	end_flags = ZVFS_PIPE_END_OPEN;
++	if ((flags & ZVFS_O_NONBLOCK) != 0) {
++		end_flags |= ZVFS_PIPE_END_NONBLOCK;
++	}
++
++	p->end[0] = (struct zvfs_pipe_end){.pipe = p, .flags = end_flags};
++	p->end[1] = (struct zvfs_pipe_end){.pipe = p, .flags = end_flags};
++
++	k_poll_signal_init(&p->read_sig);
++	k_poll_signal_init(&p->write_sig);
++	k_poll_signal_raise(&p->write_sig, 0);
++
++	zvfs_finalize_typed_fd(fd[0], &p->end[0], &zvfs_pipe_fd_vtable, ZVFS_MODE_IFIFO);
++	zvfs_finalize_typed_fd(fd[1], &p->end[1], &zvfs_pipe_fd_vtable, ZVFS_MODE_IFIFO);
++
++	if ((flags & ZVFS_O_CLOEXEC) != 0) {
++		(void)zvfs_fcntl(fd[0], ZVFS_F_SETFD, ZVFS_FD_CLOEXEC);
++		(void)zvfs_fcntl(fd[1], ZVFS_F_SETFD, ZVFS_FD_CLOEXEC);
++	}
++
++	fildes[0] = fd[0];
++	fildes[1] = fd[1];
++
++	return 0;
++
++free_pipe:
++	sys_bitarray_free(&pipes_bitarray, 1, offset);
++	return -1;
++}
++
++#ifdef CONFIG_USERSPACE
++static int z_vrfy_zvfs_pipe(int *fildes, int flags)
++{
++	K_OOPS(K_SYSCALL_MEMORY_WRITE(fildes, 2 * sizeof(int)));
++
++	return z_impl_zvfs_pipe(fildes, flags);
++}
++#include <zephyr/syscalls/zvfs_pipe_mrsh.c>
++#endif /* CONFIG_USERSPACE */
