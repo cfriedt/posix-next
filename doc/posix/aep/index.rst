@@ -170,7 +170,7 @@ are listed below, for reference, in terms that agree with the current POSIX-1 st
          :header: Symbol, Support, Remarks
          :widths: 50, 10, 50
 
-          _POSIX_AEP_REALTIME_DEDICATED, -1, :kconfig:option:`CONFIG_POSIX_AEP_REALTIME_DEDICATED`
+          _POSIX_AEP_REALTIME_DEDICATED, 200312L, :kconfig:option:`CONFIG_POSIX_AEP_REALTIME_DEDICATED`
 
       .. csv-table:: PSE53 Option Groups
          :header: Symbol, Support, Remarks
