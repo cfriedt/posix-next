@@ -9,7 +9,7 @@ target_sources(app PRIVATE ${app_sources})
 
 target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
 target_include_directories(app PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/../../../lib/posix/options/spawn
-  ${CMAKE_CURRENT_SOURCE_DIR}/../../../lib/posix/options/shared
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../../lib/posix/spawn
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../../lib/posix/shared
 )
 zephyr_linker_sources(DATA_SECTIONS iterables.ld)

@@ -8,7 +8,7 @@ FILE(GLOB app_sources src/*.c)
 target_sources(app PRIVATE ${app_sources} ../shared/msleep.c ../spawn/src/image_registry.c)
 target_include_directories(app PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/../spawn/src
-  ${CMAKE_CURRENT_SOURCE_DIR}/../../../lib/posix/options/shared
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../../lib/posix/shared
 )
 zephyr_linker_sources(DATA_SECTIONS ${CMAKE_CURRENT_SOURCE_DIR}/../spawn/iterables.ld)
 
