@@ -115,6 +115,11 @@ static inline bool valid_posix_policy(int policy)
 
 static inline int posix_sched_priority_min(int policy)
 {
+#ifdef SCHED_SPORADIC
+	if (IS_ENABLED(CONFIG_POSIX_SPORADIC_SERVER) && (policy == SCHED_SPORADIC)) {
+		return 0;
+	}
+#endif
 	if (!valid_posix_policy(policy)) {
 		errno = EINVAL;
 		return -1;
@@ -133,8 +138,9 @@ static inline int posix_sched_priority_max(int policy)
 	}
 
 #ifdef SCHED_SPORADIC
-	if (IS_ENABLED(CONFIG_POSIX_THREAD_SPORADIC_SERVER) && IS_ENABLED(CONFIG_PREEMPT_ENABLED) &&
-	    (policy == SCHED_SPORADIC)) {
+	if ((IS_ENABLED(CONFIG_POSIX_THREAD_SPORADIC_SERVER) ||
+	     IS_ENABLED(CONFIG_POSIX_SPORADIC_SERVER)) &&
+	    IS_ENABLED(CONFIG_PREEMPT_ENABLED) && (policy == SCHED_SPORADIC)) {
 		return CONFIG_NUM_PREEMPT_PRIORITIES - 1;
 	}
 #endif
