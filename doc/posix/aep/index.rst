@@ -179,7 +179,7 @@ are listed below, for reference, in terms that agree with the current POSIX-1 st
           :ref:`POSIX_MULTI_PROCESS <posix_option_group_multi_process>`,yes, :kconfig:option:`CONFIG_POSIX_MULTI_PROCESS`
           :ref:`POSIX_NETWORKING <posix_option_group_networking>`,yes, :kconfig:option:`CONFIG_POSIX_NETWORKING` :ref:`†<posix_undefined_behaviour>`
           :ref:`POSIX_PIPE <posix_option_group_pipe>`,yes, :kconfig:option:`CONFIG_POSIX_PIPE`
-          :ref:`POSIX_SIGNAL_JUMP <posix_option_group_signal_jump>`,,
+          :ref:`POSIX_SIGNAL_JUMP <posix_option_group_signal_jump>`,yes, :kconfig:option:`CONFIG_POSIX_SIGNAL_JUMP` :ref:`†<posix_undefined_behaviour>`
 
       .. csv-table:: PSE53 Option Requirements
          :header: Symbol, Support, Remarks
@@ -191,6 +191,11 @@ are listed below, for reference, in terms that agree with the current POSIX-1 st
           :ref:`_POSIX_RAW_SOCKETS <posix_option_raw_sockets>`, 200809L, :kconfig:option:`CONFIG_POSIX_RAW_SOCKETS`
           _POSIX_SPAWN, 200809L, :kconfig:option:`CONFIG_POSIX_SPAWN`
           :ref:`_POSIX_SPORADIC_SERVER <posix_option_sporadic_server>`, 200809L, :kconfig:option:`CONFIG_POSIX_SPORADIC_SERVER` :ref:`†<posix_undefined_behaviour>`
+
+      .. note::
+         ``POSIX_SIGNAL_JUMP`` builds on the C library's ``setjmp()``. It is
+         unavailable with the minimal C library, which does not provide one,
+         and in native builds with any C library other than the host's.
 
       .. note::
          ``_POSIX_SPORADIC_SERVER`` support is present for linking and argument
