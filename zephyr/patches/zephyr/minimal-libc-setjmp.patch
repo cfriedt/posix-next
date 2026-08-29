@@ -1,0 +1,168 @@
+diff --git a/lib/libc/minimal/CMakeLists.txt b/lib/libc/minimal/CMakeLists.txt
+index 8df19dfce1c..6ec3d4c620d 100644
+--- a/lib/libc/minimal/CMakeLists.txt
++++ b/lib/libc/minimal/CMakeLists.txt
+@@ -68,3 +68,53 @@ add_custom_command(
+ )
+ 
+ zephyr_include_directories(${ZEPHYR_POSIX_NEXT_MODULE_DIR}/include/zephyr/posix)
++
++# setjmp() and longjmp() are compiled from the picolibc module's machine
++# sources; include/setjmp.h mirrors the matching jmp_buf layouts.
++if(CONFIG_ARM)
++  set(setjmp_machine arm)
++elseif(CONFIG_ARM64)
++  set(setjmp_machine aarch64)
++elseif(CONFIG_RISCV)
++  set(setjmp_machine riscv)
++elseif(CONFIG_X86)
++  set(setjmp_machine x86)
++elseif(CONFIG_XTENSA)
++  set(setjmp_machine xtensa)
++elseif(CONFIG_ARC)
++  if(CONFIG_ISA_ARCV3)
++    set(setjmp_machine arc64)
++  else()
++    set(setjmp_machine arc)
++  endif()
++elseif(CONFIG_MIPS)
++  set(setjmp_machine mips)
++elseif(CONFIG_OPENRISC)
++  set(setjmp_machine or1k)
++elseif(CONFIG_SPARC)
++  set(setjmp_machine sparc)
++elseif(CONFIG_RX)
++  set(setjmp_machine rx)
++elseif(CONFIG_ARCH_POSIX)
++  if(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "x86_64|amd64|i.86")
++    set(setjmp_machine x86)
++  elseif(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
++    set(setjmp_machine aarch64)
++  endif()
++endif()
++
++set(setjmp_src ${ZEPHYR_PICOLIBC_MODULE_DIR}/newlib/libc/machine/${setjmp_machine}/setjmp.S)
++if(DEFINED setjmp_machine AND EXISTS ${setjmp_src})
++  zephyr_library_sources(${setjmp_src})
++  # only for <picolibc.h>; the sources' other quoted includes are file-relative
++  zephyr_library_include_directories(source/setjmp)
++  if(CONFIG_NATIVE_BUILD)
++    # the sources carry no .note.GNU-stack section, and the host linker's
++    # executable-stack warning is fatal under -Wl,--fatal-warnings
++    set_property(SOURCE ${setjmp_src} APPEND PROPERTY COMPILE_OPTIONS -Wa,--noexecstack)
++  endif()
++else()
++  message(WARNING "minimal libc: setjmp() and longjmp() are unavailable "
++    "(no picolibc module machine sources for this architecture); "
++    "calls will fail to link")
++endif()
+diff --git a/lib/libc/minimal/include/setjmp.h b/lib/libc/minimal/include/setjmp.h
+new file mode 100644
+index 00000000000..0ba462441de
+--- /dev/null
++++ b/lib/libc/minimal/include/setjmp.h
+@@ -0,0 +1,89 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_MINIMAL_INCLUDE_SETJMP_H_
++#define ZEPHYR_LIB_LIBC_MINIMAL_INCLUDE_SETJMP_H_
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/*
++ * setjmp() and longjmp() are compiled from the picolibc module's machine
++ * sources (see this library's CMakeLists.txt), so the buffer layouts below
++ * mirror the _JBLEN/_JBTYPE values in picolibc's <machine/setjmp.h> exactly.
++ */
++#if defined(__arm__) || defined(__thumb__)
++#define _JBLEN 20
++#define _JBTYPE long long
++#elif defined(__aarch64__)
++#define _JBLEN 22
++#define _JBTYPE long long
++#elif defined(__riscv)
++/* long long keeps 8-byte alignment so FPR save/restore cannot mis-align */
++#define _JBTYPE long long
++#ifdef __riscv_32e
++#define _JBLEN ((4 * sizeof(long)) / sizeof(long))
++#else
++#define _JBLEN ((14 * sizeof(long) + 12 * sizeof(double)) / sizeof(long))
++#endif
++#elif defined(__x86_64__)
++#define _JBLEN 8
++#define _JBTYPE long long
++#elif defined(__i386__)
++#define _JBLEN 9
++#elif defined(__XTENSA__)
++#if __XTENSA_WINDOWED_ABI__
++#define _JBLEN 17
++#else /* __XTENSA_CALL0_ABI__ */
++#define _JBLEN 6
++#endif
++#elif defined(__ARC64__)
++#define _JBLEN 18
++#ifdef __ARC64_ARCH64__
++#define _JBTYPE long long
++#else
++#define _JBTYPE long
++#endif
++#elif defined(__arc__)
++#define _JBLEN 25
++#define _JBTYPE unsigned long
++#elif defined(__mips__)
++#ifdef __mips64
++#define _JBTYPE long long
++#endif
++#ifdef __mips_soft_float
++#define _JBLEN 11
++#else
++#define _JBLEN 23
++#endif
++#elif defined(__or1k__) || defined(__or1knd__)
++#define _JBLEN 13
++#define _JBTYPE unsigned long
++#elif defined(__sparc__)
++#define _JBLEN 13
++#elif defined(__RX__)
++#define _JBLEN 0x44
++#else
++#error "no jmp_buf layout for this architecture"
++#endif
++
++#ifdef _JBTYPE
++typedef _JBTYPE jmp_buf[_JBLEN];
++#else
++typedef int jmp_buf[_JBLEN];
++#endif
++
++int setjmp(jmp_buf env);
++void longjmp(jmp_buf env, int val);
++
++#ifdef __cplusplus
++}
++#endif
++
++#include <zephyr/posix/posix_setjmp.h>
++
++#endif /* ZEPHYR_LIB_LIBC_MINIMAL_INCLUDE_SETJMP_H_ */
+diff --git a/lib/libc/minimal/source/setjmp/picolibc.h b/lib/libc/minimal/source/setjmp/picolibc.h
+new file mode 100644
+index 00000000000..0dfe29f77fc
+--- /dev/null
++++ b/lib/libc/minimal/source/setjmp/picolibc.h
+@@ -0,0 +1,9 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ *
++ * Empty stand-in for picolibc's generated configuration header, sufficient
++ * for compiling the machine setjmp.S sources outside a picolibc build; they
++ * depend only on compiler-provided macros.
++ */
