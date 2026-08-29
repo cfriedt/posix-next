@@ -193,9 +193,9 @@ are listed below, for reference, in terms that agree with the current POSIX-1 st
           :ref:`_POSIX_SPORADIC_SERVER <posix_option_sporadic_server>`, 200809L, :kconfig:option:`CONFIG_POSIX_SPORADIC_SERVER` :ref:`†<posix_undefined_behaviour>`
 
       .. note::
-         ``POSIX_SIGNAL_JUMP`` builds on the C library's ``setjmp()``. It is
-         unavailable with the minimal C library, which does not provide one,
-         and in native builds with any C library other than the host's.
+         ``POSIX_SIGNAL_JUMP`` builds on the C library's ``setjmp()`` and is
+         unavailable in native builds with any C library other than the
+         host's.
 
       .. note::
          ``_POSIX_SPORADIC_SERVER`` support is present for linking and argument
