@@ -58,6 +58,7 @@ Groups. They are documented with the same per-API detail as Option Groups.
    message_passing
    priority_scheduling
    shared_memory_objects
+   spawn
    synchronized_io
    thread_attr_stackaddr
    thread_attr_stacksize
