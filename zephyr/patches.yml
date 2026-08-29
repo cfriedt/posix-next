@@ -2454,3 +2454,22 @@ patches:
       _POSIX_C_SOURCE. Also select TC_PROVIDES_POSIX_SIGNAL_JUMP from
       NATIVE_LIBC (the c-lib-ext precedent), since glibc provides the
       option group itself.
+  - path: zephyr/minimal-libc-setjmp.patch
+    sha256sum: 1c8bdb422d23553d2e67962e7a4ed46af5da8faaaa3023b1d432eba856620024
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-28
+    upstreamable: true
+    comments: |
+      Provide setjmp() and longjmp() in the minimal libc by compiling the
+      picolibc module's per-machine setjmp.S sources directly from the
+      module tree (nothing is vendored). include/setjmp.h mirrors
+      picolibc's <machine/setjmp.h> _JBLEN/_JBTYPE values so the buffer
+      layouts match the assembly, an empty picolibc.h stand-in satisfies
+      the sources' generated-header include, and the machine is selected
+      per CONFIG_<ARCH> (arc vs arc64 via ISA_ARCV3; native builds map the
+      host processor). When the picolibc module or a machine source is
+      absent, CMake warns and calls fail at link. The header also includes
+      <zephyr/posix/posix_setjmp.h>, following the newlib and picolibc
+      setjmp.h shims, so POSIX_SIGNAL_JUMP works with the minimal libc.
