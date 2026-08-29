@@ -194,7 +194,7 @@ config POSIX_AEP_REALTIME_DEDICATED
 	select POSIX_NETWORKING
 	select POSIX_PIPE
 	# POSIX_SIGNAL_JUMP builds on the configured libc's setjmp(); see its Kconfig
-	select POSIX_SIGNAL_JUMP if !MINIMAL_LIBC && (!NATIVE_BUILD || NATIVE_LIBC)
+	select POSIX_SIGNAL_JUMP if !NATIVE_BUILD || NATIVE_LIBC
 	# Options
 	select POSIX_CPUTIME
 	# POSIX_PRIORITIZED_IO defaults to enabled with POSIX_ASYNCHRONOUS_IO
