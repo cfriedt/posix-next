@@ -8,13 +8,18 @@ common:
   min_flash: 64
   min_ram: 32
 tests:
-  # no .minimal variant: minimal libc has no setjmp(). Non-native-libc
-  # scenarios exclude native (posix-arch) builds: there setjmp()/longjmp()
-  # resolve to the host's symbols, whose jmp_buf does not match the
-  # configured libc's, so only the linux_compat variant runs on native_sim.
+  # Non-native-libc scenarios exclude native (posix-arch) builds: there
+  # setjmp()/longjmp() resolve to the host's symbols, whose jmp_buf does not
+  # match the configured libc's, so only the linux_compat variant runs on
+  # native_sim.
   portability.posix.signal_jump:
     arch_exclude: posix
     filter: not CONFIG_NATIVE_LIBC
+  portability.posix.signal_jump.minimal:
+    arch_exclude: posix
+    filter: not CONFIG_NATIVE_LIBC
+    extra_configs:
+      - CONFIG_MINIMAL_LIBC=y
   portability.posix.signal_jump.userspace:
     filter: (not CONFIG_NATIVE_LIBC) and CONFIG_ARCH_SUPPORTS_USERSPACE_SIGNALS
     tags: userspace
