@@ -1,0 +1,31 @@
+sample:
+  description: run busybox applets as processes exec'd from an ext2 file system
+  name: posix busybox
+common:
+  tags:
+    - posix
+    - exec
+    - llext
+  build_only: false
+  harness: console
+  harness_config:
+    type: multi_line
+    ordered: true
+    regex:
+      - "hello world"
+      - "Hello from busybox on Zephyr!"
+      - "motd"
+      - "hello from hush"
+      - "saw /etc/motd"
+      - "hex of 42 is 2a"
+      - "case matched zephyr"
+      - "busybox sample complete"
+  timeout: 180
+tests:
+  sample.posix.busybox:
+    # 32-bit targets need an off_t story for busybox's CONFIG_LFS first
+    platform_allow:
+      - qemu_cortex_a53
+      - qemu_riscv64
+    integration_platforms:
+      - qemu_riscv64
