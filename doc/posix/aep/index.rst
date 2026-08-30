@@ -237,7 +237,7 @@ defined only while all of them remain enabled.
           :ref:`POSIX_DEVICE_SPECIFIC_R <posix_option_group_device_specific_r>`,,
           :ref:`POSIX_DYNAMIC_LINKING <posix_option_group_dynamic_linking>`,,
           :ref:`POSIX_FIFO <posix_option_group_fifo>`,,
-          :ref:`POSIX_FILE_ATTRIBUTES <posix_option_group_file_attributes>`,,
+          :ref:`POSIX_FILE_ATTRIBUTES <posix_option_group_file_attributes>`,, :kconfig:option:`CONFIG_POSIX_FILE_ATTRIBUTES`
           :ref:`POSIX_FILE_SYSTEM_EXT <posix_option_group_file_system_ext>`,,
           :ref:`POSIX_FILE_SYSTEM_GLOB <posix_option_group_file_system_glob>`,,
           :ref:`POSIX_JOB_CONTROL <posix_option_group_job_control>`,,
@@ -246,8 +246,8 @@ defined only while all of them remain enabled.
           :ref:`POSIX_SYMBOLIC_LINKS <posix_option_group_symbolic_links>`,,
           :ref:`POSIX_SYSTEM_DATABASE <posix_option_group_system_database>`, yes, :kconfig:option:`CONFIG_POSIX_SYSTEM_DATABASE`
           :ref:`POSIX_SYSTEM_DATABASE_R <posix_option_group_system_database_r>`, yes, :kconfig:option:`CONFIG_POSIX_SYSTEM_DATABASE_R`
-          :ref:`POSIX_USER_GROUPS <posix_option_group_user_groups>`,,
-          :ref:`POSIX_USER_GROUPS_R <posix_option_group_user_groups_r>`,,
+          :ref:`POSIX_USER_GROUPS <posix_option_group_user_groups>`,, :kconfig:option:`CONFIG_POSIX_USER_GROUPS`
+          :ref:`POSIX_USER_GROUPS_R <posix_option_group_user_groups_r>`,, :kconfig:option:`CONFIG_POSIX_USER_GROUPS_R`
           :ref:`POSIX_WIDE_CHAR_DEVICE_IO <posix_option_group_wide_char_device_io>`,,
           :ref:`XSI_SYSTEM_LOGGING <posix_option_group_xsi_system_logging>`, yes, :kconfig:option:`CONFIG_XSI_SYSTEM_LOGGING`
 
