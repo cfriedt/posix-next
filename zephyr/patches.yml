@@ -3643,6 +3643,42 @@ patches:
       fds 1/2 to the console and fd 0 to EOF (MINIMAL_STDIO_FD_MIN).
       Newlib already routes through the POSIX device_io write/read aliases
       and needs no change.
+  - path: zephyr/disk-ramdisk-map-ram-region-only.patch
+    sha256sum: 71c537309fdf937e77420c4a42b4a505b9d69487f506e5817f71e14c8aa71703
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-10-04
+    upstreamable: true
+    comments: |
+      Map a RAM disk under the MMU only when its buffer is a ram-region.
+      A buffer declared in the image is already mapped and its address is
+      virtual: mapping it again as a physical address is wrong where the
+      two differ and otherwise costs a second virtual range the size of
+      the disk, which a 4 MiB disk no longer finds in an 8 MiB kernel VM.
+
+  - path: zephyr/k-process-stop-continue.patch
+    sha256sum: d0893e9dd17469d0cc2864e8f73cff2e0d9368285f6fa9f1c60c948658be8692
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-30
+    upstreamable: true
+    comments: |
+      Process stop and continue (CONFIG_PROCESS_STOP): the stop signals
+      gain their POSIX default action, suspending every member thread of
+      the receiving process (the delivery context last); generation of
+      K_SIG_CONT resumes a stopped process regardless of delivery, as
+      does K_SIG_KILL, since a stopped member cannot run its own
+      delivery. k_waitpid() accepts K_PROCESS_WUNTRACED and
+      K_PROCESS_WCONTINUED, reporting K_WSTATUS_STOPPED/CONTINUED
+      transitions without reaping. With stop support enabled the stop
+      and kill signals become unmaskable for kernel-mode callers too
+      (k_sig_mask and clone-time masks), since a process that can mask
+      SIGSTOP defeats job control. Suspension takes a bounded member
+      snapshot outside process_lock: the halt path holds the scheduler
+      lock before process_lock, so scheduler operations under it would
+      invert that order.
   - path: busybox/busybox-zephyr-module.patch
     sha256sum: 8a320ac4d8025303ad0be9a970fc42cdba24488968a3d0a6f2ba346daa723c63
     module: modules/lib/busybox
@@ -3677,17 +3713,3 @@ patches:
       getopt_r(); vfork mapped to fork; fflush_all() flushing only this
       program's streams (picolibc's global stream list is not
       process-aware).
-  - path: zephyr/disk-ramdisk-map-ram-region-only.patch
-    sha256sum: 71c537309fdf937e77420c4a42b4a505b9d69487f506e5817f71e14c8aa71703
-    module: zephyr
-    author: Chris Friedt
-    email: chris@fr4.co
-    date: 2026-10-04
-    upstreamable: true
-    comments: |
-      Map a RAM disk under the MMU only when its buffer is a ram-region.
-      A buffer declared in the image is already mapped and its address is
-      virtual: mapping it again as a physical address is wrong where the
-      two differ and otherwise costs a second virtual range the size of
-      the disk, which a 4 MiB disk no longer finds in an 8 MiB kernel VM.
-
