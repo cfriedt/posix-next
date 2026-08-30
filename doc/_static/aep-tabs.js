@@ -9,6 +9,7 @@
     "minimal-realtime-system-profile-pse51": "posix-aep-pse51",
     "realtime-controller-system-profile-pse52": "posix-aep-pse52",
     "dedicated-realtime-system-profile-pse53": "posix-aep-pse53",
+    "multi-purpose-realtime-system-profile-pse54": "posix-aep-pse54",
   };
 
   const HASH_TO_TAB_LABEL = {
@@ -20,6 +21,8 @@
     "realtime-controller-system-profile-pse52": "PSE52",
     "posix-aep-pse53": "PSE53",
     "dedicated-realtime-system-profile-pse53": "PSE53",
+    "posix-aep-pse54": "PSE54",
+    "multi-purpose-realtime-system-profile-pse54": "PSE54",
   };
 
   const TAB_LABEL_TO_HASH = {
@@ -27,6 +30,7 @@
     PSE51: "#posix-aep-pse51",
     PSE52: "#posix-aep-pse52",
     PSE53: "#posix-aep-pse53",
+    PSE54: "#posix-aep-pse54",
   };
 
   function hashSlug() {
