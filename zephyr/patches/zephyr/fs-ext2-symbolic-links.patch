@@ -1,0 +1,994 @@
+diff --git a/include/zephyr/fs/fs.h b/include/zephyr/fs/fs.h
+--- a/include/zephyr/fs/fs.h
++++ b/include/zephyr/fs/fs.h
+@@ -41,7 +41,9 @@ enum fs_dir_entry_type {
+ 	/** Identifier for file entry */
+ 	FS_DIR_ENTRY_FILE = 0,
+ 	/** Identifier for directory entry */
+-	FS_DIR_ENTRY_DIR
++	FS_DIR_ENTRY_DIR,
++	/** Identifier for symbolic link entry */
++	FS_DIR_ENTRY_SYMLINK
+ };
+ 
+ /** @brief Enumeration to uniquely identify file system types.
+@@ -132,7 +134,8 @@ struct fs_mount_t {
+  */
+ struct fs_dirent {
+ 	/**
+-	 * File/directory type (FS_DIR_ENTRY_FILE or FS_DIR_ENTRY_DIR)
++	 * Entry type (FS_DIR_ENTRY_FILE, FS_DIR_ENTRY_DIR, or
++	 * FS_DIR_ENTRY_SYMLINK)
+ 	 */
+ 	enum fs_dir_entry_type type;
+ 	/** Name of file or directory */
+@@ -673,6 +676,56 @@ int fs_readmount(int *index, const char **name);
+  */
+ int fs_stat(const char *path, struct fs_dirent *entry);
+ 
++/**
++ * @brief File, directory, or symbolic link status
++ *
++ * Like fs_stat(), except that when @p path names a symbolic link, the status
++ * of the link itself is reported rather than that of its target.
++ *
++ * @param path Path to the file, directory, or symbolic link
++ * @param entry Pointer to the fs_dirent structure to fill
++ *
++ * @retval 0 on success;
++ * @retval -EINVAL when a bad directory or file name is given;
++ * @retval -ENOENT when no such directory or file is found;
++ * @retval -ENOTSUP when not supported by underlying file system driver;
++ * @retval <0 negative errno code on error.
++ */
++int fs_lstat(const char *path, struct fs_dirent *entry);
++
++/**
++ * @brief Create a symbolic link
++ *
++ * Creates a symbolic link at @p path whose content is the string @p target.
++ *
++ * @param target The string the new link points to
++ * @param path Path of the symbolic link to create
++ *
++ * @retval 0 on success;
++ * @retval -EEXIST when an entry already exists at @p path;
++ * @retval -ENOTSUP when not supported by underlying file system driver;
++ * @retval <0 negative errno code on error.
++ */
++int fs_symlink(const char *target, const char *path);
++
++/**
++ * @brief Read the target of a symbolic link
++ *
++ * Places up to @p size bytes of the link target string in @p buf, without
++ * NUL termination.
++ *
++ * @param path Path to the symbolic link
++ * @param buf Destination buffer
++ * @param size Destination buffer size in bytes
++ *
++ * @retval >=0 the number of bytes placed in @p buf;
++ * @retval -EINVAL when @p path does not name a symbolic link;
++ * @retval -ENOENT when no such entry is found;
++ * @retval -ENOTSUP when not supported by underlying file system driver;
++ * @retval <0 negative errno code on error.
++ */
++ssize_t fs_readlink(const char *path, char *buf, size_t size);
++
+ /**
+  * @brief Retrieves statistics of the file system volume
+  *
+diff --git a/include/zephyr/fs/fs_sys.h b/include/zephyr/fs/fs_sys.h
+--- a/include/zephyr/fs/fs_sys.h
++++ b/include/zephyr/fs/fs_sys.h
+@@ -192,6 +192,39 @@ struct fs_file_system_t {
+ 	 */
+ 	int (*stat)(struct fs_mount_t *mountp, const char *path,
+ 					struct fs_dirent *entry);
++	/**
++	 * Checks the status of a file, directory, or symbolic link without
++	 * following a trailing symbolic link. Optional; when absent,
++	 * fs_lstat() falls back to the stat operation.
++	 *
++	 * @param mountp Mount point.
++	 * @param path Path to the file, directory, or symbolic link.
++	 * @param entry Directory entry.
++	 * @return 0 on success, negative errno code on fail.
++	 */
++	int (*lstat)(struct fs_mount_t *mountp, const char *path,
++					struct fs_dirent *entry);
++	/**
++	 * Creates a symbolic link. Optional.
++	 *
++	 * @param mountp Mount point.
++	 * @param target The string the new link points to.
++	 * @param path Path of the symbolic link to create.
++	 * @return 0 on success, negative errno code on fail.
++	 */
++	int (*symlink)(struct fs_mount_t *mountp, const char *target,
++					const char *path);
++	/**
++	 * Reads the target of a symbolic link. Optional.
++	 *
++	 * @param mountp Mount point.
++	 * @param path Path to the symbolic link.
++	 * @param buf Destination buffer.
++	 * @param size Destination buffer size in bytes.
++	 * @return Number of bytes placed in buf, negative errno code on fail.
++	 */
++	ssize_t (*readlink)(struct fs_mount_t *mountp, const char *path,
++					char *buf, size_t size);
+ 	/**
+ 	 * Returns the total and available space on the file system volume.
+ 	 *
+diff --git a/include/zephyr/sys/zvfs_fs.h b/include/zephyr/sys/zvfs_fs.h
+--- a/include/zephyr/sys/zvfs_fs.h
++++ b/include/zephyr/sys/zvfs_fs.h
+@@ -235,6 +235,44 @@ __syscall int zvfs_remove(const char *path);
+  */
+ __syscall int zvfs_stat(const char *path, struct zvfs_stat *buf);
+ 
++/**
++ * @brief Get status of a file, directory, or symbolic link by path.
++ *
++ * Like zvfs_stat(), except that when @p path names a symbolic link the
++ * status of the link itself is reported rather than that of its target.
++ *
++ * @param path Path to query.
++ * @param buf Destination for the status.
++ *
++ * @return 0 on success, -1 with errno set on error.
++ */
++__syscall int zvfs_lstat(const char *path, struct zvfs_stat *buf);
++
++/**
++ * @brief Create a symbolic link.
++ *
++ * @param target The string the new link points to.
++ * @param path Path of the symbolic link to create.
++ *
++ * @return 0 on success, -1 with errno set on error.
++ */
++__syscall int zvfs_symlink(const char *target, const char *path);
++
++/**
++ * @brief Read the target of a symbolic link.
++ *
++ * Places up to @p size bytes of the link target string in @p buf, without
++ * NUL termination.
++ *
++ * @param path Path to the symbolic link.
++ * @param buf Destination buffer.
++ * @param size Destination buffer size in bytes.
++ *
++ * @return The number of bytes placed in @p buf on success, -1 with errno
++ *         set on error.
++ */
++__syscall ssize_t zvfs_readlink(const char *path, char *buf, size_t size);
++
+ /**
+  * @brief Get statistics of the file system containing @p path.
+  *
+diff --git a/lib/os/zvfs/zvfs_path.c b/lib/os/zvfs/zvfs_path.c
+--- a/lib/os/zvfs/zvfs_path.c
++++ b/lib/os/zvfs/zvfs_path.c
+@@ -60,21 +60,30 @@ static int zvfs_err(int res)
+ }
+ 
+ /* Zephyr's file system subsystem exposes no permission bits; synthesize a fixed mode. */
+-static uint32_t zvfs_synth_mode(bool is_dir, bool rdonly)
++static uint32_t zvfs_synth_mode(enum fs_dir_entry_type type, bool rdonly)
+ {
+ 	uint32_t mode;
+ 
+-	if (is_dir) {
++	switch (type) {
++	case FS_DIR_ENTRY_DIR:
+ 		/* directories are always searchable */
+ 		mode = ZVFS_MODE_IFDIR | ZVFS_S_IRUSR | ZVFS_S_IXUSR | ZVFS_S_IRGRP |
+ 		       ZVFS_S_IXGRP | ZVFS_S_IROTH | ZVFS_S_IXOTH;
+-	} else {
++		break;
++	case FS_DIR_ENTRY_SYMLINK:
++		/* symbolic links conventionally report all permissions */
++		mode = ZVFS_MODE_IFLNK | ZVFS_S_IRUSR | ZVFS_S_IWUSR | ZVFS_S_IXUSR |
++		       ZVFS_S_IRGRP | ZVFS_S_IWGRP | ZVFS_S_IXGRP | ZVFS_S_IROTH |
++		       ZVFS_S_IWOTH | ZVFS_S_IXOTH;
++		break;
++	default:
+ 		/* no execute permission exists: every file is runnable */
+ 		mode = ZVFS_MODE_IFREG | ZVFS_S_IRUSR | ZVFS_S_IXUSR | ZVFS_S_IRGRP |
+ 		       ZVFS_S_IXGRP | ZVFS_S_IROTH | ZVFS_S_IXOTH;
++		break;
+ 	}
+ 
+-	if (!rdonly) {
++	if (!rdonly && (type != FS_DIR_ENTRY_SYMLINK)) {
+ 		mode |= ZVFS_S_IWUSR | ZVFS_S_IWGRP | ZVFS_S_IWOTH;
+ 	}
+ 
+@@ -193,7 +202,6 @@ int z_impl_zvfs_stat(const char *path, struct zvfs_stat *buf)
+ 	int res;
+ 	struct fs_dirent entry;
+ 	struct fs_statvfs vfs;
+-	bool is_dir;
+ 	char r[CONFIG_ZVFS_PATH_MAX];
+ 	int rrc = zvfs_resolve_path(path, r, sizeof(r));
+ 
+@@ -207,11 +215,9 @@ int z_impl_zvfs_stat(const char *path, struct zvfs_stat *buf)
+ 		return zvfs_err(res);
+ 	}
+ 
+-	is_dir = (entry.type == FS_DIR_ENTRY_DIR);
+-
+ 	*buf = (struct zvfs_stat){0};
+ 	buf->size = entry.size;
+-	buf->mode = zvfs_synth_mode(is_dir, zvfs_mount_rdonly(r));
++	buf->mode = zvfs_synth_mode(entry.type, zvfs_mount_rdonly(r));
+ 	buf->nlink = 1;
+ #ifdef CONFIG_FS_DIRENT_EXT
+ 	buf->atime = entry.atime;
+@@ -244,6 +250,123 @@ static int z_vrfy_zvfs_stat(const char *path, struct zvfs_stat *buf)
+ #include <zephyr/syscalls/zvfs_stat_mrsh.c>
+ #endif /* CONFIG_USERSPACE */
+ 
++int z_impl_zvfs_lstat(const char *path, struct zvfs_stat *buf)
++{
++	int res;
++	struct fs_dirent entry;
++	struct fs_statvfs vfs;
++	char r[CONFIG_ZVFS_PATH_MAX];
++	int rrc = zvfs_resolve_path(path, r, sizeof(r));
++
++	if (rrc < 0) {
++		errno = -rrc;
++		return -1;
++	}
++
++	res = fs_lstat(r, &entry);
++	if (res < 0) {
++		return zvfs_err(res);
++	}
++
++	*buf = (struct zvfs_stat){0};
++	buf->size = entry.size;
++	buf->mode = zvfs_synth_mode(entry.type, zvfs_mount_rdonly(r));
++	buf->nlink = 1;
++#ifdef CONFIG_FS_DIRENT_EXT
++	buf->atime = entry.atime;
++	buf->mtime = entry.mtime;
++	/* Zephyr file systems track no status-change time */
++	buf->ctime = entry.mtime;
++#endif
++
++	/* block accounting is best-effort: not every backend supports statvfs */
++	if (fs_statvfs(r, &vfs) == 0) {
++		buf->blksize = vfs.f_bsize;
++		buf->blocks = DIV_ROUND_UP(entry.size, 512);
++	}
++
++	return 0;
++}
++
++#ifdef CONFIG_USERSPACE
++static int z_vrfy_zvfs_lstat(const char *path, struct zvfs_stat *buf)
++{
++	char kpath[CONFIG_ZVFS_PATH_MAX];
++
++	K_OOPS(K_SYSCALL_MEMORY_WRITE(buf, sizeof(*buf)));
++	if (zvfs_copy_user_path(kpath, path) < 0) {
++		return -1;
++	}
++
++	return z_impl_zvfs_lstat(kpath, buf);
++}
++#include <zephyr/syscalls/zvfs_lstat_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++int z_impl_zvfs_symlink(const char *target, const char *path)
++{
++	char r[CONFIG_ZVFS_PATH_MAX];
++	int rrc = zvfs_resolve_path(path, r, sizeof(r));
++
++	if (rrc < 0) {
++		errno = -rrc;
++		return -1;
++	}
++
++	/* the target is stored verbatim, never resolved here */
++	return zvfs_err(fs_symlink(target, r));
++}
++
++#ifdef CONFIG_USERSPACE
++static int z_vrfy_zvfs_symlink(const char *target, const char *path)
++{
++	char ktarget[CONFIG_ZVFS_PATH_MAX];
++	char kpath[CONFIG_ZVFS_PATH_MAX];
++
++	if (zvfs_copy_user_path(ktarget, target) < 0 || zvfs_copy_user_path(kpath, path) < 0) {
++		return -1;
++	}
++
++	return z_impl_zvfs_symlink(ktarget, kpath);
++}
++#include <zephyr/syscalls/zvfs_symlink_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++ssize_t z_impl_zvfs_readlink(const char *path, char *buf, size_t size)
++{
++	ssize_t res;
++	char r[CONFIG_ZVFS_PATH_MAX];
++	int rrc = zvfs_resolve_path(path, r, sizeof(r));
++
++	if (rrc < 0) {
++		errno = -rrc;
++		return -1;
++	}
++
++	res = fs_readlink(r, buf, size);
++	if (res < 0) {
++		errno = -res;
++		return -1;
++	}
++
++	return res;
++}
++
++#ifdef CONFIG_USERSPACE
++static ssize_t z_vrfy_zvfs_readlink(const char *path, char *buf, size_t size)
++{
++	char kpath[CONFIG_ZVFS_PATH_MAX];
++
++	K_OOPS(K_SYSCALL_MEMORY_WRITE(buf, size));
++	if (zvfs_copy_user_path(kpath, path) < 0) {
++		return -1;
++	}
++
++	return z_impl_zvfs_readlink(kpath, buf, size);
++}
++#include <zephyr/syscalls/zvfs_readlink_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
+ void zvfs_statvfs_from_fs(struct zvfs_statvfs *buf, const struct fs_statvfs *vfs, bool rdonly)
+ {
+ 	*buf = (struct zvfs_statvfs){0};
+diff --git a/subsys/fs/ext2/ext2.h b/subsys/fs/ext2/ext2.h
+--- a/subsys/fs/ext2/ext2.h
++++ b/subsys/fs/ext2/ext2.h
+@@ -68,8 +68,19 @@
+ 	 EXT2_S_IRGRP | EXT2_S_IXGRP |                \
+ 	 EXT2_S_IROTH | EXT2_S_IXOTH)
+ 
++/* Default symlink mode: rwxrwxrwx */
++#define EXT2_DEF_LINK_MODE                            \
++	(EXT2_S_IFLNK |                               \
++	 EXT2_S_IRUSR | EXT2_S_IWUSR | EXT2_S_IXUSR | \
++	 EXT2_S_IRGRP | EXT2_S_IWGRP | EXT2_S_IXGRP | \
++	 EXT2_S_IROTH | EXT2_S_IWOTH | EXT2_S_IXOTH)
++
+ #define IS_REG_FILE(mode) (((mode) & EXT2_S_IFMT) == EXT2_S_IFREG)
+ #define IS_DIR(mode) (((mode) & EXT2_S_IFMT) == EXT2_S_IFDIR)
++#define IS_LNK(mode) (((mode) & EXT2_S_IFMT) == EXT2_S_IFLNK)
++
++/* A fast symbolic link stores its target directly in i_block */
++#define EXT2_FAST_SYMLINK_MAX (EXT2_INODE_BLOCKS * sizeof(uint32_t))
+ 
+ /* Directory file type flags */
+ #define EXT2_FT_UNKNOWN  0
+diff --git a/subsys/fs/ext2/ext2_impl.c b/subsys/fs/ext2/ext2_impl.c
+--- a/subsys/fs/ext2/ext2_impl.c
++++ b/subsys/fs/ext2/ext2_impl.c
+@@ -429,6 +429,43 @@ static char *strchrnul(const char *str, const char c);
+ static int64_t find_dir_entry(struct ext2_inode *inode, const char *name, size_t len,
+ 		uint32_t *r_offset);
+ 
++bool ext2_inode_is_fast_symlink(struct ext2_inode *inode)
++{
++	return IS_LNK(inode->i_mode) && (inode->i_blocks == 0) &&
++	       (inode->i_size <= EXT2_FAST_SYMLINK_MAX);
++}
++
++/* Splice a symbolic link target and the unresolved remainder of the path */
++static int ext2_expand_symlink(struct ext2_inode *inode, const char *rest, char *out,
++		size_t outsize)
++{
++	size_t tlen = inode->i_size;
++	size_t rlen = strlen(rest);
++
++	if (!ext2_inode_is_fast_symlink(inode)) {
++		/* only fast symbolic links are supported */
++		return -ENOTSUP;
++	}
++
++	if (tlen == 0) {
++		return -ENOENT;
++	}
++
++	if ((tlen + 1 + rlen + 1) > outsize) {
++		return -ENAMETOOLONG;
++	}
++
++	memcpy(out, (const char *)inode->i_block, tlen);
++	if (rlen > 0) {
++		out[tlen] = '/';
++		memcpy(&out[tlen + 1], rest, rlen + 1);
++	} else {
++		out[tlen] = '\0';
++	}
++
++	return 0;
++}
++
+ int ext2_lookup_inode(struct ext2_data *fs, struct ext2_lookup_args *args)
+ {
+ 	LOG_DBG("Looking for file %s", args->path);
+@@ -436,6 +473,10 @@ int ext2_lookup_inode(struct ext2_data *fs, struct ext2_lookup_args *args)
+ 	int rc, ret = 0;
+ 	struct ext2_inode *cur_dir = NULL, *next = NULL;
+ 	static char name_buf[EXT2_MAX_FILE_NAME + 1];
++	/* two buffers: an expansion's remainder may live in the other one */
++	static char link_path[2][EXT2_MAX_PATH];
++	int link_sel = 0;
++	int link_depth = 0;
+ 
+ 	/* Start looking from root directory of file system */
+ 	rc = ext2_inode_get(fs, EXT2_ROOT_INODE, &cur_dir);
+@@ -493,6 +534,45 @@ int ext2_lookup_inode(struct ext2_data *fs, struct ext2_lookup_args *args)
+ 				goto out;
+ 			}
+ 
++			if (IS_LNK(next->i_mode)) {
++				if (++link_depth > EXT2_MAX_LINK_DEPTH) {
++					ret = -ELOOP;
++					goto out;
++				}
++
++				rc = ext2_expand_symlink(next, next_path, link_path[link_sel],
++						sizeof(link_path[link_sel]));
++				ext2_inode_drop(next);
++				next = NULL;
++				if (rc < 0) {
++					ret = rc;
++					goto out;
++				}
++
++				/* create's name_pos indexes args->path: keep it consistent */
++				args->path = link_path[link_sel];
++				link_sel = 1 - link_sel;
++				path = args->path;
++
++				if (path[0] == '/') {
++					/* absolute target: restart from the root */
++					ext2_inode_drop(cur_dir);
++					cur_dir = NULL;
++					rc = ext2_inode_get(fs, EXT2_ROOT_INODE, &cur_dir);
++					if (rc < 0) {
++						ret = rc;
++						goto out;
++					}
++				}
++
++				path = skip_slash(path);
++				if (path[0] == '\0') {
++					ret = -ENOENT;
++					goto out;
++				}
++				continue;
++			}
++
+ 			if (!(next->i_mode & EXT2_S_IFDIR)) {
+ 				/* path component should be directory */
+ 				ret = -ENOTDIR;
+@@ -524,6 +604,44 @@ int ext2_lookup_inode(struct ext2_data *fs, struct ext2_lookup_args *args)
+ 				ret = rc;
+ 				goto out;
+ 			}
++
++			if (IS_LNK(next->i_mode) && !(args->flags & LOOKUP_ARG_NOFOLLOW)) {
++				if (++link_depth > EXT2_MAX_LINK_DEPTH) {
++					ret = -ELOOP;
++					goto out;
++				}
++
++				rc = ext2_expand_symlink(next, next_path, link_path[link_sel],
++						sizeof(link_path[link_sel]));
++				ext2_inode_drop(next);
++				next = NULL;
++				if (rc < 0) {
++					ret = rc;
++					goto out;
++				}
++
++				args->path = link_path[link_sel];
++				link_sel = 1 - link_sel;
++				path = args->path;
++
++				if (path[0] == '/') {
++					/* absolute target: restart from the root */
++					ext2_inode_drop(cur_dir);
++					cur_dir = NULL;
++					rc = ext2_inode_get(fs, EXT2_ROOT_INODE, &cur_dir);
++					if (rc < 0) {
++						ret = rc;
++						goto out;
++					}
++				}
++
++				path = skip_slash(path);
++				if (path[0] == '\0') {
++					ret = -ENOENT;
++					goto out;
++				}
++				continue;
++			}
+ 		}
+ 
+ 		/* Store parent directory and offset in parent directory */
+@@ -931,12 +1049,22 @@ int ext2_get_direntry(struct ext2_file *dir, struct fs_dirent *ent)
+ 	LOG_DBG("name_len=%d name=%s %d", de->de_name_len, ent->name, EXT2_MAX_FILE_NAME);
+ 
+ 	/* Get type of directory entry */
+-	ent->type = de->de_file_type & EXT2_FT_DIR ? FS_DIR_ENTRY_DIR : FS_DIR_ENTRY_FILE;
++	switch (de->de_file_type) {
++	case EXT2_FT_DIR:
++		ent->type = FS_DIR_ENTRY_DIR;
++		break;
++	case EXT2_FT_SYMLINK:
++		ent->type = FS_DIR_ENTRY_SYMLINK;
++		break;
++	default:
++		ent->type = FS_DIR_ENTRY_FILE;
++		break;
++	}
+ 
+ 	/* Get size only for files. Directories have size 0. */
+ 	size_t size = 0;
+ 
+-	if (ent->type == FS_DIR_ENTRY_FILE) {
++	if (ent->type != FS_DIR_ENTRY_DIR) {
+ 		rc = ext2_inode_get(fs, de->de_inode, &inode);
+ 		if (rc < 0) {
+ 			ret = rc;
+@@ -974,7 +1102,17 @@ static int ext2_create_inode(struct ext2_data *fs, struct ext2_inode *parent,
+ 	inode->flags = 0;
+ 	inode->i_id = ino;
+ 	inode->i_size = 0;
+-	inode->i_mode = type == FS_DIR_ENTRY_FILE ? EXT2_DEF_FILE_MODE : EXT2_DEF_DIR_MODE;
++	switch (type) {
++	case FS_DIR_ENTRY_DIR:
++		inode->i_mode = EXT2_DEF_DIR_MODE;
++		break;
++	case FS_DIR_ENTRY_SYMLINK:
++		inode->i_mode = EXT2_DEF_LINK_MODE;
++		break;
++	default:
++		inode->i_mode = EXT2_DEF_FILE_MODE;
++		break;
++	}
+ 	inode->i_links_count = 0;
+ 	memset(inode->i_block, 0, 15 * 4);
+ 
+@@ -1145,6 +1283,46 @@ out:
+ 	return ret;
+ }
+ 
++int ext2_create_symlink(struct ext2_inode *parent, struct ext2_inode *new_inode,
++		struct ext2_lookup_args *args, const char *target)
++{
++	int rc, ret = 0;
++	struct ext2_direntry *entry;
++	struct ext2_data *fs = parent->i_fs;
++	size_t tlen = strlen(target);
++
++	__ASSERT(tlen <= EXT2_FAST_SYMLINK_MAX, "symlink target too long for fast symlink");
++
++	rc = ext2_create_inode(fs, args->inode, new_inode, FS_DIR_ENTRY_SYMLINK);
++	if (rc < 0) {
++		return rc;
++	}
++
++	/* a fast symbolic link: the target lives in the inode itself */
++	memcpy(new_inode->i_block, target, tlen);
++	new_inode->i_size = tlen;
++	new_inode->i_blocks = 0;
++
++	entry = ext2_create_direntry(args->path + args->name_pos, args->name_len, new_inode->i_id,
++			EXT2_FT_SYMLINK);
++
++	rc = ext2_add_direntry(parent, entry);
++	if (rc < 0) {
++		ret = rc;
++		goto out;
++	}
++
++	new_inode->i_links_count += 1;
++
++	rc = ext2_commit_inode(new_inode);
++	if (rc < 0) {
++		ret = rc;
++	}
++out:
++	k_heap_free(&direntry_heap, entry);
++	return ret;
++}
++
+ int ext2_create_dir(struct ext2_inode *parent, struct ext2_inode *new_inode,
+ 		struct ext2_lookup_args *args)
+ {
+@@ -1351,10 +1529,12 @@ static int remove_inode(struct ext2_inode *inode)
+ 
+ 	LOG_DBG("inode: %d", inode->i_id);
+ 
+-	/* Free blocks of inode */
+-	ret = ext2_inode_remove_blocks(inode, 0);
+-	if (ret < 0) {
+-		return ret;
++	/* Free blocks of inode; a fast symlink's i_block holds its target, not blocks */
++	if (!ext2_inode_is_fast_symlink(inode)) {
++		ret = ext2_inode_remove_blocks(inode, 0);
++		if (ret < 0) {
++			return ret;
++		}
+ 	}
+ 
+ 	/* Free inode */
+@@ -1421,7 +1601,8 @@ int ext2_inode_unlink(struct ext2_inode *parent, struct ext2_inode *inode, uint3
+ 		return rc;
+ 	}
+ 
+-	if ((IS_REG_FILE(inode->i_mode) && inode->i_links_count == 1) ||
++	if (((IS_REG_FILE(inode->i_mode) || IS_LNK(inode->i_mode)) &&
++			inode->i_links_count == 1) ||
+ 			(IS_DIR(inode->i_mode) && inode->i_links_count == 2)) {
+ 
+ 		/* Only set the flag. Inode may still be open. Inode will be
+diff --git a/subsys/fs/ext2/ext2_impl.h b/subsys/fs/ext2/ext2_impl.h
+--- a/subsys/fs/ext2/ext2_impl.h
++++ b/subsys/fs/ext2/ext2_impl.h
+@@ -125,6 +125,14 @@ int ext2_format(struct ext2_data *fs, struct ext2_cfg *cfg);
+ #define LOOKUP_ARG_CREATE BIT(1)
+ #define LOOKUP_ARG_STAT BIT(2)
+ #define LOOKUP_ARG_UNLINK BIT(3)
++/* do not follow a symbolic link in the final path component */
++#define LOOKUP_ARG_NOFOLLOW BIT(4)
++
++/* Maximum path length during symbolic link expansion */
++#define EXT2_MAX_PATH 256
++
++/* Maximum number of symbolic links followed in one lookup */
++#define EXT2_MAX_LINK_DEPTH 8
+ 
+ /* Structure for lookup arguments and results.
+  *
+@@ -283,6 +291,34 @@ int ext2_create_file(struct ext2_inode *parent, struct ext2_inode *inode,
+ int ext2_create_dir(struct ext2_inode *parent, struct ext2_inode *inode,
+ 		    struct ext2_lookup_args *args);
+ 
++/**
++ * @brief Create a symbolic link
++ *
++ * The target is stored directly in the inode (a fast symbolic link), hence
++ * it must be at most EXT2_FAST_SYMLINK_MAX bytes long.
++ *
++ * @param parent Parent directory
++ * @param inode Pointer to inode structure that will be filled with new inode
++ * @param args Lookup arguments that describe the link to create
++ * @param target The string the new link points to
++ *
++ * @retval 0 on success
++ * @retval -ENOSPC there is not enough memory on storage device to create a file
++ * @retval <0 on error
++ */
++int ext2_create_symlink(struct ext2_inode *parent, struct ext2_inode *inode,
++			struct ext2_lookup_args *args, const char *target);
++
++/**
++ * @brief Check whether an inode is a fast symbolic link
++ *
++ * @param inode Inode to check
++ *
++ * @retval true when the inode is a symbolic link whose target is stored in
++ *         the inode itself
++ */
++bool ext2_inode_is_fast_symlink(struct ext2_inode *inode);
++
+ /**
+  * @brief Unlink the directory entry at given offset in parent directory
+  *
+diff --git a/subsys/fs/ext2/ext2_ops.c b/subsys/fs/ext2/ext2_ops.c
+--- a/subsys/fs/ext2/ext2_ops.c
++++ b/subsys/fs/ext2/ext2_ops.c
+@@ -5,6 +5,7 @@
+  */
+ 
+ #include <errno.h>
++#include <string.h>
+ #include <zephyr/init.h>
+ #include <zephyr/fs/fs.h>
+ #include <zephyr/fs/fs_sys.h>
+@@ -509,7 +510,7 @@ static int ext2_unlink(struct fs_mount_t *mountp, const char *name)
+ 		.parent = NULL,
+ 	};
+ 
+-	args.flags = LOOKUP_ARG_UNLINK;
++	args.flags = LOOKUP_ARG_UNLINK | LOOKUP_ARG_NOFOLLOW;
+ 
+ 	rc = ext2_lookup_inode(fs, &args);
+ 	if (rc < 0) {
+@@ -543,14 +544,14 @@ static int ext2_rename(struct fs_mount_t *mountp, const char *from, const char *
+ 		.path = path_from,
+ 		.inode = NULL,
+ 		.parent = NULL,
+-		.flags = LOOKUP_ARG_UNLINK,
++		.flags = LOOKUP_ARG_UNLINK | LOOKUP_ARG_NOFOLLOW,
+ 	};
+ 
+ 	struct ext2_lookup_args args_to = {
+ 		.path = path_to,
+ 		.inode = NULL,
+ 		.parent = NULL,
+-		.flags = LOOKUP_ARG_CREATE,
++		.flags = LOOKUP_ARG_CREATE | LOOKUP_ARG_NOFOLLOW,
+ 	};
+ 
+ 	rc = ext2_lookup_inode(fs, &args_from);
+@@ -621,6 +622,126 @@ static int ext2_statvfs(struct fs_mount_t *mountp, const char *path, struct fs_s
+ 
+ /* File system interface */
+ 
++
++static int ext2_lstat(struct fs_mount_t *mountp, const char *path, struct fs_dirent *entry)
++{
++	int rc;
++	struct ext2_data *fs = mountp->fs_data;
++
++	path = fs_impl_strip_prefix(path, mountp);
++
++	struct ext2_lookup_args args = {
++		.path = path,
++		.parent = NULL,
++		.flags = LOOKUP_ARG_STAT | LOOKUP_ARG_NOFOLLOW,
++	};
++
++	rc = ext2_lookup_inode(fs, &args);
++	if (rc < 0) {
++		return rc;
++	}
++
++	uint32_t offset = args.offset;
++	struct ext2_file dir = {.f_inode = args.parent ? args.parent : args.inode, .f_off = offset};
++
++	rc = ext2_get_direntry(&dir, entry);
++
++	ext2_inode_drop(args.parent);
++	ext2_inode_drop(args.inode);
++	return rc;
++}
++
++static int ext2_symlink(struct fs_mount_t *mountp, const char *target, const char *path)
++{
++	int rc, ret = 0;
++	struct ext2_data *fs = mountp->fs_data;
++	size_t tlen = strlen(target);
++
++	if (tlen == 0) {
++		return -ENOENT;
++	}
++
++	if (tlen > EXT2_FAST_SYMLINK_MAX) {
++		/* only fast symbolic links are supported */
++		return -ENAMETOOLONG;
++	}
++
++	path = fs_impl_strip_prefix(path, mountp);
++
++	struct ext2_lookup_args args = {
++		.path = path,
++		.inode = NULL,
++		.parent = NULL,
++		.flags = LOOKUP_ARG_CREATE | LOOKUP_ARG_NOFOLLOW,
++	};
++
++	rc = ext2_lookup_inode(fs, &args);
++	if (rc < 0) {
++		return rc;
++	}
++
++	if (args.inode != NULL) {
++		ret = -EEXIST;
++		goto out;
++	}
++
++	struct ext2_inode *new_inode;
++
++	rc = ext2_inode_get(fs, 0, &new_inode);
++	if (rc < 0) {
++		ret = rc;
++		goto out;
++	}
++
++	rc = ext2_create_symlink(args.parent, new_inode, &args, target);
++	if (rc < 0) {
++		ext2_inode_drop(new_inode);
++		ret = rc;
++		goto out;
++	}
++
++	rc = ext2_inode_drop(new_inode);
++	if (rc < 0) {
++		ret = rc;
++	}
++out:
++	ext2_inode_drop(args.inode);
++	ext2_inode_drop(args.parent);
++	return ret;
++}
++
++static ssize_t ext2_readlink(struct fs_mount_t *mountp, const char *path, char *buf, size_t size)
++{
++	int rc;
++	ssize_t ret;
++	struct ext2_data *fs = mountp->fs_data;
++
++	path = fs_impl_strip_prefix(path, mountp);
++
++	struct ext2_lookup_args args = {
++		.path = path,
++		.inode = NULL,
++		.flags = LOOKUP_ARG_OPEN | LOOKUP_ARG_NOFOLLOW,
++	};
++
++	rc = ext2_lookup_inode(fs, &args);
++	if (rc < 0) {
++		return rc;
++	}
++
++	if (!IS_LNK(args.inode->i_mode)) {
++		ret = -EINVAL;
++	} else if (!ext2_inode_is_fast_symlink(args.inode)) {
++		ret = -ENOTSUP;
++	} else {
++		ret = MIN(size, args.inode->i_size);
++		memcpy(buf, (const char *)args.inode->i_block, ret);
++	}
++
++	ext2_inode_drop(args.inode);
++	return ret;
++}
++
+ static const struct fs_file_system_t ext2_fs = {
+ 	.open = ext2_open,
+ 	.close = ext2_close,
+@@ -639,6 +760,9 @@ static const struct fs_file_system_t ext2_fs = {
+ 	.unlink = ext2_unlink,
+ 	.rename = ext2_rename,
+ 	.stat = ext2_stat,
++	.lstat = ext2_lstat,
++	.symlink = ext2_symlink,
++	.readlink = ext2_readlink,
+ 	.statvfs = ext2_statvfs,
+ #if defined(CONFIG_FILE_SYSTEM_MKFS)
+ 	.mkfs = ext2_mkfs,
+diff --git a/subsys/fs/fs.c b/subsys/fs/fs.c
+--- a/subsys/fs/fs.c
++++ b/subsys/fs/fs.c
+@@ -703,6 +703,118 @@ int fs_stat(const char *abs_path, struct fs_dirent *entry)
+ 	return rc;
+ }
+ 
++int fs_lstat(const char *abs_path, struct fs_dirent *entry)
++{
++	struct fs_mount_t *mp;
++	int rc = -EINVAL;
++	size_t mp_len;
++	size_t path_len;
++
++	if ((abs_path == NULL) || (abs_path[0] != '/')) {
++		LOG_ERR("invalid file or dir name!!");
++		return -EINVAL;
++	}
++
++	path_len = strlen(abs_path);
++	if (path_len == 1) {
++		/* Stat on the root directory */
++		entry->type = FS_DIR_ENTRY_DIR;
++		entry->name[0] = '/';
++		entry->name[1] = '\0';
++		entry->size = 0;
++		return 0;
++	}
++
++	rc = fs_get_mnt_point(&mp, abs_path, &mp_len);
++	if (rc < 0) {
++		LOG_ERR("mount point not found!!");
++		return rc;
++	}
++
++	/* abs_path can have a / at the end, unlike mnt_point. */
++	if (path_len - mp_len <= 1U) {
++		/* Stat on the mount point itself */
++		fs_copy_mnt_point_to_entry(mp, entry);
++		return 0;
++	}
++
++	/* file systems without symbolic links have nothing not to follow */
++	if (mp->fs->lstat == NULL) {
++		CHECKIF(mp->fs->stat == NULL) {
++			return -ENOTSUP;
++		}
++		return mp->fs->stat(mp, abs_path, entry);
++	}
++
++	rc = mp->fs->lstat(mp, abs_path, entry);
++	if ((rc < 0) && (rc != -ENOENT)) {
++		LOG_ERR("failed get file or dir lstat (%d)", rc);
++	}
++	return rc;
++}
++
++int fs_symlink(const char *target, const char *abs_path)
++{
++	struct fs_mount_t *mp;
++	int rc = -EINVAL;
++	size_t mp_len;
++
++	if ((target == NULL) || (abs_path == NULL) || (abs_path[0] != '/') ||
++	    (abs_path[1] == '\0')) {
++		LOG_ERR("invalid file or dir name!!");
++		return -EINVAL;
++	}
++
++	rc = fs_get_mnt_point(&mp, abs_path, &mp_len);
++	if (rc < 0) {
++		LOG_ERR("mount point not found!!");
++		return rc;
++	}
++
++	if (mp->flags & FS_MOUNT_FLAG_READ_ONLY) {
++		return -EROFS;
++	}
++
++	CHECKIF(mp->fs->symlink == NULL) {
++		return -ENOTSUP;
++	}
++
++	rc = mp->fs->symlink(mp, target, abs_path);
++	if (rc < 0) {
++		LOG_ERR("failed to create symlink (%d)", rc);
++	}
++	return rc;
++}
++
++ssize_t fs_readlink(const char *abs_path, char *buf, size_t size)
++{
++	struct fs_mount_t *mp;
++	ssize_t rc = -EINVAL;
++	size_t mp_len;
++
++	if ((abs_path == NULL) || (abs_path[0] != '/') || (abs_path[1] == '\0') ||
++	    (buf == NULL)) {
++		LOG_ERR("invalid file or dir name!!");
++		return -EINVAL;
++	}
++
++	rc = fs_get_mnt_point(&mp, abs_path, &mp_len);
++	if (rc < 0) {
++		LOG_ERR("mount point not found!!");
++		return rc;
++	}
++
++	CHECKIF(mp->fs->readlink == NULL) {
++		return -ENOTSUP;
++	}
++
++	rc = mp->fs->readlink(mp, abs_path, buf, size);
++	if ((rc < 0) && (rc != -EINVAL) && (rc != -ENOENT)) {
++		LOG_ERR("failed to read symlink (%zd)", rc);
++	}
++	return rc;
++}
++
+ int fs_statvfs(const char *abs_path, struct fs_statvfs *stat)
+ {
+ 	struct fs_mount_t *mp;
