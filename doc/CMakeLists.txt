@@ -119,6 +119,7 @@ set(INTERACTIVE_SVGS
   posix/aep/aep-pse51.svg
   posix/aep/aep-pse52.svg
   posix/aep/aep-pse53.svg
+  posix/aep/aep-pse54.svg
 )
 foreach(svg ${INTERACTIVE_SVGS})
   add_custom_command(TARGET html POST_BUILD
