@@ -14,9 +14,9 @@ interfaces require a controlling terminal, which Zephyr does not have. See also 
    :widths: 50,10
 
     :c:func:`setpgid`,yes
-    :c:func:`tcgetpgrp`,no
-    :c:func:`tcgetsid`,no
-    :c:func:`tcsetpgrp`,no
+    :c:func:`tcgetpgrp`,yes
+    :c:func:`tcgetsid`,yes
+    :c:func:`tcsetpgrp`,yes
 
 Please refer to `Subprofiling Considerations <https://pubs.opengroup.org/onlinepubs/9699919799/xrat/V4_subprofiles.html>`_ for details on the ``POSIX_JOB_CONTROL`` Option
 Group.
