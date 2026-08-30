@@ -1,0 +1,27 @@
+diff --git a/lib/os/zvfs/zvfs_fdtable.c b/lib/os/zvfs/zvfs_fdtable.c
+--- a/lib/os/zvfs/zvfs_fdtable.c
++++ b/lib/os/zvfs/zvfs_fdtable.c
+@@ -975,13 +975,19 @@ static ssize_t stdinout_write_vmeth(void *obj, const void *buffer, size_t count)
+ 
+ static int stdinout_ioctl_vmeth(void *obj, unsigned int request, va_list args)
+ {
+-	if (request == ZFD_IOCTL_ISATTY) {
++	switch (request) {
++	case ZFD_IOCTL_ISATTY:
+ 		/* the reserved stdio descriptors refer to the console */
+ 		return 0;
++	case ZVFS_F_GETFL:
++		return ZVFS_O_RDWR;
++	case ZVFS_F_SETFL:
++		/* nothing the console honors yet; accept for fcntl() users */
++		return 0;
++	default:
++		errno = EINVAL;
++		return -1;
+ 	}
+-
+-	errno = EINVAL;
+-	return -1;
+ }
+ 
+ static const struct fd_op_vtable stdinout_fd_op_vtable = {
