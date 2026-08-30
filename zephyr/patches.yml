@@ -3614,3 +3614,32 @@ patches:
       resolution following links (ELOOP after 8), and
       zvfs_symlink()/zvfs_readlink()/zvfs_lstat() syscalls for the
       POSIX_SYMBOLIC_LINKS Option Group.
+  - path: zephyr/zvfs-stdio-picolibc-write.patch
+    sha256sum: 793efdf8557e09fdb6c67064c5a31a6b2209a695718af30a1aa1192034daeeb8
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-30
+    upstreamable: true
+    comments: |
+      write() on the reserved stdout/stderr descriptors returned 0 with
+      picolibc, which sends callers that retry short writes (busybox
+      full_write) into an infinite loop; route the bytes through
+      zephyr_fputc like the other C libraries route through
+      zephyr_write_stdout.
+  - path: zephyr/libc-stdio-fd-backed-standard-streams.patch
+    sha256sum: 0dd5ddf357851a2865878bdbe4b60ed80822c00e5b0c9af00721bc94e235a282
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-02
+    upstreamable: true
+    comments: |
+      Route the standard streams through the reserved ZVFS descriptors
+      (0/1/2) under CONFIG_ZVFS_RESERVE_STDIO_FDS instead of the console
+      hook, so dup2() redirection of stdin/stdout/stderr onto pipes or
+      files (as posix_spawn() file actions do) is honored. Picolibc
+      stdio.c gains fd-backed put/get; minimal libc stops special-casing
+      fds 1/2 to the console and fd 0 to EOF (MINIMAL_STDIO_FD_MIN).
+      Newlib already routes through the POSIX device_io write/read aliases
+      and needs no change.
