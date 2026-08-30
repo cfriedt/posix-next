@@ -1,0 +1,722 @@
+diff --git a/include/zephyr/kernel/process.h b/include/zephyr/kernel/process.h
+--- a/include/zephyr/kernel/process.h
++++ b/include/zephyr/kernel/process.h
+@@ -131,6 +131,12 @@ struct k_thread;
+ /** @cond INTERNAL_HIDDEN */
+ /** A K_SIG_CHLD notification for this zombie has not yet been emitted */
+ #define K_PROCESS_FLAG_SIGCHLD BIT(0)
++/** @brief Every member thread is suspended by a stop signal */
++#define K_PROCESS_FLAG_STOPPED BIT(2)
++/** @brief The stop has not yet been reported to a K_PROCESS_WUNTRACED waiter */
++#define K_PROCESS_FLAG_WSTOP_PENDING BIT(3)
++/** @brief The continue has not yet been reported to a K_PROCESS_WCONTINUED waiter */
++#define K_PROCESS_FLAG_WCONT_PENDING BIT(4)
+ /** Reparented to init while still running: init reaps it when it exits */
+ #define K_PROCESS_FLAG_ADOPTED BIT(1)
+ /** @endcond */
+@@ -156,6 +162,16 @@ struct k_thread;
+ #define K_WIFSIGNALED(wstatus) ((((signed char)(((wstatus) & 0x7f) + 1)) >> 1) > 0)
+ /** @brief Kernel signal number that terminated the process */
+ #define K_WTERMSIG(wstatus) ((wstatus) & 0x7f)
++/** @brief Encode a stopped wait status from kernel signal @a signo */
++#define K_WSTATUS_STOPPED(signo) ((((signo) & 0xff) << 8) | 0x7f)
++/** @brief Encode a continued wait status */
++#define K_WSTATUS_CONTINUED 0xffff
++/** @brief True if the child is stopped */
++#define K_WIFSTOPPED(wstatus) (((wstatus) & 0xff) == 0x7f)
++/** @brief Kernel signal number that stopped the child */
++#define K_WSTOPSIG(wstatus) (((wstatus) >> 8) & 0xff)
++/** @brief True if the child was continued */
++#define K_WIFCONTINUED(wstatus) ((wstatus) == K_WSTATUS_CONTINUED)
+ /** @} */
+ 
+ /**
+@@ -167,9 +183,9 @@ struct k_thread;
+ /** @brief Report status without reaping the child */
+ #define K_PROCESS_WNOWAIT BIT(24)
+ 
+-/** @brief Report stopped children (reserved; stop/continue is unsupported) */
++/** @brief Report stopped children (requires CONFIG_PROCESS_STOP) */
+ #define K_PROCESS_WUNTRACED BIT(1)
+-/** @brief Report continued children (reserved; stop/continue is unsupported) */
++/** @brief Report continued children (requires CONFIG_PROCESS_STOP) */
+ #define K_PROCESS_WCONTINUED BIT(3)
+ /** @brief Report exited children (the default; accepted for waitid() compatibility) */
+ #define K_PROCESS_WEXITED BIT(2)
+@@ -252,10 +268,18 @@ struct k_process {
+ 	uint8_t state;
+ 	/** Internal K_PROCESS_FLAG_* state bits */
+ 	uint8_t flags;
++	/** Kernel signal that stopped the process (K_PROCESS_FLAG_STOPPED) */
++	uint8_t stop_sig;
+ 	/** Latched wait status (K_WSTATUS_*), valid in K_PROCESS_ZOMBIE */
+ 	int wstatus;
+ 	/** Threads pending in k_waitpid() on this process's children */
+ 	_wait_q_t waitq;
++#ifdef CONFIG_PROCESS_STOP
++	/** The member delivering the stop pends here until the process is continued */
++	_wait_q_t stopq;
++	/** Count of continues; a stop in progress compares it before pending */
++	atomic_t stop_gen;
++#endif /* CONFIG_PROCESS_STOP */
+ 	/** Node in the kernel's registry of live process records */
+ 	sys_dnode_t active_node;
+ #ifdef CONFIG_SCHED_THREAD_USAGE
+diff --git a/kernel/Kconfig.process b/kernel/Kconfig.process
+--- a/kernel/Kconfig.process
++++ b/kernel/Kconfig.process
+@@ -19,6 +19,16 @@ config PROCESS
+ 
+ if PROCESS
+ 
++config PROCESS_STOP
++	bool "Process stop and continue (job control)"
++	depends on PROCESS && SIGNAL
++	help
++	  Give the stop signals their POSIX default action: delivery of
++	  K_SIG_STOP, K_SIG_TSTP, K_SIG_TTIN, or K_SIG_TTOU suspends every
++	  member thread of the receiving process, K_SIG_CONT resumes them,
++	  and k_waitpid() reports the transitions to waiters passing
++	  K_PROCESS_WUNTRACED or K_PROCESS_WCONTINUED.
++
+ config PROCESS_VM
+ 	bool "Per-process virtual address space duplication (experimental)"
+ 	depends on PROCESS && USERSPACE && ARCH_HAS_PROCESS_VM
+diff --git a/kernel/include/kernel_internal.h b/kernel/include/kernel_internal.h
+--- a/kernel/include/kernel_internal.h
++++ b/kernel/include/kernel_internal.h
+@@ -189,6 +189,12 @@ bool z_process_self_is_reserved(void);
+  */
+ #ifdef CONFIG_SYS_PROCESS
+ int z_process_record_free(struct k_process *proc);
++#ifdef CONFIG_PROCESS_STOP
++void z_process_stop_self(int sig);
++void z_process_continue(struct k_process *proc);
++bool z_sig_is_pending(struct k_thread *tid, int signo);
++void z_sig_process_discard(struct k_process *proc, const struct k_sig_set *set);
++#endif /* CONFIG_PROCESS_STOP */
+ /* thread-granular numbering (one space with pids; a leader's tid is its pid) */
+ void z_thread_id_assign(struct k_thread *thread);
+ void z_thread_id_retire(struct k_thread *thread);
+diff --git a/kernel/process.c b/kernel/process.c
+--- a/kernel/process.c
++++ b/kernel/process.c
+@@ -13,6 +13,7 @@
+ #include <zephyr/logging/log.h>
+ #include <zephyr/sys/math_extras.h>
+ #include <ksched.h>
++#include <scheduler.h>
+ #include <wait_q.h>
+ 
+ LOG_MODULE_DECLARE(os, CONFIG_KERNEL_LOG_LEVEL);
+@@ -75,7 +76,8 @@ static struct k_session z_session_reserved[RESERVED_NUM];
+ 	.leader = (k_tid_t)&(proc), .threads = SYS_DLIST_STATIC_INIT(&(proc).threads),             \
+ 	.pgrp = &z_pgrp_reserved[i],                                                               \
+ 	.pgrp_node = {.next = &z_pgrp_reserved[i].members, .prev = &z_pgrp_reserved[i].members},   \
+-	.state = K_PROCESS_ACTIVE, .waitq = Z_WAIT_Q_INIT(&(proc).waitq)
++	.state = K_PROCESS_ACTIVE, .waitq = Z_WAIT_Q_INIT(&(proc).waitq)                           \
++	IF_ENABLED(CONFIG_PROCESS_STOP, (, .stopq = Z_WAIT_Q_INIT(&(proc).stopq)))
+ 
+ static struct k_session z_session_reserved[RESERVED_NUM] = {
+ 	RESERVED_SESSION(RESERVED_IDLE, z_proc_idle),
+@@ -235,6 +237,10 @@ void z_kernel_process_init_one(struct k_process *proc, struct k_process *parent)
+ 	sys_dlist_init(&proc->children);
+ 	sys_dlist_init(&proc->threads);
+ 	z_waitq_init(&proc->waitq);
++#ifdef CONFIG_PROCESS_STOP
++	z_waitq_init(&proc->stopq);
++	atomic_clear(&proc->stop_gen);
++#endif /* CONFIG_PROCESS_STOP */
+ 	proc->state = K_PROCESS_ACTIVE;
+ #ifdef CONFIG_USERSPACE
+ 	proc->perm_index = z_process_perm_index_alloc();
+@@ -976,6 +982,33 @@ static inline int z_vrfy_k_kill_pgrp(k_pgrp_t pgrp, int signo)
+ #include <zephyr/syscalls/k_kill_pgrp_mrsh.c>
+ #endif /* CONFIG_USERSPACE */
+ 
++#ifdef CONFIG_PROCESS_STOP
++static bool sig_is_stop(int signo)
++{
++	return (signo == K_SIG_STOP) || (signo == K_SIG_TSTP) || (signo == K_SIG_TTIN) ||
++	       (signo == K_SIG_TTOU);
++}
++
++/* the caller holds process_lock */
++static void process_kill_discard_locked(struct k_process *proc, int signo)
++{
++	struct k_sig_set set;
++
++	k_sig_emptyset(&set);
++	if (signo == K_SIG_CONT) {
++		k_sig_addset(&set, K_SIG_STOP);
++		k_sig_addset(&set, K_SIG_TSTP);
++		k_sig_addset(&set, K_SIG_TTIN);
++		k_sig_addset(&set, K_SIG_TTOU);
++	} else if (sig_is_stop(signo)) {
++		k_sig_addset(&set, K_SIG_CONT);
++	} else {
++		return;
++	}
++	z_sig_process_discard(proc, &set);
++}
++#endif /* CONFIG_PROCESS_STOP */
++
+ static int process_kill(k_pid_t pid, int signo, union k_sig_val value)
+ {
+ 	bool found = false;
+@@ -993,6 +1026,11 @@ static int process_kill(k_pid_t pid, int signo, union k_sig_val value)
+ 		}
+ 		found = true;
+ 		live = !sys_dlist_is_empty(&proc->threads);
++#ifdef CONFIG_PROCESS_STOP
++		if ((signo != 0) && live) {
++			process_kill_discard_locked(proc, signo);
++		}
++#endif /* CONFIG_PROCESS_STOP */
+ #ifdef CONFIG_SIGNAL
+ 		if ((signo != 0) && live) {
+ 			tid = process_sig_target(proc, signo);
+@@ -1013,6 +1051,16 @@ static int process_kill(k_pid_t pid, int signo, union k_sig_val value)
+ 		/* a zombie exists until reaped: nothing to deliver, nothing to report */
+ 		return 0;
+ 	}
++#ifdef CONFIG_PROCESS_STOP
++	/*
++	 * Generation of K_SIG_CONT continues a stopped process regardless of
++	 * delivery, and K_SIG_KILL must be able to kill one: a stopped
++	 * member cannot run its own delivery.
++	 */
++	if ((signo == K_SIG_CONT) || (signo == K_SIG_KILL)) {
++		z_process_continue(proc);
++	}
++#endif /* CONFIG_PROCESS_STOP */
+ #ifdef CONFIG_SIGNAL
+ 	return ret;
+ #else
+@@ -1094,6 +1142,127 @@ static inline int z_vrfy_k_sigqueue(k_pid_t pid, int signo, union k_sig_val valu
+ #include <zephyr/syscalls/k_sigqueue_mrsh.c>
+ #endif /* CONFIG_USERSPACE */
+ 
++#ifdef CONFIG_PROCESS_STOP
++/*
++ * Suspend/resume runs outside process_lock: the thread halt path holds the
++ * scheduler lock before taking process_lock, so taking scheduler locks under
++ * process_lock would invert that order. The bounded snapshot taken under the
++ * lock can miss a member racing its own creation; such a thread runs until
++ * the next stop signal, which POSIX permits (stop delivery is asynchronous).
++ * The stopping thread pends under process_stop_lock, which the continue
++ * takes to wake it: a continue cannot be lost between its decision to stop
++ * and the stop itself.
++ */
++#define PROCESS_STOP_SNAPSHOT 16
++
++static struct k_spinlock process_stop_lock;
++
++static int process_members_snapshot(struct k_process *proc, k_tid_t *snap, int max)
++{
++	int n = 0;
++	struct k_thread *member;
++
++	SYS_DLIST_FOR_EACH_CONTAINER(&proc->threads, member, process_node) {
++		if (n >= max) {
++			break;
++		}
++		snap[n++] = member;
++	}
++
++	return n;
++}
++
++void z_process_stop_self(int sig)
++{
++	k_tid_t snap[PROCESS_STOP_SNAPSHOT];
++	struct k_process *self = NULL;
++	struct k_process *parent = NULL;
++	atomic_val_t gen = 0;
++	int n = 0;
++	k_spinlock_key_t key;
++
++	K_SPINLOCK(&process_lock) {
++		self = _current->process;
++		if ((self == NULL) || process_is_reserved(self) ||
++		    ((self->flags & K_PROCESS_FLAG_STOPPED) != 0) ||
++		    z_sig_is_pending(_current, K_SIG_KILL)) {
++			self = NULL;
++			K_SPINLOCK_BREAK;
++		}
++		self->flags |= K_PROCESS_FLAG_STOPPED | K_PROCESS_FLAG_WSTOP_PENDING;
++		self->flags &= ~K_PROCESS_FLAG_WCONT_PENDING;
++		self->stop_sig = (uint8_t)sig;
++		parent = self->parent;
++		n = process_members_snapshot(self, snap, ARRAY_SIZE(snap));
++		gen = atomic_get(&self->stop_gen);
++		atomic_inc(&process_wait_gen);
++	}
++
++	if (self == NULL) {
++		return;
++	}
++
++	for (int i = 0; i < n; i++) {
++		if (snap[i] != _current) {
++			k_thread_suspend(snap[i]);
++		}
++	}
++	if (parent != NULL) {
++		(void)z_sched_wake_all(&parent->waitq, 0, NULL);
++	}
++
++	/* last: the delivery context of the stop signal itself, unless continued meanwhile */
++	key = k_spin_lock(&process_stop_lock);
++	if (atomic_get(&self->stop_gen) == gen) {
++		(void)z_pend_curr(&process_stop_lock, key, &self->stopq, K_FOREVER);
++	} else {
++		k_spin_unlock(&process_stop_lock, key);
++	}
++
++	/* continued: a resume that preceded its suspend above was lost */
++	for (int i = 0; i < n; i++) {
++		if (snap[i] != _current) {
++			k_thread_resume(snap[i]);
++		}
++	}
++}
++
++void z_process_continue(struct k_process *proc)
++{
++	k_tid_t snap[PROCESS_STOP_SNAPSHOT];
++	struct k_process *parent = NULL;
++	int n = 0;
++	bool cont = false;
++
++	K_SPINLOCK(&process_lock) {
++		if ((proc->flags & K_PROCESS_FLAG_STOPPED) == 0) {
++			K_SPINLOCK_BREAK;
++		}
++		proc->flags &= ~(K_PROCESS_FLAG_STOPPED | K_PROCESS_FLAG_WSTOP_PENDING);
++		proc->flags |= K_PROCESS_FLAG_WCONT_PENDING;
++		parent = proc->parent;
++		n = process_members_snapshot(proc, snap, ARRAY_SIZE(snap));
++		atomic_inc(&process_wait_gen);
++		cont = true;
++	}
++
++	if (!cont) {
++		return;
++	}
++
++	for (int i = 0; i < n; i++) {
++		k_thread_resume(snap[i]);
++	}
++	K_SPINLOCK(&process_stop_lock) {
++		atomic_inc(&proc->stop_gen);
++		(void)z_sched_wake_all(&proc->stopq, 0, NULL);
++	}
++	if (parent != NULL) {
++		(void)z_sched_wake_all(&parent->waitq, 0, NULL);
++	}
++}
++#endif /* CONFIG_PROCESS_STOP */
++
+ int z_impl_k_kill_all(int signo)
+ {
+ 	int ret = -ESRCH;
+@@ -1198,13 +1367,18 @@ static int waitpid_common(k_pid_t pid, k_pgrp_t pgrp, bool by_pgrp, k_pid_t *rea
+ 	struct k_process *self = process_self();
+ 	k_timepoint_t end = sys_timepoint_calc(timeout);
+ 
+-	if ((options & (K_PROCESS_WUNTRACED | K_PROCESS_WCONTINUED)) != 0) {
++	if (!IS_ENABLED(CONFIG_PROCESS_STOP) &&
++	    ((options & (K_PROCESS_WUNTRACED | K_PROCESS_WCONTINUED)) != 0)) {
+ 		return -ENOTSUP;
+ 	}
+ 
+ 	while (true) {
+ 		bool have_match = false;
+ 		struct k_process *zombie = NULL;
++#ifdef CONFIG_PROCESS_STOP
++		struct k_process *job = NULL;
++		int job_status = 0;
++#endif /* CONFIG_PROCESS_STOP */
+ 		atomic_val_t gen = atomic_get(&process_wait_gen);
+ 			bool reaped_one = false;
+ 	k_spinlock_key_t key = k_spin_lock(&process_lock);
+@@ -1218,6 +1392,19 @@ static int waitpid_common(k_pid_t pid, k_pgrp_t pgrp, bool by_pgrp, k_pid_t *rea
+ 				zombie = child;
+ 				break;
+ 			}
++#ifdef CONFIG_PROCESS_STOP
++			if (job == NULL) {
++				if (((options & K_PROCESS_WUNTRACED) != 0) &&
++				    ((child->flags & K_PROCESS_FLAG_WSTOP_PENDING) != 0)) {
++					job = child;
++					job_status = K_WSTATUS_STOPPED(child->stop_sig);
++				} else if (((options & K_PROCESS_WCONTINUED) != 0) &&
++					   ((child->flags & K_PROCESS_FLAG_WCONT_PENDING) != 0)) {
++					job = child;
++					job_status = K_WSTATUS_CONTINUED;
++				}
++			}
++#endif /* CONFIG_PROCESS_STOP */
+ 		}
+ 
+ 		if (zombie != NULL) {
+@@ -1232,6 +1419,21 @@ static int waitpid_common(k_pid_t pid, k_pgrp_t pgrp, bool by_pgrp, k_pid_t *rea
+ 				reaped_one = true;
+ 			}
+ 			ret = 0;
++#ifdef CONFIG_PROCESS_STOP
++		} else if (job != NULL) {
++			if (reaped != NULL) {
++				*reaped = job->leader;
++			}
++			if (wstatus != NULL) {
++				*wstatus = job_status;
++			}
++			if ((options & K_PROCESS_WNOWAIT) == 0) {
++				job->flags &= ~((job_status == K_WSTATUS_CONTINUED)
++							? K_PROCESS_FLAG_WCONT_PENDING
++							: K_PROCESS_FLAG_WSTOP_PENDING);
++			}
++			ret = 0;
++#endif /* CONFIG_PROCESS_STOP */
+ 		} else if (!have_match) {
+ 			ret = -ECHILD;
+ 		} else if ((options & K_PROCESS_WNOHANG) != 0) {
+diff --git a/kernel/signal.c b/kernel/signal.c
+--- a/kernel/signal.c
++++ b/kernel/signal.c
+@@ -273,6 +273,46 @@ static bool sig_entry_thread_scoped(const struct k_sig_fifo_element *entry, k_ti
+ 	return entry->tid == tid;
+ }
+ 
++#ifdef CONFIG_PROCESS_STOP
++bool z_sig_is_pending(struct k_thread *tid, int signo)
++{
++	struct k_sig_set pend;
++
++	K_SPINLOCK(k_sig_lock) {
++		z_sig_pending_unlocked(&pend, tid);
++	}
++
++	return k_sig_ismember(&pend, signo) == 1;
++}
++
++/* generation of CONT discards the pending stop signals of the process, and vice versa */
++void z_sig_process_discard(struct k_process *proc, const struct k_sig_set *set)
++{
++	K_SPINLOCK(k_sig_lock) {
++		for (size_t i = 0, N = ring_buf_size_get(&k_sig_fifo); i < N; ++i) {
++			uint8_t pos;
++			struct k_sig_fifo_element *entry;
++			struct k_process *scope;
++
++			ring_buf_get(&k_sig_fifo, &pos, 1);
++			entry = &k_sig_array[pos];
++			scope = (entry->proc != NULL) ? entry->proc : entry->tid->process;
++			if ((scope == proc) && (k_sig_ismember(set, entry->info.signo) == 1)) {
++				if (entry->proc != NULL) {
++					atomic_dec(&entry->proc->sig_pending);
++				} else {
++					atomic_dec(&entry->tid->base.sig.pending);
++				}
++				atomic_dec(&z_syscall_work_pending);
++				z_sig_slab_free_unlocked(pos);
++			} else {
++				ring_buf_put(&k_sig_fifo, &pos, 1);
++			}
++		}
++	}
++}
++#endif /* CONFIG_PROCESS_STOP */
++
+ void z_sig_thread_drop(struct k_thread *tid)
+ {
+ 	K_SPINLOCK(k_sig_lock) {
+@@ -856,10 +896,21 @@ int z_impl_k_sig_mask(int how, const struct k_sig_set *set, struct k_sig_set *os
+ 		break;
+ 	}
+ 
++#if defined(CONFIG_USERSPACE) || defined(CONFIG_PROCESS_STOP)
++	/*
++	 * Explicitly unmask signals which may not be masked. Kernel-mode
++	 * callers are otherwise trusted to mask anything, but with stop
++	 * support the stop and kill signals must remain deliverable.
++	 */
++	{
++		bool enforce = IS_ENABLED(CONFIG_PROCESS_STOP);
++
+ #ifdef CONFIG_USERSPACE
+-	if (k_is_in_user_syscall()) {
+-		/* explicitly unmask signals which may not be masked */
+-		tid->base.sig.mask.sig[0] &= ~UNMASKABLE_MASK;
++		enforce = enforce || k_is_in_user_syscall();
++#endif /* CONFIG_USERSPACE */
++		if (enforce) {
++			tid->base.sig.mask.sig[0] &= ~UNMASKABLE_MASK;
++		}
+ 	}
+ #endif
+ 
+@@ -1252,6 +1303,10 @@ static inline void z_vrfy_k_sig_fault(void)
+ #include <zephyr/syscalls/k_sig_fault_mrsh.c>
+ #endif /* CONFIG_SIGNAL_FAULT */
+ 
++#ifdef CONFIG_PROCESS_STOP
++static void z_sig_handler_stop(int sig, struct k_sig_info *info, void *ucontext);
++#endif /* CONFIG_PROCESS_STOP */
++
+ int z_sig_claim(struct k_thread *tid)
+ {
+ 	struct k_sig_ctx *const ctx = &tid->base.sig;
+@@ -1344,6 +1399,14 @@ int z_sig_claim(struct k_thread *tid)
+ 		/* ends the process here: the default actions are not user-mode code */
+ 		ctx->action.handler(ctx->info.signo, &ctx->info, NULL);
+ 	}
++#ifdef CONFIG_PROCESS_STOP
++	if (ctx->action.handler == z_sig_handler_stop) {
++		/* stops here until continued, for the same reason; nothing is left to deliver */
++		ctx->mask = ctx->restore;
++		ctx->action.handler(ctx->info.signo, &ctx->info, NULL);
++		return 0;
++	}
++#endif /* CONFIG_PROCESS_STOP */
+ 
+ 	return 1;
+ }
+@@ -1355,6 +1418,16 @@ static void z_sig_handler_term(int sig, struct k_sig_info *info, void *ucontext)
+ 	z_process_exit_signaled(sig);
+ }
+ 
++#ifdef CONFIG_PROCESS_STOP
++static void z_sig_handler_stop(int sig, struct k_sig_info *info, void *ucontext)
++{
++	ARG_UNUSED(info);
++	ARG_UNUSED(ucontext);
++
++	z_process_stop_self(sig);
++}
++#endif /* CONFIG_PROCESS_STOP */
++
+ /**
+  * @brief The coredump signal handler
+  *
+@@ -1560,15 +1633,24 @@ static k_sig_handler_t z_sig_resolve(int sig)
+ 		return z_thread_cancel_handler;
+ #endif
+ 
+-	/* all signals that have default 'Ign' behaviour */
+-	case K_SIG_CHLD:
+-	case K_SIG_URG:
+-	/* for now, ignore the following, since we do not support stop or continue */
+-	case K_SIG_CONT:
++#ifdef CONFIG_PROCESS_STOP
+ 	case K_SIG_STOP:
+ 	case K_SIG_TSTP:
+ 	case K_SIG_TTIN:
+ 	case K_SIG_TTOU:
++		return z_sig_handler_stop;
++#else
++	/* without stop support these are ignored, as is a delivered CONT */
++	case K_SIG_STOP:
++	case K_SIG_TSTP:
++	case K_SIG_TTIN:
++	case K_SIG_TTOU:
++#endif /* CONFIG_PROCESS_STOP */
++	/* all signals that have default 'Ign' behaviour */
++	case K_SIG_CHLD:
++	case K_SIG_URG:
++	/* continuation happens at generation; the delivery itself is ignored */
++	case K_SIG_CONT:
+ 	default:
+ 		if ((sig >= K_SIG_RTMIN) && (sig < K_SIG_RTMIN + K_SIG_NUM_RT)) {
+ 			/* default behaviour for RT signals is also to terminate */
+diff --git a/lib/os/clone.c b/lib/os/clone.c
+--- a/lib/os/clone.c
++++ b/lib/os/clone.c
+@@ -83,14 +83,17 @@ static int clone_thread(const struct sys_clone_args *args, k_pid_t *child)
+ 
+ #ifdef CONFIG_SIGNAL
+ 	if (args->sigmask != NULL) {
++		bool enforce = IS_ENABLED(CONFIG_PROCESS_STOP);
++
+ 		tid->base.sig.mask = *args->sigmask;
+ #ifdef CONFIG_USERSPACE
+-		if (k_is_in_user_syscall()) {
+-			/* as k_sig_mask(): user-mode requests cannot mask KILL or STOP */
++		enforce = enforce || k_is_in_user_syscall();
++#endif /* CONFIG_USERSPACE */
++		if (enforce) {
++			/* as k_sig_mask(): requests cannot mask KILL or STOP */
+ 			tid->base.sig.mask.sig[0] &=
+ 				~(BIT64(K_SIG_KILL - 1) | BIT64(K_SIG_STOP - 1));
+ 		}
+-#endif /* CONFIG_USERSPACE */
+ #ifdef CONFIG_THREAD_CANCEL
+ 		/* the reserved cancel bit in a requested mask is the cancellation state */
+ 		if (k_sig_ismember(&tid->base.sig.mask, K_SIG_CANCEL) != 0) {
+diff --git a/tests/kernel/process/src/main.c b/tests/kernel/process/src/main.c
+--- a/tests/kernel/process/src/main.c
++++ b/tests/kernel/process/src/main.c
+@@ -173,7 +173,7 @@ ZTEST(kernel_process, test_waitpid)
+ 	zassert_equal(k_waitpid(NULL, &reaped, &ws, K_PROCESS_WNOHANG, K_NO_WAIT),
+ 		      -ECHILD);
+ 	zassert_equal(k_waitpid(NULL, &reaped, &ws, K_PROCESS_WUNTRACED, K_NO_WAIT),
+-		      -ENOTSUP);
++		      IS_ENABLED(CONFIG_PROCESS_STOP) ? -ECHILD : -ENOTSUP);
+ #ifdef CONFIG_SIGNAL
+ 	waitpid_chld_drop();
+ #endif /* CONFIG_SIGNAL */
+@@ -879,6 +879,126 @@ static void kill_unclaimed_reuse(void)
+ 		      unclaimed_seen);
+ }
+ 
++static volatile bool stop_child_release;
++
++/* a kernel thread that accepts the job-control signals: a delivery point every millisecond */
++static void stop_child_entry(void *p1, void *p2, void *p3)
++{
++	struct k_sig_set set;
++	int64_t deadline = k_uptime_get() + 5000;
++
++	ARG_UNUSED(p1);
++	ARG_UNUSED(p2);
++	ARG_UNUSED(p3);
++
++	k_sig_emptyset(&set);
++	k_sig_addset(&set, K_SIG_STOP);
++	k_sig_addset(&set, K_SIG_CONT);
++	(void)k_sig_mask(K_SIG_UNBLOCK, &set, NULL);
++
++	while (!stop_child_release && (k_uptime_get() < deadline)) {
++		k_msleep(1);
++	}
++	k_exit(0);
++}
++
++/* a stop and a continue, each reported once to the waiter asking for it */
++static void kill_stop_continue(void)
++{
++	int ws = 0;
++	k_pid_t child = &child_a;
++	struct sys_clone_args args = {
++		.entry = stop_child_entry,
++		.thread = &child_a,
++		.stack = child_stack_a,
++		.stack_size = STATIC_PROC_STACK_SIZE,
++		.prio = K_LOWEST_APPLICATION_THREAD_PRIO,
++	};
++
++	stop_child_release = false;
++	zassert_ok(sys_clone(&args, NULL));
++	zassert_ok(k_kill(child, K_SIG_STOP));
++	zassert_ok(k_waitpid(child, NULL, &ws, K_PROCESS_WUNTRACED, K_SECONDS(5)));
++	zassert_true(K_WIFSTOPPED(ws), "not stopped (0x%x)", ws);
++	zassert_equal(K_WSTOPSIG(ws), K_SIG_STOP);
++	zassert_ok(k_kill(child, K_SIG_CONT));
++	zassert_ok(k_waitpid(child, NULL, &ws, K_PROCESS_WCONTINUED, K_SECONDS(5)));
++	zassert_true(K_WIFCONTINUED(ws), "not continued (0x%x)", ws);
++	stop_child_release = true;
++	zassert_ok(k_waitpid(child, NULL, &ws, 0, K_SECONDS(5)));
++	zassert_true(K_WIFEXITED(ws) && (K_WEXITSTATUS(ws) == 0), "0x%x", ws);
++}
++
++/*
++ * The child runs only once the test thread blocks: the signals are generated
++ * before it reaches its first delivery point. CONT discards the pending stop
++ * signals, and KILL ends a stopped process.
++ */
++static void kill_stop_discard(void)
++{
++	int ws = 0;
++	k_pid_t child = &child_a;
++	struct sys_clone_args args = {
++		.entry = stop_child_entry,
++		.thread = &child_a,
++		.stack = child_stack_a,
++		.stack_size = STATIC_PROC_STACK_SIZE,
++		.prio = K_LOWEST_APPLICATION_THREAD_PRIO,
++	};
++
++	stop_child_release = true;
++	zassert_ok(sys_clone(&args, NULL));
++	zassert_ok(k_kill(child, K_SIG_STOP));
++	zassert_ok(k_kill(child, K_SIG_CONT));
++	zassert_ok(k_waitpid(child, NULL, &ws, 0, K_SECONDS(5)),
++		   "the stop pending when CONT was generated was not discarded");
++	zassert_true(K_WIFEXITED(ws), "0x%x", ws);
++
++	stop_child_release = false;
++	zassert_ok(sys_clone(&args, NULL));
++	zassert_ok(k_kill(child, K_SIG_CONT));
++	zassert_ok(k_kill(child, K_SIG_STOP));
++	zassert_ok(k_waitpid(child, NULL, &ws, K_PROCESS_WUNTRACED, K_SECONDS(5)));
++	zassert_true(K_WIFSTOPPED(ws), "not stopped (0x%x)", ws);
++	zassert_ok(k_kill(child, K_SIG_KILL));
++	zassert_ok(k_waitpid(child, NULL, &ws, 0, K_SECONDS(5)),
++		   "KILL did not end the stopped process");
++	zassert_true(K_WIFSIGNALED(ws) && (K_WTERMSIG(ws) == K_SIG_KILL), "0x%x", ws);
++}
++
++/*
++ * A storm of stops and continues from another CPU lands stops on a child that is in the
++ * middle of taking one; a full queue is fine, the storm only has to keep going.
++ */
++static void kill_stop_storm(void)
++{
++	int ws = 0;
++	int ret;
++	k_pid_t child = &child_a;
++	struct sys_clone_args args = {
++		.entry = stop_child_entry,
++		.thread = &child_a,
++		.stack = child_stack_a,
++		.stack_size = STATIC_PROC_STACK_SIZE,
++		.prio = K_LOWEST_APPLICATION_THREAD_PRIO,
++	};
++
++	stop_child_release = false;
++	zassert_ok(sys_clone(&args, NULL));
++	for (int i = 0; i < 10000; i++) {
++		ret = k_kill(child, K_SIG_STOP);
++		zassert_true((ret == 0) || (ret == -EAGAIN), "STOP: %d", ret);
++		ret = k_kill(child, K_SIG_CONT);
++		zassert_true((ret == 0) || (ret == -EAGAIN), "CONT: %d", ret);
++	}
++	/* the storm's SIGCHLDs may still fill the queue: a continue does not need a slot */
++	ret = k_kill(child, K_SIG_CONT);
++	zassert_true((ret == 0) || (ret == -EAGAIN), "the last CONT: %d", ret);
++	stop_child_release = true;
++	zassert_ok(k_waitpid(child, NULL, &ws, 0, K_SECONDS(5)));
++	zassert_true(K_WIFEXITED(ws), "0x%x", ws);
++}
++
+ ZTEST(kernel_process, test_kill)
+ {
+ 	int ws = 1;
+@@ -918,6 +1038,12 @@ ZTEST(kernel_process, test_kill)
+ 	zassert_not_equal(elig_recipient, child,
+ 			  "signal was delivered to the leader, not the eligible thread");
+ 
++	if (IS_ENABLED(CONFIG_PROCESS_STOP)) {
++		kill_stop_continue();
++		kill_stop_discard();
++	kill_stop_storm();
++	}
++
+ 	if (IS_ENABLED(CONFIG_SYS_THREAD)) {
+ 		kill_unclaimed_reuse();
+ 	}
+diff --git a/tests/kernel/process/testcase.yaml b/tests/kernel/process/testcase.yaml
+--- a/tests/kernel/process/testcase.yaml
++++ b/tests/kernel/process/testcase.yaml
+@@ -15,6 +15,9 @@ tests:
+     extra_configs:
+       - CONFIG_SIGNAL=y
+       - CONFIG_SIGNAL_SET_SIZE=40
++      - CONFIG_PROCESS_STOP=y
++      # a k_current_get() in kernel code is the syscall wrapper here: kill_stop_storm sees it
++      - CONFIG_CURRENT_THREAD_USE_TLS=n
+       # k_kill_pgrp queues one signal per group member simultaneously, and each
+       # spawned child that exits leaves a best-effort SIGCHLD queued to the
+       # (kernel) test process, which keeps it masked; size the queue with
