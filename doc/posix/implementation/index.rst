@@ -1476,8 +1476,9 @@ Permission bits are not exposed
    The subsystem's ``struct fs_dirent`` carries no mode bits, so :c:func:`stat` cannot report a
    file system's stored permissions even when it has them - ext2 again being the example. It
    reports a synthesised mode instead: read and search for everyone, plus write unless the mount
-   is read-only. :c:func:`access` and :c:func:`mkdir` follow suit - ``mkdir()`` accepts its
-   ``mode`` argument and ignores it, and :c:func:`access` grants ``X_OK`` only for directories.
+   is read-only, and - since the subsystem has no execute bit to withhold - execute on every
+   regular file. :c:func:`access` and :c:func:`mkdir` follow suit: ``mkdir()`` accepts its
+   ``mode`` argument and ignores it, and :c:func:`access` grants ``X_OK`` on any file.
 
 Timestamps
    File timestamps are surfaced only when the backend records them, gated by
