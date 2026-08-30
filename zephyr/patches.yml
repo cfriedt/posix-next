@@ -4174,6 +4174,28 @@ patches:
       side, the pipe counts open descriptions per side, and wake-ups
       reach every description of a side, so anonymous pipes and FIFOs
       share one object. stat, fstat and readdir report the FIFO type.
+  - path: zephyr/k-process-stop-continue.patch
+    sha256sum: 90cc184597db65f473a63cc56958efba8a17abe7aad5300941666315165893a7
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-30
+    upstreamable: true
+    comments: |
+      Process stop and continue (CONFIG_PROCESS_STOP): the stop signals
+      gain their POSIX default action, suspending every member thread of
+      the receiving process (the delivery context last); generation of
+      K_SIG_CONT resumes a stopped process regardless of delivery, as
+      does K_SIG_KILL, since a stopped member cannot run its own
+      delivery. k_waitpid() accepts K_PROCESS_WUNTRACED and
+      K_PROCESS_WCONTINUED, reporting K_WSTATUS_STOPPED/CONTINUED
+      transitions without reaping. With stop support enabled the stop
+      and kill signals become unmaskable for kernel-mode callers too
+      (k_sig_mask and clone-time masks), since a process that can mask
+      SIGSTOP defeats job control. Suspension takes a bounded member
+      snapshot outside process_lock: the halt path holds the scheduler
+      lock before process_lock, so scheduler operations under it would
+      invert that order.
   - path: zephyr/arm64-userspace-cache-maintenance.patch
     sha256sum: 2e42fc6bdc1fec89817fa1326b6d9ac8fe57cb5096b98a4201c9b175676babf7
     module: zephyr
