@@ -1,0 +1,397 @@
+diff --git a/include/libbb.h b/include/libbb.h
+index 873149b7c..f84457c55 100644
+--- a/include/libbb.h
++++ b/include/libbb.h
+@@ -2609,7 +2609,9 @@ do { \
+ 	(sizeof(field) == 4 ? SWAP_LE32(field) : BUG_wrong_field_size())
+ 
+ 
++#ifndef ARRAY_SIZE
+ #define ARRAY_SIZE(x) ((unsigned)(sizeof(x) / sizeof((x)[0])))
++#endif
+ #define BUILD_BUG_ON(condition) ((void)sizeof(char[1 - 2*!!(condition)]))
+ 
+ 
+diff --git a/include/platform.h b/include/platform.h
+index c449075b9..391ab3c01 100644
+--- a/include/platform.h
++++ b/include/platform.h
+@@ -65,12 +65,20 @@
+  * to the new pointer) after the function returns a non-NULL value."
+  */
+ #define RETURNS_MALLOC __attribute__ ((malloc))
++#if defined(__ZEPHYR__)
++/* get the base image's ALWAYS_INLINE/ARRAY_SIZE first; ours defer to them */
++# include <zephyr/toolchain.h>
++# include <zephyr/sys/util.h>
++#endif
++
+ #define PACKED __attribute__ ((__packed__))
+ #define ALIGNED(m) __attribute__ ((__aligned__(m)))
+ 
+ /* __NO_INLINE__: some gcc's do not honor inlining! :( */
+ #if __GNUC_PREREQ(3,0) && !defined(__NO_INLINE__)
+-# define ALWAYS_INLINE __attribute__ ((always_inline)) inline
++# ifndef ALWAYS_INLINE
++#  define ALWAYS_INLINE __attribute__ ((always_inline)) inline
++# endif
+ /* I've seen a toolchain where I needed __noinline__ instead of noinline */
+ # define NOINLINE      __attribute__((__noinline__))
+ # if !ENABLE_WERROR
+@@ -81,7 +89,9 @@
+ #  define UNUSED_PARAM_RESULT
+ # endif
+ #else
+-# define ALWAYS_INLINE inline
++# ifndef ALWAYS_INLINE
++#  define ALWAYS_INLINE inline
++# endif
+ # define NOINLINE
+ # define DEPRECATED
+ # define UNUSED_PARAM_RESULT
+@@ -558,6 +568,85 @@ typedef unsigned smalluint;
+ # undef HAVE_PRINTF_PERCENTM
+ #endif
+ 
++#if defined(__ZEPHYR__)
++# include <stdarg.h>      /* the vasprintf() replacement prototype below */
++# include <netinet/in.h>  /* sockaddr unions in libbb.h */
++# ifndef SOCK_RDM
++#  define SOCK_RDM 4
++# endif
++# include <signal.h>
++# ifndef NSIG
++#  define NSIG 32
++# endif
++/* GNU extension the libc lacks */
++static inline int sigisemptyset(const sigset_t *set)
++{
++	for (int i = 1; i < NSIG; i++) {
++		if (sigismember(set, i)) {
++			return 0;
++		}
++	}
++	return 1;
++}
++/* errno may be thread-local in the base image; loadable extensions cannot
++ * carry TLS relocations, so route accesses through the exported accessor */
++# include <errno.h>
++extern int *__errno_location(void);
++# undef errno
++# define errno (*__errno_location())
++/* no vfork; fork's copied address space is strictly safer at each call site */
++# include <unistd.h>
++# undef vfork
++# define vfork fork
++/* Option-parsing state lives in this program's own image via the reentrant
++ * getopt: the base image's optind/optarg globals are shared between every
++ * process running against it. Must follow the <unistd.h> declarations. */
++# include <zephyr/getopt.h>
++extern char *bb_optarg;
++extern int bb_opterr, bb_optind, bb_optopt;
++# undef optarg
++# define optarg bb_optarg
++# undef opterr
++# define opterr bb_opterr
++# undef optind
++# define optind bb_optind
++# undef optopt
++# define optopt bb_optopt
++# undef getopt
++# define getopt(ac, av, os) getopt_r(ac, av, os, &bb_optarg, &bb_opterr, &bb_optind, &bb_optopt)
++/* these collide with declarations in the libc headers */
++# define utoa bb_utoa
++# define itoa bb_itoa
++# define bin2hex bb_bin2hex
++# define hex2bin bb_hex2bin
++# undef HAVE_CLEARENV
++# undef HAVE_DPRINTF
++# undef HAVE_MKDTEMP
++# undef HAVE_TTYNAME_R
++# undef HAVE_PTSNAME_R
++# undef HAVE_SETBIT
++# undef HAVE_SIGHANDLER_T
++# undef HAVE_STPCPY
++# undef HAVE_STPNCPY
++# undef HAVE_MEMPCPY
++# undef HAVE_STRCASESTR
++# undef HAVE_STRCHRNUL
++# undef HAVE_STRSEP
++# undef HAVE_STRSIGNAL
++# undef HAVE_STRVERSCMP
++# undef HAVE_VASPRINTF
++# undef HAVE_UNLOCKED_STDIO
++# undef HAVE_UNLOCKED_LINE_OPS
++# undef HAVE_GETLINE
++# undef HAVE_XTABS
++# undef HAVE_MNTENT_H
++# undef HAVE_NET_ETHERNET_H
++# undef HAVE_SYS_STATFS_H
++# undef HAVE_PRINTF_PERCENTM
++# undef HAVE_WAIT3
++# undef HAVE_DEV_FD
++#endif
++
+ /*
+  * Now, define prototypes for all the functions defined in platform.c
+  * These must come after all the HAVE_* macros are defined (or not)
+diff --git a/libbb/appletlib.c b/libbb/appletlib.c
+index 34b74c3df..3cfe6bbef 100644
+--- a/libbb/appletlib.c
++++ b/libbb/appletlib.c
+@@ -28,7 +28,14 @@
+ 
+ /* Define this accessor before we #define "errno" our way */
+ #include <errno.h>
++#if defined(__ZEPHYR__)
++/* errno may be thread-local in the base image; loadable extensions cannot
++ * carry TLS relocations, so take the address through the exported accessor */
++extern int *__errno_location(void);
++static inline int *get_perrno(void) { return __errno_location(); }
++#else
+ static inline int *get_perrno(void) { return &errno; }
++#endif
+ 
+ #include "busybox.h"
+ 
+@@ -878,9 +885,16 @@ int busybox_main(int argc UNUSED_PARAM, char **argv)
+ 			 * In such case, better use argv[0] as symlink target
+ 			 * if it is a full path name.
+ 			 */
++#if defined(__ZEPHYR__)
++			/* CONFIG_BUSYBOX_EXEC_PATH is the real binary, not a link */
++			if (bb_busybox_exec_path[0] == '/')
++				busybox = bb_busybox_exec_path;
++			else
++#endif
+ 			if (argv[0][0] != '/')
+ 				bb_error_msg_and_die("'%s' is not an absolute path", argv[0]);
+-			busybox = argv[0];
++			else
++				busybox = argv[0];
+ 		}
+ 		/* busybox --install [-s] [DIR]:
+ 		 * -s: make symlinks
+diff --git a/libbb/poll_with_signals.c b/libbb/poll_with_signals.c
+index 47419f240..86f7f4739 100644
+--- a/libbb/poll_with_signals.c
++++ b/libbb/poll_with_signals.c
+@@ -42,7 +42,15 @@ int FAST_FUNC check_got_signal_and_poll(struct pollfd pfd[1], int timeout)
+ 		errno = EINTR; /* inform the caller that we got a signal */
+ 		return -1;
+ 	}
++#if defined(__ZEPHYR__)
++	/* no ppoll(): restore the mask first and poll; the small race window
++	 * only delays signal-interruption of the poll */
++	(void)tv;
++	sigprocmask2(SIG_SETMASK, &orig_mask);
++	n = poll(pfd, 1, timeout);
++#else
+ 	n = ppoll(pfd, 1, timeout >= 0 ? &tv : NULL, &orig_mask);
+ 	sigprocmask2(SIG_SETMASK, &orig_mask);
++#endif
+ 	return n;
+ }
+diff --git a/libbb/ptr_to_globals.c b/libbb/ptr_to_globals.c
+index 2232c6864..40fe92279 100644
+--- a/libbb/ptr_to_globals.c
++++ b/libbb/ptr_to_globals.c
+@@ -18,6 +18,12 @@ struct globals *ptr_to_globals;
+ int *bb_errno;
+ #endif
+ 
++#ifdef __ZEPHYR__
++/* per-image option-parsing state for the reentrant getopt */
++char *bb_optarg;
++int bb_opterr, bb_optind, bb_optopt;
++#endif
++
+ 
+ #else
+ 
+diff --git a/libbb/xfuncs_printf.c b/libbb/xfuncs_printf.c
+index 8afa1ef68..0def62f25 100644
+--- a/libbb/xfuncs_printf.c
++++ b/libbb/xfuncs_printf.c
+@@ -306,7 +306,16 @@ void FAST_FUNC die_if_ferror_stdout(void)
+ 
+ int FAST_FUNC fflush_all(void)
+ {
++#if defined(__ZEPHYR__)
++	/* The C library is shared with the base image: flushing every open
++	 * stream would touch other processes' streams (and picolibc's global
++	 * stream list is not process-aware). Flush our own streams instead.
++	 */
++	int r = fflush(stdout);
++	return fflush(stderr) | r;
++#else
+ 	return fflush(NULL);
++#endif
+ }
+ 
+ 
+diff --git a/shell/hush.c b/shell/hush.c
+index d1e954485..1a772495a 100644
+--- a/shell/hush.c
++++ b/shell/hush.c
+@@ -372,6 +372,9 @@
+ #include <sys/times.h>
+ #include <sys/utsname.h> /* for setting $HOSTNAME */
+ 
++#if defined(__ZEPHYR__)
++# include <spawn.h>
++#endif
+ #include "busybox.h"  /* for APPLET_IS_NOFORK/NOEXEC */
+ #include "unicode.h"
+ #include "shell_common.h"
+@@ -9918,6 +9921,95 @@ static int redirect_and_varexp_helper(
+ 
+ 	return setup_redirects(command, sqp);
+ }
++#if defined(__ZEPHYR__)
++/* Zephyr has posix_spawn() but no fork(): run external pipe members by
++ * spawning them, with the pipe and redirect wiring expressed as file
++ * actions. Returns the pid, 0 when the member is not a plain external
++ * command (the caller falls back to fork() and its error message), or -1
++ * after reporting a spawn failure. */
++static pid_t zephyr_spawn_pipe_member(struct command *command, char **argv_expanded,
++		int infd, struct fd_pair *outpipe)
++{
++	char path[64];
++	char **argv = argv_expanded ? argv_expanded : command->argv;
++	posix_spawn_file_actions_t fa;
++	struct redir_struct *redir;
++	pid_t pid;
++	int ret;
++
++	if (!argv || !argv[0] || command->group)
++		return 0;
++	if (command->cmd_type != CMD_NORMAL)
++		return 0;
++	if (find_builtin(argv[0]))
++		return 0;
++# if ENABLE_HUSH_FUNCTIONS
++	if (find_function(argv[0]))
++		return 0;
++# endif
++
++	if (strchr(argv[0], '/')) {
++		safe_strncpy(path, argv[0], sizeof(path));
++	} else if (sprintf(path, "/bin/%.*s", (int)sizeof(path) - 8, argv[0]) < 0) {
++		return 0;
++	}
++
++	posix_spawn_file_actions_init(&fa);
++	if (infd > 0)
++		posix_spawn_file_actions_adddup2(&fa, infd, 0);
++	if (outpipe) {
++		posix_spawn_file_actions_adddup2(&fa, outpipe->wr, 1);
++		posix_spawn_file_actions_addclose(&fa, outpipe->rd);
++		posix_spawn_file_actions_addclose(&fa, outpipe->wr);
++	}
++	if (infd > 0)
++		posix_spawn_file_actions_addclose(&fa, infd);
++
++	for (redir = command->redirects; redir; redir = redir->next) {
++		if (redir->rd_type == REDIRECT_HEREDOC
++		 || redir->rd_type == REDIRECT_HEREDOC2
++		 || redir->rd_type == REDIRECT_HERESTRING
++		) {
++			bb_simple_error_msg("heredocs need fork support");
++			goto err;
++		}
++		if (redir->rd_dup == REDIRFD_CLOSE) {
++			posix_spawn_file_actions_addclose(&fa, redir->rd_fd);
++			continue;
++		}
++		if (redir->rd_dup != REDIRFD_TO_FILE) {
++			posix_spawn_file_actions_adddup2(&fa, redir->rd_dup, redir->rd_fd);
++			continue;
++		}
++		if (redir->rd_filename == NULL) {
++			syntax_error("invalid redirect");
++			goto err;
++		}
++		{
++			char *p = expand_string_to_string(redir->rd_filename,
++					EXP_FLAG_GLOBPROTECT_CHARS, /*unbackslash:*/ 1);
++			ret = posix_spawn_file_actions_addopen(&fa, redir->rd_fd, p,
++					redir_table[redir->rd_type].mode, 0666);
++			free(p);
++			if (ret != 0)
++				goto err;
++		}
++	}
++
++	ret = posix_spawn(&pid, path, &fa, NULL, argv, environ);
++	posix_spawn_file_actions_destroy(&fa);
++	if (ret != 0) {
++		errno = ret;
++		bb_perror_msg("can't execute '%s'", argv[0]);
++		return -1;
++	}
++	return pid;
++ err:
++	posix_spawn_file_actions_destroy(&fa);
++	return -1;
++}
++#endif /* __ZEPHYR__ */
++
+ static NOINLINE int run_pipe(struct pipe *pi)
+ {
+ 	static const char *const null_ptr = NULL;
+@@ -10244,6 +10336,19 @@ static NOINLINE int run_pipe(struct pipe *pi)
+ 
+ #if ENABLE_HUSH_LINENO_VAR
+ 		G.execute_lineno = command->lineno;
++#endif
++#if defined(__ZEPHYR__)
++		command->pid = zephyr_spawn_pipe_member(command, argv_expanded,
++				(pi->alive_cmds == 0 && pi->followup == PIPE_BG) ? 0 : next_infd,
++				(cmd_no < pi->num_cmds) ? &pipefds : NULL);
++		if (command->pid == 0) {
++			/* builtins, functions, and compound commands cannot yet
++			 * run as pipe members without fork */
++			bb_error_msg("can't run '%s' in a pipeline without fork",
++					command->argv ? command->argv[0] : "compound command");
++			command->pid = -1;
++		}
++		goto zephyr_spawned;
+ #endif
+ 		command->pid = BB_MMU ? fork() : vfork();
+ 		if (!command->pid) { /* child */
+@@ -10311,6 +10416,9 @@ static NOINLINE int run_pipe(struct pipe *pi)
+ 		}
+ 
+ 		/* parent or error */
++#if defined(__ZEPHYR__)
++ zephyr_spawned:
++#endif
+ #if ENABLE_HUSH_FAST
+ 		G.count_SIGCHLD++;
+ //bb_error_msg("[%d] fork in run_pipe: G.count_SIGCHLD:%d G.handled_SIGCHLD:%d", getpid(), G.count_SIGCHLD, G.handled_SIGCHLD);
+@@ -10327,8 +10435,10 @@ static NOINLINE int run_pipe(struct pipe *pi)
+ 		free(argv_expanded);
+ 		argv_expanded = NULL;
+ 		if (command->pid < 0) { /* [v]fork failed */
++#if !defined(__ZEPHYR__) /* spawn failures are reported at the spawn site */
+ 			/* Clearly indicate, was it fork or vfork */
+ 			bb_simple_perror_msg(BB_MMU ? "vfork"+1 : "vfork");
++#endif
+ 		} else {
+ 			pi->alive_cmds++;
+ #if ENABLE_HUSH_JOB
+@@ -11367,7 +11477,13 @@ int hush_main(int argc, char **argv)
+ 	 && isatty(STDIN_FILENO) && isatty(STDOUT_FILENO)
+ 	) {
+ 		/* Try to dup stdin to high fd#, >= 255 */
++#if defined(__ZEPHYR__)
++		/* the descriptor table is small; park the tty fd just above the
++		 * standard trio instead of at the customary 255 */
++		G_interactive_fd = dup_CLOEXEC(STDIN_FILENO, 2);
++#else
+ 		G_interactive_fd = dup_CLOEXEC(STDIN_FILENO, 254);
++#endif
+ 		if (G_interactive_fd < 0) {
+ 			/* Try to dup to any fd */
+ 			G_interactive_fd = dup_CLOEXEC(STDIN_FILENO, -1);
