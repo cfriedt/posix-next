@@ -1395,6 +1395,19 @@ patches:
       About one format in two hit it, which made every ext2-backed suite
       (symbolic_links_fd, file_system) look load-flaky on every qemu
       platform. Format the UUID through bin2hex() into a stack buffer.
+  - path: zephyr/fs-ext2-serialize-operations.patch
+    sha256sum: 377050a98462ff65c30e8bb68008ec0ad020b66f9750eb58c5d4c71d04ae1f41
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-30
+    upstreamable: true
+    comments: |
+      Serialize every ext2 operation behind one lock: the driver was
+      written assuming external serialization (static lookup buffers,
+      shared block-fetch state) which concurrently running processes do
+      not provide; racing lookups returned phantom ENOENTs. ext2 supports
+      a single mounted instance, so a single lock suffices.
   - path: zephyr/libc-signal-h-pthread-kill.patch
     sha256sum: 9db8dc468a348bb0603646373dbe308174a5711ddbcfd454197b47f18992eb48
     module: zephyr
