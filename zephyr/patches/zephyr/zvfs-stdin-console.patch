@@ -1,0 +1,120 @@
+diff --git a/lib/os/zvfs/Kconfig b/lib/os/zvfs/Kconfig
+--- a/lib/os/zvfs/Kconfig
++++ b/lib/os/zvfs/Kconfig
+@@ -156,6 +156,17 @@ config ZVFS_RESERVE_STDIO_FDS
+ 	  Pre-reserve fd slots 0, 1, and 2 for stdin, stdout, and stderr in the ZVFS fd
+ 	  table so dynamically allocated descriptors start at fd 3.
+ 
++config ZVFS_STDIN_CONSOLE
++	bool "Read the reserved stdin descriptor from the console"
++	depends on UART_CONSOLE
++	help
++	  read() on the reserved stdin descriptor polls the console UART with
++	  a minimal line discipline: input is line-buffered with echo,
++	  backspace editing, CR-to-NL translation, and Ctrl-D at the start of
++	  a line reporting end-of-file. Without this option such reads return
++	  0 (end-of-file). Interrupt characters are not yet routed to the
++	  foreground process group.
++
+ config ZVFS_OPEN_ADD_SIZE_STDIO
+ 	int
+ 	default 3 if ZVFS_RESERVE_STDIO_FDS
+diff --git a/lib/os/zvfs/zvfs_fdtable.c b/lib/os/zvfs/zvfs_fdtable.c
+--- a/lib/os/zvfs/zvfs_fdtable.c
++++ b/lib/os/zvfs/zvfs_fdtable.c
+@@ -25,6 +25,9 @@
+ 
+ #include <zephyr/init.h>
+ #include <zephyr/kernel.h>
++#ifdef CONFIG_ZVFS_STDIN_CONSOLE
++#include <zephyr/drivers/uart.h>
++#endif
+ #include <zephyr/kernel/process.h>
+ #include <zephyr/sys/elastipool.h>
+ #include <zephyr/sys/fdtable.h>
+@@ -872,10 +875,85 @@ int z_zvfs_fds_child_close(k_tid_t child, int fd)
+ 
+ int z_impl_zephyr_write_stdout(const char *buf, int nbytes);
+ 
++#ifdef CONFIG_ZVFS_STDIN_CONSOLE
++/*
++ * A minimal line discipline over the console UART: line-buffered input with
++ * echo, backspace editing, CR-to-NL translation, and Ctrl-D at the start of
++ * a line reporting end-of-file. One line buffer serves the one console.
++ */
++static ssize_t stdinout_read_vmeth(void *obj, void *buffer, size_t count)
++{
++	static const struct device *const cons = DEVICE_DT_GET(DT_CHOSEN(zephyr_console));
++	static K_MUTEX_DEFINE(cons_lock);
++	static char cons_line[128];
++	static size_t cons_len, cons_off;
++	size_t n = 0;
++
++	ARG_UNUSED(obj);
++
++	if (!device_is_ready(cons) || (count == 0)) {
++		return 0;
++	}
++
++	(void)k_mutex_lock(&cons_lock, K_FOREVER);
++
++	if (cons_off == cons_len) {
++		/* assemble the next line */
++		cons_len = 0;
++		cons_off = 0;
++		while (true) {
++			unsigned char c;
++
++			while (uart_poll_in(cons, &c) != 0) {
++				k_msleep(10);
++			}
++
++			if ((c == '\r') || (c == '\n')) {
++				uart_poll_out(cons, '\r');
++				uart_poll_out(cons, '\n');
++				cons_line[cons_len] = '\n';
++				cons_len++;
++				break;
++			}
++			if ((c == 0x7f) || (c == '\b')) {
++				if (cons_len > 0) {
++					cons_len--;
++					uart_poll_out(cons, '\b');
++					uart_poll_out(cons, ' ');
++					uart_poll_out(cons, '\b');
++				}
++				continue;
++			}
++			if (c == 0x04) {
++				/* Ctrl-D: end-of-file at the start of a line */
++				if (cons_len == 0) {
++					k_mutex_unlock(&cons_lock);
++					return 0;
++				}
++				continue;
++			}
++			if (cons_len < (sizeof(cons_line) - 1)) {
++				cons_line[cons_len] = (char)c;
++				cons_len++;
++				uart_poll_out(cons, c);
++			}
++		}
++	}
++
++	n = MIN(count, cons_len - cons_off);
++	(void)memcpy(buffer, &cons_line[cons_off], n);
++	cons_off += n;
++
++	k_mutex_unlock(&cons_lock);
++
++	return (ssize_t)n;
++}
++#else
+ static ssize_t stdinout_read_vmeth(void *obj, void *buffer, size_t count)
+ {
+ 	return 0;
+ }
++#endif /* CONFIG_ZVFS_STDIN_CONSOLE */
+ 
+ static ssize_t stdinout_write_vmeth(void *obj, const void *buffer, size_t count)
+ {
