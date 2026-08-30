@@ -1310,6 +1310,22 @@ patches:
       Answer F_GETFL (O_RDWR) and accept F_SETFL on the reserved stdio
       descriptors; busybox printf probes fcntl(1, F_GETFL) and treats
       failure as a closed stdout, exiting silently.
+  - path: zephyr/libc-stdio-fd-backed-standard-streams.patch
+    sha256sum: 93b7f7402b415f173e63e46b555f458978d388875d871f508b3420f760c333d3
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-02
+    upstreamable: true
+    comments: |
+      Route the standard streams through the reserved ZVFS descriptors
+      (0/1/2) under CONFIG_ZVFS_RESERVE_STDIO_FDS instead of the console
+      hook, so dup2() redirection of stdin/stdout/stderr onto pipes or
+      files (as posix_spawn() file actions do) is honored. Picolibc
+      stdio.c gains fd-backed put/get; minimal libc stops special-casing
+      fds 1/2 to the console and fd 0 to EOF (MINIMAL_STDIO_FD_MIN).
+      Newlib already routes through the POSIX device_io write/read aliases
+      and needs no change.
   - path: zephyr/libc-signal-h-pthread-kill.patch
     sha256sum: 9db8dc468a348bb0603646373dbe308174a5711ddbcfd454197b47f18992eb48
     module: zephyr
