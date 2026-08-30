@@ -3692,6 +3692,25 @@ patches:
       giving isatty() and the termios functions their fd identity check.
       The ioctl verifier admits the request, which carries no argument,
       so user mode can ask too.
+  - path: zephyr/libc-termios-glob-interpose.patch
+    sha256sum: d31c4f6b1a208c7d8ed7adbf8b9e0e29a5ce126bc9e02e6f555d420d0a972586
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-30
+    upstreamable: true
+    comments: |
+      Interpose <termios.h>, <glob.h>, and <sys/time.h> for Picolibc and
+      Newlib onto the POSIX module's headers, following the existing
+      per-libc wrapper-header pattern; the toolchain copies otherwise
+      resolve first, the toolchain termios.h depends on a <sys/termios.h>
+      nobody provides, and the toolchain sys/time.h includes the internal
+      <sys/_select.h>, whose fd_set conflicts with the interposed
+      <sys/select.h>. The existing sys/select.h wrappers also gain
+      <sys/_types.h> before the internal type headers, which some
+      toolchain builds (aarch64) require. <stdio.h> gains a chaining
+      wrapper declaring ctermid(), which neither toolchain libc
+      provides; posix_stdio.h remains its documented owner.
   - path: busybox/busybox-zephyr-module.patch
     sha256sum: 8a320ac4d8025303ad0be9a970fc42cdba24488968a3d0a6f2ba346daa723c63
     module: modules/lib/busybox
