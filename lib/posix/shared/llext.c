@@ -22,6 +22,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <fnmatch.h>
+#include <glob.h>
 #include <grp.h>
 #include <libgen.h>
 #include <limits.h>
@@ -268,6 +269,12 @@ EXPORT_SYMBOL(renameat);
 EXPORT_SYMBOL(unlinkat);
 EXPORT_SYMBOL(utimensat);
 #endif /* CONFIG_POSIX_FILE_SYSTEM_FD */
+
+/* FILE_SYSTEM_GLOB */
+#ifdef CONFIG_POSIX_FILE_SYSTEM_GLOB
+EXPORT_SYMBOL(glob);
+EXPORT_SYMBOL(globfree);
+#endif /* CONFIG_POSIX_FILE_SYSTEM_GLOB */
 
 /* FILE_SYSTEM_R */
 #ifdef CONFIG_POSIX_FILE_SYSTEM_R
