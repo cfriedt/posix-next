@@ -3643,6 +3643,40 @@ patches:
       fds 1/2 to the console and fd 0 to EOF (MINIMAL_STDIO_FD_MIN).
       Newlib already routes through the POSIX device_io write/read aliases
       and needs no change.
+  - path: busybox/busybox-zephyr-module.patch
+    sha256sum: 8a320ac4d8025303ad0be9a970fc42cdba24488968a3d0a6f2ba346daa723c63
+    module: modules/lib/busybox
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-30
+    upstreamable: true
+    comments: |
+      Zephyr module glue for busybox: module.yml, a Kconfig gate
+      (CONFIG_BUSYBOX), and a CMakeLists.txt that runs busybox's own
+      kbuild host-side at configure time (allnoconfig plus
+      zephyr/busybox.frag, settled by zephyr/configure.sh) to generate the
+      derived headers, rebuilds the sources the configuration selects with
+      the Zephyr target flags, and partially links the archive seeded by
+      an exported main() into busybox.llext. Shim headers provide the
+      glibc-isms busybox includes (features.h, sys/sysmacros.h,
+      sys/termios.h, sys/ioctl.h winsize, sys/resource.h rlimits).
+  - path: busybox/busybox-zephyr-platform.patch
+    sha256sum: 77ee730bfce6de1c3f073f941117b05848a68d1111472fd79fcaf2536b364cd4
+    module: modules/lib/busybox
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-30
+    upstreamable: true
+    comments: |
+      The busybox porting layer for Zephyr: a 'who misses what' block in
+      platform.h (no mntent/statfs/unlocked stdio, renamed utoa/itoa
+      collisions, NSIG, sigisemptyset()); errno routed through the
+      exported __errno_location() accessor because the base image's errno
+      may be thread-local and loadable extensions cannot carry TLS
+      relocations; per-image option-parsing state over the reentrant
+      getopt_r(); vfork mapped to fork; fflush_all() flushing only this
+      program's streams (picolibc's global stream list is not
+      process-aware).
   - path: zephyr/disk-ramdisk-map-ram-region-only.patch
     sha256sum: 71c537309fdf937e77420c4a42b4a505b9d69487f506e5817f71e14c8aa71703
     module: zephyr

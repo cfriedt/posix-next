@@ -1,0 +1,451 @@
+diff --git a/zephyr/CMakeLists.txt b/zephyr/CMakeLists.txt
+new file mode 100644
+index 000000000..1a41239c3
+--- /dev/null
++++ b/zephyr/CMakeLists.txt
+@@ -0,0 +1,161 @@
++# SPDX-License-Identifier: GPL-2.0-only
++# Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++#
++# Build busybox as a linkable loadable extension (llext).
++#
++# Busybox's own kbuild runs once, host-side, at configure time: it settles the
++# busybox configuration (zephyr/busybox.frag over allnoconfig), generates the
++# derived headers (autoconf.h, applet_tables.h, usage_compressed.h, ...), and
++# its V=1 log names exactly the sources the configuration compiles. Those
++# sources are then rebuilt with the Zephyr target flags into a static archive,
++# and a partial link seeded by the exported main() pulls in only the members
++# the enabled applets actually reach.
++
++if(CONFIG_BUSYBOX)
++
++set(bb_src_dir ${ZEPHYR_CURRENT_MODULE_DIR})
++set(bb_host_dir ${PROJECT_BINARY_DIR}/busybox/host)
++set(bb_log ${bb_host_dir}/zephyr-host-build.log)
++set(bb_frag ${bb_src_dir}/zephyr/busybox.frag)
++
++set(bb_stamp ${bb_host_dir}/busybox_unstripped)
++if((NOT EXISTS ${bb_stamp}) OR (${bb_frag} IS_NEWER_THAN ${bb_stamp}))
++  message(STATUS "busybox: host configure + header generation in ${bb_host_dir}")
++  execute_process(
++    COMMAND sh ${bb_src_dir}/zephyr/configure.sh ${bb_src_dir} ${bb_host_dir}
++    RESULT_VARIABLE bb_ret
++    COMMAND_ECHO STDOUT
++  )
++  if(bb_ret)
++    message(FATAL_ERROR "busybox: configure failed, see ${bb_host_dir}/configure.log")
++  endif()
++  execute_process(
++    COMMAND make -C ${bb_src_dir} O=${bb_host_dir} -j8 busybox_unstripped
++    RESULT_VARIABLE bb_ret
++    COMMAND_ECHO STDOUT
++  )
++  if(bb_ret)
++    file(REMOVE ${bb_stamp})
++    message(FATAL_ERROR "busybox: host build failed")
++  endif()
++endif()
++
++# every object the host build produced names a source the configuration
++# compiles (the V=1 log cannot be parsed for this: parallel make interleaves
++# its lines)
++file(GLOB_RECURSE bb_host_objs RELATIVE ${bb_host_dir} ${bb_host_dir}/*.o)
++set(bb_sources "")
++foreach(bb_obj ${bb_host_objs})
++  if(bb_obj MATCHES "^scripts/" OR bb_obj MATCHES "built-in\\.o$" OR
++     bb_obj MATCHES "usage_pod\\.o$")
++    continue()
++  endif()
++  string(REGEX REPLACE "\\.o$" ".c" bb_src "${bb_obj}")
++  if(EXISTS ${bb_src_dir}/${bb_src})
++    list(APPEND bb_sources ${bb_src_dir}/${bb_src})
++  endif()
++endforeach()
++list(REMOVE_DUPLICATES bb_sources)
++list(LENGTH bb_sources bb_count)
++message(STATUS "busybox: ${bb_count} sources from host build log")
++
++# sources that cannot build against Zephyr headers (grown as needed)
++set(bb_excludes
++  libbb/alloc_affinity\\.c
++  libbb/herror_msg\\.c
++  libbb/inet_common\\.c
++  libbb/xconnect\\.c
++  libbb/xgethostbyname\\.c
++  ${BUSYBOX_EXCLUDE_SOURCES}
++)
++foreach(bb_x ${bb_excludes})
++  list(FILTER bb_sources EXCLUDE REGEX "${bb_x}")
++endforeach()
++
++# busybox's version string, normally passed by its kbuild
++file(STRINGS ${bb_src_dir}/Makefile bb_ver_lines REGEX "^(VERSION|PATCHLEVEL|SUBLEVEL|EXTRAVERSION) *=")
++set(bb_VERSION "")
++set(bb_PATCHLEVEL "")
++set(bb_SUBLEVEL "")
++set(bb_EXTRAVERSION "")
++foreach(line ${bb_ver_lines})
++  string(REGEX MATCH "^([A-Z]+) *= *(.*)$" _ "${line}")
++  set(bb_${CMAKE_MATCH_1} "${CMAKE_MATCH_2}")
++endforeach()
++set(bb_ver "${bb_VERSION}.${bb_PATCHLEVEL}.${bb_SUBLEVEL}${bb_EXTRAVERSION}")
++
++# inline flag filter, as add_llext_target() does it since zephyr 4.5
++list(TRANSFORM LLEXT_REMOVE_FLAGS
++     REPLACE "(.+)" "^\\1$"
++     OUTPUT_VARIABLE llext_remove_flags_regexp
++)
++list(JOIN llext_remove_flags_regexp "|" llext_remove_flags_regexp)
++if("${llext_remove_flags_regexp}" STREQUAL "")
++  set(llext_remove_flags_regexp "^$")
++endif()
++set(zephyr_flags "$<TARGET_PROPERTY:zephyr_interface,INTERFACE_COMPILE_OPTIONS>")
++set(zephyr_filtered_flags "$<FILTER:${zephyr_flags},EXCLUDE,${llext_remove_flags_regexp}>")
++
++add_library(busybox_lib STATIC EXCLUDE_FROM_ALL ${bb_sources})
++
++# the seed object: exports busybox's main() as the extension entry point
++add_library(busybox_main OBJECT EXCLUDE_FROM_ALL ${bb_src_dir}/zephyr/llext_main.c)
++
++foreach(bb_tgt busybox_lib busybox_main)
++  target_compile_definitions(${bb_tgt} PRIVATE
++    $<TARGET_PROPERTY:zephyr_interface,INTERFACE_COMPILE_DEFINITIONS>
++    LL_EXTENSION_BUILD
++    NDEBUG
++    BB_VER="${bb_ver}"
++  )
++  target_compile_options(${bb_tgt} PRIVATE
++    ${zephyr_filtered_flags}
++    ${LLEXT_APPEND_FLAGS}
++    -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L
++    -U_XOPEN_SOURCE -D_XOPEN_SOURCE=700
++    -D_GNU_SOURCE
++    -std=gnu17
++    -include ${bb_host_dir}/include/autoconf.h
++    -funsigned-char
++    -fno-builtin-printf
++    -fno-builtin-strlen
++    -Wno-shadow
++    -Wno-undef
++    -Wno-pointer-arith
++    -Wno-double-promotion
++    -Wno-deprecated-declarations
++    -Wno-uninitialized
++  )
++  target_include_directories(${bb_tgt} PRIVATE
++    ${bb_src_dir}/zephyr/include
++    ${bb_host_dir}/include
++    ${bb_src_dir}/include
++    ${bb_src_dir}/libbb
++    $<TARGET_PROPERTY:zephyr_interface,INTERFACE_INCLUDE_DIRECTORIES>
++  )
++  target_include_directories(${bb_tgt} SYSTEM PRIVATE
++    $<TARGET_PROPERTY:zephyr_interface,INTERFACE_SYSTEM_INCLUDE_DIRECTORIES>
++  )
++  add_dependencies(${bb_tgt} zephyr_interface zephyr_generated_headers)
++endforeach()
++
++# partial link: the exported main() pulls the reachable archive members
++set(bb_llext ${PROJECT_BINARY_DIR}/busybox/busybox.llext)
++add_custom_command(
++  OUTPUT ${bb_llext}
++  COMMAND ${CMAKE_C_COMPILER}
++    "$<TARGET_PROPERTY:linker,partial_linking>"
++    ${LLEXT_APPEND_FLAGS}
++    -nostdlib -nodefaultlibs
++    $<TARGET_OBJECTS:busybox_main>
++    $<TARGET_FILE:busybox_lib>
++    -o ${bb_llext}
++  COMMAND ${CMAKE_OBJCOPY} --strip-debug ${bb_llext}
++  DEPENDS busybox_main busybox_lib $<TARGET_OBJECTS:busybox_main> $<TARGET_FILE:busybox_lib>
++  COMMAND_EXPAND_LISTS
++)
++add_custom_target(busybox_llext DEPENDS ${bb_llext})
++
++set(BUSYBOX_LLEXT_FILE ${bb_llext} CACHE INTERNAL "path to the busybox llext binary")
++
++endif()
+diff --git a/zephyr/Kconfig b/zephyr/Kconfig
+new file mode 100644
+index 000000000..afc3920fe
+--- /dev/null
++++ b/zephyr/Kconfig
+@@ -0,0 +1,11 @@
++# SPDX-License-Identifier: GPL-2.0-only
++# Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++
++config BUSYBOX
++	bool "Build busybox as a linkable loadable extension"
++	depends on LLEXT
++	help
++	  Build the busybox multi-call binary as an llext image that an
++	  application can place in a file system and run via the exec
++	  family. The applet set is selected by zephyr/busybox.frag in
++	  the busybox module.
+diff --git a/zephyr/busybox.frag b/zephyr/busybox.frag
+new file mode 100644
+index 000000000..32e6ea022
+--- /dev/null
++++ b/zephyr/busybox.frag
+@@ -0,0 +1,62 @@
++# SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++# SPDX-License-Identifier: GPL-2.0-only
++#
++# Kconfig fragment merged over `make allnoconfig` to select the minimal
++# busybox applet set built for Zephyr. Symbols here are busybox Kconfig
++# symbols, not Zephyr ones.
++
++CONFIG_BUSYBOX=y
++CONFIG_SHOW_USAGE=y
++CONFIG_LFS=y
++CONFIG_BASH_IS_NONE=y
++# CONFIG_SH_IS_ASH is not set
++# CONFIG_SHELL_ASH is not set
++
++# the shell: hush, script/-c modes; interactive and job control not yet
++CONFIG_HUSH=y
++CONFIG_SHELL_HUSH=y
++CONFIG_SH_IS_HUSH=y
++# CONFIG_SH_IS_NONE is not set
++CONFIG_HUSH_INTERACTIVE=y
++# CONFIG_HUSH_JOB is not set
++# line editing needs raw-mode console input; the console is line-buffered
++# CONFIG_FEATURE_EDITING is not set
++CONFIG_HUSH_IF=y
++CONFIG_HUSH_LOOPS=y
++CONFIG_HUSH_CASE=y
++CONFIG_HUSH_TICK=y
++# echo as an external applet so it works in pipelines (no fork for builtins)
++# CONFIG_HUSH_ECHO is not set
++CONFIG_HUSH_EXPORT=y
++CONFIG_HUSH_SET=y
++CONFIG_HUSH_UNSET=y
++CONFIG_HUSH_UMASK=y
++CONFIG_HUSH_WAIT=y
++# no getrlimit()/setrlimit() on Zephyr yet
++# CONFIG_HUSH_ULIMIT is not set
++
++# the multi-call dispatch and the /bin symlink farm
++CONFIG_FEATURE_INSTALLER=y
++CONFIG_BUSYBOX_EXEC_PATH="/bin/busybox"
++
++# applets
++CONFIG_CAT=y
++CONFIG_ECHO=y
++CONFIG_GREP=y
++CONFIG_EGREP=y
++CONFIG_FGREP=y
++CONFIG_FEATURE_GREP_CONTEXT=y
++CONFIG_SED=y
++CONFIG_PRINTF=y
++CONFIG_TEST=y
++CONFIG_TEST1=y
++CONFIG_FALSE=y
++CONFIG_LN=y
++CONFIG_LS=y
++CONFIG_MKDIR=y
++CONFIG_PWD=y
++CONFIG_READLINK=y
++CONFIG_RM=y
++CONFIG_RMDIR=y
++CONFIG_TRUE=y
++CONFIG_UNAME=y
+diff --git a/zephyr/configure.sh b/zephyr/configure.sh
+new file mode 100755
+index 000000000..fc41da449
+--- /dev/null
++++ b/zephyr/configure.sh
+@@ -0,0 +1,44 @@
++#!/bin/sh
++# SPDX-License-Identifier: GPL-2.0-only
++# Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++#
++# Configure a minimal busybox in an out-of-tree build directory:
++# allnoconfig, then the zephyr/busybox.frag symbols, settled with oldconfig.
++# Usage: configure.sh <busybox-srcdir> <builddir> [extra-frag...]
++
++set -eu
++
++src="$1"
++build="$2"
++shift 2
++
++mkdir -p "$build"
++make -C "$src" O="$build" allnoconfig >"$build/configure.log" 2>&1
++
++for frag in "$src/zephyr/busybox.frag" "$@"; do
++	while IFS= read -r line; do
++		case "$line" in
++		CONFIG_*=*) sym="${line%%=*}" ;;
++		'# CONFIG_'*' is not set') sym="${line#\# }" sym="${sym%% *}" ;;
++		*) continue ;;
++		esac
++		sed -i -e "/^# $sym is not set\$/d" -e "/^$sym=/d" "$build/.config"
++		printf '%s\n' "$line" >>"$build/.config"
++	done <"$frag"
++done
++
++yes '' | make -C "$src" O="$build" oldconfig >>"$build/configure.log" 2>&1
++
++# every fragment symbol must have survived dependency resolution
++for frag in "$src/zephyr/busybox.frag" "$@"; do
++	while IFS= read -r line; do
++		case "$line" in
++		CONFIG_*=* | '# CONFIG_'*' is not set') ;;
++		*) continue ;;
++		esac
++		if ! grep -q -F -x "$line" "$build/.config"; then
++			echo "busybox configure: '$line' lost after oldconfig" >&2
++			exit 1
++		fi
++	done <"$frag"
++done
+diff --git a/zephyr/include/features.h b/zephyr/include/features.h
+new file mode 100644
+index 000000000..b6a35b488
+--- /dev/null
++++ b/zephyr/include/features.h
+@@ -0,0 +1,13 @@
++/*
++ * SPDX-License-Identifier: GPL-2.0-only
++ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++ *
++ * busybox expects glibc's <features.h>. Feature-test macros come from the
++ * command line and the libc's own headers when building against Zephyr.
++ */
++#ifndef _FEATURES_H
++#define _FEATURES_H
++
++#include <sys/cdefs.h>
++
++#endif
+diff --git a/zephyr/include/sys/ioctl.h b/zephyr/include/sys/ioctl.h
+new file mode 100644
+index 000000000..546afdf70
+--- /dev/null
++++ b/zephyr/include/sys/ioctl.h
+@@ -0,0 +1,28 @@
++/*
++ * SPDX-License-Identifier: GPL-2.0-only
++ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++ *
++ * Zephyr's <sys/ioctl.h> plus the terminal window-size request busybox
++ * expects; with no terminal driver the request simply fails at runtime and
++ * busybox falls back to 80x24.
++ */
++#ifndef _BB_ZEPHYR_SYS_IOCTL_H
++#define _BB_ZEPHYR_SYS_IOCTL_H
++
++#include_next <sys/ioctl.h>
++
++struct winsize {
++	unsigned short ws_row;
++	unsigned short ws_col;
++	unsigned short ws_xpixel;
++	unsigned short ws_ypixel;
++};
++
++#ifndef TIOCGWINSZ
++#define TIOCGWINSZ 0x5413
++#endif
++#ifndef TIOCSWINSZ
++#define TIOCSWINSZ 0x5414
++#endif
++
++#endif
+diff --git a/zephyr/include/sys/resource.h b/zephyr/include/sys/resource.h
+new file mode 100644
+index 000000000..8f97a7963
+--- /dev/null
++++ b/zephyr/include/sys/resource.h
+@@ -0,0 +1,43 @@
++/*
++ * SPDX-License-Identifier: GPL-2.0-only
++ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++ *
++ * The libc's <sys/resource.h> plus the rlimit surface busybox's ulimit code
++ * needs to compile. Zephyr implements no resource limits: the builtin is
++ * disabled (CONFIG_HUSH_ULIMIT unset) and its unreferenced code is dropped
++ * at the partial link, so no implementation is required.
++ */
++#ifndef _BB_ZEPHYR_SYS_RESOURCE_H
++#define _BB_ZEPHYR_SYS_RESOURCE_H
++
++#include_next <sys/resource.h>
++
++typedef unsigned long rlim_t;
++
++struct rlimit {
++	rlim_t rlim_cur;
++	rlim_t rlim_max;
++};
++
++#define RLIM_INFINITY ((rlim_t)-1)
++
++#define RLIMIT_CPU    0
++#define RLIMIT_FSIZE  1
++#define RLIMIT_DATA   2
++#define RLIMIT_STACK  3
++#define RLIMIT_CORE   4
++#define RLIMIT_NOFILE 7
++#define RLIMIT_AS     9
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++int getrlimit(int resource, struct rlimit *rlp);
++int setrlimit(int resource, const struct rlimit *rlp);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif
+diff --git a/zephyr/include/sys/sysmacros.h b/zephyr/include/sys/sysmacros.h
+new file mode 100644
+index 000000000..fb4783b37
+--- /dev/null
++++ b/zephyr/include/sys/sysmacros.h
+@@ -0,0 +1,15 @@
++/*
++ * SPDX-License-Identifier: GPL-2.0-only
++ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++ *
++ * major()/minor()/makedev() for busybox on Zephyr, which has no device
++ * numbers; the traditional 8/8 split keeps ls -l output well-formed.
++ */
++#ifndef _SYS_SYSMACROS_H
++#define _SYS_SYSMACROS_H
++
++#define major(dev)        ((unsigned int)(((dev) >> 8) & 0xff))
++#define minor(dev)        ((unsigned int)((dev) & 0xff))
++#define makedev(maj, min) ((((maj) & 0xff) << 8) | ((min) & 0xff))
++
++#endif
+diff --git a/zephyr/llext_main.c b/zephyr/llext_main.c
+new file mode 100644
+index 000000000..3afdf458a
+--- /dev/null
++++ b/zephyr/llext_main.c
+@@ -0,0 +1,10 @@
++/*
++ * SPDX-License-Identifier: GPL-2.0-only
++ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++ */
++
++#include <zephyr/llext/symbol.h>
++
++/* the exec image ABI: the extension exports main() as its entry point */
++extern int main(int argc, char **argv, char **envp);
++LL_EXTENSION_SYMBOL(main);
+diff --git a/zephyr/module.yml b/zephyr/module.yml
+new file mode 100644
+index 000000000..941564a73
+--- /dev/null
++++ b/zephyr/module.yml
+@@ -0,0 +1,4 @@
++name: busybox
++build:
++  cmake: zephyr/
++  kconfig: zephyr/Kconfig
