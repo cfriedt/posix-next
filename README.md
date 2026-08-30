@@ -21,6 +21,9 @@
   <a href="https://github.com/cfriedt/posix-next/actions/workflows/asan.yml">
     <img src="https://github.com/cfriedt/posix-next/actions/workflows/asan.yml/badge.svg" alt="ASAN">
   </a>
+  <a href="https://github.com/cfriedt/posix-next/actions/workflows/codeql.yml">
+    <img src="https://github.com/cfriedt/posix-next/actions/workflows/codeql.yml/badge.svg" alt="CodeQL">
+  </a>
 </p>
 
 <p align="center">
