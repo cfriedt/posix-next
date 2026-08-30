@@ -84,6 +84,20 @@ static inline int posix_wait_common(k_pid_t child, k_pgrp_t grp, bool by_grp, pi
 			return 0;
 		}
 
+		if (K_WIFSTOPPED(kws) || K_WIFCONTINUED(kws)) {
+			/* a job report leaves nothing to reap: consume it */
+			uint32_t jobopt = K_WIFSTOPPED(kws) ? K_PROCESS_WUNTRACED
+							    : K_PROCESS_WCONTINUED;
+
+			ret = k_waitpid(reaped, NULL, NULL, jobopt | K_PROCESS_WNOHANG,
+					K_NO_WAIT);
+			if (ret == 0) {
+				return 0;
+			}
+			/* consumed by a concurrent waiter: go around again */
+			continue;
+		}
+
 		ret = k_waitpid(reaped, NULL, NULL, 0, K_NO_WAIT);
 		if (ret == 0) {
 			z_posix_exec_llext_reap(reaped);

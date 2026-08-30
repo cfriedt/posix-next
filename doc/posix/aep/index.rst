@@ -257,7 +257,7 @@ defined only while all of them remain enabled.
 
           :ref:`_POSIX_ADVISORY_INFO <posix_option_advisory_info>`, -1,
           :ref:`_POSIX_CHOWN_RESTRICTED <posix_option_chown_restricted>`, -1,
-          :ref:`_POSIX_JOB_CONTROL <posix_option_job_control>`, -1,
+          :ref:`_POSIX_JOB_CONTROL <posix_option_job_control>`, 200809L, :kconfig:option:`CONFIG_POSIX_JOB_CONTROL`
           :ref:`_POSIX_REGEXP <posix_option_group_regexp>`, -1,
           :ref:`_POSIX_SAVED_IDS <posix_option_saved_ids>`, -1,
           :ref:`_POSIX_SHELL <posix_option_shell>`, -1,
