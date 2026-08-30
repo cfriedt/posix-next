@@ -1,0 +1,38 @@
+diff --git a/include/zephyr/sys/fdtable.h b/include/zephyr/sys/fdtable.h
+--- a/include/zephyr/sys/fdtable.h
++++ b/include/zephyr/sys/fdtable.h
+@@ -372,6 +372,8 @@ enum {
+ 	ZFD_IOCTL_STATVFS,
+ 	ZFD_IOCTL_READDIR,
+ 	ZFD_IOCTL_REWINDDIR,
++	/* succeeds only on descriptors referring to a terminal */
++	ZFD_IOCTL_ISATTY,
+ 
+ 	/* Codes above 0x5400 and below 0x5500 are reserved for termios, FIO, etc */
+ 	/** Get the number of bytes available to read */
+diff --git a/lib/os/zvfs/zvfs_fdtable.c b/lib/os/zvfs/zvfs_fdtable.c
+--- a/lib/os/zvfs/zvfs_fdtable.c
++++ b/lib/os/zvfs/zvfs_fdtable.c
+@@ -897,6 +897,11 @@ static ssize_t stdinout_write_vmeth(void *obj, const void *buffer, size_t count)
+ 
+ static int stdinout_ioctl_vmeth(void *obj, unsigned int request, va_list args)
+ {
++	if (request == ZFD_IOCTL_ISATTY) {
++		/* the reserved stdio descriptors refer to the console */
++		return 0;
++	}
++
+ 	errno = EINVAL;
+ 	return -1;
+ }
+diff --git a/lib/os/zvfs/zvfs_ioctl.c b/lib/os/zvfs/zvfs_ioctl.c
+--- a/lib/os/zvfs/zvfs_ioctl.c
++++ b/lib/os/zvfs/zvfs_ioctl.c
+@@ -39,6 +39,7 @@ static int z_vrfy_zvfs_ioctl(int fd, unsigned long request, va_list args)
+ 
+ 	switch (request) {
+ 	case ZFD_IOCTL_FIONBIO:
++	case ZFD_IOCTL_ISATTY:
+ 		break;
+ 	case ZFD_IOCTL_FIONREAD: {
+ 		int *avail = va_arg(check, int *);
