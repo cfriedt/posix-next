@@ -3725,6 +3725,19 @@ patches:
       line as end-of-file. Interrupt characters are not yet routed to
       the foreground process group. Without the option such reads keep
       returning 0.
+  - path: zephyr/ext2-serialize-operations.patch
+    sha256sum: 06cf6fb79e29d6c51bd6f4b1d7b439cc8c60b8350d45b61185c81f6049744eed
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-30
+    upstreamable: true
+    comments: |
+      Serialize every ext2 operation behind one lock: the driver was
+      written assuming external serialization (static lookup buffers,
+      shared block-fetch state) which concurrently running processes do
+      not provide; racing lookups returned phantom ENOENTs. ext2 supports
+      a single mounted instance, so a single lock suffices.
   - path: busybox/busybox-zephyr-module.patch
     sha256sum: 8a320ac4d8025303ad0be9a970fc42cdba24488968a3d0a6f2ba346daa723c63
     module: modules/lib/busybox
