@@ -233,14 +233,14 @@ defined only while all of them remain enabled.
          :widths: 50, 10, 50
 
           :ref:`POSIX_C_LANG_WIDE_CHAR <posix_option_group_c_lang_wide_char>`,,
-          :ref:`POSIX_DEVICE_SPECIFIC <posix_option_group_device_specific>`,,
-          :ref:`POSIX_DEVICE_SPECIFIC_R <posix_option_group_device_specific_r>`,,
+          :ref:`POSIX_DEVICE_SPECIFIC <posix_option_group_device_specific>`, yes, :kconfig:option:`CONFIG_POSIX_DEVICE_SPECIFIC`
+          :ref:`POSIX_DEVICE_SPECIFIC_R <posix_option_group_device_specific_r>`, yes, :kconfig:option:`CONFIG_POSIX_DEVICE_SPECIFIC_R`
           :ref:`POSIX_DYNAMIC_LINKING <posix_option_group_dynamic_linking>`,,
           :ref:`POSIX_FIFO <posix_option_group_fifo>`,,
           :ref:`POSIX_FILE_ATTRIBUTES <posix_option_group_file_attributes>`, yes, :kconfig:option:`CONFIG_POSIX_FILE_ATTRIBUTES`
           :ref:`POSIX_FILE_SYSTEM_EXT <posix_option_group_file_system_ext>`,,
           :ref:`POSIX_FILE_SYSTEM_GLOB <posix_option_group_file_system_glob>`, yes, :kconfig:option:`CONFIG_POSIX_FILE_SYSTEM_GLOB`
-          :ref:`POSIX_JOB_CONTROL <posix_option_group_job_control>`,,
+          :ref:`POSIX_JOB_CONTROL <posix_option_group_job_control>`, yes, :kconfig:option:`CONFIG_POSIX_JOB_CONTROL`
           :ref:`POSIX_REGEXP <posix_option_group_regexp>`,,
           :ref:`POSIX_SHELL_FUNC <posix_option_group_shell_func>`,,
           :ref:`POSIX_SYMBOLIC_LINKS <posix_option_group_symbolic_links>`, yes, :kconfig:option:`CONFIG_POSIX_SYMBOLIC_LINKS`
