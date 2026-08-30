@@ -1,0 +1,140 @@
+diff --git a/lib/libc/minimal/source/stdio/fgetc.c b/lib/libc/minimal/source/stdio/fgetc.c
+--- a/lib/libc/minimal/source/stdio/fgetc.c
++++ b/lib/libc/minimal/source/stdio/fgetc.c
+@@ -24,7 +24,7 @@ int fgetc(FILE *stream)
+ 	}
+ 
+ 	fd = zvfs_libc_fileno(stream);
+-	if (fd < 3) {
++	if (fd < MINIMAL_STDIO_FD_MIN) {
+ 		return EOF;
+ 	}
+ 
+diff --git a/lib/libc/minimal/source/stdio/stdout_console.c b/lib/libc/minimal/source/stdio/stdout_console.c
+--- a/lib/libc/minimal/source/stdio/stdout_console.c
++++ b/lib/libc/minimal/source/stdio/stdout_console.c
+@@ -90,7 +90,7 @@ static size_t minimal_stream_read(void *ptr, size_t nbyte, FILE *stream)
+ 	unsigned char *dst = ptr;
+ 	int fd = zvfs_libc_fileno(stream);
+ 
+-	if (fd < 3 || nbyte == 0) {
++	if (fd < MINIMAL_STDIO_FD_MIN || nbyte == 0) {
+ 		return 0;
+ 	}
+ 
+@@ -120,11 +120,12 @@ static size_t minimal_stream_write(const void *ptr, size_t nbyte, FILE *stream)
+ #if defined(CONFIG_ZVFS)
+ 	int fd = zvfs_libc_fileno(stream);
+ 
++#if !defined(CONFIG_ZVFS_RESERVE_STDIO_FDS)
+ 	if (fd == 1 || fd == 2) {
+ 		return minimal_console_write((const unsigned char *)ptr, nbyte);
+ 	}
+-
+-	if (fd >= 3) {
++#endif
++	if (fd >= MINIMAL_STDIO_FD_MIN) {
+ 		return minimal_zvfs_stream_write(fd, ptr, nbyte);
+ 	}
+ #else
+diff --git a/lib/libc/minimal/source/stdio/stream_state.c b/lib/libc/minimal/source/stdio/stream_state.c
+--- a/lib/libc/minimal/source/stdio/stream_state.c
++++ b/lib/libc/minimal/source/stdio/stream_state.c
+@@ -103,7 +103,7 @@ int ungetc(int c, FILE *stream)
+ {
+ 	int fd = stream_state_fd(stream);
+ 
+-	if (fd < 3) {
++	if (fd < MINIMAL_STDIO_FD_MIN) {
+ 		return EOF;
+ 	}
+ 
+diff --git a/lib/libc/minimal/source/stdio/stream_state.h b/lib/libc/minimal/source/stdio/stream_state.h
+--- a/lib/libc/minimal/source/stdio/stream_state.h
++++ b/lib/libc/minimal/source/stdio/stream_state.h
+@@ -15,6 +15,18 @@
+ #define MINIMAL_STDIO_EOF   0x01
+ #define MINIMAL_STDIO_ERROR 0x02
+ 
++/*
++ * Lowest fd that names a real ZVFS description. With reserved stdio slots,
++ * stdin/stdout/stderr (0/1/2) are backed by the console description and honor
++ * dup2() redirection (pipes, files); otherwise only fopen()'d fds (>= 3) are
++ * real and the standard streams are handled specially (console / EOF).
++ */
++#ifdef CONFIG_ZVFS_RESERVE_STDIO_FDS
++#define MINIMAL_STDIO_FD_MIN 0
++#else
++#define MINIMAL_STDIO_FD_MIN 3
++#endif
++
+ void minimal_stdio_set_flags(int fd, unsigned char flags);
+ void minimal_stdio_clear_state(int fd);
+ int minimal_stdio_push_ungetc(int fd, int c);
+diff --git a/lib/libc/picolibc/stdio.c b/lib/libc/picolibc/stdio.c
+--- a/lib/libc/picolibc/stdio.c
++++ b/lib/libc/picolibc/stdio.c
+@@ -36,6 +36,41 @@ static inline int z_vrfy_zephyr_fputc(int c, FILE *stream)
+ #include <zephyr/syscalls/zephyr_fputc_mrsh.c>
+ #endif
+ 
++#ifdef CONFIG_ZVFS_RESERVE_STDIO_FDS
++/*
++ * The standard streams operate on the reserved descriptors 0..2 so that
++ * dup2()'ed redirections (pipes, files) apply to stdio output as well; the
++ * default descriptors refer to the console.
++ */
++#include <zephyr/sys/zvfs.h>
++
++static int picolibc_put(char a, FILE *f)
++{
++	return (zvfs_write(1, &a, 1) == 1) ? 0 : _FDEV_ERR;
++}
++
++static int picolibc_put_err(char a, FILE *f)
++{
++	return (zvfs_write(2, &a, 1) == 1) ? 0 : _FDEV_ERR;
++}
++
++static int picolibc_get(FILE *f)
++{
++	char a;
++	ssize_t ret = zvfs_read(0, &a, 1);
++
++	return (ret == 1) ? (int)(unsigned char)a : ((ret == 0) ? _FDEV_EOF : _FDEV_ERR);
++}
++
++static LIBC_DATA FILE __stdout = FDEV_SETUP_STREAM(picolibc_put, NULL, NULL, _FDEV_SETUP_WRITE);
++static LIBC_DATA FILE __stdin = FDEV_SETUP_STREAM(NULL, picolibc_get, NULL, _FDEV_SETUP_READ);
++static LIBC_DATA FILE __stderr =
++	FDEV_SETUP_STREAM(picolibc_put_err, NULL, NULL, _FDEV_SETUP_WRITE);
++
++FILE *const stdin = &__stdin;
++FILE *const stdout = &__stdout;
++FILE *const stderr = &__stderr;
++#else /* CONFIG_ZVFS_RESERVE_STDIO_FDS */
+ static int picolibc_put(char a, FILE *f)
+ {
+ 	zephyr_fputc(a, f);
+@@ -54,15 +89,21 @@ static LIBC_DATA FILE __stdin = FDEV_SETUP_STREAM(NULL, NULL, NULL, 0);
+ FILE *const stdin = &__stdin;
+ FILE *const stdout = &__stdout;
+ STDIO_ALIAS(stderr);
++#endif /* CONFIG_ZVFS_RESERVE_STDIO_FDS */
+ 
+ void __stdout_hook_install(int (*hook)(int c))
+ {
+ 	_stdout_hook = hook;
++#ifndef CONFIG_ZVFS_RESERVE_STDIO_FDS
+ 	__stdout.flags |= _FDEV_SETUP_WRITE;
++#endif
+ }
+ 
+ void __stdin_hook_install(unsigned char (*hook)(void))
+ {
++#ifndef CONFIG_ZVFS_RESERVE_STDIO_FDS
+ 	__stdin.get = (int (*)(FILE *)) hook;
+ 	__stdin.flags |= _FDEV_SETUP_READ;
++#endif
++	ARG_UNUSED(hook);
+ }
