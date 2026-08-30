@@ -56,6 +56,7 @@
 #include <sys/utsname.h>
 #include <sys/wait.h>
 #include <syslog.h>
+#include <termios.h>
 #include <time.h>
 #include <unistd.h>
 #include <utime.h>
@@ -172,6 +173,28 @@ EXPORT_SYMBOL(vprintf);
 EXPORT_SYMBOL(vscanf);
 EXPORT_SYMBOL(write);
 #endif /* CONFIG_POSIX_DEVICE_IO */
+
+/* DEVICE_SPECIFIC */
+#ifdef CONFIG_POSIX_DEVICE_SPECIFIC
+EXPORT_SYMBOL(cfgetispeed);
+EXPORT_SYMBOL(cfgetospeed);
+EXPORT_SYMBOL(cfsetispeed);
+EXPORT_SYMBOL(cfsetospeed);
+EXPORT_SYMBOL(ctermid);
+EXPORT_SYMBOL(isatty);
+EXPORT_SYMBOL(tcdrain);
+EXPORT_SYMBOL(tcflow);
+EXPORT_SYMBOL(tcflush);
+EXPORT_SYMBOL(tcgetattr);
+EXPORT_SYMBOL(tcsendbreak);
+EXPORT_SYMBOL(tcsetattr);
+EXPORT_SYMBOL(ttyname);
+#endif /* CONFIG_POSIX_DEVICE_SPECIFIC */
+
+/* DEVICE_SPECIFIC_R */
+#ifdef CONFIG_POSIX_DEVICE_SPECIFIC_R
+EXPORT_SYMBOL(ttyname_r);
+#endif /* CONFIG_POSIX_DEVICE_SPECIFIC_R */
 
 /* FD_MGMT */
 #ifdef CONFIG_POSIX_FD_MGMT
