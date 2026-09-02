@@ -176,7 +176,11 @@
 #define _POSIX_REALTIME_SIGNALS _POSIX_VERSION
 #endif
 
-/* _POSIX_REGEXP: not supported */
+#undef _POSIX_REGEXP
+#ifdef CONFIG_POSIX_REGEXP
+#define _POSIX_REGEXP _POSIX_VERSION
+#endif
+
 /* _POSIX_SAVED_IDS: not supported */
 
 #undef _POSIX_SEMAPHORES
