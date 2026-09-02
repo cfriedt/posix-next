@@ -1,0 +1,32 @@
+common:
+  tags:
+    - posix_regexp
+  platform_key:
+    - arch
+    - simulation
+  min_flash: 64
+  min_ram: 32
+tests:
+  portability.posix.regexp:
+    filter: not CONFIG_NATIVE_LIBC
+  portability.posix.regexp.minimal:
+    filter: not CONFIG_NATIVE_LIBC
+    extra_configs:
+      - CONFIG_MINIMAL_LIBC=y
+  portability.posix.regexp.newlib:
+    filter: (not CONFIG_NATIVE_LIBC) and (TOOLCHAIN_HAS_NEWLIB == 1)
+    extra_configs:
+      - CONFIG_NEWLIB_LIBC=y
+  portability.posix.regexp.picolibc:
+    tags: picolibc
+    filter: (not CONFIG_NATIVE_LIBC) and CONFIG_PICOLIBC_SUPPORTED
+    extra_configs:
+      - CONFIG_PICOLIBC=y
+  portability.posix.regexp.linux_compat:
+    tags: native
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    filter: CONFIG_NATIVE_LIBC
+    extra_configs:
+      - CONFIG_POSIX_TEST_LINUX_COMPAT=y
