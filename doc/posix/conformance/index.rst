@@ -38,6 +38,7 @@ POSIX System Interfaces
     :ref:`_POSIX_MEMORY_PROTECTION<posix_option_memory_protection>`, 200809L, :kconfig:option:`CONFIG_POSIX_MEMORY_PROTECTION`
     :ref:`_POSIX_READER_WRITER_LOCKS<posix_option_reader_writer_locks>`, 200809L, :kconfig:option:`CONFIG_POSIX_RW_LOCKS`
     :ref:`_POSIX_REALTIME_SIGNALS<posix_option_realtime_signals>`, 200809L, :kconfig:option:`CONFIG_POSIX_REALTIME_SIGNALS`
+    :ref:`_POSIX_REGEXP<posix_option_group_regexp>`, 200809L, :kconfig:option:`CONFIG_POSIX_REGEXP`
     :ref:`_POSIX_SEMAPHORES<posix_option_semaphores>`, 200809L, :kconfig:option:`CONFIG_POSIX_SEMAPHORES`
     :ref:`_POSIX_SPIN_LOCKS<posix_option_spin_locks>`, 200809L, :kconfig:option:`CONFIG_POSIX_SPIN_LOCKS`
     :ref:`_POSIX_THREAD_SAFE_FUNCTIONS<posix_option_thread_safe_functions>`, 200809L, :kconfig:option:`CONFIG_POSIX_C_LANG_SUPPORT_R` or :kconfig:option:`CONFIG_POSIX_FILE_SYSTEM_R` or :kconfig:option:`CONFIG_POSIX_FILE_LOCKING` or :kconfig:option:`CONFIG_POSIX_SYSTEM_DATABASE_R`
@@ -54,7 +55,6 @@ POSIX System Interfaces
    :widths: 50, 10, 50
 
     _POSIX_JOB_CONTROL, -1, :ref:`†<posix_undefined_behaviour>`
-    _POSIX_REGEXP, -1, :ref:`†<posix_undefined_behaviour>`
     _POSIX_SAVED_IDS, -1, :ref:`†<posix_undefined_behaviour>`
     _POSIX_SHELL, -1, :ref:`†<posix_undefined_behaviour>`
 

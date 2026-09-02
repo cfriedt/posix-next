@@ -32,6 +32,7 @@
 #include <poll.h>
 #include <pthread.h>
 #include <pwd.h>
+#include <regex.h>
 #include <sched.h>
 #include <semaphore.h>
 #include <setjmp.h>
@@ -385,6 +386,14 @@ EXPORT_SYMBOL(sigqueue);
 EXPORT_SYMBOL(sigtimedwait);
 EXPORT_SYMBOL(sigwaitinfo);
 #endif /* CONFIG_POSIX_REALTIME_SIGNALS */
+
+/* REGEXP */
+#ifdef CONFIG_POSIX_REGEXP
+EXPORT_SYMBOL(regcomp);
+EXPORT_SYMBOL(regerror);
+EXPORT_SYMBOL(regexec);
+EXPORT_SYMBOL(regfree);
+#endif /* CONFIG_POSIX_REGEXP */
 
 /* RW_LOCKS */
 #ifdef CONFIG_POSIX_RW_LOCKS
