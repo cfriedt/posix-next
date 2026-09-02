@@ -3800,3 +3800,44 @@ patches:
       getopt_r(); vfork mapped to fork; fflush_all() flushing only this
       program's streams (picolibc's global stream list is not
       process-aware).
+  - path: zephyr/libc-picolibc-regex-h-shim.patch
+    sha256sum: 73aab7370c0880ff61f98315c62270d2daca5629cd5449f34347087754d83a2e
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-02
+    upstreamable: true
+    comments: |
+      Redirect Picolibc's <regex.h> to the posix-next <zephyr/posix/regex.h>
+      owning header. Picolibc's own <regex.h> is unusable as shipped: the
+      toolchain copy is not self-contained (uses size_t without requesting it
+      from <stddef.h>) and its regcomp() has a use-after-free, and the
+      toolchain build (the Zephyr SDK default) cannot be patched. So the
+      module supplies the regex engine and this header for POSIX_REGEXP. The
+      minimal libc needs no shim (the module's include/zephyr/posix is on its
+      search path) and Newlib uses its own working regex via
+      TC_PROVIDES_POSIX_REGEXP.
+  - path: picolibc/regex-h-self-contained-size-t.patch
+    sha256sum: 535bef113a04ab0c46b0aea678f681c71587af899fbdbfa8ca9c41f575838a2f
+    module: picolibc
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-02
+    upstreamable: true
+    comments: |
+      Picolibc <regex.h> uses size_t but requests only ptrdiff_t from
+      <stddef.h>; add __need_size_t so the header is self-contained when
+      included first.
+  - path: picolibc/regcomp-no-free-of-live-sets-on-error.patch
+    sha256sum: 1832dff0a895d96a8b60d62ac4ec51276b127868b3d31f0a1fa06afdd94c71c3
+    module: picolibc
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-02
+    upstreamable: true
+    comments: |
+      Fix a use-after-free in Picolibc regcomp(): seterr() freed the
+      parser's cset arrays on any error while the parse continues to use
+      pointers into them; regcomp() already releases them via regfree() on
+      its error path. Reproduces on any invalid bracket expression, e.g.
+      regcomp(preg, "[abc", REG_EXTENDED).
