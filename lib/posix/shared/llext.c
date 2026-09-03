@@ -460,6 +460,8 @@ EXPORT_SYMBOL(sem_wait);
 /* SIGNAL_JUMP */
 #ifdef CONFIG_POSIX_SIGNAL_JUMP
 EXPORT_SYMBOL(siglongjmp);
+/* sigsetjmp() expands to this plus setjmp() */
+EXPORT_SYMBOL(__sigjmp_save);
 #endif /* CONFIG_POSIX_SIGNAL_JUMP */
 
 /* SIGNALS */
