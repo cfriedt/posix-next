@@ -1,0 +1,1030 @@
+diff --git a/include/zephyr/sys/fdtable.h b/include/zephyr/sys/fdtable.h
+--- a/include/zephyr/sys/fdtable.h
++++ b/include/zephyr/sys/fdtable.h
+@@ -36,6 +36,18 @@
+ #define ZVFS_O_DIRECTORY 0x80000
+ 
+ #define ZVFS_O_CLOEXEC 0x100000
++#define ZVFS_O_NOFOLLOW 0x200000
++
++/** Resolve a relative path against the current working directory */
++#define ZVFS_AT_FDCWD (-100)
++/** Use the effective IDs for the access check */
++#define ZVFS_AT_EACCESS 0x200
++/** Do not follow a trailing symbolic link */
++#define ZVFS_AT_SYMLINK_NOFOLLOW 0x100
++/** Remove a directory instead of a file */
++#define ZVFS_AT_REMOVEDIR 0x200
++/** Follow a trailing symbolic link */
++#define ZVFS_AT_SYMLINK_FOLLOW 0x400
+ 
+ #define ZVFS_O_DSYNC 0x10000
+ #define ZVFS_O_RSYNC 0x20000
+diff --git a/include/zephyr/sys/zvfs_fs.h b/include/zephyr/sys/zvfs_fs.h
+--- a/include/zephyr/sys/zvfs_fs.h
++++ b/include/zephyr/sys/zvfs_fs.h
+@@ -125,6 +125,16 @@ struct zvfs_dirstream {
+  */
+ __syscall struct zvfs_dirstream *zvfs_opendir(const char *path);
+ 
++/**
++ * @brief Wrap an open directory descriptor in a directory stream
++ *
++ * The stream takes ownership of @p fd: closing the stream closes it.
++ *
++ * @param fd A directory descriptor, e.g. from zvfs_open() with ZVFS_O_DIRECTORY.
++ * @return the stream, or NULL with errno set.
++ */
++__syscall struct zvfs_dirstream *zvfs_fdopendir(int fd);
++
+ /**
+  * @brief Read the next directory entry.
+  *
+@@ -157,6 +167,14 @@ __syscall int zvfs_rewinddir(int fd);
+  */
+ __syscall int zvfs_open(const char *name, int flags, int mode);
+ 
++/*
++ * The *at() variants below resolve a relative path against the directory
++ * that @p dirfd refers to, or against the current working directory when
++ * @p dirfd is ZVFS_AT_FDCWD; an absolute path resolves on its own. The
++ * plain forms are equivalent to the *at() forms with ZVFS_AT_FDCWD.
++ */
++__syscall int zvfs_openat(int dirfd, const char *name, int flags, int mode);
++
+ /**
+  * @brief Allocate a ZVFS FS descriptor slot.
+  *
+@@ -188,6 +206,8 @@ void zvfs_record_lock_drop_obj(void *obj);
+  * @return 0 on success, -1 with errno set on error.
+  */
+ __syscall int zvfs_unlink(const char *path);
++/** @brief Remove a file, or a directory with ZVFS_AT_REMOVEDIR in @p flags. */
++__syscall int zvfs_unlinkat(int dirfd, const char *path, int flags);
+ 
+ /**
+  * @brief Remove @a path on the final close of the description behind @a fd
+@@ -215,6 +235,7 @@ __syscall int zvfs_unlink_on_close(int fd, const char *path);
+  * @return 0 on success, -1 with errno set on error.
+  */
+ __syscall int zvfs_rename(const char *old, const char *newp);
++__syscall int zvfs_renameat(int olddirfd, const char *old, int newdirfd, const char *newp);
+ 
+ /**
+  * @brief Delete a file, or an empty directory, as ISO C remove() requires.
+@@ -247,6 +268,8 @@ __syscall int zvfs_stat(const char *path, struct zvfs_stat *buf);
+  * @return 0 on success, -1 with errno set on error.
+  */
+ __syscall int zvfs_lstat(const char *path, struct zvfs_stat *buf);
++/** @brief Status of a file; ZVFS_AT_SYMLINK_NOFOLLOW in @p flags reports a link itself. */
++__syscall int zvfs_statat(int dirfd, const char *path, struct zvfs_stat *buf, int flags);
+ 
+ /**
+  * @brief Create a symbolic link.
+@@ -257,6 +280,7 @@ __syscall int zvfs_lstat(const char *path, struct zvfs_stat *buf);
+  * @return 0 on success, -1 with errno set on error.
+  */
+ __syscall int zvfs_symlink(const char *target, const char *path);
++__syscall int zvfs_symlinkat(const char *target, int dirfd, const char *path);
+ 
+ /**
+  * @brief Read the target of a symbolic link.
+@@ -272,6 +296,7 @@ __syscall int zvfs_symlink(const char *target, const char *path);
+  *         set on error.
+  */
+ __syscall ssize_t zvfs_readlink(const char *path, char *buf, size_t size);
++__syscall ssize_t zvfs_readlinkat(int dirfd, const char *path, char *buf, size_t size);
+ 
+ /**
+  * @brief Get statistics of the file system containing @p path.
+@@ -303,6 +328,7 @@ __syscall int zvfs_fstatvfs(int fd, struct zvfs_statvfs *buf);
+  * @return 0 on success, -1 with errno set on error.
+  */
+ __syscall int zvfs_mkdir(const char *path, uint32_t mode);
++__syscall int zvfs_mkdirat(int dirfd, const char *path, uint32_t mode);
+ 
+ /**
+  * @brief Remove a directory.
+@@ -334,6 +360,8 @@ __syscall int zvfs_truncate(const char *path, off_t length);
+  * @return 0 when access would be granted, -1 with errno set otherwise.
+  */
+ __syscall int zvfs_access(const char *path, int amode);
++/** @brief Check accessibility; @p flags accepts ZVFS_AT_EACCESS. */
++__syscall int zvfs_accessat(int dirfd, const char *path, int amode, int flags);
+ 
+ /**
+  * @brief Set file or directory timestamps.
+@@ -345,6 +373,9 @@ __syscall int zvfs_access(const char *path, int amode);
+  * @return 0 on success, -1 with errno set on error.
+  */
+ __syscall int zvfs_utime(const char *path, const struct timespec *times);
++/** @brief Set access and modification times; @p flags accepts ZVFS_AT_SYMLINK_NOFOLLOW. */
++__syscall int zvfs_utimeat(int dirfd, const char *path, const struct timespec *times,
++			   int flags);
+ 
+ /**
+  * @brief Change the ZVFS current working directory.
+diff --git a/lib/libc/newlib/include/fcntl.h b/lib/libc/newlib/include/fcntl.h
+--- a/lib/libc/newlib/include/fcntl.h
++++ b/lib/libc/newlib/include/fcntl.h
+@@ -61,4 +61,48 @@
+ #define O_SYNC ZVFS_O_SYNC
+ #endif
+ 
++/* the *at() flags: the toolchain uses the BSD values */
++#if defined(AT_FDCWD) && AT_FDCWD != ZVFS_AT_FDCWD
++#undef AT_FDCWD
++#endif
++#ifndef AT_FDCWD
++#define AT_FDCWD ZVFS_AT_FDCWD
++#endif
++#if defined(AT_EACCESS) && AT_EACCESS != ZVFS_AT_EACCESS
++#undef AT_EACCESS
++#endif
++#ifndef AT_EACCESS
++#define AT_EACCESS ZVFS_AT_EACCESS
++#endif
++#if defined(AT_SYMLINK_NOFOLLOW) && AT_SYMLINK_NOFOLLOW != ZVFS_AT_SYMLINK_NOFOLLOW
++#undef AT_SYMLINK_NOFOLLOW
++#endif
++#ifndef AT_SYMLINK_NOFOLLOW
++#define AT_SYMLINK_NOFOLLOW ZVFS_AT_SYMLINK_NOFOLLOW
++#endif
++#if defined(AT_SYMLINK_FOLLOW) && AT_SYMLINK_FOLLOW != ZVFS_AT_SYMLINK_FOLLOW
++#undef AT_SYMLINK_FOLLOW
++#endif
++#ifndef AT_SYMLINK_FOLLOW
++#define AT_SYMLINK_FOLLOW ZVFS_AT_SYMLINK_FOLLOW
++#endif
++#if defined(AT_REMOVEDIR) && AT_REMOVEDIR != ZVFS_AT_REMOVEDIR
++#undef AT_REMOVEDIR
++#endif
++#ifndef AT_REMOVEDIR
++#define AT_REMOVEDIR ZVFS_AT_REMOVEDIR
++#endif
++#if defined(O_CLOEXEC) && O_CLOEXEC != ZVFS_O_CLOEXEC
++#undef O_CLOEXEC
++#endif
++#ifndef O_CLOEXEC
++#define O_CLOEXEC ZVFS_O_CLOEXEC
++#endif
++#if defined(O_NOFOLLOW) && O_NOFOLLOW != ZVFS_O_NOFOLLOW
++#undef O_NOFOLLOW
++#endif
++#ifndef O_NOFOLLOW
++#define O_NOFOLLOW ZVFS_O_NOFOLLOW
++#endif
++
+ #endif /* ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_FCNTL_H_ */
+diff --git a/lib/libc/newlib/include/stdio.h b/lib/libc/newlib/include/stdio.h
+--- a/lib/libc/newlib/include/stdio.h
++++ b/lib/libc/newlib/include/stdio.h
+@@ -15,8 +15,9 @@
+ extern "C" {
+ #endif
+ 
+-/* the toolchain's stdio.h does not declare ctermid() */
++/* the toolchain's stdio.h declares neither ctermid() nor renameat() */
+ char *ctermid(char *s);
++int renameat(int olddirfd, const char *oldpath, int newdirfd, const char *newpath);
+ 
+ #ifdef __cplusplus
+ }
+diff --git a/lib/libc/newlib/include/sys/stat.h b/lib/libc/newlib/include/sys/stat.h
+--- a/lib/libc/newlib/include/sys/stat.h
++++ b/lib/libc/newlib/include/sys/stat.h
+@@ -9,6 +9,14 @@
+ 
+ #include_next <sys/stat.h>
+ 
++/* utimensat() tv_nsec markers: the toolchain only defines them for other targets */
++#ifndef UTIME_NOW
++#define UTIME_NOW  -1
++#endif
++#ifndef UTIME_OMIT
++#define UTIME_OMIT -2
++#endif
++
+ #if defined(_XOPEN_SOURCE)
+ 
+ #include <zephyr/sys/fdtable.h>
+diff --git a/lib/libc/picolibc/include/fcntl.h b/lib/libc/picolibc/include/fcntl.h
+--- a/lib/libc/picolibc/include/fcntl.h
++++ b/lib/libc/picolibc/include/fcntl.h
+@@ -61,4 +61,48 @@
+ #define O_SYNC ZVFS_O_SYNC
+ #endif
+ 
++/* the *at() flags: the toolchain uses the BSD values */
++#if defined(AT_FDCWD) && AT_FDCWD != ZVFS_AT_FDCWD
++#undef AT_FDCWD
++#endif
++#ifndef AT_FDCWD
++#define AT_FDCWD ZVFS_AT_FDCWD
++#endif
++#if defined(AT_EACCESS) && AT_EACCESS != ZVFS_AT_EACCESS
++#undef AT_EACCESS
++#endif
++#ifndef AT_EACCESS
++#define AT_EACCESS ZVFS_AT_EACCESS
++#endif
++#if defined(AT_SYMLINK_NOFOLLOW) && AT_SYMLINK_NOFOLLOW != ZVFS_AT_SYMLINK_NOFOLLOW
++#undef AT_SYMLINK_NOFOLLOW
++#endif
++#ifndef AT_SYMLINK_NOFOLLOW
++#define AT_SYMLINK_NOFOLLOW ZVFS_AT_SYMLINK_NOFOLLOW
++#endif
++#if defined(AT_SYMLINK_FOLLOW) && AT_SYMLINK_FOLLOW != ZVFS_AT_SYMLINK_FOLLOW
++#undef AT_SYMLINK_FOLLOW
++#endif
++#ifndef AT_SYMLINK_FOLLOW
++#define AT_SYMLINK_FOLLOW ZVFS_AT_SYMLINK_FOLLOW
++#endif
++#if defined(AT_REMOVEDIR) && AT_REMOVEDIR != ZVFS_AT_REMOVEDIR
++#undef AT_REMOVEDIR
++#endif
++#ifndef AT_REMOVEDIR
++#define AT_REMOVEDIR ZVFS_AT_REMOVEDIR
++#endif
++#if defined(O_CLOEXEC) && O_CLOEXEC != ZVFS_O_CLOEXEC
++#undef O_CLOEXEC
++#endif
++#ifndef O_CLOEXEC
++#define O_CLOEXEC ZVFS_O_CLOEXEC
++#endif
++#if defined(O_NOFOLLOW) && O_NOFOLLOW != ZVFS_O_NOFOLLOW
++#undef O_NOFOLLOW
++#endif
++#ifndef O_NOFOLLOW
++#define O_NOFOLLOW ZVFS_O_NOFOLLOW
++#endif
++
+ #endif /* ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_FCNTL_H_ */
+diff --git a/lib/libc/picolibc/include/stdio.h b/lib/libc/picolibc/include/stdio.h
+--- a/lib/libc/picolibc/include/stdio.h
++++ b/lib/libc/picolibc/include/stdio.h
+@@ -15,8 +15,9 @@
+ extern "C" {
+ #endif
+ 
+-/* the toolchain's stdio.h does not declare ctermid() */
++/* the toolchain's stdio.h declares neither ctermid() nor renameat() */
+ char *ctermid(char *s);
++int renameat(int olddirfd, const char *oldpath, int newdirfd, const char *newpath);
+ 
+ #ifdef __cplusplus
+ }
+diff --git a/lib/libc/picolibc/include/sys/stat.h b/lib/libc/picolibc/include/sys/stat.h
+--- a/lib/libc/picolibc/include/sys/stat.h
++++ b/lib/libc/picolibc/include/sys/stat.h
+@@ -9,6 +9,14 @@
+ 
+ #include_next <sys/stat.h>
+ 
++/* utimensat() tv_nsec markers: the toolchain only defines them for other targets */
++#ifndef UTIME_NOW
++#define UTIME_NOW  -1
++#endif
++#ifndef UTIME_OMIT
++#define UTIME_OMIT -2
++#endif
++
+ #if defined(_XOPEN_SOURCE)
+ 
+ #include <zephyr/sys/fdtable.h>
+diff --git a/lib/os/zvfs/zvfs_cwd.c b/lib/os/zvfs/zvfs_cwd.c
+--- a/lib/os/zvfs/zvfs_cwd.c
++++ b/lib/os/zvfs/zvfs_cwd.c
+@@ -13,6 +13,7 @@
+  */
+ 
+ #include <errno.h>
++#include <stdio.h>
+ #include <string.h>
+ 
+ #include <zephyr/fs/fs.h>
+@@ -113,6 +114,58 @@ int zvfs_resolve_path(const char *in, char *out, size_t outsz)
+ 	return 0;
+ }
+ 
++/* like zvfs_resolve_path(), but a relative path is taken against dirfd */
++int zvfs_resolve_at(int dirfd, const char *in, char *out, size_t outsz)
++{
++	struct fd_entry *entry;
++	struct zvfs_fs_desc *desc;
++	char joined[CONFIG_ZVFS_PATH_MAX];
++
++	if (in == NULL) {
++		return -EFAULT;
++	}
++
++	if (in[0] == '/' || dirfd == ZVFS_AT_FDCWD) {
++		return zvfs_resolve_path(in, out, outsz);
++	}
++
++	if (in[0] == '\0') {
++		return -ENOENT;
++	}
++
++	entry = zvfs_fd_entry_get(dirfd);
++	if (entry == NULL) {
++		return -EBADF;
++	}
++
++	if ((entry->mode & ZVFS_MODE_IFMT) != ZVFS_MODE_IFDIR) {
++		return -ENOTDIR;
++	}
++
++	desc = entry->obj;
++	if (desc == NULL || desc->path[0] == '\0') {
++		return -EBADF;
++	}
++
++	if (snprintf(joined, sizeof(joined), "%s/%s", desc->path, in) >= (int)sizeof(joined)) {
++		return -ENAMETOOLONG;
++	}
++
++	return zvfs_resolve_path(joined, out, outsz);
++}
++
++#ifdef CONFIG_USERSPACE
++/* ZVFS_AT_FDCWD names no descriptor; anything else must be accessible */
++int zvfs_dirfd_syscall_verify(int dirfd)
++{
++	if (dirfd == ZVFS_AT_FDCWD) {
++		return 0;
++	}
++
++	return (zvfs_fd_syscall_verify(dirfd) == NULL) ? -1 : 0;
++}
++#endif /* CONFIG_USERSPACE */
++
+ int z_impl_zvfs_chdir(const char *path)
+ {
+ 	int rc;
+diff --git a/lib/os/zvfs/zvfs_dirent.c b/lib/os/zvfs/zvfs_dirent.c
+--- a/lib/os/zvfs/zvfs_dirent.c
++++ b/lib/os/zvfs/zvfs_dirent.c
+@@ -42,64 +42,74 @@ void zvfs_dirstream_free(struct zvfs_dirstream *d)
+ 	(void)sys_elastipool_free(&zvfs_dir_pool, d);
+ }
+ 
+-struct zvfs_dirstream *z_impl_zvfs_opendir(const char *path)
++struct zvfs_dirstream *z_impl_zvfs_fdopendir(int fd)
+ {
+-	int rc, fd;
++	int rc;
+ 	void *obj = NULL;
+-	struct zvfs_dirstream *d = NULL;
+-	struct zvfs_fs_desc *ptr = NULL;
+-	char r[CONFIG_ZVFS_PATH_MAX];
++	struct zvfs_dirstream *d;
++	struct zvfs_fs_desc *ptr;
++	struct fd_entry *entry = zvfs_fd_entry_get(fd);
+ 
+-	rc = zvfs_resolve_path(path, r, sizeof(r));
+-	if (rc < 0) {
+-		errno = -rc;
++	if (entry == NULL) {
+ 		return NULL;
+ 	}
+ 
+-	fd = zvfs_reserve_fd();
+-	if (fd < 0) {
++	if ((entry->mode & ZVFS_MODE_IFMT) != ZVFS_MODE_IFDIR) {
++		errno = ENOTDIR;
+ 		return NULL;
+ 	}
+ 
+-	rc = sys_elastipool_alloc(&zvfs_dir_pool, &obj);
+-	if (rc < 0) {
+-		rc = -ENOMEM;
+-		goto out_err;
+-	}
+-	d = obj;
+-
+-	ptr = zvfs_fs_desc_alloc(true);
+-	if (ptr == NULL) {
+-		rc = -EMFILE;
+-		goto out_err;
++	ptr = entry->obj;
++	if (ptr->stream != NULL) {
++		/* already a stream: hand out the same one */
++		return ptr->stream;
+ 	}
+ 
+-	fs_dir_t_init(&ptr->dir);
+-
+-	rc = fs_opendir(&ptr->dir, r);
++	rc = sys_elastipool_alloc(&zvfs_dir_pool, &obj);
+ 	if (rc < 0) {
+-		goto out_err;
++		errno = ENOMEM;
++		return NULL;
+ 	}
+ 
++	d = obj;
+ 	memset(d, 0, sizeof(*d));
+ 	d->fd = fd;
+ 	ptr->stream = d;
+-	strcpy(ptr->path, r);
+-
+-	zvfs_finalize_typed_fd(fd, ptr, &fs_dir_fd_op_vtable, ZVFS_MODE_IFDIR);
+ 
+ 	return d;
++}
+ 
+-out_err:
+-	if (ptr != NULL) {
+-		zvfs_fs_desc_free(ptr);
++#ifdef CONFIG_USERSPACE
++static struct zvfs_dirstream *z_vrfy_zvfs_fdopendir(int fd)
++{
++	if (zvfs_fd_syscall_verify(fd) == NULL) {
++		return NULL;
++	}
++
++	return z_impl_zvfs_fdopendir(fd);
++}
++#include <zephyr/syscalls/zvfs_fdopendir_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++struct zvfs_dirstream *z_impl_zvfs_opendir(const char *path)
++{
++	int fd;
++	struct zvfs_dirstream *d;
++
++	fd = z_impl_zvfs_open(path, ZVFS_O_RDONLY | ZVFS_O_DIRECTORY, 0);
++	if (fd < 0) {
++		return NULL;
+ 	}
+-	if (d != NULL) {
+-		zvfs_dirstream_free(d);
++
++	d = z_impl_zvfs_fdopendir(fd);
++	if (d == NULL) {
++		int err = errno;
++
++		(void)zvfs_close(fd);
++		errno = err;
+ 	}
+-	zvfs_free_fd(fd);
+-	errno = -rc;
+-	return NULL;
++
++	return d;
+ }
+ 
+ #ifdef CONFIG_USERSPACE
+diff --git a/lib/os/zvfs/zvfs_fs.c b/lib/os/zvfs/zvfs_fs.c
+--- a/lib/os/zvfs/zvfs_fs.c
++++ b/lib/os/zvfs/zvfs_fs.c
+@@ -84,7 +84,7 @@ static int posix_mode_to_zephyr(int mf)
+ 	return mode;
+ }
+ 
+-int z_impl_zvfs_open(const char *name, int flags, int mode)
++int z_impl_zvfs_openat(int dirfd, const char *name, int flags, int mode)
+ {
+ 	int rc, fd;
+ 	struct zvfs_fs_desc *ptr = NULL;
+@@ -96,13 +96,27 @@ int z_impl_zvfs_open(const char *name, int flags, int mode)
+ 		return zmode;
+ 	}
+ 
+-	rc = zvfs_resolve_path(name, r, sizeof(r));
++	rc = zvfs_resolve_at(dirfd, name, r, sizeof(r));
+ 	if (rc < 0) {
+ 		errno = -rc;
+ 		return -1;
+ 	}
+ 	name = r;
+ 
++	if ((flags & ZVFS_O_DIRECTORY) == 0 && (flags & ZVFS_O_CREAT) == 0) {
++		struct fs_dirent entry;
++
++		/* the root is a directory; fs_stat() cannot say so */
++		if (name[1] == '\0' ||
++		    (fs_stat(name, &entry) == 0 && entry.type == FS_DIR_ENTRY_DIR)) {
++			if ((flags & ZVFS_O_ACCMODE) != ZVFS_O_RDONLY) {
++				errno = EISDIR;
++				return -1;
++			}
++			flags |= ZVFS_O_DIRECTORY;
++		}
++	}
++
+ 	if ((flags & ZVFS_O_DIRECTORY) != 0) {
+ 		fd = zvfs_reserve_fd();
+ 		if (fd < 0) {
+@@ -309,6 +323,25 @@ const struct fd_op_vtable fs_dir_fd_op_vtable = {
+ 	.ioctl = fs_dir_ioctl_vmeth,
+ };
+ 
++#ifdef CONFIG_USERSPACE
++static int z_vrfy_zvfs_openat(int dirfd, const char *name, int flags, int mode)
++{
++	char kname[CONFIG_ZVFS_PATH_MAX];
++
++	if (zvfs_dirfd_syscall_verify(dirfd) < 0 || zvfs_copy_user_path(kname, name) < 0) {
++		return -1;
++	}
++
++	return z_impl_zvfs_openat(dirfd, kname, flags, mode);
++}
++#include <zephyr/syscalls/zvfs_openat_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++int z_impl_zvfs_open(const char *name, int flags, int mode)
++{
++	return z_impl_zvfs_openat(ZVFS_AT_FDCWD, name, flags, mode);
++}
++
+ #ifdef CONFIG_USERSPACE
+ static int z_vrfy_zvfs_open(const char *name, int flags, int mode)
+ {
+diff --git a/lib/os/zvfs/zvfs_fs_priv.h b/lib/os/zvfs/zvfs_fs_priv.h
+--- a/lib/os/zvfs/zvfs_fs_priv.h
++++ b/lib/os/zvfs/zvfs_fs_priv.h
+@@ -50,6 +50,10 @@ void zvfs_dirstream_free(struct zvfs_dirstream *d);
+  * @retval -ENAMETOOLONG when the result does not fit @p outsz.
+  */
+ int zvfs_resolve_path(const char *in, char *out, size_t outsz);
++int zvfs_resolve_at(int dirfd, const char *in, char *out, size_t outsz);
++#ifdef CONFIG_USERSPACE
++int zvfs_dirfd_syscall_verify(int dirfd);
++#endif /* CONFIG_USERSPACE */
+ 
+ /**
+  * @brief Map Zephyr file system statistics into ZVFS statistics.
+diff --git a/lib/os/zvfs/zvfs_path.c b/lib/os/zvfs/zvfs_path.c
+--- a/lib/os/zvfs/zvfs_path.c
++++ b/lib/os/zvfs/zvfs_path.c
+@@ -101,12 +101,12 @@ static bool zvfs_mount_rdonly(const char *path)
+ 	return (flags & FS_MOUNT_FLAG_READ_ONLY) != 0;
+ }
+ 
+-int z_impl_zvfs_unlink(const char *path)
++int z_impl_zvfs_unlinkat(int dirfd, const char *path, int flags)
+ {
+ 	int res;
+ 	struct fs_dirent entry;
+ 	char r[CONFIG_ZVFS_PATH_MAX];
+-	int rrc = zvfs_resolve_path(path, r, sizeof(r));
++	int rrc = zvfs_resolve_at(dirfd, path, r, sizeof(r));
+ 
+ 	if (rrc < 0) {
+ 		errno = -rrc;
+@@ -114,7 +114,15 @@ int z_impl_zvfs_unlink(const char *path)
+ 	}
+ 
+ 	res = fs_stat(r, &entry);
+-	if (res == 0 && entry.type == FS_DIR_ENTRY_DIR) {
++	if ((flags & ZVFS_AT_REMOVEDIR) != 0) {
++		if (res < 0) {
++			return zvfs_err(res);
++		}
++		if (entry.type != FS_DIR_ENTRY_DIR) {
++			errno = ENOTDIR;
++			return -1;
++		}
++	} else if (res == 0 && entry.type == FS_DIR_ENTRY_DIR) {
+ 		errno = EISDIR;
+ 		return -1;
+ 	}
+@@ -122,6 +130,25 @@ int z_impl_zvfs_unlink(const char *path)
+ 	return zvfs_err(fs_unlink(r));
+ }
+ 
++#ifdef CONFIG_USERSPACE
++static int z_vrfy_zvfs_unlinkat(int dirfd, const char *path, int flags)
++{
++	char kpath[CONFIG_ZVFS_PATH_MAX];
++
++	if (zvfs_dirfd_syscall_verify(dirfd) < 0 || zvfs_copy_user_path(kpath, path) < 0) {
++		return -1;
++	}
++
++	return z_impl_zvfs_unlinkat(dirfd, kpath, flags);
++}
++#include <zephyr/syscalls/zvfs_unlinkat_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++int z_impl_zvfs_unlink(const char *path)
++{
++	return z_impl_zvfs_unlinkat(ZVFS_AT_FDCWD, path, 0);
++}
++
+ #ifdef CONFIG_USERSPACE
+ static int z_vrfy_zvfs_unlink(const char *path)
+ {
+@@ -136,15 +163,15 @@ static int z_vrfy_zvfs_unlink(const char *path)
+ #include <zephyr/syscalls/zvfs_unlink_mrsh.c>
+ #endif /* CONFIG_USERSPACE */
+ 
+-int z_impl_zvfs_rename(const char *old, const char *newp)
++int z_impl_zvfs_renameat(int olddirfd, const char *old, int newdirfd, const char *newp)
+ {
+ 	int rrc;
+ 	char rold[CONFIG_ZVFS_PATH_MAX];
+ 	char rnew[CONFIG_ZVFS_PATH_MAX];
+ 
+-	rrc = zvfs_resolve_path(old, rold, sizeof(rold));
++	rrc = zvfs_resolve_at(olddirfd, old, rold, sizeof(rold));
+ 	if (rrc == 0) {
+-		rrc = zvfs_resolve_path(newp, rnew, sizeof(rnew));
++		rrc = zvfs_resolve_at(newdirfd, newp, rnew, sizeof(rnew));
+ 	}
+ 	if (rrc < 0) {
+ 		errno = -rrc;
+@@ -154,6 +181,27 @@ int z_impl_zvfs_rename(const char *old, const char *newp)
+ 	return zvfs_err(fs_rename(rold, rnew));
+ }
+ 
++#ifdef CONFIG_USERSPACE
++static int z_vrfy_zvfs_renameat(int olddirfd, const char *old, int newdirfd, const char *newp)
++{
++	char kold[CONFIG_ZVFS_PATH_MAX];
++	char knew[CONFIG_ZVFS_PATH_MAX];
++
++	if (zvfs_dirfd_syscall_verify(olddirfd) < 0 || zvfs_dirfd_syscall_verify(newdirfd) < 0 ||
++	    zvfs_copy_user_path(kold, old) < 0 || zvfs_copy_user_path(knew, newp) < 0) {
++		return -1;
++	}
++
++	return z_impl_zvfs_renameat(olddirfd, kold, newdirfd, knew);
++}
++#include <zephyr/syscalls/zvfs_renameat_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++int z_impl_zvfs_rename(const char *old, const char *newp)
++{
++	return z_impl_zvfs_renameat(ZVFS_AT_FDCWD, old, ZVFS_AT_FDCWD, newp);
++}
++
+ #ifdef CONFIG_USERSPACE
+ static int z_vrfy_zvfs_rename(const char *old, const char *newp)
+ {
+@@ -197,20 +245,24 @@ static int z_vrfy_zvfs_remove(const char *path)
+ #include <zephyr/syscalls/zvfs_remove_mrsh.c>
+ #endif /* CONFIG_USERSPACE */
+ 
+-int z_impl_zvfs_stat(const char *path, struct zvfs_stat *buf)
++int z_impl_zvfs_statat(int dirfd, const char *path, struct zvfs_stat *buf, int flags)
+ {
+ 	int res;
+ 	struct fs_dirent entry;
+ 	struct fs_statvfs vfs;
+ 	char r[CONFIG_ZVFS_PATH_MAX];
+-	int rrc = zvfs_resolve_path(path, r, sizeof(r));
++	int rrc = zvfs_resolve_at(dirfd, path, r, sizeof(r));
+ 
+ 	if (rrc < 0) {
+ 		errno = -rrc;
+ 		return -1;
+ 	}
+ 
+-	res = fs_stat(r, &entry);
++	if ((flags & ZVFS_AT_SYMLINK_NOFOLLOW) != 0) {
++		res = fs_lstat(r, &entry);
++	} else {
++		res = fs_stat(r, &entry);
++	}
+ 	if (res < 0) {
+ 		return zvfs_err(res);
+ 	}
+@@ -236,56 +288,43 @@ int z_impl_zvfs_stat(const char *path, struct zvfs_stat *buf)
+ }
+ 
+ #ifdef CONFIG_USERSPACE
+-static int z_vrfy_zvfs_stat(const char *path, struct zvfs_stat *buf)
++static int z_vrfy_zvfs_statat(int dirfd, const char *path, struct zvfs_stat *buf, int flags)
+ {
+ 	char kpath[CONFIG_ZVFS_PATH_MAX];
+ 
+ 	K_OOPS(K_SYSCALL_MEMORY_WRITE(buf, sizeof(*buf)));
+-	if (zvfs_copy_user_path(kpath, path) < 0) {
++	if (zvfs_dirfd_syscall_verify(dirfd) < 0 || zvfs_copy_user_path(kpath, path) < 0) {
+ 		return -1;
+ 	}
+ 
+-	return z_impl_zvfs_stat(kpath, buf);
++	return z_impl_zvfs_statat(dirfd, kpath, buf, flags);
+ }
+-#include <zephyr/syscalls/zvfs_stat_mrsh.c>
++#include <zephyr/syscalls/zvfs_statat_mrsh.c>
+ #endif /* CONFIG_USERSPACE */
+ 
+-int z_impl_zvfs_lstat(const char *path, struct zvfs_stat *buf)
++int z_impl_zvfs_stat(const char *path, struct zvfs_stat *buf)
+ {
+-	int res;
+-	struct fs_dirent entry;
+-	struct fs_statvfs vfs;
+-	char r[CONFIG_ZVFS_PATH_MAX];
+-	int rrc = zvfs_resolve_path(path, r, sizeof(r));
++	return z_impl_zvfs_statat(ZVFS_AT_FDCWD, path, buf, 0);
++}
+ 
+-	if (rrc < 0) {
+-		errno = -rrc;
+-		return -1;
+-	}
++#ifdef CONFIG_USERSPACE
++static int z_vrfy_zvfs_stat(const char *path, struct zvfs_stat *buf)
++{
++	char kpath[CONFIG_ZVFS_PATH_MAX];
+ 
+-	res = fs_lstat(r, &entry);
+-	if (res < 0) {
+-		return zvfs_err(res);
++	K_OOPS(K_SYSCALL_MEMORY_WRITE(buf, sizeof(*buf)));
++	if (zvfs_copy_user_path(kpath, path) < 0) {
++		return -1;
+ 	}
+ 
+-	*buf = (struct zvfs_stat){0};
+-	buf->size = entry.size;
+-	buf->mode = zvfs_synth_mode(entry.type, zvfs_mount_rdonly(r));
+-	buf->nlink = 1;
+-#ifdef CONFIG_FS_DIRENT_EXT
+-	buf->atime = entry.atime;
+-	buf->mtime = entry.mtime;
+-	/* Zephyr file systems track no status-change time */
+-	buf->ctime = entry.mtime;
+-#endif
+-
+-	/* block accounting is best-effort: not every backend supports statvfs */
+-	if (fs_statvfs(r, &vfs) == 0) {
+-		buf->blksize = vfs.f_bsize;
+-		buf->blocks = DIV_ROUND_UP(entry.size, 512);
+-	}
++	return z_impl_zvfs_stat(kpath, buf);
++}
++#include <zephyr/syscalls/zvfs_stat_mrsh.c>
++#endif /* CONFIG_USERSPACE */
+ 
+-	return 0;
++int z_impl_zvfs_lstat(const char *path, struct zvfs_stat *buf)
++{
++	return z_impl_zvfs_statat(ZVFS_AT_FDCWD, path, buf, ZVFS_AT_SYMLINK_NOFOLLOW);
+ }
+ 
+ #ifdef CONFIG_USERSPACE
+@@ -303,10 +342,10 @@ static int z_vrfy_zvfs_lstat(const char *path, struct zvfs_stat *buf)
+ #include <zephyr/syscalls/zvfs_lstat_mrsh.c>
+ #endif /* CONFIG_USERSPACE */
+ 
+-int z_impl_zvfs_symlink(const char *target, const char *path)
++int z_impl_zvfs_symlinkat(const char *target, int dirfd, const char *path)
+ {
+ 	char r[CONFIG_ZVFS_PATH_MAX];
+-	int rrc = zvfs_resolve_path(path, r, sizeof(r));
++	int rrc = zvfs_resolve_at(dirfd, path, r, sizeof(r));
+ 
+ 	if (rrc < 0) {
+ 		errno = -rrc;
+@@ -317,6 +356,27 @@ int z_impl_zvfs_symlink(const char *target, const char *path)
+ 	return zvfs_err(fs_symlink(target, r));
+ }
+ 
++#ifdef CONFIG_USERSPACE
++static int z_vrfy_zvfs_symlinkat(const char *target, int dirfd, const char *path)
++{
++	char ktarget[CONFIG_ZVFS_PATH_MAX];
++	char kpath[CONFIG_ZVFS_PATH_MAX];
++
++	if (zvfs_dirfd_syscall_verify(dirfd) < 0 || zvfs_copy_user_path(ktarget, target) < 0 ||
++	    zvfs_copy_user_path(kpath, path) < 0) {
++		return -1;
++	}
++
++	return z_impl_zvfs_symlinkat(ktarget, dirfd, kpath);
++}
++#include <zephyr/syscalls/zvfs_symlinkat_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++int z_impl_zvfs_symlink(const char *target, const char *path)
++{
++	return z_impl_zvfs_symlinkat(target, ZVFS_AT_FDCWD, path);
++}
++
+ #ifdef CONFIG_USERSPACE
+ static int z_vrfy_zvfs_symlink(const char *target, const char *path)
+ {
+@@ -332,11 +392,11 @@ static int z_vrfy_zvfs_symlink(const char *target, const char *path)
+ #include <zephyr/syscalls/zvfs_symlink_mrsh.c>
+ #endif /* CONFIG_USERSPACE */
+ 
+-ssize_t z_impl_zvfs_readlink(const char *path, char *buf, size_t size)
++ssize_t z_impl_zvfs_readlinkat(int dirfd, const char *path, char *buf, size_t size)
+ {
+ 	ssize_t res;
+ 	char r[CONFIG_ZVFS_PATH_MAX];
+-	int rrc = zvfs_resolve_path(path, r, sizeof(r));
++	int rrc = zvfs_resolve_at(dirfd, path, r, sizeof(r));
+ 
+ 	if (rrc < 0) {
+ 		errno = -rrc;
+@@ -352,6 +412,26 @@ ssize_t z_impl_zvfs_readlink(const char *path, char *buf, size_t size)
+ 	return res;
+ }
+ 
++#ifdef CONFIG_USERSPACE
++static ssize_t z_vrfy_zvfs_readlinkat(int dirfd, const char *path, char *buf, size_t size)
++{
++	char kpath[CONFIG_ZVFS_PATH_MAX];
++
++	K_OOPS(K_SYSCALL_MEMORY_WRITE(buf, size));
++	if (zvfs_dirfd_syscall_verify(dirfd) < 0 || zvfs_copy_user_path(kpath, path) < 0) {
++		return -1;
++	}
++
++	return z_impl_zvfs_readlinkat(dirfd, kpath, buf, size);
++}
++#include <zephyr/syscalls/zvfs_readlinkat_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++ssize_t z_impl_zvfs_readlink(const char *path, char *buf, size_t size)
++{
++	return z_impl_zvfs_readlinkat(ZVFS_AT_FDCWD, path, buf, size);
++}
++
+ #ifdef CONFIG_USERSPACE
+ static ssize_t z_vrfy_zvfs_readlink(const char *path, char *buf, size_t size)
+ {
+@@ -441,10 +521,10 @@ static int z_vrfy_zvfs_fstatvfs(int fd, struct zvfs_statvfs *buf)
+ #include <zephyr/syscalls/zvfs_fstatvfs_mrsh.c>
+ #endif /* CONFIG_USERSPACE */
+ 
+-int z_impl_zvfs_mkdir(const char *path, uint32_t mode)
++int z_impl_zvfs_mkdirat(int dirfd, const char *path, uint32_t mode)
+ {
+ 	char r[CONFIG_ZVFS_PATH_MAX];
+-	int rrc = zvfs_resolve_path(path, r, sizeof(r));
++	int rrc = zvfs_resolve_at(dirfd, path, r, sizeof(r));
+ 
+ 	if (rrc < 0) {
+ 		errno = -rrc;
+@@ -457,42 +537,41 @@ int z_impl_zvfs_mkdir(const char *path, uint32_t mode)
+ }
+ 
+ #ifdef CONFIG_USERSPACE
+-static int z_vrfy_zvfs_mkdir(const char *path, uint32_t mode)
++static int z_vrfy_zvfs_mkdirat(int dirfd, const char *path, uint32_t mode)
+ {
+ 	char kpath[CONFIG_ZVFS_PATH_MAX];
+ 
+-	if (zvfs_copy_user_path(kpath, path) < 0) {
++	if (zvfs_dirfd_syscall_verify(dirfd) < 0 || zvfs_copy_user_path(kpath, path) < 0) {
+ 		return -1;
+ 	}
+ 
+-	return z_impl_zvfs_mkdir(kpath, mode);
++	return z_impl_zvfs_mkdirat(dirfd, kpath, mode);
+ }
+-#include <zephyr/syscalls/zvfs_mkdir_mrsh.c>
++#include <zephyr/syscalls/zvfs_mkdirat_mrsh.c>
+ #endif /* CONFIG_USERSPACE */
+ 
+-int z_impl_zvfs_rmdir(const char *path)
++int z_impl_zvfs_mkdir(const char *path, uint32_t mode)
+ {
+-	int res;
+-	struct fs_dirent entry;
+-	char r[CONFIG_ZVFS_PATH_MAX];
+-	int rrc = zvfs_resolve_path(path, r, sizeof(r));
+-
+-	if (rrc < 0) {
+-		errno = -rrc;
+-		return -1;
+-	}
++	return z_impl_zvfs_mkdirat(ZVFS_AT_FDCWD, path, mode);
++}
+ 
+-	res = fs_stat(r, &entry);
+-	if (res < 0) {
+-		return zvfs_err(res);
+-	}
++#ifdef CONFIG_USERSPACE
++static int z_vrfy_zvfs_mkdir(const char *path, uint32_t mode)
++{
++	char kpath[CONFIG_ZVFS_PATH_MAX];
+ 
+-	if (entry.type != FS_DIR_ENTRY_DIR) {
+-		errno = ENOTDIR;
++	if (zvfs_copy_user_path(kpath, path) < 0) {
+ 		return -1;
+ 	}
+ 
+-	return zvfs_err(fs_unlink(r));
++	return z_impl_zvfs_mkdir(kpath, mode);
++}
++#include <zephyr/syscalls/zvfs_mkdir_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++int z_impl_zvfs_rmdir(const char *path)
++{
++	return z_impl_zvfs_unlinkat(ZVFS_AT_FDCWD, path, ZVFS_AT_REMOVEDIR);
+ }
+ 
+ #ifdef CONFIG_USERSPACE
+@@ -568,7 +647,7 @@ static int z_vrfy_zvfs_truncate(const char *path, off_t length)
+ #include <zephyr/syscalls/zvfs_truncate_mrsh.c>
+ #endif /* CONFIG_USERSPACE */
+ 
+-int z_impl_zvfs_access(const char *path, int amode)
++int z_impl_zvfs_accessat(int dirfd, const char *path, int amode, int flags)
+ {
+ 	struct zvfs_stat st;
+ 
+@@ -577,7 +656,10 @@ int z_impl_zvfs_access(const char *path, int amode)
+ 		return -1;
+ 	}
+ 
+-	if (z_impl_zvfs_stat(path, &st) < 0) {
++	/* one identity: the real and effective IDs are the same */
++	ARG_UNUSED(flags);
++
++	if (z_impl_zvfs_statat(dirfd, path, &st, 0) < 0) {
+ 		return -1;
+ 	}
+ 
+@@ -599,6 +681,25 @@ int z_impl_zvfs_access(const char *path, int amode)
+ 	return 0;
+ }
+ 
++#ifdef CONFIG_USERSPACE
++static int z_vrfy_zvfs_accessat(int dirfd, const char *path, int amode, int flags)
++{
++	char kpath[CONFIG_ZVFS_PATH_MAX];
++
++	if (zvfs_dirfd_syscall_verify(dirfd) < 0 || zvfs_copy_user_path(kpath, path) < 0) {
++		return -1;
++	}
++
++	return z_impl_zvfs_accessat(dirfd, kpath, amode, flags);
++}
++#include <zephyr/syscalls/zvfs_accessat_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++int z_impl_zvfs_access(const char *path, int amode)
++{
++	return z_impl_zvfs_accessat(ZVFS_AT_FDCWD, path, amode, 0);
++}
++
+ #ifdef CONFIG_USERSPACE
+ static int z_vrfy_zvfs_access(const char *path, int amode)
+ {
+@@ -613,19 +714,49 @@ static int z_vrfy_zvfs_access(const char *path, int amode)
+ #include <zephyr/syscalls/zvfs_access_mrsh.c>
+ #endif /* CONFIG_USERSPACE */
+ 
+-int z_impl_zvfs_utime(const char *path, const struct timespec *times)
++int z_impl_zvfs_utimeat(int dirfd, const char *path, const struct timespec *times, int flags)
+ {
+ 	char r[CONFIG_ZVFS_PATH_MAX];
+-	int rrc = zvfs_resolve_path(path, r, sizeof(r));
++	int rrc = zvfs_resolve_at(dirfd, path, r, sizeof(r));
+ 
+ 	if (rrc < 0) {
+ 		errno = -rrc;
+ 		return -1;
+ 	}
+ 
++	/* the file system API offers no way to leave a trailing link unfollowed */
++	ARG_UNUSED(flags);
++
+ 	return zvfs_err(fs_utime(r, times));
+ }
+ 
++#ifdef CONFIG_USERSPACE
++static int z_vrfy_zvfs_utimeat(int dirfd, const char *path, const struct timespec *times,
++			       int flags)
++{
++	char kpath[CONFIG_ZVFS_PATH_MAX];
++	struct timespec ktimes[2];
++	const struct timespec *tp = NULL;
++
++	if (times != NULL) {
++		K_OOPS(k_usermode_from_copy(ktimes, times, sizeof(ktimes)));
++		tp = ktimes;
++	}
++
++	if (zvfs_dirfd_syscall_verify(dirfd) < 0 || zvfs_copy_user_path(kpath, path) < 0) {
++		return -1;
++	}
++
++	return z_impl_zvfs_utimeat(dirfd, kpath, tp, flags);
++}
++#include <zephyr/syscalls/zvfs_utimeat_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++int z_impl_zvfs_utime(const char *path, const struct timespec *times)
++{
++	return z_impl_zvfs_utimeat(ZVFS_AT_FDCWD, path, times, 0);
++}
++
+ #ifdef CONFIG_USERSPACE
+ static int z_vrfy_zvfs_utime(const char *path, const struct timespec *times)
+ {

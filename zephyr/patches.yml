@@ -3841,3 +3841,25 @@ patches:
       pointers into them; regcomp() already releases them via regfree() on
       its error path. Reproduces on any invalid bracket expression, e.g.
       regcomp(preg, "[abc", REG_EXTENDED).
+  - path: zephyr/zvfs-directory-descriptors-at-family.patch
+    sha256sum: a5a58d734dee0a9e4dca0101118b82fdfedd785fb2182a128a74b839f150f475
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-03
+    upstreamable: true
+    comments: |
+      Give zvfs the *at() family that the POSIX_FILE_SYSTEM_FD,
+      POSIX_FILE_ATTRIBUTES_FD and POSIX_SYMBOLIC_LINKS_FD Option Groups need:
+      zvfs_openat(), zvfs_statat(), zvfs_accessat(), zvfs_mkdirat(),
+      zvfs_unlinkat(), zvfs_renameat(), zvfs_symlinkat(), zvfs_readlinkat(),
+      zvfs_utimeat() and zvfs_fdopendir(). A relative path resolves against the
+      directory descriptor inside the call (the *at() functions exist to close
+      the resolve-then-act race, so there is no separate resolve syscall); the
+      plain forms delegate with ZVFS_AT_FDCWD, and zvfs_opendir() is now
+      zvfs_open(O_DIRECTORY) plus zvfs_fdopendir(). open() on a directory
+      without O_DIRECTORY yields a directory descriptor, as on other systems.
+      The ZVFS_AT_* flags the POSIX headers already referenced are defined, and
+      the picolibc/newlib wrappers remap the toolchain's BSD-valued AT_* and
+      O_CLOEXEC/O_NOFOLLOW flags to them, declare renameat(), and provide the
+      UTIME_NOW/UTIME_OMIT markers.
