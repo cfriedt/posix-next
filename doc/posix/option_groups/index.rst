@@ -46,6 +46,7 @@ For individual POSIX options, see :ref:`posix_options`.
    signals_ext
    single_process
    symbolic_links
+   symbolic_links_fd
    system_database_r
    system_database
    spin_locks
