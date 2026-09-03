@@ -25,6 +25,7 @@ For individual POSIX options, see :ref:`posix_options`.
    file_attributes
    file_locking
    file_system
+   file_system_fd
    file_system_ext
    file_system_glob
    file_system_r
