@@ -58,6 +58,8 @@
 #include <time.h>
 #include <unistd.h>
 #include <utime.h>
+#include <wchar.h>
+#include <wctype.h>
 
 #include <zephyr/getopt.h>
 #include <zephyr/llext/symbol.h>
@@ -883,6 +885,38 @@ EXPORT_SYMBOL(sinh);
 EXPORT_SYMBOL(sqrt);
 EXPORT_SYMBOL(tan);
 EXPORT_SYMBOL(tanh);
+
+/* ISO C functions the minimal C library lacks (POSIX_C_LANG_SUPPORT time,
+ * POSIX_C_LANG_WIDE_CHAR) and the backends of ISO C macros
+ */
+#if defined(CONFIG_PICOLIBC) || defined(CONFIG_NEWLIB_LIBC)
+EXPORT_SYMBOL(tzset);
+EXPORT_SYMBOL(iswalnum);
+EXPORT_SYMBOL(iswalpha);
+EXPORT_SYMBOL(iswblank);
+EXPORT_SYMBOL(iswcntrl);
+EXPORT_SYMBOL(iswdigit);
+EXPORT_SYMBOL(iswgraph);
+EXPORT_SYMBOL(iswlower);
+EXPORT_SYMBOL(iswprint);
+EXPORT_SYMBOL(iswpunct);
+EXPORT_SYMBOL(iswspace);
+EXPORT_SYMBOL(iswupper);
+EXPORT_SYMBOL(iswxdigit);
+EXPORT_SYMBOL(mbrlen);
+EXPORT_SYMBOL(mbrtowc);
+EXPORT_SYMBOL(mbsinit);
+EXPORT_SYMBOL(mbsrtowcs);
+EXPORT_SYMBOL(towlower);
+EXPORT_SYMBOL(towupper);
+EXPORT_SYMBOL(wcrtomb);
+EXPORT_SYMBOL(wcslen);
+EXPORT_SYMBOL(wcsrtombs);
+EXPORT_SYMBOL(wctob);
+EXPORT_SYMBOL(btowc);
+/* MB_CUR_MAX expands to this */
+EXPORT_SYMBOL(__locale_mb_cur_max);
+#endif /* CONFIG_PICOLIBC || CONFIG_NEWLIB_LIBC */
 
 /* object-like identifiers of the groups above */
 #ifdef CONFIG_POSIX_SINGLE_PROCESS
