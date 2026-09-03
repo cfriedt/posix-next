@@ -1,0 +1,535 @@
+diff --git a/zephyr/CMakeLists.txt b/zephyr/CMakeLists.txt
+index a2c83b55..950bbf03 100644
+--- a/zephyr/CMakeLists.txt
++++ b/zephyr/CMakeLists.txt
+@@ -48,8 +48,17 @@ file(STRINGS ${tb_src_dir}/toys.h tb_ver_line REGEX "^#define TOYBOX_VERSION \""
+ string(REGEX MATCH "\"([^\"]*)\"" _ "${tb_ver_line}")
+ set(tb_ver "${CMAKE_MATCH_1}")
+ 
++# inline flag filter, as add_llext_target() does it since zephyr 4.5
++list(TRANSFORM LLEXT_REMOVE_FLAGS
++     REPLACE "(.+)" "^\\1$"
++     OUTPUT_VARIABLE llext_remove_flags_regexp
++)
++list(JOIN llext_remove_flags_regexp "|" llext_remove_flags_regexp)
++if("${llext_remove_flags_regexp}" STREQUAL "")
++  set(llext_remove_flags_regexp "^$")
++endif()
+ set(zephyr_flags "$<TARGET_PROPERTY:zephyr_interface,INTERFACE_COMPILE_OPTIONS>")
+-llext_filter_zephyr_flags(LLEXT_REMOVE_FLAGS ${zephyr_flags} zephyr_filtered_flags)
++set(zephyr_filtered_flags "$<FILTER:${zephyr_flags},EXCLUDE,${llext_remove_flags_regexp}>")
+ 
+ add_library(toybox_lib STATIC EXCLUDE_FROM_ALL ${tb_sources})
+ 
+@@ -81,6 +90,7 @@ foreach(tb_tgt toybox_lib toybox_main)
+     -Wno-double-promotion
+     -Wno-deprecated-declarations
+     -Wno-uninitialized
++    -Wno-restrict
+     -Wno-sign-compare
+     -Wno-unused-parameter
+     -Wno-unused-but-set-variable
+diff --git a/zephyr/configure.sh b/zephyr/configure.sh
+new file mode 100755
+index 00000000..e10b338c
+--- /dev/null
++++ b/zephyr/configure.sh
+@@ -0,0 +1,49 @@
++#!/bin/sh
++# SPDX-License-Identifier: 0BSD
++# Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++#
++# Configure toybox out of tree and generate its derived headers:
++# allnoconfig seeded with zephyr/toybox.frag, then scripts/make.sh with
++# NOBUILD=1 (headers and build.sh only, no compile).
++# Usage: configure.sh <toybox-srcdir> <builddir>
++
++set -eu
++
++src="$1"
++build="$2"
++
++# toybox's scripts generate into ./generated of the tree they run in, so run
++# them in a mirror of the source tree made of symlinks: the source tree stays
++# untouched and the generated headers land in <builddir>/src/generated
++mirror="$build/src"
++rm -rf "$mirror"
++mkdir -p "$mirror"
++for f in Config.in configure kconfig lib main.c Makefile scripts toys toys.h; do
++	ln -s "$src/$f" "$mirror/$f"
++done
++cd "$mirror"
++
++export KCONFIG_CONFIG="$build/.config"
++export CC="${HOSTCC:-cc}" HOSTCC="${HOSTCC:-cc}"
++unset CROSS_COMPILE CFLAGS LDFLAGS OPTIMIZE GENDIR UNSTRIPPED
++
++KCONFIG_ALLCONFIG="$src/zephyr/toybox.frag" scripts/genconfig.sh -n \
++	>"$build/configure.log" 2>&1
++
++# every fragment symbol must have survived dependency resolution
++while IFS= read -r line; do
++	case "$line" in
++	CONFIG_*=* | '# CONFIG_'*' is not set') ;;
++	*) continue ;;
++	esac
++	if ! grep -q -F -x "$line" "$KCONFIG_CONFIG"; then
++		echo "toybox configure: '$line' lost after allnoconfig" >&2
++		exit 1
++	fi
++done <"$src/zephyr/toybox.frag"
++
++NOBUILD=1 scripts/make.sh >>"$build/configure.log" 2>&1
++
++# the sources this configuration compiles, one per line
++sed -n '/^FILES="/,/^"/p' "$mirror/generated/build.sh" | sed -e 's/^FILES="//' -e '/^"$/d' |
++	tr ' ' '\n' | sed '/^$/d' >"$build/sources.txt"
+diff --git a/zephyr/include/paths.h b/zephyr/include/paths.h
+new file mode 100644
+index 00000000..db80ac5d
+--- /dev/null
++++ b/zephyr/include/paths.h
+@@ -0,0 +1,28 @@
++/*
++ * SPDX-License-Identifier: 0BSD
++ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++ *
++ * <paths.h> entries toybox expects beyond what the libc provides.
++ */
++#ifndef _TOYBOX_ZEPHYR_PATHS_H
++#define _TOYBOX_ZEPHYR_PATHS_H
++
++#include_next <paths.h>
++
++#ifndef _PATH_DEFPATH
++#define _PATH_DEFPATH "/usr/bin:/bin"
++#endif
++#ifndef _PATH_STDPATH
++#define _PATH_STDPATH "/usr/bin:/bin:/usr/sbin:/sbin"
++#endif
++#ifndef _PATH_BSHELL
++#define _PATH_BSHELL "/bin/sh"
++#endif
++#ifndef _PATH_DEVNULL
++#define _PATH_DEVNULL "/dev/null"
++#endif
++#ifndef _PATH_TTY
++#define _PATH_TTY "/dev/tty"
++#endif
++
++#endif /* _TOYBOX_ZEPHYR_PATHS_H */
+diff --git a/zephyr/include/pty.h b/zephyr/include/pty.h
+new file mode 100644
+index 00000000..748fa479
+--- /dev/null
++++ b/zephyr/include/pty.h
+@@ -0,0 +1,28 @@
++/*
++ * SPDX-License-Identifier: 0BSD
++ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++ *
++ * <pty.h> for toybox's portability layer; Zephyr has no pseudo-terminals,
++ * so these only declare.
++ */
++#ifndef _TOYBOX_ZEPHYR_PTY_H
++#define _TOYBOX_ZEPHYR_PTY_H
++
++#include <sys/ioctl.h>
++#include <sys/types.h>
++#include <termios.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++int openpty(int *amaster, int *aslave, char *name, const struct termios *termp,
++	    const struct winsize *winp);
++pid_t forkpty(int *amaster, char *name, const struct termios *termp,
++	      const struct winsize *winp);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* _TOYBOX_ZEPHYR_PTY_H */
+diff --git a/zephyr/include/signal.h b/zephyr/include/signal.h
+new file mode 100644
+index 00000000..2dbe3c55
+--- /dev/null
++++ b/zephyr/include/signal.h
+@@ -0,0 +1,20 @@
++/*
++ * SPDX-License-Identifier: 0BSD
++ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++ *
++ * <signal.h> additions toybox expects.
++ */
++#ifndef _TOYBOX_ZEPHYR_SIGNAL_H
++#define _TOYBOX_ZEPHYR_SIGNAL_H
++
++#include_next <signal.h>
++
++#ifndef NSIG
++#ifdef _NSIG
++#define NSIG _NSIG
++#else
++#define NSIG 32
++#endif
++#endif
++
++#endif /* _TOYBOX_ZEPHYR_SIGNAL_H */
+diff --git a/zephyr/include/stdio.h b/zephyr/include/stdio.h
+new file mode 100644
+index 00000000..8283db5b
+--- /dev/null
++++ b/zephyr/include/stdio.h
+@@ -0,0 +1,23 @@
++/*
++ * SPDX-License-Identifier: 0BSD
++ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++ *
++ * <stdio.h> additions toybox expects (implemented in zephyr/zephyr.c when
++ * the libc lacks them).
++ */
++#ifndef _TOYBOX_ZEPHYR_STDIO_H
++#define _TOYBOX_ZEPHYR_STDIO_H
++
++#include_next <stdio.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++int dprintf(int fd, const char *format, ...);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* _TOYBOX_ZEPHYR_STDIO_H */
+diff --git a/zephyr/include/sys/ioctl.h b/zephyr/include/sys/ioctl.h
+new file mode 100644
+index 00000000..3935cfe3
+--- /dev/null
++++ b/zephyr/include/sys/ioctl.h
+@@ -0,0 +1,30 @@
++/*
++ * SPDX-License-Identifier: 0BSD
++ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++ *
++ * <sys/ioctl.h> additions toybox expects: the terminal window size request
++ * and its structure (Linux ABI values).
++ */
++#ifndef _TOYBOX_ZEPHYR_SYS_IOCTL_H
++#define _TOYBOX_ZEPHYR_SYS_IOCTL_H
++
++#include_next <sys/ioctl.h>
++
++struct winsize {
++	unsigned short ws_row;
++	unsigned short ws_col;
++	unsigned short ws_xpixel;
++	unsigned short ws_ypixel;
++};
++
++#ifndef TIOCGWINSZ
++#define TIOCGWINSZ 0x5413
++#endif
++#ifndef TIOCSWINSZ
++#define TIOCSWINSZ 0x5414
++#endif
++#ifndef TIOCNOTTY
++#define TIOCNOTTY 0x5422
++#endif
++
++#endif /* _TOYBOX_ZEPHYR_SYS_IOCTL_H */
+diff --git a/zephyr/include/sys/mount.h b/zephyr/include/sys/mount.h
+new file mode 100644
+index 00000000..12a994e7
+--- /dev/null
++++ b/zephyr/include/sys/mount.h
+@@ -0,0 +1,51 @@
++/*
++ * SPDX-License-Identifier: 0BSD
++ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++ *
++ * Linux <sys/mount.h> and <sys/statfs.h> shapes for toybox's portability
++ * layer; Zephyr has no mount table or statfs, so these only declare.
++ */
++#ifndef _TOYBOX_ZEPHYR_SYS_MOUNT_H
++#define _TOYBOX_ZEPHYR_SYS_MOUNT_H
++
++#include <sys/types.h>
++
++struct statfs {
++	long f_type;
++	long f_bsize;
++	long f_frsize;
++	unsigned long f_blocks;
++	unsigned long f_bfree;
++	unsigned long f_bavail;
++	unsigned long f_files;
++	unsigned long f_ffree;
++	int f_fsid[2];
++	long f_namelen;
++	long f_flags;
++};
++
++#define MS_RDONLY      1
++#define MS_NOSUID      2
++#define MS_NODEV       4
++#define MS_NOEXEC      8
++#define MS_SYNCHRONOUS 16
++#define MS_REMOUNT     32
++#define MS_BIND        4096
++#define MS_MOVE        8192
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++int statfs(const char *path, struct statfs *buf);
++int fstatfs(int fd, struct statfs *buf);
++int mount(const char *source, const char *target, const char *fstype,
++	  unsigned long flags, const void *data);
++int umount(const char *target);
++int umount2(const char *target, int flags);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* _TOYBOX_ZEPHYR_SYS_MOUNT_H */
+diff --git a/zephyr/include/sys/syscall.h b/zephyr/include/sys/syscall.h
+new file mode 100644
+index 00000000..2d63f43d
+--- /dev/null
++++ b/zephyr/include/sys/syscall.h
+@@ -0,0 +1,22 @@
++/*
++ * SPDX-License-Identifier: 0BSD
++ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++ *
++ * <sys/syscall.h>: Zephyr has no raw Linux syscall numbers; toybox only
++ * needs the header and a syscall() that fails.
++ */
++#ifndef _TOYBOX_ZEPHYR_SYS_SYSCALL_H
++#define _TOYBOX_ZEPHYR_SYS_SYSCALL_H
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/* always fails with ENOSYS; toybox only reaches it on Linux */
++long syscall(long number, ...);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* _TOYBOX_ZEPHYR_SYS_SYSCALL_H */
+diff --git a/zephyr/include/sys/ttydefaults.h b/zephyr/include/sys/ttydefaults.h
+new file mode 100644
+index 00000000..2430a6ec
+--- /dev/null
++++ b/zephyr/include/sys/ttydefaults.h
+@@ -0,0 +1,32 @@
++/*
++ * SPDX-License-Identifier: 0BSD
++ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++ *
++ * BSD <sys/ttydefaults.h>: the conventional control character values.
++ */
++#ifndef _TOYBOX_ZEPHYR_SYS_TTYDEFAULTS_H
++#define _TOYBOX_ZEPHYR_SYS_TTYDEFAULTS_H
++
++#define CTRL(x) ((x) & 037)
++#define CEOF    CTRL('d')
++#define CEOL    255
++#define CERASE  0177
++#define CINTR   CTRL('c')
++#define CKILL   CTRL('u')
++#define CMIN    1
++#define CQUIT   034
++#define CSUSP   CTRL('z')
++#define CTIME   0
++#define CDSUSP  CTRL('y')
++#define CSTART  CTRL('q')
++#define CSTOP   CTRL('s')
++#define CLNEXT  CTRL('v')
++#define CDISCARD CTRL('o')
++#define CWERASE CTRL('w')
++#define CREPRINT CTRL('r')
++#define CEOT    CEOF
++#define CBRK    CEOL
++#define CRPRNT  CREPRINT
++#define CFLUSH  CDISCARD
++
++#endif /* _TOYBOX_ZEPHYR_SYS_TTYDEFAULTS_H */
+diff --git a/zephyr/include/termios.h b/zephyr/include/termios.h
+new file mode 100644
+index 00000000..431ee097
+--- /dev/null
++++ b/zephyr/include/termios.h
+@@ -0,0 +1,38 @@
++/*
++ * SPDX-License-Identifier: 0BSD
++ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++ *
++ * <termios.h> additions toybox expects: BSD flag bits Zephyr's terminal
++ * layer does not implement (defined as no-ops) and the BSD convenience
++ * functions (implemented in zephyr/zephyr.c).
++ */
++#ifndef _TOYBOX_ZEPHYR_TERMIOS_H
++#define _TOYBOX_ZEPHYR_TERMIOS_H
++
++#include_next <termios.h>
++
++#ifndef IUTF8
++#define IUTF8 0
++#endif
++#ifndef ECHOCTL
++#define ECHOCTL 0
++#endif
++#ifndef ECHOKE
++#define ECHOKE 0
++#endif
++#ifndef IXANY
++#define IXANY 0
++#endif
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++void cfmakeraw(struct termios *termios_p);
++int cfsetspeed(struct termios *termios_p, speed_t speed);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* _TOYBOX_ZEPHYR_TERMIOS_H */
+diff --git a/zephyr/llext_main.c b/zephyr/llext_main.c
+new file mode 100644
+index 00000000..7670d3bb
+--- /dev/null
++++ b/zephyr/llext_main.c
+@@ -0,0 +1,10 @@
++/*
++ * SPDX-License-Identifier: 0BSD
++ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++ */
++
++#include <zephyr/llext/symbol.h>
++
++/* the exec image ABI: the extension exports main() as its entry point */
++extern int main(int argc, char **argv);
++LL_EXTENSION_SYMBOL(main);
+diff --git a/zephyr/toybox.frag b/zephyr/toybox.frag
+new file mode 100644
+index 00000000..c51f43db
+--- /dev/null
++++ b/zephyr/toybox.frag
+@@ -0,0 +1,31 @@
++# toybox miniconfig for Zephyr: seeds allnoconfig (KCONFIG_ALLCONFIG)
++CONFIG_TOYBOX_FORCE_NOMMU=y
++# CONFIG_TOYBOX_SUID is not set
++# CONFIG_TOYBOX_ZHELP is not set
++CONFIG_TOYBOX_FLOAT=y
++CONFIG_SH=y
++CONFIG_ASCII=y
++CONFIG_BASENAME=y
++CONFIG_CAT=y
++CONFIG_DIRNAME=y
++CONFIG_ECHO=y
++CONFIG_EGREP=y
++CONFIG_FALSE=y
++CONFIG_FGREP=y
++CONFIG_GREP=y
++CONFIG_HEAD=y
++CONFIG_LN=y
++CONFIG_LS=y
++CONFIG_MKDIR=y
++CONFIG_PING=y
++CONFIG_PRINTF=y
++CONFIG_PWD=y
++CONFIG_READLINK=y
++CONFIG_RM=y
++CONFIG_RMDIR=y
++CONFIG_SED=y
++CONFIG_SEQ=y
++CONFIG_TEST=y
++CONFIG_TRUE=y
++CONFIG_UNAME=y
++CONFIG_WC=y
+diff --git a/zephyr/zephyr.c b/zephyr/zephyr.c
+new file mode 100644
+index 00000000..7b61965f
+--- /dev/null
++++ b/zephyr/zephyr.c
+@@ -0,0 +1,64 @@
++/*
++ * SPDX-License-Identifier: 0BSD
++ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++ *
++ * Functions toybox relies on that the Zephyr libc and POSIX layer lack.
++ */
++
++#include <errno.h>
++#include <stdarg.h>
++
++/* errno may be thread-local in the base image (see lib/portability.h) */
++extern int *__errno_location(void);
++#undef errno
++#define errno (*__errno_location())
++#include <stdio.h>
++#include <sys/syscall.h>
++#include <termios.h>
++#include <unistd.h>
++
++/* per image, not the base image's shared one; main() sets it from envp */
++char **environ;
++
++int dprintf(int fd, const char *format, ...)
++{
++	char buf[256];
++	va_list ap;
++	int len;
++
++	va_start(ap, format);
++	len = vsnprintf(buf, sizeof(buf), format, ap);
++	va_end(ap);
++	if (len < 0) {
++		return len;
++	}
++	if ((size_t)len >= sizeof(buf)) {
++		len = sizeof(buf) - 1;
++	}
++
++	return (int)write(fd, buf, len);
++}
++
++void cfmakeraw(struct termios *t)
++{
++	t->c_iflag &= ~(IGNBRK | BRKINT | PARMRK | ISTRIP | INLCR | IGNCR | ICRNL | IXON);
++	t->c_oflag &= ~OPOST;
++	t->c_lflag &= ~(ECHO | ECHONL | ICANON | ISIG | IEXTEN);
++	t->c_cflag &= ~(CSIZE | PARENB);
++	t->c_cflag |= CS8;
++	t->c_cc[VMIN] = 1;
++	t->c_cc[VTIME] = 0;
++}
++
++int cfsetspeed(struct termios *t, speed_t speed)
++{
++	int ret = cfsetispeed(t, speed);
++
++	return ret ? ret : cfsetospeed(t, speed);
++}
++
++long syscall(long number, ...)
++{
++	errno = ENOSYS;
++	return -1;
++}

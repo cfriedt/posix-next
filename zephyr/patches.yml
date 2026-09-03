@@ -3887,3 +3887,41 @@ patches:
       module implements over the native net_if API. Neither toolchain libc
       ships the header; the minimal libc resolves it through the module
       include path directly.
+  - path: toybox/toybox-zephyr-module.patch
+    sha256sum: 0ab0cd19222ae64e0ed6281878b0457266f65ea615560117bff8a713e510b564
+    module: modules/lib/toybox
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-03
+    upstreamable: true
+    comments: |
+      The parts of the Zephyr port that the toybox fork does not carry
+      itself (its zephyr branch holds only module.yml, Kconfig and
+      CMakeLists.txt): the configure script that runs toybox's own genconfig
+      and header generation host-side (allnoconfig seeded with
+      zephyr/toybox.frag, in a symlink mirror of the source tree so the tree
+      itself stays untouched), the command selection fragment, the exported
+      main() seed object, header shims under zephyr/include for the
+      non-POSIX headers toybox includes unconditionally (sys/mount.h, pty.h,
+      sys/syscall.h, sys/ttydefaults.h) and the extras it expects from
+      others, and zephyr/zephyr.c with dprintf(), cfmakeraw(), cfsetspeed()
+      and a failing syscall().
+  - path: toybox/toybox-zephyr-platform.patch
+    sha256sum: 45ceee88c4b5f14a0ef6245c3f71ff2480b0867ec593ba7b46e214f1f9dc36af
+    module: modules/lib/toybox
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-03
+    upstreamable: true
+    comments: |
+      Port toybox's portability layer to Zephyr: route errno through the
+      exported accessor (extensions carry no TLS relocations), fall back to
+      stat() where struct dirent has no d_type, map vfork() to fork(), provide
+      Zephyr branches for the mount table, inotify and extended attribute
+      helpers (none exist), use the Linux device number encoding, and flush
+      stdout/stderr individually on exit because fflush(NULL) walks the base
+      image's stream list, which is not per-process. The shell (toysh) runs
+      external commands through posix_spawn() with the caller's redirections
+      inherited, runs toybox commands through the toybox binary, reports
+      that subshells need fork(), keeps a per-image environ set from envp,
+      and leaves the shared stdout buffering alone.
