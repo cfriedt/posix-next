@@ -31,7 +31,7 @@ diff --git a/include/zephyr/sys/zvfs_fs.h b/include/zephyr/sys/zvfs_fs.h
 diff --git a/lib/os/zvfs/zvfs_fs.c b/lib/os/zvfs/zvfs_fs.c
 --- a/lib/os/zvfs/zvfs_fs.c
 +++ b/lib/os/zvfs/zvfs_fs.c
-@@ -176,6 +176,7 @@ int z_impl_zvfs_open(const char *name, int flags, int mode)
+@@ -190,6 +190,7 @@ int z_impl_zvfs_openat(int dirfd, const char *name, int flags, int mode)
 
  	ptr->stream = NULL;
  	ptr->flags = flags & (ZVFS_O_ACCMODE | ZVFS_O_APPEND | ZVFS_O_NONBLOCK);
@@ -39,7 +39,7 @@ diff --git a/lib/os/zvfs/zvfs_fs.c b/lib/os/zvfs/zvfs_fs.c
  	zvfs_finalize_typed_fd(fd, ptr, &fs_fd_op_vtable, ZVFS_MODE_IFREG);
 
  	return fd;
-@@ -231,6 +232,7 @@ static int fs_dir_ioctl_vmeth(void *obj, unsigned int request, va_list args)
+@@ -245,6 +246,7 @@ static int fs_dir_ioctl_vmeth(void *obj, unsigned int request, va_list args)
 
  		*buf = (struct zvfs_stat){0};
  		buf->mode = ZVFS_MODE_IFDIR;
@@ -47,7 +47,7 @@ diff --git a/lib/os/zvfs/zvfs_fs.c b/lib/os/zvfs/zvfs_fs.c
  		return 0;
  	}
  	case ZFD_IOCTL_STATVFS: {
-@@ -366,6 +368,7 @@ static int fs_ioctl_vmeth(void *obj, unsigned int request, va_list args)
+@@ -399,6 +401,7 @@ static int fs_ioctl_vmeth(void *obj, unsigned int request, va_list args)
  		if (current >= 0) {
  			buf->size = current;
  			buf->mode = ptr->is_dir ? ZVFS_MODE_IFDIR : ZVFS_MODE_IFREG;
@@ -66,7 +66,7 @@ diff --git a/lib/os/zvfs/zvfs_fs_priv.h b/lib/os/zvfs/zvfs_fs_priv.h
  struct zvfs_statvfs;
  struct zvfs_dirstream;
  struct fd_op_vtable;
-@@ -59,6 +60,7 @@ int zvfs_resolve_path(const char *in, char *out, size_t outsz);
+@@ -63,6 +64,7 @@ int zvfs_dirfd_syscall_verify(int dirfd);
   * @param rdonly True when the containing mount is read-only.
   */
  void zvfs_statvfs_from_fs(struct zvfs_statvfs *buf, const struct fs_statvfs *vfs, bool rdonly);
@@ -85,7 +85,7 @@ diff --git a/lib/os/zvfs/zvfs_path.c b/lib/os/zvfs/zvfs_path.c
 
  #include <zephyr/fs/fs.h>
  #include <zephyr/internal/syscall_handler.h>
-@@ -92,6 +93,32 @@ static bool zvfs_mount_rdonly(const char *path)
+@@ -101,6 +102,32 @@ static bool zvfs_mount_rdonly(const char *path)
  	return (flags & FS_MOUNT_FLAG_READ_ONLY) != 0;
  }
 
@@ -115,10 +115,10 @@ diff --git a/lib/os/zvfs/zvfs_path.c b/lib/os/zvfs/zvfs_path.c
 +	buf->ino = h;
 +}
 +
- int z_impl_zvfs_unlink(const char *path)
+ int z_impl_zvfs_unlinkat(int dirfd, const char *path, int flags)
  {
  	int res;
-@@ -225,6 +252,7 @@ int z_impl_zvfs_stat(const char *path, struct zvfs_stat *buf)
+@@ -283,6 +310,7 @@ int z_impl_zvfs_statat(int dirfd, const char *path, struct zvfs_stat *buf, int f
  		buf->blksize = vfs.f_bsize;
  		buf->blocks = DIV_ROUND_UP(entry.size, 512);
  	}
@@ -160,7 +160,7 @@ diff --git a/tests/lib/zvfs_mmap/src/main.c b/tests/lib/zvfs_mmap/src/main.c
 diff --git a/lib/os/zvfs/zvfs_mmap.c b/lib/os/zvfs/zvfs_mmap.c
 --- a/lib/os/zvfs/zvfs_mmap.c
 +++ b/lib/os/zvfs/zvfs_mmap.c
-@@ -1361,7 +1361,23 @@ int z_impl_zvfs_munmap(void *addr, size_t len)
+@@ -1164,7 +1164,23 @@ int z_impl_zvfs_munmap(void *addr, size_t len)
  	return ret;
  }
 
@@ -185,7 +185,7 @@ diff --git a/lib/os/zvfs/zvfs_mmap.c b/lib/os/zvfs/zvfs_mmap.c
  static int mapping_refill_others(struct zvfs_mapping *m, size_t lo, size_t hi)
  {
  	struct zvfs_mapping *o;
-@@ -1370,8 +1386,8 @@ static int mapping_refill_others(struct zvfs_mapping *m, size_t lo, size_t hi)
+@@ -1173,8 +1189,8 @@ static int mapping_refill_others(struct zvfs_mapping *m, size_t lo, size_t hi)
  	int ret = 0;
 
  	SYS_DLIST_FOR_EACH_CONTAINER(&mappings, o, node) {
