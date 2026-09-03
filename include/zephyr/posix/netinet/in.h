@@ -150,6 +150,19 @@ struct ipv6_mreq {
 #define IPV6_MULTICAST_LOOP ZSOCK_IPV6_MULTICAST_LOOP
 /** @brief Hop limit for unicast packets. */
 #define IPV6_UNICAST_HOPS ZSOCK_IPV6_UNICAST_HOPS
+#ifndef SOL_IPV6
+/** @brief setsockopt() level for IPv6 options (Linux compatibility). */
+#define SOL_IPV6 IPPROTO_IPV6
+#endif
+#ifndef IPV6_HOPLIMIT
+/** @brief Deliver the hop limit as ancillary data (Linux value). */
+#define IPV6_HOPLIMIT 52
+#endif
+#ifndef IPV6_CHECKSUM
+/** @brief Raw-socket checksum offset (Linux compatibility; the stack always
+ *         computes the ICMPv6 checksum, so setting it is not required). */
+#define IPV6_CHECKSUM 7
+#endif
 /** @brief Restrict the socket to IPv6 communication only. */
 #define IPV6_V6ONLY ZSOCK_IPV6_V6ONLY
 
