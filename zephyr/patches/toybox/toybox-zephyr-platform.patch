@@ -1,0 +1,450 @@
+diff --git a/lib/dirtree.c b/lib/dirtree.c
+index 5634759e..48f9d851 100644
+--- a/lib/dirtree.c
++++ b/lib/dirtree.c
+@@ -182,10 +182,10 @@ int dirtree_recurse(struct dirtree *node,
+     if ((flags&DIRTREE_PROC) && !isdigit(*entry->d_name)) continue;
+     if ((flags&DIRTREE_BREADTH) && isdotdot(entry->d_name)) continue;
+     if (!(new = dirtree_add_node(node, entry->d_name, flags))) continue;
+-    if ((flags&DIRTREE_SYMFOLLOW) && entry->d_type==DT_LNK
++    if ((flags&DIRTREE_SYMFOLLOW) && dirent_type(entry)==DT_LNK
+       && !S_ISLNK(new->st.st_mode)) new->again |= DIRTREE_SYMFOLLOW;
+     if (!new->st.st_blksize && !new->st.st_mode)
+-      new->st.st_mode = entry->d_type<<12;
++      new->st.st_mode = dirent_type(entry)<<12;
+     new = dirtree_handle_callback(new, callback);
+     if (new == DIRTREE_ABORTVAL) goto done;
+     if (new) {
+diff --git a/lib/portability.c b/lib/portability.c
+index 6acb0ec7..87f134b2 100644
+--- a/lib/portability.c
++++ b/lib/portability.c
+@@ -93,6 +93,14 @@ struct mtab_list *xgetmountlist(char *path)
+   return mtlist;
+ }
+ 
++#elif defined(__ZEPHYR__)
++
++// no mount table
++struct mtab_list *xgetmountlist(char *path)
++{
++  return 0;
++}
++
+ #else
+ 
+ #include <mntent.h>
+@@ -216,6 +224,34 @@ int xnotify_wait(struct xnotify *not, char **path)
+   }
+ }
+ 
++#elif defined(__ZEPHYR__)
++
++// no file change notification
++struct xnotify *xnotify_init(int max)
++{
++  struct xnotify *not = xzalloc(sizeof(struct xnotify));
++
++  not->max = max;
++  not->paths = xmalloc(max * sizeof(char *));
++  not->fds = xmalloc(max * sizeof(int));
++
++  return not;
++}
++
++int xnotify_add(struct xnotify *not, int fd, char *path)
++{
++  if (not->count == not->max) error_exit("xnotify_add overflow");
++  not->paths[not->count] = path;
++  not->fds[not->count++] = fd;
++
++  return 0;
++}
++
++int xnotify_wait(struct xnotify *not, char **path)
++{
++  error_exit("no inotify");
++}
++
+ #else
+ 
+ #include <sys/inotify.h>
+@@ -313,6 +349,57 @@ ssize_t xattr_fset(int fd, const char* name,
+   return fsetxattr(fd, name, value, size, 0, flags);
+ }
+ 
++#elif defined(__ZEPHYR__)
++
++// no extended attributes
++ssize_t xattr_get(const char *path, const char *name, void *value, size_t size)
++{
++  return errno = ENOTSUP, -1;
++}
++
++ssize_t xattr_lget(const char *path, const char *name, void *value, size_t size)
++{
++  return errno = ENOTSUP, -1;
++}
++
++ssize_t xattr_fget(int fd, const char *name, void *value, size_t size)
++{
++  return errno = ENOTSUP, -1;
++}
++
++ssize_t xattr_list(const char *path, char *list, size_t size)
++{
++  return errno = ENOTSUP, -1;
++}
++
++ssize_t xattr_llist(const char *path, char *list, size_t size)
++{
++  return errno = ENOTSUP, -1;
++}
++
++ssize_t xattr_flist(int fd, char *list, size_t size)
++{
++  return errno = ENOTSUP, -1;
++}
++
++ssize_t xattr_set(const char* path, const char* name,
++                  const void* value, size_t size, int flags)
++{
++  return errno = ENOTSUP, -1;
++}
++
++ssize_t xattr_lset(const char* path, const char* name,
++                   const void* value, size_t size, int flags)
++{
++  return errno = ENOTSUP, -1;
++}
++
++ssize_t xattr_fset(int fd, const char* name,
++                   const void* value, size_t size, int flags)
++{
++  return errno = ENOTSUP, -1;
++}
++
+ #elif !defined(__FreeBSD__) && !defined(__OpenBSD__)
+ 
+ ssize_t xattr_get(const char *path, const char *name, void *value, size_t size)
+@@ -447,7 +534,12 @@ void xsignal_all_killers(void *handler)
+   int i;
+ 
+   for (i = 1; signames[i].num != SIGCHLD; i++)
++#ifdef __ZEPHYR__
++    // best effort: the libc defines signals the kernel has no number for
++    if (signames[i].num != SIGKILL) signal(signames[i].num, handler);
++#else
+     if (signames[i].num != SIGKILL) xsignal(signames[i].num, handler);
++#endif
+ }
+ 
+ // Convert a string like "9", "KILL", "SIGHUP", or "SIGRTMIN+2" to a number.
+@@ -511,7 +603,7 @@ char *num_to_sig(int sig)
+ 
+ int dev_minor(int dev)
+ {
+-#if defined(__linux__)
++#if defined(__linux__) || defined(__ZEPHYR__)
+   return ((dev&0xfff00000)>>12)|(dev&0xff);
+ #elif defined(__APPLE__)
+   return dev&0xffffff;
+@@ -524,7 +616,7 @@ int dev_minor(int dev)
+ 
+ int dev_major(int dev)
+ {
+-#if defined(__linux__)
++#if defined(__linux__) || defined(__ZEPHYR__)
+   return (dev&0xfff00)>>8;
+ #elif defined(__APPLE__)
+   return (dev>>24)&0xff;
+@@ -537,7 +629,7 @@ int dev_major(int dev)
+ 
+ int dev_makedev(int major, int minor)
+ {
+-#if defined(__linux__)
++#if defined(__linux__) || defined(__ZEPHYR__)
+   return (minor&0xff)|((major&0xfff)<<8)|((minor&0xfff00)<<12);
+ #elif defined(__APPLE__)
+   return (minor&0xffffff)|((major&0xff)<<24);
+diff --git a/lib/portability.h b/lib/portability.h
+index e87b919f..f5dc5048 100644
+--- a/lib/portability.h
++++ b/lib/portability.h
+@@ -54,6 +54,29 @@
+ // will transitively include it, and ones that don't (macOS) won't break.
+ #include <sys/types.h>
+ 
++#ifdef __ZEPHYR__
++// errno may be thread-local in the base image; loadable extensions cannot
++// carry TLS relocations, so route accesses through the exported accessor.
++#include <errno.h>
++extern int *__errno_location(void);
++#undef errno
++#define errno (*__errno_location())
++// no d_type in struct dirent: callers fall back to stat()
++#include <dirent.h>
++#ifndef DT_UNKNOWN
++#define DT_UNKNOWN 0
++#define DT_DIR 4
++#define DT_REG 8
++#define DT_LNK 10
++#endif
++static inline int dirent_type(struct dirent *entry) { return DT_UNKNOWN; }
++// no vfork(): fork() reports the failure at the call site
++#include <unistd.h>
++#define vfork fork
++#else
++static inline int dirent_type(struct dirent *entry) { return entry->d_type; }
++#endif
++
+ // Various constants old build environments (or glibc, hiding behind
+ // _GNU_SOURCE) might not have even if kernel does.
+ 
+diff --git a/lib/xwrap.c b/lib/xwrap.c
+index fb608d57..d1223ecf 100644
+--- a/lib/xwrap.c
++++ b/lib/xwrap.c
+@@ -54,7 +54,13 @@ void xexit(void)
+ 
+     free(al);
+   }
+-  if (fflush(0) || ferror(stdout)) if (!toys.exitval) perror_msg("write");
++#ifdef __ZEPHYR__
++  // fflush(NULL) walks the shared libc stream list, which is not per-process
++  if ((fflush(stdout) | fflush(stderr)) || ferror(stdout))
++#else
++  if (fflush(0) || ferror(stdout))
++#endif
++    if (!toys.exitval) perror_msg("write");
+   _xexit();
+ }
+ 
+diff --git a/main.c b/main.c
+index aa6a52cb..759585e0 100644
+--- a/main.c
++++ b/main.c
+@@ -209,9 +209,6 @@ void toy_singleinit(struct toy_list *which, char *argv[])
+ 
+   // Setup we only want to do once: skip for multiplexer or NOFORK reentry
+   if (!(CFG_TOYBOX && which == toy_list) && !(which->flags & TOYFLAG_NOFORK)) {
+-    char *buf = 0;
+-    int btype = _IOFBF;
+-
+     toys.old_umask = umask(0);
+     if (!(which->flags & TOYFLAG_UMASK)) umask(toys.old_umask);
+ 
+@@ -222,10 +219,16 @@ void toy_singleinit(struct toy_list *which, char *argv[])
+       uselocale(newlocale(LC_CTYPE_MASK, "C.UTF-8", 0) ? :
+         newlocale(LC_CTYPE_MASK, "en_US.UTF-8", 0));
+ 
++#ifndef __ZEPHYR__
++    // the standard streams are shared with every other process: leave them
++    char *buf QUIET;
++    int btype QUIET;
++
+     if (which->flags & TOYFLAG_LINEBUF) btype = _IOLBF;
+     else if (which->flags & TOYFLAG_NOBUF) btype = _IONBF;
+     else buf = xmalloc(4096);
+     setvbuf(stdout, buf, btype, buf ? 4096 : 0);
++#endif
+   }
+ }
+ 
+@@ -341,8 +344,17 @@ void toybox_main(void)
+   xputc('\n');
+ }
+ 
++#ifdef __ZEPHYR__
++// The environment arrives as the third argument: there is no C runtime in
++// front of main() to publish it, and the base image's environ is shared by
++// every process, so this image keeps its own.
++int main(int argc, char *argv[], char *envp[])
++{
++  environ = envp;
++#else
+ int main(int argc, char *argv[])
+ {
++#endif
+   // don't segfault if our environment is crazy
+   // TODO mooted by kernel commit dcd46d897adb7 5.17 kernel Jan 2022
+   if (!*argv) return 127;
+diff --git a/toys/net/ping.c b/toys/net/ping.c
+index 3c00e0c2..c0bc7555 100644
+--- a/toys/net/ping.c
++++ b/toys/net/ping.c
+@@ -169,8 +169,14 @@ void ping_main(void)
+ 
+   // Open DGRAM socket
+   sa->sa_family = ai->ai_family;
++#ifdef __ZEPHYR__
++  // no unprivileged ICMP sockets: raw carries Linux v4 raw semantics
++  TT.sock = socket(ai->ai_family, SOCK_RAW,
++    len = (ai->ai_family == AF_INET) ? IPPROTO_ICMP : IPPROTO_ICMPV6);
++#else
+   TT.sock = socket(ai->ai_family, SOCK_DGRAM,
+     len = (ai->ai_family == AF_INET) ? IPPROTO_ICMP : IPPROTO_ICMPV6);
++#endif
+   if (TT.sock == -1) {
+     perror_msg("socket SOCK_DGRAM %x", len);
+     if (errno == EACCES) {
+@@ -181,13 +187,19 @@ void ping_main(void)
+   }
+   if (TT.I) xbind(TT.sock, sa, sizeof(srcaddr));
+ 
++#ifndef __ZEPHYR__
+   len = 1;
+   xsetsockopt(TT.sock, SOL_IP, IP_RECVTTL, &len, sizeof(len));
++#endif
+ 
++#ifdef __ZEPHYR__
++  if (FLAG(m)) error_exit("no SO_MARK");
++#else
+   if (FLAG(m)) {
+     len = TT.m;
+     xsetsockopt(TT.sock, SOL_SOCKET, SO_MARK, &len, sizeof(len));
+   }
++#endif
+ 
+   if (TT.t) {
+     len = TT.t;
+@@ -272,6 +284,22 @@ void ping_main(void)
+     if (!(len = xrecvmsgwait(TT.sock, &msg, 0, &srcaddr2, waitms)))
+       continue;
+ 
++#ifdef __ZEPHYR__
++    // raw v4 delivery includes the IP header and every ICMP message the
++    // stack receives: strip the header, take the ttl from it, and keep
++    // only echo replies that answer this process
++    if (ai->ai_family == AF_INET) {
++      unsigned hl = (toybuf[0]&0xf)*4;
++
++      if (len < (int)(hl+sizeof(*ih))) continue;
++      ttl = (unsigned char)toybuf[8];
++      len -= hl;
++      memmove(toybuf, toybuf+hl, len);
++    }
++    if (ih->type != ((ai->ai_family == AF_INET) ? 0 : 129)
++        || ih->un.echo.id != (unsigned short)getpid()) continue;
++#endif
++
+     TT.recv++;
+     TT.fugit += (pkttime = millitime()-*(unsigned *)(ih+1));
+     if (pkttime < TT.min) TT.min = pkttime;
+diff --git a/toys/pending/sh.c b/toys/pending/sh.c
+index 51a9db84..79c0aa27 100644
+--- a/toys/pending/sh.c
++++ b/toys/pending/sh.c
+@@ -371,6 +371,9 @@ config WAIT
+ 
+ #define FOR_sh
+ #include "toys.h"
++#ifdef __ZEPHYR__
++#include <spawn.h>
++#endif
+ 
+ GLOBALS(
+   union {
+@@ -1487,6 +1490,13 @@ if (DEBUG) { dprintf(2, "%d run_subshell %.*s\n", getpid(), len, str); debug_sho
+   // On nommu vfork, exec /proc/self/exe, and pipe state data to ourselves.
+   } else {
+     int pipes[2];
++#ifdef __ZEPHYR__
++    // neither vfork() nor a self image to re-enter: no subshells
++    errno = ENOSYS;
++    perror_msg("subshell");
++
++    return -1;
++#endif
+     unsigned i;
+     char **oldenv = environ, *ss = str ? : pl2str(TT.ff->pl->next, 0);
+     struct sh_vars **vv;
+@@ -2822,7 +2832,9 @@ static void sig_fcall(int sig, siginfo_t *info, void *ucontext)
+ {
+   // Tell run_lines() to eval trap, keep signal blocked until trap func ends
+   dlist_add(&TT.nextsig, (void *)(long)sig);
++#ifndef __ZEPHYR__
+   sigaddset(&((ucontext_t *)ucontext)->uc_sigmask, sig);
++#endif
+ }
+ 
+ // Set signal handler to exec string, or reset to default if NULL
+@@ -2931,6 +2943,65 @@ static void sh_exec(char **argv)
+   llist_traverse(sl, free);
+ }
+ 
++#ifdef __ZEPHYR__
++// No fork(): run an external command as a spawned process. The caller has
++// already applied the command's redirections to this process's descriptors,
++// which the child inherits, so the spawn needs no file actions. A toybox
++// command runs this binary, which dispatches on argv[0]. Returns the pid, or
++// -1 after reporting the failure.
++static pid_t zephyr_spawn_command(char **argv)
++{
++  char *pp = getvar("PATH") ? : _PATH_DEFPATH, *ss = *argv, **sss = 0;
++  struct string_list *sl = 0;
++  struct sh_vars **vv;
++  struct sh_arg aa;
++  unsigned uu;
++  pid_t pid = -1;
++  int err;
++
++  errno = ENOENT;
++  if (strchr(ss, '/')) {
++    if (access(ss, X_OK)) ss = 0;
++  } else for (sl = find_in_path(pp, toy_find(ss) ? "toybox" : ss);
++              sl || (ss = 0); free(llist_pop(&sl)))
++    if (!access(ss = sl->str, X_OK)) break;
++  if (!ss) {
++    perror_msg("%s", *argv);
++
++    return -1;
++  }
++
++  // the exported variables plus _=path, as sh_exec() builds them
++  vv = visible_vars();
++  aa.v = (void *)vv;
++  for (aa.c = uu = 0; vv[uu]; uu++) {
++    if ((vv[uu]->flags&(VAR_WHITEOUT|VAR_EXPORT))==VAR_EXPORT) {
++      if (*(pp = vv[uu]->str)=='_' && pp[1]=='=') sss = aa.v+aa.c;
++      aa.v[aa.c++] = pp;
++    }
++  }
++  aa.v[aa.c] = 0;
++  if (!sss) {
++    if (aa.c<uu) aa.v[++aa.c] = 0;
++    else arg_add(&aa, 0);
++    sss = aa.v+aa.c-1;
++  }
++  *sss = xmprintf("_=%s", ss);
++
++  err = posix_spawn(&pid, ss, 0, 0, argv, aa.v);
++  if (err) {
++    errno = err;
++    perror_msg("%s", *argv);
++    pid = -1;
++  }
++  free(*sss);
++  free(aa.v);
++  llist_traverse(sl, free);
++
++  return pid;
++}
++#endif
++
+ // Execute a single command at TT.ff->pl returning new sh_process instance.
+ static struct sh_process *run_command(int local)
+ {
+@@ -3062,8 +3133,12 @@ if (DEBUG) { dprintf(2, "%d builtin", getpid()); for (int xx = 0; xx<=pp->arg.c;
+       if (toys.old_umask) umask(toys.old_umask);
+       memcpy(&toys, &temp, jj);
+     // Run command in new child process
++#ifdef __ZEPHYR__
++    } else pp->pid = zephyr_spawn_command(pp->arg.v);
++#else
+     } else if (-1==(pp->pid = xpopen_setup(pp->arg.v, 0, sh_exec)))
+         perror_msg("%s: vfork", *pp->arg.v);
++#endif
+   }
+ 
+ done:
