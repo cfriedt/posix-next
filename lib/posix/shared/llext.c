@@ -624,6 +624,7 @@ EXPORT_SYMBOL(closelog);
 EXPORT_SYMBOL(openlog);
 EXPORT_SYMBOL(setlogmask);
 EXPORT_SYMBOL(syslog);
+EXPORT_SYMBOL(vsyslog);
 #endif /* CONFIG_XSI_SYSTEM_LOGGING */
 
 /* XSI_THREADS_EXT */

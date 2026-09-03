@@ -13,6 +13,7 @@ Enable this option group with :kconfig:option:`CONFIG_XSI_SYSTEM_LOGGING`.
     :c:func:`openlog`,yes
     :c:func:`setlogmask`,yes
     :c:func:`syslog`,yes
+    :c:func:`vsyslog`,yes
 
 .. doxygengroup:: posix_option_group_xsi_system_logging
    :project: posix
