@@ -4351,6 +4351,72 @@ patches:
       module implements over the native net_if API. Neither toolchain libc
       ships the header; the minimal libc resolves it through the module
       include path directly.
+  - path: toybox/toybox-kconfig-is-not-set-lines.patch
+    sha256sum: bede8495c6604fd47f2e588f329815063c0d1071ea522bfaf861dc539db8ecc0
+    module: modules/lib/toybox
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-10-17
+    upstreamable: true
+    comments: |
+      toybox's kconfig tool reads a KCONFIG_ALLCONFIG file to seed a
+      configuration, but recognized its "# CONFIG_X is not set" lines against
+      a trailing newline getrimline() had already removed, and from the first
+      space of the line (the one after the '#'), so every such line was
+      silently ignored and a symbol a miniconfig turned off stayed at its
+      default. Compare from the symbol's own end, without the newline.
+  - path: toybox/toybox-zephyr-module.patch
+    sha256sum: d7c5840fcbda010d98c1fcbe1ba82b91c0ac7a335ca9f4dc4360e66981977ca2
+    module: modules/lib/toybox
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-03
+    upstreamable: true
+    comments: |
+      The parts of the Zephyr port that the toybox fork does not carry
+      itself (its zephyr branch holds only module.yml, Kconfig and
+      CMakeLists.txt): the configure script that runs toybox's own genconfig
+      and header generation host-side (defconfig with zephyr/toybox.frag
+      applied over it, in a symlink mirror of the source tree so the tree
+      itself stays untouched, then toybox's own lister for the commands the
+      configuration provides, published by CMake for the /bin links), the
+      fragment, which keeps toybox's default command set less the commands
+      that need Linux kernel interfaces, /proc, utmp, sysinfo(), resource
+      limits, process priorities or C library functions Zephyr does not have,
+      the exported main() seed object, header shims under zephyr/include for
+      the non-POSIX headers toybox includes unconditionally (sys/mount.h,
+      pty.h, sys/syscall.h, sys/ttydefaults.h) and the extras it expects from
+      others (TIOCSCTTY, getgrouplist(), dprintf(), NSIG, the BSD termios
+      functions), and zephyr/zephyr.c with what the C library and the POSIX
+      layer lack: dprintf(), cfmakeraw(), cfsetspeed(), a failing syscall(),
+      getgrouplist() for the one identity, readv() and writev(), mknod() for
+      FIFOs, statfs() over statvfs(), and failing sethostname() and
+      futimens().
+  - path: toybox/toybox-zephyr-platform.patch
+    sha256sum: 42976fdca4dc36ddb0a5bdd5d08a5001e86100066925b08b2609a3bca49a8639
+    module: modules/lib/toybox
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-03
+    upstreamable: true
+    comments: |
+      Port toybox's portability layer to Zephyr: route errno through the
+      exported accessor (extensions carry no TLS relocations), fall back to
+      stat() where struct dirent has no d_type, map vfork() to fork(), provide
+      Zephyr branches for the mount table, inotify and extended attribute
+      helpers (none exist; the prototypes the Linux and macOS branches share
+      come along, for cp and tar), use the Linux device number encoding, and
+      flush stdout/stderr individually on exit because fflush(NULL) walks the
+      base image's stream list, which is not per-process. The shell (toysh)
+      runs external commands through posix_spawn() with the caller's
+      redirections inherited, runs toybox commands through the toybox binary,
+      reports that subshells need fork(), keeps a per-image environ set from
+      envp, and leaves the shared stdout buffering alone. Four commands get
+      small fixes: cp dates a copy by name where futimens() is missing, time
+      spawns its command through posix_spawnp() where fork() is missing and
+      reports no rusage, getconf guards the Linux-only _SC_UIO_MAXIOV, and
+      hostname looks a name up through getaddrinfo(), as the rest of toybox
+      does, instead of gethostbyname().
   - path: picolibc/tinystdio-wide-stream-conformance.patch
     sha256sum: 42dd7dd3fa77d3ab04f3eed65bdb53cea4cb7dd9c3900dede7742734ecb7140e
     module: picolibc
