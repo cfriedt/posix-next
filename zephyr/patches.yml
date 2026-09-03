@@ -1095,3 +1095,35 @@ patches:
       zsock_connect() directly -- the native APIs taking (struct net_sockaddr *) --
       and keep the (struct net_sockaddr *) casts, avoiding the mismatched prototype
       when passing net_sockaddr_in6/net_sockaddr_in addresses.
+  - path: zephyr/net-conn-deliver-raw-unlocked.patch
+    sha256sum: 617ac30d3c4510ecdcc488d7df9cc43693247c0a1df822def8e0184f1ed2a4d4
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-03
+    upstreamable: true
+    comments: |
+      Raw IP and packet socket delivery invoked the socket callback while
+      holding the connection lock. The callback takes the socket's fd lock,
+      which close() already holds while it waits for the connection lock in
+      net_conn_unregister(), so closing a raw socket while looped-back
+      traffic is still being delivered deadlocked the RX thread and the
+      closer. Walk the connection array by index and release the lock
+      around each delivery, as the unicast UDP path already does.
+  - path: zephyr/net-sockets-inet-raw-ip-hdrincl.patch
+    sha256sum: f7da4a339c268b90a76c77e3a47f92a140272aae26f3c94033ff1592d0065771
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-03
+    upstreamable: true
+    comments: |
+      AF_INET/AF_INET6 raw sockets always required the application to supply
+      the IP header, unlike Linux and the BSDs where the stack builds it from
+      the destination address unless IP_HDRINCL is set (or the protocol is
+      IPPROTO_RAW). Add ZSOCK_IP_HDRINCL / ZSOCK_IPV6_HDRINCL backed by a
+      NET_OPT_IP_HDRINCL context option, default off, and build the IP header
+      on the stack-built path so e.g. socket(AF_INET, SOCK_RAW, IPPROTO_ICMP)
+      + sendto() of a bare ICMP echo works as on other systems. The
+      af_inet_raw test sets the option where it supplies headers and gains
+      stack-built-header and option round-trip cases.
