@@ -23,6 +23,7 @@ For individual POSIX options, see :ref:`posix_options`.
    fd_mgmt
    fifo
    file_attributes
+   file_attributes_fd
    file_locking
    file_system
    file_system_fd
