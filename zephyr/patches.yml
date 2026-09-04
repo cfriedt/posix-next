@@ -3598,6 +3598,21 @@ patches:
       llext_load_param.rw_extra bytes follow the data and bss regions,
       pointer-aligned and zeroed, inside the same protected range; the
       extension records the area's offset and size for whoever loaded it.
+  - path: zephyr/sys-clone-fd-actions.patch
+    sha256sum: 63b89cdaf80f55eed5cc3c94e90369f8396521601d8bf78400ef54dca5b13e52
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-04
+    upstreamable: true
+    comments: |
+      sys_clone(): stage descriptor actions into the child. An array of
+      open/dup2/close actions travels with the argument vectors, in the same
+      block and under the same budget (paths copied from user memory under
+      the verifier), and the leader's trampoline applies them in order on
+      the child's own descriptor table before entering, exiting with 127
+      when one fails. A user-mode creator never has to touch another
+      process's table, which is what posix_spawn() from user mode needs.
   - path: zephyr/libc-sys-stat-utime-markers.patch
     sha256sum: 8edfcf83058522bb80d601e92c4a9e6be14baec04cf8253ffbd344fbadf05b78
     module: zephyr
