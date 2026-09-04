@@ -1,11 +1,11 @@
 diff --git a/include/zephyr/kernel.h b/include/zephyr/kernel.h
-index c620e15c66a..2a2d503aacf 100644
+index 68cd0cb66ad..efcd91f296c 100644
 --- a/include/zephyr/kernel.h
 +++ b/include/zephyr/kernel.h
-@@ -7174,6 +7174,129 @@ __syscall bool k_thread_cleanup_pop(int execute);
- 
+@@ -7525,6 +7525,129 @@ __syscall bool k_thread_cleanup_pop(int execute);
+
  #endif /* CONFIG_THREAD_CLEANUP */
- 
+
 +/**
 + * @}
 + */
@@ -133,10 +133,10 @@ index c620e15c66a..2a2d503aacf 100644
   * @}
   */
 diff --git a/include/zephyr/kernel/thread.h b/include/zephyr/kernel/thread.h
-index 939052af2ab..da690b21b6e 100644
+index 1db2550ecd6..dbbc63e0861 100644
 --- a/include/zephyr/kernel/thread.h
 +++ b/include/zephyr/kernel/thread.h
-@@ -153,6 +153,11 @@ struct _thread_base {
+@@ -154,6 +154,11 @@ struct _thread_base {
         /** Cleanup handlers */
         sys_slist_t cleanup;
  #endif
@@ -146,10 +146,10 @@ index 939052af2ab..da690b21b6e 100644
 +       sys_dlist_t key_list;
 +#endif
  };
- 
+
  typedef struct _thread_base _thread_base_t;
 diff --git a/kernel/CMakeLists.txt b/kernel/CMakeLists.txt
-index bbbdd86e164..5f9f5ca9c06 100644
+index ebd1633c02d..21b8ca29936 100644
 --- a/kernel/CMakeLists.txt
 +++ b/kernel/CMakeLists.txt
 @@ -55,6 +55,7 @@ zephyr_compile_definitions(SIGNAL_QUEUE_SIZE=${sigqueue_add_size})
@@ -157,17 +157,17 @@ index bbbdd86e164..5f9f5ca9c06 100644
  zephyr_sources_ifdef(CONFIG_SIGNAL signal.c)
  zephyr_sources_ifdef(CONFIG_THREAD_CLEANUP cleanup.c)
 +zephyr_sources_ifdef(CONFIG_THREAD_SPECIFIC_STORAGE tss.c)
- 
+
  # kernel is a normal CMake library and not a zephyr_library because it
  # should usually not be --whole-archive'd
 diff --git a/kernel/Kconfig b/kernel/Kconfig
-index 01aa9e2ec01..eff2e9b5a07 100644
+index 2df10f5d5fc..f923ebd61ae 100644
 --- a/kernel/Kconfig
 +++ b/kernel/Kconfig
-@@ -220,6 +220,26 @@ config THREAD_RESULT
+@@ -223,6 +223,26 @@ config THREAD_RESULT
  	help
  	  Say 'Y' here to support a thread result or "return value".
- 
+
 +config THREAD_SPECIFIC_STORAGE
 +	bool "Thread specific storage (TSS)"
 +	help
@@ -192,13 +192,13 @@ index 01aa9e2ec01..eff2e9b5a07 100644
  	int "Thread cancellation signal number"
  	def_int 32
 diff --git a/kernel/signal.c b/kernel/signal.c
-index d9ff86745c6..c3998b81e33 100644
+index 213692dbea8..ec6cd18a69c 100644
 --- a/kernel/signal.c
 +++ b/kernel/signal.c
-@@ -867,6 +867,18 @@ FUNC_NORETURN void z_thread_cancel_actuate(void)
+@@ -875,6 +875,18 @@ FUNC_NORETURN void z_thread_cancel_actuate(void)
  	}
  #endif
- 
+
 +#ifdef CONFIG_THREAD_SPECIFIC_STORAGE
 +	/* destroy thread-specific storage */
 +	for (void *key = NULL, *value = NULL, *_dtor = NULL;
@@ -215,19 +215,19 @@ index d9ff86745c6..c3998b81e33 100644
  	CODE_UNREACHABLE;
  }
 diff --git a/kernel/thread.c b/kernel/thread.c
-index 1f8e6893164..f9fda553356 100644
+index 70c8260aa1b..1f47a7f56c1 100644
 --- a/kernel/thread.c
 +++ b/kernel/thread.c
-@@ -741,6 +741,10 @@ char *z_setup_new_thread(struct k_thread *new_thread,
+@@ -744,6 +744,10 @@ char *z_setup_new_thread(struct k_thread *new_thread,
  	sys_slist_init(&new_thread->base.cleanup);
  #endif
- 
+
 +#ifdef CONFIG_THREAD_SPECIFIC_STORAGE
 +	sys_dlist_init(&new_thread->base.key_list);
 +#endif
 +
  	SYS_PORT_TRACING_OBJ_FUNC(k_thread, create, new_thread);
- 
+
  	return stack_ptr;
 diff --git a/kernel/tss.c b/kernel/tss.c
 new file mode 100644

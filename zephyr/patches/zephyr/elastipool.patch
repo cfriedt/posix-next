@@ -1,83 +1,31 @@
-Author: Chris Friedt <chris@fr4.co>
-Date:   Wed Dec 17 12:10:18 2025 -0500
+diff --git a/lib/CMakeLists.txt b/lib/CMakeLists.txt
+index 51413ffc4b5..073f7e38528 100644
+--- a/lib/CMakeLists.txt
++++ b/lib/CMakeLists.txt
+@@ -5,6 +5,7 @@ add_compile_options($<TARGET_PROPERTY:compiler,warning_shadow_variables>)
 
-    elastipool: add an elastic object pool implementation
-    
-    This changes adds an elastic object pool, which is a allocator of
-    fixed-size objects that can be configured to have a guaranteed minimum
-    number of objects available for allocation, and can also be configured
-    to support growing (to a user-specified size) with non-guaranteed
-    objects allocated from the heap.
-    
-    Every allocation is tracked and can be safely deallocated when no longer
-    in use.
-    
-    Elastipool was created to address the need of having a common API for
-    both static and dynamic allocation, with potentially different object
-    types that might require specialized allocators. Additionally, it
-    addresses "features" of other in-tree object allocators that can be
-    considered a hinderance in certain use cases.
-    
-    1. elastipool is a simple library
-      - does not depend on kernel primitives
-      - can be used both in kernel context and user context
-      - only depends on hash map if users require dynamic growth
-    
-    2. elastipool is not synchronized
-      - does not require any details of scheduler internals
-      - approach aligns better with traditional data structures
-      - external synchronization objects may be used, if needed, based on
-        the context
-        - `k_spinlock` in driver
-        - `sys_sem` or `k_mutex` in OS services or libraries
-        - no synchronization when only accessed by a single thread
-    
-    3. elastipool does not use a free list
-      - a (non-synchronized) bitmap is used to track fixed allocations
-      - a small tradeoff in speed for space
-      - a hash map is used to track dynamic allocations (if needed)
-    
-    4. elastipool is likely only ISR-safe when used for static allocations.
-    
-    Similarly to drivers, elastipool separates API, config, and data.
-    
-    API and configuration details are compile-time constant and selected
-    based on two input parameters.
-    
-    i) min_elements: the minimum (guaranteed) number of objects in the pool
-    ii) max_elements: the maximum possible number of objects in the pool
-    
-    The max_elements parameter must always be greater than zero, and must
-    always be greater-than or equal-to min_elements.
-    
-    If min_elements is zero, then all allocations are dynamic (from the heap).
-    
-    If min_elements is non-zero, and min_elements is equal to max_elements,
-    then all objects are guaranteed and are drawn from a statically allocated
-    pool (similar to the slab allocator).
-    
-    If max elements is greater than min_elements, then at most min_elements
-    objects are guaranteed to be available, as they are allocated statically,
-    and up to max_elements - min_elements objects may be allocated from the
-    heap.
-    
-    Heap allocation is not guaranteed and is subject to available memory
-    constraints.
-    
-    Users may effectively get a limitless number of allocations by specifying
-    a max_elements parameter of `(size_t)(-1)`. However, doing so may starve
-    the rest of the system of resources.
-    
-    Perhaps the most imminent use case for elastipool is where support is
-    needed for both dynamic and statically allocated number of kernel objects
-    such as threads, thread stacks, semaphores, mutexes, spinlocks, etc, and
-    where there may be specialized allocators required for each based on
-    allocation constraints, kernel vs userspace, and a configurable maximum
-    number of elements.
+ add_subdirectory(libc)
+ add_subdirectory_ifdef(CONFIG_CPP                  cpp)
++add_subdirectory(elastipool)
+ add_subdirectory(hash)
+ add_subdirectory(heap)
+ add_subdirectory(mem_blocks)
+diff --git a/lib/Kconfig b/lib/Kconfig
+index 41800484d6b..a9a86d724b4 100644
+--- a/lib/Kconfig
++++ b/lib/Kconfig
+@@ -9,6 +9,8 @@ source "lib/cpp/Kconfig"
 
+ menu "Additional libraries"
+
++source "lib/elastipool/Kconfig"
++
+ source "lib/hash/Kconfig"
+
+ source "lib/heap/Kconfig"
 diff --git a/include/zephyr/sys/elastipool.h b/include/zephyr/sys/elastipool.h
 new file mode 100644
-index 00000000000..b6048ae1916
+index 00000000000..46bdc18dcb4
 --- /dev/null
 +++ b/include/zephyr/sys/elastipool.h
 @@ -0,0 +1,443 @@
@@ -500,7 +448,7 @@ index 00000000000..b6048ae1916
 + */
 +#define SYS_ELASTIPOOL_DEFINE(name, size, align, min, max, ...)                                    \
 +	__maybe_unused __noinit __aligned(WB_UP(align)) static uint8_t                             \
-+		_elastipool_slab_storage_##name[ROUND_UP((size), (align)) * (size)];               \
++		_elastipool_slab_storage_##name[ROUND_UP((size), (align)) * (min)];                \
 +	SYS_ELASTIPOOL_DEFINE_ADVANCED(name, (size), (align), (min), (max),                        \
 +				       SYS_ELASTIPOOL_THREAD_HEAP_ALLOC_FN((min), (max)),          \
 +				       _elastipool_slab_storage_##name, __VA_ARGS__)
@@ -524,31 +472,6 @@ index 00000000000..b6048ae1916
 +#endif
 +
 +#endif /* ZEPHYR_INCLUDE_SYS_ELASTIPOOL_H_ */
-diff --git a/lib/CMakeLists.txt b/lib/CMakeLists.txt
-index 51413ffc4b5..073f7e38528 100644
---- a/lib/CMakeLists.txt
-+++ b/lib/CMakeLists.txt
-@@ -5,6 +5,7 @@ add_compile_options($<TARGET_PROPERTY:compiler,warning_shadow_variables>)
- 
- add_subdirectory(libc)
- add_subdirectory_ifdef(CONFIG_CPP                  cpp)
-+add_subdirectory(elastipool)
- add_subdirectory(hash)
- add_subdirectory(heap)
- add_subdirectory(mem_blocks)
-diff --git a/lib/Kconfig b/lib/Kconfig
-index 41800484d6b..a9a86d724b4 100644
---- a/lib/Kconfig
-+++ b/lib/Kconfig
-@@ -9,6 +9,8 @@ source "lib/cpp/Kconfig"
- 
- menu "Additional libraries"
- 
-+source "lib/elastipool/Kconfig"
-+
- source "lib/hash/Kconfig"
- 
- source "lib/heap/Kconfig"
 diff --git a/lib/elastipool/CMakeLists.txt b/lib/elastipool/CMakeLists.txt
 new file mode 100644
 index 00000000000..c8ee30959ec
@@ -581,10 +504,10 @@ index 00000000000..43a10eac442
 +	  both, up to a maximum number of allocations.
 diff --git a/lib/elastipool/elastipool.c b/lib/elastipool/elastipool.c
 new file mode 100644
-index 00000000000..f34f54e773a
+index 00000000000..042491d999f
 --- /dev/null
 +++ b/lib/elastipool/elastipool.c
-@@ -0,0 +1,368 @@
+@@ -0,0 +1,372 @@
 +/*
 + * Copyright (c) 2025, Friedt Professional Engineering Services, Inc.
 + *
@@ -641,7 +564,8 @@ index 00000000000..f34f54e773a
 +	}
 +
 +	/* the last long might require truncation, unless n is an even multiple of stride */
-+	unsigned long mask = (unsigned long)BIT64_MASK(n - m);
++	unsigned long mask =
++		(n - m == stride) ? ~0UL : (unsigned long)BIT64_MASK(n - m);
 +	unsigned long l = ~(*bmp) & mask;
 +
 +	if (l == 0) {
@@ -678,13 +602,15 @@ index 00000000000..f34f54e773a
 +static int sys_elastipool_bmp_free(unsigned long *bmp, size_t bit, size_t num_bits)
 +{
 +	int ret;
++	size_t stride = sizeof(unsigned long) * BITS_PER_BYTE;
 +
++	/* check() returns the word-relative bit index on success */
 +	ret = sys_elastipool_bmp_check(bmp, bit, num_bits);
 +	if (ret < 0) {
 +		return ret;
 +	}
 +
-+	*bmp &= ~BIT64(bit);
++	bmp[bit / stride] &= ~((unsigned long)BIT64(ret));
 +
 +	return 0;
 +}
@@ -826,7 +752,8 @@ index 00000000000..f34f54e773a
 +void sys_elastipool_api_clear_static(const struct sys_elastipool *pool)
 +{
 +	memset(pool->config->bmp, 0,
-+	       pool->config->min_obj * ROUND_UP(pool->config->obj_size, pool->config->obj_align));
++	       DIV_ROUND_UP(pool->config->min_obj, sizeof(unsigned long) * BITS_PER_BYTE) *
++		       sizeof(unsigned long));
 +	pool->data->pool_size = 0;
 +}
 +
@@ -865,7 +792,7 @@ index 00000000000..f34f54e773a
 +			uint8_t *storage, unsigned long *bmp, struct sys_hashmap *map,
 +			sys_elastipool_api_heap_alloc_t allocator)
 +{
-+	if ((obj_size == 0) || (min_obj == 0) || (max_obj < min_obj) ||
++	if ((obj_size == 0) || (max_obj < min_obj) ||
 +	    ((obj_align != 0) && !IS_POWER_OF_TWO(obj_align)) || (api == NULL) ||
 +	    (config == NULL)) {
 +		return -EINVAL;
@@ -1000,10 +927,10 @@ index 00000000000..4b3bdbb719e
 +CONFIG_SYS_ELASTIPOOL=y
 diff --git a/tests/lib/elastipool/src/main.c b/tests/lib/elastipool/src/main.c
 new file mode 100644
-index 00000000000..11c9a70c2f4
+index 00000000000..a99d1cd0797
 --- /dev/null
 +++ b/tests/lib/elastipool/src/main.c
-@@ -0,0 +1,143 @@
+@@ -0,0 +1,290 @@
 +/*
 + * Copyright (c) 2025, Friedt Professional Engineering Services, Inc.
 + *
@@ -1014,7 +941,10 @@ index 00000000000..11c9a70c2f4
 +
 +#include <zephyr/ztest.h>
 +#include <zephyr/sys/elastipool.h>
++#include <zephyr/sys/hash_map.h>
 +#include <zephyr/toolchain.h>
++
++#define ULONG_BITS (sizeof(unsigned long) * BITS_PER_BYTE)
 +
 +struct elem {
 +	uint64_t blob[2];
@@ -1139,11 +1069,155 @@ index 00000000000..11c9a70c2f4
 +	TC_PRINT("Re-allocated %zu objects of size %zu\n", count, sizeof(struct elem));
 +}
 +
++/* min large enough that the bitmap spans multiple words and slots >= 64 exist */
++#define HIGHBIT_POOL_MIN 100
++SYS_ELASTIPOOL_DEFINE_STATIC(highbit_pool, sizeof(uint64_t), __alignof(uint64_t),
++			     HIGHBIT_POOL_MIN, HIGHBIT_POOL_MIN);
++
++/* min is an exact multiple of the bitmap word size (in bits) on both ILP32 and LP64 */
++#define FULLWORD_POOL_MIN 128
++SYS_ELASTIPOOL_DEFINE_STATIC(fullword_pool, sizeof(uint64_t), __alignof(uint64_t),
++			     FULLWORD_POOL_MIN, FULLWORD_POOL_MIN);
++
++/* storage must be sized by object count (min), not by object size */
++BUILD_ASSERT(sizeof(_elastipool_slab_storage_highbit_pool) ==
++		     ROUND_UP(sizeof(uint64_t), __alignof(uint64_t)) * HIGHBIT_POOL_MIN,
++	     "SYS_ELASTIPOOL_DEFINE storage is not sized by min");
++
++ZTEST(elastipool, test_storage_sized_by_min)
++{
++	static void *ptrs[HIGHBIT_POOL_MIN];
++	const uint8_t *storage = highbit_pool.config->storage;
++	const size_t stride = ROUND_UP(sizeof(uint64_t), __alignof(uint64_t));
++
++	for (size_t i = 0; i < HIGHBIT_POOL_MIN; ++i) {
++		zassert_ok(sys_elastipool_alloc(&highbit_pool, &ptrs[i]));
++		zassert_true(((uint8_t *)ptrs[i] >= storage) &&
++				     ((uint8_t *)ptrs[i] < storage + stride * HIGHBIT_POOL_MIN),
++			     "slot %zu outside pool storage", i);
++		*(uint64_t *)ptrs[i] = 0xA5A50000ULL + i;
++	}
++
++	/* no two slots may overlap: every pattern must be intact after all writes */
++	for (size_t i = 0; i < HIGHBIT_POOL_MIN; ++i) {
++		zexpect_equal(*(uint64_t *)ptrs[i], 0xA5A50000ULL + i,
++			      "slot %zu corrupted by a neighbouring slot", i);
++	}
++}
++
++ZTEST(elastipool, test_free_high_bit)
++{
++	static void *ptrs[HIGHBIT_POOL_MIN];
++	void *elem;
++
++	for (size_t i = 0; i < HIGHBIT_POOL_MIN; ++i) {
++		zassert_ok(sys_elastipool_alloc(&highbit_pool, &ptrs[i]));
++	}
++
++	/* free a slot whose bitmap bit lives beyond word 0, then re-allocate it */
++	zassert_ok(sys_elastipool_free(&highbit_pool, ptrs[70]));
++	zassert_ok(sys_elastipool_alloc(&highbit_pool, &elem));
++	zexpect_equal_ptr(elem, ptrs[70], "freed high-bit slot was not the one re-allocated");
++
++	/* full free/alloc round-trip must succeed for every slot */
++	for (size_t i = 0; i < HIGHBIT_POOL_MIN; ++i) {
++		zassert_ok(sys_elastipool_free(&highbit_pool, ptrs[i]), "free of slot %zu failed",
++			   i);
++	}
++	zexpect_equal(highbit_pool.data->pool_size, 0);
++	for (size_t i = 0; i < HIGHBIT_POOL_MIN; ++i) {
++		zassert_ok(sys_elastipool_alloc(&highbit_pool, &elem));
++	}
++}
++
++ZTEST(elastipool, test_alloc_full_word_boundary)
++{
++	void *elem;
++	static void *ptrs[FULLWORD_POOL_MIN];
++
++	/* every slot must be allocatable when min is an exact bitmap-word multiple */
++	for (size_t i = 0; i < FULLWORD_POOL_MIN; ++i) {
++		zassert_ok(sys_elastipool_alloc(&fullword_pool, &ptrs[i]),
++			   "allocation %zu of %d failed", i, FULLWORD_POOL_MIN);
++	}
++	zexpect_equal(-ENOMEM, sys_elastipool_alloc(&fullword_pool, &elem));
++
++	zassert_ok(sys_elastipool_free(&fullword_pool, ptrs[FULLWORD_POOL_MIN - 1]));
++	zassert_ok(sys_elastipool_alloc(&fullword_pool, &elem));
++	zexpect_equal_ptr(elem, ptrs[FULLWORD_POOL_MIN - 1]);
++}
++
++ZTEST(elastipool, test_clear_static_bounded)
++{
++	struct sys_elastipool pool;
++	struct sys_elastipool_api api;
++	struct sys_elastipool_config config;
++	struct sys_elastipool_data data;
++	static uint8_t storage[ROUND_UP(sizeof(struct elem), __alignof(struct elem)) * 5];
++	static struct {
++		unsigned long pre[2];
++		unsigned long bmp[DIV_ROUND_UP(5, ULONG_BITS)];
++		unsigned long post[2];
++	} guarded;
++	unsigned long canary;
++	void *elem;
++
++	memset(&guarded, 0xaa, sizeof(guarded));
++	memset(&canary, 0xaa, sizeof(canary));
++	memset(guarded.bmp, 0, sizeof(guarded.bmp));
++
++	zassert_ok(sys_elastipool_init(&pool, &api, &config, &data, sizeof(struct elem),
++				       __alignof(struct elem), 5, 5, storage, guarded.bmp, NULL,
++				       NULL));
++
++	for (size_t i = 0; i < 5; ++i) {
++		zassert_ok(sys_elastipool_alloc(&pool, &elem));
++	}
++
++	/* clear must touch only the bitmap words, never the surrounding memory */
++	sys_elastipool_clear(&pool);
++	zexpect_equal(pool.data->pool_size, 0);
++	for (size_t i = 0; i < ARRAY_SIZE(guarded.pre); ++i) {
++		zexpect_equal(guarded.pre[i], canary, "clear underran the bitmap (word %zu)", i);
++	}
++	for (size_t i = 0; i < ARRAY_SIZE(guarded.post); ++i) {
++		zexpect_equal(guarded.post[i], canary, "clear overran the bitmap (word %zu)", i);
++	}
++}
++
++SYS_HASHMAP_DEFINE_STATIC(init_dyn_map);
++
++ZTEST(elastipool, test_init_min_zero_dynamic)
++{
++	struct sys_elastipool pool;
++	struct sys_elastipool_api api;
++	struct sys_elastipool_config config;
++	struct sys_elastipool_data data;
++	void *elem;
++	void *elem2;
++
++	if (!IS_ENABLED(CONFIG_SYS_HASH_MAP)) {
++		ztest_test_skip();
++	}
++
++	/* min_obj == 0 is the documented dynamic-only mode */
++	zassert_ok(sys_elastipool_init(&pool, &api, &config, &data, sizeof(struct elem),
++				       __alignof(struct elem), 0, 1, NULL, NULL, &init_dyn_map,
++				       NULL));
++
++	zassert_ok(sys_elastipool_alloc(&pool, &elem));
++	zexpect_equal(-ENOMEM, sys_elastipool_alloc(&pool, &elem2));
++	zassert_ok(sys_elastipool_free(&pool, elem));
++	zexpect_equal(pool.data->pool_size, 0);
++}
++
 +static void after(void *arg)
 +{
 +	sys_elastipool_clear(&static_pool);
 +	sys_elastipool_clear(&dynamic_pool);
 +	sys_elastipool_clear(&elastic_pool);
++	sys_elastipool_clear(&highbit_pool);
++	sys_elastipool_clear(&fullword_pool);
 +}
 +
 +ZTEST_SUITE(elastipool, NULL, NULL, NULL, after, NULL);

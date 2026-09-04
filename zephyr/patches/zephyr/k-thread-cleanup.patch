@@ -1,11 +1,11 @@
 diff --git a/include/zephyr/kernel.h b/include/zephyr/kernel.h
-index c8099844131..c620e15c66a 100644
+index 26cf28ad873..68cd0cb66ad 100644
 --- a/include/zephyr/kernel.h
 +++ b/include/zephyr/kernel.h
-@@ -7105,6 +7105,79 @@ __syscall void k_thread_exit(void *result);
- 
+@@ -7456,6 +7456,79 @@ __syscall void k_thread_exit(void *result);
+
  #endif /* CONFIG_SIGNAL */
- 
+
 +/**
 + * @addtogroup k_thread_cleanup_apis
 + * @{
@@ -83,10 +83,10 @@ index c8099844131..c620e15c66a 100644
  }
  #endif
 diff --git a/include/zephyr/kernel/thread.h b/include/zephyr/kernel/thread.h
-index 5ab4ae4e1d5..939052af2ab 100644
+index 712695c63dc..1db2550ecd6 100644
 --- a/include/zephyr/kernel/thread.h
 +++ b/include/zephyr/kernel/thread.h
-@@ -151,6 +151,11 @@ struct _thread_base {
+@@ -149,6 +149,11 @@ struct _thread_base {
         /** Sticky cancellation request pending actuation */
         atomic_t cancel_pending;
  #endif
@@ -96,28 +96,28 @@ index 5ab4ae4e1d5..939052af2ab 100644
 +       sys_slist_t cleanup;
 +#endif
  };
- 
+
  typedef struct _thread_base _thread_base_t;
 diff --git a/kernel/CMakeLists.txt b/kernel/CMakeLists.txt
-index 9b652304b64..bbbdd86e164 100644
+index 1a46ba52af8..ebd1633c02d 100644
 --- a/kernel/CMakeLists.txt
 +++ b/kernel/CMakeLists.txt
 @@ -54,6 +54,7 @@ zephyr_compile_definitions(SIGNAL_QUEUE_SIZE=${sigqueue_add_size})
- 
+
  # This file cannot be compiled with __ZEPHYR_SUPERVISOR__ when userspace is enabled
  zephyr_sources_ifdef(CONFIG_SIGNAL signal.c)
 +zephyr_sources_ifdef(CONFIG_THREAD_CLEANUP cleanup.c)
- 
+
  # kernel is a normal CMake library and not a zephyr_library because it
  # should usually not be --whole-archive'd
 diff --git a/kernel/Kconfig b/kernel/Kconfig
-index c6ce29e5ebe..01aa9e2ec01 100644
+index c0149c8390a..2df10f5d5fc 100644
 --- a/kernel/Kconfig
 +++ b/kernel/Kconfig
-@@ -259,6 +259,14 @@ config SIGNAL_SET_SIZE_MIN_THREAD_CANCEL
- 
+@@ -262,6 +262,14 @@ config SIGNAL_SET_SIZE_MIN_THREAD_CANCEL
+
  endif # THREAD_CANCEL
- 
+
 +config THREAD_CLEANUP
 +	bool "Thread cleanup"
 +	depends on THREAD_CANCEL
@@ -203,19 +203,19 @@ index 00000000000..57b2603a0c9
 +#include <syscalls/k_thread_cleanup_pop_mrsh.c>
 +#endif
 diff --git a/kernel/thread.c b/kernel/thread.c
-index 9dc164028e0..1f8e6893164 100644
+index d6847bc95f9..70c8260aa1b 100644
 --- a/kernel/thread.c
 +++ b/kernel/thread.c
-@@ -737,6 +737,10 @@ char *z_setup_new_thread(struct k_thread *new_thread,
+@@ -740,6 +740,10 @@ char *z_setup_new_thread(struct k_thread *new_thread,
  	new_thread->base.result = (atomic_t)NULL;
  #endif
- 
+
 +#ifdef CONFIG_THREAD_CLEANUP
 +	sys_slist_init(&new_thread->base.cleanup);
 +#endif
 +
  	SYS_PORT_TRACING_OBJ_FUNC(k_thread, create, new_thread);
- 
+
  	return stack_ptr;
 diff --git a/tests/kernel/threads/thread_apis/prj.conf b/tests/kernel/threads/thread_apis/prj.conf
 index 0e8c53e3af8..bf76aff7bb5 100644
@@ -227,13 +227,13 @@ index 0e8c53e3af8..bf76aff7bb5 100644
  CONFIG_THREAD_CANCEL=y
 +CONFIG_THREAD_CLEANUP=y
 diff --git a/tests/kernel/threads/thread_apis/src/test_threads_cancel_abort.c b/tests/kernel/threads/thread_apis/src/test_threads_cancel_abort.c
-index a503ac94b77..a4d4b6e6029 100644
+index d6bda3fa907..84012b49642 100644
 --- a/tests/kernel/threads/thread_apis/src/test_threads_cancel_abort.c
 +++ b/tests/kernel/threads/thread_apis/src/test_threads_cancel_abort.c
-@@ -333,6 +333,76 @@ ZTEST_USER(threads_lifecycle, test_k_thread_exit)
+@@ -382,6 +382,76 @@ ZTEST_USER(threads_lifecycle, test_k_thread_exit)
  #endif
  }
- 
+
 +#ifdef CONFIG_THREAD_CLEANUP
 +static void cleanup_handler(void *arg)
 +{

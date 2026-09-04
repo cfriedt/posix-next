@@ -56,20 +56,6 @@ See the full
 [Getting Started](https://cfriedt.github.io/posix-next/getting_started/index.html)
 guide for workspace setup, SDK installation, and sample applications.
 
-## Repository layout
-
-```
-modules/lib/posix/
-├── doc/                    # Sphinx documentation sources
-│   ├── posix/              # Vendored POSIX guides (from Zephyr v4.3.0)
-│   └── _static/            # Logo, CSS
-├── include/zephyr/posix/   # Public POSIX headers (Doxygen documented)
-├── lib/posix/options/      # Implementation sources
-├── samples/posix/          # Example applications
-├── tests/                  # Test suites (Twister)
-└── west.yml                # West manifest (pins Zephyr v4.3.0)
-```
-
 ## Contributing
 
 Contributions are welcome! Please open an issue or pull request on

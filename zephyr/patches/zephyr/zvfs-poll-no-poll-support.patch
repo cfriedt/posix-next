@@ -24,28 +24,30 @@ diff --git a/include/zephyr/sys/internal/fdtable_priv.h b/include/zephyr/sys/int
 diff --git a/lib/os/zvfs/zvfs_fdtable.c b/lib/os/zvfs/zvfs_fdtable.c
 --- a/lib/os/zvfs/zvfs_fdtable.c
 +++ b/lib/os/zvfs/zvfs_fdtable.c
-@@ -40,18 +40,21 @@ static struct fd_entry fdtable[ZVFS_OPEN_SIZE] = {
+@@ -56,6 +56,7 @@ static struct fd_entry fdtable[ZVFS_OPEN_SIZE] = {
  		.refcount = ATOMIC_INIT(1),
  		.lock = Z_MUTEX_INITIALIZER(fdtable[0].lock),
  		.cond = Z_CONDVAR_INITIALIZER(fdtable[0].cond),
 +		.mode = ZVFS_MODE_IFCHR,
  	},
  	{
- 		.vtable = &stdinout_fd_op_vtable,
+ 		/* STDOUT */
+@@ -63,6 +64,7 @@ static struct fd_entry fdtable[ZVFS_OPEN_SIZE] = {
  		.refcount = ATOMIC_INIT(1),
  		.lock = Z_MUTEX_INITIALIZER(fdtable[1].lock),
  		.cond = Z_CONDVAR_INITIALIZER(fdtable[1].cond),
 +		.mode = ZVFS_MODE_IFCHR,
  	},
  	{
- 		.vtable = &stdinout_fd_op_vtable,
+ 		/* STDERR */
+@@ -70,6 +72,7 @@ static struct fd_entry fdtable[ZVFS_OPEN_SIZE] = {
  		.refcount = ATOMIC_INIT(1),
  		.lock = Z_MUTEX_INITIALIZER(fdtable[2].lock),
  		.cond = Z_CONDVAR_INITIALIZER(fdtable[2].cond),
 +		.mode = ZVFS_MODE_IFCHR,
  	},
- #endif /* CONFIG_ZVFS_RESERVE_STDIO_FDS */
- };
+ #else
+ 	{0},
 
 diff --git a/lib/os/zvfs/zvfs_poll.c b/lib/os/zvfs/zvfs_poll.c
 --- a/lib/os/zvfs/zvfs_poll.c
