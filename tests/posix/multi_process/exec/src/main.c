@@ -43,6 +43,9 @@ static struct fs_mount_t fs_mnt = {
 	.fs_data = &fat_fs,
 };
 
+/* images the llext heap holds at once; the next load is ENOMEM */
+#define EXEC_IMAGE_SLOTS 2
+
 /* execve() loads the extension on the caller's stack; 64-bit frames need room */
 #define EXEC_CHILD_STACK_SIZE (IS_ENABLED(CONFIG_64BIT) ? 4096 : 3072)
 
@@ -50,9 +53,9 @@ static K_THREAD_STACK_DEFINE(exec_child_stack, EXEC_CHILD_STACK_SIZE);
 static struct k_thread exec_child_thread;
 
 /* enough children to occupy every image slot at once */
-static K_THREAD_STACK_ARRAY_DEFINE(exec_extra_stacks, CONFIG_POSIX_EXEC_LLEXT_MAX,
+static K_THREAD_STACK_ARRAY_DEFINE(exec_extra_stacks, EXEC_IMAGE_SLOTS,
 				   EXEC_CHILD_STACK_SIZE);
-static struct k_thread exec_extra_threads[CONFIG_POSIX_EXEC_LLEXT_MAX];
+static struct k_thread exec_extra_threads[EXEC_IMAGE_SLOTS];
 
 static char *const exec_argv[] = {"hello", "x", NULL};
 static char *const exec_exit_argv[] = {"hello", "e", NULL};
@@ -64,7 +67,8 @@ static void exec_child_entry(void *p1, void *p2, void *p3)
 	ARG_UNUSED(p3);
 
 	(void)execve(EXEC_IMAGE, p1, NULL);
-	_exit(99);
+	/* a failed exec reports its errno: 128 + errno */
+	_exit(128 + (errno & 0x7f));
 }
 
 static pid_t exec_spawn(char *const argv[])
@@ -77,6 +81,8 @@ static pid_t exec_spawn(char *const argv[])
 		.stack = exec_child_stack,
 		.stack_size = EXEC_CHILD_STACK_SIZE,
 		.prio = k_thread_priority_get(k_current_get()),
+		/* under CONFIG_TEST_USERSPACE the children exec from user mode */
+		.options = IS_ENABLED(CONFIG_TEST_USERSPACE) ? K_USER : 0,
 	};
 
 	zassert_ok(sys_clone(&args, &child));
@@ -147,7 +153,7 @@ static void execve_load_errors(void)
 /* combined argument strings past the exec budget fail after the load */
 static void execve_args_too_big(void)
 {
-	static char big[CONFIG_POSIX_EXEC_ARG_BYTES + 1];
+	static char big[CONFIG_SYS_PROCESS_ARG_BYTES + 1];
 	char *const argv[] = {"hello", big, NULL};
 
 	memset(big, 'a', sizeof(big) - 1);
@@ -158,12 +164,12 @@ static void execve_args_too_big(void)
 	zassert_is_null(llext_by_name("hello.llext"), "refused image left loaded");
 }
 
-/* zombies not yet waited for hold their image slots; a full table is ENOMEM */
-static void execve_table_enomem(void)
+/* zombies not yet waited for keep their images; reaping releases them for the next exec */
+static void execve_zombie_images(void)
 {
 	int status = -1;
 	siginfo_t info;
-	pid_t pids[CONFIG_POSIX_EXEC_LLEXT_MAX];
+	pid_t pids[EXEC_IMAGE_SLOTS];
 
 	for (size_t i = 0; i < ARRAY_SIZE(pids); i++) {
 		k_pid_t child = NULL;
@@ -174,25 +180,32 @@ static void execve_table_enomem(void)
 			.stack = exec_extra_stacks[i],
 			.stack_size = EXEC_CHILD_STACK_SIZE,
 			.prio = k_thread_priority_get(k_current_get()),
+			/* under CONFIG_TEST_USERSPACE the children exec from user mode */
+			.options = IS_ENABLED(CONFIG_TEST_USERSPACE) ? K_USER : 0,
 		};
 
-		zassert_ok(sys_clone(&args, &child));
+		int ret = sys_clone(&args, &child);
+
+		zassert_equal(ret, 0, "clone %zu: %d", i, ret);
 		pids[i] = (pid_t)sys_process_id(child);
-		/* observe the death without reaping: the zombie keeps its slot */
+		/* observe the death without reaping: the zombie keeps its image */
 		zassert_ok(waitid(P_PID, (id_t)pids[i], &info, WEXITED | WNOWAIT));
 	}
 
-	errno = 0;
-	zassert_equal(execve(EXEC_IMAGE, exec_argv, NULL), -1);
-	zassert_equal(errno, ENOMEM);
-
-	/* reaping the zombies unloads their images */
+	/* reaping the zombies releases their images */
 	for (size_t i = 0; i < ARRAY_SIZE(pids); i++) {
 		zassert_equal(waitpid(pids[i], &status, 0), pids[i]);
 		zassert_true(WIFEXITED(status));
 		zassert_equal(WEXITSTATUS(status), 43);
 	}
 	zassert_is_null(llext_by_name("hello.llext"), "zombie images leaked after reap");
+
+	/* and the memory is back: a fresh exec loads again */
+	pid_t pid = exec_spawn(exec_argv);
+
+	zassert_equal(waitpid(pid, &status, 0), pid);
+	zassert_true(WIFEXITED(status));
+	zassert_equal(WEXITSTATUS(status), 42);
 }
 
 struct exec_orphan_args {
@@ -212,6 +225,8 @@ static void exec_orphan_mid_entry(void *p1, void *p2, void *p3)
 		.stack = oa->stack,
 		.stack_size = EXEC_CHILD_STACK_SIZE,
 		.prio = k_thread_priority_get(k_current_get()),
+		/* under CONFIG_TEST_USERSPACE the children exec from user mode */
+		.options = IS_ENABLED(CONFIG_TEST_USERSPACE) ? K_USER : 0,
 	};
 
 	ARG_UNUSED(p2);
@@ -236,7 +251,7 @@ static void execve_sweep_stale_slots(void)
 	int status = -1;
 	pid_t pid;
 
-	for (size_t i = 0; i < CONFIG_POSIX_EXEC_LLEXT_MAX; i++) {
+	for (size_t i = 0; i < EXEC_IMAGE_SLOTS; i++) {
 		struct exec_orphan_args oa = {
 			.thread = &exec_extra_threads[i],
 			.stack = exec_extra_stacks[i],
@@ -249,6 +264,8 @@ static void execve_sweep_stale_slots(void)
 			.stack = exec_child_stack,
 			.stack_size = EXEC_CHILD_STACK_SIZE,
 			.prio = k_thread_priority_get(k_current_get()),
+			/* the middle process reads oa off this stack: kernel mode */
+			.options = 0,
 		};
 
 		zassert_ok(sys_clone(&args, &mid));
@@ -276,7 +293,7 @@ ZTEST(posix_exec, test_execve)
 	execve_chain_unloads_prior();
 	execve_load_errors();
 	execve_args_too_big();
-	execve_table_enomem();
+	execve_zombie_images();
 	execve_sweep_stale_slots();
 }
 
