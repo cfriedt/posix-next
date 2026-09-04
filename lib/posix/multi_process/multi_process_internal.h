@@ -38,16 +38,6 @@ static inline int wstatus_to_posix(int kws)
 	return kws;
 }
 
-#ifdef CONFIG_POSIX_EXEC_LLEXT
-/* unload the extension (if any) behind a just-reaped exec'd process */
-void z_posix_exec_llext_reap(k_pid_t reaped);
-#else
-static inline void z_posix_exec_llext_reap(k_pid_t reaped)
-{
-	ARG_UNUSED(reaped);
-}
-#endif /* CONFIG_POSIX_EXEC_LLEXT */
-
 /*
  * Wait, peek-first: the numbering entry for a child retires when it is reaped,
  * so its numeric pid must be read while it is still a zombie. Peek with
@@ -100,7 +90,6 @@ static inline int posix_wait_common(k_pid_t child, k_pgrp_t grp, bool by_grp, pi
 
 		ret = k_waitpid(reaped, NULL, NULL, 0, K_NO_WAIT);
 		if (ret == 0) {
-			z_posix_exec_llext_reap(reaped);
 			return 0;
 		}
 		/* stolen by a concurrent waiter: go around again */
@@ -118,28 +107,5 @@ int z_posix_execl_argv(char **argv, const char *arg0, va_list ap);
 const char *z_posix_exec_resolve(const char *file, char *buf, size_t buflen);
 
 /* in-place image replacement: prune members, reset signals, close CLOEXEC */
-void z_posix_exec_prepare(void);
-
-/* a resolved image, ready to run: exactly one of ext_main/entry is set */
-struct z_posix_exec_run_args {
-	int (*ext_main)(int argc, char **argv, char **envp);
-	k_thread_entry_t entry;
-	char *const *argv;
-	char *const *envp;
-};
-
-/* bound the vectors before committing to an exec: 0, or -1 with E2BIG */
-int z_posix_exec_args_check(char *const argv[], char *const envp[]);
-
-/*
- * Replace the process image with the resolved one, on a fresh pool stack
- * when one is available (the caller's own stack otherwise). Never returns.
- */
-FUNC_NORETURN void z_posix_exec_run(const struct z_posix_exec_run_args *args);
-
-#ifdef CONFIG_POSIX_EXEC_LLEXT
-/* load @a path as an ELF extension and run its main() as the new image */
-int z_posix_exec_llext(const char *path, char *const argv[], char *const envp[]);
-#endif /* CONFIG_POSIX_EXEC_LLEXT */
 
 #endif /* ZEPHYR_LIB_POSIX_OPTIONS_MULTI_PROCESS_INTERNAL_H_ */
