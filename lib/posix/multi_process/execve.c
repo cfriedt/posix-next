@@ -6,12 +6,12 @@
 
 #include <errno.h>
 #include <fcntl.h>
-#include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 
 #include <zephyr/kernel.h>
 #include <zephyr/kernel/signal.h>
-#include <zephyr/sys/internal/fdtable_priv.h>
+#include <zephyr/sys/process.h>
 
 #include "multi_process_internal.h"
 #include "posix_image.h"
@@ -34,58 +34,95 @@ static void exec_reset_signals(void)
 }
 #endif /* CONFIG_SIGNAL */
 
-static void exec_close_cloexec(void)
+/* the vectors must fit the kernel's staging budget before anything irreversible */
+static int exec_args_check(char *const argv[], char *const envp[])
 {
-	/* descriptors marked FD_CLOEXEC in the caller's own table are closed */
-	zvfs_fds_cloexec();
+	size_t bytes = 2 * sizeof(char *);
+
+	for (int i = 0; (argv != NULL) && (argv[i] != NULL); i++) {
+		bytes += sizeof(char *) + strlen(argv[i]) + 1;
+	}
+	for (int i = 0; (envp != NULL) && (envp[i] != NULL); i++) {
+		bytes += sizeof(char *) + strlen(envp[i]) + 1;
+	}
+	if (bytes > CONFIG_SYS_PROCESS_ARG_BYTES) {
+		errno = E2BIG;
+		return -1;
+	}
+
+	return 0;
 }
 
 int execve(const char *path, char *const argv[], char *const envp[])
 {
 	const struct posix_spawn_image *img;
+	k_thread_entry_t entry = NULL;
+	int ret;
 
 	if (path == NULL) {
 		errno = ENOENT;
 		return -1;
 	}
+	if (exec_args_check(argv, envp) != 0) {
+		return -1;
+	}
 
 	img = posix_spawn_image_lookup(path);
-	if ((img == NULL) || (img->entry == NULL)) {
-#ifdef CONFIG_POSIX_EXEC_LLEXT
-		/* not a prelinked image: try loading an ELF extension */
-		return z_posix_exec_llext(path, argv, envp);
-#else
+	if ((img != NULL) && (img->entry != NULL)) {
+		entry = img->entry;
+	} else if (IS_ENABLED(CONFIG_POSIX_EXEC_LLEXT)) {
+		/* not a prelinked image: the kernel loads it as the pending image */
+		ret = sys_exec_load(k_current_get(), path);
+		if (ret < 0) {
+			switch (ret) {
+			case -ENOEXEC:
+				errno = ENOEXEC;
+				break;
+			case -ENOMEM:
+				errno = ENOMEM;
+				break;
+			case -ENAMETOOLONG:
+				errno = ENAMETOOLONG;
+				break;
+			default:
+				errno = ENOENT;
+				break;
+			}
+			return -1;
+		}
+	} else {
 		errno = ENOENT;
 		return -1;
-#endif /* CONFIG_POSIX_EXEC_LLEXT */
 	}
 
-	struct z_posix_exec_run_args run = {
-		.entry = img->entry,
-		.argv = argv,
-		.envp = envp,
-	};
-
-	if (z_posix_exec_args_check(argv, envp) != 0) {
-		return -1;
-	}
-
-	z_posix_exec_run(&run);
-	CODE_UNREACHABLE;
-}
-
-/*
- * Replace the process image: abort every other member thread, preserving the
- * process's identity, parent, and group membership. Signal dispositions
- * revert to default and FD_CLOEXEC descriptors are closed, per POSIX. The
- * new image then runs on a fresh pool-drawn stack (the caller's own stack
- * when the pool is exhausted or CONFIG_SYS_THREAD is absent).
- */
-void z_posix_exec_prepare(void)
-{
+	/*
+	 * Point of no return: every other member thread is aborted and signal
+	 * dispositions revert to default (POSIX); the kernel closes the
+	 * FD_CLOEXEC descriptors, swaps the image and restarts the leader.
+	 */
 	(void)k_process_prune();
 #ifdef CONFIG_SIGNAL
 	exec_reset_signals();
 #endif /* CONFIG_SIGNAL */
-	exec_close_cloexec();
+
+	ret = sys_exec_start(entry, argv, envp);
+	switch (ret) {
+	case -E2BIG:
+		errno = E2BIG;
+		break;
+	case -ENOENT:
+		errno = ENOENT;
+		break;
+	case -ENOEXEC:
+		errno = ENOEXEC;
+		break;
+	case -EINVAL:
+		errno = EINVAL;
+		break;
+	default:
+		errno = ENOMEM;
+		break;
+	}
+
+	return -1;
 }
