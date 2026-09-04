@@ -61,3 +61,4 @@ posix-next
    posix/symbols
    samples/posix/posix
    metrics/index.rst
+   upstreaming.rst
