@@ -19,6 +19,8 @@ if(CONFIG_POSIX_EXEC_LLEXT)
     OUTPUT  ${PROJECT_BINARY_DIR}/llext/hello.llext
     SOURCES ${PROJECT_SOURCE_DIR}/src/hello_ext.c
   )
+  # the image uses pthread_atfork(): declared only under the POSIX feature macro
+  llext_compile_options(hello_ext -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
   generate_inc_file_for_target(app ${PROJECT_BINARY_DIR}/llext/hello.llext
     ${ZEPHYR_BINARY_DIR}/include/generated/hello_ext.inc
   )
