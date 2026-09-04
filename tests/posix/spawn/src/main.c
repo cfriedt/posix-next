@@ -13,12 +13,83 @@
 #include <unistd.h>
 
 #include <zephyr/ztest.h>
+#ifdef CONFIG_POSIX_EXEC_LLEXT
+#include <ff.h>
+#include <zephyr/fs/fs.h>
+#include <zephyr/llext/llext.h>
+#endif /* CONFIG_POSIX_EXEC_LLEXT */
 
 #include "image_registry.h"
 #include "spawn_internal.h"
 
 static char *const spawn_argv[] = {"child", NULL};
 static char *const spawn_envp[] = {NULL};
+
+#ifdef CONFIG_POSIX_EXEC_LLEXT
+#define SPAWN_IMAGE "/RAM:/hello.llext"
+#define SPAWN_NOEXEC_IMAGE "/RAM:/noexec.llext"
+
+static const uint8_t hello_llext[] = {
+#include "hello_ext.inc"
+};
+static const uint8_t noexec_llext[] = {
+#include "noexec_ext.inc"
+};
+
+static FATFS fat_fs;
+static struct fs_mount_t fs_mnt = {
+	.type = FS_FATFS,
+	.mnt_point = "/RAM:",
+	.fs_data = &fat_fs,
+};
+
+static void spawn_image_install(const char *path, const uint8_t *data, size_t len)
+{
+	struct fs_file_t f;
+
+	fs_file_t_init(&f);
+	zassert_ok(fs_open(&f, path, FS_O_CREATE | FS_O_WRITE));
+	zassert_equal(fs_write(&f, data, len), (ssize_t)len);
+	zassert_ok(fs_close(&f));
+}
+
+static void *spawn_suite_setup(void)
+{
+	/* the RAM disk is formatted on the first mount (CONFIG_FS_FATFS_MOUNT_MKFS) */
+	zassert_ok(fs_mount(&fs_mnt));
+	spawn_image_install(SPAWN_IMAGE, hello_llext, sizeof(hello_llext));
+	spawn_image_install(SPAWN_NOEXEC_IMAGE, noexec_llext, sizeof(noexec_llext));
+
+	return NULL;
+}
+
+/* images loaded from the file system into the child by the kernel */
+static void posix_spawn_image(void)
+{
+	char *const argv[] = {"hello", "x", NULL};
+	char *const envp[] = {"SPAWN=1", NULL};
+	pid_t pid = -1;
+	int status = -1;
+
+	for (int i = 0; i < 3; i++) {
+		zassert_ok(posix_spawn(&pid, SPAWN_IMAGE, NULL, NULL, argv, envp));
+		zassert_equal(waitpid(pid, &status, 0), pid);
+		zassert_true(WIFEXITED(status));
+		zassert_equal(WEXITSTATUS(status), 42);
+	}
+	/* reaping unloaded the image: no instance lingers */
+	zassert_is_null(llext_by_name("hello.llext.0"));
+
+	/* a loadable object that is not an executable image */
+	zassert_equal(posix_spawn(&pid, SPAWN_NOEXEC_IMAGE, NULL, NULL, argv, envp), ENOEXEC);
+	zassert_equal(posix_spawn(&pid, "/RAM:/nonesuch.llext", NULL, NULL, argv, envp), ENOENT);
+}
+#else
+#define spawn_suite_setup NULL
+static inline void posix_spawn_image(void)
+{
+}
+#endif /* CONFIG_POSIX_EXEC_LLEXT */
 
 /* prelinked images are entered as entry(argv, envp, argc) with process-owned copies */
 static void child_exit_entry(void *p1, void *p2, void *p3)
@@ -64,7 +135,7 @@ ZTEST(posix_spawn, test_posix_spawn)
 	pid_t pid = -1;
 	int status = -1;
 
-	/* unknown paths name nothing before exec exists */
+	/* unknown paths name nothing */
 	zassert_equal(posix_spawn(&pid, "/bin/nonesuch", NULL, NULL, spawn_argv, spawn_envp),
 		      ENOENT);
 	zassert_equal(posix_spawn(&pid, NULL, NULL, NULL, spawn_argv, spawn_envp), ENOENT);
@@ -97,6 +168,8 @@ ZTEST(posix_spawn, test_posix_spawn)
 	zassert_ok(eventfd_read(efd, &val));
 	zassert_equal(val, 9);
 	zassert_ok(close(efd));
+
+	posix_spawn_image();
 }
 
 ZTEST(posix_spawn, test_posix_spawnp)
@@ -371,4 +444,4 @@ ZTEST(posix_spawn, test_posix_spawn_file_actions_adddup2)
 	zassert_ok(posix_spawn_file_actions_destroy(&fa));
 }
 
-ZTEST_SUITE(posix_spawn, NULL, NULL, NULL, NULL, NULL);
+ZTEST_SUITE(posix_spawn, NULL, spawn_suite_setup, NULL, NULL, NULL);
