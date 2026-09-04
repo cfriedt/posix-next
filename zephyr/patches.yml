@@ -3756,6 +3756,26 @@ patches:
       is closed and, with CONFIG_PROCESS, when the process terminates.
       Without process support a stream that is never closed leaves its
       file in place, as there is no process termination to remove it at.
+  - path: zephyr/sys-clone-staged-args.patch
+    sha256sum: 6fe6dc7014127b1204292b718e7783f4292a0412a257c696b4fb4616eff5e838
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-03
+    upstreamable: true
+    comments: |
+      sys_clone(): stage argv/envp into the child. The vectors are packed
+      into a block hung off the process record and claimed by the leader's
+      trampoline through sys_process_args() into a frame that lives as long
+      as the process, so a child in any mode reads copies it owns; the
+      leader is entered as entry(argv, envp, argc). Unclaimed blocks are
+      released at reap and on every creation error path.
+
+      A process leader keeps SYS_PROCESS_ARG_BYTES (512 by default) of
+      argument vectors on its pool stack for the life of the process, which
+      left a 1 KiB stack on qemu_riscv32 about 370 bytes for the whole exit
+      path; it overflowed by 16 bytes. The pool stack defaults to 2048 with
+      SYS_PROCESS.
   - path: zephyr/libc-sys-stat-utime-markers.patch
     sha256sum: 8edfcf83058522bb80d601e92c4a9e6be14baec04cf8253ffbd344fbadf05b78
     module: zephyr
