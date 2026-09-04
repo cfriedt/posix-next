@@ -1,0 +1,1336 @@
+diff --git a/doc/develop/west/zephyr-cmds.rst b/doc/develop/west/zephyr-cmds.rst
+index 371c269e251..29544ee750e 100644
+--- a/doc/develop/west/zephyr-cmds.rst
++++ b/doc/develop/west/zephyr-cmds.rst
+@@ -345,6 +345,10 @@ workspace:
+ * ``clean``: remove all patches that have been applied, and reset to the manifest checkout state
+ * ``list``: list all patches in ``patches.yml``
+ * ``gh-fetch``: fetch patches from a GitHub pull request
++* ``deps``: detect which patches depend on which, and record it in ``patches.yml``
++* ``status``: show which patches are merged upstream, blocked, ready, or need a rebase
++* ``sync``: record merged pull requests in ``patches.yml``
++* ``submit``: open draft pull requests for patches that are ready
+ 
+ .. code-block:: none
+ 
+@@ -446,6 +450,72 @@ each individual commit associated with the given pull request.
+     │   └── third-commit-from-pr.patch
+     └── patches.yml
+ 
++Upstreaming patches
++===================
++
++The ``deps``, ``status``, ``sync`` and ``submit`` sub-commands help to send patches upstream
++and to keep the upstreaming metadata in ``patches.yml`` current. They require the
++`GitHub CLI <https://cli.github.com/>`_ (``gh``) to be installed and authenticated, a git
++remote for the upstream repository (the URL from the manifest), and a git remote for a fork
++of it owned by the authenticated GitHub account. Remotes may be pinned with
++``west config patch.upstream-remote`` and ``west config patch.fork-remote``.
++
++.. code-block:: bash
++
++    west patch sync --commit          # record merged pull requests from GitHub
++    west patch deps --write --commit  # refresh dependencies between patches (cached)
++    west patch status                 # what is ready, blocked, or needs a rebase
++    west patch submit -n 2            # open up to two draft pull requests
++
++``deps`` derives dependencies textually: for every file a patch fails to apply to on the
++module revision pinned in the manifest, the earlier patches touching that file are
++trial-applied to find the minimal set the patch needs. Results are cached under ``.west/``
++and recorded with ``--write``. ``--dot`` prints the dependency graph in graphviz format.
++
++``status`` fetches the upstream branch and classifies every patch:
++
++===========================  ============================================================
++Status                       Meaning
++===========================  ============================================================
++``ready``                    no unmerged dependency, and applies to the upstream branch
++``blocked``                  a dependency has not been merged upstream yet
++``needs-rebase``             dependencies are satisfied but the patch no longer applies
++``pr-draft``, ``pr-open``    a pull request is recorded and still open
++``pr-closed``                the recorded pull request was closed without merging
++``merged``                   ``merge-status: true``, or GitHub reports the PR merged
++``ignored``                  skipped on purpose via ``custom.upstream.ignore``
++``not-upstreamable``         ``upstreamable: false``
++===========================  ============================================================
++
++``submit`` commits each chosen patch on a branch from the upstream branch (with the author,
++date and a ``Signed-off-by`` trailer), pushes the branch (``patches/<patch-name>``) to the
++fork, opens a **draft** pull request, and records its URL as ``merge-pr``. Only patches whose
++dependencies are already merged upstream are submitted, one pull request per patch unless
++``--group`` is given. Splitting a commit, rewriting the generated message, and marking the
++pull request ready for review are left to the author. ``--dry-run`` builds the branch
++locally and prints the pull request title and body without pushing.
++
++The ``custom`` field of ``patches.yml`` carries the upstreaming metadata:
++
++.. code-block:: yaml
++
++    - path: zephyr/my-zephyr-change.patch
++      # ...
++      custom:
++        upstream:
++          ignore: "superseded by the discussion in issue 12345"  # or: true
++          depends-on:                                              # written by "deps"
++            - zephyr/an-earlier-change.patch
++          manual-depends-on:                                       # written by hand
++            - zephyr/a-change-in-another-file.patch
++          title: "kernel: add a thing"                             # subject override
++          branch: patches/my-zephyr-change                         # written by "submit"
++
++``upstreamable: false`` marks a patch that should never go upstream, whereas ``ignore`` marks
++one that could, but is deliberately skipped for now. ``manual-depends-on`` records
++dependencies ``deps`` cannot see, such as a call into a function another patch adds in a
++different file.
++
+ Working with the Zephyr SDK: ``west sdk``
+ *****************************************
+ 
+diff --git a/scripts/west_commands/patch.py b/scripts/west_commands/patch.py
+index 02c0631226b..a64c76258dc 100644
+--- a/scripts/west_commands/patch.py
++++ b/scripts/west_commands/patch.py
+@@ -3,14 +3,19 @@
+ # SPDX-License-Identifier: Apache-2.0
+ 
+ import argparse
++import datetime
+ import hashlib
++import io
++import json
+ import os
+ import re
+ import shlex
+ import subprocess
+ import sys
++import tempfile
+ import textwrap
+ import urllib.request
++from collections import Counter
+ from pathlib import Path
+ 
+ import pykwalify.core
+@@ -19,7 +24,6 @@ from west.commands import WestCommand
+ 
+ sys.path.append(os.fspath(Path(__file__).parent.parent))
+ import zephyr_module
+-
+ from zephyr_ext_common import ZEPHYR_BASE
+ 
+ try:
+@@ -36,6 +40,678 @@ WEST_PATCH_BASE = Path("zephyr") / "patches"
+ WEST_PATCH_YAML = Path("zephyr") / "patches.yml"
+ 
+ 
++# ---------------------------------------------------------------------------------------------
++# Upstreaming support: deps / status / sync / submit
++#
++# The bookkeeping uses the standard merge-pr / merge-status / merge-commit / merge-date keys of
++# the patches.yml schema, plus the schema's free-form "custom" field:
++#
++#     custom:
++#       upstream:
++#         ignore: true | "reason"    # never submit this patch (upstreamable but deferred)
++#         depends-on: [<path>, ...]  # textual dependencies detected by "west patch deps"
++#         manual-depends-on: [...]   # semantic dependencies the tool cannot see
++#         title: "<subject>"         # commit subject / PR title override
++#         branch: <name>             # branch pushed to the fork for the PR
++#
++# A patch is "ready" when it is upstreamable, not ignored, has no PR yet, every dependency is
++# merged upstream, and it applies to the current upstream branch.
++# ---------------------------------------------------------------------------------------------
++
++BRANCH_PREFIX = "patches/"
++SUBJECT_MAX = 75
++BODY_WIDTH = 75
++DANGLING_WORDS = {
++    "a", "an", "and", "as", "by", "for", "from", "in", "into", "is", "now", "of", "on", "or",
++    "so", "that", "the", "to", "when", "which", "with",
++}  # fmt: skip
++STATUS_ORDER = [
++    "ready", "blocked", "needs-rebase", "pr-draft", "pr-open", "pr-closed", "merged",
++    "ignored", "not-upstreamable", "unknown",
++]  # fmt: skip
++
++# (regex on a repo-relative path, subject area prefix); first match wins
++AREA_RULES = [
++    (r"^include/zephyr/net/", "net"),
++    (r"^subsys/net/lib/sockets/", "net: sockets"),
++    (r"^subsys/net/", "net"),
++    (r"^tests/net/", "tests: net"),
++    (r"^samples/net/", "samples: net"),
++    (r"^lib/libc/minimal/", "libc: minimal"),
++    (r"^lib/libc/picolibc/", "libc: picolibc"),
++    (r"^lib/libc/newlib/", "libc: newlib"),
++    (r"^lib/libc/common/", "libc: common"),
++    (r"^lib/libc/", "libc"),
++    (r"^include/zephyr/kernel", "kernel"),
++    (r"^kernel/", "kernel"),
++    (r"^lib/os/", "lib: os"),
++    (r"^lib/([^/]+)/", r"lib: \1"),
++    (r"^include/zephyr/sys/", "sys"),
++    (r"^include/zephyr/arch/([^/]+)/", r"arch: \1"),
++    (r"^arch/([^/]+)/", r"arch: \1"),
++    (r"^drivers/([^/]+)/", r"drivers: \1"),
++    (r"^include/zephyr/drivers/([^/]+)", r"drivers: \1"),
++    (r"^subsys/([^/]+)/([^/]+)/", r"\1: \2"),
++    (r"^subsys/([^/]+)/", r"\1"),
++    (r"^tests/([^/]+)/([^/]+)/", r"tests: \1: \2"),
++    (r"^tests/([^/]+)/", r"tests: \1"),
++    (r"^samples/([^/]+)/", r"samples: \1"),
++    (r"^scripts/west_commands/", "scripts: west_commands"),
++    (r"^doc/", "doc"),
++    (r"^scripts/", "scripts"),
++    (r"^boards/", "boards"),
++    (r"^cmake/", "cmake"),
++    (r"^modules/", "modules"),
++    (r"^soc/", "soc"),
++    (r"^dts/", "dts"),
++    (r"^include/zephyr/([^/]+)/", r"\1"),
++    (r"^include/zephyr/([^/]+)\.h$", r"\1"),
++]
++
++
++class UpstreamError(Exception):
++    pass
++
++
++def _git(repo, *args, check=True, env=None, input=None):
++    cmd = ["git", "-C", os.fspath(repo), *args]
++    proc = subprocess.run(cmd, capture_output=True, encoding="utf-8", env=env, input=input)
++    if check and proc.returncode:
++        raise UpstreamError(f"{' '.join(cmd)} failed:\n{proc.stderr.strip()}")
++    return proc
++
++
++def _gh(*args, check=True):
++    proc = subprocess.run(["gh", *args], capture_output=True, encoding="utf-8")
++    if check and proc.returncode:
++        raise UpstreamError(f"gh {' '.join(args)} failed:\n{proc.stderr.strip()}")
++    return proc
++
++
++def _gh_json(*args):
++    return json.loads(_gh(*args).stdout or "null")
++
++
++def parse_patch(patch_path):
++    """Return (files, rename pairs) of a unified diff: every repo-relative path it touches, and
++    the (old, new) path pairs of renames/copies."""
++    files = set()
++    pairs = []
++    with open(patch_path, encoding="utf-8", errors="replace") as f:
++        for line in f:
++            if not line.startswith("diff --git "):
++                continue
++            m = re.match(r'^diff --git (?:"?a/(.*?)"?) (?:"?b/(.*?)"?)$', line.rstrip("\n"))
++            if m:
++                a, b = m.groups()
++                files.update((a, b))
++                if a != b:
++                    pairs.append((a, b))
++    return files, pairs
++
++
++def patch_files(patch_path):
++    return parse_patch(patch_path)[0]
++
++
++def derive_area(files):
++    counts = Counter()
++    order = {}
++    for f in sorted(files):
++        for pattern, repl in AREA_RULES:
++            m = re.match(pattern, f)
++            if m:
++                area = m.expand(repl)
++                counts[area] += 1
++                order.setdefault(area, len(order))
++                break
++    if not counts:
++        return None
++    return max(counts, key=lambda a: (counts[a], -order[a]))
++
++
++def derive_summary(comments):
++    text = " ".join(comments.split())
++    if not text:
++        return ""
++    m = re.match(r"(.+?[.!?])(\s|$)", text)
++    summary = m.group(1) if m else text
++    summary = summary.rstrip(".")
++    if len(summary) > 1 and summary[1].islower():
++        summary = summary[0].lower() + summary[1:]
++    return summary
++
++
++def fit_subject(subject, limit=SUBJECT_MAX):
++    """Shorten an over-long subject at a clause boundary, else at a word boundary."""
++    if len(subject) <= limit:
++        return subject
++    cuts = [
++        m.start()
++        for m in re.finditer(r"\s*[(;:,]|\s+-\s", subject)
++        if limit // 2 <= m.start() <= limit
++    ]
++    if cuts:
++        return subject[: max(cuts)].rstrip()
++    words = subject[:limit].rsplit(" ", 1)[0].rstrip(",;:").split(" ")
++    while words and words[-1].lower() in DANGLING_WORDS:
++        words.pop()
++    return " ".join(words)
++
++
++def make_subject(entry, files):
++    if entry.title:
++        return entry.title
++    area = derive_area(files)
++    summary = derive_summary(entry.comments) or entry.stem.replace("-", " ")
++    return fit_subject(f"{area}: {summary}" if area else summary)
++
++
++def make_body(entry):
++    paragraphs = re.split(r"\n\s*\n", entry.comments)
++    return "\n\n".join(textwrap.fill(" ".join(p.split()), BODY_WIDTH) for p in paragraphs if p)
++
++
++class PatchEntry:
++    """One patches.yml record, with typed accessors over the raw mapping."""
++
++    def __init__(self, data, index):
++        self.data = data
++        self.index = index
++
++    @property
++    def path(self):
++        return self.data["path"]
++
++    @property
++    def stem(self):
++        return Path(self.path).stem
++
++    @property
++    def module(self):
++        return self.data.get("module")
++
++    @property
++    def upstreamable(self):
++        return bool(self.data.get("upstreamable", True))
++
++    @property
++    def merge_pr(self):
++        return self.data.get("merge-pr")
++
++    @property
++    def merged(self):
++        return bool(self.data.get("merge-status", False))
++
++    @property
++    def author(self):
++        return self.data.get("author", "")
++
++    @property
++    def email(self):
++        return self.data.get("email", "")
++
++    @property
++    def date(self):
++        return self.data.get("date")
++
++    @property
++    def comments(self):
++        return (self.data.get("comments") or "").strip()
++
++    def custom_upstream(self, create=False):
++        from ruamel.yaml.comments import CommentedMap
++
++        custom = self.data.get("custom")
++        if not isinstance(custom, dict):
++            if not create:
++                return {}
++            custom = CommentedMap()
++            self.set("custom", custom)
++        upstream = custom.get("upstream")
++        if not isinstance(upstream, dict):
++            if not create:
++                return {}
++            upstream = CommentedMap()
++            custom["upstream"] = upstream
++        return upstream
++
++    @property
++    def ignore_reason(self):
++        value = self.custom_upstream().get("ignore")
++        if value is True:
++            return "ignored"
++        if isinstance(value, str) and value:
++            return value
++        return None
++
++    @property
++    def detected_deps(self):
++        return list(self.custom_upstream().get("depends-on") or [])
++
++    @property
++    def manual_deps(self):
++        return list(self.custom_upstream().get("manual-depends-on") or [])
++
++    @property
++    def deps(self):
++        seen = []
++        for dep in self.detected_deps + self.manual_deps:
++            if dep not in seen:
++                seen.append(dep)
++        return seen
++
++    @property
++    def title(self):
++        return self.custom_upstream().get("title")
++
++    @property
++    def branch(self):
++        return self.custom_upstream().get("branch") or (BRANCH_PREFIX + self.stem)
++
++    def set(self, key, value):
++        """Set a top-level key, inserting new keys ahead of the trailing comments block."""
++        if key in self.data:
++            self.data[key] = value
++            return
++        keys = list(self.data.keys())
++        pos = keys.index("comments") if "comments" in keys else len(keys)
++        self.data.insert(pos, key, value)
++
++    def set_custom(self, key, value):
++        upstream = self.custom_upstream(create=True)
++        if value in (None, [], ""):
++            upstream.pop(key, None)
++        else:
++            upstream[key] = value
++        if not upstream:
++            self.data["custom"].pop("upstream", None)
++        if not self.data.get("custom"):
++            self.data.pop("custom", None)
++
++
++class PatchDB:
++    """Round-trip editor for patches.yml; refuses to touch a file it cannot reproduce."""
++
++    def __init__(self, patch_yml, patch_base):
++        try:
++            from ruamel.yaml import YAML
++        except ImportError as e:
++            raise UpstreamError("ruamel.yaml is required (pip install ruamel.yaml)") from e
++        self.path = Path(patch_yml)
++        self.patch_base = Path(patch_base)
++        self.yaml = YAML()
++        self.yaml.preserve_quotes = True
++        self.yaml.width = 4096
++        self.yaml.indent(mapping=2, sequence=4, offset=2)
++        self.text = self.path.read_text(encoding="utf-8")
++        self.doc = self.yaml.load(self.text)
++        if self.dump() != self.text:
++            raise UpstreamError(f"{self.path} does not round-trip through ruamel.yaml; not editing")
++        self.entries = [PatchEntry(d, i) for i, d in enumerate(self.doc.get("patches") or [])]
++
++    def dump(self):
++        out = io.StringIO()
++        self.yaml.dump(self.doc, out)
++        return out.getvalue()
++
++    def save(self):
++        text = self.dump()
++        if text == self.text:
++            return False
++        self.path.write_text(text, encoding="utf-8")
++        self.text = text
++        return True
++
++    def patch_file(self, entry_or_path):
++        rel = entry_or_path.path if isinstance(entry_or_path, PatchEntry) else entry_or_path
++        return self.patch_base / rel
++
++    def find(self, name):
++        """Resolve a user-supplied name (path, basename or stem) to an entry."""
++        for e in self.entries:
++            if name in (e.path, Path(e.path).name, e.stem):
++                return e
++        raise UpstreamError(f"no patch named {name!r} in {self.path}")
++
++    def by_path(self, path):
++        for e in self.entries:
++            if e.path == path:
++                return e
++        return None
++
++
++class TmpIndex:
++    """A throwaway git index so patches can be trial-applied without a working tree."""
++
++    def __init__(self, repo):
++        self.repo = repo
++        fd, self.file = tempfile.mkstemp(prefix="west-patch-index-")
++        os.close(fd)
++        os.unlink(self.file)
++        self.env = dict(os.environ, GIT_INDEX_FILE=self.file)
++        self.tree = None
++
++    def close(self):
++        if os.path.exists(self.file):
++            os.unlink(self.file)
++
++    def reset(self, tree, paths=None):
++        """Load ``tree`` into the index; with ``paths``, only those entries (much faster)."""
++        if paths is None:
++            _git(self.repo, "read-tree", tree, env=self.env)
++        else:
++            _git(self.repo, "read-tree", "--empty", env=self.env)
++            listing = _git(self.repo, "ls-tree", "-r", "--full-tree", tree, "--", *sorted(paths))
++            _git(self.repo, "update-index", "--index-info", env=self.env, input=listing.stdout)
++        self.tree = tree
++
++    def reset_files(self, paths):
++        _git(self.repo, "reset", "-q", self.tree, "--", *sorted(paths), env=self.env)
++
++    def _apply(self, patch, *flags):
++        return _git(
++            self.repo, "apply", "--cached", *flags, os.fspath(patch), env=self.env, check=False
++        )
++
++    @staticmethod
++    def _include(only):
++        return tuple(f"--include={p}" for p in sorted(only)) if only else ()
++
++    def check(self, patch, only=None):
++        return self._apply(patch, "--check", *self._include(only)).returncode == 0
++
++    def failing_files(self, patch):
++        """Files whose hunks do not apply, or None when the patch applies cleanly."""
++        proc = self._apply(patch, "--check")
++        if proc.returncode == 0:
++            return None
++        files = set()
++        for line in proc.stderr.splitlines():
++            m = re.match(r"^error: patch failed: (.+):\d+$", line)
++            if m:
++                files.add(m.group(1))
++                continue
++            m = re.match(r"^error: (.+?): (?:does not|already|patch does not)", line)
++            if m:
++                files.add(m.group(1))
++        return files or patch_files(patch)
++
++    def reverse_check(self, patch):
++        return self._apply(patch, "--check", "--reverse").returncode == 0
++
++    def apply(self, patch, only=None):
++        return self._apply(patch, *self._include(only)).returncode == 0
++
++    def write_tree(self):
++        return _git(self.repo, "write-tree", env=self.env).stdout.strip()
++
++
++class DepAnalyzer:
++    """Find, for each patch, the minimal set of earlier patches it textually needs.
++
++    Unified diffs apply file by file, so a patch's dependencies are the union of its
++    per-file dependencies. Paths linked by renames form one unit. For each unit that fails
++    to apply on the base tree, the earlier patches touching that unit form an ordered chain;
++    the shortest applying suffix of that chain, greedily minimised, is the dependency set
++    for that unit.
++    """
++
++    def __init__(self, db, entries, index, base_tree, log=None, cache_file=None):
++        self.db = db
++        self.entries = entries
++        self.index = index
++        self.base_tree = base_tree
++        self.log = log or (lambda *a: None)
++        self.cache_file = cache_file
++        self.cache_all = {}
++        if cache_file and cache_file.exists():
++            try:
++                self.cache_all = json.loads(cache_file.read_text(encoding="utf-8"))
++            except ValueError:
++                self.cache_all = {}
++        self.cache = self.cache_all.get(base_tree, {})
++        self.files = {}
++        parent = {}
++
++        def find(x):
++            while parent.setdefault(x, x) != x:
++                x = parent[x]
++            return x
++
++        for e in entries:
++            self.files[e.path], pairs = parse_patch(db.patch_file(e))
++            for a, b in pairs:
++                parent[find(a)] = find(b)
++        self.unit = {}
++        for paths in self.files.values():
++            for f in paths:
++                self.unit.setdefault(find(f), set()).add(f)
++        self.unit = {f: frozenset(u) for u in self.unit.values() for f in u}
++        self.sha = {e.path: Patch.get_file_sha256sum(db.patch_file(e)) for e in entries}
++        self.touchers = {}
++        for e in entries:
++            for u in {self.unit[f] for f in self.files[e.path]}:
++                self.touchers.setdefault(u, []).append(e.path)
++        self.deps = {}
++        self.unapplicable = []
++        self._trials = {}
++
++    def trial(self, entry, unit, seq):
++        key = (entry.path, unit, tuple(seq))
++        if key in self._trials:
++            return self._trials[key]
++        self.index.reset_files(unit)
++        ok = all(self.index.apply(self.db.patch_file(q), only=unit) for q in seq)
++        ok = ok and self.index.check(self.db.patch_file(entry), only=unit)
++        self.index.reset_files(unit)
++        self._trials[key] = ok
++        return ok
++
++    def deps_for_unit(self, entry, unit):
++        chain = self.touchers[unit]
++        chain = chain[: chain.index(entry.path)]
++        need = None
++        for k in range(1, len(chain) + 1):
++            if self.trial(entry, unit, chain[-k:]):
++                need = chain[-k:]
++                break
++        if need is None:
++            return None
++        for q in list(need):
++            trial = [x for x in need if x != q]
++            if self.trial(entry, unit, trial):
++                need = trial
++        return need
++
++    def cache_key(self, entry):
++        """Analysis of a patch depends only on the base tree, the patch, and the earlier
++        patches touching the same files."""
++        earlier = self.entries[: self.entries.index(entry)]
++        related = [q.path for q in earlier if self.files[q.path] & self.files[entry.path]]
++        return json.dumps([self.base_tree, self.sha[entry.path], [self.sha[q] for q in related]])
++
++    def run(self):
++        self.index.reset(self.base_tree, set().union(*self.files.values()))
++        order = {e.path: i for i, e in enumerate(self.entries)}
++        fresh = {}
++        for i, e in enumerate(self.entries):
++            self.log(f"  [{i + 1}/{len(self.entries)}] {e.path}")
++            key = self.cache_key(e)
++            if key in self.cache:
++                self.deps[e.path] = self.cache[key]
++                fresh[key] = self.cache[key]
++                if self.deps[e.path] is None:
++                    self.unapplicable.append(e.path)
++                continue
++            failing = self.index.failing_files(self.db.patch_file(e))
++            if failing is None:
++                self.deps[e.path] = []
++                fresh[key] = []
++                continue
++            need = set()
++            for unit in sorted({self.unit[f] for f in failing}, key=sorted):
++                d = self.deps_for_unit(e, unit)
++                if d is None:
++                    self.unapplicable.append(e.path)
++                    self.deps[e.path] = None
++                    break
++                need.update(d)
++            else:
++                self.deps[e.path] = sorted(need, key=order.get)
++            fresh[key] = self.deps[e.path]
++        self.reduce()
++        if self.cache_file:
++            self.cache_all[self.base_tree] = fresh
++            self.cache_file.parent.mkdir(parents=True, exist_ok=True)
++            self.cache_file.write_text(json.dumps(self.cache_all, indent=1), encoding="utf-8")
++        return self.deps
++
++    def reduce(self):
++        """Drop dependencies already implied by another dependency (transitive reduction)."""
++        for path, deps in self.deps.items():
++            if not deps:
++                continue
++            direct = []
++            for d in deps:
++                others = [x for x in deps if x != d]
++                if d not in self.closure(others):
++                    direct.append(d)
++            self.deps[path] = direct
++
++    def closure(self, paths):
++        need = set()
++        stack = list(paths)
++        while stack:
++            p = stack.pop()
++            if p in need:
++                continue
++            need.add(p)
++            stack.extend(self.deps.get(p) or [])
++        return need
++
++
++class UpstreamRepo:
++    """Git/GitHub view of one patched module: base revision, upstream and fork remotes."""
++
++    PR_FIELDS = "number,url,state,isDraft,mergedAt,mergeCommit,title,headRefName,closedAt"
++
++    def __init__(self, cmd, args, module):
++        self.cmd = cmd
++        self.args = args
++        self.module = module
++        self.repo = Path(args.west_workspace) / module
++        self.project = next(
++            (p for p in cmd.manifest.projects if Path(p.path) == Path(module)), None
++        )
++        self.base_ref = (
++            args.base_ref
++            or cmd.config.get("patch.base-ref")
++            or (self.project.revision if self.project else None)
++        )
++        self._remotes = None
++        self._upstream = args.upstream_remote or cmd.config.get("patch.upstream-remote")
++        self._fork = args.fork_remote or cmd.config.get("patch.fork-remote")
++        self._pr_cache = {}
++        self._login = None
++        self._main_tree = None
++
++    def remotes(self):
++        if self._remotes is None:
++            self._remotes = {}
++            for line in _git(self.repo, "remote", "-v").stdout.splitlines():
++                name, url, kind = line.split()
++                if kind == "(push)":
++                    self._remotes[name] = url
++        return self._remotes
++
++    @staticmethod
++    def slug_of(url):
++        m = re.search(r"github\.com[:/]([^/]+)/([^/\s]+?)(?:\.git)?/?$", url or "")
++        return f"{m.group(1)}/{m.group(2)}" if m else None
++
++    def remote_for_slug(self, slug):
++        for name, url in self.remotes().items():
++            if self.slug_of(url) and self.slug_of(url).lower() == slug.lower():
++                return name
++        return None
++
++    def upstream(self):
++        """(remote name, owner/repo) of the upstream repository."""
++        if self._upstream is None:
++            slug = self.slug_of(self.project.url if self.project else None)
++            self._upstream = self.remote_for_slug(slug) if slug else None
++            if self._upstream is None:
++                raise UpstreamError(
++                    f"no git remote in {self.repo} points at the manifest URL of {self.module}; "
++                    "add one or pass --upstream-remote"
++                )
++        slug = self.slug_of(self.remotes().get(self._upstream))
++        if slug is None:
++            raise UpstreamError(f"remote {self._upstream!r} is not a GitHub URL")
++        return self._upstream, slug
++
++    def gh_login(self):
++        if self._login is None:
++            self._login = _gh("api", "user", "-q", ".login").stdout.strip()
++        return self._login
++
++    def fork(self):
++        """(remote name, owner/repo) of the fork PR branches are pushed to."""
++        if self._fork is None:
++            _, upstream_slug = self.upstream()
++            wanted = f"{self.gh_login()}/{upstream_slug.split('/')[1]}"
++            self._fork = self.remote_for_slug(wanted)
++            if self._fork is None:
++                raise UpstreamError(
++                    f"no git remote in {self.repo} points at github.com/{wanted}; "
++                    "add one or pass --fork-remote"
++                )
++        return self._fork, self.slug_of(self.remotes()[self._fork])
++
++    def main_tree(self):
++        if self._main_tree is None:
++            remote, _ = self.upstream()
++            ref = f"{remote}/{self.args.upstream_branch}"
++            if not self.args.no_fetch:
++                self.cmd.note(f"fetching {remote} {self.args.upstream_branch} in {self.repo}")
++                _git(self.repo, "fetch", "-q", remote, self.args.upstream_branch)
++                ref = "FETCH_HEAD"
++            self._main_tree = _git(self.repo, "rev-parse", f"{ref}^{{commit}}").stdout.strip()
++        return self._main_tree
++
++    def base_tree(self):
++        if not self.base_ref:
++            raise UpstreamError(f"no base revision known for {self.module}; pass --base-ref")
++        try:
++            return _git(self.repo, "rev-parse", f"{self.base_ref}^{{commit}}").stdout.strip()
++        except UpstreamError as e:
++            raise UpstreamError(f"base ref {self.base_ref!r} not found in {self.repo}") from e
++
++    def pr_info(self, url):
++        if url not in self._pr_cache:
++            try:
++                self._pr_cache[url] = _gh_json("pr", "view", url, "--json", self.PR_FIELDS)
++            except UpstreamError as e:
++                self.cmd.wrn(str(e).splitlines()[-1])
++                self._pr_cache[url] = None
++        return self._pr_cache[url]
++
++    def my_prs(self):
++        _, slug = self.upstream()
++        return _gh_json(
++            "pr", "list", "--repo", slug, "--author", "@me", "--state", "all",
++            "--limit", "500", "--json", self.PR_FIELDS,
++        )  # fmt: skip
++
++    def committer(self):
++        ident = _git(self.repo, "var", "GIT_COMMITTER_IDENT").stdout.strip()
++        m = re.match(r"^(.*) <(.*)> \d+ [+-]\d{4}$", ident)
++        if not m:
++            raise UpstreamError(f"cannot parse committer identity {ident!r}")
++        return m.group(1), m.group(2)
++
++
+ class Patch(WestCommand):
+     def __init__(self):
+         super().__init__(
+@@ -71,6 +747,13 @@ class Patch(WestCommand):
+                 Run "west patch gh-fetch" to fetch patches from Github.
+                 See "west patch gh-fetch --help" for details.
+ 
++            Upstreaming Patches:
++
++                Run "west patch deps" to detect dependencies between patches,
++                "west patch status" to see which patches are merged, blocked or ready,
++                "west patch sync" to record merged pull requests in patches.yml, and
++                "west patch submit" to open draft pull requests for ready patches.
++
+             YAML File Format:
+ 
+             The patches.yml syntax is described in "scripts/schemas/patch-schema.yml".
+@@ -249,6 +932,149 @@ class Patch(WestCommand):
+             help='File containing GitHub token (alternatively, use GITHUB_TOKEN env variable)',
+         )
+ 
++        upstream_common = argparse.ArgumentParser(add_help=False)
++        upstream_common.add_argument(
++            "--upstream-remote",
++            metavar="REMOTE",
++            help="""
++                Git remote of the upstream repository (default: west config
++                patch.upstream-remote, else the remote matching the manifest URL)""",
++        )
++        upstream_common.add_argument(
++            "--fork-remote",
++            metavar="REMOTE",
++            help="""
++                Git remote of the fork to push branches to (default: west config
++                patch.fork-remote, else the remote matching the GitHub login of 'gh')""",
++        )
++        upstream_common.add_argument(
++            "--upstream-branch",
++            default="main",
++            metavar="BRANCH",
++            help="Upstream branch pull requests target (default: main)",
++        )
++        upstream_common.add_argument(
++            "--base-ref",
++            metavar="REV",
++            help="""
++                Revision the patch series is based on (default: west config patch.base-ref,
++                else the module revision in the manifest)""",
++        )
++        upstream_common.add_argument(
++            "--no-fetch", action="store_true", help="Do not fetch the upstream branch first"
++        )
++        upstream_common.add_argument(
++            "--json", action="store_true", help="Machine-readable output on stdout"
++        )
++
++        deps_arg_parser = subparsers.add_parser(
++            "deps",
++            parents=[upstream_common],
++            help="Detect dependencies between patches",
++            formatter_class=argparse.RawDescriptionHelpFormatter,
++            epilog=textwrap.dedent(
++                """
++            Detecting Dependencies:
++
++                Run "west patch deps" to find, for every patch, the earlier patches it needs
++                in order to apply to the base revision. Dependencies are detected textually,
++                file by file, and recorded with --write as custom.upstream.depends-on.
++                Semantic dependencies can be added by hand as custom.upstream.manual-depends-on.
++            """
++            ),
++        )
++        deps_arg_parser.add_argument(
++            "-w", "--write", action="store_true", help="Record dependencies in patches.yml"
++        )
++        deps_arg_parser.add_argument(
++            "--commit", action="store_true", help="Commit patches.yml after updating it"
++        )
++        deps_arg_parser.add_argument(
++            "--dot", action="store_true", help="Print the dependency graph in graphviz format"
++        )
++
++        status_arg_parser = subparsers.add_parser(
++            "status",
++            parents=[upstream_common],
++            help="Show the upstream status of patches",
++            formatter_class=argparse.RawDescriptionHelpFormatter,
++            epilog=textwrap.dedent(
++                """
++            Upstream Status:
++
++                Run "west patch status" to classify every patch as ready, blocked,
++                needs-rebase, pr-draft, pr-open, pr-closed, merged, ignored or
++                not-upstreamable. Merged, ignored and not-upstreamable patches are
++                hidden unless --all is given.
++            """
++            ),
++        )
++        status_arg_parser.add_argument(
++            "-a", "--all", action="store_true", help="Include merged and ignored patches"
++        )
++        status_arg_parser.add_argument(
++            "--no-gh", action="store_true", help="Do not query GitHub for pull request states"
++        )
++
++        sync_arg_parser = subparsers.add_parser(
++            "sync",
++            parents=[upstream_common],
++            help="Record merged pull requests in patches.yml",
++            formatter_class=argparse.RawDescriptionHelpFormatter,
++            epilog=textwrap.dedent(
++                """
++            Synchronising with Github:
++
++                Run "west patch sync" to look up every merge-pr on Github and record
++                merge-status, merge-commit and merge-date for merged pull requests. Pull
++                requests opened by hand on the conventional branch name are adopted.
++            """
++            ),
++        )
++        sync_arg_parser.add_argument(
++            "--commit", action="store_true", help="Commit patches.yml after updating it"
++        )
++
++        submit_arg_parser = subparsers.add_parser(
++            "submit",
++            parents=[upstream_common],
++            help="Open draft pull requests for ready patches",
++            formatter_class=argparse.RawDescriptionHelpFormatter,
++            epilog=textwrap.dedent(
++                """
++            Submitting Patches:
++
++                Run "west patch submit" to commit each ready patch on a branch from the
++                upstream branch, push it to the fork and open a draft pull request. Only
++                patches whose dependencies are already merged upstream are submitted, one
++                pull request per patch unless --group is given. Splitting commits and
++                marking the pull request ready for review are left to the author.
++            """
++            ),
++        )
++        submit_arg_parser.add_argument(
++            "patches", nargs="*", metavar="PATCH", help="Patches to submit (default: ready ones)"
++        )
++        submit_arg_parser.add_argument(
++            "-n", "--count", type=int, default=1, help="Number of ready patches to submit"
++        )
++        submit_arg_parser.add_argument(
++            "--group", action="store_true", help="Put all named patches in a single pull request"
++        )
++        submit_arg_parser.add_argument("--title", help="Pull request title / commit subject")
++        submit_arg_parser.add_argument("--branch", help="Branch name (single pull request only)")
++        submit_arg_parser.add_argument(
++            "--force", action="store_true", help="Submit even if not ready; replace the branch"
++        )
++        submit_arg_parser.add_argument(
++            "--dry-run",
++            action="store_true",
++            help="Build the branch locally; do not push, open a pull request or edit patches.yml",
++        )
++        submit_arg_parser.add_argument(
++            "--commit", action="store_true", help="Commit patches.yml after updating it"
++        )
++
+         subparsers.add_parser(
+             "list",
+             help="List patches",
+@@ -338,8 +1164,17 @@ class Patch(WestCommand):
+             "list": self.list,
+             "gh-fetch": self.gh_fetch,
+         }
++        upstream_method = {
++            "deps": self.deps,
++            "status": self.status,
++            "sync": self.sync,
++            "submit": self.submit,
++        }
+ 
+-        method[args.subcommand](args, yml, args.dst_modules)
++        if args.subcommand in upstream_method:
++            self.upstream_run(upstream_method[args.subcommand], args, yml, args.dst_modules)
++        else:
++            method[args.subcommand](args, yml, args.dst_modules)
+ 
+     def apply(self, args, yml, dst_mods=None):
+         patches = yml.get("patches", [])
+@@ -376,9 +1211,7 @@ class Patch(WestCommand):
+             if actual_sha256 != expect_sha256:
+                 self.dbg("FAIL")
+                 self.err(
+-                    f"sha256 mismatch for {pth}:\n"
+-                    f"expect: {expect_sha256}\n"
+-                    f"actual: {actual_sha256}"
++                    f"sha256 mismatch for {pth}:\nexpect: {expect_sha256}\nactual: {actual_sha256}"
+                 )
+                 failed_patch = pth
+                 break
+@@ -558,3 +1391,342 @@ class Patch(WestCommand):
+                 return Path(m.project).relative_to(topdir)
+ 
+         return None
++
++    # ---- upstreaming: deps / status / sync / submit ------------------------------------
++
++    def note(self, msg):
++        """Informational output; kept off stdout when --json is in effect."""
++        if getattr(self.args, "json", False):
++            print(msg, file=sys.stderr)
++        else:
++            self.inf(msg)
++
++    UPSTREAM_COMMIT_SUBJECT = {
++        "deps": "patches: record upstream dependencies",
++        "sync": "patches: sync upstream merge state",
++        "submit": "patches: record upstream pull requests",
++    }
++
++    def upstream_run(self, method, args, yml, dst_mods):
++        self.args = args
++        try:
++            db = PatchDB(args.patch_yml, args.patch_base)
++        except UpstreamError as e:
++            self.die(str(e))
++        modules = []
++        for e in db.entries:
++            mod = self.get_module_path(e.module)
++            if mod is None or (dst_mods and mod not in dst_mods) or mod in modules:
++                continue
++            modules.append(mod)
++        failed = False
++        for mod in modules:
++            series = [e for e in db.entries if self.get_module_path(e.module) == mod]
++            try:
++                method(args, db, UpstreamRepo(self, args, mod), series)
++            except UpstreamError as e:
++                self.err(f"{mod}: {e}")
++                failed = True
++        if db.save():
++            self.note(f"updated {db.path}")
++            if getattr(args, "commit", False):
++                self.commit_yml(db, self.UPSTREAM_COMMIT_SUBJECT[args.subcommand])
++        elif args.subcommand != "status":
++            self.note(f"{db.path} unchanged")
++        if failed:
++            self.die("some modules failed")
++
++    def commit_yml(self, db, subject):
++        repo = _git(db.path.parent, "rev-parse", "--show-toplevel").stdout.strip()
++        rel = os.fspath(db.path.resolve().relative_to(Path(repo).resolve()))
++        _git(repo, "add", rel)
++        _git(repo, "commit", "-q", "-s", "-m", subject, "--", rel)
++        self.note(f"committed {rel} in {repo}")
++
++    def compute_status(self, db, repo, series, use_gh=True, index=None):
++        """Classify every entry of the series; returns a list of dicts in series order."""
++        by_path = {e.path: e for e in series}
++        rows = []
++        for e in series:
++            row = {
++                "path": e.path,
++                "stem": e.stem,
++                "module": os.fspath(repo.module),
++                "deps": e.deps,
++                "pr": e.merge_pr,
++                "status": "unknown",
++                "note": "",
++            }
++            unknown_deps = [d for d in e.deps if d not in by_path]
++            if unknown_deps:
++                row["note"] = "unknown dependency " + ", ".join(unknown_deps)
++            if e.merged:
++                row["status"] = "merged"
++            elif not e.upstreamable:
++                row["status"] = "not-upstreamable"
++            elif e.ignore_reason:
++                row["status"] = "ignored"
++                row["note"] = e.ignore_reason
++            elif e.merge_pr:
++                info = repo.pr_info(e.merge_pr) if use_gh else None
++                if info is None:
++                    row["status"] = "pr-open"
++                elif info["state"] == "MERGED":
++                    row["status"] = "merged"
++                    row["note"] = "merged upstream; run `west patch sync`"
++                elif info["state"] == "CLOSED":
++                    row["status"] = "pr-closed"
++                else:
++                    row["status"] = "pr-draft" if info["isDraft"] else "pr-open"
++            else:
++                blockers = []
++                for d in e.deps:
++                    dep = by_path.get(d)
++                    if dep is None:
++                        blockers.append(f"{d}?")
++                    elif dep.merged:
++                        continue
++                    elif not dep.upstreamable:
++                        blockers.append(f"{dep.stem} (not upstreamable)")
++                    elif dep.ignore_reason:
++                        blockers.append(f"{dep.stem} (ignored)")
++                    elif dep.merge_pr:
++                        blockers.append(f"{dep.stem} ({dep.merge_pr.rsplit('/', 1)[-1]})")
++                    else:
++                        blockers.append(dep.stem)
++                if blockers:
++                    row["status"] = "blocked"
++                    row["note"] = "needs " + ", ".join(blockers)
++                elif index is not None:
++                    main_tree = repo.main_tree()
++                    if index.tree != main_tree:
++                        paths = set().union(*(patch_files(db.patch_file(x)) for x in series))
++                        index.reset(main_tree, paths)
++                    if index.check(db.patch_file(e)):
++                        row["status"] = "ready"
++                    elif index.reverse_check(db.patch_file(e)):
++                        row["status"] = "needs-rebase"
++                        row["note"] = "already present upstream? check for a merge"
++                    else:
++                        row["status"] = "needs-rebase"
++                        row["note"] = f"does not apply to upstream {self.args.upstream_branch}"
++                else:
++                    row["status"] = "ready"
++            rows.append(row)
++        return rows
++
++    def deps(self, args, db, repo, series):
++        index = TmpIndex(repo.repo)
++        try:
++            self.note(f"analysing {len(series)} patches for {repo.module} against {repo.base_ref}")
++            cache = Path(args.west_workspace) / ".west" / "patch-deps-cache.json"
++            analyzer = DepAnalyzer(
++                db, series, index, repo.base_tree(), log=self.dbg, cache_file=cache
++            )
++            deps = analyzer.run()
++        finally:
++            index.close()
++
++        if args.dot:
++            print(f'digraph "{repo.module}" {{')
++            print("  rankdir=LR; node [shape=box, fontname=monospace];")
++            for e in series:
++                print(f'  "{e.stem}";')
++                for d in deps.get(e.path) or []:
++                    print(f'  "{e.stem}" -> "{db.by_path(d).stem}";')
++            print("}")
++        elif args.json:
++            print(json.dumps({e.path: deps.get(e.path) for e in series}, indent=2))
++        else:
++            for e in series:
++                d = deps.get(e.path)
++                if d is None:
++                    self.wrn(f"{e.stem}: does not apply on {repo.base_ref} after its predecessors")
++                elif d:
++                    self.inf(f"{e.stem}: {', '.join(db.by_path(x).stem for x in d)}")
++        if analyzer.unapplicable:
++            self.wrn(f"{len(analyzer.unapplicable)} patches do not apply to {repo.base_ref}")
++
++        if not args.write:
++            self.note("dependencies not recorded (pass --write)")
++            return
++        for e in series:
++            d = deps.get(e.path)
++            if d is not None and d != e.detected_deps:
++                e.set_custom("depends-on", list(d))
++
++    def status(self, args, db, repo, series):
++        if not any(e.deps for e in series):
++            self.wrn("no dependencies recorded; run `west patch deps --write` first")
++        index = TmpIndex(repo.repo)
++        try:
++            rows = self.compute_status(db, repo, series, not args.no_gh, index)
++        finally:
++            index.close()
++        if args.json:
++            print(json.dumps(rows, indent=2))
++            return
++        hidden = {"merged", "ignored", "not-upstreamable"}
++        shown = [r for r in rows if args.all or r["status"] not in hidden]
++        width = max((len(r["stem"]) for r in shown), default=10)
++        for r in shown:
++            pr = r["pr"].rsplit("/", 1)[-1] if r["pr"] else "-"
++            self.inf(f"{r['status']:<17} {r['stem']:<{width}}  #{pr:<7} {r['note']}")
++        counts = Counter(r["status"] for r in rows)
++        summary = "  ".join(f"{s}={counts[s]}" for s in STATUS_ORDER if counts[s])
++        self.inf(f"\n{repo.module}: {len(rows)} patches: {summary}")
++
++    def sync(self, args, db, repo, series):
++        changed = []
++        listed = {}
++        for pr in repo.my_prs():
++            listed.setdefault(pr["headRefName"], pr)
++        for e in series:
++            if e.merged:
++                continue
++            if not e.merge_pr:
++                pr = listed.get(e.branch)
++                if pr is None:
++                    continue
++                e.set("merge-pr", pr["url"])
++                e.set_custom("branch", pr["headRefName"])
++                changed.append(f"{e.stem}: found PR {pr['url']}")
++            info = repo.pr_info(e.merge_pr)
++            if info is None:
++                continue
++            if info["state"] == "MERGED":
++                e.set("merge-status", True)
++                oid = (info.get("mergeCommit") or {}).get("oid")
++                if oid:
++                    e.set("merge-commit", oid)
++                if info.get("mergedAt"):
++                    e.set("merge-date", datetime.date.fromisoformat(info["mergedAt"][:10]))
++                changed.append(f"{e.stem}: merged as {oid or '?'}")
++            elif info["state"] == "CLOSED":
++                self.wrn(f"{e.stem}: PR {e.merge_pr} was closed without merging")
++
++        for line in changed:
++            self.inf(line)
++
++    def build_branch(self, db, repo, branch, unit, subjects):
++        """Commit ``unit`` on top of upstream in a temporary index; returns the tip commit."""
++        index = TmpIndex(repo.repo)
++        try:
++            index.reset(repo.main_tree())
++            parent = repo.main_tree()
++            name, email = repo.committer()
++            for e, subject in zip(unit, subjects, strict=True):
++                if not index.apply(db.patch_file(e)):
++                    raise UpstreamError(f"{e.stem} does not apply on top of {parent[:12]}")
++                message = f"{subject}\n\n{make_body(e)}\n\nSigned-off-by: {name} <{email}>\n"
++                env = dict(os.environ, GIT_AUTHOR_NAME=e.author, GIT_AUTHOR_EMAIL=e.email)
++                if e.date:
++                    env["GIT_AUTHOR_DATE"] = f"{e.date}T12:00:00"
++                parent = _git(
++                    repo.repo, "commit-tree", index.write_tree(), "-p", parent, "-F", "-",
++                    env=env, input=message,
++                ).stdout.strip()  # fmt: skip
++                self.inf(f"  {parent[:12]} {subject}")
++        finally:
++            index.close()
++        _git(repo.repo, "update-ref", f"refs/heads/{branch}", parent)
++        return parent
++
++    def submit(self, args, db, repo, series):
++        index = TmpIndex(repo.repo)
++        try:
++            rows = {r["path"]: r for r in self.compute_status(db, repo, series, True, index)}
++        finally:
++            index.close()
++
++        if args.patches:
++            chosen = sorted((db.find(n) for n in args.patches), key=lambda e: e.index)
++            chosen = [e for e in chosen if e.path in rows]
++            if not chosen:
++                return
++            group = {e.path for e in chosen} if args.group else set()
++            for e in chosen:
++                st = rows[e.path]["status"]
++                if st == "ready" or args.force:
++                    continue
++                if st == "blocked" and all(
++                    d in group or db.by_path(d).merged for d in e.deps if db.by_path(d)
++                ):
++                    continue
++                note = rows[e.path]["note"]
++                self.die(f"{e.stem} is {st} ({note}); pass --force to submit anyway")
++            units = [chosen] if args.group else [[e] for e in chosen]
++        else:
++            ready = [e for e in series if rows[e.path]["status"] == "ready"]
++            if not ready:
++                self.note(f"{repo.module}: no patch is ready for submission")
++                return
++            units = [[e] for e in ready[: args.count]]
++        if args.branch and len(units) != 1:
++            self.die("--branch only makes sense for a single PR")
++        if args.title and len(units) != 1:
++            self.die("--title only makes sense for a single PR")
++
++        upstream_remote, upstream_slug = repo.upstream()
++        fork_remote, fork_slug = repo.fork() if not args.dry_run else (None, None)
++        opened = []
++        for unit in units:
++            branch = args.branch or unit[0].branch
++            self.inf(f"building {branch} on {upstream_remote}/{args.upstream_branch}")
++            subjects = [make_subject(e, patch_files(db.patch_file(e))) for e in unit]
++            if args.title and len(unit) == 1:
++                subjects = [args.title]
++            tip = self.build_branch(db, repo, branch, unit, subjects)
++            title = args.title or (subjects[0] if len(unit) == 1 else self.group_title(unit))
++            body = self.pr_body(unit, subjects)
++            if args.dry_run:
++                self.inf(
++                    f"dry run: {branch} is {tip[:12]} in {repo.repo}; would open PR:\n"
++                    f"  title: {title}\n" + textwrap.indent(body, "  ")
++                )
++                continue
++
++            if (
++                not args.force
++                and _git(repo.repo, "ls-remote", "--heads", fork_remote, branch).stdout
++            ):
++                self.die(f"{fork_remote}/{branch} already exists; pass --force to replace it")
++            push = ["push", "-q", fork_remote, f"refs/heads/{branch}:refs/heads/{branch}"]
++            if args.force:
++                push.insert(2, "--force-with-lease")
++            _git(repo.repo, *push)
++            with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as f:
++                f.write(body)
++                body_file = f.name
++            try:
++                url = _gh(
++                    "pr", "create", "--repo", upstream_slug, "--draft",
++                    "--base", args.upstream_branch,
++                    "--head", f"{fork_slug.split('/')[0]}:{branch}",
++                    "--title", title, "--body-file", body_file,
++                ).stdout.strip().splitlines()[-1]  # fmt: skip
++            finally:
++                os.unlink(body_file)
++            self.inf(f"opened draft PR {url}")
++            for e in unit:
++                e.set("merge-pr", url)
++                e.set_custom("branch", branch)
++            db.save()
++            opened.append(url)
++
++        if opened:
++            self.inf("opened: " + " ".join(opened))
++
++    @staticmethod
++    def group_title(unit):
++        return fit_subject("patches: " + ", ".join(e.stem for e in unit))
++
++    @staticmethod
++    def pr_body(unit, subjects):
++        parts = []
++        if len(unit) == 1:
++            parts.append(make_body(unit[0]))
++        else:
++            for e, s in zip(unit, subjects, strict=True):
++                parts.append(f"* {s}\n\n" + textwrap.indent(make_body(e), "  "))
++        return "\n\n".join(p for p in parts if p) + "\n"
