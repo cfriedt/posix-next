@@ -27,7 +27,8 @@ static void child_exit_entry(void *p1, void *p2, void *p3)
 	char **envp = p2;
 	int argc = (int)(uintptr_t)p3;
 	bool ok = (argc == 1) && (strcmp(argv[0], spawn_argv[0]) == 0) && (argv[1] == NULL) &&
-		  (envp[0] == NULL) && (argv != (char **)spawn_argv);
+		  (envp[0] == NULL) && (argv != (char **)spawn_argv) &&
+		  (!IS_ENABLED(CONFIG_USERSPACE) || k_is_user_context());
 
 	_exit(ok ? 7 : 1);
 }
@@ -58,7 +59,8 @@ IMAGE_REGISTRY_ENTRY_DEFINE(img_exit, "/bin/child", child_exit_entry);
 IMAGE_REGISTRY_ENTRY_DEFINE(img_pgrp, "/bin/pgrp", child_pgrp_entry);
 IMAGE_REGISTRY_ENTRY_DEFINE(img_sigmask, "/bin/sigmask", child_sigmask_entry);
 
-ZTEST(posix_spawn, test_posix_spawn)
+/* the caller runs in user mode under CONFIG_TEST_USERSPACE: spawn is a user API */
+ZTEST_USER(posix_spawn, test_posix_spawn)
 {
 	pid_t pid = -1;
 	int status = -1;
