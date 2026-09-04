@@ -1,0 +1,276 @@
+diff --git a/arch/arm/core/cortex_m/thread.c b/arch/arm/core/cortex_m/thread.c
+index 364763f1161..ee14ba1236a 100644
+--- a/arch/arm/core/cortex_m/thread.c
++++ b/arch/arm/core/cortex_m/thread.c
+@@ -317,6 +317,17 @@ FUNC_NORETURN void arch_user_mode_enter(k_thread_entry_t user_entry, void *p1, v
+ 	CODE_UNREACHABLE;
+ }
+ 
++FUNC_NORETURN void arch_user_mode_restart(k_thread_entry_t user_entry, void *p1, void *p2, void *p3)
++{
++	/*
++	 * A user thread in a system call: the guard already moved to the
++	 * privileged stack on the first entry, and that stack is current.
++	 */
++	z_arm_userspace_enter(user_entry, p1, p2, p3, (uint32_t)_current->stack_info.start,
++			      _current->stack_info.size - _current->stack_info.delta, 1);
++	CODE_UNREACHABLE;
++}
++
+ bool z_arm_thread_is_in_user_mode(void)
+ {
+ 	uint32_t value;
+diff --git a/arch/arm64/core/thread.c b/arch/arm64/core/thread.c
+index f6a92ee9d0f..89abfb894ec 100644
+--- a/arch/arm64/core/thread.c
++++ b/arch/arm64/core/thread.c
+@@ -214,6 +214,18 @@ FUNC_NORETURN void arch_user_mode_enter(k_thread_entry_t user_entry,
+ 
+ 	CODE_UNREACHABLE;
+ }
++
++FUNC_NORETURN void arch_user_mode_restart(k_thread_entry_t user_entry, void *p1, void *p2, void *p3)
++{
++	/*
++	 * A user thread in a system call: this exception is never returned
++	 * from, so the depth it added must leave with it (the eret does not
++	 * pop it), or every later exception of this thread reads one too deep.
++	 */
++	arch_irq_lock();
++	write_tpidrro_el0(read_tpidrro_el0() & ~TPIDRROEL0_EXC_DEPTH);
++	arch_user_mode_enter(user_entry, p1, p2, p3);
++}
+ #endif
+ 
+ int arch_coprocessors_disable(struct k_thread *thread)
+diff --git a/arch/riscv/core/thread.c b/arch/riscv/core/thread.c
+index ecdc0864dfd..21f37c569d3 100644
+--- a/arch/riscv/core/thread.c
++++ b/arch/riscv/core/thread.c
+@@ -157,32 +157,14 @@ void arch_new_thread(struct k_thread *thread, k_thread_stack_t *stack,
+  * The conversion is one way, and threads which transition to user mode do
+  * not transition back later, unless they are doing system calls.
+  */
+-FUNC_NORETURN void arch_user_mode_enter(k_thread_entry_t user_entry,
+-					void *p1, void *p2, void *p3)
++/* the mode switch shared by the first entry and a restart */
++static FUNC_NORETURN void riscv_user_mode_enter(k_thread_entry_t user_entry, void *p1,
++						void *p2, void *p3,
++						unsigned long top_of_priv_stack)
+ {
+-	unsigned long top_of_user_stack, top_of_priv_stack;
++	unsigned long top_of_user_stack;
+ 	unsigned long status;
+ 
+-	/* Set up privileged stack */
+-#ifdef CONFIG_GEN_PRIV_STACKS
+-	_current->arch.priv_stack_start =
+-			(unsigned long)z_priv_stack_find(_current->stack_obj);
+-	/* remove the stack guard from the main stack */
+-	_current->stack_info.start -= K_THREAD_STACK_RESERVED;
+-	_current->stack_info.size += K_THREAD_STACK_RESERVED;
+-#else
+-	_current->arch.priv_stack_start = (unsigned long)_current->stack_obj;
+-#endif /* CONFIG_GEN_PRIV_STACKS */
+-	top_of_priv_stack = Z_STACK_PTR_ALIGN(_current->arch.priv_stack_start +
+-					      K_KERNEL_STACK_RESERVED +
+-					      CONFIG_PRIVILEGED_STACK_SIZE);
+-
+-#ifdef CONFIG_INIT_STACKS
+-	/* Initialize the privileged stack, leaving its guard area untouched */
+-	(void)memset((void *)(_current->arch.priv_stack_start + K_KERNEL_STACK_RESERVED), 0xaa,
+-		     top_of_priv_stack - _current->arch.priv_stack_start - K_KERNEL_STACK_RESERVED);
+-#endif /* CONFIG_INIT_STACKS */
+-
+ 	top_of_user_stack = Z_STACK_PTR_ALIGN(
+ 				_current->stack_info.start +
+ 				_current->stack_info.size -
+@@ -276,6 +258,44 @@ FUNC_NORETURN void arch_user_mode_enter(k_thread_entry_t user_entry,
+ 	CODE_UNREACHABLE;
+ }
+ 
++FUNC_NORETURN void arch_user_mode_enter(k_thread_entry_t user_entry,
++					void *p1, void *p2, void *p3)
++{
++	unsigned long top_of_priv_stack;
++
++	/* Set up privileged stack */
++#ifdef CONFIG_GEN_PRIV_STACKS
++	_current->arch.priv_stack_start =
++			(unsigned long)z_priv_stack_find(_current->stack_obj);
++	/* remove the stack guard from the main stack */
++	_current->stack_info.start -= K_THREAD_STACK_RESERVED;
++	_current->stack_info.size += K_THREAD_STACK_RESERVED;
++#else
++	_current->arch.priv_stack_start = (unsigned long)_current->stack_obj;
++#endif /* CONFIG_GEN_PRIV_STACKS */
++	top_of_priv_stack = Z_STACK_PTR_ALIGN(_current->arch.priv_stack_start +
++					      K_KERNEL_STACK_RESERVED +
++					      CONFIG_PRIVILEGED_STACK_SIZE);
++
++#ifdef CONFIG_INIT_STACKS
++	/* Initialize the privileged stack, leaving its guard area untouched */
++	(void)memset((void *)(_current->arch.priv_stack_start + K_KERNEL_STACK_RESERVED), 0xaa,
++		     top_of_priv_stack - _current->arch.priv_stack_start - K_KERNEL_STACK_RESERVED);
++#endif /* CONFIG_INIT_STACKS */
++
++	riscv_user_mode_enter(user_entry, p1, p2, p3, top_of_priv_stack);
++}
++
++FUNC_NORETURN void arch_user_mode_restart(k_thread_entry_t user_entry, void *p1, void *p2, void *p3)
++{
++	/* a user thread in a system call: the privileged stack was set up on the first entry */
++	unsigned long top_of_priv_stack = Z_STACK_PTR_ALIGN(_current->arch.priv_stack_start +
++							    K_KERNEL_STACK_RESERVED +
++							    CONFIG_PRIVILEGED_STACK_SIZE);
++
++	riscv_user_mode_enter(user_entry, p1, p2, p3, top_of_priv_stack);
++}
++
+ int arch_thread_priv_stack_space_get(const struct k_thread *thread, size_t *stack_size,
+ 				     size_t *unused_ptr)
+ {
+diff --git a/include/zephyr/arch/arch_interface.h b/include/zephyr/arch/arch_interface.h
+index 13fa06b2815..6e8d08764cf 100644
+--- a/include/zephyr/arch/arch_interface.h
++++ b/include/zephyr/arch/arch_interface.h
+@@ -1111,6 +1111,24 @@ size_t arch_virt_region_align(uintptr_t phys, size_t size);
+ FUNC_NORETURN void arch_user_mode_enter(k_thread_entry_t user_entry,
+ 					void *p1, void *p2, void *p3);
+ 
++/**
++ * Re-enter user mode on a fresh user stack.
++ *
++ * Like arch_user_mode_enter(), for a thread that already runs in user mode
++ * and is executing a system call: the user stack pointer is reset to its
++ * initial value and execution transfers to @a user_entry in user mode. The
++ * privileged stack and any one-time adjustments made on the first entry are
++ * left as they are. The default implementation calls arch_user_mode_enter(),
++ * which is correct where that function makes no such adjustments.
++ *
++ * @param user_entry Entry point to start executing as a user thread
++ * @param p1 1st parameter to user thread
++ * @param p2 2nd parameter to user thread
++ * @param p3 3rd parameter to user thread
++ */
++FUNC_NORETURN void arch_user_mode_restart(k_thread_entry_t user_entry,
++					  void *p1, void *p2, void *p3);
++
+ /**
+  * @brief Induce a kernel oops that appears to come from a specific location
+  *
+diff --git a/kernel/include/kernel_internal.h b/kernel/include/kernel_internal.h
+index 1cf90992604..5390cd5f72e 100644
+--- a/kernel/include/kernel_internal.h
++++ b/kernel/include/kernel_internal.h
+@@ -286,6 +286,12 @@ static inline void z_process_image_drop(struct k_process *proc)
+ #endif /* CONFIG_SYS_PROCESS_EXEC */
+ #endif /* CONFIG_PROCESS */
+ 
++#ifdef CONFIG_USERSPACE
++/* restart the current user thread on a fresh user stack, from a system call */
++FUNC_NORETURN void z_thread_user_mode_restart(k_thread_entry_t entry, void *p1, void *p2,
++					      void *p3);
++#endif /* CONFIG_USERSPACE */
++
+ #ifdef CONFIG_USERSPACE
+ /* permission-principal index management and the reap-time sweep */
+ int16_t z_process_perm_index_alloc(void);
+diff --git a/kernel/thread.c b/kernel/thread.c
+index c7d8c30214a..82a3b13dca5 100644
+--- a/kernel/thread.c
++++ b/kernel/thread.c
+@@ -513,6 +513,31 @@ static inline void set_stack_sentinel(char *buf_start)
+ #endif /* CONFIG_STACK_SENTINEL */
+ }
+ 
++#ifdef CONFIG_THREAD_LOCAL_STORAGE
++/*
++ * The thread-local copy of the current thread that k_current_get() reads. z_thread_entry()
++ * sets it when the thread first runs; a thread whose storage is initialized (or initialized
++ * again, on entering user mode or restarting) and that runs kernel code before, or instead
++ * of, its entry - one created paused and discarded, say - has it set here. Static TLS puts a
++ * variable at the same offset from the thread pointer in every thread.
++ */
++static void thread_tls_current_set(struct k_thread *thread)
++{
++#ifdef CONFIG_CURRENT_THREAD_USE_TLS
++	extern Z_THREAD_LOCAL k_tid_t z_tls_current;
++
++	if (k_is_pre_kernel()) {
++		/* no thread pointer to measure from yet; the threads made here run their entry first */
++		return;
++	}
++
++	*(k_tid_t *)(thread->tls + ((uintptr_t)&z_tls_current - _current->tls)) = thread;
++#else
++	ARG_UNUSED(thread);
++#endif /* CONFIG_CURRENT_THREAD_USE_TLS */
++}
++#endif /* CONFIG_THREAD_LOCAL_STORAGE */
++
+ /*
+  * Compute how much to reserve at the top of the stack buffer for TLS,
+  * userspace-local data and stack-pointer randomization, and return the
+@@ -530,6 +555,7 @@ static size_t reserve_stack_headroom(struct k_thread *new_thread,
+ #ifdef CONFIG_THREAD_LOCAL_STORAGE
+ 	/* TLS is always last within the stack buffer */
+ 	delta += arch_tls_stack_setup(new_thread, stack_ptr);
++	thread_tls_current_set(new_thread);
+ #endif /* CONFIG_THREAD_LOCAL_STORAGE */
+ #ifdef CONFIG_THREAD_USERSPACE_LOCAL_DATA
+ 	size_t tls_size = sizeof(struct _thread_userspace_local_data);
+@@ -1274,6 +1300,7 @@ FUNC_NORETURN void k_thread_user_mode_enter(k_thread_entry_t entry,
+ 	arch_tls_stack_setup(_current,
+ 			     (char *)(_current->stack_info.start +
+ 				      _current->stack_info.size));
++	thread_tls_current_set(_current);
+ #endif /* CONFIG_THREAD_LOCAL_STORAGE */
+ 	arch_user_mode_enter(entry, p1, p2, p3);
+ #else
+@@ -1282,6 +1309,28 @@ FUNC_NORETURN void k_thread_user_mode_enter(k_thread_entry_t entry,
+ #endif /* CONFIG_USERSPACE */
+ }
+ 
++#ifdef CONFIG_USERSPACE
++FUNC_NORETURN void z_thread_user_mode_restart(k_thread_entry_t entry, void *p1, void *p2, void *p3)
++{
++	__ASSERT((_current->base.user_options & K_USER) != 0U, "not a user thread");
++#ifdef CONFIG_THREAD_MONITOR
++	_current->entry.pEntry = entry;
++	_current->entry.parameter1 = p1;
++	_current->entry.parameter2 = p2;
++	_current->entry.parameter3 = p3;
++#endif /* CONFIG_THREAD_MONITOR */
++#ifdef CONFIG_THREAD_USERSPACE_LOCAL_DATA
++	memset(_current->userspace_local_data, 0, sizeof(struct _thread_userspace_local_data));
++#endif /* CONFIG_THREAD_USERSPACE_LOCAL_DATA */
++#ifdef CONFIG_THREAD_LOCAL_STORAGE
++	arch_tls_stack_setup(_current,
++			     (char *)(_current->stack_info.start + _current->stack_info.size));
++	thread_tls_current_set(_current);
++#endif /* CONFIG_THREAD_LOCAL_STORAGE */
++	arch_user_mode_restart(entry, p1, p2, p3);
++}
++#endif /* CONFIG_USERSPACE */
++
+ #if defined(CONFIG_INIT_STACKS) && defined(CONFIG_THREAD_STACK_INFO)
+ #ifdef CONFIG_STACK_GROWS_UP
+ #error "Unsupported configuration for stack analysis"
+diff --git a/kernel/userspace/userspace.c b/kernel/userspace/userspace.c
+index ffab0409fb8..971b78506a0 100644
+--- a/kernel/userspace/userspace.c
++++ b/kernel/userspace/userspace.c
+@@ -637,6 +637,12 @@ void k_object_free(void *obj)
+ 	z_kobj_graveyard_flush();
+ }
+ 
++__weak FUNC_NORETURN void arch_user_mode_restart(k_thread_entry_t user_entry, void *p1, void *p2,
++						 void *p3)
++{
++	arch_user_mode_enter(user_entry, p1, p2, p3);
++}
++
+ struct k_object *k_object_find(const void *obj)
+ {
+ 	struct k_object *ret;
