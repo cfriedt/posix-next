@@ -20,13 +20,17 @@
 static char *const spawn_argv[] = {"child", NULL};
 static char *const spawn_envp[] = {NULL};
 
+/* prelinked images are entered as entry(argv, envp, argc) with process-owned copies */
 static void child_exit_entry(void *p1, void *p2, void *p3)
 {
-	ARG_UNUSED(p3);
+	char **argv = p1;
+	char **envp = p2;
+	int argc = (int)(uintptr_t)p3;
+	bool ok = (argc == 1) && (strcmp(argv[0], spawn_argv[0]) == 0) && (argv[1] == NULL) &&
+		  (envp[0] == NULL) && (argv != (char **)spawn_argv) &&
+		  (!IS_ENABLED(CONFIG_USERSPACE) || k_is_user_context());
 
-	zassert_equal((char *const *)p1, spawn_argv);
-	zassert_equal((char *const *)p2, spawn_envp);
-	_exit(7);
+	_exit(ok ? 7 : 1);
 }
 
 static void child_pgrp_entry(void *p1, void *p2, void *p3)

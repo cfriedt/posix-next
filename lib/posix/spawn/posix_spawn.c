@@ -183,7 +183,13 @@ int posix_spawn(pid_t *pid, const char *path, const posix_spawn_file_actions_t *
 
 	img = posix_spawn_image_lookup(path);
 	if ((img != NULL) && (img->entry != NULL)) {
+		/* the vectors are copied into the child, which runs in user mode */
 		args.entry = img->entry;
+		args.argv = argv;
+		args.envp = envp;
+		if (IS_ENABLED(CONFIG_USERSPACE)) {
+			args.options = K_USER;
+		}
 	} else {
 #ifdef CONFIG_POSIX_EXEC_LLEXT
 		/* not a prelinked image: the child loads it from the file system */
@@ -202,8 +208,6 @@ int posix_spawn(pid_t *pid, const char *path, const posix_spawn_file_actions_t *
 	}
 
 	args.flags = SYS_CLONE_PAUSED;
-	args.p1 = (void *)argv;
-	args.p2 = (void *)envp;
 	args.prio = k_thread_priority_get(k_current_get());
 
 	if ((attrp != NULL) && ((attrp->flags & POSIX_SPAWN_SETSCHEDPARAM) != 0)) {
@@ -228,6 +232,9 @@ int posix_spawn(pid_t *pid, const char *path, const posix_spawn_file_actions_t *
 	ret = sys_clone(&args, &child);
 	if (ret < 0) {
 		spawn_exec_slot_release(slot);
+		if (ret == -E2BIG) {
+			return E2BIG;
+		}
 		return (ret == -EINVAL) ? EINVAL : EAGAIN;
 	}
 
