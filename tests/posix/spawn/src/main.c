@@ -6,6 +6,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <signal.h>
 #include <spawn.h>
 #include <string.h>
 #include <sys/eventfd.h>
@@ -27,7 +28,8 @@ static void child_exit_entry(void *p1, void *p2, void *p3)
 	char **envp = p2;
 	int argc = (int)(uintptr_t)p3;
 	bool ok = (argc == 1) && (strcmp(argv[0], spawn_argv[0]) == 0) && (argv[1] == NULL) &&
-		  (envp[0] == NULL) && (argv != (char **)spawn_argv);
+		  (envp[0] == NULL) && (argv != (char **)spawn_argv) &&
+		  (!IS_ENABLED(CONFIG_USERSPACE) || k_is_user_context());
 
 	_exit(ok ? 7 : 1);
 }
@@ -58,7 +60,109 @@ IMAGE_REGISTRY_ENTRY_DEFINE(img_exit, "/bin/child", child_exit_entry);
 IMAGE_REGISTRY_ENTRY_DEFINE(img_pgrp, "/bin/pgrp", child_pgrp_entry);
 IMAGE_REGISTRY_ENTRY_DEFINE(img_sigmask, "/bin/sigmask", child_sigmask_entry);
 
-ZTEST(posix_spawn, test_posix_spawn)
+/* the image starts with no signal blocked */
+static void child_mask_clear_entry(void *p1, void *p2, void *p3)
+{
+	sigset_t cur;
+
+	ARG_UNUSED(p1);
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	sigemptyset(&cur);
+	(void)sigprocmask(SIG_SETMASK, NULL, &cur);
+	_exit(((sigismember(&cur, SIGUSR1) == 0) && (sigismember(&cur, SIGTERM) == 0)) ? 0 : 1);
+}
+
+IMAGE_REGISTRY_ENTRY_DEFINE(img_mask_clear, "/bin/clear", child_mask_clear_entry);
+
+/* without a SETSIGMASK attribute the image inherits the caller's mask; a kernel thread blocks
+ * every signal, which a user-mode image cannot start with: it starts with none blocked
+ */
+static void posix_spawn_mask_from_kernel(void)
+{
+	pid_t pid = -1;
+	int status = -1;
+
+	if (!IS_ENABLED(CONFIG_USERSPACE) || k_is_user_context()) {
+		return;
+	}
+	zassert_ok(posix_spawn(&pid, "/bin/clear", NULL, NULL, spawn_argv, spawn_envp));
+	zassert_equal(waitpid(pid, &status, 0), pid);
+	zassert_true(WIFEXITED(status));
+	zassert_equal(WEXITSTATUS(status), 0, "an image a kernel thread spawned had signals blocked");
+}
+
+static ZTEST_BMEM volatile pid_t spawn_chld_pid;
+
+static void spawn_chld_handler(int sig, siginfo_t *info, void *ucontext)
+{
+	ARG_UNUSED(sig);
+	ARG_UNUSED(ucontext);
+
+	spawn_chld_pid = info->si_pid;
+}
+
+/* two processes of the suite's own, the inner created by the outer: only the outer's process was
+ * granted access to the inner's leader. The inner accepts SIGCHLD and sleeps while its child
+ * exits, so the kernel's notifier, which belongs to no process of the chain, reports the exit.
+ */
+static void child_parent_entry(void *p1, void *p2, void *p3)
+{
+	struct sigaction act = {.sa_sigaction = spawn_chld_handler, .sa_flags = SA_SIGINFO};
+	char **argv = p1;
+	sigset_t set;
+	pid_t pid = -1;
+	int status = -1;
+
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	if (strcmp(argv[1], "outer") == 0) {
+		char *const inner[] = {"parent", "inner", NULL};
+
+		if (posix_spawn(&pid, "/bin/parent", NULL, NULL, inner, spawn_envp) != 0) {
+			_exit(4);
+		}
+		if (waitpid(pid, &status, 0) != pid) {
+			_exit(5);
+		}
+		_exit(WIFEXITED(status) ? WEXITSTATUS(status) : 6);
+	}
+
+	sigemptyset(&set);
+	sigaddset(&set, SIGCHLD);
+	(void)sigaction(SIGCHLD, &act, NULL);
+	(void)sigprocmask(SIG_UNBLOCK, &set, NULL);
+	spawn_chld_pid = 0;
+	status = posix_spawn(&pid, "/bin/child", NULL, NULL, spawn_argv, spawn_envp);
+	if (status != 0) {
+		_exit(status);
+	}
+	k_msleep(100);
+	if (waitpid(pid, &status, 0) != pid) {
+		_exit(3);
+	}
+	_exit((spawn_chld_pid == pid) ? 0 : 1);
+}
+
+IMAGE_REGISTRY_ENTRY_DEFINE(img_parent, "/bin/parent", child_parent_entry);
+
+static void posix_spawn_sigchld(void)
+{
+	char *const outer[] = {"parent", "outer", NULL};
+	pid_t pid = -1;
+	int status = -1;
+
+	zassert_ok(posix_spawn(&pid, "/bin/parent", NULL, NULL, outer, spawn_envp));
+	zassert_equal(waitpid(pid, &status, 0), pid);
+	zassert_true(WIFEXITED(status));
+	zassert_equal(WEXITSTATUS(status), 0, "SIGCHLD for a spawned process's child was lost (%d)",
+		      WEXITSTATUS(status));
+}
+
+/* the caller runs in user mode under CONFIG_TEST_USERSPACE: spawn is a user API */
+ZTEST_USER(posix_spawn, test_posix_spawn)
 {
 	pid_t pid = -1;
 	int status = -1;
@@ -67,6 +171,9 @@ ZTEST(posix_spawn, test_posix_spawn)
 	zassert_equal(posix_spawn(&pid, "/bin/nonesuch", NULL, NULL, spawn_argv, spawn_envp),
 		      ENOENT);
 	zassert_equal(posix_spawn(&pid, NULL, NULL, NULL, spawn_argv, spawn_envp), ENOENT);
+
+	posix_spawn_mask_from_kernel();
+	posix_spawn_sigchld();
 
 	/* registry-resolved spawn with a pool-drawn leader; reap by pid */
 	for (int i = 0; i < 3; i++) {
