@@ -22,6 +22,7 @@ if(NOT CONFIG_TC_PROVIDES_POSIX_NETWORKING)
     freeaddrinfo.c
     gai_strerror.c
     getaddrinfo.c
+    getifaddrs.c
     getnameinfo.c
     getpeername.c
     gethostname.c
