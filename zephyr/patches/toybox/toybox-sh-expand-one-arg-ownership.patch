@@ -1,0 +1,17 @@
+diff --git a/toys/pending/sh.c b/toys/pending/sh.c
+--- a/toys/pending/sh.c
++++ b/toys/pending/sh.c
+@@ -2618,7 +2618,12 @@
+   if (!expand_arg(&arg, new, flags|NO_PATH|NO_SPLIT, &del))
+     if (!(s = *arg.v) && (flags&(NO_IFS|NO_NULL))) s = "";
+ 
+-  // Free non-returned allocations.
++  // Free non-returned allocations. The result is the caller's to free
++  // whenever it isn't the input: a value the expansion borrowed (a variable's
++  // own string, for a bare $var) is copied so the caller never frees into
++  // someone else's allocation.
++  for (dd = del; dd; dd = dd->next) if (dd->arg == s) break;
++  if (s && s != new && !dd) s = xstrdup(s);
+   while (del) {
+     dd = del->next;
+     if (del->arg != s) free(del->arg);
