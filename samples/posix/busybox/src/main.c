@@ -12,6 +12,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <zephyr/app_memory/app_memdomain.h>
 #include <zephyr/fs/fs.h>
 #include <zephyr/kernel.h>
 
@@ -93,6 +94,16 @@ static int run(const char *path, char *const argv[])
 
 int main(void)
 {
+#ifdef CONFIG_USERSPACE
+	/* what busybox's processes touch of the system's shared state: directory streams
+	 * and the user and group databases
+	 */
+	extern struct k_mem_partition zvfs_dir_partition;
+	extern struct k_mem_partition posix_system_database_partition;
+
+	(void)k_mem_domain_add_partition(&k_mem_domain_default, &zvfs_dir_partition);
+	(void)k_mem_domain_add_partition(&k_mem_domain_default, &posix_system_database_partition);
+#endif /* CONFIG_USERSPACE */
 	static const char passwd[] = "root:x:0:0:root:/root:/bin/sh\n";
 	static const char group[] = "root:x:0:\n";
 	static const char motd[] = "Hello from busybox on Zephyr!\n";

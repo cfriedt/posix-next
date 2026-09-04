@@ -5,11 +5,13 @@
  */
 
 #include <errno.h>
+#include <stdlib.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 #include <zephyr/sys/libc-hooks.h>
 #include <zephyr/sys/zvfs.h>
+#include <zephyr/sys/process_state.h>
 #include <zephyr/sys/zvfs_fs.h>
 #include <zephyr/toolchain.h>
 
@@ -21,6 +23,38 @@
  */
 
 static Z_LIBC_DATA mode_t attr_cmask;
+
+#if PROCESS_STATE_SUPPORTED
+/* an image process keeps its mask with its C library state; the boot image in the static */
+struct posix_process_attr {
+	mode_t cmask;
+};
+
+static mode_t *attr_cmask_ptr(void)
+{
+	struct process_state *lp = process_state_get();
+	struct posix_process_attr *pa;
+
+	if (lp == NULL) {
+		return &attr_cmask;
+	}
+	pa = lp->slot[PROCESS_STATE_SLOT_POSIX];
+	if (pa == NULL) {
+		pa = calloc(1, sizeof(*pa));
+		if (pa == NULL) {
+			return &attr_cmask;
+		}
+		lp->slot[PROCESS_STATE_SLOT_POSIX] = pa;
+	}
+
+	return &pa->cmask;
+}
+#else
+static inline mode_t *attr_cmask_ptr(void)
+{
+	return &attr_cmask;
+}
+#endif /* PROCESS_STATE_SUPPORTED */
 
 static int attr_path_exists(const char *path)
 {
@@ -81,9 +115,9 @@ int fchown(int fildes, uid_t owner, gid_t group)
 
 mode_t umask(mode_t cmask)
 {
-	mode_t prev = attr_cmask;
+	mode_t *mask = attr_cmask_ptr();
+	mode_t prev = *mask;
 
-	attr_cmask = cmask & 0777;
-
+	*mask = cmask & 0777;
 	return prev;
 }

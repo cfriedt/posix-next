@@ -96,6 +96,16 @@ static int run(const char *path, char *const argv[])
 
 int main(void)
 {
+#ifdef CONFIG_USERSPACE
+	/* what toybox's processes touch of the system's shared state: directory streams
+	 * and the user and group databases
+	 */
+	extern struct k_mem_partition zvfs_dir_partition;
+	extern struct k_mem_partition posix_system_database_partition;
+
+	(void)k_mem_domain_add_partition(&k_mem_domain_default, &zvfs_dir_partition);
+	(void)k_mem_domain_add_partition(&k_mem_domain_default, &posix_system_database_partition);
+#endif /* CONFIG_USERSPACE */
 	static const char passwd[] = "root:x:0:0:root:/root:/bin/sh\n";
 	static const char group[] = "root:x:0:\n";
 	static const char motd[] = "Hello from toybox on Zephyr!\n";

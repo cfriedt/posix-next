@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include <stdlib.h>
 #include <string.h>
 #include <zephyr/llext/symbol.h>
 
@@ -12,6 +13,22 @@ int main(int argc, char **argv, char **envp)
 {
 	if ((argc == 2) && (strcmp(argv[1], "x") == 0) && (envp[0] != NULL) &&
 	    (strcmp(envp[0], "SPAWN=1") == 0) && (envp[1] == NULL)) {
+		/* the process's own arena: allocate, use, and give back */
+		char *blocks[8];
+
+		for (size_t i = 0; i < 8; i++) {
+			blocks[i] = malloc(64 + 16 * i);
+			if (blocks[i] == NULL) {
+				return 2;
+			}
+			memset(blocks[i], (int)i, 64 + 16 * i);
+		}
+		for (size_t i = 0; i < 8; i++) {
+			if ((unsigned char)blocks[i][63] != i) {
+				return 3;
+			}
+			free(blocks[i]);
+		}
 		return 42;
 	}
 
