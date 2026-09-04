@@ -4004,8 +4004,28 @@ patches:
       the child's own descriptor table before entering, exiting with 127
       when one fails. A user-mode creator never has to touch another
       process's table, which is what posix_spawn() from user mode needs.
+  - path: zephyr/sys-process-state-area.patch
+    sha256sum: 648c73a96e243d3c82002e9aab760c2ebd17a2feedd0d6ce161539791c2903f1
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-04
+    upstreamable: true
+    comments: |
+      Per-process C library state for user-mode image processes.
+      CONFIG_SYS_PROCESS_STATE_AREA bytes are appended to a user image's
+      writable block at load and published by sys_process_state_area(); the common
+      C library lays out a struct process_state there (a state lock, a heap
+      lock, slots for the environment, stdio and POSIX state, and the
+      process's malloc heap), set up lazily and started from the leader's
+      trampoline with the entry vectors. malloc() selects the process heap
+      for user-mode execution only: privileged execution on the process's
+      behalf keeps the boot heap it may be resizing. A user process's domain
+      is seeded from the default domain rather than the C library
+      partitions alone, minus the boot malloc partition when the process
+      owns an arena.
   - path: toybox/toybox-zephyr-module.patch
-    sha256sum: 0ab0cd19222ae64e0ed6281878b0457266f65ea615560117bff8a713e510b564
+    sha256sum: 6cd953b655c3febac4b0f101b50d0aa129efa3766c33797c75aa633e3b7361c4
     module: modules/lib/toybox
     author: Chris Friedt
     email: chris@fr4.co
@@ -4024,7 +4044,7 @@ patches:
       others, and zephyr/zephyr.c with dprintf(), cfmakeraw(), cfsetspeed()
       and a failing syscall().
   - path: toybox/toybox-zephyr-platform.patch
-    sha256sum: 45ceee88c4b5f14a0ef6245c3f71ff2480b0867ec593ba7b46e214f1f9dc36af
+    sha256sum: 472718c59cab72f3075eeadf3f5f9577f8009096e5ba877d4a59fc1014e5795a
     module: modules/lib/toybox
     author: Chris Friedt
     email: chris@fr4.co

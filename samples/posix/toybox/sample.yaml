@@ -16,6 +16,7 @@ common:
       - "Hello from toybox on Zephyr!"
       - "motd"
       - "bytes from 127[.]0[.]0[.]1"
+      - "bytes from ::1"
       - "toybox sample complete"
   timeout: 180
 tests:
@@ -26,3 +27,67 @@ tests:
       - qemu_riscv64
     integration_platforms:
       - qemu_riscv64
+  sample.posix.toybox.gateway:
+    # qemu user-mode networking: e1000 to the SLIRP virtual gateway, no
+    # host-side TAP or privileges needed
+    platform_allow:
+      - qemu_cortex_a53
+    extra_configs:
+      - CONFIG_NET_TEST=n
+      - CONFIG_NET_SLIP_TAP=n
+      - CONFIG_NET_QEMU_USER=y
+      - CONFIG_NET_L2_ETHERNET=y
+      - CONFIG_ETH_DRIVER=y
+      - CONFIG_NET_DEFAULT_IF_ETHERNET=y
+      - CONFIG_NET_CONFIG_SETTINGS=y
+      - CONFIG_NET_CONFIG_NEED_IPV4=y
+      - CONFIG_NET_CONFIG_MY_IPV4_ADDR="10.0.2.15"
+      - CONFIG_NET_CONFIG_MY_IPV4_NETMASK="255.255.255.0"
+      - CONFIG_NET_CONFIG_MY_IPV4_GW="10.0.2.2"
+      # the PCIe ECAM window alone is 256 MB of kernel VM
+      - CONFIG_KERNEL_VM_SIZE=0x30000000
+      - CONFIG_MAX_XLAT_TABLES=128
+    harness_config:
+      type: multi_line
+      ordered: true
+      regex:
+        - "hello world"
+        - "Hello from toybox on Zephyr!"
+        - "motd"
+        - "bytes from 127[.]0[.]0[.]1"
+        - "bytes from ::1"
+        - "bytes from 10[.]0[.]2[.]2"
+        - "toybox sample complete"
+  sample.posix.toybox.fork:
+    # user-mode image processes on a PROCESS_VM platform: toysh forks for
+    # subshells and command substitution
+    platform_allow:
+      - qemu_cortex_a53
+      - qemu_riscv64
+      - qemu_x86_64
+    extra_configs:
+      - CONFIG_USERSPACE=y
+      - CONFIG_PROCESS_VM=y
+      - CONFIG_CURRENT_THREAD_USE_TLS=n
+      # each image process owns its C library state and malloc arena
+      - CONFIG_SYS_PROCESS_STATE_AREA=131072
+      # PROCESS_VM needs the kernel on the process's page tables (no KPTI);
+      # every image process and fork holds a memory domain, and the
+      # per-process page tables outgrow the 8 MiB default VM
+      - platform:qemu_x86_64/atom:CONFIG_X86_KPTI=n
+      - platform:qemu_x86_64/atom:CONFIG_X86_MAX_ADDITIONAL_MEM_DOMAINS=16
+      - platform:qemu_x86_64/atom:CONFIG_KERNEL_VM_SIZE=0x2400000
+      # riscv64: sixteen image processes with a user and a kernel view each
+      - platform:qemu_riscv64/qemu_virt_riscv64:CONFIG_MAX_XLAT_TABLES=512
+    harness_config:
+      type: multi_line
+      ordered: true
+      regex:
+        - "hello world"
+        - "Hello from toybox on Zephyr!"
+        - "motd"
+        - "bytes from 127[.]0[.]0[.]1"
+        - "bytes from ::1"
+        - "subshell works"
+        - "cmdsub is works"
+        - "toybox sample complete"

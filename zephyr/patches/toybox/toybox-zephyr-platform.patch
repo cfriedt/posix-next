@@ -332,7 +332,7 @@ index 3c00e0c2..c0bc7555 100644
      TT.fugit += (pkttime = millitime()-*(unsigned *)(ih+1));
      if (pkttime < TT.min) TT.min = pkttime;
 diff --git a/toys/pending/sh.c b/toys/pending/sh.c
-index 51a9db84..79c0aa27 100644
+index 51a9db84..305e8609 100644
 --- a/toys/pending/sh.c
 +++ b/toys/pending/sh.c
 @@ -371,6 +371,9 @@ config WAIT
@@ -345,21 +345,7 @@ index 51a9db84..79c0aa27 100644
  
  GLOBALS(
    union {
-@@ -1487,6 +1490,13 @@ if (DEBUG) { dprintf(2, "%d run_subshell %.*s\n", getpid(), len, str); debug_sho
-   // On nommu vfork, exec /proc/self/exe, and pipe state data to ourselves.
-   } else {
-     int pipes[2];
-+#ifdef __ZEPHYR__
-+    // neither vfork() nor a self image to re-enter: no subshells
-+    errno = ENOSYS;
-+    perror_msg("subshell");
-+
-+    return -1;
-+#endif
-     unsigned i;
-     char **oldenv = environ, *ss = str ? : pl2str(TT.ff->pl->next, 0);
-     struct sh_vars **vv;
-@@ -2822,7 +2832,9 @@ static void sig_fcall(int sig, siginfo_t *info, void *ucontext)
+@@ -2822,7 +2825,9 @@ static void sig_fcall(int sig, siginfo_t *info, void *ucontext)
  {
    // Tell run_lines() to eval trap, keep signal blocked until trap func ends
    dlist_add(&TT.nextsig, (void *)(long)sig);
@@ -369,7 +355,7 @@ index 51a9db84..79c0aa27 100644
  }
  
  // Set signal handler to exec string, or reset to default if NULL
-@@ -2931,6 +2943,65 @@ static void sh_exec(char **argv)
+@@ -2931,6 +2936,65 @@ static void sh_exec(char **argv)
    llist_traverse(sl, free);
  }
  
@@ -435,7 +421,7 @@ index 51a9db84..79c0aa27 100644
  // Execute a single command at TT.ff->pl returning new sh_process instance.
  static struct sh_process *run_command(int local)
  {
-@@ -3062,8 +3133,12 @@ if (DEBUG) { dprintf(2, "%d builtin", getpid()); for (int xx = 0; xx<=pp->arg.c;
+@@ -3062,8 +3126,12 @@ if (DEBUG) { dprintf(2, "%d builtin", getpid()); for (int xx = 0; xx<=pp->arg.c;
        if (toys.old_umask) umask(toys.old_umask);
        memcpy(&toys, &temp, jj);
      // Run command in new child process

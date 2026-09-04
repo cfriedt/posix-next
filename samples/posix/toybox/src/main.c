@@ -164,6 +164,10 @@ int main(void)
 	}
 
 	RUN("ping", "-c", "1", "127.0.0.1");
+#ifdef CONFIG_PROCESS_VM
+	/* subshells and command substitution fork() the shell */
+	RUN("sh", "-c", "(echo subshell works); echo cmdsub is $(echo works)");
+#endif
 
 	printf("\ntoybox sample complete\n");
 

@@ -1,0 +1,638 @@
+diff --git a/include/zephyr/kernel/process.h b/include/zephyr/kernel/process.h
+--- a/include/zephyr/kernel/process.h
++++ b/include/zephyr/kernel/process.h
+@@ -308,6 +308,10 @@ struct k_process {
+ 	void *image;
+ 	/** Extension loaded for a pending exec of the leader (system layer), or NULL */
+ 	void *image_next;
++	/** The process's private per-process state area (system layer), NULL when shared */
++	void *state_area;
++	/** Size of the private per-process state area */
++	size_t state_area_size;
+ #endif /* CONFIG_SYS_PROCESS_EXEC */
+ 	/** @endcond */
+ };
+diff --git a/include/zephyr/sys/libc-hooks.h b/include/zephyr/sys/libc-hooks.h
+--- a/include/zephyr/sys/libc-hooks.h
++++ b/include/zephyr/sys/libc-hooks.h
+@@ -106,6 +106,15 @@ extern struct k_mem_partition z_libc_partition;
+ /* C library memory partitions */
+ #define Z_LIBC_DATA K_APP_DMEM(z_libc_partition)
+ 
++/**
++ * @brief An image process is about to enter its main()
++ *
++ * Called by the process leader trampoline with the vectors the process was
++ * entered with, before main(); records what the C library's per-process
++ * state needs of them. A no-op without per-process C library state.
++ */
++void z_process_state_start(int argc, char **argv, char **envp);
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/include/zephyr/sys/process.h b/include/zephyr/sys/process.h
+--- a/include/zephyr/sys/process.h
++++ b/include/zephyr/sys/process.h
+@@ -218,6 +218,22 @@ __syscall int sys_exec_load(k_pid_t child, const char *path);
+  */
+ __syscall int sys_exec_start(k_thread_entry_t entry, char *const *argv, char *const *envp);
+ 
++/**
++ * @brief The calling process's private C library area
++ *
++ * An image process loaded with @kconfig{CONFIG_SYS_PROCESS_STATE_AREA} set
++ * owns a writable area of that size inside its image's block, for the C
++ * library's per-process state: the malloc arena and the standard streams.
++ * The area is zeroed at load; the C library lays it out and initializes it
++ * on first use.
++ *
++ * @param area receives the area's start
++ * @param size receives its size, in bytes
++ * @retval 0 on success
++ * @retval -ENOENT if the calling process shares the boot image's C library state
++ */
++__syscall int sys_process_state_area(void **area, size_t *size);
++
+ /**
+  * @}
+  */
+diff --git a/include/zephyr/sys/process_state.h b/include/zephyr/sys/process_state.h
+new file mode 100644
+--- /dev/null
++++ b/include/zephyr/sys/process_state.h
+@@ -0,0 +1,115 @@
++/*
++ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++/**
++ * @file
++ * @brief Per-process C library state
++ *
++ * An image process loaded with @kconfig{CONFIG_SYS_PROCESS_STATE_AREA} set owns
++ * an area of process memory for the C library's state: its malloc heap, the
++ * environment it was entered with, and slots other libraries fill with state
++ * of their own, allocated from that heap. Processes without an area share the
++ * boot image's state.
++ */
++
++#ifndef ZEPHYR_INCLUDE_SYS_PROCESS_STATE_H_
++#define ZEPHYR_INCLUDE_SYS_PROCESS_STATE_H_
++
++#include <zephyr/kernel.h>
++#include <zephyr/sys/sys_heap.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/** Slots for other libraries' per-process state */
++enum process_state_slot {
++	PROCESS_STATE_SLOT_ENV,		/**< The environment (POSIX getenv() and friends) */
++	PROCESS_STATE_SLOT_STDIO,	/**< Standard I/O streams */
++	PROCESS_STATE_SLOT_POSIX,	/**< POSIX per-process attributes (umask and friends) */
++	PROCESS_STATE_SLOT_COUNT,
++};
++
++/** Whether processes can have C library state of their own in this build */
++#if defined(CONFIG_SYS_PROCESS_EXEC) && defined(CONFIG_USERSPACE) && \
++	(CONFIG_SYS_PROCESS_STATE_AREA > 0)
++#define PROCESS_STATE_SUPPORTED 1
++#else
++#define PROCESS_STATE_SUPPORTED 0
++#endif
++
++#if PROCESS_STATE_SUPPORTED
++/** The per-process state block, at the start of the process's area */
++struct process_state {
++	/** @cond INTERNAL_HIDDEN */
++	atomic_t init;
++	struct k_futex lock;
++	struct k_futex heap_lock;
++	void *slot[PROCESS_STATE_SLOT_COUNT];
++	/** The environment vector the process was entered with */
++	char **envp;
++	/** The process's malloc heap; the arena follows the block */
++	struct sys_heap heap;
++	/** @endcond */
++};
++
++/**
++ * @brief The calling process's C library state
++ *
++ * @return the process's state block, or NULL when the boot state is shared
++ */
++struct process_state *process_state_get(void);
++
++/**
++ * @brief Take the process state lock (a futex: process memory, any mode)
++ *
++ * The heap has its own lock, so the state lock may be held across malloc().
++ */
++void process_state_lock(struct process_state *lp);
++
++/** @brief Release the process state lock */
++void process_state_unlock(struct process_state *lp);
++
++/** @brief Take the process heap lock; never held while taking the state lock */
++void process_state_heap_lock(struct process_state *lp);
++
++/** @brief Release the process heap lock */
++void process_state_heap_unlock(struct process_state *lp);
++#else
++/** No per-process state in this configuration: the block is never instantiated */
++struct process_state;
++
++static inline struct process_state *process_state_get(void)
++{
++	return NULL;
++}
++
++static inline void process_state_lock(struct process_state *lp)
++{
++	ARG_UNUSED(lp);
++}
++
++static inline void process_state_unlock(struct process_state *lp)
++{
++	ARG_UNUSED(lp);
++}
++
++static inline void process_state_heap_lock(struct process_state *lp)
++{
++	ARG_UNUSED(lp);
++}
++
++static inline void process_state_heap_unlock(struct process_state *lp)
++{
++	ARG_UNUSED(lp);
++}
++#endif
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* ZEPHYR_INCLUDE_SYS_PROCESS_STATE_H_ */
+diff --git a/lib/libc/common/CMakeLists.txt b/lib/libc/common/CMakeLists.txt
+--- a/lib/libc/common/CMakeLists.txt
++++ b/lib/libc/common/CMakeLists.txt
+@@ -4,6 +4,7 @@ zephyr_system_include_directories(include)
+ 
+ zephyr_library()
+ zephyr_library_property(ALLOW_EMPTY TRUE)
++zephyr_library_sources(source/process.c)
+ zephyr_library_sources_ifdef(CONFIG_COMMON_LIBC_ABORT source/stdlib/abort.c)
+ zephyr_library_sources_ifdef(CONFIG_COMMON_LIBC_ASCTIME source/time/asctime.c)
+ zephyr_library_sources_ifdef(CONFIG_COMMON_LIBC_LOCALTIME source/time/localtime.c)
+diff --git a/lib/libc/common/source/process.c b/lib/libc/common/source/process.c
+new file mode 100644
+--- /dev/null
++++ b/lib/libc/common/source/process.c
+@@ -0,0 +1,111 @@
++/*
++ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <zephyr/kernel.h>
++#include <zephyr/sys/libc-hooks.h>
++#include <zephyr/sys/process_state.h>
++#include <zephyr/sys/process.h>
++
++#if defined(CONFIG_SYS_PROCESS_EXEC) && defined(CONFIG_USERSPACE) && \
++	(CONFIG_SYS_PROCESS_STATE_AREA > 0)
++
++#define PROCESS_STATE_UNKNOWN ((struct process_state *)-1)
++#define PROCESS_STATE_ARENA_ALIGN 16
++
++#ifdef CONFIG_THREAD_LOCAL_STORAGE
++static __thread struct process_state *process_state_cache = PROCESS_STATE_UNKNOWN;
++#endif /* CONFIG_THREAD_LOCAL_STORAGE */
++
++/* laid out on first use by whichever thread of the process comes first */
++static struct process_state *process_state_init(void *area, size_t size)
++{
++	struct process_state *lp = area;
++	size_t arena = ROUND_UP(sizeof(*lp), PROCESS_STATE_ARENA_ALIGN);
++
++	if (size < arena + 2 * PROCESS_STATE_ARENA_ALIGN) {
++		return NULL;
++	}
++	if (atomic_cas(&lp->init, 0, 1)) {
++		sys_heap_init(&lp->heap, (uint8_t *)area + arena, size - arena);
++		atomic_set(&lp->init, 2);
++	}
++	while (atomic_get(&lp->init) != 2) {
++		k_yield();
++	}
++
++	return lp;
++}
++
++struct process_state *process_state_get(void)
++{
++	struct process_state *lp;
++	void *area;
++	size_t size;
++
++#ifdef CONFIG_THREAD_LOCAL_STORAGE
++	if (process_state_cache != PROCESS_STATE_UNKNOWN) {
++		return process_state_cache;
++	}
++#endif /* CONFIG_THREAD_LOCAL_STORAGE */
++	lp = (sys_process_state_area(&area, &size) == 0) ? process_state_init(area, size) : NULL;
++#ifdef CONFIG_THREAD_LOCAL_STORAGE
++	process_state_cache = lp;
++#endif /* CONFIG_THREAD_LOCAL_STORAGE */
++
++	return lp;
++}
++
++static void futex_lock(struct k_futex *f)
++{
++	while (!atomic_cas(&f->val, 0, 1)) {
++		(void)k_futex_wait(f, 1, K_FOREVER);
++	}
++}
++
++static void futex_unlock(struct k_futex *f)
++{
++	atomic_set(&f->val, 0);
++	(void)k_futex_wake(f, false);
++}
++
++void process_state_lock(struct process_state *lp)
++{
++	futex_lock(&lp->lock);
++}
++
++void process_state_unlock(struct process_state *lp)
++{
++	futex_unlock(&lp->lock);
++}
++
++void process_state_heap_lock(struct process_state *lp)
++{
++	futex_lock(&lp->heap_lock);
++}
++
++void process_state_heap_unlock(struct process_state *lp)
++{
++	futex_unlock(&lp->heap_lock);
++}
++
++void z_process_state_start(int argc, char **argv, char **envp)
++{
++	struct process_state *lp = process_state_get();
++
++	ARG_UNUSED(argc);
++	ARG_UNUSED(argv);
++	if (lp != NULL) {
++		lp->envp = envp;
++	}
++}
++#else
++void z_process_state_start(int argc, char **argv, char **envp)
++{
++	ARG_UNUSED(argc);
++	ARG_UNUSED(argv);
++	ARG_UNUSED(envp);
++}
++#endif
+diff --git a/lib/libc/common/source/stdlib/malloc.c b/lib/libc/common/source/stdlib/malloc.c
+--- a/lib/libc/common/source/stdlib/malloc.c
++++ b/lib/libc/common/source/stdlib/malloc.c
+@@ -125,6 +125,35 @@ Z_LIBC_DATA static struct sys_heap z_malloc_heap;
+ SYS_HEAP_KASAN_ENABLE(z_malloc_heap, HEAP_SIZE);
+ #endif /* CONFIG_SYS_HEAP_KASAN_MALLOC && HEAP_STATIC */
+ 
++#if defined(CONFIG_SYS_PROCESS_EXEC) && defined(CONFIG_USERSPACE) && \
++	(CONFIG_SYS_PROCESS_STATE_AREA > 0)
++#define MALLOC_PROCESS_HEAP 1
++#include <zephyr/sys/process_state.h>
++
++/*
++ * An image process owns its heap (see process_state_get()) for its user-mode execution;
++ * privileged execution on its behalf (a syscall) allocates from the boot heap, whose
++ * buffers it may be resizing.
++ */
++static inline struct process_state *malloc_process(void)
++{
++	return k_is_user_context() ? process_state_get() : NULL;
++}
++
++static inline struct sys_heap *malloc_heap(void)
++{
++	struct process_state *lp = malloc_process();
++
++	return (lp != NULL) ? &lp->heap : &z_malloc_heap;
++}
++#else
++#define MALLOC_PROCESS_HEAP 0
++static inline struct sys_heap *malloc_heap(void)
++{
++	return &z_malloc_heap;
++}
++#endif /* CONFIG_SYS_PROCESS_EXEC && CONFIG_USERSPACE && CONFIG_SYS_PROCESS_STATE_AREA */
++
+ #ifdef CONFIG_MULTITHREADING
+ Z_LIBC_DATA SYS_MUTEX_DEFINE(z_malloc_heap_mutex);
+ 
+@@ -132,6 +161,14 @@ static inline void
+ malloc_lock(void) {
+ 	int lock_ret;
+ 
++#if MALLOC_PROCESS_HEAP
++	struct process_state *lp = malloc_process();
++
++	if (lp != NULL) {
++		process_state_heap_lock(lp);
++		return;
++	}
++#endif /* MALLOC_PROCESS_HEAP */
+ 	lock_ret = sys_mutex_lock(&z_malloc_heap_mutex, K_FOREVER);
+ 	__ASSERT_NO_MSG(lock_ret == 0);
+ }
+@@ -139,6 +176,14 @@ malloc_lock(void) {
+ static inline void
+ malloc_unlock(void)
+ {
++#if MALLOC_PROCESS_HEAP
++	struct process_state *lp = malloc_process();
++
++	if (lp != NULL) {
++		process_state_heap_unlock(lp);
++		return;
++	}
++#endif /* MALLOC_PROCESS_HEAP */
+ 	(void) sys_mutex_unlock(&z_malloc_heap_mutex);
+ }
+ #else
+@@ -152,8 +197,8 @@ void *malloc(size_t size)
+ 
+ 	malloc_lock();
+ 
+-	if (z_malloc_heap.heap != NULL) {
+-		ret = sys_heap_aligned_alloc(&z_malloc_heap, __alignof__(z_max_align_t), size);
++	if (malloc_heap()->heap != NULL) {
++		ret = sys_heap_aligned_alloc(malloc_heap(), __alignof__(z_max_align_t), size);
+ 	}
+ 	if (ret == NULL && size != 0) {
+ 		errno = ENOMEM;
+@@ -170,8 +215,8 @@ void *aligned_alloc(size_t alignment, size_t size)
+ 
+ 	malloc_lock();
+ 
+-	if (z_malloc_heap.heap != NULL) {
+-		ret = sys_heap_aligned_alloc(&z_malloc_heap, alignment, size);
++	if (malloc_heap()->heap != NULL) {
++		ret = sys_heap_aligned_alloc(malloc_heap(), alignment, size);
+ 	}
+ 	if (ret == NULL && size != 0) {
+ 		errno = ENOMEM;
+@@ -268,8 +313,8 @@ void *realloc(void *ptr, size_t requested_size)
+ 
+ 	malloc_lock();
+ 
+-	if (z_malloc_heap.heap != NULL) {
+-		ret = sys_heap_aligned_realloc(&z_malloc_heap, ptr, __alignof__(z_max_align_t),
++	if (malloc_heap()->heap != NULL) {
++		ret = sys_heap_aligned_realloc(malloc_heap(), ptr, __alignof__(z_max_align_t),
+ 					       requested_size);
+ 	}
+ 
+@@ -285,7 +330,7 @@ void *realloc(void *ptr, size_t requested_size)
+ void free(void *ptr)
+ {
+ 	malloc_lock();
+-	sys_heap_free(&z_malloc_heap, ptr);
++	sys_heap_free(malloc_heap(), ptr);
+ 	malloc_unlock();
+ }
+ 
+@@ -297,7 +342,7 @@ int malloc_runtime_stats_get(struct sys_memory_stats *stats)
+ 
+ 	malloc_lock();
+ 
+-	ret = sys_heap_runtime_stats_get(&z_malloc_heap, stats);
++	ret = sys_heap_runtime_stats_get(malloc_heap(), stats);
+ 
+ 	malloc_unlock();
+ 
+diff --git a/lib/os/Kconfig.sys_process b/lib/os/Kconfig.sys_process
+--- a/lib/os/Kconfig.sys_process
++++ b/lib/os/Kconfig.sys_process
+@@ -66,6 +66,16 @@ config SYS_PROCESS_EXEC
+ 	  child's memory domain and the extension is unloaded when the process
+ 	  is reaped.
+ 
++config SYS_PROCESS_STATE_AREA
++	int "Per-process state area of an image process, in bytes"
++	depends on SYS_PROCESS_EXEC && USERSPACE
++	default 0
++	help
++	  Size of the writable area appended to a user-mode image process's
++	  RW block for the C library's per-process state: its malloc arena
++	  and standard streams. 0 leaves image processes sharing the boot
++	  image's C library state.
++
+ config SYS_PROCESS_EXEC_PATH_MAX
+ 	int "Maximum image path length for sys_exec_load()"
+ 	depends on SYS_PROCESS_EXEC
+diff --git a/lib/os/process.c b/lib/os/process.c
+--- a/lib/os/process.c
++++ b/lib/os/process.c
+@@ -1444,6 +1444,7 @@ static void process_leader_entry(void *p1, void *p2, void *p3)
+ #ifdef CONFIG_SYS_PROCESS_EXEC
+ 	if (start.main != NULL) {
+ 		/* the image ABI: a normal return from main() is exit(status) */
++		z_process_state_start(argc, argv, &argv[argc + 1]);
+ 		exit(start.main(argc, argv, &argv[argc + 1]));
+ 	}
+ #endif /* CONFIG_SYS_PROCESS_EXEC */
+@@ -1454,17 +1455,18 @@ static void process_leader_entry(void *p1, void *p2, void *p3)
+ /*
+  * A user-mode process owns a memory domain. A process entered at a base-image
+  * function mirrors its creator's partitions; a process whose image
+- * sys_exec_load() brings in gets only the C library's shared state, and its
+- * image's blocks on top: three partitions, which is what MPU parts with few
+- * regions can afford. Arch domain state (page tables) is not reclaimable, so
+- * pool domains are initialized once and emptied for reuse.
++ * sys_exec_load() brings in gets the system's shared partitions, those of
++ * the default domain (the C library's state, and whatever the application
++ * added there for every user thread), and its image's two blocks on top.
++ * Arch domain state (page tables) is not reclaimable, so pool domains are
++ * initialized once and emptied for reuse.
+  */
+ static struct k_mem_domain domain_pool[RECORD_POOL_MAX];
+ static uint8_t domain_state[RECORD_POOL_MAX]; /* 0 free, 1 used, 2 free but initialized */
+ 
+ enum process_domain_base {
+ 	PROCESS_DOMAIN_MIRROR,	/* the creator's partitions: base-image code */
+-	PROCESS_DOMAIN_LIBC,	/* the C library's shared state: an image process */
++	PROCESS_DOMAIN_SYSTEM,	/* the default domain's partitions: an image process */
+ 	PROCESS_DOMAIN_EMPTY,	/* nothing: a kernel-mode process on an MPU part */
+ };
+ 
+@@ -1527,21 +1529,22 @@ static struct k_mem_domain *process_domain_alloc(enum process_domain_base base,
+ 				goto err;
+ 			}
+ 		}
+-	} else if (base == PROCESS_DOMAIN_LIBC) {
+-		struct k_mem_partition *libc[] = {
+-#if Z_LIBC_PARTITION_EXISTS
+-			&z_libc_partition,
+-#endif
+-#if Z_MALLOC_PARTITION_EXISTS
+-			&z_malloc_partition,
+-#endif
+-		};
++	} else if (base == PROCESS_DOMAIN_SYSTEM) {
++		struct k_mem_domain *sys = &k_mem_domain_default;
++
++		for (uint8_t i = 0; i < CONFIG_MAX_DOMAIN_PARTITIONS; i++) {
++			struct k_mem_partition *part = &sys->partitions[i];
+ 
+-		for (size_t i = 0; i < ARRAY_SIZE(libc); i++) {
+-			if (libc[i]->size == 0U) {
++			if (part->size == 0U) {
+ 				continue;
+ 			}
+-			ret = k_mem_domain_add_partition(d, libc[i]);
++#if Z_MALLOC_PARTITION_EXISTS && (CONFIG_SYS_PROCESS_STATE_AREA > 0)
++			/* a process with its own arena has no business in the boot arena */
++			if (part->start == z_malloc_partition.start) {
++				continue;
++			}
++#endif /* Z_MALLOC_PARTITION_EXISTS && CONFIG_SYS_PROCESS_STATE_AREA */
++			ret = k_mem_domain_add_partition(d, part);
+ 			if (ret != 0) {
+ 				goto err;
+ 			}
+@@ -1568,7 +1571,7 @@ static void process_domain_release(struct k_mem_domain *d)
+ 
+ static int process_domain_create(struct k_process *proc, bool mirror)
+ {
+-	enum process_domain_base base = mirror ? PROCESS_DOMAIN_MIRROR : PROCESS_DOMAIN_LIBC;
++	enum process_domain_base base = mirror ? PROCESS_DOMAIN_MIRROR : PROCESS_DOMAIN_SYSTEM;
+ 	struct k_mem_domain *d = process_domain_alloc(base, _current->mem_domain_info.mem_domain);
+ 
+ 	if (d == NULL) {
+@@ -1647,6 +1650,42 @@ static void image_bury(struct llext *ext)
+ 	__ASSERT(buried, "image graveyard full");
+ }
+ 
++/* the C library area an image carries, if the load asked for one */
++static void process_state_from_image(struct k_process *proc, struct llext *ext)
++{
++	proc->state_area = NULL;
++	proc->state_area_size = 0;
++#ifdef CONFIG_LLEXT_REGION_BLOCKS
++	if ((ext != NULL) && (ext->rw_extra_size != 0)) {
++		proc->state_area = (uint8_t *)ext->blocks[LLEXT_BLOCK_RW] + ext->rw_extra_offset;
++		proc->state_area_size = ext->block_size[LLEXT_BLOCK_RW] - ext->rw_extra_offset;
++	}
++#endif /* CONFIG_LLEXT_REGION_BLOCKS */
++}
++
++int z_impl_sys_process_state_area(void **area, size_t *size)
++{
++	struct k_process *proc = _current->process;
++
++	if ((proc == NULL) || (proc->state_area == NULL)) {
++		return -ENOENT;
++	}
++	*area = proc->state_area;
++	*size = proc->state_area_size;
++
++	return 0;
++}
++
++#ifdef CONFIG_USERSPACE
++static inline int z_vrfy_sys_process_state_area(void **area, size_t *size)
++{
++	K_OOPS(K_SYSCALL_MEMORY_WRITE(area, sizeof(*area)));
++	K_OOPS(K_SYSCALL_MEMORY_WRITE(size, sizeof(*size)));
++	return z_impl_sys_process_state_area(area, size);
++}
++#include <zephyr/syscalls/sys_process_state_area_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
+ void z_process_image_drop(struct k_process *proc)
+ {
+ 	struct llext *ext = proc->image;
+@@ -1654,6 +1693,8 @@ void z_process_image_drop(struct k_process *proc)
+ 
+ 	proc->image = NULL;
+ 	proc->image_next = NULL;
++	proc->state_area = NULL;
++	proc->state_area_size = 0;
+ 	image_bury(ext);
+ 	image_bury(next);
+ }
+@@ -1775,6 +1816,13 @@ int z_impl_sys_exec_load(k_pid_t child, const char *path)
+ 	/* images of already-reaped processes give their memory back first */
+ 	image_graveyard_drain();
+ 
++#if defined(CONFIG_USERSPACE) && (CONFIG_SYS_PROCESS_STATE_AREA > 0)
++	if ((child->base.user_options & K_USER) != 0U) {
++		/* a user-mode image process owns its C library state */
++		param.rw_extra = CONFIG_SYS_PROCESS_STATE_AREA;
++	}
++#endif /* CONFIG_USERSPACE && CONFIG_SYS_PROCESS_STATE_AREA */
++
+ 	ret = llext_load(&fldr.loader, name, &ext, &param);
+ 	if (ret < 0) {
+ 		return (ret == -ENOMEM) ? -ENOMEM : -ENOENT;
+@@ -1825,6 +1873,7 @@ int z_impl_sys_exec_load(k_pid_t child, const char *path)
+ 		}
+ 	} else {
+ 		proc->image = ext;
++		process_state_from_image(proc, ext);
+ 		*(const void **)&blk->start.main = main_sym;
+ 	}
+ 
+@@ -1860,6 +1909,21 @@ int z_impl_sys_exec_load(k_pid_t child, const char *path)
+ 	return -ENOTSUP;
+ }
+ 
++int z_impl_sys_process_state_area(void **area, size_t *size)
++{
++	ARG_UNUSED(area);
++	ARG_UNUSED(size);
++	return -ENOENT;
++}
++
++#ifdef CONFIG_USERSPACE
++static inline int z_vrfy_sys_process_state_area(void **area, size_t *size)
++{
++	return z_impl_sys_process_state_area(area, size);
++}
++#include <zephyr/syscalls/sys_process_state_area_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
+ #ifdef CONFIG_USERSPACE
+ static inline int z_vrfy_sys_exec_load(k_pid_t child, const char *path)
+ {
+@@ -1940,6 +2004,7 @@ static int exec_start(k_thread_entry_t entry, char *const *argv, char *const *en
+ 
+ 		proc->image = proc->image_next;
+ 		proc->image_next = NULL;
++		process_state_from_image(proc, proc->image);
+ #ifdef CONFIG_USERSPACE
+ 		if (proc->domain_next != NULL) {
+ 			/* the switch: the old domain, old image and all, is retired */
+@@ -2076,6 +2141,8 @@ int z_sys_clone_process(const struct sys_clone_args *args, k_pid_t *child)
+ #ifdef CONFIG_SYS_PROCESS_EXEC
+ 	proc->image = NULL;
+ 	proc->image_next = NULL;
++	proc->state_area = NULL;
++	proc->state_area_size = 0;
+ #endif /* CONFIG_SYS_PROCESS_EXEC */
+ 
+ 	/* create the leader paused; k_process_init() re-homes it */
