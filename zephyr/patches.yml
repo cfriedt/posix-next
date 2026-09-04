@@ -3887,6 +3887,20 @@ patches:
       module implements over the native net_if API. Neither toolchain libc
       ships the header; the minimal libc resolves it through the module
       include path directly.
+  - path: zephyr/sys-clone-staged-args.patch
+    sha256sum: 40ea30938a6d8949a7937c21eb68ca519e0c971d5fef332db4740f354c1c0a59
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-03
+    upstreamable: true
+    comments: |
+      sys_clone(): stage argv/envp into the child. The vectors are packed
+      into a block hung off the process record and claimed by the leader's
+      trampoline through sys_process_args() into a frame that lives as long
+      as the process, so a child in any mode reads copies it owns; the
+      leader is entered as entry(argv, envp, argc). Unclaimed blocks are
+      released at reap and on every creation error path.
   - path: toybox/toybox-zephyr-module.patch
     sha256sum: 0ab0cd19222ae64e0ed6281878b0457266f65ea615560117bff8a713e510b564
     module: modules/lib/toybox
