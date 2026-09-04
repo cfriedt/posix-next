@@ -9,17 +9,7 @@
 #include <errno.h>
 
 #include <zephyr/sys/atomic.h>
-#include <zephyr/sys/libc-hooks.h>
 #include <zephyr/sys/util.h>
-
-struct posix_atfork {
-	void (*prepare)(void);
-	void (*parent)(void);
-	void (*child)(void);
-};
-
-static Z_LIBC_DATA struct posix_atfork atfork_handlers[MAX(POSIX_THREAD_ATFORK_MAX, 1)];
-static Z_LIBC_DATA atomic_t atfork_count;
 
 int z_posix_atfork_register(void (*prepare)(void), void (*parent)(void), void (*child)(void))
 {
@@ -30,18 +20,23 @@ int z_posix_atfork_register(void (*prepare)(void), void (*parent)(void), void (*
 
 	return ENOMEM;
 #else
+	struct posix_process_attr *pa = z_posix_process_attr();
 	atomic_val_t slot;
 
+	if (pa == NULL) {
+		return ENOMEM;
+	}
+
 	do {
-		slot = atomic_get(&atfork_count);
+		slot = atomic_get(&pa->atfork_count);
 		if (slot >= POSIX_THREAD_ATFORK_MAX) {
 			return ENOMEM;
 		}
-	} while (!atomic_cas(&atfork_count, slot, slot + 1));
+	} while (!atomic_cas(&pa->atfork_count, slot, slot + 1));
 
-	atfork_handlers[slot].prepare = prepare;
-	atfork_handlers[slot].parent = parent;
-	atfork_handlers[slot].child = child;
+	pa->atfork[slot].prepare = prepare;
+	pa->atfork[slot].parent = parent;
+	pa->atfork[slot].child = child;
 
 	return 0;
 #endif
@@ -49,7 +44,15 @@ int z_posix_atfork_register(void (*prepare)(void), void (*parent)(void), void (*
 
 void z_posix_atfork_run(enum posix_atfork_stage stage)
 {
-	int n = (int)atomic_get(&atfork_count);
+	struct posix_process_attr *pa = z_posix_process_attr();
+	struct posix_atfork *atfork_handlers;
+	int n;
+
+	if (pa == NULL) {
+		return;
+	}
+	atfork_handlers = pa->atfork;
+	n = (int)atomic_get(&pa->atfork_count);
 
 	switch (stage) {
 	case POSIX_ATFORK_PREPARE:

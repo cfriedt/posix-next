@@ -13,6 +13,8 @@
 
 #include <zephyr/sys/process.h>
 #include <errno.h>
+#include <sys/types.h>
+#include <zephyr/sys/atomic.h>
 #include <limits.h>
 #include <sched.h>
 #include <stdbool.h>
@@ -290,6 +292,31 @@ enum posix_atfork_stage {
 	POSIX_ATFORK_PARENT,
 	POSIX_ATFORK_CHILD,
 };
+
+struct posix_atfork {
+	void (*prepare)(void);
+	void (*parent)(void);
+	void (*child)(void);
+};
+
+#ifndef POSIX_THREAD_ATFORK_MAX
+#define POSIX_THREAD_ATFORK_MAX 0
+#endif
+
+/*
+ * Per-process POSIX attributes. The boot image's live in a static; an image
+ * process with C library state of its own carries a block in a slot there.
+ */
+struct posix_process_attr {
+	mode_t cmask;
+	atomic_t atfork_count;
+	struct posix_atfork atfork[MAX(POSIX_THREAD_ATFORK_MAX, 1)];
+};
+
+/* the calling process's block, or NULL when it cannot be allocated */
+struct posix_process_attr *z_posix_process_attr(void);
+/* the boot image's block, shared by every thread without process state */
+struct posix_process_attr *z_posix_boot_process_attr(void);
 
 int z_posix_atfork_register(void (*prepare)(void), void (*parent)(void), void (*child)(void));
 void z_posix_atfork_run(enum posix_atfork_stage stage);
