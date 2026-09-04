@@ -4417,6 +4417,21 @@ patches:
       reports no rusage, getconf guards the Linux-only _SC_UIO_MAXIOV, and
       hostname looks a name up through getaddrinfo(), as the rest of toybox
       does, instead of gethostbyname().
+  - path: toybox/toybox-sh-expand-one-arg-ownership.patch
+    sha256sum: b654fb77df8f5c95b5609468b88fc417bcdfc96983340343941e9af5a090ecec
+    module: modules/lib/toybox
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-04
+    upstreamable: true
+    comments: |
+      toysh: expand_one_arg() hands its callers a string they free whenever
+      it differs from the input, but for a bare $var the expansion borrows
+      the variable's own string, so `case $x in` queued a pointer into the
+      variable for deletion and the frame pop freed it a second time (an
+      interior free on Zephyr's heap, a heap-buffer-overflow under ASAN on
+      the host). The expansion now copies a borrowed result, which is what
+      every caller already assumes it owns.
   - path: picolibc/tinystdio-wide-stream-conformance.patch
     sha256sum: 42dd7dd3fa77d3ab04f3eed65bdb53cea4cb7dd9c3900dede7742734ecb7140e
     module: picolibc
