@@ -26,6 +26,24 @@ extern "C" {
 /** @brief Maximum length of a network interface name including the NUL terminator. */
 #define IF_NAMESIZE NET_IFNAMSIZ
 
+/* SIOCGIFFLAGS-style interface flags (BSD extension, Linux values) */
+#ifndef IFF_UP
+/** @brief Interface is administratively up. */
+#define IFF_UP 0x1
+#endif
+#ifndef IFF_BROADCAST
+/** @brief Interface has a broadcast address. */
+#define IFF_BROADCAST 0x2
+#endif
+#ifndef IFF_LOOPBACK
+/** @brief Interface is a loopback device. */
+#define IFF_LOOPBACK 0x8
+#endif
+#ifndef IFF_RUNNING
+/** @brief Interface is operationally running. */
+#define IFF_RUNNING 0x40
+#endif
+
 #if !(defined(_IF_NAMEINDEX_DECLARED) || defined(__if_nameindex_defined)) || defined(__DOXYGEN__)
 /** @brief Network interface name-to-index mapping. */
 struct if_nameindex {
