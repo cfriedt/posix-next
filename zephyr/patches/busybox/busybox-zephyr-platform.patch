@@ -232,6 +232,23 @@ index 2232c6864..40fe92279 100644
  
  #else
  
+diff --git a/libbb/xconnect.c b/libbb/xconnect.c
+index 095f7ff47..8d47c177d 100644
+--- a/libbb/xconnect.c
++++ b/libbb/xconnect.c
+@@ -227,7 +227,12 @@ IF_NOT_FEATURE_IPV6(sa_family_t af = AF_INET;)
+ 	 * check whether this is a numeric IPv4 */
+ 	IF_FEATURE_IPV6(if(af != AF_INET6)) {
+ 		struct in_addr in4;
++#ifdef __ZEPHYR__
++		/* no BSD inet_aton(): strict dotted-quad is enough here */
++		if (inet_pton(AF_INET, host, &in4) == 1) {
++#else
+ 		if (inet_aton(host, &in4) != 0) {
++#endif
+ 			r = xzalloc(LSA_LEN_SIZE + sizeof(struct sockaddr_in));
+ 			r->len = sizeof(struct sockaddr_in);
+ 			r->u.sa.sa_family = AF_INET;
 diff --git a/libbb/xfuncs_printf.c b/libbb/xfuncs_printf.c
 index 8afa1ef68..0def62f25 100644
 --- a/libbb/xfuncs_printf.c
@@ -253,6 +270,95 @@ index 8afa1ef68..0def62f25 100644
  }
  
  
+diff --git a/networking/ping.c b/networking/ping.c
+index b7e6955a9..069ce0f50 100644
+--- a/networking/ping.c
++++ b/networking/ping.c
+@@ -229,6 +229,20 @@ create_icmp_socket(void)
+ 		bb_simple_perror_msg_and_die(bb_msg_can_not_create_raw_socket);
+ 	}
+ 
++#ifdef __ZEPHYR__
++	{
++		/* signals only deliver at syscall boundaries: bound each
++		 * receive so the pacing SIGALRM gets one */
++		struct timeval tv = { .tv_usec = 100 * 1000 };
++		sigset_t sset;
++
++		setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
++		/* the spawning shell may leave SIGALRM in the inherited mask */
++		sigemptyset(&sset);
++		sigaddset(&sset, SIGALRM);
++		sigprocmask(SIG_UNBLOCK, &sset, NULL);
++	}
++#endif
+ 	xmove_fd(sock, pingsock);
+ }
+ 
+@@ -275,6 +289,10 @@ static void ping4(len_and_sockaddr *lsa)
+ 		c = recv(pingsock, G.packet, sizeof(G.packet), 0);
+ #endif
+ 		if (c < 0) {
++#ifdef __ZEPHYR__
++			if (errno == EAGAIN || errno == EWOULDBLOCK)
++				continue; /* receive timeout: a syscall boundary */
++#endif
+ 			if (errno != EINTR)
+ 				bb_simple_perror_msg("recvfrom");
+ 			continue;
+@@ -320,6 +338,10 @@ static void ping6(len_and_sockaddr *lsa)
+ 		c = recv(pingsock, G.packet, sizeof(G.packet), 0);
+ #endif
+ 		if (c < 0) {
++#ifdef __ZEPHYR__
++			if (errno == EAGAIN || errno == EWOULDBLOCK)
++				continue; /* receive timeout: a syscall boundary */
++#endif
+ 			if (errno != EINTR)
+ 				bb_simple_perror_msg("recvfrom");
+ 			continue;
+@@ -531,6 +553,11 @@ static void sendping_tail(void (*sp)(int), int size_pkt)
+ 
+ 	if (pingcount == 0 || G.ntransmitted < pingcount) {
+ 		/* Didn't send all pings yet - schedule next in -i SEC interval */
++#ifdef __ZEPHYR__
++		/* no setitimer(): pace with alarm(), rounding subsecond intervals up */
++		signal(SIGALRM, sp);
++		alarm((G.interval_us + 999999) / 1000000);
++#else
+ 		struct itimerval i;
+ 		signal(SIGALRM, sp);
+ 		/*ualarm(G.interval_us, 0); - does not work for >=1sec on some libc */
+@@ -539,6 +566,7 @@ static void sendping_tail(void (*sp)(int), int size_pkt)
+ 		i.it_value.tv_sec = G.interval_us / 1000000;
+ 		i.it_value.tv_usec = G.interval_us % 1000000;
+ 		setitimer(ITIMER_REAL, &i, NULL);
++#endif
+ 	} else { /* -c NN, and all NN are sent */
+ 		/* Wait for the last ping to come back.
+ 		 * -W timeout: wait for a response in seconds.
+@@ -801,6 +829,10 @@ static void ping4(len_and_sockaddr *lsa)
+ 		c = recvfrom(pingsock, G.rcv_packet, G.sizeof_rcv_packet, 0,
+ 				(struct sockaddr *) &from, &fromlen);
+ 		if (c < 0) {
++#ifdef __ZEPHYR__
++			if (errno == EAGAIN || errno == EWOULDBLOCK)
++				continue; /* receive timeout: a syscall boundary */
++#endif
+ 			if (errno != EINTR)
+ 				bb_simple_perror_msg("recvfrom");
+ 			continue;
+@@ -882,6 +914,10 @@ static void ping6(len_and_sockaddr *lsa)
+ 		msg.msg_controllen = sizeof(control_buf);
+ 		c = recvmsg(pingsock, &msg, 0);
+ 		if (c < 0) {
++#ifdef __ZEPHYR__
++			if (errno == EAGAIN || errno == EWOULDBLOCK)
++				continue; /* receive timeout: a syscall boundary */
++#endif
+ 			if (errno != EINTR)
+ 				bb_simple_perror_msg("recvfrom");
+ 			continue;
 diff --git a/shell/hush.c b/shell/hush.c
 index d1e954485..1a772495a 100644
 --- a/shell/hush.c

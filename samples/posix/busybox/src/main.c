@@ -148,6 +148,7 @@ int main(void)
 	 * the binary, exec follows the link, and busybox dispatches on argv[0]
 	 */
 	RUN("--install", "-s", "/bin");
+	RUN("ping", "-c", "1", "127.0.0.1");
 	RUN_AS("ls", "-l", "/bin");
 
 	/* hush: builtins, variables, globbing, and control flow run in the
