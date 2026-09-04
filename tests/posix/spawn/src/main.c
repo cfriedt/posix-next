@@ -5,6 +5,7 @@
  */
 
 #include <errno.h>
+#include <pthread.h>
 #include <fcntl.h>
 #include <spawn.h>
 #include <string.h>
@@ -77,6 +78,10 @@ static void posix_spawn_image(void)
 	char *const envp[] = {"SPAWN=1", NULL};
 	pid_t pid = -1;
 	int status = -1;
+
+	/* fill this process's fork handler table: the image registers into one of its own */
+	zassert_ok(pthread_atfork(NULL, NULL, NULL));
+	zassert_equal(pthread_atfork(NULL, NULL, NULL), ENOMEM);
 
 	for (int i = 0; i < 3; i++) {
 		zassert_ok(posix_spawn(&pid, SPAWN_IMAGE, NULL, NULL, argv, envp));

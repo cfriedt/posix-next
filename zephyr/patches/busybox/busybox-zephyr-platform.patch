@@ -136,7 +136,7 @@ index c449075b9..391ab3c01 100644
   * Now, define prototypes for all the functions defined in platform.c
   * These must come after all the HAVE_* macros are defined (or not)
 diff --git a/libbb/appletlib.c b/libbb/appletlib.c
-index 34b74c3df..3cfe6bbef 100644
+index 34b74c3df..aaeb21f7c 100644
 --- a/libbb/appletlib.c
 +++ b/libbb/appletlib.c
 @@ -28,7 +28,14 @@
@@ -172,6 +172,29 @@ index 34b74c3df..3cfe6bbef 100644
  		}
  		/* busybox --install [-s] [DIR]:
  		 * -s: make symlinks
+@@ -1039,9 +1053,22 @@ get_script_content(unsigned n UNUSED_PARAM)
+ #if ENABLE_BUILD_LIBBUSYBOX
+ int lbb_main(char **argv)
+ #else
++#ifdef __ZEPHYR__
++/*
++ * The environment arrives as the third argument: there is no C runtime in
++ * front of main() to publish it, and the base image's environ is shared by
++ * every process.
++ */
++char **environ;
++int main(int argc UNUSED_PARAM, char **argv, char **envp)
++#else
+ int main(int argc UNUSED_PARAM, char **argv)
+ #endif
++#endif
+ {
++#ifdef __ZEPHYR__
++	environ = envp;
++#endif
+ #if 0
+ 	/* TODO: find a use for a block of memory between end of .bss
+ 	 * and end of page. For example, I'm getting "_end:0x812e698 2408 bytes"
 diff --git a/libbb/poll_with_signals.c b/libbb/poll_with_signals.c
 index 47419f240..86f7f4739 100644
 --- a/libbb/poll_with_signals.c

@@ -5,13 +5,15 @@
  */
 
 #include <errno.h>
+#include <stdlib.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include <zephyr/sys/libc-hooks.h>
 #include <zephyr/sys/zvfs.h>
 #include <zephyr/sys/zvfs_fs.h>
 #include <zephyr/toolchain.h>
+
+#include "posix_internal.h"
 
 /*
  * Zephyr file systems store neither owners nor permission bits: every file
@@ -20,7 +22,17 @@
  * umask() round-trips, but with no stored modes it masks nothing.
  */
 
-static Z_LIBC_DATA mode_t attr_cmask;
+static mode_t *attr_cmask_ptr(void)
+{
+	struct posix_process_attr *pa = z_posix_process_attr();
+
+	if (pa == NULL) {
+		/* no block of its own: the boot image's mask, as before process state */
+		pa = z_posix_boot_process_attr();
+	}
+
+	return &pa->cmask;
+}
 
 static int attr_path_exists(const char *path)
 {
@@ -81,9 +93,9 @@ int fchown(int fildes, uid_t owner, gid_t group)
 
 mode_t umask(mode_t cmask)
 {
-	mode_t prev = attr_cmask;
+	mode_t *mask = attr_cmask_ptr();
+	mode_t prev = *mask;
 
-	attr_cmask = cmask & 0777;
-
+	*mask = cmask & 0777;
 	return prev;
 }
