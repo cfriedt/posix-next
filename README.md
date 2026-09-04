@@ -76,6 +76,9 @@ guide for workspace setup, SDK installation, and sample applications.
 Contributions are welcome! Please open an issue or pull request on
 [GitHub](https://github.com/cfriedt/posix-next).
 
+Changes to the Zephyr tree are carried as patches under `zephyr/patches/` and submitted
+upstream with `west patch submit` (see `doc/upstreaming.rst`).
+
 ## License
 
 This project is licensed under the [Apache License 2.0](LICENSE).
