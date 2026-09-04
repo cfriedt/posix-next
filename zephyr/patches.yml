@@ -3649,6 +3649,26 @@ patches:
       the child's own descriptor table before entering, exiting with 127
       when one fails. A user-mode creator never has to touch another
       process's table, which is what posix_spawn() from user mode needs.
+  - path: zephyr/sys-process-state-area.patch
+    sha256sum: bbc7b61cdceb8251a7202a23d748e64c739e564c494a12b6133da1b4f04e75b8
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-04
+    upstreamable: true
+    comments: |
+      Per-process C library state for user-mode image processes.
+      CONFIG_SYS_PROCESS_STATE_AREA bytes are appended to a user image's
+      writable block at load and published by sys_process_state_area(); the common
+      C library lays out a struct process_state there (a state lock, a heap
+      lock, slots for the environment, stdio and POSIX state, and the
+      process's malloc heap), set up lazily and started from the leader's
+      trampoline with the entry vectors. malloc() selects the process heap
+      for user-mode execution only: privileged execution on the process's
+      behalf keeps the boot heap it may be resizing. A user process's domain
+      is seeded from the default domain rather than the C library
+      partitions alone, minus the boot malloc partition when the process
+      owns an arena.
   - path: zephyr/libc-sys-stat-utime-markers.patch
     sha256sum: 8edfcf83058522bb80d601e92c4a9e6be14baec04cf8253ffbd344fbadf05b78
     module: zephyr
