@@ -572,7 +572,7 @@ Each is expected to be retired as the corresponding substrate lands.
        extension; the new image runs on the calling thread restarted at
        the base of its own stack (on its live frames only where the
        architecture lacks stack-jump support, e.g. native_sim).
-       ``execvp`` and ``execlp`` search a bare name along
+       ``execvp``, ``execlp`` and ``posix_spawnp`` search a bare name along
        ``PATH`` (:kconfig:option:`CONFIG_POSIX_DEFAULT_PATH` when it is
        unset, which is also what ``confstr(_CS_PATH)`` reports): every
        candidate is opened, and the first that is an executable regular file
