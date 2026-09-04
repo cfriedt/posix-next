@@ -5,6 +5,7 @@
  */
 
 #include <errno.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -174,20 +175,31 @@ static int exec_domain_enter(int slot, struct llext *ext)
 
 int z_posix_exec_llext(const char *path, char *const argv[], char *const envp[])
 {
+	static atomic_t exec_instance;
 	struct llext_fs_loader fldr = LLEXT_FS_LOADER(path);
 	struct llext_load_param param = LLEXT_LOAD_PARAM_DEFAULT;
 	struct llext *ext = NULL;
 	struct llext *prior;
 	int (*ext_main)(int argc, char **argv, char **envp);
-	const char *name;
+	char name[LLEXT_MAX_NAME_LEN + 1];
+	char suffix[8];
+	const char *base;
 	int slot;
 	int ret;
 
-	/* the extension's name is the path's last component */
-	name = strrchr(path, '/');
-	name = (name == NULL) ? path : (name + 1);
+	/*
+	 * Each exec loads a private instance of the image, named by the
+	 * path's last component plus an instance number: llext shares loaded
+	 * extensions by name, which would hand this process another running
+	 * image's writable globals.
+	 */
+	base = strrchr(path, '/');
+	base = (base == NULL) ? path : (base + 1);
+	(void)snprintf(suffix, sizeof(suffix), ".%x",
+		       (unsigned int)atomic_inc(&exec_instance) & 0xffffU);
+	(void)snprintf(name, sizeof(name), "%.*s%s",
+		       (int)(LLEXT_MAX_NAME_LEN - strlen(suffix)), base, suffix);
 
-	/* a positive return is a use count: the image is already loaded and shared */
 	/* the table is claimed first: a full table is ENOMEM before any heap is spent */
 	slot = exec_image_claim(k_getpid());
 	if (slot < 0) {
