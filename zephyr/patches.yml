@@ -3927,6 +3927,45 @@ patches:
       partitions; the image's regions join it, its main() is recorded in the
       staged block and entered as exit(main(argc, argv, envp)), and the
       extension is unloaded when the process is reaped.
+  - path: zephyr/arch-user-mode-restart.patch
+    sha256sum: 9ae8db98e558de23a2fc9be29bd7161350872f7d7b8584f0a2c443d78d52110b
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-04
+    upstreamable: true
+    comments: |
+      arch_user_mode_restart(): re-enter user mode on a fresh user stack
+      from a system call, for a thread that already runs in user mode.
+      The default calls arch_user_mode_enter(); ARM Cortex-M and RISC-V
+      override it since their first-entry paths make one-time stack
+      guard adjustments, and arm64 to drop the exception depth of the
+      system call it never returns from. z_thread_user_mode_restart() is
+      the kernel side, used by the exec of a user-mode process.
+  - path: zephyr/llext-remove-domain.patch
+    sha256sum: e09ba3ad329e22fcf03169643a9544261c3fceb135d54d84ef0d188ecc9bb7a8
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-04
+    upstreamable: true
+    comments: |
+      llext_remove_domain(): the inverse of llext_add_domain(), so an
+      extension's partitions can leave a domain before it is unloaded.
+  - path: zephyr/sys-exec-start.patch
+    sha256sum: 62a9cea693c60a4543be1ec25f91f5f5cf86935e3b71187f419b4e5f24fab2a5
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-04
+    upstreamable: true
+    comments: |
+      sys_exec_start(): replace the calling process's image. Stages the
+      vectors, closes FD_CLOEXEC descriptors, swaps in the image loaded as
+      pending by sys_exec_load() on the caller, and restarts the leader
+      on a fresh stack in its own mode. A self-exec on MPU parts gets a
+      pending domain the switch installs; images of reaped processes are
+      unloaded from a graveyard before the next load.
   - path: toybox/toybox-zephyr-module.patch
     sha256sum: 0ab0cd19222ae64e0ed6281878b0457266f65ea615560117bff8a713e510b564
     module: modules/lib/toybox

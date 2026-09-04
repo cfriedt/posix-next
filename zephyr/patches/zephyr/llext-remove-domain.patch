@@ -1,0 +1,53 @@
+diff --git a/include/zephyr/llext/llext.h b/include/zephyr/llext/llext.h
+--- a/include/zephyr/llext/llext.h
++++ b/include/zephyr/llext/llext.h
+@@ -418,6 +418,16 @@ int llext_call_fn(struct llext *ext, const char *sym_name);
+  */
+ int llext_add_domain(struct llext *ext, struct k_mem_domain *domain);
+ 
++/**
++ * @brief Remove the known memory partitions of the extension from a memory domain
++ *
++ * @param[in] ext Extension to remove partitions from
++ * @param[in] domain Memory domain to remove partitions from
++ * @returns 0 on success, or a negative error code.
++ * @retval -ENOSYS Option @kconfig{CONFIG_USERSPACE} is not enabled or supported.
++ */
++int llext_remove_domain(struct llext *ext, struct k_mem_domain *domain);
++
+ /**
+  * @brief Architecture specific opcode update function
+  *
+diff --git a/subsys/llext/llext_mem.c b/subsys/llext/llext_mem.c
+--- a/subsys/llext/llext_mem.c
++++ b/subsys/llext/llext_mem.c
+@@ -563,6 +563,29 @@ int llext_add_domain(struct llext *ext, struct k_mem_domain *domain)
+ #endif
+ }
+ 
++int llext_remove_domain(struct llext *ext, struct k_mem_domain *domain)
++{
++#ifdef CONFIG_USERSPACE
++	int ret = 0;
++
++	for (int i = 0; i < LLEXT_MEM_PARTITIONS; i++) {
++		if (ext->mem_parts[i].size == 0) {
++			continue;
++		}
++		ret = k_mem_domain_remove_partition(domain, &ext->mem_parts[i]);
++		if (ret != 0) {
++			LOG_ERR("Failed removing memory partition %d from domain %p",
++				i, domain);
++			return ret;
++		}
++	}
++
++	return ret;
++#else
++	return -ENOSYS;
++#endif
++}
++
+ int llext_heap_init_harvard(void *instr_mem, size_t instr_bytes, void *data_mem, size_t data_bytes)
+ {
+ #if !defined(CONFIG_LLEXT_HEAP_DYNAMIC) || !defined(CONFIG_HARVARD)
