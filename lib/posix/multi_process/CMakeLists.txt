@@ -21,7 +21,6 @@ if(NOT CONFIG_TC_PROVIDES_POSIX_MULTI_PROCESS)
     execlp.c
     execv.c
     execve.c
-    exec_run.c
     execvp.c
     fork.c
     posix_spawn_image.c
@@ -38,5 +37,4 @@ if(NOT CONFIG_TC_PROVIDES_POSIX_MULTI_PROCESS)
     waitid.c
     waitpid.c
   )
-  zephyr_library_sources_ifdef(CONFIG_POSIX_EXEC_LLEXT exec_llext.c)
 endif()
