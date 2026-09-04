@@ -238,7 +238,7 @@ defined only while all of them remain enabled.
           :ref:`POSIX_DYNAMIC_LINKING <posix_option_group_dynamic_linking>`,,
           :ref:`POSIX_FIFO <posix_option_group_fifo>`,,
           :ref:`POSIX_FILE_ATTRIBUTES <posix_option_group_file_attributes>`, yes, :kconfig:option:`CONFIG_POSIX_FILE_ATTRIBUTES`
-          :ref:`POSIX_FILE_SYSTEM_EXT <posix_option_group_file_system_ext>`,,
+          :ref:`POSIX_FILE_SYSTEM_EXT <posix_option_group_file_system_ext>`, yes, :kconfig:option:`CONFIG_POSIX_FILE_SYSTEM_EXT`
           :ref:`POSIX_FILE_SYSTEM_GLOB <posix_option_group_file_system_glob>`, yes, :kconfig:option:`CONFIG_POSIX_FILE_SYSTEM_GLOB`
           :ref:`POSIX_JOB_CONTROL <posix_option_group_job_control>`, yes, :kconfig:option:`CONFIG_POSIX_JOB_CONTROL`
           :ref:`POSIX_REGEXP <posix_option_group_regexp>`, yes, :kconfig:option:`CONFIG_POSIX_REGEXP`
