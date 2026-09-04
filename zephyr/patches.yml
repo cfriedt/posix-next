@@ -4084,3 +4084,18 @@ patches:
       inherited, runs toybox commands through the toybox binary, reports
       that subshells need fork(), keeps a per-image environ set from envp,
       and leaves the shared stdout buffering alone.
+  - path: toybox/toybox-sh-expand-one-arg-ownership.patch
+    sha256sum: b654fb77df8f5c95b5609468b88fc417bcdfc96983340343941e9af5a090ecec
+    module: modules/lib/toybox
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-04
+    upstreamable: true
+    comments: |
+      toysh: expand_one_arg() hands its callers a string they free whenever
+      it differs from the input, but for a bare $var the expansion borrows
+      the variable's own string, so `case $x in` queued a pointer into the
+      variable for deletion and the frame pop freed it a second time (an
+      interior free on Zephyr's heap, a heap-buffer-overflow under ASAN on
+      the host). The expansion now copies a borrowed result, which is what
+      every caller already assumes it owns.
