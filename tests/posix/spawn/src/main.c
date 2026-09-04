@@ -26,6 +26,13 @@ static char *const spawn_argv[] = {"child", NULL};
 static char *const spawn_envp[] = {NULL};
 
 #ifdef CONFIG_POSIX_EXEC_LLEXT
+#include <stdlib.h>
+#include <zephyr/llext/symbol.h>
+
+/* what the image links against: its own process's malloc */
+EXPORT_SYMBOL(malloc);
+EXPORT_SYMBOL(free);
+
 #define SPAWN_IMAGE "/RAM:/hello.llext"
 #define SPAWN_NOEXEC_IMAGE "/RAM:/noexec.llext"
 
@@ -77,8 +84,10 @@ static void posix_spawn_image(void)
 		zassert_true(WIFEXITED(status));
 		zassert_equal(WEXITSTATUS(status), 42);
 	}
-	/* reaping unloaded the image: no instance lingers */
-	zassert_is_null(llext_by_name("hello.llext.0"));
+	/* reaping unloaded the image: no instance lingers (a kernel-side lookup) */
+	if (!k_is_user_context()) {
+		zassert_is_null(llext_by_name("hello.llext.0"));
+	}
 
 	/* a loadable object that is not an executable image */
 	zassert_equal(posix_spawn(&pid, SPAWN_NOEXEC_IMAGE, NULL, NULL, argv, envp), ENOEXEC);
@@ -130,7 +139,8 @@ IMAGE_REGISTRY_ENTRY_DEFINE(img_exit, "/bin/child", child_exit_entry);
 IMAGE_REGISTRY_ENTRY_DEFINE(img_pgrp, "/bin/pgrp", child_pgrp_entry);
 IMAGE_REGISTRY_ENTRY_DEFINE(img_sigmask, "/bin/sigmask", child_sigmask_entry);
 
-ZTEST(posix_spawn, test_posix_spawn)
+/* the caller runs in user mode under CONFIG_TEST_USERSPACE: spawn is a user API */
+ZTEST_USER(posix_spawn, test_posix_spawn)
 {
 	pid_t pid = -1;
 	int status = -1;
