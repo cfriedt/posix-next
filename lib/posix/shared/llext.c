@@ -24,6 +24,7 @@
 #include <fnmatch.h>
 #include <glob.h>
 #include <grp.h>
+#include <ifaddrs.h>
 #include <libgen.h>
 #include <limits.h>
 #include <locale.h>
@@ -368,8 +369,10 @@ EXPORT_SYMBOL(endnetent);
 EXPORT_SYMBOL(endprotoent);
 EXPORT_SYMBOL(endservent);
 EXPORT_SYMBOL(freeaddrinfo);
+EXPORT_SYMBOL(freeifaddrs);
 EXPORT_SYMBOL(gai_strerror);
 EXPORT_SYMBOL(getaddrinfo);
+EXPORT_SYMBOL(getifaddrs); /* BSD extension, with freeifaddrs() above */
 EXPORT_SYMBOL(gethostent);
 EXPORT_SYMBOL(gethostname);
 EXPORT_SYMBOL(getnameinfo);
