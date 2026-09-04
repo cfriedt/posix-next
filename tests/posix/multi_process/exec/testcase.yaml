@@ -35,3 +35,28 @@ tests:
       - CONFIG_ARM_MPU=y
       - CONFIG_USERSPACE=y
       - CONFIG_TEST_USERSPACE_WITHOUT_HW_STACK_PROTECTION=y
+  # the children exec from user mode; MMU parts and, with two-block images, an385
+  portability.posix.exec.llext.userspace:
+    tags: userspace
+    platform_allow:
+      - mps2/an385
+      - qemu_cortex_a53
+      - qemu_riscv64
+      - qemu_x86
+      - qemu_x86_64
+    integration_platforms:
+      - qemu_x86
+      - mps2/an385
+    extra_configs:
+      - CONFIG_TEST_USERSPACE=y
+      - CONFIG_USERSPACE=y
+      - CONFIG_ZTEST_FATAL_HOOK=y
+      - CONFIG_ZTEST_STACK_SIZE=4096
+      - CONFIG_MAIN_STACK_SIZE=4096
+      # a user process loads its next image inside a system call
+      - CONFIG_PRIVILEGED_STACK_SIZE=8192
+      - platform:mps2/an385:CONFIG_ARM_MPU=y
+      - platform:mps2/an385:CONFIG_TEST_USERSPACE_WITHOUT_HW_STACK_PROTECTION=y
+      # every live user process holds an x86 domain; a pending exec a second
+      - platform:qemu_x86/atom:CONFIG_X86_MAX_ADDITIONAL_MEM_DOMAINS=8
+      - platform:qemu_x86_64/atom:CONFIG_X86_MAX_ADDITIONAL_MEM_DOMAINS=8
