@@ -5,6 +5,7 @@
  */
 
 #include <errno.h>
+#include <pthread.h>
 #include <fcntl.h>
 #include <spawn.h>
 #include <string.h>
@@ -32,6 +33,7 @@ static char *const spawn_envp[] = {NULL};
 /* what the image links against: its own process's malloc */
 EXPORT_SYMBOL(malloc);
 EXPORT_SYMBOL(free);
+EXPORT_SYMBOL(pthread_atfork);
 
 #define SPAWN_IMAGE "/RAM:/hello.llext"
 /* a directory beside the images: a same-named candidate that is not an executable file */
@@ -104,9 +106,19 @@ static void posix_spawnp_path(void)
 static void posix_spawn_image(void)
 {
 	char *const argv[] = {"hello", "x", NULL};
-	char *const envp[] = {"SPAWN=1", NULL};
+	char *const user_envp[] = {"SPAWN=1", "ATFORK=1", NULL};
+	char *const kernel_envp[] = {"SPAWN=1", NULL};
+	char *const *envp = IS_ENABLED(CONFIG_USERSPACE) ? user_envp : kernel_envp;
 	pid_t pid = -1;
 	int status = -1;
+
+	if (IS_ENABLED(CONFIG_USERSPACE)) {
+		/* fill this process's fork handler table: a user image, with a libc state of its
+		 * own, registers into one of its own; a kernel-mode image shares this table
+		 */
+		zassert_ok(pthread_atfork(NULL, NULL, NULL));
+		zassert_equal(pthread_atfork(NULL, NULL, NULL), ENOMEM);
+	}
 
 	for (int i = 0; i < 3; i++) {
 		zassert_ok(posix_spawn(&pid, SPAWN_IMAGE, NULL, NULL, argv, envp));
