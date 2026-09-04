@@ -5,6 +5,7 @@
  */
 
 #include <errno.h>
+#include <pthread.h>
 #include <signal.h>
 #include <stdlib.h>
 #include <sys/eventfd.h>
@@ -109,6 +110,44 @@ static void fork_sigmask(void)
 	zassert_ok(pthread_sigmask(SIG_SETMASK, &old, NULL));
 }
 
+static ZTEST_DMEM volatile unsigned int atfork_stages;
+
+static void atfork_prepare(void)
+{
+	atfork_stages |= 1U;
+}
+
+static void atfork_parent(void)
+{
+	atfork_stages |= 2U;
+}
+
+static void atfork_child(void)
+{
+	atfork_stages |= 4U;
+}
+
+/* prepare runs before the fork, parent after it here, child after it there (POSIX) */
+static void fork_atfork(void)
+{
+	pid_t pid;
+	int status = -1;
+
+	atfork_stages = 0;
+	zassert_ok(pthread_atfork(atfork_prepare, atfork_parent, atfork_child));
+
+	pid = fork();
+	zassert_true(pid >= 0, "fork failed: %d", errno);
+	if (pid == 0) {
+		_exit((atfork_stages == (1U | 4U)) ? 9 : 1);
+	}
+
+	zassert_equal(waitpid(pid, &status, 0), pid);
+	zassert_true(WIFEXITED(status));
+	zassert_equal(WEXITSTATUS(status), 9, "the child did not see prepare and child only");
+	zassert_equal(atfork_stages, 1U | 2U, "the parent ran %#x", atfork_stages);
+}
+
 ZTEST_USER(posix_fork, test_fork)
 {
 	volatile int on_stack = 20;
@@ -171,6 +210,7 @@ ZTEST_USER(posix_fork, test_fork)
 
 	fork_dispositions();
 	fork_sigmask();
+	fork_atfork();
 }
 
 ZTEST_SUITE(posix_fork, NULL, NULL, NULL, NULL, NULL);
