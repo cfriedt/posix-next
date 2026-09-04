@@ -3989,6 +3989,21 @@ patches:
       llext_inspect_discarded_groups.py split every .config line on all of
       its '=' characters, so a string option whose value contains one
       (a command line, an expression) crashed the build.
+  - path: zephyr/sys-clone-fd-actions.patch
+    sha256sum: e19455f6d40383fab035f75558ee21c0c2b2b5e089c1ee9a7b033b8dc6439324
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-04
+    upstreamable: true
+    comments: |
+      sys_clone(): stage descriptor actions into the child. An array of
+      open/dup2/close actions travels with the argument vectors, in the same
+      block and under the same budget (paths copied from user memory under
+      the verifier), and the leader's trampoline applies them in order on
+      the child's own descriptor table before entering, exiting with 127
+      when one fails. A user-mode creator never has to touch another
+      process's table, which is what posix_spawn() from user mode needs.
   - path: toybox/toybox-zephyr-module.patch
     sha256sum: 0ab0cd19222ae64e0ed6281878b0457266f65ea615560117bff8a713e510b564
     module: modules/lib/toybox
