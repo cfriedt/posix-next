@@ -14,7 +14,6 @@
 #include <unistd.h>
 
 #include <zephyr/kernel.h>
-#include <zephyr/sys/internal/fdtable_priv.h>
 #include <zephyr/sys/process.h>
 
 /* a failed spawn leaves no child: abort the paused leader and reap the process */
@@ -24,33 +23,34 @@ static void spawn_child_discard(k_pid_t child)
 	(void)k_waitpid(child, NULL, NULL, 0, K_FOREVER);
 }
 
-static int spawn_file_actions_apply(k_pid_t child, const posix_spawn_file_actions_t *fa)
+/* the child applies its file actions itself, on its own table, before its image */
+static int spawn_file_actions_stage(const posix_spawn_file_actions_t *fa,
+				    struct sys_clone_fd_action *acts, size_t max)
 {
-	/* the paused child has its own descriptor table: act on it, not ours */
+	if (fa->num > max) {
+		return -E2BIG;
+	}
 	for (int i = 0; i < fa->num; i++) {
 		const struct posix_spawn_file_action *act = &fa->actions[i];
-		int ret = 0;
 
+		acts[i] = (struct sys_clone_fd_action){0};
 		switch (act->type) {
-		case POSIX_SPAWN_FILE_ACTION_OPEN: {
-			int fd = open(act->path, act->oflag, act->mode);
-
-			if (fd < 0) {
-				return errno;
-			}
-			ret = z_zvfs_fds_child_set(child, act->fildes, fd);
-			(void)close(fd);
+		case POSIX_SPAWN_FILE_ACTION_OPEN:
+			acts[i].op = SYS_CLONE_FD_OPEN;
+			acts[i].fd = act->fildes;
+			acts[i].oflag = act->oflag;
+			acts[i].mode = act->mode;
+			acts[i].path = act->path;
 			break;
-		}
 		case POSIX_SPAWN_FILE_ACTION_CLOSE:
-			ret = z_zvfs_fds_child_close(child, act->fildes);
+			acts[i].op = SYS_CLONE_FD_CLOSE;
+			acts[i].fd = act->fildes;
 			break;
 		case POSIX_SPAWN_FILE_ACTION_DUP2:
-			ret = z_zvfs_fds_child_dup2(child, act->fildes, act->newfildes);
+			acts[i].op = SYS_CLONE_FD_DUP2;
+			acts[i].fd = act->fildes;
+			acts[i].newfd = act->newfildes;
 			break;
-		}
-		if (ret < 0) {
-			return EBADF;
 		}
 	}
 
@@ -67,6 +67,8 @@ int posix_spawn(pid_t *pid, const char *path, const posix_spawn_file_actions_t *
 	const sigset_t *maskp = &inherit;
 	const struct posix_spawn_image *img;
 	struct sys_clone_args args = {0};
+	/* staged with the vectors: the kernel's budget bounds them */
+	struct sys_clone_fd_action acts[(file_actions != NULL) ? MAX(file_actions->num, 1) : 1];
 
 	if (path == NULL) {
 		return ENOENT;
@@ -85,6 +87,13 @@ int posix_spawn(pid_t *pid, const char *path, const posix_spawn_file_actions_t *
 		return ENOENT;
 	}
 	/* else: the image is loaded into the paused child by sys_exec_load() */
+	if (file_actions != NULL) {
+		if (spawn_file_actions_stage(file_actions, acts, file_actions->num) < 0) {
+			return E2BIG;
+		}
+		args.fd_actions = acts;
+		args.fd_actions_len = file_actions->num;
+	}
 
 	args.flags = SYS_CLONE_PAUSED;
 	args.prio = k_thread_priority_get(k_current_get());
@@ -133,15 +142,7 @@ int posix_spawn(pid_t *pid, const char *path, const posix_spawn_file_actions_t *
 		}
 	}
 
-	/* the child is stopped: apply file actions and attributes, then start it */
-	if (file_actions != NULL) {
-		ret = spawn_file_actions_apply(child, file_actions);
-		if (ret != 0) {
-			spawn_child_discard(child);
-			return ret;
-		}
-	}
-
+	/* the child is stopped: apply attributes, then start it */
 	if (attrp != NULL) {
 		if ((attrp->flags & POSIX_SPAWN_SETPGROUP) != 0) {
 			/* pgroup 0 starts a new group led by the child (POSIX) */
