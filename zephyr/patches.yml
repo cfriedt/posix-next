@@ -3583,6 +3583,45 @@ patches:
       partitions; the image's regions join it, its main() is recorded in the
       staged block and entered as exit(main(argc, argv, envp)), and the
       extension is unloaded when the process is reaped.
+  - path: zephyr/arch-user-mode-restart.patch
+    sha256sum: 9d00380375dae061f271b278d2f3165baa033474e7dfed806bb0ede4098f54f1
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-04
+    upstreamable: true
+    comments: |
+      arch_user_mode_restart(): re-enter user mode on a fresh user stack
+      from a system call, for a thread that already runs in user mode.
+      The default calls arch_user_mode_enter(); ARM Cortex-M and RISC-V
+      override it since their first-entry paths make one-time stack
+      guard adjustments, and arm64 to drop the exception depth of the
+      system call it never returns from. z_thread_user_mode_restart() is
+      the kernel side, used by the exec of a user-mode process.
+  - path: zephyr/llext-remove-domain.patch
+    sha256sum: a7249712fb9e143b3af58a0c891178935c3efbdb9d9cfd77d30f254027fa1d7f
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-04
+    upstreamable: true
+    comments: |
+      llext_remove_domain(): the inverse of llext_add_domain(), so an
+      extension's partitions can leave a domain before it is unloaded.
+  - path: zephyr/sys-exec-start.patch
+    sha256sum: b1a1e7a5b6ef9b2cc3e04ebd1f40ede34846137647d95e265a38652d0f3931e8
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-04
+    upstreamable: true
+    comments: |
+      sys_exec_start(): replace the calling process's image. Stages the
+      vectors, closes FD_CLOEXEC descriptors, swaps in the image loaded as
+      pending by sys_exec_load() on the caller, and restarts the leader
+      on a fresh stack in its own mode. A self-exec on MPU parts gets a
+      pending domain the switch installs; images of reaped processes are
+      unloaded from a graveyard before the next load.
   - path: zephyr/libc-sys-stat-utime-markers.patch
     sha256sum: 8edfcf83058522bb80d601e92c4a9e6be14baec04cf8253ffbd344fbadf05b78
     module: zephyr
