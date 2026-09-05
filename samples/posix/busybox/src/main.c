@@ -149,6 +149,11 @@ int main(void)
 	 */
 	RUN("--install", "-s", "/bin");
 	RUN("ping", "-c", "1", "127.0.0.1");
+	RUN("ping6", "-c", "1", "::1");
+#ifdef CONFIG_NET_CONFIG_SETTINGS
+	/* a real interface is configured: reach past the loopback */
+	RUN("ping", "-c", "1", CONFIG_NET_CONFIG_MY_IPV4_GW);
+#endif
 	RUN_AS("ls", "-l", "/bin");
 
 	/* hush: builtins, variables, globbing, and control flow run in the
