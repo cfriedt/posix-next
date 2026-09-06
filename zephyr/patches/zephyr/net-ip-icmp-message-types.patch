@@ -1,0 +1,134 @@
+diff --git a/include/zephyr/net/icmp.h b/include/zephyr/net/icmp.h
+index 7014d4ad96f..53c03ceb5da 100644
+--- a/include/zephyr/net/icmp.h
++++ b/include/zephyr/net/icmp.h
+@@ -33,10 +33,7 @@
+ extern "C" {
+ #endif
+ 
+-#define NET_ICMPV4_ECHO_REQUEST 8    /**< ICMPv4 Echo-Request */
+-#define NET_ICMPV4_ECHO_REPLY   0    /**< ICMPv4 Echo-Reply */
+-#define NET_ICMPV6_ECHO_REQUEST 128  /**< ICMPv6 Echo-Request */
+-#define NET_ICMPV6_ECHO_REPLY   129  /**< ICMPv6 Echo-Reply */
++/* the message types live in net_ip.h next to the header layout */
+ 
+ struct net_icmp_ctx;
+ struct net_icmp_ip_hdr;
+diff --git a/include/zephyr/net/net_ip.h b/include/zephyr/net/net_ip.h
+index 0e28f4f3376..5fe608a01ad 100644
+--- a/include/zephyr/net/net_ip.h
++++ b/include/zephyr/net/net_ip.h
+@@ -629,6 +629,61 @@ struct net_icmp_hdr {
+ 	uint16_t chksum;
+ } __packed;
+ 
++/* ICMPv4 message types (RFC 792) */
++#define NET_ICMPV4_ECHO_REPLY        0  /**< Echo reply */
++#define NET_ICMPV4_DST_UNREACH       3  /**< Destination unreachable */
++#define NET_ICMPV4_SOURCE_QUENCH     4  /**< Source quench */
++#define NET_ICMPV4_REDIRECT          5  /**< Redirect */
++#define NET_ICMPV4_ECHO_REQUEST      8  /**< Echo request */
++#define NET_ICMPV4_ROUTER_ADVERT     9  /**< Router advertisement */
++#define NET_ICMPV4_ROUTER_SOLICIT   10  /**< Router solicitation */
++#define NET_ICMPV4_TIME_EXCEEDED    11  /**< Time exceeded */
++#define NET_ICMPV4_BAD_IP_HEADER    12  /**< Parameter problem */
++#define NET_ICMPV4_TIMESTAMP        13  /**< Timestamp request */
++#define NET_ICMPV4_TIMESTAMP_REPLY  14  /**< Timestamp reply */
++#define NET_ICMPV4_INFO_REQUEST     15  /**< Information request */
++#define NET_ICMPV4_INFO_REPLY       16  /**< Information reply */
++#define NET_ICMPV4_ADDR_MASK        17  /**< Address mask request */
++#define NET_ICMPV4_ADDR_MASK_REPLY  18  /**< Address mask reply */
++
++/* ICMPv4 destination unreachable codes */
++#define NET_ICMPV4_DST_UNREACH_NO_NET    0  /**< Network unreachable */
++#define NET_ICMPV4_DST_UNREACH_NO_HOST   1  /**< Host unreachable */
++#define NET_ICMPV4_DST_UNREACH_NO_PROTO  2  /**< Protocol not supported */
++#define NET_ICMPV4_DST_UNREACH_NO_PORT   3  /**< Port unreachable */
++#define NET_ICMPV4_DST_UNREACH_FRAG      4  /**< Fragmentation needed */
++#define NET_ICMPV4_DST_UNREACH_SRC_ROUTE 5  /**< Source route failed */
++
++/* ICMPv6 message types (RFC 4443, RFC 4861, RFC 2710) */
++#define NET_ICMPV6_DST_UNREACH       1  /**< Destination unreachable */
++#define NET_ICMPV6_PACKET_TOO_BIG    2  /**< Packet too big */
++#define NET_ICMPV6_TIME_EXCEEDED     3  /**< Time exceeded */
++#define NET_ICMPV6_PARAM_PROBLEM     4  /**< Parameter problem */
++#define NET_ICMPV6_ECHO_REQUEST    128  /**< Echo request */
++#define NET_ICMPV6_ECHO_REPLY      129  /**< Echo reply */
++#define NET_ICMPV6_MLD_QUERY       130  /**< Multicast listener query */
++#define NET_ICMPV6_MLD_REPORT      131  /**< Multicast listener report */
++#define NET_ICMPV6_MLD_DONE        132  /**< Multicast listener done */
++#define NET_ICMPV6_RS              133  /**< Router solicitation */
++#define NET_ICMPV6_RA              134  /**< Router advertisement */
++#define NET_ICMPV6_NS              135  /**< Neighbor solicitation */
++#define NET_ICMPV6_NA              136  /**< Neighbor advertisement */
++#define NET_ICMPV6_REDIRECT        137  /**< Redirect */
++
++/* ICMPv6 destination unreachable codes */
++#define NET_ICMPV6_DST_UNREACH_NO_ROUTE  0  /**< No route to destination */
++#define NET_ICMPV6_DST_UNREACH_ADMIN     1  /**< Administratively prohibited */
++#define NET_ICMPV6_DST_UNREACH_SCOPE     2  /**< Beyond scope of source address */
++#define NET_ICMPV6_DST_UNREACH_NO_ADDR   3  /**< Address unreachable */
++#define NET_ICMPV6_DST_UNREACH_NO_PORT   4  /**< Port unreachable */
++#define NET_ICMPV6_DST_UNREACH_SRC_ADDR  5  /**< Source address failed policy */
++#define NET_ICMPV6_DST_UNREACH_REJ_ROUTE 6  /**< Reject route to destination */
++
++/* ICMPv6 parameter problem codes */
++#define NET_ICMPV6_PARAM_PROB_HEADER     0  /**< Erroneous header field */
++#define NET_ICMPV6_PARAM_PROB_NEXTHEADER 1  /**< Unrecognized next header */
++#define NET_ICMPV6_PARAM_PROB_OPTION     2  /**< Unrecognized option */
++
+ struct net_udp_hdr {
+ 	uint16_t src_port;
+ 	uint16_t dst_port;
+diff --git a/subsys/net/ip/icmpv4.h b/subsys/net/ip/icmpv4.h
+index 88f13971c9c..8204aafe573 100644
+--- a/subsys/net/ip/icmpv4.h
++++ b/subsys/net/ip/icmpv4.h
+@@ -18,12 +18,7 @@
+ #include <zephyr/net/net_ip.h>
+ #include <zephyr/net/net_pkt.h>
+ 
+-#define NET_ICMPV4_DST_UNREACH  3	/* Destination unreachable */
+-#define NET_ICMPV4_TIME_EXCEEDED 11	/* Time exceeded */
+-#define NET_ICMPV4_BAD_IP_HEADER 12	/* Bad IP header */
+ 
+-#define NET_ICMPV4_DST_UNREACH_NO_PROTO  2 /* Protocol not supported */
+-#define NET_ICMPV4_DST_UNREACH_NO_PORT   3 /* Port unreachable */
+ #define NET_ICMPV4_TIME_EXCEEDED_FRAGMENT_REASSEMBLY_TIME 1 /* Fragment reassembly time exceeded */
+ #define NET_ICMPV4_BAD_IP_HEADER_LENGTH  2 /* Bad length field */
+ 
+diff --git a/subsys/net/ip/icmpv6.h b/subsys/net/ip/icmpv6.h
+index 2b68ae8bfae..d888e021524 100644
+--- a/subsys/net/ip/icmpv6.h
++++ b/subsys/net/ip/icmpv6.h
+@@ -143,30 +143,11 @@ struct net_icmpv6_ptb {
+ #define NET_ICMPV6_RA_FLAG_ONLINK     0x80
+ #define NET_ICMPV6_RA_FLAG_AUTONOMOUS 0x40
+ 
+-#define NET_ICMPV6_DST_UNREACH    1	/* Destination unreachable */
+-#define NET_ICMPV6_PACKET_TOO_BIG 2	/* Packet too big */
+-#define NET_ICMPV6_TIME_EXCEEDED  3	/* Time exceeded */
+-#define NET_ICMPV6_PARAM_PROBLEM  4	/* IPv6 header is bad */
+-#define NET_ICMPV6_MLD_QUERY    130	/* Multicast Listener Query */
+-#define NET_ICMPV6_RS           133	/* Router Solicitation */
+-#define NET_ICMPV6_RA           134	/* Router Advertisement */
+-#define NET_ICMPV6_NS           135	/* Neighbor Solicitation */
+-#define NET_ICMPV6_NA           136	/* Neighbor Advertisement */
+ #define NET_ICMPV6_MLDv2        143	/* Multicast Listener Report v2 */
+ 
+ /* Codes for ICMPv6 Destination Unreachable message */
+-#define NET_ICMPV6_DST_UNREACH_NO_ROUTE  0 /* No route to destination */
+-#define NET_ICMPV6_DST_UNREACH_ADMIN     1 /* Admin prohibited communication */
+-#define NET_ICMPV6_DST_UNREACH_SCOPE     2 /* Beyond scope of source address */
+-#define NET_ICMPV6_DST_UNREACH_NO_ADDR   3 /* Address unreachable */
+-#define NET_ICMPV6_DST_UNREACH_NO_PORT   4 /* Port unreachable */
+-#define NET_ICMPV6_DST_UNREACH_SRC_ADDR  5 /* Source address failed */
+-#define NET_ICMPV6_DST_UNREACH_REJ_ROUTE 6 /* Reject route to destination */
+ 
+ /* Codes for ICMPv6 Parameter Problem message */
+-#define NET_ICMPV6_PARAM_PROB_HEADER     0 /* Erroneous header field */
+-#define NET_ICMPV6_PARAM_PROB_NEXTHEADER 1 /* Unrecognized next header */
+-#define NET_ICMPV6_PARAM_PROB_OPTION     2 /* Unrecognized option */
+ 
+ /* ICMPv6 header has 4 unused bytes that must be zero, RFC 4443 ch 3.1 */
+ #define NET_ICMPV6_UNUSED_LEN 4
