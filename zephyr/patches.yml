@@ -1752,3 +1752,17 @@ patches:
       libraries.sys_aio{,.priority,.static_only,.userspace} variants;
       the priority variant proves priority-order execution and
       ready-state cancellation under a scheduler lock.
+  - path: zephyr/arm64-userspace-libgcc-partition.patch
+    sha256sum: 960c99961184516342d061e417e13d61e0e5d5b5b99ddd84ad112c54292ae613
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-04
+    upstreamable: true
+    comments: |
+      Place libgcc's globals in the libc partition on arm64. The toolchain's
+      prebuilt C libraries perform their atomics through libgcc's outline
+      helpers, which consult __aarch64_have_lse_atomics on every call; with
+      the flag in kernel bss, any such call from user mode (e.g. Picolibc's
+      getc_unlocked()) faults. Zephyr's own code already builds with
+      -mno-outline-atomics under CONFIG_USERSPACE.
