@@ -1,0 +1,17 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index c0cbd8e5989..3ad8e5c9906 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1255,6 +1255,12 @@ if(CONFIG_USERSPACE)
+   if(CONFIG_PICOLIBC)
+     set(LIBC_PART -l libc.a z_libc_partition)
+   endif()
++  if(CONFIG_ARM64 AND DEFINED LIBC_PART)
++    # the prebuilt C library performs its atomics through libgcc's outline
++    # helpers, which consult __aarch64_have_lse_atomics on every call; the
++    # flag lives in libgcc's bss and must be user-readable
++    list(APPEND LIBC_PART -l libgcc.a z_libc_partition)
++  endif()
+ 
+   add_custom_command(
+     OUTPUT ${APP_SMEM_UNALIGNED_LD} ${APP_SMEM_PINNED_UNALIGNED_LD}
