@@ -1,0 +1,17 @@
+diff --git a/subsys/fs/fs.c b/subsys/fs/fs.c
+index 74319ad6d07..8673ddfeb7b 100644
+--- a/subsys/fs/fs.c
++++ b/subsys/fs/fs.c
+@@ -363,8 +363,10 @@ int fs_opendir(struct fs_dir_t *zdp, const char *abs_path)
+ 	}
+ 
+ 
+-	if (strcmp(abs_path, "/") == 0) {
+-		/* Open VFS root dir, marked by zdp->mp == NULL */
++	if ((strcmp(abs_path, "/") == 0) && (fs_get_mnt_point(&mp, abs_path, NULL) < 0)) {
++		/* Nothing is mounted at the root itself: open the virtual VFS
++		 * root dir that lists mount points, marked by zdp->mp == NULL
++		 */
+ 		k_mutex_lock(&mutex, K_FOREVER);
+ 
+ 		zdp->mp = NULL;
