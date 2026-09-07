@@ -465,3 +465,19 @@ patches:
       call, which only returns the routine (and refuses to follow a cleanup entry the
       caller has corrupted), so handlers run in the popping thread's own privilege level;
       the tests assert that mode.
+  - path: zephyr/k-tss.patch
+    sha256sum: 3ee1ee0eee28b475bf70081dbe057b938e22ee3d968483fd6e9400e64dda97da
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-03-07
+    upstreamable: true
+    comments: |
+      add thread-specific storage support
+      The thread-specific storage system calls are not cancellation points.
+      k_thread_key_delete() drops the live associations of the key in every
+      thread instead of failing with -EBUSY; a thread's exit calls destructors
+      only for non-NULL values, in passes bounded by
+      CONFIG_THREAD_SPECIFIC_STORAGE_DESTRUCTOR_ITERATIONS, each visiting the
+      values stored when it started (reported in zephyr#120152 by Harshit
+      Kudhial). k_thread_specific_count() reports the number of stored values.
