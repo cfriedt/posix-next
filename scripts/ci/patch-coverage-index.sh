@@ -5,7 +5,7 @@
 
 # Sync gcovr index.html summary totals with merged.json. gcovr --html-details
 # can show incorrect directory/file rollups when rendering merged trace JSON
-# (--merge-mode-functions=separate); the header summary is authoritative for CI.
+# (--merge-mode-functions=merge-use-line-min); the header summary is authoritative for CI.
 
 set -euo pipefail
 
