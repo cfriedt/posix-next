@@ -1,8 +1,7 @@
 diff --git a/scripts/pylib/twister/twisterlib/coverage.py b/scripts/pylib/twister/twisterlib/coverage.py
-index ed3413fa9b8..b66a66860ae 100644
 --- a/scripts/pylib/twister/twisterlib/coverage.py
 +++ b/scripts/pylib/twister/twisterlib/coverage.py
-@@ -56,8 +56,10 @@ class CoverageTool:
+@@ -61,8 +61,10 @@ class CoverageTool:
          extracted_coverage_info = collections.defaultdict(list)
          capture_data = False
          capture_complete = False
@@ -13,45 +12,47 @@ index ed3413fa9b8..b66a66860ae 100644
                  if re.search("GCOV_COVERAGE_DUMP_START", line):
                      capture_data = True
                      capture_complete = False
-@@ -79,7 +81,11 @@ class CoverageTool:
-                         continue
-                 else:
-                     continue
--                hex_bytes = bytes.fromhex(hex_dump)
-+                try:
-+                    hex_bytes = bytes.fromhex(hex_dump)
-+                except ValueError:
-+                    logger.error(f"{file_name}:{lineno}: Unable to convert hex data: {line}")
-+                    continue
-                 extracted_coverage_info[file_name].append(hex_bytes)
-         if not capture_data:
-             capture_complete = True
-@@ -159,6 +165,8 @@ class CoverageTool:
-         build_dirs = None
-         if not self.coverage_capture and self.coverage_report and self.coverage_per_instance:
+@@ -184,6 +186,8 @@ class CoverageTool:
+             # .gcda exist at the top level to capture from (semihosting writes
+             # tagged files only).
              build_dirs = [instance.build_dir for instance in self.instances.values()]
 +        if not self.coverage_capture:
 +            logger.info("Starting aggregate coverage merge into %s", outdir)
          reports = {}
          with open(os.path.join(outdir, "coverage.log"), "a") as coveragelog:
              ret, reports = self._generate(outdir, coveragelog, build_dirs)
-@@ -187,9 +195,15 @@ class CoverageTool:
-                     )
-                 }
+@@ -217,9 +221,15 @@ class CoverageTool:
+                 per_instance_report = self.coverage_capture and self.coverage_per_instance
+                 log = logger.debug if per_instance_report else logger.info
                  for r in self.output_formats.split(','):
 +                    if r not in report_log:
 +                        continue
-                     logger.info(report_log[r])
+                     log(report_log[r])
 +                if not self.coverage_capture:
 +                    logger.info("Aggregate coverage merge completed successfully")
              else:
                  coverage_completed = False
 +                if not self.coverage_capture:
 +                    logger.error("Aggregate coverage merge failed")
+         gcov_process_duration = time.time() - gcov_process_start
          logger.debug(f"All coverage data processed: {coverage_completed}")
-         return coverage_completed, reports
+         logger.info(f"Coverage data processed in {gcov_process_duration:.2f} seconds")
+@@ -523,7 +533,13 @@ class Gcovr(CoverageTool):
+         self.version = self.get_version()
+         # Different ifdef-ed implementations of the same function should not be
+         # in conflict treated by GCOVR as separate objects for coverage statistics.
+-        self.options = ["-v", "--merge-mode-functions=separate"]
++        #
++        # NOTE: --merge-mode-functions=separate crashes gcovr 8.6's JSON writer with
++        # a KeyError when a merged function has a per-line execution count but no
++        # matching start/end position info (FunctionCoverage.serialize does
++        # self.start[lineno] unconditionally). Use merge-use-line-min, which collapses
++        # such functions to their lowest line number instead of aborting the report.
++        self.options = ["-v", "--merge-mode-functions=merge-use-line-min"]
  
-@@ -465,12 +479,21 @@ class Gcovr(CoverageTool):
+ 
+     def get_version(self):
+@@ -629,12 +645,21 @@ class Gcovr(CoverageTool):
                      logger.debug(f"Coverage merge no files in: {dir_}")
                      continue
                  files += files_
@@ -75,7 +76,7 @@ index ed3413fa9b8..b66a66860ae 100644
  
          if not files:
              logger.warning(f"No coverage files to compose report for {outdir}")
-@@ -480,6 +503,8 @@ class Gcovr(CoverageTool):
+@@ -644,6 +669,8 @@ class Gcovr(CoverageTool):
          os.makedirs(subdir, exist_ok=True)
  
          tracefiles = self._interleave_list("--add-tracefile", files)
@@ -84,7 +85,7 @@ index ed3413fa9b8..b66a66860ae 100644
  
          # Convert command line argument (comma-separated list) to gcovr flags
          report_options = {
-@@ -492,7 +517,7 @@ class Gcovr(CoverageTool):
+@@ -656,7 +683,7 @@ class Gcovr(CoverageTool):
              "sonarqube": ["--sonarqube", os.path.join(subdir, "coverage.sonarqube.xml")]
          }
          gcovr_options = self._flatten_list(
@@ -93,7 +94,7 @@ index ed3413fa9b8..b66a66860ae 100644
          )
  
          cmd = ["gcovr", "-r", self.base_dir] + self.options + gcovr_options + tracefiles
-@@ -604,6 +629,12 @@ def run_coverage_tool(options, outdir, is_system_gcov, instances,
+@@ -1148,6 +1175,12 @@ def run_coverage_tool(options, outdir, is_system_gcov, instances,
      # Apply output format default
      if options.coverage_formats is not None:
          coverage_tool.output_formats = options.coverage_formats

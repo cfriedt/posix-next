@@ -126,7 +126,7 @@ refresh_build_dir() {
       -e '.*/samples/.*' \
       "${ignore_args[@]}" \
       "${object_dir_args[@]}" \
-      --merge-mode-functions=separate \
+      --merge-mode-functions=merge-use-line-min \
       "${branch_excludes[@]}" \
       "${workspace_filter_args[@]}" \
       --json -o "$coverage_json" \

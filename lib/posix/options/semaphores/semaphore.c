@@ -15,6 +15,7 @@
 #include <pthread.h>
 #include <semaphore.h>
 #include <ksem.h>
+#include <wait_q.h>
 
 struct nsem_obj {
 	sys_snode_t snode;
