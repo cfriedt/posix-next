@@ -1,8 +1,8 @@
 diff --git a/include/zephyr/kernel.h b/include/zephyr/kernel.h
-index 9db624c1473..138b0c21aba 100644
+index 681882b6f04..ed9c3d6b46e 100644
 --- a/include/zephyr/kernel.h
 +++ b/include/zephyr/kernel.h
-@@ -2483,9 +2483,17 @@ __syscall void *k_queue_peek_tail(struct k_queue *queue);
+@@ -2878,9 +2878,17 @@ __syscall void *k_queue_peek_tail(struct k_queue *queue);
   * only on atomic access to shared memory. k_futex are tracked as
   * kernel objects and can live in user memory so that any access
   * bypasses the kernel object permission management mechanism.
@@ -18,7 +18,7 @@ index 9db624c1473..138b0c21aba 100644
  	atomic_t val;
 +	atomic_t waiters;
  };
-
+ 
  /**
 diff --git a/include/zephyr/sys/sem.h b/include/zephyr/sys/sem.h
 index 16c6b33ba46..fc45817e1da 100644
@@ -27,7 +27,7 @@ index 16c6b33ba46..fc45817e1da 100644
 @@ -139,6 +139,19 @@ int sys_sem_take(struct sys_sem *sem, k_timeout_t timeout);
   */
  unsigned int sys_sem_count_get(struct sys_sem *sem);
-
+ 
 +/**
 + * @brief Check whether any thread is blocked taking @a sem.
 + *
@@ -45,7 +45,7 @@ index 16c6b33ba46..fc45817e1da 100644
   * @cond INTERNAL_HIDDEN
   */
 diff --git a/kernel/futex.c b/kernel/futex.c
-index c6e5e47e683..8cd8b001ef0 100644
+index 85245183f18..8cd8b001ef0 100644
 --- a/kernel/futex.c
 +++ b/kernel/futex.c
 @@ -41,6 +41,7 @@ int z_impl_k_futex_wake(struct k_futex *futex, bool wake_all)
@@ -56,23 +56,19 @@ index c6e5e47e683..8cd8b001ef0 100644
  			woken++;
  			arch_thread_return_value_set(thread, 0);
  			z_ready_thread(thread);
-@@ -78,15 +79,22 @@ int z_impl_k_futex_wait(struct k_futex *futex, int expected,
- 		return -EINVAL;
- 	}
-
-+	key = k_spin_lock(&futex_data->lock);
-+
+@@ -80,7 +81,11 @@ int z_impl_k_futex_wait(struct k_futex *futex, int expected,
+ 
+ 	key = k_spin_lock(&futex_data->lock);
+ 
 +	/* counted before the compare, so a waker that sees zero knows the value check follows */
 +	(void)atomic_inc(&futex->waiters);
 +
  	if (atomic_get(&futex->val) != (atomic_val_t)expected) {
 +		(void)atomic_dec(&futex->waiters);
-+		k_spin_unlock(&futex_data->lock, key);
+ 		k_spin_unlock(&futex_data->lock, key);
  		return -EAGAIN;
  	}
-
--	key = k_spin_lock(&futex_data->lock);
--
+@@ -88,6 +93,8 @@ int z_impl_k_futex_wait(struct k_futex *futex, int expected,
  	ret = z_pend_curr(&futex_data->lock,
  			key, &futex_data->wait_q, timeout);
  	if (ret == -EAGAIN) {
@@ -80,7 +76,7 @@ index c6e5e47e683..8cd8b001ef0 100644
 +		(void)atomic_dec(&futex->waiters);
  		ret = -ETIMEDOUT;
  	}
-
+ 
 diff --git a/lib/os/sem.c b/lib/os/sem.c
 index bb1b3fdc6b8..a45eb46d586 100644
 --- a/lib/os/sem.c
@@ -88,7 +84,7 @@ index bb1b3fdc6b8..a45eb46d586 100644
 @@ -7,6 +7,10 @@
  #include <zephyr/sys/sem.h>
  #include <zephyr/internal/syscall_handler.h>
-
+ 
 +#ifndef CONFIG_USERSPACE
 +#include <wait_q.h>
 +#endif
@@ -97,15 +93,15 @@ index bb1b3fdc6b8..a45eb46d586 100644
  #define SYS_SEM_MINIMUM      0
  #define SYS_SEM_CONTENDED    (SYS_SEM_MINIMUM - 1)
 @@ -54,6 +58,7 @@ int sys_sem_init(struct sys_sem *sem, unsigned int initial_count,
-
+ 
  	(void)atomic_set(&sem->futex.val, initial_count);
  	sem->limit = limit;
 +	(void)atomic_clear(&sem->futex.waiters);
-
+ 
  	return 0;
  }
 @@ -104,6 +109,11 @@ unsigned int sys_sem_count_get(struct sys_sem *sem)
-
+ 
  	return (value > SYS_SEM_MINIMUM) ? value : SYS_SEM_MINIMUM;
  }
 +

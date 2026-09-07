@@ -1,10 +1,10 @@
 diff --git a/include/zephyr/kernel.h b/include/zephyr/kernel.h
-index d2ea9af7d66..1508f0e0b38 100644
+index 2e6bbfe5c5b..1814a0d74d4 100644
 --- a/include/zephyr/kernel.h
 +++ b/include/zephyr/kernel.h
 @@ -347,6 +347,15 @@ void k_thread_foreach_unlocked_filter_by_cpu(unsigned int cpu,
   */
- #define K_SSE_REGS (BIT(7))
+ #define K_SSE_REGS (BIT(15))
  
 +/**
 + * @brief Asynchronous cancellation for thread
@@ -18,7 +18,7 @@ index d2ea9af7d66..1508f0e0b38 100644
  /* end - thread options */
  
  #if !defined(_ASMLANGUAGE)
-@@ -6975,6 +6984,168 @@ __syscall void k_sig_current(struct k_sig_info *info, struct k_sig_action *actio
+@@ -7328,6 +7337,168 @@ __syscall void k_sig_current(struct k_sig_info *info, struct k_sig_action *actio
  __syscall void k_sig_return(void);
  /** @endcond */
  #endif
@@ -206,10 +206,10 @@ index aec91958d13..6047c73acc1 100644
  /** @brief Number of supported realtime signals */
  #define K_SIG_NUM_RT MAX(SIGNAL_SET_SIZE - K_SIG_RTMIN, 0)
 diff --git a/include/zephyr/kernel/thread.h b/include/zephyr/kernel/thread.h
-index 5ab4ae4e1d5..c0fd785097b 100644
+index 3bf21068998..712695c63dc 100644
 --- a/include/zephyr/kernel/thread.h
 +++ b/include/zephyr/kernel/thread.h
-@@ -148,6 +148,11 @@ struct _thread_base {
+@@ -144,6 +144,11 @@ struct _thread_base {
         /** Thread result or return value */
         atomic_t result;
  #endif
@@ -222,10 +222,10 @@ index 5ab4ae4e1d5..c0fd785097b 100644
  
  typedef struct _thread_base _thread_base_t;
 diff --git a/kernel/Kconfig b/kernel/Kconfig
-index 968f63f91ae..b052a0c2d23 100644
+index 6384b76174d..e2205d49354 100644
 --- a/kernel/Kconfig
 +++ b/kernel/Kconfig
-@@ -220,6 +220,57 @@ config THREAD_RESULT
+@@ -223,6 +223,57 @@ config THREAD_RESULT
  	help
  	  Say 'Y' here to support a thread result or "return value".
  
@@ -284,10 +284,10 @@ index 968f63f91ae..b052a0c2d23 100644
  	bool "Thread custom data"
  	help
 diff --git a/kernel/include/kernel_internal.h b/kernel/include/kernel_internal.h
-index c731a27b286..edb05d00d0a 100644
+index da07ce4b297..50d94af6ec4 100644
 --- a/kernel/include/kernel_internal.h
 +++ b/kernel/include/kernel_internal.h
-@@ -269,6 +269,21 @@ void k_thread_abort_cleanup(struct k_thread *thread);
+@@ -280,6 +280,21 @@ void k_thread_abort_cleanup(struct k_thread *thread);
  void k_thread_abort_cleanup_check_reuse(struct k_thread *thread);
  #endif /* CONFIG_THREAD_ABORT_NEED_CLEANUP */
  
@@ -310,10 +310,10 @@ index c731a27b286..edb05d00d0a 100644
  }
  #endif
 diff --git a/kernel/sched.c b/kernel/sched.c
-index 092f56f0d1d..5f139fef7a2 100644
+index f579928390f..bc1f31af63c 100644
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -1261,6 +1261,12 @@ static ALWAYS_INLINE void halt_thread(struct k_thread *thread, uint8_t new_state
+@@ -1344,6 +1344,12 @@ static ALWAYS_INLINE void halt_thread(struct k_thread *thread, uint8_t new_state
  		}
  
  		if (new_state == _THREAD_DEAD) {
@@ -529,10 +529,10 @@ index 23893981a86..5c30929f34b 100644
  {
  	if (atomic_get(&_current->base.sig.pending) > 0) {
 diff --git a/kernel/thread.c b/kernel/thread.c
-index 4c5d6134fbd..9f2952a41c4 100644
+index 7609ce440de..b772692f916 100644
 --- a/kernel/thread.c
 +++ b/kernel/thread.c
-@@ -858,6 +858,10 @@ void z_init_thread_base(struct _thread_base *thread_base, int priority,
+@@ -929,6 +929,10 @@ void z_init_thread_base(struct _thread_base *thread_base, int priority,
  	/* swap_data does not need to be initialized */
  
  	z_init_thread_timeout(thread_base);
@@ -543,7 +543,7 @@ index 4c5d6134fbd..9f2952a41c4 100644
  }
  
  FUNC_NORETURN void k_thread_user_mode_enter(k_thread_entry_t entry,
-@@ -1269,3 +1273,179 @@ void *z_vrfy_k_thread_result_get(void)
+@@ -1411,3 +1415,179 @@ void *z_vrfy_k_thread_result_get(void)
  }
  #include <zephyr/syscalls/k_thread_result_get_mrsh.c>
  #endif
@@ -724,10 +724,10 @@ index 4c5d6134fbd..9f2952a41c4 100644
 +
 +#endif /* CONFIG_THREAD_CANCEL */
 diff --git a/lib/os/thread_entry.c b/lib/os/thread_entry.c
-index a1541b587cc..0d0f8b1abf9 100644
+index 2ad86c62d0c..07eabc83ba5 100644
 --- a/lib/os/thread_entry.c
 +++ b/lib/os/thread_entry.c
-@@ -45,9 +45,21 @@ FUNC_NORETURN void z_thread_entry(k_thread_entry_t entry,
+@@ -57,9 +57,21 @@ FUNC_NORETURN void z_thread_entry(k_thread_entry_t entry,
  	__stack_chk_guard = stack_guard;
  	__stack_chk_guard <<= 8;
  #endif	/* CONFIG_STACK_CANARIES */
@@ -750,7 +750,7 @@ index a1541b587cc..0d0f8b1abf9 100644
  	/*
  	 * Compiler can't tell that k_thread_abort() won't return and issues a
 diff --git a/scripts/build/gen_syscalls.py b/scripts/build/gen_syscalls.py
-index 28da182a1ab..8088976c87a 100755
+index 3af4c2ee10f..b3e0d306a0d 100755
 --- a/scripts/build/gen_syscalls.py
 +++ b/scripts/build/gen_syscalls.py
 @@ -76,6 +76,8 @@ not_cancellation_points = {

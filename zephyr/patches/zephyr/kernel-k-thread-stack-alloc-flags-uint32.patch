@@ -1,14 +1,14 @@
 diff --git a/include/zephyr/kernel.h b/include/zephyr/kernel.h
-index 3c70faf7466..b78d94e2414 100644
+index 0293d3d56a2..e00afde4e3e 100644
 --- a/include/zephyr/kernel.h
 +++ b/include/zephyr/kernel.h
-@@ -383,7 +383,7 @@ void k_thread_foreach_unlocked_filter_by_cpu(unsigned int cpu,
+@@ -392,7 +392,7 @@ void k_thread_foreach_unlocked_filter_by_cpu(unsigned int cpu,
   *
   * @see @kconfig{CONFIG_DYNAMIC_THREAD}
   */
 -__syscall k_thread_stack_t *k_thread_stack_alloc(size_t size, int flags);
 +__syscall k_thread_stack_t *k_thread_stack_alloc(size_t size, uint32_t flags);
- 
+
  /**
   * @brief Free a dynamically allocated thread stack.
 diff --git a/kernel/dynamic.c b/kernel/dynamic.c
@@ -18,7 +18,7 @@ index aecba3fbf97..987efdf1b6d 100644
 @@ -31,7 +31,7 @@ static K_THREAD_STACK_ARRAY_DEFINE(dynamic_stack, CONFIG_DYNAMIC_THREAD_POOL_SIZ
  				   K_THREAD_STACK_LEN(CONFIG_DYNAMIC_THREAD_STACK_SIZE));
  SYS_BITARRAY_DEFINE_STATIC(dynamic_ba, BA_SIZE);
- 
+
 -static k_thread_stack_t *z_thread_stack_alloc_pool(size_t size, int flags)
 +static k_thread_stack_t *z_thread_stack_alloc_pool(size_t size, uint32_t flags)
  {
@@ -27,7 +27,7 @@ index aecba3fbf97..987efdf1b6d 100644
 @@ -56,7 +56,7 @@ static k_thread_stack_t *z_thread_stack_alloc_pool(size_t size, int flags)
  	return stack;
  }
- 
+
 -static k_thread_stack_t *z_thread_stack_alloc_dyn(size_t size, int flags)
 +static k_thread_stack_t *z_thread_stack_alloc_dyn(size_t size, uint32_t flags)
  {
@@ -36,15 +36,15 @@ index aecba3fbf97..987efdf1b6d 100644
 @@ -72,7 +72,7 @@ static k_thread_stack_t *z_thread_stack_alloc_dyn(size_t size, int flags)
  	return z_thread_aligned_alloc(Z_KERNEL_STACK_OBJ_ALIGN, K_KERNEL_STACK_LEN(size));
  }
- 
+
 -k_thread_stack_t *z_impl_k_thread_stack_alloc(size_t size, int flags)
 +k_thread_stack_t *z_impl_k_thread_stack_alloc(size_t size, uint32_t flags)
  {
  	k_thread_stack_t *stack = NULL;
- 
+
 @@ -95,7 +95,7 @@ k_thread_stack_t *z_impl_k_thread_stack_alloc(size_t size, int flags)
  }
- 
+
  #ifdef CONFIG_USERSPACE
 -static inline k_thread_stack_t *z_vrfy_k_thread_stack_alloc(size_t size, int flags)
 +static inline k_thread_stack_t *z_vrfy_k_thread_stack_alloc(size_t size, uint32_t flags)
@@ -58,7 +58,7 @@ index 47ce077304f..8e23adab8c9 100644
 @@ -9,7 +9,7 @@
  #include <zephyr/kernel.h>
  #include <zephyr/kernel/thread_stack.h>
- 
+
 -k_thread_stack_t *z_impl_k_thread_stack_alloc(size_t size, int flags)
 +k_thread_stack_t *z_impl_k_thread_stack_alloc(size_t size, uint32_t flags)
  {
