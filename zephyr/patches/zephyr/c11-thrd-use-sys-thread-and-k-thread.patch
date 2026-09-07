@@ -265,10 +265,10 @@ index 2125e25bf07..0ccc62943a8 100644
 +	sys_thread_once((sys_thread_once_t *)flag, func);
  }
 diff --git a/lib/libc/common/source/thrd/thrd.c b/lib/libc/common/source/thrd/thrd.c
-index 0946e2cb2b9..51320f8b003 100644
+index 0946e2cb2b9..272c3497fe4 100644
 --- a/lib/libc/common/source/thrd/thrd.c
 +++ b/lib/libc/common/source/thrd/thrd.c
-@@ -8,25 +8,27 @@
+@@ -8,25 +8,28 @@
  #include <threads.h>
 
  #include <zephyr/kernel.h>
@@ -284,6 +284,7 @@ index 0946e2cb2b9..51320f8b003 100644
 +static void thrd_trampoline(void *p1, void *p2, void *p3)
 +{
 +	thrd_start_t func = (thrd_start_t)p1;
++
 +	ARG_UNUSED(p3);
 +
 +	k_thread_exit(INT_TO_POINTER(func(p2)));
@@ -307,7 +308,7 @@ index 0946e2cb2b9..51320f8b003 100644
  		return thrd_nomem;
  	default:
  		return thrd_error;
-@@ -35,12 +37,12 @@ int thrd_create(thrd_t *thr, thrd_start_t func, void *arg)
+@@ -35,12 +38,12 @@ int thrd_create(thrd_t *thr, thrd_start_t func, void *arg)
 
  int thrd_equal(thrd_t lhs, thrd_t rhs)
  {
@@ -322,7 +323,13 @@ index 0946e2cb2b9..51320f8b003 100644
  }
 
  int thrd_sleep(const struct timespec *duration, struct timespec *remaining)
-@@ -54,31 +56,33 @@ int thrd_sleep(const struct timespec *duration, struct timespec *remaining)
+@@ -49,36 +52,38 @@ int thrd_sleep(const struct timespec *duration, struct timespec *remaining)
+ 		return thrd_error;
+ 	}
+
+-	return thrd_success;
++	return 0;
+ }
 
  void thrd_yield(void)
  {
@@ -462,22 +469,17 @@ index 00000000000..1bfdb05822e
 +
 +source "Kconfig.zephyr"
 diff --git a/tests/lib/c_lib/thrd/prj.conf b/tests/lib/c_lib/thrd/prj.conf
-index a595b337ca5..89fd2fd99b2 100644
+index a595b337ca5..8cc6748ad04 100644
 --- a/tests/lib/c_lib/thrd/prj.conf
 +++ b/tests/lib/c_lib/thrd/prj.conf
-@@ -1,12 +1,17 @@
- CONFIG_ZTEST=y
--CONFIG_TEST_USERSPACE=y
+@@ -2,10 +2,17 @@ CONFIG_ZTEST=y
+ CONFIG_TEST_USERSPACE=y
  CONFIG_ZTEST_FATAL_HOOK=y
 
 -CONFIG_POSIX_AEP_CHOICE_BASE=y
--CONFIG_THREAD_STACK_INFO=y
+ CONFIG_THREAD_STACK_INFO=y
 -CONFIG_DYNAMIC_THREAD=y
 -CONFIG_DYNAMIC_THREAD_POOL_SIZE=2
- CONFIG_COMMON_LIBC_THRD=y
--# work around for #91620
--CONFIG_MP_MAX_NUM_CPUS=1
--CONFIG_MAX_THREAD_BYTES=8
 +CONFIG_SYS_THREAD=y
 +
 +# These need to be >= the corresponding MIN_ADD values in Kconfig
@@ -488,9 +490,9 @@ index a595b337ca5..89fd2fd99b2 100644
 +
 +# This is needed for tss to have heap access
 +CONFIG_HEAP_MEM_POOL_SIZE=256
-+
-+# For native_sim
-+CONFIG_PICOLIBC=y
+ CONFIG_COMMON_LIBC_THRD=y
+ # work around for #91620
+ CONFIG_MP_MAX_NUM_CPUS=1
 diff --git a/tests/lib/c_lib/thrd/src/cnd.c b/tests/lib/c_lib/thrd/src/cnd.c
 index cf011b23b87..fc93b25c6e6 100644
 --- a/tests/lib/c_lib/thrd/src/cnd.c
@@ -1118,3 +1120,24 @@ index e11360efd2e..99cf50e9931 100644
 +    extra_configs:
 +      - CONFIG_USERSPACE=y
 +      - CONFIG_TEST_USERSPACE=y
+diff --git a/tests/lib/c_lib/thrd/boards/qemu_x86.conf b/tests/lib/c_lib/thrd/boards/qemu_x86.conf
+index 2fa43926ee4..e280f7d1208 100644
+--- a/tests/lib/c_lib/thrd/boards/qemu_x86.conf
++++ b/tests/lib/c_lib/thrd/boards/qemu_x86.conf
+@@ -1 +1 @@
+-CONFIG_DYNAMIC_THREAD_STACK_SIZE=4096
++CONFIG_SYS_THREAD_STACK_SIZE=4096
+diff --git a/tests/lib/c_lib/thrd/boards/qemu_x86_64.conf b/tests/lib/c_lib/thrd/boards/qemu_x86_64.conf
+index 2fa43926ee4..e280f7d1208 100644
+--- a/tests/lib/c_lib/thrd/boards/qemu_x86_64.conf
++++ b/tests/lib/c_lib/thrd/boards/qemu_x86_64.conf
+@@ -1 +1 @@
+-CONFIG_DYNAMIC_THREAD_STACK_SIZE=4096
++CONFIG_SYS_THREAD_STACK_SIZE=4096
+diff --git a/tests/lib/c_lib/thrd/boards/up_squared.conf b/tests/lib/c_lib/thrd/boards/up_squared.conf
+index 2fa43926ee4..e280f7d1208 100644
+--- a/tests/lib/c_lib/thrd/boards/up_squared.conf
++++ b/tests/lib/c_lib/thrd/boards/up_squared.conf
+@@ -1 +1 @@
+-CONFIG_DYNAMIC_THREAD_STACK_SIZE=4096
++CONFIG_SYS_THREAD_STACK_SIZE=4096

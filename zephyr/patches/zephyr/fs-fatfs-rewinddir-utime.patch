@@ -1,10 +1,11 @@
 diff --git a/modules/fatfs/zephyr_fatfs_config.h b/modules/fatfs/zephyr_fatfs_config.h
+index 9896b953e11..1910cdbcdff 100644
 --- a/modules/fatfs/zephyr_fatfs_config.h
 +++ b/modules/fatfs/zephyr_fatfs_config.h
 @@ -97,6 +97,11 @@
  #define FF_FS_NORTC 1
  #endif /* defined(CONFIG_FS_FATFS_HAS_RTC) */
- 
+
 +#if defined(CONFIG_FS_FATFS_FF_USE_CHMOD)
 +#undef FF_USE_CHMOD
 +#define FF_USE_CHMOD 1
@@ -13,14 +14,14 @@ diff --git a/modules/fatfs/zephyr_fatfs_config.h b/modules/fatfs/zephyr_fatfs_co
  /* Zephyr uses FF_VOLUME_STRS */
  #undef FF_STR_VOLUME_ID
  #define FF_STR_VOLUME_ID 1
-
 diff --git a/subsys/fs/Kconfig.fatfs b/subsys/fs/Kconfig.fatfs
+index 7db3ec3e4f8..9de8028b9e8 100644
 --- a/subsys/fs/Kconfig.fatfs
 +++ b/subsys/fs/Kconfig.fatfs
 @@ -102,6 +102,15 @@ config FS_FATFS_HAS_RTC
  	    10: 5 = Minute (0..59)
  	     4: 0 = Seconds/2 (0..29)
- 
+
 +config FS_FATFS_FF_USE_CHMOD
 +	bool "Attribute and timestamp write support"
 +	depends on !FS_FATFS_READ_ONLY
@@ -33,14 +34,14 @@ diff --git a/subsys/fs/Kconfig.fatfs b/subsys/fs/Kconfig.fatfs
  config FS_FATFS_EXTRA_NATIVE_API
  	bool "Additional native API functions"
  	help
-
 diff --git a/subsys/fs/fat_fs.c b/subsys/fs/fat_fs.c
+index 742c40cf924..a7bc676bbe5 100644
 --- a/subsys/fs/fat_fs.c
 +++ b/subsys/fs/fat_fs.c
 @@ -5,14 +5,18 @@
   * SPDX-License-Identifier: Apache-2.0
   */
- 
+
 +#define _POSIX_C_SOURCE 200809L /* Required for gmtime_r */
 +
  #include <stdio.h>
@@ -59,7 +60,7 @@ diff --git a/subsys/fs/fat_fs.c b/subsys/fs/fat_fs.c
 @@ -364,6 +368,32 @@ static int fatfs_opendir(struct fs_dir_t *zdp, const char *path)
  	return translate_error(res);
  }
- 
+
 +#if defined(CONFIG_FS_DIRENT_EXT)
 +static void fatfs_time_to_timespec(WORD fdate, WORD ftime, struct timespec *ts)
 +{
@@ -96,10 +97,10 @@ diff --git a/subsys/fs/fat_fs.c b/subsys/fs/fat_fs.c
 +			fatfs_fill_dirent_times(entry, &fno);
  		}
  	}
- 
+
  	return translate_error(res);
  }
- 
+
 +static int fatfs_rewinddir(struct fs_dir_t *zdp)
 +{
 +	FRESULT res;
@@ -119,10 +120,10 @@ diff --git a/subsys/fs/fat_fs.c b/subsys/fs/fat_fs.c
  		entry->size = fno.fsize;
 +		fatfs_fill_dirent_times(entry, &fno);
  	}
- 
+
  	return translate_error(res);
  }
- 
+
 +#if FF_USE_CHMOD && !FF_FS_READONLY
 +static int fatfs_utime(struct fs_mount_t *mountp, const char *name,
 +		       const struct timespec times[2])
@@ -172,21 +173,21 @@ diff --git a/subsys/fs/fat_fs.c b/subsys/fs/fat_fs.c
  #if defined(CONFIG_FILE_SYSTEM_MKFS) && defined(CONFIG_FS_FATFS_MKFS)
  	.mkfs = fatfs_mkfs,
  #endif
-
 diff --git a/tests/subsys/fs/fat_fs_api/CMakeLists.txt b/tests/subsys/fs/fat_fs_api/CMakeLists.txt
+index 93e537dae82..3e27dc35100 100644
 --- a/tests/subsys/fs/fat_fs_api/CMakeLists.txt
 +++ b/tests/subsys/fs/fat_fs_api/CMakeLists.txt
 @@ -14,6 +14,7 @@ target_sources(app PRIVATE
- 		src/test_fat_rename.c
- 		src/test_fat_rd_only_mount.c
- 		src/test_fat_file.c
-+		src/test_fat_utime.c
- 		../common/test_fs_open_flags.c)
+   src/test_fat_rename.c
+   src/test_fat_rd_only_mount.c
+   src/test_fat_file.c
++  src/test_fat_utime.c
+   ../common/test_fs_open_flags.c
+ )
  target_sources_ifdef(CONFIG_FLASH app PRIVATE
- 		../common/test_fs_mkfs.c
-
-diff --git ab/tests/subsys/fs/fat_fs_api/src/test_fat_utime.c b/tests/subsys/fs/fat_fs_api/src/test_fat_utime.c
+diff --git a/tests/subsys/fs/fat_fs_api/src/test_fat_utime.c b/tests/subsys/fs/fat_fs_api/src/test_fat_utime.c
 new file mode 100644
+index 00000000000..3db22e9b91c
 --- /dev/null
 +++ b/tests/subsys/fs/fat_fs_api/src/test_fat_utime.c
 @@ -0,0 +1,72 @@
@@ -262,8 +263,8 @@ new file mode 100644
 +}
 +
 +#endif /* CONFIG_FS_DIRENT_EXT && CONFIG_FS_FATFS_FF_USE_CHMOD */
-
 diff --git a/tests/subsys/fs/fat_fs_api/testcase.yaml b/tests/subsys/fs/fat_fs_api/testcase.yaml
+index 752551a0236..2862b57ebbb 100644
 --- a/tests/subsys/fs/fat_fs_api/testcase.yaml
 +++ b/tests/subsys/fs/fat_fs_api/testcase.yaml
 @@ -46,6 +46,12 @@ tests:

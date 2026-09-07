@@ -1,0 +1,3054 @@
+diff --git a/doc/releases/release-notes-4.3.rst b/doc/releases/release-notes-4.3.rst
+index 3156ae3ea3a..4df150063c5 100644
+--- a/doc/releases/release-notes-4.3.rst
++++ b/doc/releases/release-notes-4.3.rst
+@@ -142,6 +142,11 @@ Deprecated APIs and options
+
+ * RISCV's :kconfig:option:`CONFIG_EXTRA_EXCEPTION_INFO` is deprecated. Use :kconfig:option:`CONFIG_EXCEPTION_DEBUG` instead.
+
++* :kconfig:option:`CONFIG_XOPEN_STREAMS` was deprecated. Instead, use :kconfig:option:`CONFIG_XSI_STREAMS`.
++
++* :kconfig:option:`CONFIG_POSIX_API` was deprecated. See :ref:`POSIX Configuration<posix_config>`
++  for more details.
++
+ New APIs and options
+ ====================
+
+diff --git a/drivers/modem/Kconfig b/drivers/modem/Kconfig
+index 8f211f8d57d..cf7226bc559 100644
+--- a/drivers/modem/Kconfig
++++ b/drivers/modem/Kconfig
+@@ -158,7 +158,7 @@ config MODEM_SOCKET
+ 	  Note that the modem socket uses runtime allocated file descriptors
+ 	  reserved from the fdtable, for which the max count is set using the
+ 	  Kconfig option ZVFS_OPEN_MAX. Make sure to update this value as both
+-	  the modem sockets and the POSIX_API, if used, share them.
++	  the modem sockets and other POSIX APIs, if used, share them.
+
+ config MODEM_SOCKET_PACKET_COUNT
+ 	int "Maximum number of stored packet sizes per socket"
+diff --git a/drivers/net/nsos_fcntl.c b/drivers/net/nsos_fcntl.c
+index ad6a61285c9..6a0fa55555e 100644
+--- a/drivers/net/nsos_fcntl.c
++++ b/drivers/net/nsos_fcntl.c
+@@ -19,11 +19,7 @@
+ /*
+  * When building for Zephyr, use Zephyr specific fcntl definitions.
+  */
+-#ifdef __ZEPHYR__
+-#include <zephyr/posix/fcntl.h>
+-#else
+ #include <fcntl.h>
+-#endif
+
+ #include "nsi_errno.h"
+ #include "nsos_fcntl.h"
+diff --git a/drivers/wifi/nxp/Kconfig.nxp b/drivers/wifi/nxp/Kconfig.nxp
+index e2f544a1cd0..e53ba452c33 100644
+--- a/drivers/wifi/nxp/Kconfig.nxp
++++ b/drivers/wifi/nxp/Kconfig.nxp
+@@ -1207,10 +1207,15 @@ if NXP_WIFI_SMOKE_TESTS
+
+ config NXP_WIFI_SIGMA_AGENT
+ 	bool "Wi-Fi Alliance Sigma Agent Support"
+-	select POSIX_API
+-	select POSIX_THREADS
++	select POSIX_SYSTEM_INTERFACES
++	select POSIX_BASE_DEFINITIONS
++	select POSIX_AEP_REALTIME_MINIMAL
++	select POSIX_NETWORKING
++	imply EVENTFD
++	imply POSIX_FD_MGMT
++	imply POSIX_MULTI_PROCESS
++	imply XSI_SINGLE_PROCESS
+ 	select PTHREAD_CREATE_BARRIER
+-	select POSIX_TIMERS
+ 	help
+ 	  This option is to enable Wi-Fi Alliance Sigma Agent support in the Wi-Fi driver.
+
+diff --git a/drivers/wifi/simplelink/CMakeLists.txt b/drivers/wifi/simplelink/CMakeLists.txt
+index 3dbe2a2807f..6b789964bff 100644
+--- a/drivers/wifi/simplelink/CMakeLists.txt
++++ b/drivers/wifi/simplelink/CMakeLists.txt
+@@ -9,5 +9,7 @@ if(CONFIG_WIFI_SIMPLELINK)
+     simplelink_support.c
+     simplelink.c
+     )
++  # TI's driver portability layer relies on POSIX for multi-threading and timers
++  zephyr_library_compile_definitions(_POSIX_C_SOURCE=200809L)
+ endif()
+ zephyr_library_sources_ifdef(CONFIG_NET_SOCKETS_OFFLOAD simplelink_sockets.c)
+diff --git a/include/zephyr/net/ethernet.h b/include/zephyr/net/ethernet.h
+index a852876debd..2ec5b9e3fe1 100644
+--- a/include/zephyr/net/ethernet.h
++++ b/include/zephyr/net/ethernet.h
+@@ -18,8 +18,6 @@
+ #include <stdbool.h>
+ #include <zephyr/sys/atomic.h>
+
+-#include <zephyr/net/net_ip.h>
+-#include <zephyr/net/net_pkt.h>
+ #include <zephyr/net/lldp.h>
+ #include <zephyr/sys/clock.h>
+ #include <zephyr/sys/util.h>
+diff --git a/include/zephyr/net/socket.h b/include/zephyr/net/socket.h
+index 322309c26f0..e5e10182da5 100644
+--- a/include/zephyr/net/socket.h
++++ b/include/zephyr/net/socket.h
+@@ -374,7 +374,7 @@ __syscall void *zsock_get_context_object(int sock);
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/socket.html
+  * for normative description.
+  * This function is also exposed as `socket()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  *
+  * If CONFIG_USERSPACE is enabled, the caller will be granted access to the
+  * context object associated with the returned file descriptor.
+@@ -391,7 +391,7 @@ __syscall int zsock_socket(int family, int type, int proto);
+  * https://pubs.opengroup.org/onlinepubs/009695399/functions/socketpair.html
+  * for normative description.
+  * This function is also exposed as `socketpair()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ __syscall int zsock_socketpair(int family, int type, int proto, int *sv);
+
+@@ -401,7 +401,7 @@ __syscall int zsock_socketpair(int family, int type, int proto, int *sv);
+  * @details
+  * Close a network socket.
+  * This function is also exposed as `close()`
+- * if @kconfig{CONFIG_POSIX_API} is defined (in which case it
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined (in which case it
+  * may conflict with generic POSIX `close()` function).
+  */
+ __syscall int zsock_close(int sock);
+@@ -415,7 +415,7 @@ __syscall int zsock_close(int sock);
+  * for normative description, but currently this function has no effect in
+  * Zephyr and provided solely for compatibility with existing code.
+  * This function is also exposed as `shutdown()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ __syscall int zsock_shutdown(int sock, int how);
+
+@@ -427,7 +427,7 @@ __syscall int zsock_shutdown(int sock, int how);
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/bind.html
+  * for normative description.
+  * This function is also exposed as `bind()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ __syscall int zsock_bind(int sock, const struct net_sockaddr *addr,
+ 			 net_socklen_t addrlen);
+@@ -440,7 +440,7 @@ __syscall int zsock_bind(int sock, const struct net_sockaddr *addr,
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/connect.html
+  * for normative description.
+  * This function is also exposed as `connect()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ __syscall int zsock_connect(int sock, const struct net_sockaddr *addr,
+ 			    net_socklen_t addrlen);
+@@ -453,7 +453,7 @@ __syscall int zsock_connect(int sock, const struct net_sockaddr *addr,
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/listen.html
+  * for normative description.
+  * This function is also exposed as `listen()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ __syscall int zsock_listen(int sock, int backlog);
+
+@@ -465,7 +465,7 @@ __syscall int zsock_listen(int sock, int backlog);
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/accept.html
+  * for normative description.
+  * This function is also exposed as `accept()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ __syscall int zsock_accept(int sock, struct net_sockaddr *addr, net_socklen_t *addrlen);
+
+@@ -477,7 +477,7 @@ __syscall int zsock_accept(int sock, struct net_sockaddr *addr, net_socklen_t *a
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/sendto.html
+  * for normative description.
+  * This function is also exposed as `sendto()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ __syscall ssize_t zsock_sendto(int sock, const void *buf, size_t len,
+ 			       int flags, const struct net_sockaddr *dest_addr,
+@@ -491,7 +491,7 @@ __syscall ssize_t zsock_sendto(int sock, const void *buf, size_t len,
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/send.html
+  * for normative description.
+  * This function is also exposed as `send()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ static inline ssize_t zsock_send(int sock, const void *buf, size_t len,
+ 				 int flags)
+@@ -507,7 +507,7 @@ static inline ssize_t zsock_send(int sock, const void *buf, size_t len,
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/sendmsg.html
+  * for normative description.
+  * This function is also exposed as `sendmsg()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ __syscall ssize_t zsock_sendmsg(int sock, const struct net_msghdr *msg,
+ 				int flags);
+@@ -520,7 +520,7 @@ __syscall ssize_t zsock_sendmsg(int sock, const struct net_msghdr *msg,
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/recvfrom.html
+  * for normative description.
+  * This function is also exposed as `recvfrom()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ __syscall ssize_t zsock_recvfrom(int sock, void *buf, size_t max_len,
+ 				 int flags, struct net_sockaddr *src_addr,
+@@ -534,7 +534,7 @@ __syscall ssize_t zsock_recvfrom(int sock, void *buf, size_t max_len,
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/recvmsg.html
+  * for normative description.
+  * This function is also exposed as `recvmsg()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ __syscall ssize_t zsock_recvmsg(int sock, struct net_msghdr *msg, int flags);
+
+@@ -546,7 +546,7 @@ __syscall ssize_t zsock_recvmsg(int sock, struct net_msghdr *msg, int flags);
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/recv.html
+  * for normative description.
+  * This function is also exposed as `recv()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ static inline ssize_t zsock_recv(int sock, void *buf, size_t max_len,
+ 				 int flags)
+@@ -561,7 +561,7 @@ static inline ssize_t zsock_recv(int sock, void *buf, size_t max_len,
+  * This functions allow to (only) configure a socket for blocking or
+  * non-blocking operation (O_NONBLOCK).
+  * This function is also exposed as `fcntl()`
+- * if @kconfig{CONFIG_POSIX_API} is defined (in which case
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined (in which case
+  * it may conflict with generic POSIX `fcntl()` function).
+  */
+ __syscall int zsock_fcntl_impl(int sock, int cmd, int flags);
+@@ -599,7 +599,7 @@ static inline int zsock_fcntl_wrapper(int sock, int cmd, ...)
+  * `ZFD_IOCTL_FIONREAD`, to set non-blocking mode, and query the number of
+  * bytes available to read, respectively.
+  * This function is also exposed as `ioctl()`
+- * if @kconfig{CONFIG_POSIX_API} is defined (in which case
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined (in which case
+  * it may conflict with generic POSIX `ioctl()` function).
+  */
+ __syscall int zsock_ioctl_impl(int sock, unsigned long request, va_list ap);
+@@ -630,7 +630,7 @@ static inline int zsock_ioctl_wrapper(int sock, unsigned long request, ...)
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/poll.html
+  * for normative description.
+  * This function is also exposed as `poll()`
+- * if @kconfig{CONFIG_POSIX_API} is defined (in which case
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined (in which case
+  * it may conflict with generic POSIX `poll()` function).
+  */
+ static inline int zsock_poll(struct zsock_pollfd *fds, int nfds, int timeout)
+@@ -649,7 +649,7 @@ static inline int zsock_poll(struct zsock_pollfd *fds, int nfds, int timeout)
+  * available in Linux (some options are dummy and provided to ease porting
+  * of existing code).
+  * This function is also exposed as `getsockopt()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ __syscall int zsock_getsockopt(int sock, int level, int optname,
+ 			       void *optval, net_socklen_t *optlen);
+@@ -665,7 +665,7 @@ __syscall int zsock_getsockopt(int sock, int level, int optname,
+  * available in Linux (some options are dummy and provided to ease porting
+  * of existing code).
+  * This function is also exposed as `setsockopt()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ __syscall int zsock_setsockopt(int sock, int level, int optname,
+ 			       const void *optval, net_socklen_t optlen);
+@@ -678,7 +678,7 @@ __syscall int zsock_setsockopt(int sock, int level, int optname,
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/getpeername.html
+  * for normative description.
+  * This function is also exposed as `getpeername()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ __syscall int zsock_getpeername(int sock, struct net_sockaddr *addr,
+ 				net_socklen_t *addrlen);
+@@ -691,7 +691,7 @@ __syscall int zsock_getpeername(int sock, struct net_sockaddr *addr,
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/getsockname.html
+  * for normative description.
+  * This function is also exposed as `getsockname()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ __syscall int zsock_getsockname(int sock, struct net_sockaddr *addr,
+ 				net_socklen_t *addrlen);
+@@ -704,7 +704,7 @@ __syscall int zsock_getsockname(int sock, struct net_sockaddr *addr,
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/gethostname.html
+  * for normative description.
+  * This function is also exposed as `gethostname()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ __syscall int zsock_gethostname(char *buf, size_t len);
+
+@@ -716,7 +716,7 @@ __syscall int zsock_gethostname(char *buf, size_t len);
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/inet_ntop.html
+  * for normative description.
+  * This function is also exposed as `inet_ntop()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ static inline char *zsock_inet_ntop(net_sa_family_t family, const void *src,
+ 				    char *dst, size_t size)
+@@ -732,7 +732,7 @@ static inline char *zsock_inet_ntop(net_sa_family_t family, const void *src,
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/inet_pton.html
+  * for normative description.
+  * This function is also exposed as `inet_pton()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ __syscall int zsock_inet_pton(net_sa_family_t family, const char *src, void *dst);
+
+@@ -775,7 +775,7 @@ __syscall int z_zsock_getaddrinfo_internal(const char *host,
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/getaddrinfo.html
+  * for normative description.
+  * This function is also exposed as `getaddrinfo()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ int zsock_getaddrinfo(const char *host, const char *service,
+ 		      const struct zsock_addrinfo *hints,
+@@ -789,7 +789,7 @@ int zsock_getaddrinfo(const char *host, const char *service,
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/freeaddrinfo.html
+  * for normative description.
+  * This function is also exposed as `freeaddrinfo()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ void zsock_freeaddrinfo(struct zsock_addrinfo *ai);
+
+@@ -801,7 +801,7 @@ void zsock_freeaddrinfo(struct zsock_addrinfo *ai);
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/gai_strerror.html
+  * for normative description.
+  * This function is also exposed as `gai_strerror()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ const char *zsock_gai_strerror(int errcode);
+
+@@ -836,7 +836,7 @@ const char *zsock_gai_strerror(int errcode);
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/getnameinfo.html
+  * for normative description.
+  * This function is also exposed as `getnameinfo()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_NETWORKING} is defined.
+  */
+ int zsock_getnameinfo(const struct net_sockaddr *addr, net_socklen_t addrlen,
+ 		      char *host, net_socklen_t hostlen,
+diff --git a/include/zephyr/net/socket_select.h b/include/zephyr/net/socket_select.h
+index 10f3d9d4553..fc4374da5aa 100644
+--- a/include/zephyr/net/socket_select.h
++++ b/include/zephyr/net/socket_select.h
+@@ -43,7 +43,7 @@ typedef struct zvfs_fd_set zsock_fd_set;
+  * use zsock_poll() instead. In Zephyr this function works only with
+  * sockets, not arbitrary file descriptors.
+  * This function is also exposed as `select()`
+- * if @kconfig{CONFIG_POSIX_API} is defined (in which case
++ * if @kconfig{CONFIG_POSIX_DEVICE_IO} is defined (in which case
+  * it may conflict with generic POSIX `select()` function).
+  */
+ static inline int zsock_select(int nfds, zsock_fd_set *readfds, zsock_fd_set *writefds,
+@@ -68,7 +68,7 @@ static inline int zsock_select(int nfds, zsock_fd_set *readfds, zsock_fd_set *wr
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/select.html
+  * for normative description.
+  * This function is also exposed as `FD_ZERO()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_DEVICE_IO} is defined.
+  */
+ static inline void ZSOCK_FD_ZERO(zsock_fd_set *set)
+ {
+@@ -83,7 +83,7 @@ static inline void ZSOCK_FD_ZERO(zsock_fd_set *set)
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/select.html
+  * for normative description.
+  * This function is also exposed as `FD_ISSET()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_DEVICE_IO} is defined.
+  */
+ static inline int ZSOCK_FD_ISSET(int fd, zsock_fd_set *set)
+ {
+@@ -98,7 +98,7 @@ static inline int ZSOCK_FD_ISSET(int fd, zsock_fd_set *set)
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/select.html
+  * for normative description.
+  * This function is also exposed as `FD_CLR()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_DEVICE_IO} is defined.
+  */
+ static inline void ZSOCK_FD_CLR(int fd, zsock_fd_set *set)
+ {
+@@ -113,7 +113,7 @@ static inline void ZSOCK_FD_CLR(int fd, zsock_fd_set *set)
+  * http://pubs.opengroup.org/onlinepubs/9699919799/functions/select.html
+  * for normative description.
+  * This function is also exposed as `FD_SET()`
+- * if @kconfig{CONFIG_POSIX_API} is defined.
++ * if @kconfig{CONFIG_POSIX_DEVICE_IO} is defined.
+  */
+ static inline void ZSOCK_FD_SET(int fd, zsock_fd_set *set)
+ {
+diff --git a/lib/libc/arcmwdt/include/aio.h b/lib/libc/arcmwdt/include/aio.h
+new file mode 100644
+index 00000000000..6ef19e21168
+--- /dev/null
++++ b/lib/libc/arcmwdt/include/aio.h
+@@ -0,0 +1,12 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_ARCMWDT_INCLUDE_AIO_H_
++#define ZEPHYR_LIB_LIBC_ARCMWDT_INCLUDE_AIO_H_
++
++#include <zephyr/posix/aio.h>
++
++#endif /* ZEPHYR_LIB_LIBC_ARCMWDT_INCLUDE_AIO_H_ */
+diff --git a/lib/libc/arcmwdt/include/arpa/inet.h b/lib/libc/arcmwdt/include/arpa/inet.h
+new file mode 100644
+index 00000000000..8b6dee52292
+--- /dev/null
++++ b/lib/libc/arcmwdt/include/arpa/inet.h
+@@ -0,0 +1,12 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_ARCMWDT_INCLUDE_ARPA_INET_H_
++#define ZEPHYR_LIB_LIBC_ARCMWDT_INCLUDE_ARPA_INET_H_
++
++#include <zephyr/posix/arpa/inet.h>
++
++#endif /* ZEPHYR_LIB_LIBC_ARCMWDT_INCLUDE_ARPA_INET_H_ */
+diff --git a/lib/libc/arcmwdt/include/net/if.h b/lib/libc/arcmwdt/include/net/if.h
+new file mode 100644
+index 00000000000..18c80053c8c
+--- /dev/null
++++ b/lib/libc/arcmwdt/include/net/if.h
+@@ -0,0 +1,12 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_ARCMWDT_INCLUDE_NET_IF_H_
++#define ZEPHYR_LIB_LIBC_ARCMWDT_INCLUDE_NET_IF_H_
++
++#include <zephyr/posix/net/if.h>
++
++#endif /* ZEPHYR_LIB_LIBC_ARCMWDT_INCLUDE_NET_IF_H_ */
+diff --git a/lib/libc/arcmwdt/include/net/if_arp.h b/lib/libc/arcmwdt/include/net/if_arp.h
+new file mode 100644
+index 00000000000..51a426e7f5f
+--- /dev/null
++++ b/lib/libc/arcmwdt/include/net/if_arp.h
+@@ -0,0 +1,12 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_ARCMWDT_INCLUDE_NET_IF_ARP_H_
++#define ZEPHYR_LIB_LIBC_ARCMWDT_INCLUDE_NET_IF_ARP_H_
++
++#include <zephyr/posix/net/if_arp.h>
++
++#endif /* ZEPHYR_LIB_LIBC_ARCMWDT_INCLUDE_NET_IF_ARP_H_ */
+diff --git a/lib/libc/arcmwdt/include/netinet/in.h b/lib/libc/arcmwdt/include/netinet/in.h
+new file mode 100644
+index 00000000000..495740ff555
+--- /dev/null
++++ b/lib/libc/arcmwdt/include/netinet/in.h
+@@ -0,0 +1,12 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_ARCMWDT_INCLUDE_NETINET_IN_H_
++#define ZEPHYR_LIB_LIBC_ARCMWDT_INCLUDE_NETINET_IN_H_
++
++#include <zephyr/posix/netinet/in.h>
++
++#endif /* ZEPHYR_LIB_LIBC_ARCMWDT_INCLUDE_NETINET_IN_H_ */
+diff --git a/lib/libc/arcmwdt/include/netinet/tcp.h b/lib/libc/arcmwdt/include/netinet/tcp.h
+new file mode 100644
+index 00000000000..c100b692cf2
+--- /dev/null
++++ b/lib/libc/arcmwdt/include/netinet/tcp.h
+@@ -0,0 +1,12 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_ARCMWDT_INCLUDE_NETINET_TCP_H_
++#define ZEPHYR_LIB_LIBC_ARCMWDT_INCLUDE_NETINET_TCP_H_
++
++#include <zephyr/posix/netinet/tcp.h>
++
++#endif /* ZEPHYR_LIB_LIBC_ARCMWDT_INCLUDE_NETINET_TCP_H_ */
+diff --git a/lib/libc/arcmwdt/include/pthread.h b/lib/libc/arcmwdt/include/pthread.h
+new file mode 100644
+index 00000000000..ec93137904f
+--- /dev/null
++++ b/lib/libc/arcmwdt/include/pthread.h
+@@ -0,0 +1,44 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_ARCMWDT_INCLUDE_PTHREAD_H_
++#define ZEPHYR_LIB_LIBC_ARCMWDT_INCLUDE_PTHREAD_H_
++
++#if defined(_POSIX_THREADS)
++#undef __dead2
++#define __dead2
++
++#include_next <pthread.h>
++
++#define _PTHREAD_ATTR_T_DECLARED
++
++#undef PTHREAD_ONCE_INIT
++#define PTHREAD_ONCE_INIT                                                                          \
++	{                                                                                          \
++		0                                                                                  \
++	}
++
++/* The minimum allowable stack size */
++#define PTHREAD_STACK_MIN K_KERNEL_STACK_LEN(0)
++
++void __z_pthread_cleanup_push(void *cleanup[3], void (*routine)(void *arg), void *arg);
++void __z_pthread_cleanup_pop(int execute);
++
++#undef pthread_cleanup_push
++#define pthread_cleanup_push(_rtn, _arg)                                                           \
++	do /* enforce '{'-like behaviour */ {                                                      \
++		void *_z_pthread_cleanup[3];                                                       \
++	__z_pthread_cleanup_push(_z_pthread_cleanup, _rtn, _arg)
++
++#undef pthread_cleanup_pop
++#define pthread_cleanup_pop(_ex)                                                                   \
++	__z_pthread_cleanup_pop(_ex);                                                              \
++	} /* enforce '}'-like behaviour */                                                         \
++	while (0)
++
++#endif
++
++#endif /* ZEPHYR_LIB_LIBC_ARCMWDT_INCLUDE_PTHREAD_H_ */
+diff --git a/lib/libc/arcmwdt/include/sys/types.h b/lib/libc/arcmwdt/include/sys/types.h
+index 1c76cf1f9da..743b5da9e8d 100644
+--- a/lib/libc/arcmwdt/include/sys/types.h
++++ b/lib/libc/arcmwdt/include/sys/types.h
+@@ -17,6 +17,7 @@
+ #define _NLINK_T_DECLARED
+ #define _UID_T_DECLARED
+ #define _GID_T_DECLARED
++#define _PID_T_DECLARED
+
+ #ifndef _SSIZE_T_DEFINED
+ #define _SSIZE_T_DEFINED
+diff --git a/lib/libc/arcmwdt/include/time.h b/lib/libc/arcmwdt/include/time.h
+index 9f7a7412152..4ab1b906a58 100644
+--- a/lib/libc/arcmwdt/include/time.h
++++ b/lib/libc/arcmwdt/include/time.h
+@@ -9,6 +9,24 @@
+
+ #include_next <time.h>
+
++#if defined(_POSIX_C_SOURCE) || defined(CONFIG_POSIX_SYSTEM_INTERFACES)
++/*
++ * POSIX requires time.h to define pid_t and clockid_t
++ * https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/time.h.html
++ */
++#if !defined(_PID_T_DECLARED)
++typedef long pid_t;
++#define _PID_T_DECLARED
++#endif
++
++#if !defined(_CLOCKID_T_DECLARED)
++typedef int clockid_t;
++#define _CLOCKID_T_DECLARED
++#endif
++#endif
++
++#define _TIMESPEC_DECLARED
++
+ #include <zephyr/posix/posix_time.h>
+
+ #ifdef __cplusplus
+diff --git a/lib/libc/arcmwdt/include/unistd.h b/lib/libc/arcmwdt/include/unistd.h
+new file mode 100644
+index 00000000000..589af758501
+--- /dev/null
++++ b/lib/libc/arcmwdt/include/unistd.h
+@@ -0,0 +1,31 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_ARCMWDT_INCLUDE_UNISTD_H_
++#define ZEPHYR_LIB_LIBC_ARCMWDT_INCLUDE_UNISTD_H_
++
++#include_next <unistd.h>
++
++#include <zephyr/posix/posix_features.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++int getentropy(void *buffer, size_t length);
++
++#if _POSIX_C_SOURCE >= 2
++#include <zephyr/posix/sys/confstr.h>
++#endif
++
++/* Note: usleep() was declared obsolescent as of POSIX.1-2001 and removed from POSIX.1-2008 */
++int usleep(__useconds_t __useconds);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* ZEPHYR_LIB_LIBC_ARCMWDT_INCLUDE_UNISTD_H_ */
+diff --git a/lib/libc/armstdc/include/stdlib.h b/lib/libc/armstdc/include/stdlib.h
+new file mode 100644
+index 00000000000..49578c8988b
+--- /dev/null
++++ b/lib/libc/armstdc/include/stdlib.h
+@@ -0,0 +1,14 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_ARMSTDC_INCLUDE_STDLIB_H_
++#define ZEPHYR_LIB_LIBC_ARMSTDC_INCLUDE_STDLIB_H_
++
++#include_next <stdlib.h>
++
++#include <zephyr/posix/posix_stdlib.h>
++
++#endif /* ZEPHYR_LIB_LIBC_ARMSTDC_INCLUDE_STDLIB_H_ */
+diff --git a/lib/libc/common/Kconfig b/lib/libc/common/Kconfig
+index c4ac88dbab1..bd44c55c903 100644
+--- a/lib/libc/common/Kconfig
++++ b/lib/libc/common/Kconfig
+@@ -107,9 +107,9 @@ config COMMON_LIBC_STRNLEN
+ config COMMON_LIBC_THRD
+ 	bool "C11 <threads.h> API support"
+ 	depends on DYNAMIC_THREAD
+-	# Note: the POSIX_API dependency is only necessary until common elements
++	# Note: the POSIX_THREADS dependency is only necessary until common elements
+ 	# of C11 threads and POSIX API can be abstracted out to a common library.
+-	depends on POSIX_API
++	depends on POSIX_THREADS
+ 	default y
+ 	help
+ 	  Common implementation of C11 <threads.h> API.
+diff --git a/lib/libc/common/source/thrd/cnd.c b/lib/libc/common/source/thrd/cnd.c
+index aea6f5cb78a..457a9ae0ee8 100644
+--- a/lib/libc/common/source/thrd/cnd.c
++++ b/lib/libc/common/source/thrd/cnd.c
+@@ -7,7 +7,7 @@
+ #include <errno.h>
+ #include <threads.h>
+
+-#include <zephyr/posix/pthread.h>
++#include <pthread.h>
+
+ int cnd_broadcast(cnd_t *cond)
+ {
+diff --git a/lib/libc/common/source/thrd/mtx.c b/lib/libc/common/source/thrd/mtx.c
+index 9746ea64fe6..17b41a99709 100644
+--- a/lib/libc/common/source/thrd/mtx.c
++++ b/lib/libc/common/source/thrd/mtx.c
+@@ -8,7 +8,7 @@
+ #include <threads.h>
+
+ #include <zephyr/kernel.h>
+-#include <zephyr/posix/pthread.h>
++#include <pthread.h>
+
+ int mtx_init(mtx_t *mutex, int type)
+ {
+diff --git a/lib/libc/common/source/thrd/once.c b/lib/libc/common/source/thrd/once.c
+index 7cfd9983df8..2125e25bf07 100644
+--- a/lib/libc/common/source/thrd/once.c
++++ b/lib/libc/common/source/thrd/once.c
+@@ -8,7 +8,7 @@
+ #include <threads.h>
+
+ #include <zephyr/kernel.h>
+-#include <zephyr/posix/pthread.h>
++#include <pthread.h>
+
+ void call_once(once_flag *flag, void (*func)(void))
+ {
+diff --git a/lib/libc/common/source/thrd/thrd.c b/lib/libc/common/source/thrd/thrd.c
+index ad2cb72b602..0946e2cb2b9 100644
+--- a/lib/libc/common/source/thrd/thrd.c
++++ b/lib/libc/common/source/thrd/thrd.c
+@@ -8,8 +8,8 @@
+ #include <threads.h>
+
+ #include <zephyr/kernel.h>
+-#include <zephyr/posix/pthread.h>
+-#include <zephyr/posix/sched.h>
++#include <pthread.h>
++#include <sched.h>
+ #include <zephyr/sys/clock.h>
+
+ struct thrd_trampoline_arg {
+diff --git a/lib/libc/common/source/thrd/tss.c b/lib/libc/common/source/thrd/tss.c
+index 4b110d17170..dca1a3a7577 100644
+--- a/lib/libc/common/source/thrd/tss.c
++++ b/lib/libc/common/source/thrd/tss.c
+@@ -8,7 +8,7 @@
+ #include <threads.h>
+
+ #include <zephyr/kernel.h>
+-#include <zephyr/posix/pthread.h>
++#include <pthread.h>
+
+ int tss_create(tss_t *key, tss_dtor_t destructor)
+ {
+diff --git a/lib/libc/common/source/time/gmtime_r.c b/lib/libc/common/source/time/gmtime_r.c
+index 96afa6bc742..5f240b77dce 100644
+--- a/lib/libc/common/source/time/gmtime_r.c
++++ b/lib/libc/common/source/time/gmtime_r.c
+@@ -10,9 +10,10 @@
+  * http://howardhinnant.github.io/date_algorithms.html#civil_from_days
+  */
+
+-#include <zephyr/toolchain.h>
+ #include <time.h>
+
++#include <zephyr/toolchain.h>
++
+ /* A signed type with the representation of time_t without its
+  * implications.
+  */
+diff --git a/lib/libc/minimal/CMakeLists.txt b/lib/libc/minimal/CMakeLists.txt
+index 29f2db74367..e0a47206f05 100644
+--- a/lib/libc/minimal/CMakeLists.txt
++++ b/lib/libc/minimal/CMakeLists.txt
+@@ -52,3 +52,5 @@ add_custom_command(
+   DEPENDS include/errno.h
+   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+ )
++
++zephyr_include_directories(${ZEPHYR_BASE}/include/zephyr/posix)
+diff --git a/lib/libc/minimal/include/stdlib.h b/lib/libc/minimal/include/stdlib.h
+index a62a4a1e4d6..5749f75eb43 100644
+--- a/lib/libc/minimal/include/stdlib.h
++++ b/lib/libc/minimal/include/stdlib.h
+@@ -73,17 +73,11 @@ static inline long long llabs(long long __n)
+ }
+
+ char *getenv(const char *name);
+-#if _POSIX_C_SOURCE >= 200112L
+-int setenv(const char *name, const char *val, int overwrite);
+-int unsetenv(const char *name);
+-#endif
+-
+-#ifdef _BSD_SOURCE
+-int getenv_r(const char *name, char *buf, size_t len);
+-#endif
+
+ #ifdef __cplusplus
+ }
+ #endif
+
++#include <zephyr/posix/posix_stdlib.h>
++
+ #endif  /* ZEPHYR_LIB_LIBC_MINIMAL_INCLUDE_STDLIB_H_ */
+diff --git a/lib/libc/minimal/include/string.h b/lib/libc/minimal/include/string.h
+index 35052c0c06c..0cf173a560e 100644
+--- a/lib/libc/minimal/include/string.h
++++ b/lib/libc/minimal/include/string.h
+@@ -48,4 +48,6 @@ extern void  *memchr(const void *s, int c, size_t n);
+ }
+ #endif
+
++#include <zephyr/posix/posix_string.h>
++
+ #endif  /* ZEPHYR_LIB_LIBC_MINIMAL_INCLUDE_STRING_H_ */
+diff --git a/lib/libc/minimal/include/sys/_types.h b/lib/libc/minimal/include/sys/_types.h
+index a5ed9aff847..4a4673f9700 100644
+--- a/lib/libc/minimal/include/sys/_types.h
++++ b/lib/libc/minimal/include/sys/_types.h
+@@ -12,6 +12,7 @@
+
+ #include <stdint.h>
+
++typedef long _CLOCK_T_;
+ typedef int64_t _TIME_T_;
+ typedef int32_t _SUSECONDS_T_;
+
+diff --git a/lib/libc/minimal/include/time.h b/lib/libc/minimal/include/time.h
+index 55c8a0fb632..98814672a4c 100644
+--- a/lib/libc/minimal/include/time.h
++++ b/lib/libc/minimal/include/time.h
+@@ -43,6 +43,11 @@ typedef _TIME_T_ time_t;
+ typedef _SUSECONDS_T_ suseconds_t;
+ #endif
+
++#if !defined(__clock_t_defined)
++#define __clock_t_defined
++typedef _CLOCK_T_ clock_t;
++#endif
++
+ /*
+  * Conversion between civil time and UNIX time.  The companion
+  * mktime() is not provided here since it
+diff --git a/lib/libc/newlib/CMakeLists.txt b/lib/libc/newlib/CMakeLists.txt
+index d3dc448ecca..f25f97f752e 100644
+--- a/lib/libc/newlib/CMakeLists.txt
++++ b/lib/libc/newlib/CMakeLists.txt
+@@ -49,3 +49,11 @@ if(CONFIG_NEWLIB_LIBC_NANO)
+     -specs=nano.specs
+     )
+ endif()
++
++if(CONFIG_POSIX_DEVICE_IO)
++  zephyr_compile_definitions(-D_READ_WRITE_RETURN_TYPE=ssize_t)
++endif()
++
++if(CONFIG_POSIX_THREADS)
++  zephyr_compile_definitions(_UNIX98_THREAD_MUTEX_ATTRIBUTES)
++endif()
+diff --git a/lib/libc/newlib/include/aio.h b/lib/libc/newlib/include/aio.h
+new file mode 100644
+index 00000000000..f261c2c87e0
+--- /dev/null
++++ b/lib/libc/newlib/include/aio.h
+@@ -0,0 +1,12 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_AIO_H_
++#define ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_AIO_H_
++
++#include <zephyr/posix/aio.h>
++
++#endif /* ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_AIO_H_ */
+diff --git a/lib/libc/newlib/include/arpa/inet.h b/lib/libc/newlib/include/arpa/inet.h
+new file mode 100644
+index 00000000000..cff1406728c
+--- /dev/null
++++ b/lib/libc/newlib/include/arpa/inet.h
+@@ -0,0 +1,12 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_ARPA_INET_H_
++#define ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_ARPA_INET_H_
++
++#include <zephyr/posix/arpa/inet.h>
++
++#endif /* ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_ARPA_INET_H_ */
+diff --git a/lib/libc/newlib/include/dirent.h b/lib/libc/newlib/include/dirent.h
+new file mode 100644
+index 00000000000..cd2f2ea8d04
+--- /dev/null
++++ b/lib/libc/newlib/include/dirent.h
+@@ -0,0 +1,12 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_DIRENT_H_
++#define ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_DIRENT_H_
++
++#include <zephyr/posix/dirent.h>
++
++#endif /* ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_DIRENT_H_ */
+diff --git a/lib/libc/newlib/include/fnmatch.h b/lib/libc/newlib/include/fnmatch.h
+new file mode 100644
+index 00000000000..15f9ce76984
+--- /dev/null
++++ b/lib/libc/newlib/include/fnmatch.h
+@@ -0,0 +1,17 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_FNMATCH_H_
++#define ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_FNMATCH_H_
++
++#include_next <fnmatch.h>
++
++/* Note: this is a GNU Extension */
++#ifndef FNM_LEADING_DIR
++#define FNM_LEADING_DIR 0x08
++#endif
++
++#endif /* ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_FNMATCH_H_ */
+diff --git a/lib/libc/newlib/include/mqueue.h b/lib/libc/newlib/include/mqueue.h
+new file mode 100644
+index 00000000000..6e6fc6ce64b
+--- /dev/null
++++ b/lib/libc/newlib/include/mqueue.h
+@@ -0,0 +1,12 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_MQUEUE_H_
++#define ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_MQUEUE_H_
++
++#include <zephyr/posix/mqueue.h>
++
++#endif /* ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_MQUEUE_H_ */
+diff --git a/lib/libc/newlib/include/net/if.h b/lib/libc/newlib/include/net/if.h
+new file mode 100644
+index 00000000000..0cfd8e19dd7
+--- /dev/null
++++ b/lib/libc/newlib/include/net/if.h
+@@ -0,0 +1,12 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_NET_IF_H_
++#define ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_NET_IF_H_
++
++#include <zephyr/posix/net/if.h>
++
++#endif /* ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_NET_IF_H_ */
+diff --git a/lib/libc/newlib/include/net/if_arp.h b/lib/libc/newlib/include/net/if_arp.h
+new file mode 100644
+index 00000000000..944852a175e
+--- /dev/null
++++ b/lib/libc/newlib/include/net/if_arp.h
+@@ -0,0 +1,12 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_NET_IF_ARP_H_
++#define ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_NET_IF_ARP_H_
++
++#include <zephyr/posix/net/if_arp.h>
++
++#endif /* ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_NET_IF_ARP_H_ */
+diff --git a/lib/libc/newlib/include/netdb.h b/lib/libc/newlib/include/netdb.h
+new file mode 100644
+index 00000000000..931366f20e9
+--- /dev/null
++++ b/lib/libc/newlib/include/netdb.h
+@@ -0,0 +1,12 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_NETDB_H_
++#define ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_NETDB_H_
++
++#include <zephyr/posix/netdb.h>
++
++#endif /* ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_NETDB_H_ */
+diff --git a/lib/libc/newlib/include/netinet/in.h b/lib/libc/newlib/include/netinet/in.h
+new file mode 100644
+index 00000000000..b62909b07cf
+--- /dev/null
++++ b/lib/libc/newlib/include/netinet/in.h
+@@ -0,0 +1,12 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_NETINET_IN_H_
++#define ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_NETINET_IN_H_
++
++#include <zephyr/posix/netinet/in.h>
++
++#endif /* ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_NETINET_IN_H_ */
+diff --git a/lib/libc/newlib/include/netinet/tcp.h b/lib/libc/newlib/include/netinet/tcp.h
+new file mode 100644
+index 00000000000..8f28f9d142c
+--- /dev/null
++++ b/lib/libc/newlib/include/netinet/tcp.h
+@@ -0,0 +1,12 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_NETINET_TCP_H_
++#define ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_NETINET_TCP_H_
++
++#include <zephyr/posix/netinet/tcp.h>
++
++#endif /* ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_NETINET_TCP_H_ */
+diff --git a/lib/libc/newlib/include/poll.h b/lib/libc/newlib/include/poll.h
+new file mode 100644
+index 00000000000..0ea95ede618
+--- /dev/null
++++ b/lib/libc/newlib/include/poll.h
+@@ -0,0 +1,12 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_POLL_H_
++#define ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_POLL_H_
++
++#include <zephyr/posix/poll.h>
++
++#endif /* ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_POLL_H_ */
+diff --git a/lib/libc/newlib/include/pthread.h b/lib/libc/newlib/include/pthread.h
+new file mode 100644
+index 00000000000..448836f0ccf
+--- /dev/null
++++ b/lib/libc/newlib/include/pthread.h
+@@ -0,0 +1,44 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_PTHREAD_H_
++#define ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_PTHREAD_H_
++
++#if defined(_POSIX_THREADS)
++#undef __dead2
++#define __dead2
++
++#include_next <pthread.h>
++
++#define _PTHREAD_ATTR_T_DECLARED
++
++#undef PTHREAD_ONCE_INIT
++#define PTHREAD_ONCE_INIT                                                                          \
++	{                                                                                          \
++		0                                                                                  \
++	}
++
++/* The minimum allowable stack size */
++#define PTHREAD_STACK_MIN K_KERNEL_STACK_LEN(0)
++
++void __z_pthread_cleanup_push(void *cleanup[3], void (*routine)(void *arg), void *arg);
++void __z_pthread_cleanup_pop(int execute);
++
++#undef pthread_cleanup_push
++#define pthread_cleanup_push(_rtn, _arg)                                                           \
++	do /* enforce '{'-like behaviour */ {                                                      \
++		void *_z_pthread_cleanup[3];                                                       \
++	__z_pthread_cleanup_push(_z_pthread_cleanup, _rtn, _arg)
++
++#undef pthread_cleanup_pop
++#define pthread_cleanup_pop(_ex)                                                                   \
++	__z_pthread_cleanup_pop(_ex);                                                              \
++	} /* enforce '}'-like behaviour */                                                         \
++	while (0)
++
++#endif
++
++#endif /* ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_PTHREAD_H_ */
+diff --git a/lib/libc/newlib/include/semaphore.h b/lib/libc/newlib/include/semaphore.h
+new file mode 100644
+index 00000000000..08c7d81e50c
+--- /dev/null
++++ b/lib/libc/newlib/include/semaphore.h
+@@ -0,0 +1,12 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_SEMAPHORE_H_
++#define ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_SEMAPHORE_H_
++
++#include <zephyr/posix/semaphore.h>
++
++#endif /* ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_SEMAPHORE_H_ */
+diff --git a/lib/libc/newlib/include/stropts.h b/lib/libc/newlib/include/stropts.h
+new file mode 100644
+index 00000000000..e634a7da643
+--- /dev/null
++++ b/lib/libc/newlib/include/stropts.h
+@@ -0,0 +1,12 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_STROPTS_H_
++#define ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_STROPTS_H_
++
++#include <zephyr/posix/stropts.h>
++
++#endif /* ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_STROPTS_H_ */
+diff --git a/lib/libc/newlib/include/sys/_types.h b/lib/libc/newlib/include/sys/_types.h
+new file mode 100644
+index 00000000000..83dad7edd48
+--- /dev/null
++++ b/lib/libc/newlib/include/sys/_types.h
+@@ -0,0 +1,14 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_SYS__TYPES_H_
++#define ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_SYS__TYPES_H_
++
++#include_next <sys/_types.h>
++
++typedef _ssize_t ssize_t;
++
++#endif /* ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_SYS__TYPES_H_ */
+diff --git a/lib/libc/newlib/include/sys/eventfd.h b/lib/libc/newlib/include/sys/eventfd.h
+new file mode 100644
+index 00000000000..6b1f9fd1680
+--- /dev/null
++++ b/lib/libc/newlib/include/sys/eventfd.h
+@@ -0,0 +1,12 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_SYS_EVENTFD_H_
++#define ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_SYS_EVENTFD_H_
++
++#include <zephyr/posix/sys/eventfd.h>
++
++#endif /* ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_SYS_EVENTFD_H_ */
+diff --git a/lib/libc/newlib/include/sys/ioctl.h b/lib/libc/newlib/include/sys/ioctl.h
+new file mode 100644
+index 00000000000..27b11b3175f
+--- /dev/null
++++ b/lib/libc/newlib/include/sys/ioctl.h
+@@ -0,0 +1,12 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_SYS_IOCTL_H_
++#define ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_SYS_IOCTL_H_
++
++#include <zephyr/posix/sys/ioctl.h>
++
++#endif /* ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_SYS_IOCTL_H_ */
+diff --git a/lib/libc/newlib/include/sys/mman.h b/lib/libc/newlib/include/sys/mman.h
+new file mode 100644
+index 00000000000..b7c10d5bb6a
+--- /dev/null
++++ b/lib/libc/newlib/include/sys/mman.h
+@@ -0,0 +1,12 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_SYS_MMAN_H_
++#define ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_SYS_MMAN_H_
++
++#include <zephyr/posix/sys/mman.h>
++
++#endif /* ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_SYS_MMAN_H_ */
+diff --git a/lib/libc/newlib/include/sys/socket.h b/lib/libc/newlib/include/sys/socket.h
+new file mode 100644
+index 00000000000..5c9710b4912
+--- /dev/null
++++ b/lib/libc/newlib/include/sys/socket.h
+@@ -0,0 +1,12 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_SYS_SOCKET_H_
++#define ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_SYS_SOCKET_H_
++
++#include <zephyr/posix/sys/socket.h>
++
++#endif /* ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_SYS_SOCKET_H_ */
+diff --git a/lib/libc/newlib/include/sys/stat.h b/lib/libc/newlib/include/sys/stat.h
+new file mode 100644
+index 00000000000..00cfdba84ea
+--- /dev/null
++++ b/lib/libc/newlib/include/sys/stat.h
+@@ -0,0 +1,23 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_SYS_STAT_H_
++#define ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_SYS_STAT_H_
++
++#include_next <sys/stat.h>
++
++#if defined(_XOPEN_SOURCE)
++
++#include <zephyr/sys/fdtable.h>
++
++#define S_IFSHM ZVFS_MODE_IFSHM
++
++#define S_TYPEISMQ(buf)  (0)
++#define S_TYPEISSEM(buf) (0)
++#define S_TYPEISSHM(st)  (((st)->st_mode & S_IFMT) == S_IFSHM)
++#endif
++
++#endif /* ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_SYS_STAT_H_ */
+diff --git a/lib/libc/newlib/include/sys/utsname.h b/lib/libc/newlib/include/sys/utsname.h
+new file mode 100644
+index 00000000000..fad08d9ee99
+--- /dev/null
++++ b/lib/libc/newlib/include/sys/utsname.h
+@@ -0,0 +1,12 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_SYS_UTSNAME_H_
++#define ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_SYS_UTSNAME_H_
++
++#include <zephyr/posix/sys/utsname.h>
++
++#endif /* ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_SYS_UTSNAME_H_ */
+diff --git a/lib/libc/newlib/include/syslog.h b/lib/libc/newlib/include/syslog.h
+new file mode 100644
+index 00000000000..e9c6b1bf2cb
+--- /dev/null
++++ b/lib/libc/newlib/include/syslog.h
+@@ -0,0 +1,12 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_SYSLOG_H_
++#define ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_SYSLOG_H_
++
++#include <zephyr/posix/syslog.h>
++
++#endif /* ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_SYSLOG_H_ */
+diff --git a/lib/libc/newlib/include/time.h b/lib/libc/newlib/include/time.h
+new file mode 100644
+index 00000000000..a92d4651c50
+--- /dev/null
++++ b/lib/libc/newlib/include/time.h
+@@ -0,0 +1,15 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_TIME_H_
++#define ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_TIME_H_
++
++#include_next <time.h>
++
++#define _TIMESPEC_DECLARED
++#define _TIMEVAL_DECLARED
++
++#endif /* ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_TIME_H_ */
+diff --git a/lib/libc/newlib/include/unistd.h b/lib/libc/newlib/include/unistd.h
+new file mode 100644
+index 00000000000..95e25281bf2
+--- /dev/null
++++ b/lib/libc/newlib/include/unistd.h
+@@ -0,0 +1,31 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_UNISTD_H_
++#define ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_UNISTD_H_
++
++#include_next <unistd.h>
++
++#include <zephyr/posix/posix_features.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++int getentropy(void *buffer, size_t length);
++
++#if _POSIX_C_SOURCE >= 2
++#include <zephyr/posix/sys/confstr.h>
++#endif
++
++/* Note: usleep() was declared obsolescent as of POSIX.1-2001 and removed from POSIX.1-2008 */
++int usleep(__useconds_t __useconds);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_UNISTD_H_ */
+diff --git a/lib/libc/newlib/libc-hooks.c b/lib/libc/newlib/libc-hooks.c
+index 55c109d8fe8..de2529f58a1 100644
+--- a/lib/libc/newlib/libc-hooks.c
++++ b/lib/libc/newlib/libc-hooks.c
+@@ -9,7 +9,7 @@
+ #include <stdio.h>
+ #include <malloc.h>
+ #include <zephyr/sys/__assert.h>
+-#include <zephyr/posix/sys/stat.h>
++#include <sys/stat.h>
+ #include <zephyr/linker/linker-defs.h>
+ #include <zephyr/sys/util.h>
+ #include <zephyr/sys/errno_private.h>
+diff --git a/lib/libc/picolibc/CMakeLists.txt b/lib/libc/picolibc/CMakeLists.txt
+index 280a16a8945..e71ba2db988 100644
+--- a/lib/libc/picolibc/CMakeLists.txt
++++ b/lib/libc/picolibc/CMakeLists.txt
+@@ -10,7 +10,13 @@ zephyr_library_sources(
+   locks.c
+   stdio.c
+   )
+-zephyr_include_directories(include)
++if(CONFIG_POSIX_BASE_DEFINITIONS OR CONFIG_EVENTFD)
++  zephyr_include_directories(include)
++endif()
++if(CONFIG_PICOLIBC_USE_MODULE)
++  # temporary workaround for https://github.com/picolibc/picolibc/pull/1079
++  zephyr_compile_options(-Dpid_t=__pid_t)
++endif()
+
+ zephyr_library_compile_options($<TARGET_PROPERTY:compiler,prohibit_lto>)
+
+@@ -18,6 +24,10 @@ zephyr_library_compile_options($<TARGET_PROPERTY:compiler,prohibit_lto>)
+ # used by the network stack
+ zephyr_compile_definitions(__LINUX_ERRNO_EXTENSIONS__)
+
++if(CONFIG_POSIX_THREADS)
++  zephyr_compile_definitions(_UNIX98_THREAD_MUTEX_ATTRIBUTES)
++endif()
++
+ if(NOT CONFIG_PICOLIBC_USE_MODULE)
+
+   # Use picolibc provided with the toolchain. This requires a new enough
+diff --git a/lib/libc/picolibc/include/aio.h b/lib/libc/picolibc/include/aio.h
+new file mode 100644
+index 00000000000..bf198234118
+--- /dev/null
++++ b/lib/libc/picolibc/include/aio.h
+@@ -0,0 +1,12 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_AIO_H_
++#define ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_AIO_H_
++
++#include <zephyr/posix/aio.h>
++
++#endif /* ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_AIO_H_ */
+diff --git a/lib/libc/picolibc/include/arpa/inet.h b/lib/libc/picolibc/include/arpa/inet.h
+new file mode 100644
+index 00000000000..cbd9e7c57c7
+--- /dev/null
++++ b/lib/libc/picolibc/include/arpa/inet.h
+@@ -0,0 +1,12 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_ARPA_INET_H_
++#define ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_ARPA_INET_H_
++
++#include <zephyr/posix/arpa/inet.h>
++
++#endif /* ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_ARPA_INET_H_ */
+diff --git a/lib/libc/picolibc/include/dirent.h b/lib/libc/picolibc/include/dirent.h
+new file mode 100644
+index 00000000000..34b564b45ff
+--- /dev/null
++++ b/lib/libc/picolibc/include/dirent.h
+@@ -0,0 +1,12 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_DIRENT_H_
++#define ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_DIRENT_H_
++
++#include <zephyr/posix/dirent.h>
++
++#endif /* ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_DIRENT_H_ */
+diff --git a/lib/libc/picolibc/include/fnmatch.h b/lib/libc/picolibc/include/fnmatch.h
+new file mode 100644
+index 00000000000..194140b8800
+--- /dev/null
++++ b/lib/libc/picolibc/include/fnmatch.h
+@@ -0,0 +1,17 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_FNMATCH_H_
++#define ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_FNMATCH_H_
++
++#include_next <fnmatch.h>
++
++/* Note: this is a GNU Extension */
++#ifndef FNM_LEADING_DIR
++#define FNM_LEADING_DIR 0x08
++#endif
++
++#endif /* ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_FNMATCH_H_ */
+diff --git a/lib/libc/picolibc/include/mqueue.h b/lib/libc/picolibc/include/mqueue.h
+new file mode 100644
+index 00000000000..117e2c394a8
+--- /dev/null
++++ b/lib/libc/picolibc/include/mqueue.h
+@@ -0,0 +1,12 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_MQUEUE_H_
++#define ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_MQUEUE_H_
++
++#include <zephyr/posix/mqueue.h>
++
++#endif /* ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_MQUEUE_H_ */
+diff --git a/lib/libc/picolibc/include/net/if.h b/lib/libc/picolibc/include/net/if.h
+new file mode 100644
+index 00000000000..53dcdd8d318
+--- /dev/null
++++ b/lib/libc/picolibc/include/net/if.h
+@@ -0,0 +1,12 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_NET_IF_H_
++#define ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_NET_IF_H_
++
++#include <zephyr/posix/net/if.h>
++
++#endif /* ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_NET_IF_H_ */
+diff --git a/lib/libc/picolibc/include/net/if_arp.h b/lib/libc/picolibc/include/net/if_arp.h
+new file mode 100644
+index 00000000000..310371d2aca
+--- /dev/null
++++ b/lib/libc/picolibc/include/net/if_arp.h
+@@ -0,0 +1,12 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_NET_IF_ARP_H_
++#define ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_NET_IF_ARP_H_
++
++#include <zephyr/posix/net/if_arp.h>
++
++#endif /* ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_NET_IF_ARP_H_ */
+diff --git a/lib/libc/picolibc/include/netdb.h b/lib/libc/picolibc/include/netdb.h
+new file mode 100644
+index 00000000000..726384afd51
+--- /dev/null
++++ b/lib/libc/picolibc/include/netdb.h
+@@ -0,0 +1,12 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_NETDB_H_
++#define ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_NETDB_H_
++
++#include <zephyr/posix/netdb.h>
++
++#endif /* ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_NETDB_H_ */
+diff --git a/lib/libc/picolibc/include/netinet/in.h b/lib/libc/picolibc/include/netinet/in.h
+new file mode 100644
+index 00000000000..2f2eada72e9
+--- /dev/null
++++ b/lib/libc/picolibc/include/netinet/in.h
+@@ -0,0 +1,12 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_NETINET_IN_H_
++#define ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_NETINET_IN_H_
++
++#include <zephyr/posix/netinet/in.h>
++
++#endif /* ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_NETINET_IN_H_ */
+diff --git a/lib/libc/picolibc/include/netinet/tcp.h b/lib/libc/picolibc/include/netinet/tcp.h
+new file mode 100644
+index 00000000000..9ba9a55d5e0
+--- /dev/null
++++ b/lib/libc/picolibc/include/netinet/tcp.h
+@@ -0,0 +1,12 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_NETINET_TCP_H_
++#define ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_NETINET_TCP_H_
++
++#include <zephyr/posix/netinet/tcp.h>
++
++#endif /* ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_NETINET_TCP_H_ */
+diff --git a/lib/libc/picolibc/include/poll.h b/lib/libc/picolibc/include/poll.h
+new file mode 100644
+index 00000000000..a59c0eb60e6
+--- /dev/null
++++ b/lib/libc/picolibc/include/poll.h
+@@ -0,0 +1,12 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_POLL_H_
++#define ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_POLL_H_
++
++#include <zephyr/posix/poll.h>
++
++#endif /* ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_POLL_H_ */
+diff --git a/lib/libc/picolibc/include/pthread.h b/lib/libc/picolibc/include/pthread.h
+new file mode 100644
+index 00000000000..fc5c6fd545a
+--- /dev/null
++++ b/lib/libc/picolibc/include/pthread.h
+@@ -0,0 +1,52 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_PTHREAD_H_
++#define ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_PTHREAD_H_
++
++#if defined(_POSIX_THREADS)
++#undef __dead2
++#define __dead2
++
++/* workaround until https://github.com/picolibc/picolibc/pull/1096 is fixed */
++#include <sys/types.h> /* for clock_t */
++#if defined(CONFIG_PICOLIBC_USE_MODULE)
++/* <sys/_pthreadtypes.h> not available in module */
++#include <zephyr/posix/sys/_pthreadtypes.h>
++/* <pthread.h> not available in module */
++#include <zephyr/posix/pthread.h>
++#else
++#include <sys/_pthreadtypes.h>
++#include_next <pthread.h>
++#endif
++
++#undef PTHREAD_ONCE_INIT
++#define PTHREAD_ONCE_INIT                                                                          \
++	{                                                                                          \
++		0                                                                                  \
++	}
++
++/* The minimum allowable stack size */
++#define PTHREAD_STACK_MIN K_KERNEL_STACK_LEN(0)
++
++void __z_pthread_cleanup_push(void *cleanup[3], void (*routine)(void *arg), void *arg);
++void __z_pthread_cleanup_pop(int execute);
++
++#undef pthread_cleanup_push
++#define pthread_cleanup_push(_rtn, _arg)                                                           \
++	do /* enforce '{'-like behaviour */ {                                                      \
++		void *_z_pthread_cleanup[3];                                                       \
++	__z_pthread_cleanup_push(_z_pthread_cleanup, _rtn, _arg)
++
++#undef pthread_cleanup_pop
++#define pthread_cleanup_pop(_ex)                                                                   \
++	__z_pthread_cleanup_pop(_ex);                                                              \
++	} /* enforce '}'-like behaviour */                                                         \
++	while (0)
++
++#endif
++
++#endif /* ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_PTHREAD_H_ */
+diff --git a/lib/libc/picolibc/include/semaphore.h b/lib/libc/picolibc/include/semaphore.h
+new file mode 100644
+index 00000000000..76a192143b5
+--- /dev/null
++++ b/lib/libc/picolibc/include/semaphore.h
+@@ -0,0 +1,12 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SEMAPHORE_H_
++#define ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SEMAPHORE_H_
++
++#include <zephyr/posix/semaphore.h>
++
++#endif /* ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SEMAPHORE_H_ */
+diff --git a/lib/libc/picolibc/include/stropts.h b/lib/libc/picolibc/include/stropts.h
+new file mode 100644
+index 00000000000..88d43b8efe3
+--- /dev/null
++++ b/lib/libc/picolibc/include/stropts.h
+@@ -0,0 +1,12 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_STROPTS_H_
++#define ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_STROPTS_H_
++
++#include <zephyr/posix/stropts.h>
++
++#endif /* ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_STROPTS_H_ */
+diff --git a/lib/libc/picolibc/include/sys/_timespec.h b/lib/libc/picolibc/include/sys/_timespec.h
+deleted file mode 100644
+index 6b5c58d8ea6..00000000000
+--- a/lib/libc/picolibc/include/sys/_timespec.h
++++ /dev/null
+@@ -1,14 +0,0 @@
+-/*
+- * Copyright The Zephyr Project Contributors
+- *
+- * SPDX-License-Identifier: Apache-2.0
+- */
+-
+-#ifndef ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SYS__TIMESPEC_H_
+-#define ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SYS__TIMESPEC_H_
+-
+-#include_next <sys/_timespec.h>
+-
+-#define _TIMESPEC_DECLARED
+-
+-#endif /* ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SYS__TIMESPEC_H_ */
+diff --git a/lib/libc/picolibc/include/sys/eventfd.h b/lib/libc/picolibc/include/sys/eventfd.h
+new file mode 100644
+index 00000000000..db2c6d80e4e
+--- /dev/null
++++ b/lib/libc/picolibc/include/sys/eventfd.h
+@@ -0,0 +1,12 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SYS_EVENTFD_H_
++#define ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SYS_EVENTFD_H_
++
++#include <zephyr/posix/sys/eventfd.h>
++
++#endif /* ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SYS_EVENTFD_H_ */
+diff --git a/lib/libc/picolibc/include/sys/ioctl.h b/lib/libc/picolibc/include/sys/ioctl.h
+new file mode 100644
+index 00000000000..d2f2b408d4f
+--- /dev/null
++++ b/lib/libc/picolibc/include/sys/ioctl.h
+@@ -0,0 +1,12 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SYS_IOCTL_H_
++#define ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SYS_IOCTL_H_
++
++#include <zephyr/posix/sys/ioctl.h>
++
++#endif /* ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SYS_IOCTL_H_ */
+diff --git a/lib/libc/picolibc/include/sys/mman.h b/lib/libc/picolibc/include/sys/mman.h
+new file mode 100644
+index 00000000000..1c9414acdb7
+--- /dev/null
++++ b/lib/libc/picolibc/include/sys/mman.h
+@@ -0,0 +1,12 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SYS_MMAN_H_
++#define ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SYS_MMAN_H_
++
++#include <zephyr/posix/sys/mman.h>
++
++#endif /* ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SYS_MMAN_H_ */
+diff --git a/lib/libc/picolibc/include/sys/socket.h b/lib/libc/picolibc/include/sys/socket.h
+new file mode 100644
+index 00000000000..791262af51d
+--- /dev/null
++++ b/lib/libc/picolibc/include/sys/socket.h
+@@ -0,0 +1,12 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SYS_SOCKET_H_
++#define ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SYS_SOCKET_H_
++
++#include <zephyr/posix/sys/socket.h>
++
++#endif /* ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SYS_SOCKET_H_ */
+diff --git a/lib/libc/picolibc/include/sys/stat.h b/lib/libc/picolibc/include/sys/stat.h
+new file mode 100644
+index 00000000000..d8608d948fc
+--- /dev/null
++++ b/lib/libc/picolibc/include/sys/stat.h
+@@ -0,0 +1,23 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SYS_STAT_H_
++#define ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SYS_STAT_H_
++
++#include_next <sys/stat.h>
++
++#if defined(_XOPEN_SOURCE)
++
++#include <zephyr/sys/fdtable.h>
++
++#define S_IFSHM ZVFS_MODE_IFSHM
++
++#define S_TYPEISMQ(buf)  (0)
++#define S_TYPEISSEM(buf) (0)
++#define S_TYPEISSHM(st)  (((st)->st_mode & S_IFMT) == S_IFSHM)
++#endif
++
++#endif /* ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SYS_STAT_H_ */
+diff --git a/lib/libc/picolibc/include/sys/utsname.h b/lib/libc/picolibc/include/sys/utsname.h
+new file mode 100644
+index 00000000000..4ebda772bd1
+--- /dev/null
++++ b/lib/libc/picolibc/include/sys/utsname.h
+@@ -0,0 +1,12 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SYS_UTSNAME_H_
++#define ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SYS_UTSNAME_H_
++
++#include <zephyr/posix/sys/utsname.h>
++
++#endif /* ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SYS_UTSNAME_H_ */
+diff --git a/lib/libc/picolibc/include/syslog.h b/lib/libc/picolibc/include/syslog.h
+new file mode 100644
+index 00000000000..451257002b4
+--- /dev/null
++++ b/lib/libc/picolibc/include/syslog.h
+@@ -0,0 +1,12 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SYSLOG_H_
++#define ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SYSLOG_H_
++
++#include <zephyr/posix/syslog.h>
++
++#endif /* ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SYSLOG_H_ */
+diff --git a/lib/libc/picolibc/include/time.h b/lib/libc/picolibc/include/time.h
+index b6ff65137e6..1c24933efa9 100644
+--- a/lib/libc/picolibc/include/time.h
++++ b/lib/libc/picolibc/include/time.h
+@@ -7,7 +7,7 @@
+ #ifndef ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_TIME_H_
+ #define ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_TIME_H_
+
+-#if defined(_POSIX_C_SOURCE) || defined(__DOXYGEN__)
++#if defined(_POSIX_C_SOURCE) || defined(CONFIG_POSIX_SYSTEM_INTERFACES)
+
+ /* temporary workaround for https://github.com/picolibc/picolibc/pull/1079 */
+ #include <sys/_types.h>
+@@ -25,8 +25,11 @@ typedef __pid_t pid_t;
+ }
+ #endif
+
+-#endif /* defined(_POSIX_C_SOURCE) || defined(__DOXYGEN__) */
++#endif /* defined(_POSIX_C_SOURCE) || defined(CONFIG_POSIX_SYSTEM_INTERFACES) */
+
+ #include_next <time.h>
+
++#define _TIMESPEC_DECLARED
++#define _TIMEVAL_DECLARED
++
+ #endif /* ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_TIME_H_ */
+diff --git a/lib/libc/picolibc/include/unistd.h b/lib/libc/picolibc/include/unistd.h
+new file mode 100644
+index 00000000000..5d801a13c8b
+--- /dev/null
++++ b/lib/libc/picolibc/include/unistd.h
+@@ -0,0 +1,31 @@
++/*
++ * Copyright The Zephyr Project Contributors
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_UNISTD_H_
++#define ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_UNISTD_H_
++
++#include_next <unistd.h>
++
++#include <zephyr/posix/posix_features.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++int getentropy(void *buffer, size_t length);
++
++#if _POSIX_C_SOURCE >= 2
++#include <zephyr/posix/sys/confstr.h>
++#endif
++
++/* Note: usleep() was declared obsolescent as of POSIX.1-2001 and removed from POSIX.1-2008 */
++int usleep(__useconds_t __useconds);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_UNISTD_H_ */
+diff --git a/lib/libc/picolibc/picolibc-hooks.h b/lib/libc/picolibc/picolibc-hooks.h
+index 1800e5ee404..0105c94512b 100644
+--- a/lib/libc/picolibc/picolibc-hooks.h
++++ b/lib/libc/picolibc/picolibc-hooks.h
+@@ -10,7 +10,7 @@
+ #include <errno.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+-#include <zephyr/posix/sys/stat.h>
++#include <sys/stat.h>
+ #include <sys/time.h>
+ #include <zephyr/arch/cpu.h>
+ #include <zephyr/linker/linker-defs.h>
+diff --git a/lib/os/cbprintf_packaged.c b/lib/os/cbprintf_packaged.c
+index d5add5ecf37..e88fd346dcc 100644
+--- a/lib/os/cbprintf_packaged.c
++++ b/lib/os/cbprintf_packaged.c
+@@ -8,10 +8,10 @@
+ #include <stdarg.h>
+ #include <stdint.h>
+ #include <string.h>
++#include <time.h>
+ #include <zephyr/toolchain.h>
+ #include <zephyr/linker/utils.h>
+ #include <zephyr/sys/cbprintf.h>
+-#include <sys/types.h>
+ #include <zephyr/sys/util.h>
+ #include <zephyr/sys/__assert.h>
+ #include <zephyr/logging/log.h>
+diff --git a/modules/hostap/src/supp_main.c b/modules/hostap/src/supp_main.c
+index c56e9b13427..7063f8c545a 100644
+--- a/modules/hostap/src/supp_main.c
++++ b/modules/hostap/src/supp_main.c
+@@ -5,6 +5,8 @@
+  * SPDX-License-Identifier: Apache-2.0
+  */
+
++#include <unistd.h>
++
+ #include <zephyr/logging/log.h>
+ LOG_MODULE_REGISTER(wifi_supplicant, CONFIG_WIFI_NM_WPA_SUPPLICANT_LOG_LEVEL);
+
+diff --git a/modules/openthread/platform/dhcp6_pd.c b/modules/openthread/platform/dhcp6_pd.c
+index f91a3b18997..f21a380e3f0 100644
+--- a/modules/openthread/platform/dhcp6_pd.c
++++ b/modules/openthread/platform/dhcp6_pd.c
+@@ -9,7 +9,7 @@
+ #include "openthread_border_router.h"
+ #include <common/code_utils.hpp>
+ #include <openthread/platform/infra_if.h>
+-#include <zephyr/posix/sys/socket.h>
++#include <sys/socket.h>
+ #include <zephyr/net/socket_service.h>
+ #include <zephyr/net/net_if.h>
+ #include <zephyr/net/net_ip.h>
+diff --git a/modules/thrift/Kconfig b/modules/thrift/Kconfig
+index 1beb722d49e..d4908ac9648 100644
+--- a/modules/thrift/Kconfig
++++ b/modules/thrift/Kconfig
+@@ -10,7 +10,7 @@ menuconfig THRIFT
+ 	depends on CPP
+ 	depends on STD_CPP17
+ 	depends on CPP_EXCEPTIONS
+-	depends on POSIX_API
++	depends on POSIX_SYSTEM_INTERFACES
+ 	help
+ 	  Enable this option to support Apache Thrift
+
+diff --git a/modules/thrift/src/thrift/server/TFDServer.cpp b/modules/thrift/src/thrift/server/TFDServer.cpp
+index f87bcb5684e..e59643a69f1 100644
+--- a/modules/thrift/src/thrift/server/TFDServer.cpp
++++ b/modules/thrift/src/thrift/server/TFDServer.cpp
+@@ -8,9 +8,9 @@
+ #include <system_error>
+
+ #include <errno.h>
+-#include <zephyr/posix/poll.h>
+-#include <zephyr/posix/sys/eventfd.h>
+-#include <zephyr/posix/unistd.h>
++#include <poll.h>
++#include <sys/eventfd.h>
++#include <unistd.h>
+
+ #include <thrift/transport/TFDTransport.h>
+
+diff --git a/modules/thrift/src/thrift/transport/TSSLServerSocket.cpp b/modules/thrift/src/thrift/transport/TSSLServerSocket.cpp
+index f4390e52154..41e78cac956 100644
+--- a/modules/thrift/src/thrift/transport/TSSLServerSocket.cpp
++++ b/modules/thrift/src/thrift/transport/TSSLServerSocket.cpp
+@@ -6,8 +6,8 @@
+
+ #include <cstring>
+ #include <zephyr/net/tls_credentials.h>
+-#include <zephyr/posix/sys/socket.h>
+-#include <zephyr/posix/unistd.h>
++#include <sys/socket.h>
++#include <unistd.h>
+
+ #include <thrift/thrift_export.h>
+ #include <thrift/transport/TSSLServerSocket.h>
+diff --git a/modules/thrift/src/thrift/transport/TSSLSocket.cpp b/modules/thrift/src/thrift/transport/TSSLSocket.cpp
+index f23c6b4f96d..3c085593fdd 100644
+--- a/modules/thrift/src/thrift/transport/TSSLSocket.cpp
++++ b/modules/thrift/src/thrift/transport/TSSLSocket.cpp
+@@ -11,7 +11,7 @@
+ #include <memory>
+ #include <string>
+ #ifdef HAVE_ARPA_INET_H
+-#include <zephyr/posix/arpa/inet.h>
++#include <arpa/inet.h>
+ #endif
+ #include <sys/types.h>
+ #ifdef HAVE_POLL_H
+diff --git a/modules/thrift/src/thrift/transport/TSSLSocket.h b/modules/thrift/src/thrift/transport/TSSLSocket.h
+index db6fa359183..650aed5222d 100644
+--- a/modules/thrift/src/thrift/transport/TSSLSocket.h
++++ b/modules/thrift/src/thrift/transport/TSSLSocket.h
+@@ -13,7 +13,7 @@
+ #include <string>
+ #include <thrift/concurrency/Mutex.h>
+
+-#include <zephyr/posix/sys/socket.h>
++#include <sys/socket.h>
+
+ namespace apache
+ {
+diff --git a/modules/thrift/src/thrift/transport/TServerSocket.h b/modules/thrift/src/thrift/transport/TServerSocket.h
+index f213bd7bcfa..2478095c699 100644
+--- a/modules/thrift/src/thrift/transport/TServerSocket.h
++++ b/modules/thrift/src/thrift/transport/TServerSocket.h
+@@ -15,10 +15,10 @@
+
+ #include <sys/types.h>
+ #ifdef HAVE_SYS_SOCKET_H
+-#include <zephyr/posix/sys/socket.h>
++#include <sys/socket.h>
+ #endif
+ #ifdef HAVE_NETDB_H
+-#include <zephyr/posix/netdb.h>
++#include <netdb.h>
+ #endif
+
+ namespace apache
+diff --git a/samples/drivers/video/tcpserversink/prj.conf b/samples/drivers/video/tcpserversink/prj.conf
+index d7c140b6aae..97d4ddfdaf7 100644
+--- a/samples/drivers/video/tcpserversink/prj.conf
++++ b/samples/drivers/video/tcpserversink/prj.conf
+@@ -3,7 +3,7 @@ CONFIG_NETWORKING=y
+ CONFIG_NET_TCP=y
+ CONFIG_NET_IPV4=y
+ CONFIG_NET_SOCKETS=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+
+ # Kernel options
+ CONFIG_MAIN_STACK_SIZE=2048
+diff --git a/samples/modules/thrift/hello/client/prj.conf b/samples/modules/thrift/hello/client/prj.conf
+index 9a581877c2a..ff1ce0a14ac 100644
+--- a/samples/modules/thrift/hello/client/prj.conf
++++ b/samples/modules/thrift/hello/client/prj.conf
+@@ -4,7 +4,7 @@ CONFIG_REQUIRES_FULL_LIBCPP=y
+ CONFIG_CPP=y
+ CONFIG_STD_CPP17=y
+ CONFIG_CPP_EXCEPTIONS=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ CONFIG_COMMON_LIBC_THRD=y
+ CONFIG_DYNAMIC_THREAD=y
+ CONFIG_THREAD_STACK_INFO=y
+@@ -14,6 +14,8 @@ CONFIG_NET_SOCKETPAIR=y
+ CONFIG_HEAP_MEM_POOL_SIZE=16384
+ CONFIG_EVENTFD=y
+ CONFIG_XSI_STREAMS=y
++CONFIG_XSI=y
++CONFIG_XSI_SINGLE_PROCESS=y
+
+ CONFIG_THRIFT=y
+
+diff --git a/samples/modules/thrift/hello/server/prj.conf b/samples/modules/thrift/hello/server/prj.conf
+index 0f7c523db59..5f269a236b8 100644
+--- a/samples/modules/thrift/hello/server/prj.conf
++++ b/samples/modules/thrift/hello/server/prj.conf
+@@ -5,11 +5,13 @@ CONFIG_REQUIRES_FULL_LIBCPP=y
+ CONFIG_CPP=y
+ CONFIG_STD_CPP17=y
+ CONFIG_CPP_EXCEPTIONS=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ CONFIG_XSI_STREAMS=y
+ CONFIG_NET_SOCKETPAIR=y
+ CONFIG_HEAP_MEM_POOL_SIZE=16384
+ CONFIG_EVENTFD=y
++CONFIG_XSI=y
++CONFIG_XSI_SINGLE_PROCESS=y
+
+ CONFIG_THRIFT=y
+
+diff --git a/samples/net/cellular_modem/prj.conf b/samples/net/cellular_modem/prj.conf
+index b646a6ff8dd..c8ea6035961 100644
+--- a/samples/net/cellular_modem/prj.conf
++++ b/samples/net/cellular_modem/prj.conf
+@@ -1,6 +1,6 @@
+ # Copyright (c) 2023 Bjarki Arge Andreasen
+ # SPDX-License-Identifier: Apache-2.0
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+
+ # Networking
+ CONFIG_NETWORKING=y
+diff --git a/samples/net/cellular_modem/src/main.c b/samples/net/cellular_modem/src/main.c
+index 6d8b89f4dac..8539d5a71db 100644
+--- a/samples/net/cellular_modem/src/main.c
++++ b/samples/net/cellular_modem/src/main.c
+@@ -4,9 +4,13 @@
+  * SPDX-License-Identifier: Apache-2.0
+  */
+
++#include <netinet/in.h>
++#include <sys/socket.h>
++#include <arpa/inet.h>
++#include <unistd.h>
++
+ #include <zephyr/device.h>
+ #include <zephyr/kernel.h>
+-#include <zephyr/net/socket.h>
+ #include <zephyr/net/net_if.h>
+ #include <zephyr/net/dns_resolve.h>
+ #include <zephyr/pm/device.h>
+diff --git a/samples/net/cloud/aws_iot_mqtt/prj.conf b/samples/net/cloud/aws_iot_mqtt/prj.conf
+index 998b69d16cc..ffc1a7d5bac 100644
+--- a/samples/net/cloud/aws_iot_mqtt/prj.conf
++++ b/samples/net/cloud/aws_iot_mqtt/prj.conf
+@@ -12,7 +12,7 @@ CONFIG_INIT_STACKS=y
+ CONFIG_HW_STACK_PROTECTION=y
+ CONFIG_REQUIRES_FULL_LIBC=y
+ CONFIG_JSON_LIBRARY=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+
+ # DNS
+ CONFIG_DNS_RESOLVER=y
+diff --git a/samples/net/cloud/mqtt_azure/prj.conf b/samples/net/cloud/mqtt_azure/prj.conf
+index e79c2a9389f..1aa9e0c77fd 100644
+--- a/samples/net/cloud/mqtt_azure/prj.conf
++++ b/samples/net/cloud/mqtt_azure/prj.conf
+@@ -1,5 +1,5 @@
+ CONFIG_NETWORKING=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+
+ # Disable IPv6 support
+ CONFIG_NET_IPV6=n
+diff --git a/samples/net/cloud/tagoio_http_post/prj.conf b/samples/net/cloud/tagoio_http_post/prj.conf
+index 9a4178d7f8a..31db54fcab5 100644
+--- a/samples/net/cloud/tagoio_http_post/prj.conf
++++ b/samples/net/cloud/tagoio_http_post/prj.conf
+@@ -6,7 +6,7 @@ CONFIG_MAIN_STACK_SIZE=4096
+ # HEAP size (512 bytes) are enough to run DNS.
+ CONFIG_COMMON_LIBC_MALLOC_ARENA_SIZE=4096
+
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+
+ # Networking config
+ CONFIG_NETWORKING=y
+diff --git a/samples/net/lwm2m_client/overlay-swir_hl78xx_ev_kit.conf b/samples/net/lwm2m_client/overlay-swir_hl78xx_ev_kit.conf
+index ae5f58454b1..29bcd513c01 100644
+--- a/samples/net/lwm2m_client/overlay-swir_hl78xx_ev_kit.conf
++++ b/samples/net/lwm2m_client/overlay-swir_hl78xx_ev_kit.conf
+@@ -22,7 +22,7 @@ CONFIG_DNS_RESOLVER=y
+ CONFIG_NET_SOCKETS_DNS_TIMEOUT=15000
+
+ # POSIX API
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ CONFIG_REQUIRES_FULL_LIBC=y
+
+ # Wait for the network to be ready
+diff --git a/samples/net/mdns_responder/prj.conf b/samples/net/mdns_responder/prj.conf
+index 97461678430..a883352b088 100644
+--- a/samples/net/mdns_responder/prj.conf
++++ b/samples/net/mdns_responder/prj.conf
+@@ -46,4 +46,4 @@ CONFIG_NET_CONFIG_PEER_IPV4_ADDR="192.0.2.2"
+ CONFIG_NET_CONFIG_MY_IPV4_GW="192.0.2.2"
+
+ CONFIG_NET_SOCKETS=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+diff --git a/samples/net/mqtt_publisher/prj.conf b/samples/net/mqtt_publisher/prj.conf
+index f5ea4e3f11e..3510887d495 100644
+--- a/samples/net/mqtt_publisher/prj.conf
++++ b/samples/net/mqtt_publisher/prj.conf
+@@ -9,7 +9,7 @@ CONFIG_NET_IF_MCAST_IPV6_ADDR_COUNT=2
+
+ CONFIG_PRINTK=y
+ CONFIG_STDOUT_CONSOLE=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+
+ # Enable IPv6 support
+ CONFIG_NET_IPV6=n
+diff --git a/samples/net/ocpp/prj.conf b/samples/net/ocpp/prj.conf
+index 5d6bb9cbeee..7bf06039197 100644
+--- a/samples/net/ocpp/prj.conf
++++ b/samples/net/ocpp/prj.conf
+@@ -50,5 +50,5 @@ CONFIG_SNTP=y
+
+ CONFIG_ZBUS=y
+ CONFIG_ZBUS_RUNTIME_OBSERVERS=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ CONFIG_POSIX_CLOCK_SELECTION=y
+diff --git a/samples/net/secure_mqtt_sensor_actuator/prj.conf b/samples/net/secure_mqtt_sensor_actuator/prj.conf
+index a38d60d779e..4ef4039eb39 100644
+--- a/samples/net/secure_mqtt_sensor_actuator/prj.conf
++++ b/samples/net/secure_mqtt_sensor_actuator/prj.conf
+@@ -42,7 +42,7 @@ CONFIG_NET_CONNECTION_MANAGER=y
+ CONFIG_NET_HOSTNAME_ENABLE=y
+
+ # Enable Posix API functionality
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+
+ # Enable sensor API
+ CONFIG_SENSOR=y
+diff --git a/samples/net/sockets/big_http_download/prj.conf b/samples/net/sockets/big_http_download/prj.conf
+index c623d3b763b..745c93b431e 100644
+--- a/samples/net/sockets/big_http_download/prj.conf
++++ b/samples/net/sockets/big_http_download/prj.conf
+@@ -11,7 +11,7 @@ CONFIG_NET_IPV4=y
+ CONFIG_NET_IPV6=y
+ CONFIG_NET_TCP=y
+ CONFIG_NET_SOCKETS=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ CONFIG_NET_CONTEXT_RCVTIMEO=y
+ CONFIG_NET_CONTEXT_SNDTIMEO=y
+
+diff --git a/samples/net/sockets/big_http_download/sample.yaml b/samples/net/sockets/big_http_download/sample.yaml
+index 4c70c0d15d0..69610275a7a 100644
+--- a/samples/net/sockets/big_http_download/sample.yaml
++++ b/samples/net/sockets/big_http_download/sample.yaml
+@@ -11,8 +11,6 @@ common:
+     - net
+     - socket
+ tests:
+-  sample.net.sockets.big_http_download:
+-    extra_configs:
+-      - CONFIG_POSIX_API=y
++  sample.net.sockets.big_http_download: {}
+   sample.net.sockets.big_http_download.ci:
+     extra_args: EXTRA_CONF_FILE=overlay-ci.conf
+diff --git a/samples/net/sockets/big_http_download/src/big_http_download.c b/samples/net/sockets/big_http_download/src/big_http_download.c
+index 2955605cc64..63b33a707b1 100644
+--- a/samples/net/sockets/big_http_download/src/big_http_download.c
++++ b/samples/net/sockets/big_http_download/src/big_http_download.c
+@@ -13,19 +13,14 @@
+
+ #include <psa/crypto.h>
+
+-#if !defined(__ZEPHYR__) || defined(CONFIG_POSIX_API)
+-
+ #include <netinet/in.h>
+ #include <sys/socket.h>
+ #include <arpa/inet.h>
+ #include <unistd.h>
+ #include <netdb.h>
+
+-#endif
+-
+ #if defined(__ZEPHYR__)
+
+-#include <zephyr/net/socket.h>
+ #include <zephyr/kernel.h>
+
+ #if defined(CONFIG_NET_SOCKETS_SOCKOPT_TLS)
+diff --git a/samples/net/sockets/can/prj.conf b/samples/net/sockets/can/prj.conf
+index 2ba72a0957f..9d181937f3f 100644
+--- a/samples/net/sockets/can/prj.conf
++++ b/samples/net/sockets/can/prj.conf
+@@ -6,7 +6,7 @@ CONFIG_NET_DRIVERS=y
+ CONFIG_NET_CANBUS=y
+ CONFIG_NET_SOCKETS=y
+ CONFIG_NET_SOCKETS_CAN=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+
+ CONFIG_NET_IPV6=n
+ CONFIG_NET_IPV4=n
+diff --git a/samples/net/sockets/coap_client/prj.conf b/samples/net/sockets/coap_client/prj.conf
+index 7748f1dbbfc..f3eadff303f 100644
+--- a/samples/net/sockets/coap_client/prj.conf
++++ b/samples/net/sockets/coap_client/prj.conf
+@@ -6,7 +6,7 @@ CONFIG_NET_UDP=y
+
+ CONFIG_NET_SOCKETS=y
+ CONFIG_ZVFS_POLL_MAX=4
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+
+ CONFIG_COAP=y
+
+diff --git a/samples/net/sockets/coap_server/prj.conf b/samples/net/sockets/coap_server/prj.conf
+index ce12e0d895a..5bc4d591c4c 100644
+--- a/samples/net/sockets/coap_server/prj.conf
++++ b/samples/net/sockets/coap_server/prj.conf
+@@ -5,7 +5,7 @@ CONFIG_NET_UDP=y
+
+ # Socket
+ CONFIG_NET_SOCKETS=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ CONFIG_ZVFS_POLL_MAX=10
+
+ # CoAP
+diff --git a/samples/net/sockets/dumb_http_server/prj.conf b/samples/net/sockets/dumb_http_server/prj.conf
+index a1e6b9efa8d..d05755681fb 100644
+--- a/samples/net/sockets/dumb_http_server/prj.conf
++++ b/samples/net/sockets/dumb_http_server/prj.conf
+@@ -7,7 +7,7 @@ CONFIG_NET_IPV4=y
+ CONFIG_NET_IPV6=n
+ CONFIG_NET_TCP=y
+ CONFIG_NET_SOCKETS=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+
+ # Network driver config
+ CONFIG_TEST_RANDOM_GENERATOR=y
+diff --git a/samples/net/sockets/dumb_http_server/sample.yaml b/samples/net/sockets/dumb_http_server/sample.yaml
+index 547ba2de636..541109957e5 100644
+--- a/samples/net/sockets/dumb_http_server/sample.yaml
++++ b/samples/net/sockets/dumb_http_server/sample.yaml
+@@ -12,11 +12,7 @@ common:
+   platform_exclude: intel_adsp/cavs25
+ tests:
+   sample.net.sockets.dumb_http_server:
+-    extra_configs:
+-      - CONFIG_POSIX_API=y
+     platform_exclude: s32k148_evb/s32k148
+   sample.net.sockets.dumb_http_server.s32k148_evb:
+-    extra_configs:
+-      - CONFIG_POSIX_API=y
+     extra_args: SHIELD=nxp_adtja1101
+     platform_allow: s32k148_evb/s32k148
+diff --git a/samples/net/sockets/dumb_http_server/src/socket_dumb_http.c b/samples/net/sockets/dumb_http_server/src/socket_dumb_http.c
+index d9194ca0dd2..252c5c29754 100644
+--- a/samples/net/sockets/dumb_http_server/src/socket_dumb_http.c
++++ b/samples/net/sockets/dumb_http_server/src/socket_dumb_http.c
+@@ -7,17 +7,13 @@
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <errno.h>
+-
+-#if !defined(__ZEPHYR__) || defined(CONFIG_POSIX_API)
+-
+ #include <netinet/in.h>
+ #include <sys/socket.h>
+ #include <arpa/inet.h>
+ #include <unistd.h>
+
+-#else
++#if defined(__ZEPHYR__)
+
+-#include <zephyr/net/socket.h>
+ #include <zephyr/kernel.h>
+
+ #include <zephyr/net/net_pkt.h>
+diff --git a/samples/net/sockets/dumb_http_server_mt/prj.conf b/samples/net/sockets/dumb_http_server_mt/prj.conf
+index 77ec17c7c7e..04f810f7f15 100644
+--- a/samples/net/sockets/dumb_http_server_mt/prj.conf
++++ b/samples/net/sockets/dumb_http_server_mt/prj.conf
+@@ -2,7 +2,7 @@
+ CONFIG_TEST_RANDOM_GENERATOR=y
+
+ # POSIX options
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+
+ # Networking config
+ CONFIG_NETWORKING=y
+diff --git a/samples/net/sockets/dumb_http_server_mt/src/main.c b/samples/net/sockets/dumb_http_server_mt/src/main.c
+index 5971d8efc6f..d244537d1a8 100644
+--- a/samples/net/sockets/dumb_http_server_mt/src/main.c
++++ b/samples/net/sockets/dumb_http_server_mt/src/main.c
+@@ -11,6 +11,11 @@ LOG_MODULE_REGISTER(net_dumb_http_srv_mt_sample);
+ #include <zephyr/posix/sys/socket.h>
+ #include <zephyr/posix/unistd.h>
+
++#include <netinet/in.h>
++#include <sys/socket.h>
++#include <arpa/inet.h>
++#include <unistd.h>
++
+ #include <zephyr/kernel.h>
+ #include <errno.h>
+ #include <zephyr/net/net_ip.h>
+diff --git a/samples/net/sockets/echo/prj.conf b/samples/net/sockets/echo/prj.conf
+index 33729784d8e..f6c5b825bc4 100644
+--- a/samples/net/sockets/echo/prj.conf
++++ b/samples/net/sockets/echo/prj.conf
+@@ -1,6 +1,7 @@
+ # General config
+ CONFIG_MAIN_STACK_SIZE=1200
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE52=y
++CONFIG_POSIX_NETWORKING=y
+
+ # Networking config
+ CONFIG_NETWORKING=y
+diff --git a/samples/net/sockets/echo_async/prj.conf b/samples/net/sockets/echo_async/prj.conf
+index 77cc25261f8..984240d5e47 100644
+--- a/samples/net/sockets/echo_async/prj.conf
++++ b/samples/net/sockets/echo_async/prj.conf
+@@ -10,7 +10,7 @@ CONFIG_NET_TCP=y
+ CONFIG_NET_SOCKETS=y
+ CONFIG_ZVFS_POLL_MAX=5
+
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+
+ # Network driver config
+ CONFIG_TEST_RANDOM_GENERATOR=y
+diff --git a/samples/net/sockets/echo_async/sample.yaml b/samples/net/sockets/echo_async/sample.yaml
+index 1a03bbcc91b..ce69521b03d 100644
+--- a/samples/net/sockets/echo_async/sample.yaml
++++ b/samples/net/sockets/echo_async/sample.yaml
+@@ -9,9 +9,7 @@ common:
+     - net
+     - socket
+ tests:
+-  sample.net.sockets.echo_async:
+-    extra_configs:
+-      - CONFIG_POSIX_API=y
++  sample.net.sockets.echo_async: {}
+   sample.net.sockets.echo_async.wifi.nrf70dk:
+     extra_args:
+       - SNIPPET=wifi-ipv4
+diff --git a/samples/net/sockets/echo_async_select/prj.conf b/samples/net/sockets/echo_async_select/prj.conf
+index 85f4ba5a0b1..13189c6d39d 100644
+--- a/samples/net/sockets/echo_async_select/prj.conf
++++ b/samples/net/sockets/echo_async_select/prj.conf
+@@ -1,7 +1,7 @@
+ # General config
+ CONFIG_REQUIRES_FULL_LIBC=y
+ CONFIG_MAIN_STACK_SIZE=1200
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+
+ # Networking config
+ CONFIG_NETWORKING=y
+diff --git a/samples/net/sockets/echo_async_select/sample.yaml b/samples/net/sockets/echo_async_select/sample.yaml
+index 4a9d84172d0..3d3b2e42844 100644
+--- a/samples/net/sockets/echo_async_select/sample.yaml
++++ b/samples/net/sockets/echo_async_select/sample.yaml
+@@ -9,6 +9,4 @@ common:
+     - socket
+   filter: CONFIG_FULL_LIBC_SUPPORTED and not CONFIG_NATIVE_LIBC
+ tests:
+-  sample.net.sockets.echo_async_select:
+-    extra_configs:
+-      - CONFIG_POSIX_API=y
++  sample.net.sockets.echo_async_select: {}
+diff --git a/samples/net/sockets/echo_client/prj.conf b/samples/net/sockets/echo_client/prj.conf
+index 434969a397d..0a434fd9968 100644
+--- a/samples/net/sockets/echo_client/prj.conf
++++ b/samples/net/sockets/echo_client/prj.conf
+@@ -8,7 +8,8 @@ CONFIG_NET_SOCKETS=y
+ CONFIG_ZVFS_POLL_MAX=5
+ CONFIG_NET_CONNECTION_MANAGER=y
+
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
++CONFIG_EVENTFD=y
+
+ # Kernel options
+ CONFIG_MAIN_STACK_SIZE=2048
+diff --git a/samples/net/sockets/echo_server/prj.conf b/samples/net/sockets/echo_server/prj.conf
+index d233af34065..11a6598da95 100644
+--- a/samples/net/sockets/echo_server/prj.conf
++++ b/samples/net/sockets/echo_server/prj.conf
+@@ -5,7 +5,7 @@ CONFIG_NET_TCP=y
+ CONFIG_NET_IPV6=y
+ CONFIG_NET_IPV4=y
+ CONFIG_NET_SOCKETS=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ CONFIG_NET_CONNECTION_MANAGER=y
+
+ # Kernel options
+diff --git a/samples/net/sockets/echo_server/src/tcp.c b/samples/net/sockets/echo_server/src/tcp.c
+index 45742db9629..80b637281c3 100644
+--- a/samples/net/sockets/echo_server/src/tcp.c
++++ b/samples/net/sockets/echo_server/src/tcp.c
+@@ -13,6 +13,8 @@ LOG_MODULE_DECLARE(net_echo_server_sample, LOG_LEVEL_DBG);
+ #include <zephyr/kernel.h>
+ #include <errno.h>
+ #include <stdio.h>
++#include <sys/socket.h>
++#include <unistd.h>
+
+ #include <zephyr/posix/sys/socket.h>
+ #include <zephyr/posix/unistd.h>
+diff --git a/samples/net/sockets/echo_service/prj.conf b/samples/net/sockets/echo_service/prj.conf
+index 761c4613622..db4a31369cb 100644
+--- a/samples/net/sockets/echo_service/prj.conf
++++ b/samples/net/sockets/echo_service/prj.conf
+@@ -1,7 +1,7 @@
+ # General config
+ # The async method used in the sample needs more stack for the workqueue
+ CONFIG_SYSTEM_WORKQUEUE_STACK_SIZE=1500
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+
+ # Networking config
+ CONFIG_NETWORKING=y
+diff --git a/samples/net/sockets/echo_service/src/main.c b/samples/net/sockets/echo_service/src/main.c
+index 5f2b12c7298..250f3e1e606 100644
+--- a/samples/net/sockets/echo_service/src/main.c
++++ b/samples/net/sockets/echo_service/src/main.c
+@@ -12,10 +12,10 @@ LOG_MODULE_REGISTER(net_echo_server_svc_sample, LOG_LEVEL_DBG);
+ #include <errno.h>
+
+ #include <zephyr/kernel.h>
+-#include <zephyr/posix/unistd.h>
+-#include <zephyr/posix/poll.h>
+-#include <zephyr/posix/arpa/inet.h>
+-#include <zephyr/posix/sys/socket.h>
++#include <unistd.h>
++#include <poll.h>
++#include <arpa/inet.h>
++#include <sys/socket.h>
+ #include <zephyr/net/socket_service.h>
+
+ #define MY_PORT 4242
+@@ -172,7 +172,7 @@ static void tcp_accept_handler(struct net_socket_service_event *pev)
+ 	int client;
+ 	int sock = pev->event.fd;
+ 	char addr_str[INET6_ADDRSTRLEN];
+-	struct sockaddr_in6 client_addr;
++	struct sockaddr_in6 client_addr = {};
+ 	socklen_t client_addr_len = sizeof(client_addr);
+
+ 	client = accept(sock, (struct sockaddr *)&client_addr, &client_addr_len);
+diff --git a/samples/net/sockets/http_client/prj.conf b/samples/net/sockets/http_client/prj.conf
+index 6f0e8af7b63..2294f41a73f 100644
+--- a/samples/net/sockets/http_client/prj.conf
++++ b/samples/net/sockets/http_client/prj.conf
+@@ -12,7 +12,7 @@ CONFIG_NET_SHELL=y
+ # Sockets
+ CONFIG_NET_SOCKETS=y
+ CONFIG_ZVFS_POLL_MAX=4
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+
+ # Network driver config
+ CONFIG_TEST_RANDOM_GENERATOR=y
+diff --git a/samples/net/sockets/http_get/prj.conf b/samples/net/sockets/http_get/prj.conf
+index a4f5e966a94..5b113017a1f 100644
+--- a/samples/net/sockets/http_get/prj.conf
++++ b/samples/net/sockets/http_get/prj.conf
+@@ -9,7 +9,8 @@ CONFIG_NET_IPV6=y
+ CONFIG_NET_TCP=y
+ CONFIG_NET_SOCKETS=y
+
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE52=y
++CONFIG_POSIX_NETWORKING=y
+
+ CONFIG_DNS_RESOLVER=y
+ CONFIG_DNS_SERVER_IP_ADDRESSES=y
+diff --git a/samples/net/sockets/http_get/sample.yaml b/samples/net/sockets/http_get/sample.yaml
+index d6e385c49e9..8cfdecce870 100644
+--- a/samples/net/sockets/http_get/sample.yaml
++++ b/samples/net/sockets/http_get/sample.yaml
+@@ -16,8 +16,6 @@ tests:
+     platform_exclude:
+       - cc3220sf_launchxl
+       - cc3235sf_launchxl
+-    extra_configs:
+-      - CONFIG_POSIX_API=y
+   sample.net.sockets.http_get.offload.simplelink:
+     platform_allow: cc3220sf_launchxl
+     harness: net
+diff --git a/samples/net/sockets/net_mgmt/prj.conf b/samples/net/sockets/net_mgmt/prj.conf
+index 854419e60d4..1067711131b 100644
+--- a/samples/net/sockets/net_mgmt/prj.conf
++++ b/samples/net/sockets/net_mgmt/prj.conf
+@@ -5,7 +5,7 @@ CONFIG_NET_TCP=y
+ CONFIG_NET_IPV6=y
+ CONFIG_NET_IPV4=y
+ CONFIG_NET_SOCKETS=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ CONFIG_NET_SOCKETS_NET_MGMT=y
+ CONFIG_NET_MGMT_EVENT=y
+
+diff --git a/samples/net/sockets/packet/prj.conf b/samples/net/sockets/packet/prj.conf
+index 254248f1012..45cd051f67d 100644
+--- a/samples/net/sockets/packet/prj.conf
++++ b/samples/net/sockets/packet/prj.conf
+@@ -6,7 +6,7 @@ CONFIG_NET_IPV6=n
+ CONFIG_NET_IPV4=n
+ CONFIG_NET_MAX_CONTEXTS=10
+ CONFIG_NET_SOCKETS=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ CONFIG_NET_CONTEXT_RCVTIMEO=y
+ CONFIG_NET_MGMT=y
+ CONFIG_NET_MGMT_EVENT=y
+diff --git a/samples/net/sockets/packet/src/packet.c b/samples/net/sockets/packet/src/packet.c
+index 7f0a3dc708f..92ef83f8876 100644
+--- a/samples/net/sockets/packet/src/packet.c
++++ b/samples/net/sockets/packet/src/packet.c
+@@ -10,9 +10,14 @@ LOG_MODULE_REGISTER(net_pkt_sock_sample, LOG_LEVEL_DBG);
+ #include <zephyr/kernel.h>
+ #include <errno.h>
+ #include <stdio.h>
++#include <netinet/in.h>
++#include <sys/socket.h>
++#include <arpa/inet.h>
++#include <unistd.h>
++#include <netdb.h>
++#include <poll.h>
+
+ #include <zephyr/misc/lorem_ipsum.h>
+-#include <zephyr/net/socket.h>
+ #include <zephyr/net/ethernet.h>
+ #include <zephyr/net/net_mgmt.h>
+
+diff --git a/samples/net/sockets/sntp_client/prj.conf b/samples/net/sockets/sntp_client/prj.conf
+index 4b94923895b..ca456e8ceb8 100644
+--- a/samples/net/sockets/sntp_client/prj.conf
++++ b/samples/net/sockets/sntp_client/prj.conf
+@@ -1,6 +1,6 @@
+ # General config
+ CONFIG_REQUIRES_FULL_LIBC=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+
+ # Networking config
+ CONFIG_NETWORKING=y
+diff --git a/samples/net/sockets/socketpair/prj.conf b/samples/net/sockets/socketpair/prj.conf
+index f94b2b62e05..2b7400d93e6 100644
+--- a/samples/net/sockets/socketpair/prj.conf
++++ b/samples/net/sockets/socketpair/prj.conf
+@@ -2,7 +2,7 @@
+ CONFIG_HEAP_MEM_POOL_SIZE=2048
+
+ # socketpair dependencies
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ CONFIG_NET_SOCKETPAIR=y
+
+ # Networking config (network subsystem dependencies)
+diff --git a/samples/net/sockets/tcp/prj.conf b/samples/net/sockets/tcp/prj.conf
+index f3660f4ac56..b44c0b077c6 100644
+--- a/samples/net/sockets/tcp/prj.conf
++++ b/samples/net/sockets/tcp/prj.conf
+@@ -3,7 +3,7 @@ CONFIG_REQUIRES_FULL_LIBC=y
+ CONFIG_NETWORKING=y
+
+ CONFIG_NET_SOCKETS=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+
+ CONFIG_NET_IPV4=y
+ CONFIG_NET_IPV6=y
+diff --git a/samples/net/sockets/txtime/prj.conf b/samples/net/sockets/txtime/prj.conf
+index 13520274bf0..a85b19609ac 100644
+--- a/samples/net/sockets/txtime/prj.conf
++++ b/samples/net/sockets/txtime/prj.conf
+@@ -5,7 +5,7 @@ CONFIG_NET_TCP=n
+ CONFIG_NET_IPV6=y
+ CONFIG_NET_IPV4=y
+ CONFIG_NET_SOCKETS=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ CONFIG_NET_CONTEXT_PRIORITY=y
+ CONFIG_NET_CONTEXT_TXTIME=y
+ CONFIG_NET_TC_TX_COUNT=7
+diff --git a/samples/net/sockets/websocket_client/prj.conf b/samples/net/sockets/websocket_client/prj.conf
+index e6a9e794860..61470691126 100644
+--- a/samples/net/sockets/websocket_client/prj.conf
++++ b/samples/net/sockets/websocket_client/prj.conf
+@@ -41,4 +41,4 @@ CONFIG_NET_LOG=y
+
+ CONFIG_MAIN_STACK_SIZE=2048
+ CONFIG_HEAP_MEM_POOL_SIZE=1500
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+diff --git a/samples/net/tftp_client/prj.conf b/samples/net/tftp_client/prj.conf
+index e42aaf7d45a..ce88e5d1b67 100644
+--- a/samples/net/tftp_client/prj.conf
++++ b/samples/net/tftp_client/prj.conf
+@@ -18,6 +18,6 @@ CONFIG_NET_CONFIG_MY_IPV4_ADDR="192.0.2.1"
+
+ CONFIG_DNS_RESOLVER=n
+ CONFIG_TFTP_LIB=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+
+ CONFIG_MAIN_STACK_SIZE=2048
+diff --git a/samples/subsys/modbus/tcp_gateway/prj.conf b/samples/subsys/modbus/tcp_gateway/prj.conf
+index 1129c8ac1ae..4148456d214 100644
+--- a/samples/subsys/modbus/tcp_gateway/prj.conf
++++ b/samples/subsys/modbus/tcp_gateway/prj.conf
+@@ -1,6 +1,6 @@
+ CONFIG_LOG=y
+ CONFIG_MAIN_STACK_SIZE=1200
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+
+ CONFIG_SERIAL=y
+ CONFIG_UART_INTERRUPT_DRIVEN=y
+diff --git a/samples/subsys/modbus/tcp_server/prj.conf b/samples/subsys/modbus/tcp_server/prj.conf
+index 210952bfb4f..0d5da0285bf 100644
+--- a/samples/subsys/modbus/tcp_server/prj.conf
++++ b/samples/subsys/modbus/tcp_server/prj.conf
+@@ -1,7 +1,7 @@
+ CONFIG_LOG=y
+ CONFIG_GPIO=y
+ CONFIG_MAIN_STACK_SIZE=1200
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+
+ CONFIG_MODBUS=y
+ CONFIG_MODBUS_ROLE_SERVER=y
+diff --git a/samples/subsys/shell/shell_module/src/main.c b/samples/subsys/shell/shell_module/src/main.c
+index 674cfb3475d..ba2a77316a8 100644
+--- a/samples/subsys/shell/shell_module/src/main.c
++++ b/samples/subsys/shell/shell_module/src/main.c
+@@ -119,7 +119,6 @@ static int cmd_demo_getopt_ts(const struct shell *sh, size_t argc,
+ 			bflag = 1;
+ 			break;
+ 		case 'c':
+-			cvalue = state->optarg;
+ 			break;
+ 		case 'h':
+ 			/* When getopt is active shell is not parsing
+@@ -155,7 +154,6 @@ static int cmd_demo_getopt_ts(const struct shell *sh, size_t argc,
+ static int cmd_demo_getopt(const struct shell *sh, size_t argc,
+ 			      char **argv)
+ {
+-	char *cvalue = NULL;
+ 	int aflag = 0;
+ 	int bflag = 0;
+ 	int c;
+diff --git a/samples/subsys/usb/legacy/netusb/prj.conf b/samples/subsys/usb/legacy/netusb/prj.conf
+index 239322da2fa..53164fe876a 100644
+--- a/samples/subsys/usb/legacy/netusb/prj.conf
++++ b/samples/subsys/usb/legacy/netusb/prj.conf
+@@ -14,7 +14,7 @@ CONFIG_NET_IF_MCAST_IPV6_ADDR_COUNT=5
+ CONFIG_NET_IF_UNICAST_IPV4_ADDR_COUNT=1
+ CONFIG_NET_MAX_CONTEXTS=5
+ CONFIG_NET_TC_TX_COUNT=1
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+
+ CONFIG_INIT_STACKS=y
+ CONFIG_TEST_RANDOM_GENERATOR=y
+diff --git a/subsys/fs/virtiofs/virtiofs_zfs.c b/subsys/fs/virtiofs/virtiofs_zfs.c
+index 4a0f50fcb1e..d8544f5e63a 100644
+--- a/subsys/fs/virtiofs/virtiofs_zfs.c
++++ b/subsys/fs/virtiofs/virtiofs_zfs.c
+@@ -5,10 +5,11 @@
+  */
+
+ #include <zephyr/init.h>
++#include <zephyr/kernel.h>
+ #include <zephyr/fs/fs.h>
+ #include <zephyr/fs/fs_sys.h>
+ #include <zephyr/fs/virtiofs.h>
+-#include <zephyr/posix/fcntl.h>
++#include <fcntl.h>
+ #include "../fs_impl.h"
+ #include <string.h>
+ #include "virtiofs.h"
+diff --git a/subsys/net/l2/wifi/wifi_shell.c b/subsys/net/l2/wifi/wifi_shell.c
+index a194979cb6a..adaf5b43e01 100644
+--- a/subsys/net/l2/wifi/wifi_shell.c
++++ b/subsys/net/l2/wifi/wifi_shell.c
+@@ -13,6 +13,7 @@
+ LOG_MODULE_REGISTER(net_wifi_shell, LOG_LEVEL_INF);
+
+ #include <zephyr/kernel.h>
++#include <getopt.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
+diff --git a/subsys/net/lib/http/http_server_core.c b/subsys/net/lib/http/http_server_core.c
+index ed43e55d024..d395a8f0a93 100644
+--- a/subsys/net/lib/http/http_server_core.c
++++ b/subsys/net/lib/http/http_server_core.c
+@@ -5,7 +5,10 @@
+  * SPDX-License-Identifier: Apache-2.0
+  */
+
++/* required for FNM_LEADING_DIR */
++#define _GNU_SOURCE
+ #include <errno.h>
++#include <fnmatch.h>
+ #include <stdbool.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+diff --git a/subsys/shell/shell_wildcard.c b/subsys/shell/shell_wildcard.c
+index cfa23d00f78..f8a47794661 100644
+--- a/subsys/shell/shell_wildcard.c
++++ b/subsys/shell/shell_wildcard.c
+@@ -5,7 +5,7 @@
+  */
+
+ #include <string.h>
+-#include <zephyr/posix/fnmatch.h>
++#include <fnmatch.h>
+ #include "shell_wildcard.h"
+ #include "shell_utils.h"
+ #include "shell_ops.h"
+diff --git a/tests/lib/c_lib/thrd/prj.conf b/tests/lib/c_lib/thrd/prj.conf
+index 563b7529e05..a595b337ca5 100644
+--- a/tests/lib/c_lib/thrd/prj.conf
++++ b/tests/lib/c_lib/thrd/prj.conf
+@@ -2,7 +2,7 @@ CONFIG_ZTEST=y
+ CONFIG_TEST_USERSPACE=y
+ CONFIG_ZTEST_FATAL_HOOK=y
+
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_BASE=y
+ CONFIG_THREAD_STACK_INFO=y
+ CONFIG_DYNAMIC_THREAD=y
+ CONFIG_DYNAMIC_THREAD_POOL_SIZE=2
+diff --git a/tests/lib/fdtable/prj.conf b/tests/lib/fdtable/prj.conf
+index 76745de38fc..dbc73b5898e 100644
+--- a/tests/lib/fdtable/prj.conf
++++ b/tests/lib/fdtable/prj.conf
+@@ -1,4 +1,4 @@
+ CONFIG_ZTEST=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE52=y
+ CONFIG_ZVFS=y
+ CONFIG_ZVFS_FDTABLE=y
+diff --git a/tests/modules/thrift/ThriftTest/prj.conf b/tests/modules/thrift/ThriftTest/prj.conf
+index d7d5e5fdb8c..ae25c74a708 100755
+--- a/tests/modules/thrift/ThriftTest/prj.conf
++++ b/tests/modules/thrift/ThriftTest/prj.conf
+@@ -6,8 +6,10 @@ CONFIG_CPP=y
+ CONFIG_STD_CPP17=y
+ CONFIG_CPP_EXCEPTIONS=y
+ CONFIG_GLIBCXX_LIBCPP=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ CONFIG_XSI_STREAMS=y
++CONFIG_XSI=y
++CONFIG_XSI_SINGLE_PROCESS=y
+ CONFIG_NETWORKING=y
+ CONFIG_NET_TCP=y
+ CONFIG_NET_SOCKETS=y
+diff --git a/tests/net/lib/http_server/common/prj.conf b/tests/net/lib/http_server/common/prj.conf
+index 2e812387e38..af8a1862549 100644
+--- a/tests/net/lib/http_server/common/prj.conf
++++ b/tests/net/lib/http_server/common/prj.conf
+@@ -8,7 +8,7 @@ CONFIG_ZTEST_STACK_SIZE=1024
+
+ CONFIG_HTTP_SERVER=y
+ CONFIG_EVENTFD=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+
+ # Networking config
+ CONFIG_NET_SOCKETS=y
+diff --git a/tests/net/lib/http_server/core/prj.conf b/tests/net/lib/http_server/core/prj.conf
+index 6937eda0cbc..318d8f1fd41 100644
+--- a/tests/net/lib/http_server/core/prj.conf
++++ b/tests/net/lib/http_server/core/prj.conf
+@@ -3,7 +3,7 @@ CONFIG_NET_TEST=y
+
+ # Eventfd
+ CONFIG_EVENTFD=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+
+ CONFIG_ENTROPY_GENERATOR=y
+ CONFIG_TEST_RANDOM_GENERATOR=y
+diff --git a/tests/net/lib/http_server/crime/prj.conf b/tests/net/lib/http_server/crime/prj.conf
+index 276466da416..0d0bedcf6bd 100644
+--- a/tests/net/lib/http_server/crime/prj.conf
++++ b/tests/net/lib/http_server/crime/prj.conf
+@@ -3,7 +3,7 @@ CONFIG_NET_TEST=y
+
+ # Eventfd
+ CONFIG_EVENTFD=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+
+ CONFIG_ENTROPY_GENERATOR=y
+ CONFIG_TEST_RANDOM_GENERATOR=y
+diff --git a/tests/net/lib/http_server/hpack/prj.conf b/tests/net/lib/http_server/hpack/prj.conf
+index 9d1f9695b86..28bef60ad9d 100644
+--- a/tests/net/lib/http_server/hpack/prj.conf
++++ b/tests/net/lib/http_server/hpack/prj.conf
+@@ -1,6 +1,6 @@
+ CONFIG_ZTEST=y
+ CONFIG_NET_TEST=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ CONFIG_ENTROPY_GENERATOR=y
+ CONFIG_TEST_RANDOM_GENERATOR=y
+
+diff --git a/tests/net/lib/ocpp/prj.conf b/tests/net/lib/ocpp/prj.conf
+index b949422a4c0..6e533ccc55f 100644
+--- a/tests/net/lib/ocpp/prj.conf
++++ b/tests/net/lib/ocpp/prj.conf
+@@ -37,7 +37,7 @@ CONFIG_NET_MGMT_EVENT=y
+ CONFIG_ENTROPY_GENERATOR=y
+ CONFIG_TEST_RANDOM_GENERATOR=y
+
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE52=y
+ CONFIG_POSIX_CLOCK_SELECTION=y
+
+ CONFIG_ZTEST=y
+diff --git a/tests/net/lib/prometheus/collector/prj.conf b/tests/net/lib/prometheus/collector/prj.conf
+index 6a5b7ce43c0..9d2a31e2781 100644
+--- a/tests/net/lib/prometheus/collector/prj.conf
++++ b/tests/net/lib/prometheus/collector/prj.conf
+@@ -3,7 +3,7 @@ CONFIG_NET_LOG=y
+ CONFIG_ZTEST=y
+ CONFIG_ZTEST_STACK_SIZE=1024
+ CONFIG_PROMETHEUS=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ CONFIG_NETWORKING=y
+ CONFIG_NET_SOCKETS=y
+ CONFIG_HTTP_SERVER=y
+diff --git a/tests/net/lib/prometheus/counter/prj.conf b/tests/net/lib/prometheus/counter/prj.conf
+index 547832cdf8e..28fa9313aca 100644
+--- a/tests/net/lib/prometheus/counter/prj.conf
++++ b/tests/net/lib/prometheus/counter/prj.conf
+@@ -3,7 +3,7 @@ CONFIG_ZTEST=y
+ CONFIG_TEST_RANDOM_GENERATOR=y
+ CONFIG_ZTEST_STACK_SIZE=1024
+ CONFIG_PROMETHEUS=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ CONFIG_NETWORKING=y
+ CONFIG_NET_SOCKETS=y
+ CONFIG_NET_LOG=y
+diff --git a/tests/net/lib/prometheus/formatter/prj.conf b/tests/net/lib/prometheus/formatter/prj.conf
+index 6a5b7ce43c0..9d2a31e2781 100644
+--- a/tests/net/lib/prometheus/formatter/prj.conf
++++ b/tests/net/lib/prometheus/formatter/prj.conf
+@@ -3,7 +3,7 @@ CONFIG_NET_LOG=y
+ CONFIG_ZTEST=y
+ CONFIG_ZTEST_STACK_SIZE=1024
+ CONFIG_PROMETHEUS=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ CONFIG_NETWORKING=y
+ CONFIG_NET_SOCKETS=y
+ CONFIG_HTTP_SERVER=y
+diff --git a/tests/net/lib/prometheus/gauge/prj.conf b/tests/net/lib/prometheus/gauge/prj.conf
+index 547832cdf8e..28fa9313aca 100644
+--- a/tests/net/lib/prometheus/gauge/prj.conf
++++ b/tests/net/lib/prometheus/gauge/prj.conf
+@@ -3,7 +3,7 @@ CONFIG_ZTEST=y
+ CONFIG_TEST_RANDOM_GENERATOR=y
+ CONFIG_ZTEST_STACK_SIZE=1024
+ CONFIG_PROMETHEUS=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ CONFIG_NETWORKING=y
+ CONFIG_NET_SOCKETS=y
+ CONFIG_NET_LOG=y
+diff --git a/tests/net/lib/prometheus/histogram/prj.conf b/tests/net/lib/prometheus/histogram/prj.conf
+index 5e13db5a5ab..36ee5793e64 100644
+--- a/tests/net/lib/prometheus/histogram/prj.conf
++++ b/tests/net/lib/prometheus/histogram/prj.conf
+@@ -3,7 +3,7 @@ CONFIG_ZTEST=y
+ CONFIG_TEST_RANDOM_GENERATOR=y
+ CONFIG_ZTEST_STACK_SIZE=1024
+ CONFIG_PROMETHEUS=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ CONFIG_NETWORKING=y
+ CONFIG_NET_SOCKETS=y
+ CONFIG_NET_LOG=y
+diff --git a/tests/net/lib/prometheus/summary/prj.conf b/tests/net/lib/prometheus/summary/prj.conf
+index 547832cdf8e..28fa9313aca 100644
+--- a/tests/net/lib/prometheus/summary/prj.conf
++++ b/tests/net/lib/prometheus/summary/prj.conf
+@@ -3,7 +3,7 @@ CONFIG_ZTEST=y
+ CONFIG_TEST_RANDOM_GENERATOR=y
+ CONFIG_ZTEST_STACK_SIZE=1024
+ CONFIG_PROMETHEUS=y
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ CONFIG_NETWORKING=y
+ CONFIG_NET_SOCKETS=y
+ CONFIG_NET_LOG=y
+diff --git a/tests/net/socket/service/prj.conf b/tests/net/socket/service/prj.conf
+index f2835795342..b08a0beb8b2 100644
+--- a/tests/net/socket/service/prj.conf
++++ b/tests/net/socket/service/prj.conf
+@@ -13,7 +13,7 @@ CONFIG_NET_SOCKETS_SERVICE=y
+ CONFIG_ZVFS_POLL_MAX=20
+
+ # We need to set POSIX_API and use picolibc for eventfd to work
+-CONFIG_POSIX_API=y
++CONFIG_POSIX_AEP_CHOICE_PSE53=y
+ CONFIG_PICOLIBC=y
+
+ # Network driver config
+diff --git a/tests/net/socket/service/src/main.c b/tests/net/socket/service/src/main.c
+index 07ddd346b24..659a0cfb1d8 100644
+--- a/tests/net/socket/service/src/main.c
++++ b/tests/net/socket/service/src/main.c
+@@ -8,6 +8,13 @@
+ LOG_MODULE_REGISTER(net_test, CONFIG_NET_SOCKETS_LOG_LEVEL);
+
+ #include <stdio.h>
++#include <netinet/in.h>
++#include <sys/socket.h>
++#include <arpa/inet.h>
++#include <unistd.h>
++#include <fcntl.h>
++#include <poll.h>
++
+ #include <zephyr/ztest_assert.h>
+
+ #include <zephyr/net/socket_service.h>
+diff --git a/tests/net/socket/socket_helpers.h b/tests/net/socket/socket_helpers.h
+index ec024dc71f2..7c5cf28dd34 100644
+--- a/tests/net/socket/socket_helpers.h
++++ b/tests/net/socket/socket_helpers.h
+@@ -6,10 +6,10 @@
+
+ #include <zephyr/ztest_assert.h>
+
+-#if defined(CONFIG_POSIX_API)
+-#include <zephyr/posix/sys/socket.h>
+-#include <zephyr/posix/arpa/inet.h>
+-#include <zephyr/posix/unistd.h>
++#if defined(CONFIG_POSIX_NETWORKING)
++#include <sys/socket.h>
++#include <arpa/inet.h>
++#include <unistd.h>
+ #else
+ #include <zephyr/net/socket.h>
+ #endif

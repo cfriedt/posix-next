@@ -1,48 +1,9 @@
-diff --git a/kernel/include/timeout_q.h b/kernel/include/timeout_q.h
-index 6ae627aadbd..ccf1a169336 100644
---- a/kernel/include/timeout_q.h
-+++ b/kernel/include/timeout_q.h
-@@ -25,6 +25,9 @@ extern "C" {
- /* Value written to dticks when timeout is aborted. */
- #define TIMEOUT_DTICKS_ABORTED (IS_ENABLED(CONFIG_TIMEOUT_64BIT) ? INT64_MIN : INT32_MIN)
- 
-+/* Value written to dticks when timeout is being announced (handler pending). */
-+#define TIMEOUT_DTICKS_ANNOUNCING (TIMEOUT_DTICKS_ABORTED + 1)
-+
- static inline void z_init_timeout(struct _timeout *to)
- {
- 	sys_dnode_init(&to->node);
-@@ -38,6 +41,24 @@ k_ticks_t z_add_timeout(struct _timeout *to, _timeout_func_t fn, k_timeout_t tim
- 
- int z_abort_timeout(struct _timeout *to);
- 
-+/* Determine if the timeout handler should continue.
-+ *
-+ * The routine sys_clock_announce() both removes the timeout from the timeout
-+ * list and unlocks interrupts prior to invoking the timeout handler. This
-+ * provides a small gap where another ISR (or thread on another CPU) could
-+ * do something that would cause the timeout handler to be canceled (e.g.
-+ * restarting a k_timer). This routine allows the timeout handler to check if
-+ * it should continue or if it should just return immediately. It assumes that
-+ * the handler has already locked interrupts / relevant spinlocks.
-+ *
-+ * Testing if the timeout node is linked is insufficient as the timeout node
-+ * could have been reused.
-+ */
-+static inline bool z_is_timeout_handler_canceled(const struct _timeout *to)
-+{
-+	return (to->dticks != TIMEOUT_DTICKS_ANNOUNCING);
-+}
-+
- static inline bool z_is_inactive_timeout(const struct _timeout *to)
- {
- 	return !sys_dnode_is_linked(&to->node);
 diff --git a/kernel/timeout.c b/kernel/timeout.c
-index 894e1d34977..11a81f178f7 100644
+index ef470ccc6a0..205c368ebb5 100644
 --- a/kernel/timeout.c
 +++ b/kernel/timeout.c
-@@ -53,6 +53,10 @@ static struct _timeout *next(struct _timeout *t)
- 
+@@ -42,6 +42,10 @@ static struct _timeout *next(struct _timeout *t)
+
  static void remove_timeout(struct _timeout *t)
  {
 +	if (!sys_dnode_is_linked(&t->node)) {
@@ -52,20 +13,3 @@ index 894e1d34977..11a81f178f7 100644
  	if (next(t) != NULL) {
  		next(t)->dticks += t->dticks;
  	}
-@@ -169,6 +173,8 @@ int z_abort_timeout(struct _timeout *to)
- 			if (is_first) {
- 				sys_clock_set_timeout(next_timeout(elapsed()), false);
- 			}
-+		} else if (to->dticks == TIMEOUT_DTICKS_ANNOUNCING) {
-+			to->dticks = TIMEOUT_DTICKS_ABORTED;
- 		}
- 	}
- 
-@@ -255,6 +257,7 @@ void sys_clock_announce(int32_t ticks)
- 		curr_tick += dt;
- 		t->dticks = 0;
- 		remove_timeout(t);
-+		t->dticks = TIMEOUT_DTICKS_ANNOUNCING;
- 
- 		k_spin_unlock(&timeout_lock, key);
- 		t->fn(t);

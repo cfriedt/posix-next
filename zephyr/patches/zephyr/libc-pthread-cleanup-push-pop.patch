@@ -1,84 +1,84 @@
 diff --git a/lib/libc/arcmwdt/include/pthread.h b/lib/libc/arcmwdt/include/pthread.h
-index 8921a1ad18f..d2ba619d56e 100644
+index ec93137904f..d2ba619d56e 100644
 --- a/lib/libc/arcmwdt/include/pthread.h
 +++ b/lib/libc/arcmwdt/include/pthread.h
-@@ -24,18 +24,15 @@
+@@ -22,20 +22,17 @@
+ 	}
+
  /* The minimum allowable stack size */
- #define PTHREAD_STACK_MIN CONFIG_IDLE_STACK_SIZE
- 
+-#define PTHREAD_STACK_MIN K_KERNEL_STACK_LEN(0)
+-
 -void __z_pthread_cleanup_push(void *cleanup[3], void (*routine)(void *arg), void *arg);
 -void __z_pthread_cleanup_pop(int execute);
--
++#define PTHREAD_STACK_MIN CONFIG_IDLE_STACK_SIZE
+
  #undef pthread_cleanup_push
  #define pthread_cleanup_push(_rtn, _arg)                                                           \
  	do /* enforce '{'-like behaviour */ {                                                      \
  		void *_z_pthread_cleanup[3];                                                       \
 -	__z_pthread_cleanup_push(_z_pthread_cleanup, _rtn, _arg)
 +		k_thread_cleanup_push(_z_pthread_cleanup, _rtn, _arg)
- 
+
  #undef pthread_cleanup_pop
  #define pthread_cleanup_pop(_ex)                                                                   \
 -	__z_pthread_cleanup_pop(_ex);                                                              \
 +	k_thread_cleanup_pop(_ex);                                                            \
  	} /* enforce '}'-like behaviour */                                                         \
  	while (0)
- 
+
 diff --git a/lib/libc/newlib/include/pthread.h b/lib/libc/newlib/include/pthread.h
-index 0d37431c5e3..9a16bcbe47b 100644
+index 448836f0ccf..5f7d4003407 100644
 --- a/lib/libc/newlib/include/pthread.h
 +++ b/lib/libc/newlib/include/pthread.h
-@@ -24,18 +24,15 @@
+@@ -22,20 +22,17 @@
+ 	}
+
  /* The minimum allowable stack size */
- #define PTHREAD_STACK_MIN CONFIG_IDLE_STACK_SIZE
- 
+-#define PTHREAD_STACK_MIN K_KERNEL_STACK_LEN(0)
+-
 -void __z_pthread_cleanup_push(void *cleanup[3], void (*routine)(void *arg), void *arg);
 -void __z_pthread_cleanup_pop(int execute);
--
- #undef pthread_cleanup_push
- #define pthread_cleanup_push(_rtn, _arg)                                                           \
- 	do /* enforce '{'-like behaviour */ {                                                      \
- 		void *_z_pthread_cleanup[3];                                                       \
--	__z_pthread_cleanup_push(_z_pthread_cleanup, _rtn, _arg)
-+	k_thread_cleanup_push(_z_pthread_cleanup, _rtn, _arg)
- 
- #undef pthread_cleanup_pop
- #define pthread_cleanup_pop(_ex)                                                                   \
--	__z_pthread_cleanup_pop(_ex);                                                              \
-+	k_thread_cleanup_pop(_ex);                                                            \
- 	} /* enforce '}'-like behaviour */                                                         \
- 	while (0)
- 
-diff --git a/lib/libc/picolibc/include/pthread.h b/lib/libc/picolibc/include/pthread.h
-index c24dce0aaa6..725e8283037 100644
---- a/lib/libc/picolibc/include/pthread.h
-+++ b/lib/libc/picolibc/include/pthread.h
-@@ -11,6 +11,8 @@
- #undef __dead2
- #define __dead2
- 
-+#include <zephyr/kernel.h>
-+
- /* workaround until https://github.com/picolibc/picolibc/pull/1096 is fixed */
- #include <sys/types.h> /* for clock_t */
- #if defined(CONFIG_PICOLIBC_USE_MODULE)
-@@ -32,18 +34,15 @@
- /* The minimum allowable stack size */
- #define PTHREAD_STACK_MIN CONFIG_IDLE_STACK_SIZE
- 
--void __z_pthread_cleanup_push(void *cleanup[3], void (*routine)(void *arg), void *arg);
--void __z_pthread_cleanup_pop(int execute);
--
++#define PTHREAD_STACK_MIN CONFIG_IDLE_STACK_SIZE
+
  #undef pthread_cleanup_push
  #define pthread_cleanup_push(_rtn, _arg)                                                           \
  	do /* enforce '{'-like behaviour */ {                                                      \
  		void *_z_pthread_cleanup[3];                                                       \
 -	__z_pthread_cleanup_push(_z_pthread_cleanup, _rtn, _arg)
 +		k_thread_cleanup_push(_z_pthread_cleanup, _rtn, _arg)
- 
+
  #undef pthread_cleanup_pop
  #define pthread_cleanup_pop(_ex)                                                                   \
 -	__z_pthread_cleanup_pop(_ex);                                                              \
-+		k_thread_cleanup_pop(_ex);                                                            \
++	k_thread_cleanup_pop(_ex);                                                            \
  	} /* enforce '}'-like behaviour */                                                         \
  	while (0)
- 
+
+diff --git a/lib/libc/picolibc/include/pthread.h b/lib/libc/picolibc/include/pthread.h
+index fc5c6fd545a..1c4f305b488 100644
+--- a/lib/libc/picolibc/include/pthread.h
++++ b/lib/libc/picolibc/include/pthread.h
+@@ -30,20 +30,17 @@
+ 	}
+
+ /* The minimum allowable stack size */
+-#define PTHREAD_STACK_MIN K_KERNEL_STACK_LEN(0)
+-
+-void __z_pthread_cleanup_push(void *cleanup[3], void (*routine)(void *arg), void *arg);
+-void __z_pthread_cleanup_pop(int execute);
++#define PTHREAD_STACK_MIN CONFIG_IDLE_STACK_SIZE
+
+ #undef pthread_cleanup_push
+ #define pthread_cleanup_push(_rtn, _arg)                                                           \
+ 	do /* enforce '{'-like behaviour */ {                                                      \
+ 		void *_z_pthread_cleanup[3];                                                       \
+-	__z_pthread_cleanup_push(_z_pthread_cleanup, _rtn, _arg)
++		k_thread_cleanup_push(_z_pthread_cleanup, _rtn, _arg)
+
+ #undef pthread_cleanup_pop
+ #define pthread_cleanup_pop(_ex)                                                                   \
+-	__z_pthread_cleanup_pop(_ex);                                                              \
++	k_thread_cleanup_pop(_ex);                                                            \
+ 	} /* enforce '}'-like behaviour */                                                         \
+ 	while (0)
+
