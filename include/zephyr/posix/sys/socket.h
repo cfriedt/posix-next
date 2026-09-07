@@ -23,6 +23,11 @@
 #include <sys/types.h>
 #include <zephyr/net/socket.h>
 
+/* Temporary workaround required to build with Zephyr 4.4+ */
+#define ZEPHYR_INCLUDE_NET_COMPAT_MODE_SYMBOLS
+#include <zephyr/net/net_compat.h>
+#undef ZEPHYR_INCLUDE_NET_COMPAT_MODE_SYMBOLS
+
 /** @brief Shut down the read half of the connection.  @ingroup posix_option_group_networking*/
 #define SHUT_RD   ZSOCK_SHUT_RD
 /** @brief Shut down the write half of the connection.  @ingroup posix_option_group_networking*/
@@ -45,7 +50,10 @@ extern "C" {
 
 #if !defined(_SOCKLEN_T_DECLARED) && !defined(__socklen_t_defined)
 /** @brief Type for socket address length values.  @ingroup posix_option_group_networking*/
+/* Temporary workaround required to build with Zephyr 4.4+ */
+#ifndef socklen_t
 typedef uint32_t socklen_t;
+#endif
 #define _SOCKLEN_T_DECLARED
 #define __socklen_t_defined
 #endif

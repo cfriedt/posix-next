@@ -762,6 +762,15 @@ patches:
     comments: |
       libc: use k_thread_cleanup_push/pop and CONFIG_IDLE_STACK_SIZE in
       newlib/picolibc/arcmwdt pthread.h overlays (post deprecate/move).
+  - path: zephyr/minor-improvements-for-coverage-py.patch
+    sha256sum: 44aca183ecac1e7a12970713a45155d4239854cf7384a7f0566a4ce3fcae2eec
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-06-07
+    upstreamable: true
+    comments: |
+      Minor improvements for coverage.py.
   - path: zephyr/misc-fixes-for-coverage.patch
     sha256sum: 64e1bb21f194234065a557fa549b9217c137b6ce90016b2b36f23a83775de342
     module: zephyr
@@ -983,7 +992,7 @@ patches:
       fs read_offs and write_offs vtable methods, restoring the underlying file
       position after offset I/O so lseek(SEEK_CUR) is unchanged.
   - path: picolibc/tinystdio-fgetpos-fsetpos.patch
-    sha256sum: c223181e6b7c19159881cfe9c69e5bf0d880ce69e760835473f28db485ef2e87
+    sha256sum: 5fcf090847b930dff1a2da52e6e24711a64c37d428be9e0db7ba8cd92348dcaa
     module: picolibc
     author: Chris Friedt
     email: chris@fr4.co
@@ -1041,3 +1050,93 @@ patches:
     comments: |
       Implement POSIX advisory record locking via fcntl() F_GETLK, F_SETLK, and
       F_SETLKW for ZVFS-backed regular files, with libc fcntl command normalization.
+  - path: zephyr/arm-cortex-m-decouple-exception-from-switch.patch
+    sha256sum: afd69aa6da95808913e31d18001694df5d7cf0d9ace0462e72d7339ddb9ca725
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-18
+    upstreamable: true
+    comments: |
+      Decouple <zephyr/arch/exception.h> from the Cortex-M context-switch
+      machinery: factor the _EXC_* priority macros into cortex_m/cpu.h and stop
+      cortex_m/exception.h from including arm-m-switch.h (and thus kernel/thread.h),
+      restoring the cross-arch convention that v4.4.1's new arm-m-switch.h broke.
+      Fixes '_EXC_IRQ_DEFAULT_PRIO undeclared' and the CONFIG_SIGNAL circular
+      include on Cortex-M.
+  - path: zephyr/kernel-dyn-stack-priv-placement.patch
+    sha256sum: ff5066d458d701b302f46a8789908f18fb744def3498f442bd99cf1e5244e56b
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-04
+    upstreamable: true
+    comments: |
+      kernel: userspace: place dynamic-stack privileged stacks past the object
+
+      Upstream d6071319b53 ("kernel/userspace: Dynamically allocate
+      privileged stack after user stack", v4.4.0) moved dynamically
+      allocated privileged stacks from the object base to the end of the
+      user stack, but computed the end from the requested size.
+
+      dynamic_object_create() places the privileged stack for a dynamically
+      allocated user thread stack at ROUND_UP(data + size, obj_align), but
+      the user buffer laid out by setup_thread_stack() spans
+      K_THREAD_STACK_LEN(size) bytes: K_THREAD_STACK_RESERVED (the PMP
+      stack guard) plus any power-of-two size rounding. On RISC-V with
+      CONFIG_PMP_STACK_GUARD and CONFIG_PMP_POWER_OF_TWO_ALIGNMENT a
+      4 KiB request yields an 8 KiB user object, and the privileged stack
+      lands in its top half: every syscall and interrupt then writes kernel
+      exception frames over the live user stack top - the thread's TLS area
+      and any caller spill slots - so a user thread on an oversized dynamic
+      stack corrupts itself as soon as it makes a syscall (observed as the
+      syscall wrapper reloading a spilled argument as 0 and oopsing with
+      "0 is not a valid k_thread").
+
+      Place the privileged stack after the full K_THREAD_STACK_LEN(size)
+      footprint instead. On MPU targets K_THREAD_STACK_RESERVED is 0 and
+      the two expressions coincide, so only PMP-guarded configurations
+      change. STACK_ELEMENT_DATA_SIZE() already budgets an extra
+      Z_THREAD_STACK_OBJ_ALIGN(size) of slack, which covers the moved
+      placement.
+  - path: zephyr/net-mgmt-test-wait-for-async-delivery.patch
+    sha256sum: c2a1b0c7c3a5d05ea4c7774d7a7de1c328728e3cb2561211227eb98deac8ac7c
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-18
+    upstreamable: true
+    comments: |
+      Make tests/net/mgmt deterministic: poll rx_calls for async net_mgmt event
+      delivery instead of a single fixed k_msleep(THREAD_SLEEP), which races on
+      platforms where the worker drains its queue slower than the sleep (e.g.
+      mps2/an385 under QEMU deterministic icount). Upstream v4.4.1 test fragility,
+      not specific to the POSIX module.
+  - path: zephyr/remove-config-getopt.patch
+    sha256sum: 0a89fabe91bfe1e8e97c7f4313adf30126aa5b16801e465cbba49b4350185f2b
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-15
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/deprecate-config-posix-api-v4.4.1.patch
+          - zephyr/deprecate-config-getopt-shell.patch
+    comments: |
+      Rebased onto v4.5.0-rc1, where upstream had renamed its getopt to sys_getopt_*: the Bluetooth, SSH,
+      HTTP client, TFTP and iptables shells that appeared since v4.4.1 are converted to getopt_long_r()
+      as well, and the OpenThread border router overlays select ZEPHYR_GETOPT_LONG.
+      Remove CONFIG_GETOPT, CONFIG_GETOPT_LONG, CONFIG_SHELL_GETOPT, and lib/utils/getopt.
+      Convert remaining sys_getopt callers to getopt_r() / getopt_long_r() and select
+      ZEPHYR_GETOPT / ZEPHYR_GETOPT_LONG instead.
+  - path: zephyr/tracing-ctf-forward-declare-zvfs-pollfd.patch
+    sha256sum: 3a919118df16415c70a5c8ddad1d5d4c85a4e576c45d3e3f537acd4a30fcfadc
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-15
+    upstreamable: true
+    comments: |
+      Forward-declare struct zvfs_pollfd in tracing_ctf.h to break fdtable→kernel→tracing include cycle.

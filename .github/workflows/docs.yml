@@ -39,11 +39,23 @@ jobs:
         with:
           path: modules/lib/posix
 
-      - name: Checkout Zephyr v4.3.0
+      # Docs build against the same Zephyr revision the manifest pins, without
+      # a full west workspace; deriving the ref from west.yml keeps this from
+      # drifting when the pin is bumped.
+      - name: Read Zephyr revision from west.yml
+        id: zephyr-rev
+        working-directory: modules/lib/posix
+        run: |
+          rev=$(yq '.manifest.projects[] | select(.name == "zephyr") | .revision' west.yml)
+          test -n "$rev" && test "$rev" != "null"
+          echo "rev=${rev}" >> "$GITHUB_OUTPUT"
+          echo "Zephyr revision: ${rev}"
+
+      - name: Checkout Zephyr
         uses: actions/checkout@v4
         with:
           repository: zephyrproject-rtos/zephyr
-          ref: v4.3.0
+          ref: ${{ steps.zephyr-rev.outputs.rev }}
           path: zephyr
 
       - name: Set up Python

@@ -24,6 +24,11 @@
 
 #include <zephyr/net/socket.h>
 
+/* Temporary workaround required to build with Zephyr 4.4+ */
+#define ZEPHYR_INCLUDE_NET_COMPAT_MODE_SYMBOLS
+#include <zephyr/net/net_compat.h>
+#undef ZEPHYR_INCLUDE_NET_COMPAT_MODE_SYMBOLS
+
 #ifdef __cplusplus
 extern "C" {
 #endif
