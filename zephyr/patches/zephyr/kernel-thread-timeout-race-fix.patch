@@ -1,85 +1,9 @@
-diff --git a/kernel/include/ksched.h b/kernel/include/ksched.h
-index 622d8581b76..2251582d211 100644
---- a/kernel/include/ksched.h
-+++ b/kernel/include/ksched.h
-@@ -54,7 +54,17 @@ extern struct k_thread _thread_dummy;
- 
- void z_sched_init(void);
- void z_move_thread_to_end_of_prio_q(struct k_thread *thread);
-+
-+/**
-+ * @brief Unpend thread, do not abort its timeout (if it exists).
-+ */
- void z_unpend_thread_no_timeout(struct k_thread *thread);
-+
-+/**
-+ * @brief Unpend thread and abort its timeout (if it exists).
-+ */
-+void z_unpend_thread(struct k_thread *thread);
-+
- struct k_thread *z_unpend1_no_timeout(_wait_q_t *wait_q);
- int z_pend_curr(struct k_spinlock *lock, k_spinlock_key_t key,
- 	       _wait_q_t *wait_q, k_timeout_t timeout);
-@@ -62,7 +72,6 @@ void z_pend_thread(struct k_thread *thread, _wait_q_t *wait_q,
- 		   k_timeout_t timeout);
- void z_reschedule(struct k_spinlock *lock, k_spinlock_key_t key);
- void z_reschedule_irqlock(uint32_t key);
--void z_unpend_thread(struct k_thread *thread);
- int z_unpend_all(_wait_q_t *wait_q);
- bool z_thread_prio_set(struct k_thread *thread, int prio);
- void *z_get_next_switch_handle(void *interrupted);
 diff --git a/kernel/sched.c b/kernel/sched.c
-index 5ea68c5788e..f661f5077da 100644
+index f579928390f..33884f2bfdd 100644
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -600,10 +600,44 @@ void z_sched_wake_thread(struct k_thread *thread, bool is_timeout)
- /* Timeout handler for *_thread_timeout() APIs */
- void z_thread_timeout(struct _timeout *timeout)
- {
-+	k_spinlock_key_t key = k_spin_lock(&_sched_spinlock);
-+
-+	if (z_is_timeout_handler_canceled(timeout)) {
-+		/*
-+		 * The timeout was canceled (or re-used) by a thread on
-+		 * another CPU or another ISR between sys_clock_announce()
-+		 * releasing the timeout lock and us acquiring the
-+		 * scheduler spinlock. Bail.
-+		 */
-+		k_spin_unlock(&_sched_spinlock, key);
-+		return;
-+	}
-+
- 	struct k_thread *thread = CONTAINER_OF(timeout,
- 					       struct k_thread, base.timeout);
-+	bool killed = (thread->base.thread_state &
-+		       (_THREAD_DEAD | _THREAD_ABORTING));
-+
-+#ifdef CONFIG_EVENTS
-+	bool do_nothing = thread->no_wake_on_timeout;
-+
-+	thread->no_wake_on_timeout = false;
-+
-+	if (do_nothing) {
-+		k_spin_unlock(&_sched_spinlock, key);
-+		return;
-+	}
-+#endif /* CONFIG_EVENTS */
- 
--	z_sched_wake_thread(thread, true);
-+	if (!killed) {
-+		if (thread->base.pended_on != NULL) {
-+			unpend_thread_no_timeout(thread);
-+		}
-+		z_mark_thread_as_not_sleeping(thread);
-+		ready_thread(thread);
-+	}
-+
-+	k_spin_unlock(&_sched_spinlock, key);
- }
- #endif /* CONFIG_SYS_CLOCK_EXISTS */
- 
-@@ -646,8 +680,12 @@ struct k_thread *z_unpend1_no_timeout(_wait_q_t *wait_q)
- 
+@@ -727,8 +727,12 @@ struct k_thread *z_unpend1_no_timeout(_wait_q_t *wait_q)
+
  void z_unpend_thread(struct k_thread *thread)
  {
 -	z_unpend_thread_no_timeout(thread);
@@ -91,5 +15,5 @@ index 5ea68c5788e..f661f5077da 100644
 +		z_abort_thread_timeout(thread);
 +	}
  }
- 
+
  /* Priority set utility that does no rescheduling, it just changes the

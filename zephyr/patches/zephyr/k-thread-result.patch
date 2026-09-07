@@ -1,5 +1,5 @@
 diff --git a/include/zephyr/kernel.h b/include/zephyr/kernel.h
-index 43cd2804411..d2ea9af7d66 100644
+index aa325c4d4bf..2e6bbfe5c5b 100644
 --- a/include/zephyr/kernel.h
 +++ b/include/zephyr/kernel.h
 @@ -448,6 +448,48 @@ __syscall k_tid_t k_thread_create(struct k_thread *new_thread,
@@ -51,7 +51,7 @@ index 43cd2804411..d2ea9af7d66 100644
  /**
   * @brief Drop a thread's privileges permanently to user mode
   *
-@@ -571,6 +613,36 @@ void k_thread_system_pool_assign(struct k_thread *thread);
+@@ -673,6 +715,36 @@ void k_thread_system_pool_assign(struct k_thread *thread);
   */
  __syscall int k_thread_join(struct k_thread *thread, k_timeout_t timeout);
 
@@ -89,10 +89,10 @@ index 43cd2804411..d2ea9af7d66 100644
   * @brief Put the current thread to sleep.
   *
 diff --git a/include/zephyr/kernel/thread.h b/include/zephyr/kernel/thread.h
-index c822f921552..5ab4ae4e1d5 100644
+index adf62ec1ca1..3bf21068998 100644
 --- a/include/zephyr/kernel/thread.h
 +++ b/include/zephyr/kernel/thread.h
-@@ -143,6 +143,11 @@ struct _thread_base {
+@@ -139,6 +139,11 @@ struct _thread_base {
  #ifdef CONFIG_SIGNAL
  	struct k_sig_ctx sig;
  #endif
@@ -105,10 +105,10 @@ index c822f921552..5ab4ae4e1d5 100644
 
  typedef struct _thread_base _thread_base_t;
 diff --git a/kernel/Kconfig b/kernel/Kconfig
-index ba1866cc4f7..968f63f91ae 100644
+index f198f17a007..6384b76174d 100644
 --- a/kernel/Kconfig
 +++ b/kernel/Kconfig
-@@ -215,6 +215,11 @@ config THREAD_ABORT_NEED_CLEANUP
+@@ -218,6 +218,11 @@ config THREAD_ABORT_NEED_CLEANUP
  	  k_thread_abort(_current) is called, as the cleanup cannot be
  	  running in the current thread stack.
 
@@ -121,10 +121,10 @@ index ba1866cc4f7..968f63f91ae 100644
  	bool "Thread custom data"
  	help
 diff --git a/kernel/sched.c b/kernel/sched.c
-index f4eaa0f5627..092f56f0d1d 100644
+index 38a04e468f1..f579928390f 100644
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -1371,10 +1371,24 @@ void z_impl_k_thread_abort(k_tid_t thread)
+@@ -1457,10 +1457,24 @@ void z_impl_k_thread_abort(k_tid_t thread)
  }
  #endif /* !CONFIG_ARCH_HAS_THREAD_ABORT */
 
@@ -150,7 +150,7 @@ index f4eaa0f5627..092f56f0d1d 100644
 
  	SYS_PORT_TRACING_OBJ_FUNC_ENTER(k_thread, join, thread, timeout);
 
-@@ -1393,17 +1407,31 @@ int z_impl_k_thread_join(struct k_thread *thread, k_timeout_t timeout)
+@@ -1479,17 +1493,31 @@ int z_impl_k_thread_join(struct k_thread *thread, k_timeout_t timeout)
 
  		SYS_PORT_TRACING_OBJ_FUNC_BLOCKING(k_thread, join, thread, timeout);
  		ret = z_swap(&_sched_spinlock, key);
@@ -182,7 +182,7 @@ index f4eaa0f5627..092f56f0d1d 100644
  #ifdef CONFIG_USERSPACE
  /* Special case: don't oops if the thread is uninitialized.  This is because
   * the initialization bit does double-duty for thread objects; if false, means
-@@ -1436,6 +1464,7 @@ static inline int z_vrfy_k_thread_join(struct k_thread *thread,
+@@ -1522,6 +1550,7 @@ static inline int z_vrfy_k_thread_join(struct k_thread *thread,
  				       k_timeout_t timeout)
  {
  	if (thread_obj_validate(thread)) {
@@ -190,7 +190,7 @@ index f4eaa0f5627..092f56f0d1d 100644
  		return 0;
  	}
 
-@@ -1443,6 +1472,21 @@ static inline int z_vrfy_k_thread_join(struct k_thread *thread,
+@@ -1529,6 +1558,21 @@ static inline int z_vrfy_k_thread_join(struct k_thread *thread,
  }
  #include <zephyr/syscalls/k_thread_join_mrsh.c>
 
@@ -213,10 +213,10 @@ index f4eaa0f5627..092f56f0d1d 100644
  {
  	if (thread_obj_validate(thread)) {
 diff --git a/kernel/thread.c b/kernel/thread.c
-index 846d9d4dc35..4c5d6134fbd 100644
+index f26b82e1db2..7609ce440de 100644
 --- a/kernel/thread.c
 +++ b/kernel/thread.c
-@@ -733,6 +733,10 @@ char *z_setup_new_thread(struct k_thread *new_thread,
+@@ -736,6 +736,10 @@ char *z_setup_new_thread(struct k_thread *new_thread,
  #endif
  #endif
 
@@ -227,7 +227,7 @@ index 846d9d4dc35..4c5d6134fbd 100644
  	SYS_PORT_TRACING_OBJ_FUNC(k_thread, create, new_thread);
 
  	return stack_ptr;
-@@ -1251,3 +1255,17 @@ void z_dummy_thread_init(struct k_thread *dummy_thread)
+@@ -1393,3 +1397,17 @@ void z_dummy_thread_init(struct k_thread *dummy_thread)
 
  	z_current_thread_set(dummy_thread);
  }
@@ -246,7 +246,7 @@ index 846d9d4dc35..4c5d6134fbd 100644
 +#include <zephyr/syscalls/k_thread_result_get_mrsh.c>
 +#endif
 diff --git a/scripts/build/gen_syscalls.py b/scripts/build/gen_syscalls.py
-index 09a50e939ea..ef70587c5f5 100755
+index e13fc778d24..1bc4582bd95 100755
 --- a/scripts/build/gen_syscalls.py
 +++ b/scripts/build/gen_syscalls.py
 @@ -72,6 +72,8 @@ not_cancellation_points = {

@@ -38,12 +38,15 @@ extern "C" {
 /** @brief Round-robin (preemptive, priority-based) scheduling policy. @ingroup posix_option_priority_scheduling */
 #define SCHED_RR 2
 
-#if defined(CONFIG_MINIMAL_LIBC) || defined(CONFIG_PICOLIBC) || defined(CONFIG_ARMCLANG_STD_LIBC) \
-	|| defined(CONFIG_ARCMWDT_LIBC)
+#if (defined(CONFIG_MINIMAL_LIBC) || defined(CONFIG_PICOLIBC) || defined(CONFIG_ARMCLANG_STD_LIBC) \
+	|| defined(CONFIG_ARCMWDT_LIBC)) && !defined(_SCHED_PARAM_DEFINED) && \
+	!defined(__sched_param_defined)
 /** @brief Scheduling parameters used with sched_setparam() / pthread_attr_setschedparam(). */
 struct sched_param {
 	int sched_priority; /**< Scheduling priority. */
 };
+#define _SCHED_PARAM_DEFINED
+#define __sched_param_defined
 #endif
 
 /**

@@ -525,7 +525,7 @@ index 00000000000..825d1928037
 +	atomic_clear_bit(used, ((const uint8_t *)fp - store[0]) / ZVFS_LIBC_FILE_SIZE);
 +}
 diff --git a/lib/libc/minimal/CMakeLists.txt b/lib/libc/minimal/CMakeLists.txt
-index 084a9e324fe..688340478cd 100644
+index 238d520d065..3bee7c305b7 100644
 --- a/lib/libc/minimal/CMakeLists.txt
 +++ b/lib/libc/minimal/CMakeLists.txt
 @@ -36,6 +36,8 @@ zephyr_library_sources(
@@ -537,15 +537,6 @@ index 084a9e324fe..688340478cd 100644
  if(CONFIG_STD_C23)
    # pull in from posix-next, since the libc must provide this for c23
    zephyr_library_sources(${ZEPHYR_POSIX_NEXT_MODULE_DIR}/lib/posix/c_lang_support_r/gmtime_r.c)
-@@ -64,4 +66,7 @@ add_dependencies(zephyr strerror_table_gen)
-
- set_source_files_properties(source/string/strerror.c PROPERTIES OBJECT_DEPENDS ${STRERROR_TABLE_H})
-
--zephyr_include_directories(${ZEPHYR_POSIX_NEXT_MODULE_DIR}/include/zephyr/posix)
-+zephyr_include_directories(
-+  ${ZEPHYR_POSIX_NEXT_MODULE_DIR}/include
-+  ${ZEPHYR_POSIX_NEXT_MODULE_DIR}/include/zephyr/posix
-+)
 diff --git a/lib/libc/minimal/include/stdio.h b/lib/libc/minimal/include/stdio.h
 index 12b53ae81b2..7d7d0c26715 100644
 --- a/lib/libc/minimal/include/stdio.h
@@ -1069,25 +1060,15 @@ index 00000000000..b8ff39066f8
 +	return fp->_file;
 +}
 diff --git a/lib/libc/picolibc/CMakeLists.txt b/lib/libc/picolibc/CMakeLists.txt
-index 981c155819e..cf98d6c353c 100644
+index 981c155819e..dd0f74f755f 100644
 --- a/lib/libc/picolibc/CMakeLists.txt
 +++ b/lib/libc/picolibc/CMakeLists.txt
-@@ -10,6 +10,18 @@ zephyr_library_sources(
+@@ -10,6 +10,8 @@ zephyr_library_sources(
    locks.c
    stdio.c
    )
-+# The ZVFS FILE<->fd hook needs picolibc's tinystdio private headers
-+# (struct __file_bufio / FDEV_SETUP_BUFIO). When picolibc comes from the module
-+# (not the SDK, which ships these headers on its default include path), give this
-+# translation unit the module's internal include dir.
++
 +zephyr_library_sources_ifdef(CONFIG_ZVFS_LIBC_FILE zvfs_libc.c)
-+if(CONFIG_ZVFS_LIBC_FILE AND CONFIG_PICOLIBC_USE_MODULE AND DEFINED ZEPHYR_PICOLIBC_MODULE_DIR)
-+  set_source_files_properties(zvfs_libc.c
-+    DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-+    PROPERTIES INCLUDE_DIRECTORIES
-+    "${ZEPHYR_PICOLIBC_MODULE_DIR}/newlib/libc/tinystdio"
-+  )
-+endif()
    zephyr_include_directories(include)
  if(CONFIG_PICOLIBC_USE_MODULE)
    # temporary workaround for https://github.com/picolibc/picolibc/pull/1079
@@ -1235,129 +1216,13 @@ index 00000000000..9956f3184cf
 +
 +	return POINTER_TO_INT(((const struct __file_bufio *)fp)->ptr);
 +}
-diff --git a/lib/os/fdtable.c b/lib/os/fdtable.c
-index d1ce548e0c9..e86c444be3c 100644
---- a/lib/os/fdtable.c
-+++ b/lib/os/fdtable.c
-@@ -23,6 +23,7 @@
- #include <zephyr/sys/speculation.h>
- #include <zephyr/internal/syscall_handler.h>
- #include <zephyr/sys/atomic.h>
-+#include <zephyr/sys/zvfs_libc.h>
-
- struct stat;
-
-@@ -36,14 +37,16 @@ struct fd_entry {
- 	uint32_t mode;
- };
-
--#if defined(CONFIG_POSIX_DEVICE_IO)
-+#if defined(CONFIG_ZVFS_RESERVE_STDIO_FDS)
- static const struct fd_op_vtable stdinout_fd_op_vtable;
-
--BUILD_ASSERT(ZVFS_OPEN_SIZE >= 3, "ZVFS_OPEN_SIZE >= 3 for CONFIG_POSIX_DEVICE_IO");
--#endif /* defined(CONFIG_POSIX_DEVICE_IO) */
-+BUILD_ASSERT(ZVFS_OPEN_SIZE >= 3, "ZVFS_OPEN_SIZE >= 3 for CONFIG_ZVFS_RESERVE_STDIO_FDS");
-+#endif /* defined(CONFIG_ZVFS_RESERVE_STDIO_FDS) */
-+
-+BUILD_ASSERT(ZVFS_OPEN_SIZE > 0, "ZVFS_OPEN_SIZE must be > 0 when CONFIG_FDTABLE is enabled");
-
- static struct fd_entry fdtable[ZVFS_OPEN_SIZE] = {
--#if defined(CONFIG_POSIX_DEVICE_IO)
-+#if defined(CONFIG_ZVFS_RESERVE_STDIO_FDS)
- 	/*
- 	 * Predefine entries for stdin/stdout/stderr.
- 	 */
-@@ -68,9 +71,7 @@ static struct fd_entry fdtable[ZVFS_OPEN_SIZE] = {
- 		.lock = Z_MUTEX_INITIALIZER(fdtable[2].lock),
- 		.cond = Z_CONDVAR_INITIALIZER(fdtable[2].cond),
- 	},
--#else
--	{0},
--#endif
-+#endif /* CONFIG_ZVFS_RESERVE_STDIO_FDS */
- };
-
- static K_MUTEX_DEFINE(fdtable_lock);
-@@ -425,32 +426,16 @@ int zvfs_close(int fd)
- 	}
- 	k_mutex_unlock(&fdtable[fd].lock);
-
-+#if defined(CONFIG_ZVFS_LIBC_FILE)
-+	/* Return any C library FILE bound to this fd (via fdopen()/fopen()) to the store. */
-+	zvfs_libc_file_free(zvfs_libc_file_from_fd(fd));
-+#endif
-+
- 	zvfs_free_fd(fd);
-
- 	return res;
- }
-
--FILE *zvfs_fdopen(int fd, const char *mode)
--{
--	ARG_UNUSED(mode);
--
--	if (_check_fd(fd) < 0) {
--		return NULL;
--	}
--
--	return (FILE *)&fdtable[fd];
--}
--
--int zvfs_fileno(FILE *file)
--{
--	if (!IS_ARRAY_ELEMENT(fdtable, file)) {
--		errno = EBADF;
--		return -1;
--	}
--
--	return (struct fd_entry *)file - fdtable;
--}
--
- int zvfs_fstat(int fd, struct stat *buf)
- {
- 	if (_check_fd(fd) < 0) {
-@@ -555,12 +540,14 @@ int zvfs_ioctl(int fd, unsigned long request, va_list args)
- }
-
-
--#if defined(CONFIG_POSIX_DEVICE_IO)
-+#if defined(CONFIG_ZVFS_RESERVE_STDIO_FDS)
- /*
-  * fd operations for stdio/stdout/stderr
-  */
-
-+#if defined(CONFIG_POSIX_DEVICE_IO)
- int z_impl_zephyr_write_stdout(const char *buf, int nbytes);
-+#endif /* CONFIG_POSIX_DEVICE_IO */
-
- static ssize_t stdinout_read_vmeth(void *obj, void *buffer, size_t count)
- {
-@@ -589,4 +576,4 @@ static const struct fd_op_vtable stdinout_fd_op_vtable = {
- 	.ioctl = stdinout_ioctl_vmeth,
- };
-
--#endif /* defined(CONFIG_POSIX_DEVICE_IO) */
-+#endif /* defined(CONFIG_ZVFS_RESERVE_STDIO_FDS) */
-diff --git a/lib/os/zvfs/CMakeLists.txt b/lib/os/zvfs/CMakeLists.txt
-index d855d1005ef..abe597ffe17 100644
---- a/lib/os/zvfs/CMakeLists.txt
-+++ b/lib/os/zvfs/CMakeLists.txt
-@@ -1,6 +1,7 @@
- # SPDX-License-Identifier: Apache-2.0
-
- zephyr_library()
-+zephyr_library_sources_ifdef(CONFIG_ZVFS_FS zvfs_fs.c)
- zephyr_library_sources_ifdef(CONFIG_ZVFS_EVENTFD zvfs_eventfd.c)
- zephyr_library_sources_ifdef(CONFIG_ZVFS_POLL zvfs_poll.c)
- zephyr_library_sources_ifdef(CONFIG_ZVFS_SELECT zvfs_select.c)
 diff --git a/lib/os/zvfs/Kconfig b/lib/os/zvfs/Kconfig
-index 117944dbdc6..a48b1c532f6 100644
+index 53ec7d3e59d..48000e47ea9 100644
 --- a/lib/os/zvfs/Kconfig
 +++ b/lib/os/zvfs/Kconfig
-@@ -14,6 +14,81 @@ menuconfig ZVFS
+@@ -31,6 +31,81 @@ config ZVFS_DEFAULT_FILE_VMETHODS
 
- if ZVFS
+ endif
 
 +config ZVFS_LIBC_FILE_SIZE
 +	int
@@ -1439,10 +1304,10 @@ index 117944dbdc6..a48b1c532f6 100644
  	imply ZVFS_POLL
 diff --git a/lib/os/zvfs/zvfs_fs.c b/lib/os/zvfs/zvfs_fs.c
 new file mode 100644
-index 00000000000..ed5cf6941ff
+index 00000000000..02259ebf687
 --- /dev/null
 +++ b/lib/os/zvfs/zvfs_fs.c
-@@ -0,0 +1,294 @@
+@@ -0,0 +1,293 @@
 +/*
 + * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
 + * SPDX-License-Identifier: Apache-2.0
@@ -1463,10 +1328,9 @@ index 00000000000..ed5cf6941ff
 +#if defined(CONFIG_MINIMAL_LIBC)
 +#define _POSIX_C_SOURCE 200809L
 +#define _XOPEN_SOURCE 700
-+#include <zephyr/posix/sys/stat.h>
-+#else
-+#include <sys/stat.h>
 +#endif
++
++#include <sys/stat.h>
 +
 +#include <zephyr/fs/fs.h>
 +#include <zephyr/kernel.h>
@@ -1602,7 +1466,7 @@ index 00000000000..ed5cf6941ff
 +
 +	switch (request) {
 +	case ZFD_IOCTL_STAT: {
-+		struct stat *buf = va_arg(args, struct stat *);
++		struct zvfs_stat *buf = va_arg(args, struct zvfs_stat *);
 +		long offset = fs_tell(&ptr->file);
 +		long current;
 +
@@ -1610,7 +1474,7 @@ index 00000000000..ed5cf6941ff
 +			return offset;
 +		}
 +
-+		memset(buf, 0, sizeof(struct stat));
++		*buf = (struct zvfs_stat){0};
 +
 +		rc = fs_seek(&ptr->file, 0, FS_SEEK_END);
 +		if (rc < 0) {
@@ -1619,8 +1483,8 @@ index 00000000000..ed5cf6941ff
 +
 +		current = fs_tell(&ptr->file);
 +		if (current >= 0) {
-+			buf->st_size = current;
-+			buf->st_mode = ptr->is_dir ? ZVFS_MODE_IFDIR : ZVFS_MODE_IFREG;
++			buf->size = current;
++			buf->mode = ptr->is_dir ? ZVFS_MODE_IFDIR : ZVFS_MODE_IFREG;
 +		}
 +
 +		rc = fs_seek(&ptr->file, offset, FS_SEEK_SET);

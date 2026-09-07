@@ -1,8 +1,8 @@
 diff --git a/include/zephyr/sys/fdtable.h b/include/zephyr/sys/fdtable.h
-index df09a039bfa..4ba9b9c1e98 100644
+index f3e39dbab1b..d508d9742fb 100644
 --- a/include/zephyr/sys/fdtable.h
 +++ b/include/zephyr/sys/fdtable.h
-@@ -36,10 +36,30 @@
+@@ -37,10 +37,30 @@
  #define ZVFS_F_SETFD 2
  #define ZVFS_F_GETFL 3
  #define ZVFS_F_SETFL 4
@@ -33,6 +33,83 @@ index df09a039bfa..4ba9b9c1e98 100644
  /* File mode bits */
  #define ZVFS_MODE_IFMT   0170000
  #define ZVFS_MODE_UNSPEC 0000000
+@@ -267,11 +287,9 @@ static inline int zvfs_fdtable_call_ioctl(const struct fd_op_vtable *vtable, voi
+ /**
+  * Structure for result of the ZFD_IOCTL_STAT ioctl call.
+  * Contains fields for all currently supported details. Defined to avoid POSIX dependency.
++ *
++ * Declared in @ref zvfs.h (see struct zvfs_stat).
+  */
+-struct zvfs_stat {
+-	off_t size;
+-	uint32_t mode;
+-};
+
+ struct zvfs_pollfd {
+ 	int fd;
+@@ -330,62 +348,6 @@ enum {
+ 	ZFD_IOCTL_FIONBIO = 0x5421,
+ };
+
+-/**
+- * @brief Open a file with a given name.
+- *
+- * @param name Name of the file
+- * @param flags Access modes for @ref fs_open
+- * @param vtable Pointer to structure with appropriate i/o functions
+- *
+- * @return Index of newly created file descriptor on success, -1 on error with errno set.
+- */
+-int zvfs_open(const char *name, int flags, struct fd_op_vtable *vtable);
+-
+-/**
+- * @brief Get information about file.
+- *
+- * @param fd File descriptor index
+- * @param buf Pointer to result structure
+- *
+- * @return 0 on success, -1 with errno set on error.
+- */
+-int zvfs_fstat(int fd, struct zvfs_stat *buf);
+-
+-/**
+- * @brief Close file.
+- *
+- * @param fd File descriptor index
+- *
+- * @return 0 on success, -1 with errno set on error.
+- */
+-int zvfs_close(int fd);
+-
+-/**
+- * @brief Read bytes from file.
+- *
+- * @param fd File descriptor index
+- * @param buf Destination buffer
+- * @param sz Number of bytes to read
+- * @param from_offset Pointer to variable specifying starting position;
+- * current offset will be used if NULL
+- *
+- * @return Number of bytes read successfully, or -1 with errno set on failure
+- */
+-ssize_t zvfs_read(int fd, void *buf, size_t sz, const size_t *from_offset);
+-
+-/**
+- * @brief Write bytes to file.
+- *
+- * @param fd File descriptor index
+- * @param buf Source buffer
+- * @param sz Number of bytes to write
+- * @param from_offset Pointer to variable specifying starting position;
+- * current offset will be used if NULL
+- *
+- * @return Number of bytes written successfully, or -1 with errno set on failure
+- */
+-ssize_t zvfs_write(int fd, const void *buf, size_t sz, const size_t *from_offset);
+-
+ #ifdef CONFIG_ZVFS_DEFAULT_FILE_VMETHODS
+ int zvfs_ioctl_vmeth(void *obj, unsigned int request, va_list args);
+ int zvfs_close_vmeth(void *obj);
 diff --git a/include/zephyr/sys/internal/fdtable_priv.h b/include/zephyr/sys/internal/fdtable_priv.h
 index 521cc65d8f8..e6dd5503b5a 100644
 --- a/include/zephyr/sys/internal/fdtable_priv.h
@@ -74,14 +151,27 @@ index ab1e1a60b52..d5e799cb694 100644
  }
  #endif
 diff --git a/lib/os/zvfs/CMakeLists.txt b/lib/os/zvfs/CMakeLists.txt
-index ee82b29ed33..35606cbf123 100644
+index e8a9b51795c..22c1822d0c6 100644
 --- a/lib/os/zvfs/CMakeLists.txt
 +++ b/lib/os/zvfs/CMakeLists.txt
-@@ -13,7 +13,10 @@ zephyr_library_sources_ifdef(CONFIG_FDTABLE
-   zvfs_fcntl.c
-   zvfs_ioctl.c
- )
--zephyr_library_sources_ifdef(CONFIG_ZVFS_FS zvfs_fs.c)
+@@ -1,8 +1,23 @@
+ # SPDX-License-Identifier: Apache-2.0
+
+ zephyr_library()
+-zephyr_library_sources_ifdef(CONFIG_ZVFS_FDTABLE zvfs_fdtable.c)
++zephyr_library_sources_ifdef(CONFIG_ZVFS_FDTABLE
++  zvfs_fdtable.c
++  zvfs_rw.c
++  zvfs_file_locking.c
++  zvfs_close.c
++  zvfs_lseek.c
++  zvfs_fstat.c
++  zvfs_fsync.c
++  zvfs_ftruncate.c
++  zvfs_fcntl.c
++  zvfs_ioctl.c
++)
+ zephyr_library_sources_ifdef(CONFIG_ZVFS_DEFAULT_FILE_VMETHODS zvfs_file_vmethods.c)
 +zephyr_library_sources_ifdef(CONFIG_ZVFS_FS
 +  zvfs_fs.c
 +  zvfs_record_lock.c
@@ -90,10 +180,10 @@ index ee82b29ed33..35606cbf123 100644
  zephyr_library_sources_ifdef(CONFIG_ZVFS_POLL zvfs_poll.c)
  zephyr_library_sources_ifdef(CONFIG_ZVFS_SELECT zvfs_select.c)
 diff --git a/lib/os/zvfs/Kconfig b/lib/os/zvfs/Kconfig
-index a48b1c532f6..dfdc72af7c9 100644
+index 48000e47ea9..35f5dac4095 100644
 --- a/lib/os/zvfs/Kconfig
 +++ b/lib/os/zvfs/Kconfig
-@@ -67,6 +67,15 @@ config ZVFS_FS_DESC_MAX
+@@ -84,6 +84,15 @@ config ZVFS_FS_DESC_MAX
  	  Maximum concurrent Zephyr FS objects tracked by the ZVFS FS descriptor
  	  pool (open files and directory streams).
 
@@ -110,10 +200,10 @@ index a48b1c532f6..dfdc72af7c9 100644
  	int
  	depends on ZVFS_FS
 diff --git a/lib/os/zvfs/zvfs_fs.c b/lib/os/zvfs/zvfs_fs.c
-index 7f01fbedd6b..df4c922eedc 100644
+index ec935003d1a..11fd46edee6 100644
 --- a/lib/os/zvfs/zvfs_fs.c
 +++ b/lib/os/zvfs/zvfs_fs.c
-@@ -125,6 +125,7 @@ int zvfs_open(const char *name, int flags, int mode)
+@@ -124,6 +124,7 @@ int zvfs_open(const char *name, int flags, int mode)
  		goto out_err;
  	}
 
@@ -121,7 +211,7 @@ index 7f01fbedd6b..df4c922eedc 100644
  	zvfs_finalize_typed_fd(fd, ptr, &fs_fd_op_vtable, ZVFS_MODE_IFREG);
 
  	return fd;
-@@ -145,6 +146,7 @@ static int fs_close_vmeth(void *obj)
+@@ -144,6 +145,7 @@ static int fs_close_vmeth(void *obj)
  	int rc;
 
  	rc = fs_close(&ptr->file);
@@ -129,7 +219,7 @@ index 7f01fbedd6b..df4c922eedc 100644
  	zvfs_fs_desc_free(ptr);
 
  	return rc;
-@@ -214,6 +216,16 @@ static int fs_ioctl_vmeth(void *obj, unsigned int request, va_list args)
+@@ -221,6 +223,16 @@ static int fs_ioctl_vmeth(void *obj, unsigned int request, va_list args)
  		}
  		break;
  	}
