@@ -1,8 +1,8 @@
 diff --git a/arch/arm64/core/mmu.c b/arch/arm64/core/mmu.c
-index 0e3fbb27e60..ece3dc83bc0 100644
+index 3894ef139ae..5d716ba91d8 100644
 --- a/arch/arm64/core/mmu.c
 +++ b/arch/arm64/core/mmu.c
-@@ -1258,9 +1258,28 @@ int arch_mem_domain_partition_remove(struct k_mem_domain *domain,
+@@ -1299,9 +1299,28 @@ int arch_mem_domain_partition_remove(struct k_mem_domain *domain,
  static int map_thread_stack(struct k_thread *thread,
  			    struct arm_mmu_ptables *ptables)
  {
@@ -35,7 +35,7 @@ index 0e3fbb27e60..ece3dc83bc0 100644
  
  int arch_mem_domain_thread_add(struct k_thread *thread)
 diff --git a/include/zephyr/sys/kobject.h b/include/zephyr/sys/kobject.h
-index 9fe9b5ad212..633f09fc97d 100644
+index f267084fbd9..8d8755bd33b 100644
 --- a/include/zephyr/sys/kobject.h
 +++ b/include/zephyr/sys/kobject.h
 @@ -78,6 +78,8 @@ enum k_objects {
@@ -47,7 +47,7 @@ index 9fe9b5ad212..633f09fc97d 100644
  
  /**
   * Grant a thread access to a kernel object
-@@ -250,6 +252,28 @@ __syscall void *k_object_alloc_size(enum k_objects otype, size_t size);
+@@ -272,6 +274,28 @@ __syscall void *k_object_alloc_size(enum k_objects otype, size_t size);
   * @param obj Pointer to the kernel object memory address.
   */
  void k_object_free(void *obj);
@@ -76,7 +76,7 @@ index 9fe9b5ad212..633f09fc97d 100644
  #else
  
  /* LCOV_EXCL_START */
-@@ -278,6 +302,15 @@ static inline void k_object_free(void *obj)
+@@ -300,6 +324,15 @@ static inline void k_object_free(void *obj)
  {
  	ARG_UNUSED(obj);
  }
@@ -93,7 +93,7 @@ index 9fe9b5ad212..633f09fc97d 100644
  #endif /* CONFIG_DYNAMIC_OBJECTS */
  
 diff --git a/kernel/userspace.c b/kernel/userspace.c
-index 61e00afcbc4..a8c9b0a1648 100644
+index b2b5ee050c5..7dcd6607337 100644
 --- a/kernel/userspace.c
 +++ b/kernel/userspace.c
 @@ -150,10 +150,9 @@ uint8_t *z_priv_stack_find(k_thread_stack_t *stack)
@@ -109,11 +109,10 @@ index 61e00afcbc4..a8c9b0a1648 100644
  #else
  #define DYN_OBJ_DATA_ALIGN_K_THREAD_STACK \
  	Z_THREAD_STACK_OBJ_ALIGN(CONFIG_PRIVILEGED_STACK_SIZE)
-@@ -479,7 +478,22 @@ void k_object_free(void *obj)
- 	k_spin_unlock(&objfree_lock, key);
- 
- 	if (dyn != NULL) {
--		k_free(dyn->data);
+@@ -509,6 +508,19 @@ void k_object_free(void *obj)
+ 			k_free(stack);
+ 		} else
+ #endif /* CONFIG_DYNAMIC_OBJECTS_FORCE_STACK_CACHED */
 +#ifdef CONFIG_MMU
 +		if ((dyn->kobj.flags & K_OBJ_FLAG_MAP) != 0) {
 +			/* the data is a k_object_map_size() anonymous mapping, not heap */
@@ -127,13 +126,10 @@ index 61e00afcbc4..a8c9b0a1648 100644
 +			k_mem_unmap(dyn->data, unmap_size);
 +		} else
 +#endif /* CONFIG_MMU */
-+		{
-+			k_free(dyn->data);
-+		}
- 		k_free(dyn);
- 	}
- }
-@@ -519,6 +533,64 @@ void k_object_wordlist_foreach(_wordlist_cb_func_t func, void *context)
+ 		{
+ 			k_free(dyn->data);
+ 		}
+@@ -551,6 +563,64 @@ void k_object_wordlist_foreach(_wordlist_cb_func_t func, void *context)
  	}
  	k_spin_unlock(&lists_lock, key);
  }
@@ -199,10 +195,10 @@ index 61e00afcbc4..a8c9b0a1648 100644
  
  /* In the earlier linker-passes before we have the real generated
 diff --git a/kernel/userspace_handler.c b/kernel/userspace_handler.c
-index ab6e4f0623c..22d0f136226 100644
+index 4f717943733..678f6e6e56d 100644
 --- a/kernel/userspace_handler.c
 +++ b/kernel/userspace_handler.c
-@@ -87,3 +87,16 @@ static inline void *z_vrfy_k_object_alloc_size(enum k_objects otype, size_t size
+@@ -97,3 +97,16 @@ static inline void *z_vrfy_k_object_alloc_size(enum k_objects otype, size_t size
  	return z_impl_k_object_alloc_size(otype, size);
  }
  #include <zephyr/syscalls/k_object_alloc_size_mrsh.c>

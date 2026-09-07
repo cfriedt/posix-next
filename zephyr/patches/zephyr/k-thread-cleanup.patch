@@ -1,8 +1,8 @@
 diff --git a/include/zephyr/kernel.h b/include/zephyr/kernel.h
-index 8b7aefaacc4..cc086c26f63 100644
+index c920e914515..7e1c68ded17 100644
 --- a/include/zephyr/kernel.h
 +++ b/include/zephyr/kernel.h
-@@ -7130,6 +7130,105 @@ FUNC_NORETURN void k_thread_exit(void *result);
+@@ -7483,6 +7483,105 @@ FUNC_NORETURN void k_thread_exit(void *result);
 
  #endif /* CONFIG_SIGNAL */
 
@@ -109,10 +109,10 @@ index 8b7aefaacc4..cc086c26f63 100644
  }
  #endif
 diff --git a/include/zephyr/kernel/thread.h b/include/zephyr/kernel/thread.h
-index c0fd785097b..593f12fefa6 100644
+index 712695c63dc..1db2550ecd6 100644
 --- a/include/zephyr/kernel/thread.h
 +++ b/include/zephyr/kernel/thread.h
-@@ -153,6 +153,11 @@ struct _thread_base {
+@@ -149,6 +149,11 @@ struct _thread_base {
         /** Sticky cancellation request pending actuation */
         atomic_t cancel_pending;
  #endif
@@ -125,7 +125,7 @@ index c0fd785097b..593f12fefa6 100644
 
  typedef struct _thread_base _thread_base_t;
 diff --git a/kernel/CMakeLists.txt b/kernel/CMakeLists.txt
-index 71a40b1a3d6..618cfc05c1b 100644
+index 0e870ec1dc6..e54c5cfa5af 100644
 --- a/kernel/CMakeLists.txt
 +++ b/kernel/CMakeLists.txt
 @@ -80,6 +80,7 @@ zephyr_compile_definitions(SIGNAL_ACTION_DB_SIZE=${sigaction_min_size})
@@ -137,10 +137,10 @@ index 71a40b1a3d6..618cfc05c1b 100644
  # kernel is a normal CMake library and not a zephyr_library because it
  # should usually not be --whole-archive'd
 diff --git a/kernel/Kconfig b/kernel/Kconfig
-index a5f9e97262d..992a2cb9e6f 100644
+index 9dbe032b07a..820c8b0e1b9 100644
 --- a/kernel/Kconfig
 +++ b/kernel/Kconfig
-@@ -259,6 +259,14 @@ config SIGNAL_SET_SIZE_MIN_THREAD_CANCEL
+@@ -262,6 +262,14 @@ config SIGNAL_SET_SIZE_MIN_THREAD_CANCEL
 
  endif # THREAD_CANCEL
 
@@ -237,10 +237,10 @@ index 00000000000..f5f68b8f8a0
 +#include <syscalls/k_thread_cleanup_pop_entry_mrsh.c>
 +#endif
 diff --git a/kernel/thread.c b/kernel/thread.c
-index cf09aaaab8f..c68a635feb6 100644
+index 22b4c7ee121..6d5d9540f40 100644
 --- a/kernel/thread.c
 +++ b/kernel/thread.c
-@@ -737,6 +737,10 @@ char *z_setup_new_thread(struct k_thread *new_thread,
+@@ -740,6 +740,10 @@ char *z_setup_new_thread(struct k_thread *new_thread,
  	new_thread->base.result = (atomic_t)NULL;
  #endif
 
@@ -252,7 +252,7 @@ index cf09aaaab8f..c68a635feb6 100644
 
  	return stack_ptr;
 diff --git a/scripts/build/gen_syscalls.py b/scripts/build/gen_syscalls.py
-index e72ec622a80..83579c57e7a 100755
+index 592fb10353a..a3b52a197e1 100755
 --- a/scripts/build/gen_syscalls.py
 +++ b/scripts/build/gen_syscalls.py
 @@ -72,6 +72,8 @@ not_cancellation_points = {
