@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "posix_internal.h"
+#include "threads_base_internal.h"
 
 #include <errno.h>
 #include <pthread.h>
@@ -37,12 +37,17 @@ int pthread_cond_init(pthread_cond_t *cvar, const pthread_condattr_t *att)
 		}
 	}
 
+	if (IS_ENABLED(CONFIG_POSIX_THREAD_FUTEX)) {
+		posix_futex_cond_init(cvar, sys_clock_id);
+		return 0;
+	}
+
 	ret = sys_condvar_alloc(&cond, sys_clock_id);
 	if (ret < 0) {
 		return -ret;
 	}
 
-	*cvar = (pthread_cond_t)(uintptr_t)cond;
+	posix_cond_set_handle(cvar, cond);
 
 	return 0;
 }

@@ -221,13 +221,14 @@ static inline bool posix_sporadic_param_is_valid(const struct sched_param *param
 BUILD_ASSERT((sizeof(void *) == sizeof(pthread_barrier_t)) ||
 		     (sizeof(void *) == 2 * sizeof(pthread_barrier_t)),
 	     "unsupported pthread_barrier_t size");
-BUILD_ASSERT((sizeof(void *) == sizeof(pthread_cond_t)) ||
+BUILD_ASSERT(IS_ENABLED(CONFIG_POSIX_THREAD_FUTEX) || (sizeof(void *) == sizeof(pthread_cond_t)) ||
 		     (sizeof(void *) == 2 * sizeof(pthread_cond_t)),
 	     "unsupported pthread_cond_t size");
 BUILD_ASSERT((sizeof(void *) == sizeof(pthread_key_t)) ||
 		     (sizeof(void *) == 2 * sizeof(pthread_key_t)),
 	     "unsupported pthread_key_t size");
-BUILD_ASSERT((sizeof(void *) == sizeof(pthread_mutex_t)) ||
+BUILD_ASSERT(IS_ENABLED(CONFIG_POSIX_THREAD_FUTEX) ||
+		     (sizeof(void *) == sizeof(pthread_mutex_t)) ||
 		     (sizeof(void *) == 2 * sizeof(pthread_mutex_t)),
 	     "unsupported pthread_mutex_t size");
 
@@ -264,26 +265,26 @@ static inline struct k_mutex *to_k_mutex(const pthread_mutex_t *mu)
 {
 	extern struct k_mutex sys_mutex_pool[];
 
+	if (IS_ENABLED(CONFIG_POSIX_THREAD_FUTEX)) {
+		/* only PTHREAD_PRIO_INHERIT mutexes refer to a k_mutex; the handle is the lock word */
+		return (struct k_mutex *)*(const uintptr_t *)mu;
+	}
+
 	return (struct k_mutex *)posix_to_kernel_object((void *)mu, sizeof(pthread_mutex_t),
 							sys_mutex_pool);
-}
-
-static inline pthread_mutex_t to_pthread_mutex(const struct k_mutex *kmu)
-{
-	return (pthread_mutex_t)posix_from_kernel_object((void *)kmu, sizeof(pthread_mutex_t));
 }
 
 static inline struct k_condvar *to_k_condvar(const pthread_cond_t *cv)
 {
 	extern struct k_condvar sys_condvar_pool[];
 
+	if (IS_ENABLED(CONFIG_POSIX_THREAD_FUTEX)) {
+		/* never a k_condvar */
+		return NULL;
+	}
+
 	return (struct k_condvar *)posix_to_kernel_object((void *)cv, sizeof(pthread_cond_t),
 							  sys_condvar_pool);
-}
-
-static inline pthread_cond_t to_pthread_cond(const struct k_condvar *kcv)
-{
-	return (pthread_cond_t)posix_from_kernel_object((void *)kcv, sizeof(pthread_cond_t));
 }
 
 static inline struct k_thread *to_k_thread(const pthread_t *th)

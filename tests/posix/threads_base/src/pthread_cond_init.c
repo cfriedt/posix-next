@@ -63,7 +63,8 @@ static void test_pthread_cond_init(void)
 {
 	cond_init_attr();
 
-	if (!IS_ENABLED(CONFIG_NATIVE_LIBC) && !k_is_user_context()) {
+	if (!IS_ENABLED(CONFIG_NATIVE_LIBC) && !IS_ENABLED(CONFIG_POSIX_THREAD_FUTEX) &&
+	    !k_is_user_context()) {
 		cond_init_resource_exhausted();
 	}
 }
