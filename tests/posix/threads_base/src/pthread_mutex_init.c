@@ -65,7 +65,8 @@ static void test_pthread_mutex_init(void)
 {
 	mutex_init_attr();
 
-	if (!IS_ENABLED(CONFIG_NATIVE_LIBC) && !k_is_user_context()) {
+	if (!IS_ENABLED(CONFIG_NATIVE_LIBC) && !IS_ENABLED(CONFIG_POSIX_THREAD_FUTEX) &&
+	    !k_is_user_context()) {
 		mutex_init_resource_exhausted();
 	}
 }

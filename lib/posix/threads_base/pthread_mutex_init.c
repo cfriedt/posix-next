@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "posix_internal.h"
+#include "threads_base_internal.h"
 
 #include <errno.h>
 #include <pthread.h>
@@ -59,12 +59,16 @@ int pthread_mutex_init(pthread_mutex_t *mu, const pthread_mutexattr_t *attr)
 		return EINVAL;
 	}
 
+	if (IS_ENABLED(CONFIG_POSIX_THREAD_FUTEX)) {
+		return posix_futex_mutex_init(mu, (const struct pthread_mutexattr *)attr, flags);
+	}
+
 	ret = sys_mutex_alloc(&mutex, flags);
 	if (ret < 0) {
 		return -ret;
 	}
 
-	*mu = (pthread_mutex_t)(uintptr_t)mutex;
+	posix_mutex_set_handle(mu, mutex);
 
 	return 0;
 }
