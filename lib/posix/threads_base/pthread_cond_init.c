@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "posix_internal.h"
+#include "threads_base_internal.h"
 
 #include <errno.h>
 #include <pthread.h>
@@ -15,8 +15,8 @@
 
 int pthread_cond_init(pthread_cond_t *cvar, const pthread_condattr_t *att)
 {
-	int ret;
-	struct k_condvar *cond;
+	__maybe_unused int ret;
+	__maybe_unused struct k_condvar *cond;
 	uint32_t sys_clock_id = SYS_CLOCK_REALTIME;
 	struct posix_condattr *const attr = (struct posix_condattr *)att;
 
@@ -37,12 +37,18 @@ int pthread_cond_init(pthread_cond_t *cvar, const pthread_condattr_t *att)
 		}
 	}
 
+#ifdef CONFIG_POSIX_THREAD_FUTEX
+	*cvar = (pthread_cond_t){
+		.flags = (sys_clock_id == SYS_CLOCK_MONOTONIC) ? POSIX_COND_CLOCK_MONOTONIC : 0,
+	};
+#else
 	ret = sys_condvar_alloc(&cond, sys_clock_id);
 	if (ret < 0) {
 		return -ret;
 	}
 
 	*cvar = (pthread_cond_t)(uintptr_t)cond;
+#endif
 
 	return 0;
 }

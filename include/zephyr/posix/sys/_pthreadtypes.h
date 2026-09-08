@@ -11,6 +11,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#ifdef CONFIG_POSIX_THREAD_FUTEX
+#include <zephyr/sys/atomic_types.h>
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -45,8 +49,16 @@ typedef struct {
 
 #if !(defined(_PTHREAD_COND_T_DECLARED) && defined(__pthread_cond_t_defined)) ||                   \
 	defined(__DOXYGEN__)
+#ifdef CONFIG_POSIX_THREAD_FUTEX
+typedef struct {
+	atomic_t seq;
+	atomic_t waiters;
+	uint32_t flags;
+} pthread_cond_t;
+#else
 /* TODO: convert this to a long so that it can refer to a k_condvar (pointer) */
 typedef uint32_t pthread_cond_t;
+#endif
 #define _PTHREAD_COND_T_DECLARED
 #define __pthread_cond_t_defined
 #endif
@@ -68,8 +80,19 @@ typedef uintptr_t pthread_key_t;
 
 #if !(defined(_PTHREAD_MUTEX_T_DECLARED) && defined(__pthread_mutex_t_defined)) ||                 \
 	defined(__DOXYGEN__)
+#ifdef CONFIG_POSIX_THREAD_FUTEX
+typedef struct {
+	atomic_t val;
+	atomic_t waiters;
+	uint32_t owner;
+	uint16_t count;
+	uint8_t type;
+	uint8_t protocol;
+} pthread_mutex_t;
+#else
 /* TODO: convert this to a long so that it can refer to a k_mutex (pointer) */
 typedef uint32_t pthread_mutex_t;
+#endif
 #define _PTHREAD_MUTEX_T_DECLARED
 #define __pthread_mutex_t_defined
 #endif
@@ -122,13 +145,23 @@ typedef uint32_t pthread_t;
 #define __pthread_t_defined
 #endif
 
+/* clang-format off */
 #ifndef _PTHREAD_MUTEX_INITIALIZER
+#ifdef CONFIG_POSIX_THREAD_FUTEX
+#define _PTHREAD_MUTEX_INITIALIZER {0}
+#else
 #define _PTHREAD_MUTEX_INITIALIZER (-1)
+#endif
 #endif
 
 #ifndef _PTHREAD_COND_INITIALIZER
+#ifdef CONFIG_POSIX_THREAD_FUTEX
+#define _PTHREAD_COND_INITIALIZER {0}
+#else
 #define _PTHREAD_COND_INITIALIZER (-1)
 #endif
+#endif
+/* clang-format on */
 
 #ifndef _PTHREAD_RWLOCK_INITIALIZER
 #define _PTHREAD_RWLOCK_INITIALIZER (-1)

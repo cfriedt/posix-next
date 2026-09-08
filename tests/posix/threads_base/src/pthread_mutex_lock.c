@@ -69,12 +69,41 @@ static void mutex_lock_static_init(void)
 	zassert_ok(pthread_mutex_destroy(&m));
 }
 
+#ifdef _POSIX_THREAD_PRIO_INHERIT
+/* PTHREAD_PRIO_INHERIT mutexes take a different path from default mutexes */
+static void mutex_lock_prio_inherit(void)
+{
+	pthread_t th;
+	pthread_mutexattr_t attr;
+
+	zassert_ok(pthread_mutexattr_init(&attr));
+	zassert_ok(pthread_mutexattr_setprotocol(&attr, PTHREAD_PRIO_INHERIT));
+	zassert_ok(pthread_mutex_init(&mutex, &attr));
+	zassert_ok(pthread_mutexattr_destroy(&attr));
+
+	zassert_ok(pthread_mutex_lock(&mutex));
+	zassert_equal(pthread_mutex_trylock(&mutex), EBUSY);
+
+	zassert_ok(pthread_create(&th, NULL, normal_mutex_entry, NULL));
+
+	k_msleep(SLEEP_MS);
+	zassert_ok(pthread_mutex_unlock(&mutex));
+
+	zassert_ok(pthread_join(th, NULL));
+
+	zassert_ok(pthread_mutex_destroy(&mutex));
+}
+#endif
+
 static void test_pthread_mutex_lock(void)
 {
 	mutex_lock_static_init();
 
 	if (!IS_ENABLED(CONFIG_NATIVE_LIBC)) {
 		mutex_lock_normal();
+#ifdef _POSIX_THREAD_PRIO_INHERIT
+		mutex_lock_prio_inherit();
+#endif
 	}
 }
 

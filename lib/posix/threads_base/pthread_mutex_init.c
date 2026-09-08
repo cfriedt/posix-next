@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "posix_internal.h"
+#include "threads_base_internal.h"
 
 #include <errno.h>
 #include <pthread.h>
@@ -49,6 +49,38 @@ static int pthread_mutexattr_to_flags(const pthread_mutexattr_t *attr, int *flag
 	return 0;
 }
 
+#ifdef CONFIG_POSIX_THREAD_FUTEX
+int pthread_mutex_init(pthread_mutex_t *mu, const pthread_mutexattr_t *attr)
+{
+	int ret;
+	int flags = 0;
+	struct k_mutex *mutex;
+	const struct pthread_mutexattr *const a = (const struct pthread_mutexattr *)attr;
+
+	if (pthread_mutexattr_to_flags(attr, &flags) < 0) {
+		return EINVAL;
+	}
+
+	*mu = (pthread_mutex_t){0};
+
+	if (a != NULL) {
+		mu->type = (a->type == PTHREAD_MUTEX_DEFAULT) ? PTHREAD_MUTEX_NORMAL : a->type;
+		mu->protocol = a->protocol;
+	}
+
+	if (posix_mutex_is_pi(mu)) {
+		ret = sys_mutex_alloc(&mutex, flags);
+		if (ret < 0) {
+			*mu = (pthread_mutex_t){0};
+			return -ret;
+		}
+
+		mu->val = (atomic_val_t)(uintptr_t)mutex;
+	}
+
+	return 0;
+}
+#else
 int pthread_mutex_init(pthread_mutex_t *mu, const pthread_mutexattr_t *attr)
 {
 	int ret;
@@ -68,3 +100,4 @@ int pthread_mutex_init(pthread_mutex_t *mu, const pthread_mutexattr_t *attr)
 
 	return 0;
 }
+#endif /* CONFIG_POSIX_THREAD_FUTEX */

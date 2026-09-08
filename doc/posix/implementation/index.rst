@@ -128,11 +128,11 @@ Zephyr's POSIX threading implementation follows the same threading model as the
 `Native POSIX Thread Library (NPTL) <https://www.akkadia.org/drepper/nptl-design.pdf>`_
 found in glibc on Linux: threading is strictly 1:1, with no user-space scheduler or M:N
 multiplexing layer — each ``pthread_t`` *is* a ``k_thread``. For the synchronization
-primitives Zephyr goes further than NPTL — glibc implements mutexes and condition variables
-as futex-based objects in user memory, entering the kernel only on contention, whereas
-Zephyr currently maps them 1:1 onto kernel objects as well: each ``pthread_mutex_t`` *is* a
-``k_mutex`` and each ``pthread_cond_t`` *is* a ``k_condvar`` (a futex-based fast path is a
-planned optimization; see below).
+primitives Zephyr by default goes further than NPTL — glibc implements mutexes and condition
+variables as futex-based objects in user memory, entering the kernel only on contention,
+whereas Zephyr maps them 1:1 onto kernel objects as well: each ``pthread_mutex_t`` *is* a
+``k_mutex`` and each ``pthread_cond_t`` *is* a ``k_condvar``. The NPTL layout is available
+as an option when userspace and processes are enabled (see below).
 
 .. graphviz::
    :caption: 1:1 mapping between POSIX and Zephyr kernel objects
@@ -184,12 +184,30 @@ This 1:1 design means:
   features, it is highly recommended to enable one of the
   :ref:`POSIX subprofiles <posix_aep>` such as ``CONFIG_POSIX_AEP_CHOICE_PSE51``.
 
-A planned speed optimization is to adopt the NPTL approach for ``pthread_mutex_t`` and
-``pthread_cond_t``: implementing them as futex-based objects in user memory (backed by
-``k_futex``), so that the uncontended lock and unlock fast paths complete with a single atomic
-operation and no system call, entering the kernel only on contention. This optimization is
-deliberately limited to configurations where both userspace and processes are enabled. The
-gating follows from where the futex word lives: unlike a kernel object mediated by per-thread
+Futex-backed mutexes and condition variables
+--------------------------------------------
+
+With :kconfig:option:`CONFIG_POSIX_THREAD_FUTEX` (the default when it is available), Zephyr
+adopts the NPTL approach for ``pthread_mutex_t`` and ``pthread_cond_t``: they are futex-based
+objects in user memory (backed by ``k_futex``), so that the uncontended lock and unlock fast
+paths complete with a single atomic operation and no system call, entering the kernel only to
+block (``k_futex_wait()``) or to wake a waiter (``k_futex_wake()``). The mutex word follows the
+classic three-state scheme (unlocked, locked, locked with possible waiters); the condition
+variable pairs a sequence word with the count of blocked waiters that the kernel maintains in
+every ``k_futex``, so that a signal or broadcast with no waiter costs no system call at all, a
+signal wakes exactly one blocked waiter, and a woken waiter never touches the object again,
+which makes destroying a condition variable right after a broadcast safe.
+``PTHREAD_MUTEX_ERRORCHECK`` and ``PTHREAD_MUTEX_RECURSIVE`` mutexes record their owner in user
+memory; ``PTHREAD_PRIO_INHERIT`` mutexes keep the ``k_mutex`` path, since only the kernel object
+provides priority inheritance. Because the futex system calls are building blocks rather than
+POSIX interfaces, they are not cancellation points: ``pthread_cond_wait()`` tests for a pending
+cancellation while the mutex is still held, as POSIX requires, and ``pthread_mutex_lock()``
+never acts on one. With :kconfig:option:`CONFIG_THREAD_CANCEL_TLS` that test reads a copy of
+the pending flag in thread-local storage and only enters the kernel when a cancellation is
+actually pending.
+
+This option is deliberately limited to configurations where both userspace and processes are
+enabled. The gating follows from where the futex word lives: unlike a kernel object mediated by per-thread
 permission grants, a futex word sits in user memory, so the set of threads that can write it
 must coincide with a POSIX trust boundary. Processes provide exactly that boundary through
 address-space isolation — a process-private futex word is reachable only by threads of the
@@ -198,14 +216,15 @@ owning process, which by definition share an address space and trust one another
 memory. The kernel itself remains protected in either case, since the futex wait and wake
 system calls validate the caller's access to the futex word. This is also precisely the
 configuration in which the optimization pays off: without userspace, "system calls" are direct
-function calls and kernel objects are already cheap to reach.
+function calls and kernel objects are already cheap to reach. Newlib is currently excluded
+because its own ``<sys/_pthreadtypes.h>`` fixes both types at 32 bits.
 
 Note that the gate is functional, not hardware: the futex mechanism itself needs no MMU or MPU
 (userspace and processes pull in whatever protection hardware the platform requires). The one
 hardware constraint that does matter is native atomic operations usable from user mode — on
 platforms that fall back to ``CONFIG_ATOMIC_OPERATIONS_C``, each user-mode atomic operation
-itself traps into the kernel, which would make the futex "fast path" slower than the current
-single-syscall kernel-object path.
+itself traps into the kernel, which would make the futex "fast path" slower than the
+single-syscall kernel-object path, so the option is unavailable there.
 
 .. _posix_scheduling_priorities:
 

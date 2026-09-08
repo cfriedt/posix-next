@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "posix_internal.h"
+#include "threads_base_internal.h"
 
 #include <pthread.h>
 
@@ -12,6 +12,9 @@
 
 int pthread_cond_signal(pthread_cond_t *cvar)
 {
+#ifdef CONFIG_POSIX_THREAD_FUTEX
+	return posix_futex_cond_signal(cvar);
+#else
 	int ret;
 
 	if (*cvar == PTHREAD_COND_INITIALIZER) {
@@ -22,4 +25,5 @@ int pthread_cond_signal(pthread_cond_t *cvar)
 	}
 
 	return -k_condvar_signal(to_k_condvar(cvar));
+#endif
 }

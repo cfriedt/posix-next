@@ -221,15 +221,19 @@ static inline bool posix_sporadic_param_is_valid(const struct sched_param *param
 BUILD_ASSERT((sizeof(void *) == sizeof(pthread_barrier_t)) ||
 		     (sizeof(void *) == 2 * sizeof(pthread_barrier_t)),
 	     "unsupported pthread_barrier_t size");
+#ifndef CONFIG_POSIX_THREAD_FUTEX
 BUILD_ASSERT((sizeof(void *) == sizeof(pthread_cond_t)) ||
 		     (sizeof(void *) == 2 * sizeof(pthread_cond_t)),
 	     "unsupported pthread_cond_t size");
+#endif
 BUILD_ASSERT((sizeof(void *) == sizeof(pthread_key_t)) ||
 		     (sizeof(void *) == 2 * sizeof(pthread_key_t)),
 	     "unsupported pthread_key_t size");
+#ifndef CONFIG_POSIX_THREAD_FUTEX
 BUILD_ASSERT((sizeof(void *) == sizeof(pthread_mutex_t)) ||
 		     (sizeof(void *) == 2 * sizeof(pthread_mutex_t)),
 	     "unsupported pthread_mutex_t size");
+#endif
 
 /* FIXME: Need to adjust the toolchain so that pthread_t, pthread_mutex_t, pthread_cond_t,
  * pthread_key_t, etc are the same size of uintptr_t (i.e. void *) */
@@ -260,6 +264,13 @@ static inline uintptr_t posix_from_kernel_object(void *input, size_t size)
 	return output;
 }
 
+#ifdef CONFIG_POSIX_THREAD_FUTEX
+/* only PTHREAD_PRIO_INHERIT mutexes refer to a k_mutex; the handle lives in the futex word */
+static inline struct k_mutex *to_k_mutex(const pthread_mutex_t *mu)
+{
+	return (struct k_mutex *)(uintptr_t)mu->val;
+}
+#else
 static inline struct k_mutex *to_k_mutex(const pthread_mutex_t *mu)
 {
 	extern struct k_mutex sys_mutex_pool[];
@@ -285,6 +296,7 @@ static inline pthread_cond_t to_pthread_cond(const struct k_condvar *kcv)
 {
 	return (pthread_cond_t)posix_from_kernel_object((void *)kcv, sizeof(pthread_cond_t));
 }
+#endif /* CONFIG_POSIX_THREAD_FUTEX */
 
 static inline struct k_thread *to_k_thread(const pthread_t *th)
 {
