@@ -1,13 +1,11 @@
 diff --git a/doc/develop/west/zephyr-cmds.rst b/doc/develop/west/zephyr-cmds.rst
-index 371c269e251..d4670c3a494 100644
+index 371c269e251..29544ee750e 100644
 --- a/doc/develop/west/zephyr-cmds.rst
 +++ b/doc/develop/west/zephyr-cmds.rst
-@@ -345,6 +345,12 @@ workspace:
+@@ -345,6 +345,10 @@ workspace:
  * ``clean``: remove all patches that have been applied, and reset to the manifest checkout state
  * ``list``: list all patches in ``patches.yml``
  * ``gh-fetch``: fetch patches from a GitHub pull request
-+* ``push``: apply the next patch(es) of the series; ``pop``: reverse the last applied one(s)
-+* ``next``: rank the patches that are ready to upstream
 +* ``deps``: detect which patches depend on which, and record it in ``patches.yml``
 +* ``status``: show which patches are merged upstream, blocked, ready, or need a rebase
 +* ``sync``: record merged pull requests in ``patches.yml``
@@ -15,28 +13,10 @@ index 371c269e251..d4670c3a494 100644
  
  .. code-block:: none
  
-@@ -446,6 +452,96 @@ each individual commit associated with the given pull request.
+@@ -446,6 +450,72 @@ each individual commit associated with the given pull request.
      │   └── third-commit-from-pr.patch
      └── patches.yml
  
-+Pushing and popping patches
-+===========================
-+
-+``apply`` and ``clean`` act on the whole series. To stop part-way through it, for example to
-+test or rework one patch, ``push`` applies the next unapplied patch(es) and ``pop`` reverses
-+the most recently applied one(s), in the manner of ``quilt``:
-+
-+.. code-block:: bash
-+
-+    west patch push                          # apply the next patch
-+    west patch push my-zephyr-change         # apply up to and including a patch
-+    west patch pop -n 2                      # reverse the last two applied patches
-+    west patch pop -a                        # reverse everything that was pushed
-+
-+The applied state is kept in ``.west/patch-stack.json``: ``apply`` skips patches that were
-+already pushed, and ``clean`` forgets them. Only patches applied with ``git apply`` (the
-+default ``apply-command``) can be popped.
-+
 +Upstreaming patches
 +===================
 +
@@ -52,7 +32,6 @@ index 371c269e251..d4670c3a494 100644
 +    west patch sync --commit          # record merged pull requests from GitHub
 +    west patch deps --write --commit  # refresh dependencies between patches (cached)
 +    west patch status                 # what is ready, blocked, or needs a rebase
-+    west patch next --path 'kernel/*' # which ready patches to send first
 +    west patch submit -n 2            # open up to two draft pull requests
 +
 +``deps`` derives dependencies textually: for every file a patch fails to apply to on the
@@ -74,11 +53,6 @@ index 371c269e251..d4670c3a494 100644
 +``ignored``                  skipped on purpose via ``custom.upstream.ignore``
 +``not-upstreamable``         ``upstreamable: false``
 +===========================  ============================================================
-+
-+``next`` ranks the ready patches by how many other patches they unblock, whether their
-+description reads like a bug fix, and their position in the series, and prints size and
-+subject area alongside. ``--path`` restricts the candidates to patches touching matching
-+files.
 +
 +``submit`` commits each chosen patch on a branch from the upstream branch (with the author,
 +date and a ``Signed-off-by`` trailer), pushes the branch (``patches/<patch-name>``) to the
@@ -113,15 +87,14 @@ index 371c269e251..d4670c3a494 100644
  *****************************************
  
 diff --git a/scripts/west_commands/patch.py b/scripts/west_commands/patch.py
-index 02c0631226b..08c93c3ee19 100644
+index 02c0631226b..a64c76258dc 100644
 --- a/scripts/west_commands/patch.py
 +++ b/scripts/west_commands/patch.py
-@@ -3,14 +3,20 @@
+@@ -3,14 +3,19 @@
  # SPDX-License-Identifier: Apache-2.0
  
  import argparse
 +import datetime
-+import fnmatch
  import hashlib
 +import io
 +import json
@@ -137,7 +110,7 @@ index 02c0631226b..08c93c3ee19 100644
  from pathlib import Path
  
  import pykwalify.core
-@@ -19,7 +25,6 @@ from west.commands import WestCommand
+@@ -19,7 +24,6 @@ from west.commands import WestCommand
  
  sys.path.append(os.fspath(Path(__file__).parent.parent))
  import zephyr_module
@@ -145,13 +118,10 @@ index 02c0631226b..08c93c3ee19 100644
  from zephyr_ext_common import ZEPHYR_BASE
  
  try:
-@@ -34,6 +39,679 @@ with open(WEST_PATCH_SCHEMA_PATH) as f:
- 
- WEST_PATCH_BASE = Path("zephyr") / "patches"
+@@ -36,6 +40,678 @@ WEST_PATCH_BASE = Path("zephyr") / "patches"
  WEST_PATCH_YAML = Path("zephyr") / "patches.yml"
-+WEST_PATCH_STACK = Path(".west") / "patch-stack.json"
-+
-+
+ 
+ 
 +# ---------------------------------------------------------------------------------------------
 +# Upstreaming support: deps / status / sync / submit
 +#
@@ -221,7 +191,7 @@ index 02c0631226b..08c93c3ee19 100644
 +]
 +
 +
-+class PatchError(Exception):
++class UpstreamError(Exception):
 +    pass
 +
 +
@@ -229,14 +199,14 @@ index 02c0631226b..08c93c3ee19 100644
 +    cmd = ["git", "-C", os.fspath(repo), *args]
 +    proc = subprocess.run(cmd, capture_output=True, encoding="utf-8", env=env, input=input)
 +    if check and proc.returncode:
-+        raise PatchError(f"{' '.join(cmd)} failed:\n{proc.stderr.strip()}")
++        raise UpstreamError(f"{' '.join(cmd)} failed:\n{proc.stderr.strip()}")
 +    return proc
 +
 +
 +def _gh(*args, check=True):
 +    proc = subprocess.run(["gh", *args], capture_output=True, encoding="utf-8")
 +    if check and proc.returncode:
-+        raise PatchError(f"gh {' '.join(args)} failed:\n{proc.stderr.strip()}")
++        raise UpstreamError(f"gh {' '.join(args)} failed:\n{proc.stderr.strip()}")
 +    return proc
 +
 +
@@ -449,7 +419,7 @@ index 02c0631226b..08c93c3ee19 100644
 +        try:
 +            from ruamel.yaml import YAML
 +        except ImportError as e:
-+            raise PatchError("ruamel.yaml is required (pip install ruamel.yaml)") from e
++            raise UpstreamError("ruamel.yaml is required (pip install ruamel.yaml)") from e
 +        self.path = Path(patch_yml)
 +        self.patch_base = Path(patch_base)
 +        self.yaml = YAML()
@@ -459,7 +429,7 @@ index 02c0631226b..08c93c3ee19 100644
 +        self.text = self.path.read_text(encoding="utf-8")
 +        self.doc = self.yaml.load(self.text)
 +        if self.dump() != self.text:
-+            raise PatchError(f"{self.path} does not round-trip through ruamel.yaml; not editing")
++            raise UpstreamError(f"{self.path} does not round-trip through ruamel.yaml; not editing")
 +        self.entries = [PatchEntry(d, i) for i, d in enumerate(self.doc.get("patches") or [])]
 +
 +    def dump(self):
@@ -484,7 +454,7 @@ index 02c0631226b..08c93c3ee19 100644
 +        for e in self.entries:
 +            if name in (e.path, Path(e.path).name, e.stem):
 +                return e
-+        raise PatchError(f"no patch named {name!r} in {self.path}")
++        raise UpstreamError(f"no patch named {name!r} in {self.path}")
 +
 +    def by_path(self, path):
 +        for e in self.entries:
@@ -754,13 +724,13 @@ index 02c0631226b..08c93c3ee19 100644
 +            slug = self.slug_of(self.project.url if self.project else None)
 +            self._upstream = self.remote_for_slug(slug) if slug else None
 +            if self._upstream is None:
-+                raise PatchError(
++                raise UpstreamError(
 +                    f"no git remote in {self.repo} points at the manifest URL of {self.module}; "
 +                    "add one or pass --upstream-remote"
 +                )
 +        slug = self.slug_of(self.remotes().get(self._upstream))
 +        if slug is None:
-+            raise PatchError(f"remote {self._upstream!r} is not a GitHub URL")
++            raise UpstreamError(f"remote {self._upstream!r} is not a GitHub URL")
 +        return self._upstream, slug
 +
 +    def gh_login(self):
@@ -775,7 +745,7 @@ index 02c0631226b..08c93c3ee19 100644
 +            wanted = f"{self.gh_login()}/{upstream_slug.split('/')[1]}"
 +            self._fork = self.remote_for_slug(wanted)
 +            if self._fork is None:
-+                raise PatchError(
++                raise UpstreamError(
 +                    f"no git remote in {self.repo} points at github.com/{wanted}; "
 +                    "add one or pass --fork-remote"
 +                )
@@ -794,17 +764,17 @@ index 02c0631226b..08c93c3ee19 100644
 +
 +    def base_tree(self):
 +        if not self.base_ref:
-+            raise PatchError(f"no base revision known for {self.module}; pass --base-ref")
++            raise UpstreamError(f"no base revision known for {self.module}; pass --base-ref")
 +        try:
 +            return _git(self.repo, "rev-parse", f"{self.base_ref}^{{commit}}").stdout.strip()
-+        except PatchError as e:
-+            raise PatchError(f"base ref {self.base_ref!r} not found in {self.repo}") from e
++        except UpstreamError as e:
++            raise UpstreamError(f"base ref {self.base_ref!r} not found in {self.repo}") from e
 +
 +    def pr_info(self, url):
 +        if url not in self._pr_cache:
 +            try:
 +                self._pr_cache[url] = _gh_json("pr", "view", url, "--json", self.PR_FIELDS)
-+            except PatchError as e:
++            except UpstreamError as e:
 +                self.cmd.wrn(str(e).splitlines()[-1])
 +                self._pr_cache[url] = None
 +        return self._pr_cache[url]
@@ -820,30 +790,20 @@ index 02c0631226b..08c93c3ee19 100644
 +        ident = _git(self.repo, "var", "GIT_COMMITTER_IDENT").stdout.strip()
 +        m = re.match(r"^(.*) <(.*)> \d+ [+-]\d{4}$", ident)
 +        if not m:
-+            raise PatchError(f"cannot parse committer identity {ident!r}")
++            raise UpstreamError(f"cannot parse committer identity {ident!r}")
 +        return m.group(1), m.group(2)
- 
- 
++
++
  class Patch(WestCommand):
-@@ -66,11 +744,25 @@ class Patch(WestCommand):
-                 Run "west patch list" to list patches.
-                 See "west patch list --help" for details.
- 
-+            Pushing and Popping Patches:
-+
-+                Run "west patch push" to apply the next patch of the series and
-+                "west patch pop" to reverse the last applied one, quilt-style.
-+                See "west patch push --help" and "west patch pop --help" for details.
-+
-             Fetching Patches:
- 
+     def __init__(self):
+         super().__init__(
+@@ -71,6 +747,13 @@ class Patch(WestCommand):
                  Run "west patch gh-fetch" to fetch patches from Github.
                  See "west patch gh-fetch --help" for details.
  
 +            Upstreaming Patches:
 +
-+                Run "west patch next" to see which patches to upstream first,
-+                "west patch deps" to detect dependencies between patches,
++                Run "west patch deps" to detect dependencies between patches,
 +                "west patch status" to see which patches are merged, blocked or ready,
 +                "west patch sync" to record merged pull requests in patches.yml, and
 +                "west patch submit" to open draft pull requests for ready patches.
@@ -851,66 +811,7 @@ index 02c0631226b..08c93c3ee19 100644
              YAML File Format:
  
              The patches.yml syntax is described in "scripts/schemas/patch-schema.yml".
-@@ -188,6 +880,58 @@ class Patch(WestCommand):
-             ),
-         )
- 
-+        push_arg_parser = subparsers.add_parser(
-+            "push",
-+            help="Apply the next patch(es) of the series",
-+            formatter_class=argparse.RawDescriptionHelpFormatter,
-+            epilog=textwrap.dedent(
-+                """
-+            Pushing Patches:
-+
-+                Run "west patch push" to apply the next unapplied patch of the series,
-+                "west patch push -n 3" for the next three, "west patch push <patch>" for
-+                every patch up to and including the named one, or "west patch push -a"
-+                for all of them. Applied patches are tracked in .west/patch-stack.json;
-+                "west patch apply" skips patches already pushed and "west patch clean"
-+                forgets them.
-+            """
-+            ),
-+        )
-+        push_arg_parser.add_argument(
-+            "patches", nargs="*", metavar="PATCH", help="Push up to and including this patch"
-+        )
-+        push_arg_parser.add_argument(
-+            "-n", "--count", type=int, default=1, help="Number of patches to push (default: 1)"
-+        )
-+        push_arg_parser.add_argument(
-+            "-a", "--all", action="store_true", help="Push every remaining patch"
-+        )
-+
-+        pop_arg_parser = subparsers.add_parser(
-+            "pop",
-+            help="Reverse the last applied patch(es)",
-+            formatter_class=argparse.RawDescriptionHelpFormatter,
-+            epilog=textwrap.dedent(
-+                """
-+            Popping Patches:
-+
-+                Run "west patch pop" to reverse the most recently applied patch,
-+                "west patch pop -n 3" for the last three, "west patch pop <patch>" to
-+                reverse down to and including the named one, or "west patch pop -a" for
-+                all of them. Only patches applied with "git apply" can be reversed.
-+            """
-+            ),
-+        )
-+        pop_arg_parser.add_argument(
-+            "patches", nargs="*", metavar="PATCH", help="Pop down to and including this patch"
-+        )
-+        pop_arg_parser.add_argument(
-+            "-n", "--count", type=int, default=1, help="Number of patches to pop (default: 1)"
-+        )
-+        pop_arg_parser.add_argument(
-+            "-a", "--all", action="store_true", help="Pop every applied patch"
-+        )
-+
-         gh_fetch_arg_parser = subparsers.add_parser(
-             "gh-fetch",
-             help="Fetch patch from Github",
-@@ -249,6 +993,179 @@ class Patch(WestCommand):
+@@ -249,6 +932,149 @@ class Patch(WestCommand):
              help='File containing GitHub token (alternatively, use GITHUB_TOKEN env variable)',
          )
  
@@ -947,36 +848,6 @@ index 02c0631226b..08c93c3ee19 100644
 +        )
 +        upstream_common.add_argument(
 +            "--json", action="store_true", help="Machine-readable output on stdout"
-+        )
-+
-+        next_arg_parser = subparsers.add_parser(
-+            "next",
-+            parents=[upstream_common],
-+            help="Rank the patches that are ready to upstream",
-+            formatter_class=argparse.RawDescriptionHelpFormatter,
-+            epilog=textwrap.dedent(
-+                """
-+            Choosing What To Upstream Next:
-+
-+                Run "west patch next" to rank the patches that are ready for submission
-+                by how many other patches they unblock, whether they look like bug fixes,
-+                and their position in the series. Use --path to restrict the candidates
-+                to patches touching matching files, e.g. --path 'kernel/*' --path 'arch/*'.
-+            """
-+            ),
-+        )
-+        next_arg_parser.add_argument(
-+            "-n", "--count", type=int, default=5, help="Number of candidates to show"
-+        )
-+        next_arg_parser.add_argument(
-+            "--path",
-+            action="append",
-+            default=[],
-+            metavar="GLOB",
-+            help="Only consider patches touching a file matching GLOB (repeatable)",
-+        )
-+        next_arg_parser.add_argument(
-+            "--no-gh", action="store_true", help="Do not query GitHub for pull request states"
 +        )
 +
 +        deps_arg_parser = subparsers.add_parser(
@@ -1090,20 +961,16 @@ index 02c0631226b..08c93c3ee19 100644
          subparsers.add_parser(
              "list",
              help="List patches",
-@@ -337,69 +1254,120 @@ class Patch(WestCommand):
-             "clean": self.clean,
+@@ -338,8 +1164,17 @@ class Patch(WestCommand):
              "list": self.list,
              "gh-fetch": self.gh_fetch,
-+            "push": self.push,
-+            "pop": self.pop,
-+        }
+         }
 +        upstream_method = {
-+            "next": self.next,
 +            "deps": self.deps,
 +            "status": self.status,
 +            "sync": self.sync,
 +            "submit": self.submit,
-         }
++        }
  
 -        method[args.subcommand](args, yml, args.dst_modules)
 +        if args.subcommand in upstream_method:
@@ -1111,228 +978,20 @@ index 02c0631226b..08c93c3ee19 100644
 +        else:
 +            method[args.subcommand](args, yml, args.dst_modules)
  
--    def apply(self, args, yml, dst_mods=None):
--        patches = yml.get("patches", [])
--        if not patches:
--            return
-+    def stack_path(self, args):
-+        return Path(args.west_workspace) / WEST_PATCH_STACK
- 
--        patch_count = 0
--        failed_patch = None
--        patched_mods = set()
-+    def stack_load(self, args):
-+        """Paths of the patches currently applied from args.patch_yml, in application order."""
-+        try:
-+            with open(self.stack_path(args), encoding="utf-8") as f:
-+                return json.load(f).get(os.fspath(args.patch_yml.resolve()), [])
-+        except (OSError, ValueError):
-+            return []
- 
--        for patch_info in patches:
-+    def stack_save(self, args, applied):
-+        path = self.stack_path(args)
-+        try:
-+            with open(path, encoding="utf-8") as f:
-+                data = json.load(f)
-+        except (OSError, ValueError):
-+            data = {}
-+        key = os.fspath(args.patch_yml.resolve())
-+        if applied:
-+            data[key] = applied
-+        else:
-+            data.pop(key, None)
-+        path.parent.mkdir(parents=True, exist_ok=True)
-+        with open(path, "w", encoding="utf-8") as f:
-+            json.dump(data, f, indent=1)
-+
-+    def series(self, yml, dst_mods=None):
-+        """(patch_info, module path) for every patch of the selected modules, in order."""
-+        out = []
-+        for patch_info in yml.get("patches", []):
-             mod = self.get_module_path(patch_info["module"])
--            if mod is None:
-+            if mod is None or (dst_mods and mod not in dst_mods):
-                 continue
-+            out.append((patch_info, mod))
-+        return out
- 
--            if dst_mods and mod not in dst_mods:
--                continue
-+    def apply_one(self, args, patch_info, mod, reverse=False):
-+        """Apply (or reverse) one patch in its module; raises PatchError on failure."""
-+        pth = patch_info["path"]
-+        patch_path = os.path.realpath(Path(args.patch_base) / pth)
- 
--            pth = patch_info["path"]
--            patch_path = os.path.realpath(Path(args.patch_base) / pth)
-+        self.dbg(f"reading patch file {pth}")
-+        expect_sha256 = patch_info["sha256sum"]
-+        try:
-+            actual_sha256 = self.get_file_sha256sum(patch_path)
-+        except Exception as e:
-+            raise PatchError(f"failed to read {pth}: {e}") from e
-+        if actual_sha256 != expect_sha256:
-+            raise PatchError(
-+                f"sha256 mismatch for {pth}:\nexpect: {expect_sha256}\nactual: {actual_sha256}"
-+            )
- 
--            apply_cmd = patch_info["apply-command"]
--            apply_cmd_list = shlex.split(apply_cmd)
-+        apply_cmd_list = shlex.split(patch_info["apply-command"])
-+        if reverse:
-+            if apply_cmd_list[:2] != ["git", "apply"]:
-+                raise PatchError(f"cannot reverse {pth}: apply-command is not 'git apply'")
-+            apply_cmd_list.append("--reverse")
-+        apply_cmd_list.append(patch_path)
-+
-+        verb = "reversing" if reverse else "patching"
-+        self.dbg(f"{verb} {mod} with {pth}... ", end="")
-+        proc = subprocess.run(
-+            apply_cmd_list,
-+            capture_output=True,
-+            cwd=Path(args.west_workspace) / mod,
-+            encoding="utf-8",
-+        )
-+        if proc.returncode:
-+            self.dbg("FAIL")
-+            raise PatchError(f"failed to {'reverse' if reverse else 'apply'} {pth}\n{proc.stderr}")
-+        self.dbg("OK")
- 
--            self.dbg(f"reading patch file {pth}")
--            expect_sha256 = patch_info["sha256sum"]
--            try:
--                actual_sha256 = self.get_file_sha256sum(patch_path)
--            except Exception as e:
--                self.err(f"failed to read {pth}: {e}")
--                failed_patch = pth
--                break
-+    def apply(self, args, yml, dst_mods=None):
-+        series = self.series(yml, dst_mods)
-+        if not series:
-+            return
- 
--            if actual_sha256 != expect_sha256:
--                self.dbg("FAIL")
--                self.err(
+     def apply(self, args, yml, dst_mods=None):
+         patches = yml.get("patches", [])
+@@ -376,9 +1211,7 @@ class Patch(WestCommand):
+             if actual_sha256 != expect_sha256:
+                 self.dbg("FAIL")
+                 self.err(
 -                    f"sha256 mismatch for {pth}:\n"
 -                    f"expect: {expect_sha256}\n"
 -                    f"actual: {actual_sha256}"
--                )
-+        applied = self.stack_load(args)
-+        patch_count = 0
-+        failed_patch = None
-+        patched_mods = set()
-+
-+        for patch_info, mod in series:
-+            pth = patch_info["path"]
-+            if pth in applied:
-+                self.dbg(f"{pth} already applied")
-+                continue
-+            try:
-+                self.apply_one(args, patch_info, mod)
-+            except PatchError as e:
-+                self.err(str(e))
++                    f"sha256 mismatch for {pth}:\nexpect: {expect_sha256}\nactual: {actual_sha256}"
+                 )
                  failed_patch = pth
                  break
--            self.dbg("OK")
-             patch_count += 1
--
--            mod_path = Path(args.west_workspace) / mod
-             patched_mods.add(mod)
--
--            self.dbg(f"patching {mod}... ", end="")
--            apply_cmd += patch_path
--            apply_cmd_list.extend([patch_path])
--            proc = subprocess.run(
--                apply_cmd_list, capture_output=True, cwd=mod_path, encoding="utf-8"
--            )
--            if proc.returncode:
--                self.dbg("FAIL")
--                self.err(proc.stderr)
--                failed_patch = pth
--                break
--            self.dbg("OK")
-+            applied.append(pth)
-+            self.stack_save(args, applied)
- 
-         if not failed_patch:
-             self.inf(f"{patch_count} patches applied successfully \\o/")
-@@ -410,6 +1378,61 @@ class Patch(WestCommand):
- 
-         self.die(f"failed to apply patch {failed_patch}")
- 
-+    def push(self, args, yml, dst_mods=None):
-+        applied = self.stack_load(args)
-+        pending = [(p, m) for p, m in self.series(yml, dst_mods) if p["path"] not in applied]
-+        if not pending:
-+            self.inf("nothing to push")
-+            return
-+        if args.patches:
-+            limit = max(self.series_index(pending, name) for name in args.patches) + 1
-+        elif args.all:
-+            limit = len(pending)
-+        else:
-+            limit = args.count
-+        for patch_info, mod in pending[:limit]:
-+            try:
-+                self.apply_one(args, patch_info, mod)
-+            except PatchError as e:
-+                self.die(str(e))
-+            applied.append(patch_info["path"])
-+            self.stack_save(args, applied)
-+            self.inf(f"pushed {patch_info['path']}")
-+        left = len(pending) - min(limit, len(pending))
-+        self.inf(f"top is {applied[-1]}; {left} patches left to push")
-+
-+    def pop(self, args, yml, dst_mods=None):
-+        applied = self.stack_load(args)
-+        by_path = {p["path"]: (p, m) for p, m in self.series(yml, dst_mods)}
-+        stack = [(by_path[pth][0], by_path[pth][1]) for pth in applied if pth in by_path]
-+        if not stack:
-+            self.inf("nothing to pop")
-+            return
-+        stack.reverse()
-+        if args.patches:
-+            limit = max(self.series_index(stack, name) for name in args.patches) + 1
-+        elif args.all:
-+            limit = len(stack)
-+        else:
-+            limit = args.count
-+        for patch_info, mod in stack[:limit]:
-+            try:
-+                self.apply_one(args, patch_info, mod, reverse=True)
-+            except PatchError as e:
-+                self.die(str(e))
-+            applied.remove(patch_info["path"])
-+            self.stack_save(args, applied)
-+            self.inf(f"popped {patch_info['path']}")
-+        top = applied[-1] if applied else "nothing"
-+        self.inf(f"top is {top}; {len(applied)} patches applied")
-+
-+    def series_index(self, series, name):
-+        for i, (patch_info, _) in enumerate(series):
-+            pth = Path(patch_info["path"])
-+            if name in (patch_info["path"], pth.name, pth.stem):
-+                return i
-+        self.die(f"patch {name!r} is not in the selected part of the series")
-+
-     def clean(self, args, yml, dst_mods=None):
-         clean_cmd = yml["clean-command"]
-         checkout_cmd = yml["checkout-command"]
-@@ -456,6 +1479,11 @@ class Patch(WestCommand):
-                 # If this fails for some reason, just log it and continue
-                 self.err(f"failed to clean up {mod}: {e}")
- 
-+        cleaned = {m for _, m in self.series(yml, dst_mods)}
-+        by_path = {p["path"]: m for p, m in self.series(yml)}
-+        applied = [pth for pth in self.stack_load(args) if by_path.get(pth) not in cleaned]
-+        self.stack_save(args, applied)
-+
-     def list(self, args, yml, dst_mods=None):
-         patches = yml.get("patches", [])
-         if not patches:
-@@ -558,3 +1586,413 @@ class Patch(WestCommand):
+@@ -558,3 +1391,342 @@ class Patch(WestCommand):
                  return Path(m.project).relative_to(topdir)
  
          return None
@@ -1356,7 +1015,7 @@ index 02c0631226b..08c93c3ee19 100644
 +        self.args = args
 +        try:
 +            db = PatchDB(args.patch_yml, args.patch_base)
-+        except PatchError as e:
++        except UpstreamError as e:
 +            self.die(str(e))
 +        modules = []
 +        for e in db.entries:
@@ -1369,14 +1028,14 @@ index 02c0631226b..08c93c3ee19 100644
 +            series = [e for e in db.entries if self.get_module_path(e.module) == mod]
 +            try:
 +                method(args, db, UpstreamRepo(self, args, mod), series)
-+            except PatchError as e:
++            except UpstreamError as e:
 +                self.err(f"{mod}: {e}")
 +                failed = True
 +        if db.save():
 +            self.note(f"updated {db.path}")
 +            if getattr(args, "commit", False):
 +                self.commit_yml(db, self.UPSTREAM_COMMIT_SUBJECT[args.subcommand])
-+        elif args.subcommand not in ("status", "next"):
++        elif args.subcommand != "status":
 +            self.note(f"{db.path} unchanged")
 +        if failed:
 +            self.die("some modules failed")
@@ -1459,77 +1118,6 @@ index 02c0631226b..08c93c3ee19 100644
 +                    row["status"] = "ready"
 +            rows.append(row)
 +        return rows
-+
-+    FIX_WORDS = re.compile(
-+        r"\b(fix\w*|bug\w*|race|fault\w*|crash\w*|leak\w*|regress\w*|deadlock\w*|"
-+        r"corrupt\w*|overflow\w*|hang|hangs|garbage|wrong|incorrect)\b",
-+        re.IGNORECASE,
-+    )
-+
-+    def next(self, args, db, repo, series):
-+        index = TmpIndex(repo.repo)
-+        try:
-+            rows = self.compute_status(db, repo, series, not args.no_gh, index)
-+        finally:
-+            index.close()
-+        by_path = {e.path: e for e in series}
-+        dependents = {}
-+        for e in series:
-+            for d in e.deps:
-+                dependents.setdefault(d, []).append(e.path)
-+
-+        def unblocks(path):
-+            seen = set()
-+            stack = list(dependents.get(path, []))
-+            while stack:
-+                x = stack.pop()
-+                if x not in seen:
-+                    seen.add(x)
-+                    stack.extend(dependents.get(x, []))
-+            return len(seen)
-+
-+        ranked = []
-+        for row in rows:
-+            if row["status"] != "ready":
-+                continue
-+            e = by_path[row["path"]]
-+            files = patch_files(db.patch_file(e))
-+            if args.path and not any(fnmatch.fnmatch(f, g) for f in files for g in args.path):
-+                continue
-+            size = 0
-+            with open(db.patch_file(e), encoding="utf-8", errors="replace") as f:
-+                for line in f:
-+                    if line[:1] in "+-" and not line.startswith(("+++", "---")):
-+                        size += 1
-+            ranked.append(
-+                {
-+                    "path": e.path,
-+                    "stem": e.stem,
-+                    "index": e.index,
-+                    "unblocks": unblocks(e.path),
-+                    "fix": bool(self.FIX_WORDS.search(e.comments)),
-+                    "size": size,
-+                    "files": len(files),
-+                    "area": derive_area(files) or "-",
-+                    "date": str(e.date),
-+                }
-+            )
-+        ranked.sort(key=lambda r: (-r["unblocks"], not r["fix"], r["index"]))
-+        ranked = ranked[: args.count]
-+        if args.json:
-+            print(json.dumps(ranked, indent=2))
-+            return
-+        if not ranked:
-+            self.inf(f"{repo.module}: no patch is ready for submission")
-+            return
-+        width = max(len(r["stem"]) for r in ranked)
-+        self.inf(f"{'#':>3} {'patch':<{width}}  unblocks  fix  lines  files  area")
-+        for n, r in enumerate(ranked, 1):
-+            self.inf(
-+                f"{n:>3} {r['stem']:<{width}}  {r['unblocks']:>8}  {'yes' if r['fix'] else 'no':<3}"
-+                f"  {r['size']:>5}  {r['files']:>5}  {r['area']}"
-+            )
-+        self.inf(f"\nsubmit with: west patch submit {ranked[0]['stem']}")
 +
 +    def deps(self, args, db, repo, series):
 +        index = TmpIndex(repo.repo)
@@ -1633,7 +1221,7 @@ index 02c0631226b..08c93c3ee19 100644
 +            name, email = repo.committer()
 +            for e, subject in zip(unit, subjects, strict=True):
 +                if not index.apply(db.patch_file(e)):
-+                    raise PatchError(f"{e.stem} does not apply on top of {parent[:12]}")
++                    raise UpstreamError(f"{e.stem} does not apply on top of {parent[:12]}")
 +                message = f"{subject}\n\n{make_body(e)}\n\nSigned-off-by: {name} <{email}>\n"
 +                env = dict(os.environ, GIT_AUTHOR_NAME=e.author, GIT_AUTHOR_EMAIL=e.email)
 +                if e.date:
