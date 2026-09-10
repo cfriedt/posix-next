@@ -1,0 +1,508 @@
+diff --git a/include/zephyr/kernel.h b/include/zephyr/kernel.h
+index 72e65b2b103..84f9bc6b217 100644
+--- a/include/zephyr/kernel.h
++++ b/include/zephyr/kernel.h
+@@ -1326,7 +1326,8 @@ __syscall void k_reschedule(void);
+  * @brief Sets all CPU enable masks to zero
+  *
+  * After this returns, the thread will no longer be schedulable on any
+- * CPUs.  The thread must not be currently runnable.
++ * CPUs.  With @kconfig{CONFIG_SCHED_CPU_MASK_PIN_ONLY} the thread must
++ * not be currently runnable.
+  *
+  * @note You should enable @kconfig{CONFIG_SCHED_CPU_MASK} in your project
+  * configuration.
+@@ -1334,13 +1335,14 @@ __syscall void k_reschedule(void);
+  * @param thread Thread to operate upon
+  * @return Zero on success, otherwise error code
+  */
+-int k_thread_cpu_mask_clear(k_tid_t thread);
++__syscall int k_thread_cpu_mask_clear(k_tid_t thread);
+
+ /**
+  * @brief Sets all CPU enable masks to one
+  *
+- * After this returns, the thread will be schedulable on any CPU.  The
+- * thread must not be currently runnable.
++ * After this returns, the thread will be schedulable on any CPU.  With
++ * @kconfig{CONFIG_SCHED_CPU_MASK_PIN_ONLY} the thread must not be
++ * currently runnable.
+  *
+  * @note You should enable @kconfig{CONFIG_SCHED_CPU_MASK} in your project
+  * configuration.
+@@ -1348,12 +1350,13 @@ int k_thread_cpu_mask_clear(k_tid_t thread);
+  * @param thread Thread to operate upon
+  * @return Zero on success, otherwise error code
+  */
+-int k_thread_cpu_mask_enable_all(k_tid_t thread);
++__syscall int k_thread_cpu_mask_enable_all(k_tid_t thread);
+
+ /**
+  * @brief Enable thread to run on specified CPU
+  *
+- * The thread must not be currently runnable.
++ * With @kconfig{CONFIG_SCHED_CPU_MASK_PIN_ONLY} the thread must not be
++ * currently runnable.
+  *
+  * @note You should enable @kconfig{CONFIG_SCHED_CPU_MASK} in your project
+  * configuration.
+@@ -1362,12 +1365,13 @@ int k_thread_cpu_mask_enable_all(k_tid_t thread);
+  * @param cpu CPU index
+  * @return Zero on success, otherwise error code
+  */
+-int k_thread_cpu_mask_enable(k_tid_t thread, int cpu);
++__syscall int k_thread_cpu_mask_enable(k_tid_t thread, int cpu);
+
+ /**
+  * @brief Prevent thread to run on specified CPU
+  *
+- * The thread must not be currently runnable.
++ * With @kconfig{CONFIG_SCHED_CPU_MASK_PIN_ONLY} the thread must not be
++ * currently runnable.
+  *
+  * @note You should enable @kconfig{CONFIG_SCHED_CPU_MASK} in your project
+  * configuration.
+@@ -1376,7 +1380,7 @@ int k_thread_cpu_mask_enable(k_tid_t thread, int cpu);
+  * @param cpu CPU index
+  * @return Zero on success, otherwise error code
+  */
+-int k_thread_cpu_mask_disable(k_tid_t thread, int cpu);
++__syscall int k_thread_cpu_mask_disable(k_tid_t thread, int cpu);
+
+ /**
+  * @brief Pin a thread to a CPU
+@@ -1388,7 +1392,29 @@ int k_thread_cpu_mask_disable(k_tid_t thread, int cpu);
+  * @param cpu CPU index
+  * @return Zero on success, otherwise error code
+  */
+-int k_thread_cpu_pin(k_tid_t thread, int cpu);
++__syscall int k_thread_cpu_pin(k_tid_t thread, int cpu);
++
++/**
++ * @brief Replace the CPU enable mask of a thread
++ *
++ * The whole mask changes in one step, so a runnable thread is never left
++ * without a CPU while it moves.  With @kconfig{CONFIG_SCHED_CPU_MASK_PIN_ONLY}
++ * the mask may name at most one CPU and the thread must not be currently
++ * runnable.
++ *
++ * @param thread Thread to operate upon
++ * @param mask Bit per CPU index the thread may run on
++ * @return Zero on success, otherwise error code
++ */
++__syscall int k_thread_cpu_mask_set(k_tid_t thread, uint32_t mask);
++
++/**
++ * @brief Get the CPU enable mask of a thread
++ *
++ * @param thread Thread to query
++ * @return Bit per CPU index the thread may run on
++ */
++__syscall uint32_t k_thread_cpu_mask_get(k_tid_t thread);
+ #endif
+
+ /**
+diff --git a/kernel/cpu_mask.c b/kernel/cpu_mask.c
+index e7c16511f89..4ddb40be92b 100644
+--- a/kernel/cpu_mask.c
++++ b/kernel/cpu_mask.c
+@@ -6,6 +6,7 @@
+ #include <zephyr/kernel.h>
+ #include <ksched.h>
+ #include <zephyr/spinlock.h>
++#include <zephyr/internal/syscall_handler.h>
+
+ extern struct k_spinlock _sched_spinlock;
+
+@@ -19,6 +20,7 @@ BUILD_ASSERT(CONFIG_MP_MAX_NUM_CPUS <= 16, "Too many CPUs for mask word");
+ static int cpu_mask_mod(k_tid_t thread, uint32_t enable_mask, uint32_t disable_mask)
+ {
+ 	int ret = 0;
++	bool need_sched = false;
+
+ #ifdef CONFIG_SCHED_CPU_MASK_PIN_ONLY
+ 	__ASSERT(z_is_thread_prevented_from_running(thread),
+@@ -26,12 +28,15 @@ static int cpu_mask_mod(k_tid_t thread, uint32_t enable_mask, uint32_t disable_m
+ #endif /* CONFIG_SCHED_CPU_MASK_PIN_ONLY */
+
+ 	K_SPINLOCK(&_sched_spinlock) {
+-		if (z_is_thread_prevented_from_running(thread)) {
+-			thread->base.cpu_mask |= enable_mask;
+-			thread->base.cpu_mask  &= ~disable_mask;
+-		} else {
++		if (IS_ENABLED(CONFIG_SCHED_CPU_MASK_PIN_ONLY) &&
++		    !z_is_thread_prevented_from_running(thread)) {
+ 			ret = -EINVAL;
++			K_SPINLOCK_BREAK;
+ 		}
++
++		thread->base.cpu_mask |= enable_mask;
++		thread->base.cpu_mask  &= ~disable_mask;
++		need_sched = z_sched_cpu_mask_changed(thread);
+ 	}
+
+ #if defined(CONFIG_ASSERT) && defined(CONFIG_SCHED_CPU_MASK_PIN_ONLY)
+@@ -41,32 +46,125 @@ static int cpu_mask_mod(k_tid_t thread, uint32_t enable_mask, uint32_t disable_m
+ 			 "Only one CPU allowed in mask when PIN_ONLY");
+ #endif /* defined(CONFIG_ASSERT) && defined(CONFIG_SCHED_CPU_MASK_PIN_ONLY) */
+
++	if (need_sched && (IS_ENABLED(CONFIG_SMP) || (_current->base.sched_locked == 0U))) {
++		z_reschedule_unlocked();
++	}
++
+ 	return ret;
+ }
+
+-int k_thread_cpu_mask_clear(k_tid_t thread)
++int z_impl_k_thread_cpu_mask_clear(k_tid_t thread)
+ {
+ 	return cpu_mask_mod(thread, 0, 0xffffffff);
+ }
+
+-int k_thread_cpu_mask_enable_all(k_tid_t thread)
++#ifdef CONFIG_USERSPACE
++static inline int z_vrfy_k_thread_cpu_mask_clear(k_tid_t thread)
++{
++	K_OOPS(K_SYSCALL_OBJ(thread, K_OBJ_THREAD));
++	return z_impl_k_thread_cpu_mask_clear(thread);
++}
++#include <zephyr/syscalls/k_thread_cpu_mask_clear_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++int z_impl_k_thread_cpu_mask_enable_all(k_tid_t thread)
+ {
+ 	return cpu_mask_mod(thread, 0xffffffff, 0);
+ }
+
+-int k_thread_cpu_mask_enable(k_tid_t thread, int cpu)
++#ifdef CONFIG_USERSPACE
++static inline int z_vrfy_k_thread_cpu_mask_enable_all(k_tid_t thread)
++{
++	K_OOPS(K_SYSCALL_OBJ(thread, K_OBJ_THREAD));
++	return z_impl_k_thread_cpu_mask_enable_all(thread);
++}
++#include <zephyr/syscalls/k_thread_cpu_mask_enable_all_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++int z_impl_k_thread_cpu_mask_enable(k_tid_t thread, int cpu)
+ {
+ 	return cpu_mask_mod(thread, BIT(cpu), 0);
+ }
+
+-int k_thread_cpu_mask_disable(k_tid_t thread, int cpu)
++#ifdef CONFIG_USERSPACE
++static inline int z_vrfy_k_thread_cpu_mask_enable(k_tid_t thread, int cpu)
++{
++	K_OOPS(K_SYSCALL_OBJ(thread, K_OBJ_THREAD));
++	K_OOPS(K_SYSCALL_VERIFY_MSG((cpu >= 0) && (cpu < CONFIG_MP_MAX_NUM_CPUS),
++				    "invalid cpu %d", cpu));
++	return z_impl_k_thread_cpu_mask_enable(thread, cpu);
++}
++#include <zephyr/syscalls/k_thread_cpu_mask_enable_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++int z_impl_k_thread_cpu_mask_disable(k_tid_t thread, int cpu)
+ {
+ 	return cpu_mask_mod(thread, 0, BIT(cpu));
+ }
+
+-int k_thread_cpu_pin(k_tid_t thread, int cpu)
++#ifdef CONFIG_USERSPACE
++static inline int z_vrfy_k_thread_cpu_mask_disable(k_tid_t thread, int cpu)
++{
++	K_OOPS(K_SYSCALL_OBJ(thread, K_OBJ_THREAD));
++	K_OOPS(K_SYSCALL_VERIFY_MSG((cpu >= 0) && (cpu < CONFIG_MP_MAX_NUM_CPUS),
++				    "invalid cpu %d", cpu));
++	return z_impl_k_thread_cpu_mask_disable(thread, cpu);
++}
++#include <zephyr/syscalls/k_thread_cpu_mask_disable_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++int z_impl_k_thread_cpu_pin(k_tid_t thread, int cpu)
+ {
+ 	uint32_t mask = BIT(cpu);
+
+ 	return cpu_mask_mod(thread, mask, ~mask);
+ }
++
++#ifdef CONFIG_USERSPACE
++static inline int z_vrfy_k_thread_cpu_pin(k_tid_t thread, int cpu)
++{
++	K_OOPS(K_SYSCALL_OBJ(thread, K_OBJ_THREAD));
++	K_OOPS(K_SYSCALL_VERIFY_MSG((cpu >= 0) && (cpu < CONFIG_MP_MAX_NUM_CPUS),
++				    "invalid cpu %d", cpu));
++	return z_impl_k_thread_cpu_pin(thread, cpu);
++}
++#include <zephyr/syscalls/k_thread_cpu_pin_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++int z_impl_k_thread_cpu_mask_set(k_tid_t thread, uint32_t mask)
++{
++	if (IS_ENABLED(CONFIG_SCHED_CPU_MASK_PIN_ONLY) && ((mask & (mask - 1)) != 0)) {
++		return -EINVAL;
++	}
++
++	return cpu_mask_mod(thread, mask, ~mask);
++}
++
++#ifdef CONFIG_USERSPACE
++static inline int z_vrfy_k_thread_cpu_mask_set(k_tid_t thread, uint32_t mask)
++{
++	K_OOPS(K_SYSCALL_OBJ(thread, K_OBJ_THREAD));
++	return z_impl_k_thread_cpu_mask_set(thread, mask);
++}
++#include <zephyr/syscalls/k_thread_cpu_mask_set_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++uint32_t z_impl_k_thread_cpu_mask_get(k_tid_t thread)
++{
++	uint32_t mask = 0;
++
++	K_SPINLOCK(&_sched_spinlock) {
++		mask = thread->base.cpu_mask;
++	}
++
++	return mask;
++}
++
++#ifdef CONFIG_USERSPACE
++static inline uint32_t z_vrfy_k_thread_cpu_mask_get(k_tid_t thread)
++{
++	K_OOPS(K_SYSCALL_OBJ(thread, K_OBJ_THREAD));
++	return z_impl_k_thread_cpu_mask_get(thread);
++}
++#include <zephyr/syscalls/k_thread_cpu_mask_get_mrsh.c>
++#endif /* CONFIG_USERSPACE */
+diff --git a/kernel/include/ksched.h b/kernel/include/ksched.h
+index 1c537abb442..8ee1bf346e2 100644
+--- a/kernel/include/ksched.h
++++ b/kernel/include/ksched.h
+@@ -65,6 +65,9 @@ void z_unpend_thread(struct k_thread *thread);
+ int z_unpend_all(_wait_q_t *wait_q);
+ int z_unpend_all_locked(_wait_q_t *wait_q);
+ bool z_thread_prio_set(struct k_thread *thread, int prio);
++#ifdef CONFIG_SCHED_CPU_MASK
++bool z_sched_cpu_mask_changed(struct k_thread *thread);
++#endif /* CONFIG_SCHED_CPU_MASK */
+ void *z_get_next_switch_handle(void *interrupted);
+
+ /* Wrapper around z_get_next_switch_handle() for the benefit of
+diff --git a/kernel/sched.c b/kernel/sched.c
+index bf9e618c398..ecf97637cc5 100644
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -78,6 +78,16 @@ static ALWAYS_INLINE void *curr_cpu_runq(void)
+ #endif /* CONFIG_SCHED_CPU_MASK_PIN_ONLY */
+ }
+
++/* false once a mask change has left _current on a CPU it may no longer run on */
++static ALWAYS_INLINE bool current_cpu_allowed(void)
++{
++#if defined(CONFIG_SCHED_CPU_MASK) && !defined(CONFIG_SCHED_CPU_MASK_PIN_ONLY)
++	return (_current->base.cpu_mask & BIT(_current_cpu->id)) != 0;
++#else
++	return true;
++#endif /* CONFIG_SCHED_CPU_MASK && !CONFIG_SCHED_CPU_MASK_PIN_ONLY */
++}
++
+ static ALWAYS_INLINE void runq_add(struct k_thread *thread)
+ {
+ 	__ASSERT_NO_MSG(!z_is_idle_thread_object(thread));
+@@ -238,7 +248,7 @@ static ALWAYS_INLINE struct k_thread *next_up(void)
+ 		thread = _current_cpu->idle_thread;
+ 	}
+
+-	if (active) {
++	if (active && current_cpu_allowed()) {
+ 		int32_t cmp = z_sched_prio_cmp(_current, thread);
+
+ 		/* Ties only switch if state says we yielded */
+@@ -266,6 +276,9 @@ static ALWAYS_INLINE struct k_thread *next_up(void)
+ #endif
+ 		   ) {
+ 			queue_thread(_current);
++			if (!current_cpu_allowed()) {
++				flag_ipi(ipi_mask_create(_current));
++			}
+ 		}
+ 	}
+
+@@ -813,6 +826,21 @@ bool z_thread_prio_set(struct k_thread *thread, int prio)
+
+ 	return need_sched;
+ }
++
++#ifdef CONFIG_SCHED_CPU_MASK
++/* Called under _sched_spinlock after thread's cpu_mask changed */
++bool z_sched_cpu_mask_changed(struct k_thread *thread)
++{
++	if (z_is_thread_prevented_from_running(thread)) {
++		return false;
++	}
++
++	update_cache(1);
++	flag_ipi(IPI_ALL_CPUS_MASK);
++
++	return true;
++}
++#endif /* CONFIG_SCHED_CPU_MASK */
+ #ifdef IAR_SUPPRESS_ALWAYS_INLINE_WARNING_FLAG
+ TOOLCHAIN_ENABLE_WARNING(TOOLCHAIN_WARNING_ALWAYS_INLINE)
+ #endif
+diff --git a/tests/kernel/smp/src/main.c b/tests/kernel/smp/src/main.c
+index 56c8735fcf7..59a2e33cc5a 100644
+--- a/tests/kernel/smp/src/main.c
++++ b/tests/kernel/smp/src/main.c
+@@ -1248,6 +1248,8 @@ ZTEST(smp_stress, test_smp_switch_stress)
+  *
+  * @details Pin thread to a specific cpu. Once thread gets cpu, check
+  *          the cpu id is correct and then thread will give up cpu.
++ *          Then move a running thread from cpu to cpu and check that
++ *          it follows.
+  */
+ #ifdef CONFIG_SCHED_CPU_MASK
+ static void check_affinity(void *arg0, void *arg1, void *arg2)
+@@ -1265,8 +1267,23 @@ static void check_affinity(void *arg0, void *arg1, void *arg2)
+ 	}
+ }
+
++static volatile int affinity_cpu;
++static volatile bool affinity_stop;
++
++static void report_cpu(void *arg0, void *arg1, void *arg2)
++{
++	ARG_UNUSED(arg0);
++	ARG_UNUSED(arg1);
++	ARG_UNUSED(arg2);
++
++	while (!affinity_stop) {
++		affinity_cpu = curr_cpu();
++	}
++}
++
+ ZTEST(smp, test_smp_affinity)
+ {
++	k_tid_t tid;
+ 	int num_threads = arch_num_cpus();
+
+ 	for (int i = 0; i < num_threads; ++i) {
+@@ -1282,6 +1299,26 @@ ZTEST(smp, test_smp_affinity)
+ 	for (int i = 0; i < num_threads; i++) {
+ 		k_thread_join(&tthread[i], K_FOREVER);
+ 	}
++
++	affinity_stop = false;
++	affinity_cpu = -1;
++	tid = k_thread_create(&tthread[0], tstack[0], STACK_SIZE, report_cpu, NULL, NULL, NULL,
++			      k_thread_priority_get(k_current_get()) + 1, 0, K_NO_WAIT);
++
++	for (int i = 0; i < 2 * num_threads; i++) {
++		int cpu = i % num_threads;
++
++		zassert_ok(k_thread_cpu_pin(tid, cpu));
++		zassert_true(WAIT_FOR(affinity_cpu == cpu, TIMEOUT * USEC_PER_MSEC, k_msleep(1)),
++			     "running thread did not move to CPU %d", cpu);
++		zassert_equal(k_thread_cpu_mask_get(tid), BIT(cpu));
++	}
++
++	zassert_ok(k_thread_cpu_mask_set(tid, BIT_MASK(num_threads)));
++	zassert_equal(k_thread_cpu_mask_get(tid), BIT_MASK(num_threads));
++
++	affinity_stop = true;
++	k_thread_join(tid, K_FOREVER);
+ }
+ #endif
+
+diff --git a/tests/kernel/threads/thread_apis/src/test_threads_cpu_mask.c b/tests/kernel/threads/thread_apis/src/test_threads_cpu_mask.c
+index 574bcd5aeee..c3e884ec51a 100644
+--- a/tests/kernel/threads/thread_apis/src/test_threads_cpu_mask.c
++++ b/tests/kernel/threads/thread_apis/src/test_threads_cpu_mask.c
+@@ -41,21 +41,52 @@ ZTEST(threads_lifecycle_1cpu, test_threads_cpu_mask)
+ 	k_tid_t thread;
+ 	int ret, pass, prio;
+
+-	/* Shouldn't be able to operate on a running thread */
+-	ret = k_thread_cpu_mask_clear(k_current_get());
+-	zassert_true(ret == -EINVAL, "");
++	if (IS_ENABLED(CONFIG_SCHED_CPU_MASK_PIN_ONLY)) {
++		/* Shouldn't be able to operate on a running thread */
++		ret = k_thread_cpu_mask_clear(k_current_get());
++		zassert_true(ret == -EINVAL, "");
+
+-	ret = k_thread_cpu_mask_enable_all(k_current_get());
+-	zassert_true(ret == -EINVAL, "");
++		ret = k_thread_cpu_mask_enable_all(k_current_get());
++		zassert_true(ret == -EINVAL, "");
+
+-	ret = k_thread_cpu_mask_enable(k_current_get(), 0);
+-	zassert_true(ret == -EINVAL, "");
++		ret = k_thread_cpu_mask_enable(k_current_get(), 0);
++		zassert_true(ret == -EINVAL, "");
+
+-	ret = k_thread_cpu_mask_disable(k_current_get(), 0);
+-	zassert_true(ret == -EINVAL, "");
++		ret = k_thread_cpu_mask_disable(k_current_get(), 0);
++		zassert_true(ret == -EINVAL, "");
+
+-	ret = k_thread_cpu_pin(k_current_get(), 0);
+-	zassert_true(ret == -EINVAL, "");
++		ret = k_thread_cpu_pin(k_current_get(), 0);
++		zassert_true(ret == -EINVAL, "");
++
++		ret = k_thread_cpu_mask_set(k_current_get(), BIT(0));
++		zassert_true(ret == -EINVAL, "");
++	} else {
++		/* A running thread may change its own mask, as long as it keeps its CPU */
++		unsigned int key = arch_irq_lock();
++		int cpu = _current_cpu->id;
++
++		arch_irq_unlock(key);
++
++		ret = k_thread_cpu_mask_enable_all(k_current_get());
++		zassert_true(ret == 0, "");
++		zassert_equal(k_thread_cpu_mask_get(k_current_get()) &
++				      BIT_MASK(CONFIG_MP_MAX_NUM_CPUS),
++			      BIT_MASK(CONFIG_MP_MAX_NUM_CPUS), "");
++
++		ret = k_thread_cpu_pin(k_current_get(), cpu);
++		zassert_true(ret == 0, "");
++		zassert_equal(k_thread_cpu_mask_get(k_current_get()), BIT(cpu), "");
++
++		ret = k_thread_cpu_mask_enable(k_current_get(), cpu);
++		zassert_true(ret == 0, "");
++
++		ret = k_thread_cpu_mask_set(k_current_get(), BIT(cpu));
++		zassert_true(ret == 0, "");
++		zassert_equal(k_thread_cpu_mask_get(k_current_get()), BIT(cpu), "");
++
++		ret = k_thread_cpu_mask_enable_all(k_current_get());
++		zassert_true(ret == 0, "");
++	}
+
+ 	for (pass = 0; pass < 4; pass++) {
+ 		if (IS_ENABLED(CONFIG_SCHED_CPU_MASK_PIN_ONLY) && pass == 1) {
+diff --git a/doc/kernel/services/smp/smp.rst b/doc/kernel/services/smp/smp.rst
+index 9393b96a21e..5ee5dd2483e 100644
+--- a/doc/kernel/services/smp/smp.rst
++++ b/doc/kernel/services/smp/smp.rst
+@@ -108,9 +108,17 @@ By default, new threads can run on any CPU.  Calling
+ that thread from running on that CPU in the future.  Likewise
+ :c:func:`k_thread_cpu_mask_enable` will re-enable execution.  There are also
+ :c:func:`k_thread_cpu_mask_clear` and :c:func:`k_thread_cpu_mask_enable_all` APIs
+-available for convenience.  For obvious reasons, these APIs are
+-illegal if called on a runnable thread.  The thread must be blocked or
+-suspended, otherwise an ``-EINVAL`` will be returned.
++available for convenience, :c:func:`k_thread_cpu_pin` restricts a thread to a
++single CPU, and :c:func:`k_thread_cpu_mask_set` replaces the whole mask in one
++step so that a thread is never momentarily left without a CPU.
++:c:func:`k_thread_cpu_mask_get` reads the mask back.
++
++These APIs may be called on any thread, including the calling thread.  A
++runnable thread whose mask no longer includes the CPU it is on is handed back
++to the run queue and picked up by a permitted CPU.  With
++:kconfig:option:`CONFIG_SCHED_CPU_MASK_PIN_ONLY` the mask is immutable while a
++thread is runnable: the thread must be blocked or suspended, otherwise an
++``-EINVAL`` will be returned.
+
+ Note that when this feature is enabled, the scheduler algorithm
+ involved in doing the per-CPU mask test requires that the list be
