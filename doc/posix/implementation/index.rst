@@ -121,6 +121,78 @@ The general rule is that Option Groups will *always* have an associated Kconfig 
 Options (but not all) have an associated Kconfig option in Zephyr. The latter is mostly for
 maintainability.
 
+.. _posix_non_portable_extensions:
+
+Non-Portable Extensions
+=======================
+
+Beyond IEEE Std 1003.1, Zephyr provides a small set of extensions that programs written for
+other Operating Systems, such as Linux or BSD, commonly rely on. Each follows the existing
+convention, so that compatible programs build and behave as expected, and the ``linux_compat``
+twister variants run the corresponding testsuites against the host libc to keep the two in
+step. Extensions that share a header with standard interfaces are only visible when the
+program asks for them, by defining ``_GNU_SOURCE`` (or ``_BSD_SOURCE``) before the first
+include.
+
+POSIX_NON_PORTABLE
+------------------
+
+:ref:`posix_option_group_non_portable` (:kconfig:option:`CONFIG_POSIX_NON_PORTABLE`) collects
+the ``_np`` pthread functions that ``<pthread.h>`` declares under ``_GNU_SOURCE``. Like every
+other pthread function they operate on the ``k_thread`` behind the ``pthread_t`` (see *Native
+POSIX Thread Library* below), so they are available to unprivileged threads that hold
+permission on the thread object.
+
+- :c:func:`pthread_setname_np` and :c:func:`pthread_getname_np` read and write the kernel thread
+  name (:kconfig:option:`CONFIG_THREAD_NAME`, selected by the option group).
+- :c:func:`pthread_tryjoin_np` and :c:func:`pthread_timedjoin_np` are the conventional
+  non-blocking and absolute-deadline (``CLOCK_REALTIME``) forms of :c:func:`pthread_join`; a
+  NULL deadline blocks indefinitely.
+- :c:func:`pthread_setaffinity_np` and :c:func:`pthread_getaffinity_np` are thin wrappers over
+  the kernel's per-thread CPU mask, ``k_thread_cpu_mask_set()`` and ``k_thread_cpu_mask_get()``,
+  which exist with :kconfig:option:`CONFIG_SCHED_CPU_MASK`; the option group implies it wherever
+  the scheduler backend supports it. ``cpu_set_t`` and the ``CPU_*`` macros come from
+  ``<sched.h>`` or ``<pthread.h>`` under ``_GNU_SOURCE``, name CPUs by index up to
+  ``CPU_SETSIZE``, and are mapped onto the kernel mask by index. The whole mask is replaced in
+  one step, so a thread is never momentarily left without a CPU, and a runnable thread whose new
+  mask excludes the CPU it is on is handed back to the scheduler and picked up by a permitted
+  CPU; that includes the calling thread, which returns on a CPU named by the new set. CPUs that
+  do not exist are ignored, but at least one existing CPU must remain (``EINVAL``). Without
+  :kconfig:option:`CONFIG_SCHED_CPU_MASK` every thread runs on every CPU, so the getter reports
+  the full set and the setter accepts only that set, returning ``ENOTSUP`` for anything
+  narrower; with :kconfig:option:`CONFIG_SCHED_CPU_MASK_PIN_ONLY` a set may name only one CPU
+  and a runnable thread cannot be moved, matching the kernel's rules for that variant.
+
+Event file descriptors
+----------------------
+
+``<sys/eventfd.h>`` (:kconfig:option:`CONFIG_EVENTFD`) provides :c:func:`eventfd`,
+:c:func:`eventfd_read`, :c:func:`eventfd_write`, ``eventfd_t``, ``EFD_NONBLOCK`` and
+``EFD_SEMAPHORE`` with the conventional semantics: a 64-bit counter that :c:func:`write` adds
+to and :c:func:`read` returns and resets, or decrements by one in semaphore mode, with
+``EAGAIN`` in place of blocking when non-blocking. The descriptor is an ordinary ZVFS file
+descriptor (:kconfig:option:`CONFIG_ZVFS_EVENTFD_MAX` bounds their number), so it also works with
+:c:func:`poll`, :c:func:`select`, :c:func:`close`, and as a target of asynchronous I/O, where
+it counts as a descriptor with a waitable readiness condition (see
+:ref:`posix_option_asynchronous_io`).
+
+Other compatible extensions
+---------------------------
+
+- ``SIGEV_THREAD_ID`` with the conventional ``sigev_notify_thread_id`` field in
+  ``struct sigevent`` lets :c:func:`timer_create`, :c:func:`mq_notify` and the asynchronous I/O
+  functions direct their notification signal at a specific thread. Zephyr's own headers declare
+  it, and the patched picolibc and newlib ``struct sigevent`` carry the field as well.
+- :c:func:`fnmatch` accepts the GNU flags ``FNM_LEADING_DIR``, ``FNM_CASEFOLD`` (alias
+  ``FNM_IGNORECASE``) and ``FNM_EXTMATCH`` under ``_GNU_SOURCE``.
+- ``MSG_NOSIGNAL`` is accepted by :c:func:`send` and friends with its conventional meaning.
+- :c:func:`getenv_r` (``_BSD_SOURCE``) is the conventional reentrant form of :c:func:`getenv`,
+  reading an environment variable into a caller-supplied buffer.
+
+The ``posix`` Zephyr shell command (:kconfig:option:`CONFIG_POSIX_SHELL`) is tooling rather than
+API: its ``env`` and ``uname`` subcommands expose the environment and :c:func:`uname` output
+from the shell.
+
 Native POSIX Thread Library (NPTL)
 ==================================
 
