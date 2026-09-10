@@ -330,7 +330,9 @@ EXPORT_SYMBOL(socketpair);
 
 /* NON_PORTABLE */
 #ifdef CONFIG_POSIX_NON_PORTABLE
+EXPORT_SYMBOL(pthread_getaffinity_np);
 EXPORT_SYMBOL(pthread_getname_np);
+EXPORT_SYMBOL(pthread_setaffinity_np);
 EXPORT_SYMBOL(pthread_setname_np);
 EXPORT_SYMBOL(pthread_timedjoin_np);
 EXPORT_SYMBOL(pthread_tryjoin_np);
