@@ -2911,3 +2911,35 @@ patches:
       absent, CMake warns and calls fail at link. The header also includes
       <zephyr/posix/posix_setjmp.h>, following the newlib and picolibc
       setjmp.h shims, so POSIX_SIGNAL_JUMP works with the minimal libc.
+  - path: zephyr/k-thread-cpu-mask.patch
+    sha256sum: e610fdaafedd16eaa562fcc71640ae5dcdf66b4aab9411643d4f0fce5b797bf4
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-09
+    upstreamable: true
+    comments: |
+      kernel: let the CPU mask of a runnable thread change, and add a getter
+      and whole-mask setter as system calls
+
+      The k_thread_cpu_mask_*() API refused any thread that was runnable,
+      including the caller itself, so a thread could never move itself and
+      a running thread had to be suspended around every mask change. Only
+      the PIN_ONLY variant needs that restriction, since it keys the per-CPU
+      run queue on the mask at enqueue time. Without PIN_ONLY the run queue
+      is global and filtered by mask at pick time, so a queued thread needs
+      no more than the mask write; a running thread is handed back to the
+      queue by next_up() on the CPU it may no longer use, which is poked
+      with an IPI, and an IPI is flagged for the CPUs that may take it. On
+      one CPU the ready-queue cache is refreshed so the change is acted on
+      at the next reschedule.
+
+      k_thread_cpu_mask_set() replaces the whole mask in one step, so a
+      thread is never momentarily left with no CPU while it moves;
+      k_thread_cpu_mask_get() reads it back. Every k_thread_cpu_mask_*()
+      function is now a system call so user threads with permission on a
+      thread object can operate on it.
+
+      The thread_apis cpu-mask test keeps the -EINVAL expectations for
+      PIN_ONLY and otherwise exercises the running caller; the smp affinity
+      test moves a running thread between CPUs and checks that it follows.
