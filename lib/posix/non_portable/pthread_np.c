@@ -17,6 +17,85 @@
 
 LOG_MODULE_REGISTER(posix_non_portable, CONFIG_POSIX_NON_PORTABLE_LOG_LEVEL);
 
+#define CPU_MASK_ALL BIT_MASK(CONFIG_MP_MAX_NUM_CPUS)
+
+#ifdef CONFIG_SCHED_CPU_MASK
+static int thread_cpu_mask_set(struct k_thread *thread, uint32_t mask)
+{
+	return -k_thread_cpu_mask_set(thread, mask);
+}
+
+static uint32_t thread_cpu_mask_get(struct k_thread *thread)
+{
+	return k_thread_cpu_mask_get(thread);
+}
+#else
+/* every thread may run on every CPU, which is the only set that can be honored */
+static int thread_cpu_mask_set(struct k_thread *thread, uint32_t mask)
+{
+	ARG_UNUSED(thread);
+
+	return (mask == CPU_MASK_ALL) ? 0 : ENOTSUP;
+}
+
+static uint32_t thread_cpu_mask_get(struct k_thread *thread)
+{
+	ARG_UNUSED(thread);
+
+	return CPU_MASK_ALL;
+}
+#endif /* CONFIG_SCHED_CPU_MASK */
+
+int pthread_getaffinity_np(pthread_t thread, size_t cpusetsize, cpu_set_t *cpuset)
+{
+	uint32_t mask;
+
+	if (cpuset == NULL) {
+		return EFAULT;
+	}
+
+	if (cpusetsize < sizeof(*cpuset)) {
+		return EINVAL;
+	}
+
+	mask = thread_cpu_mask_get(to_k_thread(&thread)) & CPU_MASK_ALL;
+
+	memset(cpuset, 0, cpusetsize);
+	for (int cpu = 0; cpu < CONFIG_MP_MAX_NUM_CPUS; ++cpu) {
+		if ((mask & BIT(cpu)) != 0) {
+			CPU_SET(cpu, cpuset);
+		}
+	}
+
+	return 0;
+}
+
+int pthread_setaffinity_np(pthread_t thread, size_t cpusetsize, const cpu_set_t *cpuset)
+{
+	uint32_t mask = 0;
+
+	if (cpuset == NULL) {
+		return EFAULT;
+	}
+
+	if (cpusetsize < sizeof(*cpuset)) {
+		return EINVAL;
+	}
+
+	for (int cpu = 0; cpu < CONFIG_MP_MAX_NUM_CPUS; ++cpu) {
+		if (CPU_ISSET(cpu, cpuset)) {
+			mask |= BIT(cpu);
+		}
+	}
+
+	/* CPUs that do not exist are dropped, but one must remain */
+	if (mask == 0) {
+		return EINVAL;
+	}
+
+	return thread_cpu_mask_set(to_k_thread(&thread), mask);
+}
+
 int pthread_timedjoin_np(pthread_t pthread, void **status, const struct timespec *abstime)
 {
 	/* as on Linux, a NULL abstime blocks indefinitely (and must not be dereferenced) */

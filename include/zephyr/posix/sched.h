@@ -20,6 +20,10 @@
 
 #include <zephyr/kernel.h>
 
+#if defined(_GNU_SOURCE) || defined(__DOXYGEN__)
+#include <zephyr/posix/sys/cpuset.h>
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
