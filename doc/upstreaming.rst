@@ -35,6 +35,7 @@ Daily workflow
    west patch $P sync --commit          # record merged / closed PRs from GitHub
    west patch $P deps --write --commit  # refresh detected dependencies (cached; fast)
    west patch $P -dm zephyr status      # what is ready, blocked, or needs a rebase
+   west patch $P -dm zephyr next        # rank the ready patches: what to send first
    west patch $P -dm zephyr submit -n 2 # open up to two draft PRs for ready patches
 
 ``submit`` commits each chosen patch on a branch from upstream ``main`` (built in a temporary
@@ -44,6 +45,10 @@ dependencies are already merged upstream are submitted, one PR per patch unless 
 is given. Splitting the commit into implementation, tests and documentation, editing the
 generated message, and taking the PR out of draft are left to the human. ``--dry-run`` builds
 the branch locally and prints the PR title and body without pushing.
+
+To work on a single patch, ``west patch push``/``pop`` apply and reverse patches one at a
+time (quilt-style), tracked in ``.west/patch-stack.json``; ``apply`` and ``clean`` remain
+the all-or-nothing forms.
 
 The statuses, the ``custom.upstream`` keys (``ignore``, ``depends-on``,
 ``manual-depends-on``, ``title``, ``branch``) and the ``patch.*`` west config keys are
