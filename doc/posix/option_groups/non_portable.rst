@@ -9,7 +9,9 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_NON_PORTABLE`.
    :header: API, Supported
    :widths: 50,10
 
+    :c:func:`pthread_getaffinity_np`,yes
     :c:func:`pthread_getname_np`,yes
+    :c:func:`pthread_setaffinity_np`,yes
     :c:func:`pthread_setname_np`,yes
     :c:func:`pthread_timedjoin_np`,yes
     :c:func:`pthread_tryjoin_np`,yes
