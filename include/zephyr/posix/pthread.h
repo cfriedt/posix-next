@@ -25,6 +25,9 @@
 #include <sched.h>
 
 #include <zephyr/posix/sys/_pthreadtypes.h>
+#if defined(_GNU_SOURCE) || defined(__DOXYGEN__)
+#include <zephyr/posix/sys/cpuset.h>
+#endif
 #include <zephyr/toolchain.h>
 
 #ifdef __cplusplus
@@ -1216,6 +1219,17 @@ void pthread_testcancel(void);
 #if defined(_GNU_SOURCE) || defined(__DOXYGEN__)
 
 /**
+ * @brief Get the set of CPUs a thread may run on (GNU extension).
+ * @ingroup posix_option_group_non_portable
+ * @param thread     Thread to query.
+ * @param cpusetsize Size of @p cpuset in bytes, at least @c sizeof(cpu_set_t).
+ * @param cpuset     Output: the CPUs @p thread may run on.
+ * @return 0 on success, or a positive error number on failure.
+ * @see https://man7.org/linux/man-pages/man3/pthread_getaffinity_np.3.html
+ */
+int pthread_getaffinity_np(pthread_t thread, size_t cpusetsize, cpu_set_t *cpuset);
+
+/**
  * @brief Get the name of a thread (GNU extension).
  * @ingroup posix_option_group_non_portable
  * @param thread Thread to query.
@@ -1225,6 +1239,25 @@ void pthread_testcancel(void);
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/pthread_getname_np.html
  */
 int pthread_getname_np(pthread_t thread, char *name, size_t len);
+
+/**
+ * @brief Set the CPUs a thread may run on (GNU extension).
+ * @ingroup posix_option_group_non_portable
+ *
+ * CPUs in @p cpuset that do not exist are ignored; at least one existing CPU
+ * must remain. Without CONFIG_SCHED_CPU_MASK only a set naming
+ * every CPU can be honored.
+ *
+ * @param thread     Thread to modify.
+ * @param cpusetsize Size of @p cpuset in bytes, at least @c sizeof(cpu_set_t).
+ * @param cpuset     The CPUs @p thread may run on.
+ * @retval 0 on success.
+ * @retval EFAULT if @p cpuset is NULL.
+ * @retval EINVAL if @p cpusetsize is too small or @p cpuset names no existing CPU.
+ * @retval ENOTSUP if the set cannot be honored in this configuration.
+ * @see https://man7.org/linux/man-pages/man3/pthread_setaffinity_np.3.html
+ */
+int pthread_setaffinity_np(pthread_t thread, size_t cpusetsize, const cpu_set_t *cpuset);
 
 /**
  * @brief Set the name of a thread (GNU extension).
