@@ -507,6 +507,28 @@ patches:
 
       This lifts the static-allocation restriction from sys_sem and
       everything built on it, notably POSIX sem_t.
+  - path: zephyr/kernel-futex-without-userspace.patch
+    sha256sum: 5bd7d6dc4b898482ebe600ea82d7706a2de8fc1841eac8045789daf76d9e88e4
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-12
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/futex-wait-at-any-user-accessible-address.patch
+    comments: |
+      k_futex was only built and declared with CONFIG_USERSPACE, although
+      nothing in the contended path needs user mode: waiters pend on a
+      wait queue that is found either through the kernel object table or,
+      for unregistered addresses, the address-hashed buckets. Build futex.c
+      whenever the kernel is multithreaded and keep only the system call
+      verifiers and marshallers under CONFIG_USERSPACE, so supervisor-only
+      builds can block on a futex word too. Without userspace no futex is
+      a registered kernel object, so every futex uses the hashed queues.
+      This lets sys_thread_once() block waiters on the once word in every
+      configuration instead of polling when userspace is disabled.
   - path: zephyr/k-obj-map-size.patch
     sha256sum: 2dd724c14885b31b9dff2cb7caa53b0b9aedecde81f801dd97f18280a5a38d58
     module: zephyr
