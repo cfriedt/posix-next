@@ -1275,3 +1275,34 @@ patches:
       external interrupt and use the supervisor contexts instead, so that
       external interrupts (virtio-net on qemu_riscv64) reach the kernel.
 
+  - path: zephyr/boards-qemu-riscv64-smode-default.patch
+    sha256sum: a9a982cc753d1fc04cf10c58395204c06225c20579f78ae2dddea5278173070a
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-13
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/riscv-mmu-support.patch
+    comments: |
+      Rebased onto v4.5.0-rc1 + the zephyr#105403 head: upstream's opensbi and opensbi_smp variants stay,
+      the MMU properties use the PR's /cpus form, and coredump_threads keeps upstream's
+      'not CONFIG_RISCV_S_MODE' filter, which still covers the mmode variant.
+      boards: qemu_riscv64: S-mode with the Sv39 MMU is the board's default
+      configuration, as qemu_cortex_a53 and qemu_x86_64 run their MMU by
+      default; the M-mode PMP configuration that upstream calls
+      qemu_riscv64 becomes the qemu_riscv64/qemu_virt_riscv64/mmode variant
+      and the smode variant goes away (sv48 and smp are unchanged). The
+      four Zephyr test manifests that excluded or listed the smode
+      identifier now name qemu_riscv64, and coredump_threads, whose
+      S-mode exclusion would otherwise leave riscv64 uncovered, lists the
+      mmode variant. Not for upstream as is: it reverses upstream's board
+      default.
+      Kernel leaf mappings made after a domain privatized the covering leaf
+      table (dynamically allocated thread stacks, k_mem_map()) are mirrored
+      into every domain's private leaf tables on arch_mem_map()/arch_mem_unmap();
+      the upstream PR syncs only new L0/L1 entries, so such pages were
+      reachable from a domain only while its table was still shared with the
+      kernel, although a trap from user mode stores into the thread's
+      privilege stack before switching SATP.
