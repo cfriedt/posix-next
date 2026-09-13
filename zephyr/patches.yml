@@ -2386,3 +2386,40 @@ patches:
       current thread would alias the parent's physical memory through
       the shared kernel page tables - the bug the own-block design was
       built to dodge.
+  - path: zephyr/k-process-fork-riscv.patch
+    sha256sum: d24bf14dbf317e377dff11c4e2a60bdd86891ac559f8d8ce972b09c409226d60
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-13
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/riscv-mmu-support.patch
+          - zephyr/riscv-mmu-domain-mappings.patch
+          - zephyr/k-process-fork-resume.patch
+    comments: |
+      riscv64 fork support: memory substrate and resume. RISCV_MMU selects
+      ARCH_HAS_PROCESS_VM and ARCH_HAS_FORK_RESUME. z_mem_domain_clone_remap()
+      privatizes the leaf tables covering the range and repoints them at
+      the copy frames, as writable user memory. Unlike x86 without KPTI
+      and arm64, the RISC-V kernel cannot run on the process's page tables:
+      user mode executes kernel text there, and S-mode cannot fetch from a
+      user page, so every trap from user mode switches to the kernel's own
+      tables - where a forked child's addresses still resolve to the
+      parent's frames. A domain whose memory diverges therefore gets a
+      kernel view: its own tables, with the leaf tables covering kernel
+      text copied and PTE_USER clear, everything else shared with the user
+      view so the diverged leaves are seen by both. Threads of such a
+      domain trap into that view and are switched onto it (a per-thread
+      kernel SATP), so system calls read and write the child's copies, as
+      do the kernel's thread-local accesses (the user-mode flag lives in
+      TLS on RISC-V). The resume stages a copy of the parent's syscall
+      frame where a live user trap would build it, at the top of the
+      child's privilege stack, seeds the callee-saved registers banked at
+      syscall entry (the C convention preserves them through the kernel,
+      so the exit path never restores them), zeroes a0 and leaves through
+      the common exception exit path: privilege-stack bookkeeping, the
+      domain SATP switch and sret included. Floating-point state is not
+      inherited.
