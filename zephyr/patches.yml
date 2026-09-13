@@ -1077,3 +1077,24 @@ patches:
       leaving leaves that carry PTE_USER (the domain's own) alone, so that
       late mappings stay reachable while a domain SATP is active - a trap
       from user mode stores into the privilege stack before switching SATP.
+  - path: zephyr/boards-qemu-riscv64-smode-default.patch
+    sha256sum: d38c14d289f9f637fc6682cc8c08df77ff4bf8394bded04ff8789923ad94141a
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-13
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/riscv-mmu-support.patch
+    comments: |
+      boards: qemu_riscv64: S-mode with the Sv39 MMU is the board's default
+      configuration, as qemu_cortex_a53 and qemu_x86_64 run their MMU by
+      default; the M-mode PMP configuration that upstream calls
+      qemu_riscv64 becomes the qemu_riscv64/qemu_virt_riscv64/mmode variant
+      and the smode variant goes away (sv48 and smp are unchanged). The
+      four Zephyr test manifests that excluded or listed the smode
+      identifier now name qemu_riscv64, and coredump_threads, whose
+      S-mode exclusion would otherwise leave riscv64 uncovered, lists the
+      mmode variant. Not for upstream as is: it reverses upstream's board
+      default.
