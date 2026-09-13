@@ -128,6 +128,10 @@ if [ ${#PLATFORMS[@]} -eq 0 ]; then
   PLATFORMS=("${DEFAULT_PLATFORMS[@]}")
 fi
 
+# platform groups planned separately (see plan-groups.sh); one group means
+# twister plans as it runs, more than one means a merged plan is loaded
+mapfile -t PLAN_GROUPS < <("$SCRIPT_PATH/plan-groups.sh" "$CI_CONFIG" "$CI_CONFIG_PROFILE" "${PLATFORMS[@]}")
+
 _tmp=("${PLATFORMS[@]}")
 PLATFORMS=()
 for p in "${_tmp[@]}"; do
@@ -168,14 +172,45 @@ else
   fi
 fi
 
+group_platform_args() {
+  local p
+  read -r -a _group <<< "$1"
+  GROUP_PLATFORMS=()
+  for p in "${_group[@]}"; do GROUP_PLATFORMS+=(-p "$p"); done
+}
+
 if [ "$EVENT_NAME" = "pull_request" ]; then
-  "$ZEPHYR_BASE"/scripts/ci/test_plan.py -r "$POSIX_NEXT_PATH" \
-    -o "$POSIX_NEXT_PATH"/testplan.json \
-    -c $PR_DEST.. --pull-request \
-    --alt-tags "$TAGS_CONFIG" \
-    --ignore-path "$TWISTER_IGNORE" \
-    "${PLATFORMS[@]}" \
-    "${TEST_PLAN_ROOTS[@]}"
+  plans=()
+  i=0
+  for group in "${PLAN_GROUPS[@]}"; do
+    group_platform_args "$group"
+    rm -f "$POSIX_NEXT_PATH/testplan.$i.json"
+    "$ZEPHYR_BASE"/scripts/ci/test_plan.py -r "$POSIX_NEXT_PATH" \
+      -o "$POSIX_NEXT_PATH/testplan.$i.json" \
+      -c $PR_DEST.. --pull-request \
+      --alt-tags "$TAGS_CONFIG" \
+      --ignore-path "$TWISTER_IGNORE" \
+      "${GROUP_PLATFORMS[@]}" \
+      "${TEST_PLAN_ROOTS[@]}"
+    plans+=("$POSIX_NEXT_PATH/testplan.$i.json")
+    i=$((i + 1))
+  done
+  "$SCRIPT_PATH/merge-testplans.sh" "$POSIX_NEXT_PATH"/testplan.json "${plans[@]}"
+  rm -f "${plans[@]}"
+elif [ "$HAVE_PLAN" -eq 0 ] && [ ${#PLAN_GROUPS[@]} -gt 1 ]; then
+  plans=()
+  i=0
+  for group in "${PLAN_GROUPS[@]}"; do
+    group_platform_args "$group"
+    # the roots are workspace-relative, like the run itself below
+    (cd "$WORKSPACE_PATH" && "$ZEPHYR_BASE"/scripts/twister -c "${GROUP_PLATFORMS[@]}" \
+      "${ROOTS[@]}" --save-tests "$POSIX_NEXT_PATH/testplan.$i.json")
+    plans+=("$POSIX_NEXT_PATH/testplan.$i.json")
+    i=$((i + 1))
+  done
+  "$SCRIPT_PATH/merge-testplans.sh" "$POSIX_NEXT_PATH"/testplan.json "${plans[@]}"
+  rm -f "${plans[@]}"
+  EVENT_NAME="planned"
 fi
 
 twister_cmd=(
@@ -189,7 +224,7 @@ twister_cmd+=("${PLATFORMS[@]}")
 
 twister_cmd+=("${ROOTS[@]}")
 
-if [ "$EVENT_NAME" = "pull_request" ]; then
+if [ "$EVENT_NAME" = "pull_request" ] || [ "$EVENT_NAME" = "planned" ]; then
   twister_cmd+=(--load-tests "$POSIX_NEXT_PATH"/testplan.json)
 fi
 
