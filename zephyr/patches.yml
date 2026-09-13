@@ -3277,6 +3277,67 @@ patches:
       thread through z_sig_queue_thread(): kill() authorization is
       process-level, established by identity resolution. Per-architecture
       substrate and resume follow: riscv64, arm64, x86.
+  - path: zephyr/k-process-fork-riscv.patch
+    sha256sum: e9b5f0e481825ff876583b53a1b32cc2b0115d935fd9a7cd7854b132c4d46776
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-13
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/riscv-mmu-support.patch
+          - zephyr/riscv-mmu-domain-mappings.patch
+          - zephyr/k-process-vm.patch
+    comments: |
+      riscv64 fork support: memory substrate and resume. RISCV_MMU selects
+      ARCH_HAS_PROCESS_VM and ARCH_HAS_FORK_RESUME. z_mem_domain_clone_remap()
+      privatizes the leaf tables covering the range and repoints them at
+      the copy frames, as writable user memory. Unlike x86 without KPTI
+      and arm64, the RISC-V kernel cannot run on the process's page tables:
+      user mode executes kernel text there, and S-mode cannot fetch from a
+      user page, so every trap from user mode switches to the kernel's own
+      tables - where a forked child's addresses still resolve to the
+      parent's frames. A domain whose memory diverges therefore gets a
+      kernel view: its own tables, with the leaf tables covering kernel
+      text copied and PTE_USER clear, everything else shared with the user
+      view so the diverged leaves are seen by both. Threads of such a
+      domain trap into that view and are switched onto it (a per-thread
+      kernel SATP), so system calls read and write the child's copies, as
+      do the kernel's thread-local accesses (the user-mode flag lives in
+      TLS on RISC-V). The resume stages a copy of the parent's syscall
+      frame where a live user trap would build it, at the top of the
+      child's privilege stack, seeds the callee-saved registers banked at
+      syscall entry (the C convention preserves them through the kernel,
+      so the exit path never restores them), zeroes a0 and leaves through
+      the common exception exit path: privilege-stack bookkeeping, the
+      domain SATP switch and sret included. Floating-point state is not
+      inherited. arch_syscall_frame_sp() reads the caller's stack pointer
+      from the captured frame.
+
+      arch_mem_domain_partition_remove() zeroed the partition's leaves through
+      every table reachable from the domain's roots. A forked process's kernel
+      view (kptables) only holds private copies of the tables the clone remap
+      touched; for a partition granted after the fork - a 4 KiB mmap() the
+      child made - its leaf table is still the kernel's own, and the removal
+      unmapped the page from the kernel. mapping_release() then found the
+      page gone (k_mem_update_flags() -EFAULT) and k_mem_unmap() asserted
+      "page already unmapped" (stress-ng iomix and memlock on qemu_riscv64).
+      A domain's leaves are dropped only from tables it holds privately; a
+      table shared with the kernel is left alone. tests/lib/zvfs_mmap's fork
+      test has the child map and release 2 MiB and a page of its own after
+      the fork: wide enough to reach a leaf table the fork never privatised.
+
+      Every arch_mem_map() propagated new kernel table entries into each live
+      domain with sync_root(): all 512 root entries and, for a private L1, all
+      512 of its entries (and the L2s under Sv48), regardless of the range
+      mapped, and sync_domain_leaves() walked the tables once per page. A fork
+      maps five transient copy windows, so each fork cost ~200k cycles more
+      for every live domain on qemu_riscv64 (the tenth fork 3.26M cycles,
+      2.5x the first). sync_table_range() and sync_leaves_range() descend
+      only the entries covering [va, va+size): ~95k cycles per domain, the
+      tenth fork 2.14M cycles; the sigrt stressor's bogo ops +40%.
   - path: zephyr/libc-sys-stat-utime-markers.patch
     sha256sum: 8edfcf83058522bb80d601e92c4a9e6be14baec04cf8253ffbd344fbadf05b78
     module: zephyr
