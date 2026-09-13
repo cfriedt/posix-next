@@ -1050,3 +1050,30 @@ patches:
       overflow, and mem-mapped dynamic stack objects stay fully resolvable so
       k_mem_unmap_phys_guard() can free their page frames at thread destroy
       (V=0 tripped its "cannot unmap an unmapped address" assert).
+  - path: zephyr/riscv-mmu-domain-mappings.patch
+    sha256sum: 3502fae0a19f097154b623d21b2713064eddc9f3d295633b53647d3adbf0995a
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-13
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/riscv-mmu-support.patch
+    comments: |
+      riscv: mmu: keep memory-domain mappings in step with the kernel's. Two
+      fixes to the backported MMU (zephyr#105403), for memory that is mapped
+      rather than identity-mapped, such as a thread stack from k_mem_map().
+      Domain tables mapped user ranges (partitions, user stacks) at virt ==
+      phys, so a user thread on a mapped stack saw a different page than the
+      kernel did: the user-mode flag the kernel set in its TLS read 0, the
+      inline system call wrapper concluded it was in kernel context and
+      dereferenced kernel data. User ranges are now mapped page by page at
+      the frames the kernel tables hold. And kernel leaf mappings made after
+      a domain privatized the covering leaf table were never propagated
+      (upstream syncs only new L0/L1 entries): arch_mem_map()/arch_mem_unmap()
+      now mirror the changed leaves into every domain's private leaf tables,
+      leaving leaves that carry PTE_USER (the domain's own) alone, so that
+      late mappings stay reachable while a domain SATP is active - a trap
+      from user mode stores into the privilege stack before switching SATP.
