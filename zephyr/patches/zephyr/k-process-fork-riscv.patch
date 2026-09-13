@@ -1,0 +1,677 @@
+diff --git a/arch/riscv/Kconfig b/arch/riscv/Kconfig
+index fb0afb474c5..b1c0bcdac58 100644
+--- a/arch/riscv/Kconfig
++++ b/arch/riscv/Kconfig
+@@ -676,6 +676,8 @@ config RISCV_MMU
+ 	select KERNEL_VM_SUPPORT
+ 	select ARCH_HAS_USERSPACE
+ 	select ARCH_HAS_STACK_PROTECTION
++	select ARCH_HAS_PROCESS_VM if USERSPACE
++	select ARCH_HAS_FORK_RESUME if USERSPACE
+ 	select ARCH_MEM_DOMAIN_DATA if USERSPACE
+ 	select ARCH_MEM_DOMAIN_SYNCHRONOUS_API if USERSPACE
+ 	select ARCH_HAS_RESERVED_PAGE_FRAMES
+diff --git a/arch/riscv/core/isr.S b/arch/riscv/core/isr.S
+index 80bd1755892..3b1f203b61f 100644
+--- a/arch/riscv/core/isr.S
++++ b/arch/riscv/core/isr.S
+@@ -124,6 +124,9 @@ GTEXT(z_riscv_thread_start)
+ #ifdef CONFIG_RISCV_MMU
+ GTEXT(z_riscv_userspace_enter)
+ #endif
++#ifdef CONFIG_PROCESS_VM
++GTEXT(z_riscv_fork_resume)
++#endif
+ 
+ #ifdef CONFIG_TRACING
+ GTEXT(sys_trace_isr_enter)
+@@ -205,8 +208,14 @@ SECTION_FUNC(exception.entry, _isr_wrapper)
+ 
+ #ifdef CONFIG_RISCV_MMU
+ 	/* Switch to kernel address space before touching any kernel data. */
++#ifdef CONFIG_PROCESS_VM
++	/* the kernel's view of the current process (z_mem_domain_clone_remap) */
++	lr t1, ___cpu_t_current_OFFSET(s0)
++	lr t1, _thread_offset_to_ksatp(t1)
++#else
+ 	la t1, z_riscv_kernel_satp_val
+ 	lr t1, 0(t1)
++#endif /* CONFIG_PROCESS_VM */
+ 	csrw satp, t1
+ 	sfence.vma
+ #endif /* CONFIG_RISCV_MMU */
+@@ -627,6 +636,28 @@ is_user_syscall:
+ 	mv a6, sp
+ #endif /* CONFIG_RISCV_ISA_RV32E */
+ 
++#ifdef CONFIG_PROCESS_VM
++	/*
++	 * The callee-saved registers still hold the caller's values (the C
++	 * convention preserves them through the kernel, so the exit path never
++	 * restores them); bank them so fork() can seed the child's resume.
++	 */
++	lr t1, ___cpu_t_current_OFFSET(s0)
++	li t2, __thread_fork_s_OFFSET
++	add t1, t1, t2
++	sr s1, (0*RV_REGSIZE)(t1)
++	sr s2, (1*RV_REGSIZE)(t1)
++	sr s3, (2*RV_REGSIZE)(t1)
++	sr s4, (3*RV_REGSIZE)(t1)
++	sr s5, (4*RV_REGSIZE)(t1)
++	sr s6, (5*RV_REGSIZE)(t1)
++	sr s7, (6*RV_REGSIZE)(t1)
++	sr s8, (7*RV_REGSIZE)(t1)
++	sr s9, (8*RV_REGSIZE)(t1)
++	sr s10, (9*RV_REGSIZE)(t1)
++	sr s11, (10*RV_REGSIZE)(t1)
++#endif /* CONFIG_PROCESS_VM */
++
+ 	/* validate syscall limit */
+ 	li t1, K_SYSCALL_LIMIT
+ 	bltu t0, t1, valid_syscall_id
+@@ -1023,3 +1054,37 @@ SECTION_FUNC(exception.entry, z_riscv_userspace_enter)
+ 	mv sp, a4
+ 	TRAP_RET
+ #endif /* CONFIG_RISCV_MMU */
++
++#ifdef CONFIG_PROCESS_VM
++/*
++ * void z_riscv_fork_resume(struct arch_esf *esf, const unsigned long *s)
++ *
++ * First run of a forked child, in supervisor mode on its own stack: leave
++ * through the exception exit path on the staged frame, the callee-saved
++ * registers loaded with the values banked at the parent's syscall entry.
++ */
++SECTION_FUNC(exception.entry, z_riscv_fork_resume)
++	csrc RV_STATUS, STATUS_IE
++	mv sp, a0
++	lr s1, (0*RV_REGSIZE)(a1)
++	lr s2, (1*RV_REGSIZE)(a1)
++	lr s3, (2*RV_REGSIZE)(a1)
++	lr s4, (3*RV_REGSIZE)(a1)
++	lr s5, (4*RV_REGSIZE)(a1)
++	lr s6, (5*RV_REGSIZE)(a1)
++	lr s7, (6*RV_REGSIZE)(a1)
++	lr s8, (7*RV_REGSIZE)(a1)
++	lr s9, (8*RV_REGSIZE)(a1)
++	lr s10, (9*RV_REGSIZE)(a1)
++	lr s11, (10*RV_REGSIZE)(a1)
++#ifdef CONFIG_FPU_SHARING
++	/* the exit path decrements exception_depth and re-evaluates FPU access */
++	get_current_cpu s0
++	lr t0, ___cpu_t_current_OFFSET(s0)
++	lb t1, _thread_offset_to_exception_depth(t0)
++	addi t1, t1, 1
++	sb t1, _thread_offset_to_exception_depth(t0)
++	call z_riscv_fpu_enter_exc
++#endif /* CONFIG_FPU_SHARING */
++	j might_have_rescheduled
++#endif /* CONFIG_PROCESS_VM */
+diff --git a/arch/riscv/core/mmu.c b/arch/riscv/core/mmu.c
+index 25c71516652..492327453b3 100644
+--- a/arch/riscv/core/mmu.c
++++ b/arch/riscv/core/mmu.c
+@@ -1070,65 +1070,75 @@ static void sync_l2_from_kernel(uint64_t *k_l1, uint64_t *d_l1)
+  *
+  * Must be called with xlat_lock held.
+  */
+-static void sync_domains(void)
++static void sync_root(uint64_t *domain_root)
+ {
+-	sys_snode_t *node;
++	unsigned int i;
+ 
+-	SYS_SLIST_FOR_EACH_NODE(&domain_list, node) {
+-		struct arch_mem_domain *arch_domain =
+-			CONTAINER_OF(node, struct arch_mem_domain, node);
+-		uint64_t *domain_root = arch_domain->ptables;
+-		unsigned int i;
++	for (i = 0; i < RISCV_PGTABLE_ENTRIES; i++) {
++		pte_t k_pte = kernel_root_table[i];
++		pte_t d_pte = domain_root[i];
+ 
+-		for (i = 0; i < RISCV_PGTABLE_ENTRIES; i++) {
+-			pte_t k_pte = kernel_root_table[i];
+-			pte_t d_pte = domain_root[i];
++		if (!pte_is_valid(k_pte)) {
++			continue;
++		}
+ 
+-			if (!pte_is_valid(k_pte)) {
+-				continue;
+-			}
++		if (!pte_is_valid(d_pte)) {
++			/* Domain missing this L0 entry entirely. */
++			domain_root[i] = k_pte;
++			continue;
++		}
+ 
+-			if (!pte_is_valid(d_pte)) {
+-				/* Domain missing this L0 entry entirely. */
+-				domain_root[i] = k_pte;
+-				continue;
+-			}
++		if (!pte_is_table(k_pte) || !pte_is_table(d_pte)) {
++			/* Leaf (huge page) mapping - no sub-table to sync. */
++			continue;
++		}
++
++		{
++			uint64_t *k_l1 = (uint64_t *)pte_to_phys(k_pte);
++			uint64_t *d_l1 = (uint64_t *)pte_to_phys(d_pte);
++			unsigned int j;
+ 
+-			if (!pte_is_table(k_pte) || !pte_is_table(d_pte)) {
+-				/* Leaf (huge page) mapping - no sub-table to sync. */
++			if (k_l1 == d_l1) {
++				/* Shared L1 - already in sync. */
+ 				continue;
+ 			}
+ 
+-			{
+-				uint64_t *k_l1 = (uint64_t *)pte_to_phys(k_pte);
+-				uint64_t *d_l1 = (uint64_t *)pte_to_phys(d_pte);
+-				unsigned int j;
+-
+-				if (k_l1 == d_l1) {
+-					/* Shared L1 - already in sync. */
+-					continue;
+-				}
+-
+-				/*
+-				 * Domain has a private L1 copy.  Copy any
+-				 * kernel L1 entries that are absent in the
+-				 * private copy.
+-				 */
+-				for (j = 0; j < RISCV_PGTABLE_ENTRIES; j++) {
+-					if (pte_is_valid(k_l1[j]) &&
+-					    !pte_is_valid(d_l1[j])) {
+-						d_l1[j] = k_l1[j];
+-					}
++			/*
++			 * Domain has a private L1 copy.  Copy any
++			 * kernel L1 entries that are absent in the
++			 * private copy.
++			 */
++			for (j = 0; j < RISCV_PGTABLE_ENTRIES; j++) {
++				if (pte_is_valid(k_l1[j]) &&
++				    !pte_is_valid(d_l1[j])) {
++					d_l1[j] = k_l1[j];
+ 				}
++			}
+ 
+ #if PGTABLE_LEVELS == 4
+-				sync_l2_from_kernel(k_l1, d_l1);
++			sync_l2_from_kernel(k_l1, d_l1);
+ #endif
+-			}
+ 		}
+ 	}
+ }
+ 
++static void sync_domains(void)
++{
++	sys_snode_t *node;
++
++	SYS_SLIST_FOR_EACH_NODE(&domain_list, node) {
++		struct arch_mem_domain *arch_domain =
++			CONTAINER_OF(node, struct arch_mem_domain, node);
++
++		sync_root(arch_domain->ptables);
++#ifdef CONFIG_PROCESS_VM
++		if (arch_domain->kptables != NULL) {
++			sync_root(arch_domain->kptables);
++		}
++#endif /* CONFIG_PROCESS_VM */
++	}
++}
++
+ /*
+  * Mirror the kernel's leaf mappings of [va, va+size) into a page table that
+  * holds a private copy of the covering leaf table; a table still shared with
+@@ -1208,6 +1218,11 @@ static void sync_domain_leaves(uintptr_t va, size_t size)
+ 			CONTAINER_OF(node, struct arch_mem_domain, node);
+ 
+ 		sync_root_leaves(arch_domain->ptables, arch_domain->asid, va, size);
++#ifdef CONFIG_PROCESS_VM
++		if (arch_domain->kptables != NULL) {
++			sync_root_leaves(arch_domain->kptables, arch_domain->kasid, va, size);
++		}
++#endif /* CONFIG_PROCESS_VM */
+ 	}
+ }
+ 
+@@ -1258,6 +1273,9 @@ int arch_mem_domain_init(struct k_mem_domain *domain)
+ 	}
+ 
+ 	domain->arch.asid = alloc_asid();
++#ifdef CONFIG_PROCESS_VM
++	domain->arch.kptables = NULL;
++#endif /* CONFIG_PROCESS_VM */
+ 
+ 	sys_slist_append(&domain_list, &domain->arch.node);
+ 
+@@ -1338,6 +1356,177 @@ static int ensure_private_tables(uint64_t *domain_root, uintptr_t va, size_t siz
+ 	return 0;
+ }
+ 
++#ifdef CONFIG_PROCESS_VM
++/* A private copy of a page table, PTE count included. Must hold xlat_lock. */
++static uint64_t *copy_table(const uint64_t *src)
++{
++	uint64_t *table = new_table();
++	unsigned int i;
++
++	if (table == NULL) {
++		return NULL;
++	}
++	inc_table_ref(table);
++	memcpy(table, src, PAGE_SIZE);
++	for (i = 0; i < RISCV_PGTABLE_ENTRIES; i++) {
++		if (pte_is_valid(table[i])) {
++			adjust_table_usage(table, 1);
++		}
++	}
++
++	return table;
++}
++
++/* Clear PTE_USER on the leaves of @table in [text_start, rom_end). */
++static void clear_user_text(uint64_t *table, uintptr_t base, uintptr_t text_start,
++			    uintptr_t rom_end)
++{
++	unsigned int i;
++
++	for (i = 0; i < RISCV_PGTABLE_ENTRIES; i++) {
++		uintptr_t page_va = base + ((uintptr_t)i << PAGE_SIZE_SHIFT);
++		pte_t pte = table[i];
++
++		if (pte_is_valid(pte) && pte_is_leaf(pte) && (page_va >= text_start) &&
++		    (page_va < rom_end)) {
++			table[i] = pte & ~((pte_t)PTE_USER);
++		}
++	}
++}
++
++/*
++ * Build the kernel's view of a domain whose memory diverges from the
++ * kernel's own (a forking child): the domain's own tables, except that the
++ * leaf tables covering kernel text are copied so PTE_USER can stay clear
++ * there (S-mode cannot execute a user page).  Everything else is shared
++ * with the user view, so the diverged leaves z_mem_domain_clone_remap()
++ * installs are seen by both.  Threads of the domain trap into this view
++ * instead of the kernel's global tables (see _isr_wrapper), so their
++ * system calls read and write the process's copies.
++ *
++ * Must be called with xlat_lock held.
++ */
++static int kernel_view_init(struct k_mem_domain *domain)
++{
++	extern char __rom_region_start[];
++	extern char __text_region_start[];
++	extern char __rom_region_end[];
++
++	const uintptr_t rom_start = ROUND_DOWN((uintptr_t)__rom_region_start, PAGE_SIZE);
++	const uintptr_t text_start = (uintptr_t)__text_region_start;
++	const uintptr_t rom_end = ROUND_UP((uintptr_t)__rom_region_end, PAGE_SIZE);
++	const unsigned int l0_idx = VPN(rom_start, 0);
++	uint64_t *root;
++	uint64_t *l1;
++	pte_t l0_pte;
++	unsigned int l1_idx;
++
++	root = new_table();
++	if (root == NULL) {
++		return -ENOMEM;
++	}
++	inc_table_ref(root);
++	memcpy(root, domain->arch.ptables, PAGE_SIZE);
++
++	l0_pte = root[l0_idx];
++	if (!pte_is_valid(l0_pte) || !pte_is_table(l0_pte)) {
++		goto done;
++	}
++
++	l1 = copy_table((uint64_t *)pte_to_phys(l0_pte));
++	if (l1 == NULL) {
++		return -ENOMEM;
++	}
++	root[l0_idx] = pte_create((uintptr_t)l1, PTE_TYPE_TABLE);
++
++	for (l1_idx = 0; l1_idx < RISCV_PGTABLE_ENTRIES; l1_idx++) {
++		pte_t l1_pte = l1[l1_idx];
++		uintptr_t l1_base = ((uintptr_t)l0_idx << RISCV_PGLEVEL_SHIFT(0)) |
++				    ((uintptr_t)l1_idx << RISCV_PGLEVEL_SHIFT(1));
++		uint64_t *l2;
++
++		if (!pte_is_valid(l1_pte) || pte_is_leaf(l1_pte) || (l1_base >= rom_end) ||
++		    (l1_base + L1_MAP_SIZE <= text_start)) {
++			continue;
++		}
++
++		l2 = copy_table((uint64_t *)pte_to_phys(l1_pte));
++		if (l2 == NULL) {
++			return -ENOMEM;
++		}
++		l1[l1_idx] = pte_create((uintptr_t)l2, PTE_TYPE_TABLE);
++
++#if PGTABLE_LEVELS == 4
++		for (unsigned int i = 0; i < RISCV_PGTABLE_ENTRIES; i++) {
++			pte_t l2_pte = l2[i];
++			uintptr_t l2_base = l1_base | ((uintptr_t)i << RISCV_PGLEVEL_SHIFT(2));
++			uint64_t *l3;
++
++			if (!pte_is_valid(l2_pte) || pte_is_leaf(l2_pte) || (l2_base >= rom_end) ||
++			    (l2_base + BIT(RISCV_PGLEVEL_SHIFT(2)) <= text_start)) {
++				continue;
++			}
++
++			l3 = copy_table((uint64_t *)pte_to_phys(l2_pte));
++			if (l3 == NULL) {
++				return -ENOMEM;
++			}
++			l2[i] = pte_create((uintptr_t)l3, PTE_TYPE_TABLE);
++			clear_user_text(l3, l2_base, text_start, rom_end);
++		}
++#else
++		clear_user_text(l2, l1_base, text_start, rom_end);
++#endif
++	}
++
++done:
++	domain->arch.kptables = root;
++	domain->arch.kasid = alloc_asid();
++
++	return 0;
++}
++
++/*
++ * Repoint the mappings of [virt, virt+size) in @a domain at fresh physical
++ * memory starting at @a phys, as writable user memory, in the user and the
++ * kernel view alike (S-mode reaches user pages through SUM).  The domain is
++ * not live on any CPU when this runs (a forking child before its first
++ * start).
++ */
++int z_mem_domain_clone_remap(struct k_mem_domain *domain, void *virt, size_t size, uintptr_t phys)
++{
++	uintptr_t va = (uintptr_t)virt;
++	k_spinlock_key_t key;
++	int ret = 0;
++
++	if (((va | size | phys) % CONFIG_MMU_PAGE_SIZE) != 0U) {
++		return -EINVAL;
++	}
++
++	key = k_spin_lock(&xlat_lock);
++
++	if (domain->arch.kptables == NULL) {
++		ret = kernel_view_init(domain);
++	}
++	if (ret == 0) {
++		ret = ensure_private_tables(domain->arch.ptables, va, size);
++	}
++	if (ret == 0) {
++		ret = ensure_private_tables(domain->arch.kptables, va, size);
++	}
++	if (ret == 0) {
++		map_pages_into(domain->arch.ptables, va, phys, size, PTE_PAGE_RW | PTE_USER);
++		map_pages_into(domain->arch.kptables, va, phys, size, PTE_PAGE_RW | PTE_USER);
++		SFENCE_VMA_ASID(domain->arch.asid);
++		SFENCE_VMA_ASID(domain->arch.kasid);
++	}
++
++	k_spin_unlock(&xlat_lock, key);
++
++	return ret;
++}
++#endif /* CONFIG_PROCESS_VM */
++
+ int arch_mem_domain_partition_add(struct k_mem_domain *domain, uint32_t partition_id)
+ {
+ 	struct k_mem_partition *part = &domain->partitions[partition_id];
+@@ -1444,6 +1633,15 @@ int arch_mem_domain_thread_add(struct k_thread *thread)
+ 	thread->arch.satp = ((uintptr_t)SATP_MODE << SATP_MODE_SHIFT) |
+ 			    ((uintptr_t)domain->arch.asid << SATP_ASID_SHIFT) |
+ 			    ((uintptr_t)domain->arch.ptables >> PAGE_SIZE_SHIFT);
++#ifdef CONFIG_PROCESS_VM
++	/* system calls run on the kernel's view of a diverged address space */
++	thread->arch.ksatp = z_riscv_kernel_satp();
++	if (domain->arch.kptables != NULL) {
++		thread->arch.ksatp = ((uintptr_t)SATP_MODE << SATP_MODE_SHIFT) |
++				     ((uintptr_t)domain->arch.kasid << SATP_ASID_SHIFT) |
++				     ((uintptr_t)domain->arch.kptables >> PAGE_SIZE_SHIFT);
++	}
++#endif /* CONFIG_PROCESS_VM */
+ 
+ 	/*
+ 	 * Ensure the thread's user stack is mapped with PTE_USER in the
+@@ -1463,33 +1661,28 @@ int arch_mem_domain_thread_remove(struct k_thread *thread)
+ {
+ 	/* Revert to kernel page tables */
+ 	thread->arch.satp = z_riscv_kernel_satp();
++#ifdef CONFIG_PROCESS_VM
++	thread->arch.ksatp = thread->arch.satp;
++#endif /* CONFIG_PROCESS_VM */
+ 
+ 	return 0;
+ }
+ 
+-int arch_mem_domain_destroy(struct k_mem_domain *domain)
++/*
++ * Release intermediate tables that are exclusively owned by a root table
++ * (ref_count == XLAT_REF_COUNT_UNIT means only that root points to them),
++ * then the root itself.  Tables shared with the kernel page table have a
++ * higher ref count and must not be freed.
++ *
++ * TODO: recurse into deeper levels for partitions that required
++ * multi-level exclusive sub-tables.
++ *
++ * Must be called with xlat_lock held.
++ */
++static void release_root(uint64_t *ptables)
+ {
+-	k_spinlock_key_t key;
+-	uint64_t *ptables = domain->arch.ptables;
+ 	int i;
+ 
+-	if (!ptables) {
+-		return 0;
+-	}
+-
+-	key = k_spin_lock(&xlat_lock);
+-
+-	sys_slist_find_and_remove(&domain_list, &domain->arch.node);
+-
+-	/*
+-	 * Release intermediate tables that are exclusively owned by this
+-	 * domain (ref_count == XLAT_REF_COUNT_UNIT means only the domain
+-	 * root points to them).  Tables shared with the kernel page table
+-	 * have a higher ref count and must not be freed.
+-	 *
+-	 * TODO: recurse into deeper levels for partitions that required
+-	 * multi-level exclusive sub-tables.
+-	 */
+ 	for (i = 0; i < RISCV_PGTABLE_ENTRIES; i++) {
+ 		pte_t pte = ptables[i];
+ 
+@@ -1503,8 +1696,29 @@ int arch_mem_domain_destroy(struct k_mem_domain *domain)
+ 		}
+ 	}
+ 
+-	/* Free the domain root table */
+ 	xlat_use_count[table_index(ptables)] = 0;
++}
++
++int arch_mem_domain_destroy(struct k_mem_domain *domain)
++{
++	k_spinlock_key_t key;
++	uint64_t *ptables = domain->arch.ptables;
++
++	if (!ptables) {
++		return 0;
++	}
++
++	key = k_spin_lock(&xlat_lock);
++
++	sys_slist_find_and_remove(&domain_list, &domain->arch.node);
++
++#ifdef CONFIG_PROCESS_VM
++	if (domain->arch.kptables != NULL) {
++		release_root(domain->arch.kptables);
++		domain->arch.kptables = NULL;
++	}
++#endif /* CONFIG_PROCESS_VM */
++	release_root(ptables);
+ 	domain->arch.ptables = NULL;
+ 
+ 	k_spin_unlock(&xlat_lock, key);
+diff --git a/arch/riscv/core/offsets/offsets.c b/arch/riscv/core/offsets/offsets.c
+index bbeb9eac394..b1836a44db9 100644
+--- a/arch/riscv/core/offsets/offsets.c
++++ b/arch/riscv/core/offsets/offsets.c
+@@ -97,6 +97,10 @@ GEN_OFFSET_SYM(_thread_arch_t, exception_depth);
+ 
+ #ifdef CONFIG_RISCV_MMU
+ GEN_OFFSET_SYM(_thread_arch_t, satp);
++#ifdef CONFIG_PROCESS_VM
++GEN_OFFSET_SYM(_thread_arch_t, ksatp);
++GEN_ABSOLUTE_SYM(__thread_fork_s_OFFSET, offsetof(struct k_thread, arch.fork_s));
++#endif /* CONFIG_PROCESS_VM */
+ #endif
+ 
+ /* esf member offsets */
+diff --git a/arch/riscv/core/switch.S b/arch/riscv/core/switch.S
+index 1e884ae6dcf..bd78003d595 100644
+--- a/arch/riscv/core/switch.S
++++ b/arch/riscv/core/switch.S
+@@ -61,6 +61,16 @@ SECTION_FUNC(TEXT, z_riscv_switch)
+ 	/* Get the new thread's stack pointer */
+ 	lr sp, _thread_offset_to_sp(a0)
+ 
++#ifdef CONFIG_PROCESS_VM
++	/* run on the incoming thread's kernel view of its address space */
++	lr t0, _thread_offset_to_ksatp(a0)
++	csrr t1, satp
++	beq t0, t1, 1f
++	csrw satp, t0
++	sfence.vma
++1:
++#endif /* CONFIG_PROCESS_VM */
++
+ #ifdef CONFIG_CUSTOM_STACK_GUARD
+ #ifdef CONFIG_USERSPACE
+ 	/*
+diff --git a/arch/riscv/core/thread.c b/arch/riscv/core/thread.c
+index 3e91a31c8b3..a715815c47c 100644
+--- a/arch/riscv/core/thread.c
++++ b/arch/riscv/core/thread.c
+@@ -123,6 +123,9 @@ void arch_new_thread(struct k_thread *thread, k_thread_stack_t *stack,
+ 
+ #ifdef CONFIG_RISCV_MMU
+ 	thread->arch.satp = z_riscv_kernel_satp();
++#ifdef CONFIG_PROCESS_VM
++	thread->arch.ksatp = thread->arch.satp;
++#endif /* CONFIG_PROCESS_VM */
+ #endif
+ 
+ #ifdef CONFIG_RISCV_MMU_STACK_GUARD
+@@ -349,3 +352,44 @@ int arch_coprocessors_disable(struct k_thread *thread)
+ 	return -ENOTSUP;
+ #endif
+ }
++
++#ifdef CONFIG_PROCESS_VM
++/*
++ * A forked child resumes through the exception exit path on a copy of the
++ * parent's syscall frame, staged where a live user trap would build it: at
++ * the top of the child's privilege stack.  The parent's callee-saved
++ * registers, banked at syscall entry, seed the child's; a0 reads 0, the
++ * child's fork() return.
++ */
++void *arch_fork_frame_init(struct k_thread *child, void *parent_ssf)
++{
++	const struct arch_esf *pesf = parent_ssf;
++	struct arch_esf *esf;
++	unsigned long top;
++
++	child->arch.priv_stack_start = (unsigned long)child->stack_obj;
++	top = Z_STACK_PTR_ALIGN(child->arch.priv_stack_start + K_KERNEL_STACK_RESERVED +
++				CONFIG_PRIVILEGED_STACK_SIZE);
++	esf = Z_STACK_PTR_TO_FRAME(struct arch_esf, top);
++
++	*esf = *pesf;
++	esf->a0 = 0;
++	(void)memcpy(child->arch.fork_s, _current->arch.fork_s, sizeof(child->arch.fork_s));
++
++	return esf;
++}
++
++FUNC_NORETURN void arch_fork_resume(void *frame)
++{
++	extern FUNC_NORETURN void z_riscv_fork_resume(struct arch_esf *esf,
++						       const unsigned long *s);
++#ifdef CONFIG_INIT_STACKS
++	uintptr_t bottom = _current->arch.priv_stack_start + K_KERNEL_STACK_RESERVED;
++
++	/* the privilege stack below the staged frame, as arch_user_mode_enter() would */
++	(void)memset((void *)bottom, 0xaa, (uintptr_t)frame - bottom);
++#endif /* CONFIG_INIT_STACKS */
++
++	z_riscv_fork_resume(frame, _current->arch.fork_s);
++}
++#endif /* CONFIG_PROCESS_VM */
+diff --git a/arch/riscv/include/offsets_short_arch.h b/arch/riscv/include/offsets_short_arch.h
+index 13aa4edb6e5..b15a631178b 100644
+--- a/arch/riscv/include/offsets_short_arch.h
++++ b/arch/riscv/include/offsets_short_arch.h
+@@ -64,6 +64,10 @@
+ #ifdef CONFIG_RISCV_MMU
+ #define _thread_offset_to_satp \
+ 	(___thread_t_arch_OFFSET + ___thread_arch_t_satp_OFFSET)
++#ifdef CONFIG_PROCESS_VM
++#define _thread_offset_to_ksatp \
++	(___thread_t_arch_OFFSET + ___thread_arch_t_ksatp_OFFSET)
++#endif
+ #endif
+ 
+ #ifdef CONFIG_USERSPACE
+diff --git a/include/zephyr/arch/riscv/arch.h b/include/zephyr/arch/riscv/arch.h
+index a8f97eb7623..b159197508c 100644
+--- a/include/zephyr/arch/riscv/arch.h
++++ b/include/zephyr/arch/riscv/arch.h
+@@ -283,6 +283,8 @@ extern "C" {
+ 	{PMP_R | PMP_W | PMP_X})
+ #define K_MEM_PARTITION_P_RX_U_RX ((k_mem_partition_attr_t) \
+ 	{PMP_R | PMP_X})
++/* True if the partition grants write access (used by CONFIG_PROCESS_VM) */
++#define K_MEM_PARTITION_IS_WRITABLE(attr) (((attr).pmp_attr & PMP_W) != 0)
+ 
+ /* Typedef for the k_mem_partition attribute */
+ typedef struct {
+@@ -294,6 +296,10 @@ struct arch_mem_domain {
+ 	uint64_t *ptables; /* root page table for this domain */
+ 	uint16_t asid; /* ASID assigned to this domain */
+ 	sys_snode_t node; /* domain list linkage for kernel mapping sync */
++#ifdef CONFIG_PROCESS_VM
++	uint64_t *kptables; /* the kernel's view of the domain (z_mem_domain_clone_remap) */
++	uint16_t kasid;
++#endif /* CONFIG_PROCESS_VM */
+ #else
+ 	unsigned int pmp_update_nr;
+ #endif
+diff --git a/include/zephyr/arch/riscv/thread.h b/include/zephyr/arch/riscv/thread.h
+index 4bfc07610a9..5b3cdf24089 100644
+--- a/include/zephyr/arch/riscv/thread.h
++++ b/include/zephyr/arch/riscv/thread.h
+@@ -84,6 +84,11 @@ struct _thread_arch {
+ #endif
+ #ifdef CONFIG_RISCV_MMU
+ 	uintptr_t satp; /* SATP value for this thread's address space */
++#ifdef CONFIG_PROCESS_VM
++	uintptr_t ksatp; /* SATP of the kernel's view of that address space */
++	/* caller's s1..s11 banked at syscall entry (fork frame seed) */
++	unsigned long fork_s[11];
++#endif /* CONFIG_PROCESS_VM */
+ #endif
+ #if defined(CONFIG_CPP) && !defined(CONFIG_FPU_SHARING) && !defined(CONFIG_USERSPACE) && \
+ 	!defined(CONFIG_PMP_STACK_GUARD) && !defined(CONFIG_RISCV_MMU)
