@@ -1,0 +1,400 @@
+diff --git a/boards/qemu/riscv64/board.yml b/boards/qemu/riscv64/board.yml
+index 4583c1400b0..aa9da59c2b9 100644
+--- a/boards/qemu/riscv64/board.yml
++++ b/boards/qemu/riscv64/board.yml
+@@ -5,6 +5,6 @@ board:
+   socs:
+     - name: qemu_virt_riscv64
+       variants:
++        - name: mmode
+         - name: smp
+-        - name: smode
+         - name: sv48
+diff --git a/boards/qemu/riscv64/qemu_riscv64.dts b/boards/qemu/riscv64/qemu_riscv64.dts
+index 1ce836c16c8..f46a838f88f 100644
+--- a/boards/qemu/riscv64/qemu_riscv64.dts
++++ b/boards/qemu/riscv64/qemu_riscv64.dts
+@@ -1,4 +1,4 @@
+-/* Copyright (c) 2019 BayLibre SAS */
++/* Copyright (c) 2026 Alexios Lyrakis */
+ /* SPDX-License-Identifier: Apache-2.0 */
+ 
+ /dts-v1/;
+@@ -10,34 +10,47 @@
+ 		zephyr,console = &uart0;
+ 		zephyr,shell-uart = &uart0;
+ 		zephyr,sram = &ram0;
+-		zephyr,display = &ramfb0;
+ 	};
++};
+ 
+-	fwcfg0: fw-cfg@10100000 {
+-		compatible = "qemu,fw-cfg-mmio";
+-		reg = <0x10100000 0x18>;
+-		status = "okay";
+-	};
++&{/cpus/cpu@0} {
++	riscv,privilege-modes = "m", "s", "u";
++	mmu-type = "riscv,sv39";
++};
+ 
+-	reserved-memory {
+-		#address-cells = <1>;
+-		#size-cells = <1>;
+-		ranges;
++&{/cpus/cpu@1} {
++	riscv,privilege-modes = "m", "s", "u";
++	mmu-type = "riscv,sv39";
++};
+ 
+-		ramfb_mem: framebuffer@8fc00000 {
+-			reg = <0x8fc00000 0x00400000>; /* 4 MiB */
+-			no-map;
+-		};
+-	};
++&{/cpus/cpu@2} {
++	riscv,privilege-modes = "m", "s", "u";
++	mmu-type = "riscv,sv39";
++};
+ 
+-	ramfb0: ramfb {
+-		compatible = "qemu,ramfb";
+-		fwcfg = <&fwcfg0>;
+-		memory-region = <&ramfb_mem>;
+-		width = <1024>;
+-		height = <768>;
+-		status = "okay";
+-	};
++&{/cpus/cpu@3} {
++	riscv,privilege-modes = "m", "s", "u";
++	mmu-type = "riscv,sv39";
++};
++
++&{/cpus/cpu@4} {
++	riscv,privilege-modes = "m", "s", "u";
++	mmu-type = "riscv,sv39";
++};
++
++&{/cpus/cpu@5} {
++	riscv,privilege-modes = "m", "s", "u";
++	mmu-type = "riscv,sv39";
++};
++
++&{/cpus/cpu@6} {
++	riscv,privilege-modes = "m", "s", "u";
++	mmu-type = "riscv,sv39";
++};
++
++&{/cpus/cpu@7} {
++	riscv,privilege-modes = "m", "s", "u";
++	mmu-type = "riscv,sv39";
+ };
+ 
+ &uart0 {
+diff --git a/boards/qemu/riscv64/qemu_riscv64.yaml b/boards/qemu/riscv64/qemu_riscv64.yaml
+index 240ebcdbde9..88dbaf6f6f6 100644
+--- a/boards/qemu/riscv64/qemu_riscv64.yaml
++++ b/boards/qemu/riscv64/qemu_riscv64.yaml
+@@ -6,8 +6,6 @@ simulation:
+ arch: riscv
+ toolchain:
+   - zephyr
+-supported:
+-  - netif
+ ram: 262144
+ flash: 32768
+ testing:
+diff --git a/boards/qemu/riscv64/qemu_riscv64_defconfig b/boards/qemu/riscv64/qemu_riscv64_defconfig
+index 18dbae0da77..fb65c1003af 100644
+--- a/boards/qemu/riscv64/qemu_riscv64_defconfig
++++ b/boards/qemu/riscv64/qemu_riscv64_defconfig
+@@ -1,9 +1,14 @@
+ # SPDX-License-Identifier: Apache-2.0
+ 
+-CONFIG_PRIVILEGED_STACK_SIZE=2048
+ CONFIG_CONSOLE=y
+ CONFIG_SERIAL=y
+ CONFIG_UART_CONSOLE=y
+ CONFIG_STACK_SENTINEL=y
+ CONFIG_XIP=n
+-CONFIG_RISCV_PMP=y
++CONFIG_RISCV_S_MODE=y
++CONFIG_QEMU_ICOUNT=y
++# The PLIC driver configures PLIC context 0 (M-mode) for hart 0.  In S-mode
++# Zephyr the correct context is 1 (supervisor mode), so external device
++# interrupts via the PLIC do not reach the CPU.  Disable interrupt-driven
++# UART TX so the shell backend falls back to polling, which works correctly.
++CONFIG_SHELL_BACKEND_SERIAL_INTERRUPT_DRIVEN=n
+diff --git a/boards/qemu/riscv64/qemu_riscv64_qemu_virt_riscv64_mmode.dts b/boards/qemu/riscv64/qemu_riscv64_qemu_virt_riscv64_mmode.dts
+new file mode 100644
+index 00000000000..1ce836c16c8
+--- /dev/null
++++ b/boards/qemu/riscv64/qemu_riscv64_qemu_virt_riscv64_mmode.dts
+@@ -0,0 +1,45 @@
++/* Copyright (c) 2019 BayLibre SAS */
++/* SPDX-License-Identifier: Apache-2.0 */
++
++/dts-v1/;
++
++#include <qemu/virt-riscv64.dtsi>
++
++/ {
++	chosen {
++		zephyr,console = &uart0;
++		zephyr,shell-uart = &uart0;
++		zephyr,sram = &ram0;
++		zephyr,display = &ramfb0;
++	};
++
++	fwcfg0: fw-cfg@10100000 {
++		compatible = "qemu,fw-cfg-mmio";
++		reg = <0x10100000 0x18>;
++		status = "okay";
++	};
++
++	reserved-memory {
++		#address-cells = <1>;
++		#size-cells = <1>;
++		ranges;
++
++		ramfb_mem: framebuffer@8fc00000 {
++			reg = <0x8fc00000 0x00400000>; /* 4 MiB */
++			no-map;
++		};
++	};
++
++	ramfb0: ramfb {
++		compatible = "qemu,ramfb";
++		fwcfg = <&fwcfg0>;
++		memory-region = <&ramfb_mem>;
++		width = <1024>;
++		height = <768>;
++		status = "okay";
++	};
++};
++
++&uart0 {
++	status = "okay";
++};
+diff --git a/boards/qemu/riscv64/qemu_riscv64_qemu_virt_riscv64_mmode.yaml b/boards/qemu/riscv64/qemu_riscv64_qemu_virt_riscv64_mmode.yaml
+new file mode 100644
+index 00000000000..6c00b4cfecf
+--- /dev/null
++++ b/boards/qemu/riscv64/qemu_riscv64_qemu_virt_riscv64_mmode.yaml
+@@ -0,0 +1,17 @@
++identifier: qemu_riscv64/qemu_virt_riscv64/mmode
++name: QEMU Emulation for RISC-V 64-bit M-mode (PMP)
++type: qemu
++simulation:
++  - name: qemu
++arch: riscv
++toolchain:
++  - zephyr
++supported:
++  - netif
++ram: 262144
++flash: 32768
++testing:
++  default: true
++  ignore_tags:
++    - net
++    - bluetooth
+diff --git a/boards/qemu/riscv64/qemu_riscv64_qemu_virt_riscv64_mmode_defconfig b/boards/qemu/riscv64/qemu_riscv64_qemu_virt_riscv64_mmode_defconfig
+new file mode 100644
+index 00000000000..18dbae0da77
+--- /dev/null
++++ b/boards/qemu/riscv64/qemu_riscv64_qemu_virt_riscv64_mmode_defconfig
+@@ -0,0 +1,9 @@
++# SPDX-License-Identifier: Apache-2.0
++
++CONFIG_PRIVILEGED_STACK_SIZE=2048
++CONFIG_CONSOLE=y
++CONFIG_SERIAL=y
++CONFIG_UART_CONSOLE=y
++CONFIG_STACK_SENTINEL=y
++CONFIG_XIP=n
++CONFIG_RISCV_PMP=y
+diff --git a/boards/qemu/riscv64/qemu_riscv64_qemu_virt_riscv64_smode.dts b/boards/qemu/riscv64/qemu_riscv64_qemu_virt_riscv64_smode.dts
+deleted file mode 100644
+index f46a838f88f..00000000000
+--- a/boards/qemu/riscv64/qemu_riscv64_qemu_virt_riscv64_smode.dts
++++ /dev/null
+@@ -1,58 +0,0 @@
+-/* Copyright (c) 2026 Alexios Lyrakis */
+-/* SPDX-License-Identifier: Apache-2.0 */
+-
+-/dts-v1/;
+-
+-#include <qemu/virt-riscv64.dtsi>
+-
+-/ {
+-	chosen {
+-		zephyr,console = &uart0;
+-		zephyr,shell-uart = &uart0;
+-		zephyr,sram = &ram0;
+-	};
+-};
+-
+-&{/cpus/cpu@0} {
+-	riscv,privilege-modes = "m", "s", "u";
+-	mmu-type = "riscv,sv39";
+-};
+-
+-&{/cpus/cpu@1} {
+-	riscv,privilege-modes = "m", "s", "u";
+-	mmu-type = "riscv,sv39";
+-};
+-
+-&{/cpus/cpu@2} {
+-	riscv,privilege-modes = "m", "s", "u";
+-	mmu-type = "riscv,sv39";
+-};
+-
+-&{/cpus/cpu@3} {
+-	riscv,privilege-modes = "m", "s", "u";
+-	mmu-type = "riscv,sv39";
+-};
+-
+-&{/cpus/cpu@4} {
+-	riscv,privilege-modes = "m", "s", "u";
+-	mmu-type = "riscv,sv39";
+-};
+-
+-&{/cpus/cpu@5} {
+-	riscv,privilege-modes = "m", "s", "u";
+-	mmu-type = "riscv,sv39";
+-};
+-
+-&{/cpus/cpu@6} {
+-	riscv,privilege-modes = "m", "s", "u";
+-	mmu-type = "riscv,sv39";
+-};
+-
+-&{/cpus/cpu@7} {
+-	riscv,privilege-modes = "m", "s", "u";
+-	mmu-type = "riscv,sv39";
+-};
+-
+-&uart0 {
+-	status = "okay";
+-};
+diff --git a/boards/qemu/riscv64/qemu_riscv64_qemu_virt_riscv64_smode.yaml b/boards/qemu/riscv64/qemu_riscv64_qemu_virt_riscv64_smode.yaml
+deleted file mode 100644
+index 15ca3a418d1..00000000000
+--- a/boards/qemu/riscv64/qemu_riscv64_qemu_virt_riscv64_smode.yaml
++++ /dev/null
+@@ -1,15 +0,0 @@
+-identifier: qemu_riscv64/qemu_virt_riscv64/smode
+-name: QEMU Emulation for RISC-V 64-bit S-mode
+-type: qemu
+-simulation:
+-  - name: qemu
+-arch: riscv
+-toolchain:
+-  - zephyr
+-ram: 262144
+-flash: 32768
+-testing:
+-  default: true
+-  ignore_tags:
+-    - net
+-    - bluetooth
+diff --git a/boards/qemu/riscv64/qemu_riscv64_qemu_virt_riscv64_smode_defconfig b/boards/qemu/riscv64/qemu_riscv64_qemu_virt_riscv64_smode_defconfig
+deleted file mode 100644
+index fb65c1003af..00000000000
+--- a/boards/qemu/riscv64/qemu_riscv64_qemu_virt_riscv64_smode_defconfig
++++ /dev/null
+@@ -1,14 +0,0 @@
+-# SPDX-License-Identifier: Apache-2.0
+-
+-CONFIG_CONSOLE=y
+-CONFIG_SERIAL=y
+-CONFIG_UART_CONSOLE=y
+-CONFIG_STACK_SENTINEL=y
+-CONFIG_XIP=n
+-CONFIG_RISCV_S_MODE=y
+-CONFIG_QEMU_ICOUNT=y
+-# The PLIC driver configures PLIC context 0 (M-mode) for hart 0.  In S-mode
+-# Zephyr the correct context is 1 (supervisor mode), so external device
+-# interrupts via the PLIC do not reach the CPU.  Disable interrupt-driven
+-# UART TX so the shell backend falls back to polling, which works correctly.
+-CONFIG_SHELL_BACKEND_SERIAL_INTERRUPT_DRIVEN=n
+diff --git a/tests/arch/common/interrupt/testcase.yaml b/tests/arch/common/interrupt/testcase.yaml
+index 896a19c40cf..f59ca08900e 100644
+--- a/tests/arch/common/interrupt/testcase.yaml
++++ b/tests/arch/common/interrupt/testcase.yaml
+@@ -43,7 +43,7 @@ tests:
+       - cdns_swerv/s420/64/whisper
+       # In S-mode only SSIP (IRQ 1) can be triggered from software; the
+       # shared interrupt test requires two independent triggerable IRQ lines.
+-      - qemu_riscv64/qemu_virt_riscv64/smode
++      - qemu_riscv64
+       - qemu_riscv64/qemu_virt_riscv64/sv48
+     arch_exclude:
+       # test needs 2 working interrupt lines
+@@ -69,7 +69,7 @@ tests:
+       - cdns_swerv/s420/64/whisper
+       # In S-mode only SSIP (IRQ 1) can be triggered from software; the
+       # shared interrupt test requires two independent triggerable IRQ lines.
+-      - qemu_riscv64/qemu_virt_riscv64/smode
++      - qemu_riscv64
+       - qemu_riscv64/qemu_virt_riscv64/sv48
+     arch_exclude:
+       # test needs 2 working interrupt lines
+diff --git a/tests/arch/common/stack_unwind/testcase.yaml b/tests/arch/common/stack_unwind/testcase.yaml
+index 4e97d790285..4285c94d276 100644
+--- a/tests/arch/common/stack_unwind/testcase.yaml
++++ b/tests/arch/common/stack_unwind/testcase.yaml
+@@ -65,7 +65,7 @@ tests:
+     integration_platforms:
+       - qemu_riscv32e
+       - qemu_riscv32
+-      - qemu_riscv64
++      - qemu_riscv64/qemu_virt_riscv64/mmode
+       - qemu_cortex_a53
+     platform_exclude:
+       # these platforms disabled here since CONFIG_ARM_MMU=n by default
+@@ -74,7 +74,7 @@ tests:
+       # In S-mode z_riscv_fatal_error() is called directly (no ecall), adding
+       # two extra func1 frames at the start; the regex expects the alternating
+       # func1/func2 pattern but gets func1/func1/func2 instead.
+-      - qemu_riscv64/qemu_virt_riscv64/smode
++      - qemu_riscv64
+     extra_configs:
+       - CONFIG_FRAME_POINTER=y
+       - CONFIG_SYMTAB=y
+diff --git a/tests/kernel/mem_protect/mem_map/testcase.yaml b/tests/kernel/mem_protect/mem_map/testcase.yaml
+index bbe5263024d..7ddeb14aac2 100644
+--- a/tests/kernel/mem_protect/mem_map/testcase.yaml
++++ b/tests/kernel/mem_protect/mem_map/testcase.yaml
+@@ -19,7 +19,7 @@ tests:
+       - qemu_x86_64
+       - intel_adsp/ace30/ptl
+     integration_platforms:
+-      - qemu_riscv64/qemu_virt_riscv64/smode
++      - qemu_riscv64
+       - qemu_riscv64/qemu_virt_riscv64/sv48
+       - qemu_x86
+   kernel.memory_protection.mem_map.x86_64:
+diff --git a/tests/subsys/debug/coredump_threads/testcase.yaml b/tests/subsys/debug/coredump_threads/testcase.yaml
+index da4b562d34a..5dc4c3ee019 100644
+--- a/tests/subsys/debug/coredump_threads/testcase.yaml
++++ b/tests/subsys/debug/coredump_threads/testcase.yaml
+@@ -9,7 +9,7 @@ common:
+   integration_platforms:
+     - qemu_cortex_m3
+     - qemu_riscv32
+-    - qemu_riscv64
++    - qemu_riscv64/qemu_virt_riscv64/mmode
+     - qemu_riscv32e
+ tests:
+   debug.coredump.threads:
+@@ -17,7 +17,7 @@ tests:
+       # In S-mode ARCH_EXCEPT calls z_riscv_fatal_error() with esf=NULL;
+       # arch_coredump_info_dump() returns immediately when esf is NULL so
+       # the coredump output is never produced.
+-      - qemu_riscv64/qemu_virt_riscv64/smode
++      - qemu_riscv64
+     filter: CONFIG_DEBUG_COREDUMP_MEMORY_DUMP_THREADS and CONFIG_MP_MAX_NUM_CPUS == 1
+     harness: console
+     harness_config:
