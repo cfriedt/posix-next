@@ -291,6 +291,31 @@ patches:
     comments: |
       add thread-specific storage support
       The thread-specific storage system calls are not cancellation points.
+  - path: zephyr/gen-syscalls-va-list-by-reference.patch
+    sha256sum: 41069f0397e39b383d3d64b8adb79b9f494d11757e357b02f6ea6e9079dd4075
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-13
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/k-signal.patch
+    comments: |
+      scripts: build: gen_syscalls: pass va_list arguments by reference. A
+      va_list system-call argument (zsock_ioctl_impl(), zvfs_ioctl()) was
+      va_copy()d into a register-sized union and its first word sent
+      through the trap; the marshaller rebuilt a va_list from that word.
+      That only works where a va_list is a pointer (riscv, arm, x86-32).
+      On x86_64 and arm64 it is a struct or an array wider than a register,
+      so the kernel read the remaining fields uninitialized - GCC 14
+      diagnoses reg_save_area/overflow_arg_area as maybe-uninitialized in
+      z_vrfy_zsock_ioctl_impl(), a build error under warnings-as-errors,
+      and at run time va_arg() walked garbage. The wrapper now keeps the
+      copy on the caller's stack and sends its address; the marshaller
+      validates that object for reading, va_copy()s it into a local list
+      for the verifier and va_end()s it afterwards.
   - path: zephyr/k-thread-detach.patch
     sha256sum: fe0f265975c939eb171a49dc80a7977993e9de894ff37b71353b38142b5123bc
     module: zephyr
