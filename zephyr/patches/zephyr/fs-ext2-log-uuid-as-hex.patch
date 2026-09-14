@@ -1,0 +1,31 @@
+diff --git a/subsys/fs/ext2/ext2_format.c b/subsys/fs/ext2/ext2_format.c
+--- a/subsys/fs/ext2/ext2_format.c
++++ b/subsys/fs/ext2/ext2_format.c
+@@ -8,6 +8,7 @@
+ #include <zephyr/random/random.h>
+ #include <zephyr/fs/ext2.h>
+ #include <zephyr/sys/byteorder.h>
++#include <zephyr/sys/util.h>
+ 
+ #include "ext2.h"
+ #include "ext2_impl.h"
+@@ -107,14 +108,17 @@ static void default_directory_inode(struct ext2_disk_inode *in, uint32_t nblocks
+ int ext2_format(struct ext2_data *fs, struct ext2_cfg *cfg)
+ {
+ 	int rc, ret = 0;
++	char uuid_hex[2 * sizeof(cfg->uuid) + 1];
+ 
+ 	ret = validate_config(cfg);
+ 	if (ret < 0) {
+ 		return ret;
+ 	}
+ 
+-	LOG_INF("[Config] blk_sz:%d fs_sz:%d ino_bytes:%d uuid:'%s' vol:'%s'",
+-			cfg->block_size, cfg->fs_size, cfg->bytes_per_inode, cfg->uuid,
++	/* the UUID is 16 raw bytes, neither text nor terminated */
++	(void)bin2hex(cfg->uuid, sizeof(cfg->uuid), uuid_hex, sizeof(uuid_hex));
++	LOG_INF("[Config] blk_sz:%d fs_sz:%d ino_bytes:%d uuid:%s vol:'%s'",
++			cfg->block_size, cfg->fs_size, cfg->bytes_per_inode, uuid_hex,
+ 			cfg->volume_name);
+ 
+ 	uint32_t fs_memory = cfg->fs_size ? MIN(cfg->fs_size, fs->device_size) : fs->device_size;
