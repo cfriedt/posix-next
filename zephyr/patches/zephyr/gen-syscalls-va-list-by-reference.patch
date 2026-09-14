@@ -1,0 +1,78 @@
+diff --git a/scripts/build/gen_syscalls.py b/scripts/build/gen_syscalls.py
+index 31bc43cfa5e..61ed30d5530 100755
+--- a/scripts/build/gen_syscalls.py
++++ b/scripts/build/gen_syscalls.py
+@@ -319,14 +319,18 @@ def wrapper_defs(func_name, func_type, args, fn, userspace_only):
+     valist_args = []
+     for argnum, (argtype, argname) in enumerate(args):
+         split = need_split(argtype)
+-        decl = union_decl(argtype, split)
+-        wrap += f"\t\t{decl} parm{argnum}"
+-        if argtype != "va_list":
+-            wrap += f" = {{ .val = {argname} }};\n"
++        if argtype == "va_list":
++            # A va_list is an array or a struct on some ABIs (x86_64, arm64),
++            # wider than a register: a copy lives on the caller's stack and
++            # its address crosses the trap.
++            wrap += "\t\t" + f"va_list parm{argnum}_va;\n"
++            wrap += "\t\t" + f"va_copy(parm{argnum}_va, {argname});\n"
++            wrap += "\t\t" + f"union {{ uintptr_t x; va_list *val; }} parm{argnum}"
++            wrap += f" = {{ .val = &parm{argnum}_va }};\n"
++            valist_args.append(f"parm{argnum}_va")
+         else:
+-            # va_list objects are ... peculiar.
+-            wrap += ";\n" + "\t\t" + f"va_copy(parm{argnum}.val, {argname});\n"
+-            valist_args.append(f"parm{argnum}.val")
++            decl = union_decl(argtype, split)
++            wrap += f"\t\t{decl} parm{argnum} = {{ .val = {argname} }};\n"
+         if split:
+             mrsh_args.append(f"parm{argnum}.split.lo")
+             mrsh_args.append(f"parm{argnum}.split.hi")
+@@ -478,10 +482,23 @@ def marshall_defs(func_name, func_type, args):
+         )
+ 
+     argnum = 0
++    out_args = []
++    va_end_calls = ""
+     for i, (argtype, split) in enumerate(vrfy_parms):
++        rval = mrsh_rval(argnum, nmrsh)
++        if argtype == "va_list":
++            # the caller's copy is read by address (see wrapper_defs)
++            mrsh += "\t" + f"union {{ uintptr_t x; va_list *val; }} parm{i};\n"
++            mrsh += "\t" + f"parm{i}.x = {rval};\n"
++            mrsh += "\t" + f"K_OOPS(K_SYSCALL_MEMORY_READ(parm{i}.val, sizeof(va_list)));\n"
++            mrsh += "\t" + f"va_list parm{i}_va;\n"
++            mrsh += "\t" + f"va_copy(parm{i}_va, *parm{i}.val);\n"
++            out_args.append(f"parm{i}_va")
++            va_end_calls += "\t" + f"va_end(parm{i}_va);\n"
++            argnum += 1
++            continue
+         decl = union_decl(argtype, split)
+         mrsh += f"\t{decl} parm{i};\n"
+-        rval = mrsh_rval(argnum, nmrsh)
+         if split:
+             mrsh += "\t" + f"parm{i}.split.lo = {rval};\n"
+             argnum += 1
+@@ -489,18 +506,20 @@ def marshall_defs(func_name, func_type, args):
+             mrsh += "\t" + f"parm{i}.split.hi = {rval};\n"
+         else:
+             mrsh += "\t" + f"parm{i}.x = {rval};\n"
++        out_args.append(f"parm{i}.val")
+         argnum += 1
+ 
+     # Finally, invoke the verify function
+-    out_args = ", ".join([f"parm{i}.val" for i in range(len(args))])
+-    vrfy_call = f"z_vrfy_{func_name}({out_args})"
++    vrfy_call = f"z_vrfy_{func_name}({', '.join(out_args)})"
+ 
+     if func_type == "void":
+         mrsh += "\t" + f"{vrfy_call};\n"
++        mrsh += va_end_calls
+         mrsh += "\t" + "_current->syscall_frame = NULL;\n"
+         mrsh += "\t" + "return 0;\n"
+     else:
+         mrsh += "\t" + f"{func_type} ret = {vrfy_call};\n"
++        mrsh += va_end_calls
+ 
+         if need_split(func_type):
+             rval = mrsh_rval(nmrsh - 1, nmrsh)
