@@ -20,6 +20,7 @@ struct posix_barrier {
 	struct k_condvar *cond;
 	uint32_t max;
 	uint32_t count;
+	uint32_t cycle;
 };
 
 struct posix_barrierattr {
@@ -39,6 +40,7 @@ int pthread_barrier_wait(pthread_barrier_t *b)
 {
 	int ret;
 	int err;
+	uint32_t cycle;
 	struct posix_barrier *bar;
 
 	bar = posix_get_pool_obj(&posix_barrier_pool, &posix_barrier_lock, *b);
@@ -49,26 +51,26 @@ int pthread_barrier_wait(pthread_barrier_t *b)
 	err = k_mutex_lock(bar->mutex, K_FOREVER);
 	__ASSERT_NO_MSG(err == 0);
 
-	++bar->count;
+	cycle = bar->cycle;
 
-	if (bar->count == bar->max) {
+	if (++bar->count == bar->max) {
+		bar->cycle++;
 		bar->count = 0;
 		ret = PTHREAD_BARRIER_SERIAL_THREAD;
+		err = k_condvar_broadcast(bar->cond);
+		__ASSERT_NO_MSG(err == 0);
 
 		goto unlock;
 	}
 
-	while (bar->count != 0) {
+	while (cycle == bar->cycle) {
 		err = k_condvar_wait(bar->cond, bar->mutex, K_FOREVER);
 		__ASSERT_NO_MSG(err == 0);
-		/* Note: count is reset to zero by the serialized thread */
 	}
 
 	ret = 0;
 
 unlock:
-	err = k_condvar_signal(bar->cond);
-	__ASSERT_NO_MSG(err == 0);
 	err = k_mutex_unlock(bar->mutex);
 	__ASSERT_NO_MSG(err == 0);
 
@@ -105,6 +107,7 @@ int pthread_barrier_init(pthread_barrier_t *b, const pthread_barrierattr_t *attr
 
 	bar->max = count;
 	bar->count = 0;
+	bar->cycle = 0;
 
 	*b = (pthread_barrier_t)(uintptr_t)bar;
 
