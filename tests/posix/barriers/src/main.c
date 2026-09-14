@@ -12,11 +12,13 @@
 
 #include "../../shared/linux_compat_test.h"
 
-#define N_THR 3
+#define N_THR    3
+#define N_CYCLES 5
 
 static ZTEST_BMEM pthread_barrier_t barrier;
 static ZTEST_BMEM int barrier_return[N_THR];
 static ZTEST_BMEM int barrier_done[N_THR];
+static ZTEST_BMEM int barrier_serial[N_THR];
 
 static void *barrier_thread(void *p1)
 {
@@ -24,6 +26,24 @@ static void *barrier_thread(void *p1)
 
 	barrier_return[id] = pthread_barrier_wait(&barrier);
 	barrier_done[id] = 1;
+
+	return NULL;
+}
+
+static void *barrier_cycle_thread(void *p1)
+{
+	int id = POINTER_TO_INT(p1);
+
+	for (int i = 0; i < N_CYCLES; i++) {
+		int ret = pthread_barrier_wait(&barrier);
+
+		zassert_true(ret == 0 || ret == PTHREAD_BARRIER_SERIAL_THREAD,
+			     "pthread_barrier_wait returned unexpected value %d", ret);
+
+		if (ret == PTHREAD_BARRIER_SERIAL_THREAD) {
+			barrier_serial[id]++;
+		}
+	}
 
 	return NULL;
 }
@@ -66,15 +86,11 @@ ZTEST_USER(posix_barriers, test_pthread_barrier_init)
 	zassert_ok(pthread_barrier_destroy(&barrier));
 }
 
-ZTEST_USER(posix_barriers, test_pthread_barrier_wait)
+static void pthread_barrier_wait_single_cycle(void)
 {
 	pthread_t threads[N_THR];
 	int serial_threads = 0;
 	int i;
-
-	if (CONFIG_SYS_THREAD_STACK_MAX == 0) {
-		ztest_test_skip();
-	}
 
 	zassert_ok(pthread_barrier_init(&barrier, NULL, N_THR));
 
@@ -93,6 +109,46 @@ ZTEST_USER(posix_barriers, test_pthread_barrier_wait)
 
 	zassert_equal(serial_threads, 1, "expected exactly one PTHREAD_BARRIER_SERIAL_THREAD");
 	zassert_ok(pthread_barrier_destroy(&barrier));
+}
+
+/*
+ * A barrier can be reused immediately after a successful return: a thread that re-enters
+ * for the next cycle before every thread of the previous cycle has woken up must not
+ * stall the stragglers.
+ */
+static void pthread_barrier_wait_cyclic_reuse(void)
+{
+	pthread_t threads[N_THR];
+	int serial_threads = 0;
+	int i;
+
+	zassert_ok(pthread_barrier_init(&barrier, NULL, N_THR));
+
+	for (i = 0; i < N_THR; i++) {
+		barrier_serial[i] = 0;
+		zassert_ok(pthread_create(&threads[i], NULL, barrier_cycle_thread,
+					  INT_TO_POINTER(i)));
+	}
+
+	for (i = 0; i < N_THR; i++) {
+		zassert_ok(pthread_join(threads[i], NULL));
+		serial_threads += barrier_serial[i];
+	}
+
+	/* exactly one PTHREAD_BARRIER_SERIAL_THREAD per cycle */
+	zassert_equal(serial_threads, N_CYCLES, "expected %d serial threads, got %d", N_CYCLES,
+		      serial_threads);
+	zassert_ok(pthread_barrier_destroy(&barrier));
+}
+
+ZTEST_USER(posix_barriers, test_pthread_barrier_wait)
+{
+	if (CONFIG_SYS_THREAD_STACK_MAX == 0) {
+		ztest_test_skip();
+	}
+
+	pthread_barrier_wait_single_cycle();
+	pthread_barrier_wait_cyclic_reuse();
 }
 
 ZTEST_USER(posix_barriers, test_pthread_barrier_destroy)
