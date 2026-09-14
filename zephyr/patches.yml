@@ -3738,6 +3738,23 @@ patches:
       shared block-fetch state) which concurrently running processes do
       not provide; racing lookups returned phantom ENOENTs. ext2 supports
       a single mounted instance, so a single lock suffices.
+  - path: zephyr/fs-ext2-log-uuid-as-hex.patch
+    sha256sum: 1068a07e1a3af85de5ae194064b01dc38d1894166b73ad0f0660cbdede1457ce
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-14
+    upstreamable: true
+    comments: |
+      fs: ext2: log the file system UUID as hex. ext2_format() logged
+      cfg->uuid with %s, but the UUID is 16 raw bytes - random ones when
+      the caller sets none - neither text nor NUL-terminated: any byte at
+      or above 0x80 put a non-UTF-8 byte on the console, which twister's
+      byte-wise decoder reports as "unexpected byte" and fails the run,
+      and the string ran into whatever followed the field in memory.
+      About one format in two hit it, which made every ext2-backed suite
+      (symbolic_links_fd, file_system) look load-flaky on every qemu
+      platform. Format the UUID through bin2hex() into a stack buffer.
   - path: busybox/busybox-zephyr-module.patch
     sha256sum: 8a320ac4d8025303ad0be9a970fc42cdba24488968a3d0a6f2ba346daa723c63
     module: modules/lib/busybox
