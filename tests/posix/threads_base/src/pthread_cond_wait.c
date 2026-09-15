@@ -32,6 +32,43 @@ static void *cond_wait_fn(void *arg)
 	return NULL;
 }
 
+static void cond_wait_cancel_cleanup(void *arg)
+{
+	zassert_ok(pthread_mutex_unlock((pthread_mutex_t *)arg));
+}
+
+static void *cond_wait_cancel_fn(void *arg)
+{
+	ARG_UNUSED(arg);
+
+	zassert_ok(pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL));
+	zassert_ok(pthread_mutex_lock(&cond_wait_mtx));
+	pthread_cleanup_push(cond_wait_cancel_cleanup, &cond_wait_mtx);
+	zassert_ok(pthread_cancel(pthread_self()));
+	/* a cancellation point: acts on the pending request with the mutex held */
+	(void)pthread_cond_wait(&cond_wait_cv, &cond_wait_mtx);
+	cond_wait_done = true;
+	pthread_cleanup_pop(1);
+
+	return NULL;
+}
+
+/* a cancel pending at entry terminates the waiter and its cleanup handler sees the mutex held */
+static void cond_wait_cancel(void)
+{
+	pthread_t th;
+	void *retval;
+
+	cond_wait_done = false;
+	zassert_ok(pthread_create(&th, NULL, cond_wait_cancel_fn, NULL));
+	zassert_ok(pthread_join(th, &retval));
+	zassert_equal(retval, PTHREAD_CANCELED);
+	zassert_false(cond_wait_done);
+	/* the handler released it */
+	zassert_ok(pthread_mutex_trylock(&cond_wait_mtx));
+	zassert_ok(pthread_mutex_unlock(&cond_wait_mtx));
+}
+
 static void test_pthread_cond_wait(void)
 {
 	pthread_t th;
@@ -52,6 +89,8 @@ static void test_pthread_cond_wait(void)
 	zassert_ok(pthread_mutex_unlock(&cond_wait_mtx));
 
 	zassert_ok(pthread_join(th, NULL));
+
+	cond_wait_cancel();
 
 	zassert_ok(pthread_cond_destroy(&cond_wait_cv));
 	zassert_ok(pthread_mutex_destroy(&cond_wait_mtx));

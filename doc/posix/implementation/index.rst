@@ -127,12 +127,11 @@ Native POSIX Thread Library (NPTL)
 Zephyr's POSIX threading implementation follows the same threading model as the
 `Native POSIX Thread Library (NPTL) <https://www.akkadia.org/drepper/nptl-design.pdf>`_
 found in glibc on Linux: threading is strictly 1:1, with no user-space scheduler or M:N
-multiplexing layer — each ``pthread_t`` *is* a ``k_thread``. For the synchronization
-primitives Zephyr goes further than NPTL — glibc implements mutexes and condition variables
-as futex-based objects in user memory, entering the kernel only on contention, whereas
-Zephyr currently maps them 1:1 onto kernel objects as well: each ``pthread_mutex_t`` *is* a
-``k_mutex`` and each ``pthread_cond_t`` *is* a ``k_condvar`` (a futex-based fast path is a
-planned optimization; see below).
+multiplexing layer — each ``pthread_t`` *is* a ``k_thread``. The synchronization primitives
+follow NPTL too: each ``pthread_mutex_t`` *is* a :c:struct:`sys_mutex` and each
+``pthread_cond_t`` *is* a :c:struct:`sys_condvar`, futex-based objects in user memory shared
+with the C11 ``mtx_t`` and ``cnd_t`` and with the C library's own locks, entering the kernel
+only on contention (see below).
 
 .. graphviz::
    :caption: 1:1 mapping between POSIX and Zephyr kernel objects
@@ -147,8 +146,6 @@ planned optimization; see below).
            color="#e8f5e9";
            fillcolor="#e8f5e9";
            pt  [label="pthread_t"        fillcolor="#c8e6c9"];
-           pm  [label="pthread_mutex_t"  fillcolor="#c8e6c9"];
-           pc  [label="pthread_cond_t"   fillcolor="#c8e6c9"];
        }
 
        subgraph cluster_kernel {
@@ -157,55 +154,64 @@ planned optimization; see below).
            color="#e3f2fd";
            fillcolor="#e3f2fd";
            kt  [label="k_thread"   fillcolor="#bbdefb"];
-           km  [label="k_mutex"    fillcolor="#bbdefb"];
-           kc  [label="k_condvar"  fillcolor="#bbdefb"];
        }
 
        pt -> kt [label="1:1" style=bold];
-       pm -> km [label="1:1" style=bold];
-       pc -> kc [label="1:1" style=bold];
    }
 
-The POSIX types (``pthread_t``, ``pthread_mutex_t``, ``pthread_cond_t``) are opaque integer handles
-whose value is derived from the address of the underlying kernel object in a system-wide pool. The
-conversion is performed by ``to_k_thread()``, ``to_k_mutex()``, and ``to_k_condvar()`` (and their
-inverses) defined in the internal header ``posix_internal.h``.
+``pthread_t`` is an opaque integer handle whose value is derived from the address of the
+underlying kernel object in a system-wide pool. The conversion is performed by ``to_k_thread()``
+(and its inverse) defined in the internal header ``posix_internal.h``.
 
 This 1:1 design means:
 
 - No extra scheduling layer — every POSIX thread is a kernel thread (and vice versa)
 - Kernel-level visibility — debuggers and trace tools see the same objects as the application.
-- **Full userspace support** — because every operation on these primitives bottoms out in a
-  Zephyr system call operating on a kernel object, the POSIX threading API is available to
-  both privileged and unprivileged (userspace) threads. As with everything userspace, it is
-  important to keep in mind that user threads do not have permission on any kernel objects by
-  default.
+- **Full userspace support** — thread operations bottom out in a Zephyr system call operating
+  on a kernel object, and mutexes and condition variables live in user memory, so the POSIX
+  threading API is available to both privileged and unprivileged (userspace) threads. As with
+  everything userspace, it is important to keep in mind that user threads do not have
+  permission on any kernel objects by default.
 - **POSIX is optional** - POSIX is entirely optional in Zephyr. However, in order to use POSIX
   features, it is highly recommended to enable one of the
   :ref:`POSIX subprofiles <posix_aep>` such as ``CONFIG_POSIX_AEP_CHOICE_PSE51``.
 
-A planned speed optimization is to adopt the NPTL approach for ``pthread_mutex_t`` and
-``pthread_cond_t``: implementing them as futex-based objects in user memory (backed by
-``k_futex``), so that the uncontended lock and unlock fast paths complete with a single atomic
-operation and no system call, entering the kernel only on contention. This optimization is
-deliberately limited to configurations where both userspace and processes are enabled. The
-gating follows from where the futex word lives: unlike a kernel object mediated by per-thread
-permission grants, a futex word sits in user memory, so the set of threads that can write it
-must coincide with a POSIX trust boundary. Processes provide exactly that boundary through
-address-space isolation — a process-private futex word is reachable only by threads of the
-owning process, which by definition share an address space and trust one another, while
-``PTHREAD_PROCESS_SHARED`` synchronization objects reside in explicitly established shared
-memory. The kernel itself remains protected in either case, since the futex wait and wake
-system calls validate the caller's access to the futex word. This is also precisely the
-configuration in which the optimization pays off: without userspace, "system calls" are direct
-function calls and kernel objects are already cheap to reach.
+Mutexes and condition variables
+-------------------------------
 
-Note that the gate is functional, not hardware: the futex mechanism itself needs no MMU or MPU
-(userspace and processes pull in whatever protection hardware the platform requires). The one
-hardware constraint that does matter is native atomic operations usable from user mode — on
-platforms that fall back to ``CONFIG_ATOMIC_OPERATIONS_C``, each user-mode atomic operation
-itself traps into the kernel, which would make the futex "fast path" slower than the current
-single-syscall kernel-object path.
+``pthread_mutex_t`` is Zephyr's :c:struct:`sys_mutex` and ``pthread_cond_t`` is Zephyr's
+:c:struct:`sys_condvar`: futex-based objects in user memory (backed by ``k_futex``), so that the
+uncontended lock and unlock fast paths complete with a single atomic operation and no system
+call, entering the kernel only to block (``k_futex_wait()``) or to wake a waiter
+(``k_futex_wake()``). The same objects implement the C11 ``mtx_t`` and ``cnd_t`` and the C
+library's own locks, so the mutex attribute layer of POSIX is the only thing the POSIX module
+adds: the type and protocol of a ``pthread_mutexattr_t`` become the options the object is
+initialized with, and ``PTHREAD_MUTEX_INITIALIZER`` is a ``sys_mutex`` of type ``K_MUTEX_NORMAL``.
+
+The mutex word follows the classic three-state scheme (unlocked, locked, locked with possible
+waiters); the condition variable pairs a sequence word with the count of blocked waiters that
+the kernel maintains in every ``k_futex``, so that a signal or broadcast with no waiter costs
+no system call at all, a signal wakes exactly one blocked waiter, and a woken waiter never
+touches the object again, which makes destroying a condition variable right after a broadcast
+safe. ``PTHREAD_MUTEX_ERRORCHECK`` and ``PTHREAD_MUTEX_RECURSIVE`` mutexes record their owner
+in user memory. A ``PTHREAD_PRIO_INHERIT`` mutex is backed by a kernel mutex that the kernel
+associates with the address of the user object, never with its contents: every operation on it
+is a system call, ownership is enforced by the kernel, and the owner inherits the priority of
+the highest-priority waiter (:kconfig:option:`CONFIG_SYS_MUTEX_PRIO_INHERIT`, selected by
+:kconfig:option:`CONFIG_POSIX_THREAD_PRIO_INHERIT`). Because the futex system calls are
+building blocks rather than POSIX interfaces, they are not cancellation points:
+``pthread_cond_wait()`` tests for a pending cancellation while the mutex is still held, as
+POSIX requires, and ``pthread_mutex_lock()`` never acts on one. With
+:kconfig:option:`CONFIG_THREAD_CANCEL_TLS` that test reads a copy of the pending flag in
+thread-local storage and only enters the kernel when a cancellation is actually pending.
+
+A futex word is usable by every thread that can write its memory, so the trust boundary of a
+mutex or condition variable is the memory domain (a process, or explicitly shared memory for
+``PTHREAD_PROCESS_SHARED`` objects) rather than per-thread kernel object permissions. The kernel
+itself remains protected in either case, since the futex system calls validate the caller's
+access to the futex word. The mechanism needs no MMU or MPU, only atomic operations; on
+platforms that fall back to ``CONFIG_ATOMIC_OPERATIONS_C`` every user-mode atomic operation is
+itself a system call, so the uncontended path is not free there.
 
 .. _posix_scheduling_priorities:
 
@@ -752,11 +758,11 @@ In the threading subsystem, the pools are instantiated in ``zephyr/lib/os/thread
 
 .. code-block:: c
 
-   K_MUTEX_ARRAY_DEFINE(sys_mutex_pool, SYS_THREAD_MUTEX_MIN);
-   SYS_ELASTIPOOL_DEFINE_ADVANCED(mutex_pool,
-       sizeof(struct k_mutex), __alignof(struct k_mutex),
-       SYS_THREAD_MUTEX_MIN, CONFIG_SYS_THREAD_MUTEX_MAX,
-       mutex_pool_heap_alloc, sys_mutex_pool, static);
+   K_THREAD_ARRAY_DEFINE(sys_thread_pool, SYS_THREAD_THREAD_MIN);
+   SYS_ELASTIPOOL_DEFINE_ADVANCED(thread_pool,
+       sizeof(struct k_thread), __alignof(struct k_thread),
+       SYS_THREAD_THREAD_MIN, CONFIG_SYS_THREAD_THREAD_MAX,
+       thread_pool_heap_alloc, sys_thread_pool, static);
 
 Distributed Kconfig
 ===================
@@ -772,18 +778,18 @@ pool size. At build time, CMake sums all ``_MIN_ADD_*`` contributions together w
 definition.
 
 .. graphviz::
-   :caption: Distributed Kconfig aggregation for SYS_THREAD_MUTEX_MIN
+   :caption: Distributed Kconfig aggregation for SYS_THREAD_STACK_MIN
 
    digraph {
        rankdir=LR;
        node [shape=rect, style="filled,rounded"];
 
-       app   [label="Application\nCONFIG_SYS_THREAD_MUTEX_MIN=2" fillcolor="#c8e6c9"];
+       app   [label="Application\nCONFIG_SYS_THREAD_STACK_MIN=2" fillcolor="#c8e6c9"];
        test  [label="Test suite\n_MIN_ADD_TEST=4"                 fillcolor="#bbdefb"];
        lib   [label="Library\n_MIN_ADD_MYLIB=1"                   fillcolor="#ffe0b2"];
 
        sum   [label="CMake\nΣ = 2 + 4 + 1 = 7" shape=ellipse     fillcolor="#f3e5f5"];
-       def   [label="SYS_THREAD_MUTEX_MIN=7"                      fillcolor="#d1c4e9"];
+       def   [label="SYS_THREAD_STACK_MIN=7"                      fillcolor="#d1c4e9"];
 
        app  -> sum;
        test -> sum;
@@ -795,7 +801,7 @@ The aggregation is performed by this CMake loop in ``zephyr/lib/os/CMakeLists.tx
 
 .. code-block:: cmake
 
-   foreach(_pool CONDVAR MUTEX STACK THREAD)
+   foreach(_pool STACK THREAD)
      import_kconfig(
        CONFIG_SYS_THREAD_${_pool}_MIN_ADD_
        ${DOTCONFIG}
@@ -810,9 +816,9 @@ The aggregation is performed by this CMake loop in ``zephyr/lib/os/CMakeLists.tx
      )
    endforeach()
 
-The result is a non-``CONFIG_`` prefixed compile definition (e.g., ``SYS_THREAD_MUTEX_MIN=7``)
+The result is a non-``CONFIG_`` prefixed compile definition (e.g., ``SYS_THREAD_STACK_MIN=7``)
 that is used to size the static portion of the corresponding elastipool. The ``CONFIG_``-prefixed
-``_MAX`` value (e.g., ``CONFIG_SYS_THREAD_MUTEX_MAX``) sets the upper bound.
+``_MAX`` value (e.g., ``CONFIG_SYS_THREAD_STACK_MAX``) sets the upper bound.
 
 This pattern has several advantages:
 
@@ -828,15 +834,15 @@ To add a new contributor, create a Kconfig symbol in your subsystem:
 
 .. code-block:: kconfig
 
-   config SYS_THREAD_MUTEX_MIN_ADD_MYLIB
-       int "Mutexes required by mylib"
+   config SYS_THREAD_STACK_MIN_ADD_MYLIB
+       int "Thread stacks required by mylib"
        default 3
 
 Then set it in your ``prj.conf`` or ``testcase.yaml``:
 
 .. code-block:: cfg
 
-   CONFIG_SYS_THREAD_MUTEX_MIN_ADD_MYLIB=3
+   CONFIG_SYS_THREAD_STACK_MIN_ADD_MYLIB=3
 
 The build system automatically discovers all ``_MIN_ADD_*`` symbols and includes them in the sum.
 

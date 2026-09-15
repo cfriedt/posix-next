@@ -11,13 +11,14 @@
 #include <pthread.h>
 
 #include <zephyr/kernel.h>
+#include <zephyr/sys/condvar.h>
 #include <zephyr/sys/elastipool.h>
+#include <zephyr/sys/mutex.h>
 #include <zephyr/sys/sem.h>
-#include <zephyr/sys/thread.h>
 
 struct posix_barrier {
-	struct k_mutex *mutex;
-	struct k_condvar *cond;
+	struct sys_mutex mutex;
+	struct sys_condvar cond;
 	uint32_t max;
 	uint32_t count;
 };
@@ -46,7 +47,7 @@ int pthread_barrier_wait(pthread_barrier_t *b)
 		return EINVAL;
 	}
 
-	err = k_mutex_lock(bar->mutex, K_FOREVER);
+	err = sys_mutex_lock(&bar->mutex, K_FOREVER);
 	__ASSERT_NO_MSG(err == 0);
 
 	++bar->count;
@@ -59,7 +60,7 @@ int pthread_barrier_wait(pthread_barrier_t *b)
 	}
 
 	while (bar->count != 0) {
-		err = k_condvar_wait(bar->cond, bar->mutex, K_FOREVER);
+		err = sys_condvar_wait(&bar->cond, &bar->mutex, K_FOREVER);
 		__ASSERT_NO_MSG(err == 0);
 		/* Note: count is reset to zero by the serialized thread */
 	}
@@ -67,9 +68,9 @@ int pthread_barrier_wait(pthread_barrier_t *b)
 	ret = 0;
 
 unlock:
-	err = k_condvar_signal(bar->cond);
+	err = sys_condvar_signal(&bar->cond);
 	__ASSERT_NO_MSG(err == 0);
-	err = k_mutex_unlock(bar->mutex);
+	err = sys_mutex_unlock(&bar->mutex);
 	__ASSERT_NO_MSG(err == 0);
 
 	return ret;
@@ -92,16 +93,8 @@ int pthread_barrier_init(pthread_barrier_t *b, const pthread_barrierattr_t *attr
 		return ENOMEM;
 	}
 
-	err = sys_mutex_alloc(&bar->mutex, K_MUTEX_NORMAL);
-	if (err < 0) {
-		goto free_bar;
-	}
-
-	err = sys_condvar_alloc(&bar->cond, SYS_CLOCK_REALTIME);
-	if (err < 0) {
-		(void)sys_mutex_destroy(bar->mutex);
-		goto free_bar;
-	}
+	(void)sys_mutex_init_ext(&bar->mutex, K_MUTEX_NORMAL);
+	sys_condvar_init(&bar->cond);
 
 	bar->max = count;
 	bar->count = 0;
@@ -109,13 +102,6 @@ int pthread_barrier_init(pthread_barrier_t *b, const pthread_barrierattr_t *attr
 	*b = (pthread_barrier_t)(uintptr_t)bar;
 
 	return 0;
-
-free_bar:
-	SYS_SEM_LOCK(&posix_barrier_lock) {
-		(void)sys_elastipool_free(&posix_barrier_pool, (void *)bar);
-	}
-
-	return ENOMEM;
 }
 
 int pthread_barrier_destroy(pthread_barrier_t *b)
@@ -128,8 +114,8 @@ int pthread_barrier_destroy(pthread_barrier_t *b)
 		return EINVAL;
 	}
 
-	(void)sys_condvar_destroy(bar->cond);
-	(void)sys_mutex_destroy(bar->mutex);
+	(void)sys_condvar_destroy(&bar->cond);
+	(void)sys_mutex_destroy(&bar->mutex);
 
 	SYS_SEM_LOCK(&posix_barrier_lock) {
 		ret = sys_elastipool_free(&posix_barrier_pool, (void *)bar);
