@@ -52,49 +52,45 @@ static ALWAYS_INLINE void posix_thread_attr_init(struct posix_thread_attr *attr)
 	};
 }
 
+#include <errno.h>
+#include <stddef.h>
+
+#include <zephyr/sys/condvar.h>
+#include <zephyr/sys/mutex.h>
+
+/* PTHREAD_MUTEX_INITIALIZER spells out the K_MUTEX_NORMAL options of a struct sys_mutex */
+BUILD_ASSERT(K_MUTEX_NORMAL == 1);
+
 static ALWAYS_INLINE int pthread_mutex_lock_common(pthread_mutex_t *m, k_timeout_t timeout)
 {
-	int ret;
+	int ret = sys_mutex_lock(m, timeout);
 
-	if (*m == PTHREAD_MUTEX_INITIALIZER) {
-		ret = pthread_mutex_init(m, NULL);
-
-		if (ret != 0) {
-			return ret;
-		}
-	}
-
-	return -k_mutex_lock(to_k_mutex(m), timeout);
+	return (ret == -ENOMEM) ? EAGAIN : -ret;
 }
 
 static ALWAYS_INLINE int cond_wait(pthread_cond_t *cvar, pthread_mutex_t *mu, clockid_t clock_id,
 				   const struct timespec *abstime)
 {
-	int ret;
+	uint32_t clock;
 
-	if (*mu == PTHREAD_MUTEX_INITIALIZER) {
-		ret = pthread_mutex_init(mu, NULL);
-		if (ret != 0) {
-			return ret;
-		}
-	}
-
-	if (*cvar == PTHREAD_COND_INITIALIZER) {
-		ret = pthread_cond_init(cvar, NULL);
-		if (ret != 0) {
-			return ret;
-		}
-	}
+	/* cancellation point, taken while the mutex is still held */
+	pthread_testcancel();
 
 	if (abstime == NULL) {
-		return -k_condvar_wait(to_k_condvar(cvar), to_k_mutex(mu), K_FOREVER);
+		return -sys_condvar_wait(cvar, mu, K_FOREVER);
 	}
 
 	if (clock_id == -1) {
-		return -k_condvar_timedwait(to_k_condvar(cvar), to_k_mutex(mu), abstime);
+		clock = sys_condvar_clock(cvar);
+	} else if (clock_id == CLOCK_REALTIME) {
+		clock = SYS_CLOCK_REALTIME;
+	} else if (clock_id == CLOCK_MONOTONIC) {
+		clock = SYS_CLOCK_MONOTONIC;
+	} else {
+		return EINVAL;
 	}
 
-	return -k_condvar_clockwait(to_k_condvar(cvar), to_k_mutex(mu), clock_id, abstime);
+	return -sys_condvar_clockwait(cvar, mu, clock, abstime);
 }
 
 #endif /* ZEPHYR_LIB_POSIX_OPTIONS_THREADS_BASE_THREADS_BASE_INTERNAL_H_ */

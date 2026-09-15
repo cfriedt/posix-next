@@ -20,7 +20,7 @@ static void test_pthread_mutex_destroy(void)
 
 	posix_test_skip_if_native_libc();
 
-	for (size_t i = 0; i < 2 * SYS_THREAD_MUTEX_MIN; ++i) {
+	for (size_t i = 0; i < 8; ++i) {
 		zassert_ok(pthread_mutex_init(&m, NULL), "failed to init mutex %zu", i);
 		zassert_ok(pthread_mutex_destroy(&m), "failed to destroy mutex %zu", i);
 	}
