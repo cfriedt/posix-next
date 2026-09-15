@@ -3,7 +3,7 @@ index bd44c55c903..6b73119db78 100644
 --- a/lib/libc/common/Kconfig
 +++ b/lib/libc/common/Kconfig
 @@ -106,10 +106,9 @@ config COMMON_LIBC_STRNLEN
-
+ 
  config COMMON_LIBC_THRD
  	bool "C11 <threads.h> API support"
 -	depends on DYNAMIC_THREAD
@@ -17,7 +17,7 @@ index bd44c55c903..6b73119db78 100644
  	help
  	  Common implementation of C11 <threads.h> API.
 diff --git a/lib/libc/common/include/machine/_threads.h b/lib/libc/common/include/machine/_threads.h
-index cebce717c73..7223c99dda7 100644
+index cebce717c73..a1fd7c33765 100644
 --- a/lib/libc/common/include/machine/_threads.h
 +++ b/lib/libc/common/include/machine/_threads.h
 @@ -1,6 +1,5 @@
@@ -27,45 +27,54 @@ index cebce717c73..7223c99dda7 100644
 + * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
   * SPDX-License-Identifier: Apache-2.0
   */
-
-@@ -11,14 +10,19 @@
+ 
+@@ -11,15 +10,19 @@
  extern "C" {
  #endif
-
+ 
 +#include <zephyr/kernel.h>
 +#include <zephyr/sys/atomic.h>
++#include <zephyr/sys/condvar.h>
++#include <zephyr/sys/mutex.h>
++#include <zephyr/sys/thread_once.h>
 +
  #define ONCE_FLAG_INIT {0}
-
+ 
 -typedef int cnd_t;
 -typedef int mtx_t;
 -typedef int thrd_t;
 -typedef int tss_t;
-+typedef struct k_condvar *cnd_t;
-+typedef struct k_mutex *mtx_t;
+-typedef struct {
+-	char flag;
+-} once_flag;
++typedef struct sys_condvar cnd_t;
++typedef struct sys_mutex mtx_t;
 +typedef struct k_thread *thrd_t;
 +typedef void *tss_t;
-+/* mirrors sys_thread_once_t (a struct k_futex): state word, kernel-maintained waiter count */
- typedef struct {
--	char flag;
-+	atomic_t val;
-+	atomic_t waiters;
- } once_flag;
-
++typedef sys_thread_once_t once_flag;
+ 
  #ifdef __cplusplus
+ }
 diff --git a/lib/libc/common/source/thrd/cnd.c b/lib/libc/common/source/thrd/cnd.c
-index 457a9ae0ee8..dac87befd6f 100644
+index 457a9ae0ee8..e077bf03b8c 100644
 --- a/lib/libc/common/source/thrd/cnd.c
 +++ b/lib/libc/common/source/thrd/cnd.c
-@@ -7,29 +7,26 @@
+@@ -1,59 +1,41 @@
+ /*
+- * Copyright (c) 2023, Meta
+- *
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
+  * SPDX-License-Identifier: Apache-2.0
+  */
+ 
  #include <errno.h>
  #include <threads.h>
-
+ 
 -#include <pthread.h>
 +#include <zephyr/kernel.h>
-+#include <zephyr/sys/thread.h>
-+#include <zephyr/sys/timeutil.h>
-
++#include <zephyr/sys/clock.h>
++#include <zephyr/sys/condvar.h>
+ 
  int cnd_broadcast(cnd_t *cond)
  {
 -	switch (pthread_cond_broadcast(cond)) {
@@ -74,45 +83,45 @@ index 457a9ae0ee8..dac87befd6f 100644
 -	default:
 -		return thrd_error;
 -	}
-+	return (k_condvar_broadcast(*cond) >= 0) ? thrd_success : thrd_error;
++	return (sys_condvar_broadcast(cond) == 0) ? thrd_success : thrd_error;
  }
-
+ 
  void cnd_destroy(cnd_t *cond)
  {
 -	(void)pthread_cond_destroy(cond);
-+	sys_condvar_destroy(*cond);
++	(void)sys_condvar_destroy(cond);
  }
-
+ 
  int cnd_init(cnd_t *cond)
  {
 -	switch (pthread_cond_init(cond, NULL)) {
-+	switch (sys_condvar_alloc(cond, SYS_CLOCK_REALTIME)) {
- 	case 0:
- 		return thrd_success;
+-	case 0:
+-		return thrd_success;
 -	case ENOMEM:
-+	case -ENOMEM:
- 		return thrd_nomem;
- 	default:
- 		return thrd_error;
-@@ -38,11 +35,9 @@ int cnd_init(cnd_t *cond)
-
+-		return thrd_nomem;
+-	default:
+-		return thrd_error;
+-	}
++	return (sys_condvar_init_ext(cond, SYS_CLOCK_REALTIME) == 0) ? thrd_success : thrd_error;
+ }
+ 
  int cnd_signal(cnd_t *cond)
  {
 -	switch (pthread_cond_signal(cond)) {
-+	switch (k_condvar_signal(*cond)) {
- 	case 0:
- 		return thrd_success;
+-	case 0:
+-		return thrd_success;
 -	case ENOMEM:
 -		return thrd_nomem;
- 	default:
- 		return thrd_error;
- 	}
-@@ -50,10 +45,10 @@ int cnd_signal(cnd_t *cond)
-
+-	default:
+-		return thrd_error;
+-	}
++	return (sys_condvar_signal(cond) == 0) ? thrd_success : thrd_error;
+ }
+ 
  int cnd_timedwait(cnd_t *restrict cond, mtx_t *restrict mtx, const struct timespec *restrict ts)
  {
 -	switch (pthread_cond_timedwait(cond, mtx, ts)) {
-+	switch (k_condvar_timedwait(*cond, *mtx, ts)) {
++	switch (sys_condvar_timedwait(cond, mtx, ts)) {
  	case 0:
  		return thrd_success;
 -	case ETIMEDOUT:
@@ -120,34 +129,42 @@ index 457a9ae0ee8..dac87befd6f 100644
  		return thrd_timedout;
  	default:
  		return thrd_error;
-@@ -62,7 +57,7 @@ int cnd_timedwait(cnd_t *restrict cond, mtx_t *restrict mtx, const struct timesp
-
+@@ -62,7 +44,7 @@ int cnd_timedwait(cnd_t *restrict cond, mtx_t *restrict mtx, const struct timesp
+ 
  int cnd_wait(cnd_t *cond, mtx_t *mtx)
  {
 -	switch (pthread_cond_wait(cond, mtx)) {
-+	switch (k_condvar_wait(*cond, *mtx, K_FOREVER)) {
++	switch (sys_condvar_wait(cond, mtx, K_FOREVER)) {
  	case 0:
  		return thrd_success;
  	default:
 diff --git a/lib/libc/common/source/thrd/mtx.c b/lib/libc/common/source/thrd/mtx.c
-index 17b41a99709..ec3e421e72c 100644
+index 17b41a99709..7385bb54488 100644
 --- a/lib/libc/common/source/thrd/mtx.c
 +++ b/lib/libc/common/source/thrd/mtx.c
-@@ -8,55 +8,50 @@
+@@ -1,6 +1,5 @@
+ /*
+- * Copyright (c) 2023, Meta
+- *
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
+  * SPDX-License-Identifier: Apache-2.0
+  */
+ 
+@@ -8,55 +7,37 @@
  #include <threads.h>
-
+ 
  #include <zephyr/kernel.h>
 -#include <pthread.h>
-+#include <zephyr/sys/thread.h>
++#include <zephyr/sys/mutex.h>
 +#include <zephyr/sys/timeutil.h>
-
+ 
  int mtx_init(mtx_t *mutex, int type)
  {
- 	int ret;
+-	int ret;
 -	pthread_mutexattr_t attr;
 -	pthread_mutexattr_t *attrp = NULL;
 +	uint32_t opts;
-
+ 
  	switch (type) {
  	case mtx_plain:
  	case mtx_timed:
@@ -166,48 +183,45 @@ index 17b41a99709..ec3e421e72c 100644
  	default:
  		return thrd_error;
  	}
-
+ 
 -	switch (pthread_mutex_init(mutex, attrp)) {
-+	switch (sys_mutex_alloc(mutex, opts)) {
- 	case 0:
- 		ret = thrd_success;
- 		break;
-+	case -ENOMEM:
-+		ret = thrd_nomem;
-+		break;
- 	default:
- 		ret = thrd_error;
- 		break;
- 	}
-
+-	case 0:
+-		ret = thrd_success;
+-		break;
+-	default:
+-		ret = thrd_error;
+-		break;
+-	}
+-
 -	if (attrp != NULL) {
 -		(void)pthread_mutexattr_destroy(attrp);
 -	}
 -
- 	return ret;
+-	return ret;
++	return (sys_mutex_init_ext(mutex, opts) == 0) ? thrd_success : thrd_error;
  }
-
+ 
  void mtx_destroy(mtx_t *mutex)
  {
 -	(void)pthread_mutex_destroy(mutex);
-+	sys_mutex_destroy(*mutex);
++	(void)sys_mutex_destroy(mutex);
  }
-
+ 
  int mtx_lock(mtx_t *mutex)
  {
 -	switch (pthread_mutex_lock(mutex)) {
-+	switch (k_mutex_lock(*mutex, K_FOREVER)) {
++	switch (sys_mutex_lock(mutex, K_FOREVER)) {
  	case 0:
  		return thrd_success;
  	default:
-@@ -66,10 +61,12 @@ int mtx_lock(mtx_t *mutex)
-
+@@ -66,10 +47,12 @@ int mtx_lock(mtx_t *mutex)
+ 
  int mtx_timedlock(mtx_t *restrict mutex, const struct timespec *restrict time_point)
  {
 -	switch (pthread_mutex_timedlock(mutex, time_point)) {
 +	k_timepoint_t end = timespec_abs_rt_to_timepoint(time_point);
 +
-+	switch (k_mutex_lock(*mutex, sys_timepoint_timeout(end))) {
++	switch (sys_mutex_lock(mutex, sys_timepoint_timeout(end))) {
  	case 0:
  		return thrd_success;
 -	case ETIMEDOUT:
@@ -215,12 +229,12 @@ index 17b41a99709..ec3e421e72c 100644
  		return thrd_timedout;
  	default:
  		return thrd_error;
-@@ -78,10 +75,10 @@ int mtx_timedlock(mtx_t *restrict mutex, const struct timespec *restrict time_po
-
+@@ -78,10 +61,10 @@ int mtx_timedlock(mtx_t *restrict mutex, const struct timespec *restrict time_po
+ 
  int mtx_trylock(mtx_t *mutex)
  {
 -	switch (pthread_mutex_trylock(mutex)) {
-+	switch (k_mutex_lock(*mutex, K_NO_WAIT)) {
++	switch (sys_mutex_lock(mutex, K_NO_WAIT)) {
  	case 0:
  		return thrd_success;
 -	case EBUSY:
@@ -228,41 +242,39 @@ index 17b41a99709..ec3e421e72c 100644
  		return thrd_busy;
  	default:
  		return thrd_error;
-@@ -90,7 +87,7 @@ int mtx_trylock(mtx_t *mutex)
-
+@@ -90,7 +73,7 @@ int mtx_trylock(mtx_t *mutex)
+ 
  int mtx_unlock(mtx_t *mutex)
  {
 -	switch (pthread_mutex_unlock(mutex)) {
-+	switch (k_mutex_unlock(*mutex)) {
++	switch (sys_mutex_unlock(mutex)) {
  	case 0:
  		return thrd_success;
  	default:
 diff --git a/lib/libc/common/source/thrd/once.c b/lib/libc/common/source/thrd/once.c
-index 2125e25bf07..0ccc62943a8 100644
+index 2125e25bf07..5b5502abe14 100644
 --- a/lib/libc/common/source/thrd/once.c
 +++ b/lib/libc/common/source/thrd/once.c
-@@ -1,16 +1,16 @@
+@@ -1,16 +1,14 @@
  /*
 - * Copyright (c) 2023, Meta
 - *
 + * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
   * SPDX-License-Identifier: Apache-2.0
   */
-
+ 
 -#include <errno.h>
  #include <threads.h>
-
+ 
 -#include <zephyr/kernel.h>
 -#include <pthread.h>
 +#include <zephyr/sys/thread.h>
 +#include <zephyr/toolchain.h>
-+
-+BUILD_ASSERT(sizeof(once_flag) == sizeof(sys_thread_once_t));
-
+ 
  void call_once(once_flag *flag, void (*func)(void))
  {
 -	(void)pthread_once((pthread_once_t *)flag, func);
-+	sys_thread_once((sys_thread_once_t *)flag, func);
++	sys_thread_once(flag, func);
  }
 diff --git a/lib/libc/common/source/thrd/thrd.c b/lib/libc/common/source/thrd/thrd.c
 index 0946e2cb2b9..272c3497fe4 100644
@@ -270,13 +282,13 @@ index 0946e2cb2b9..272c3497fe4 100644
 +++ b/lib/libc/common/source/thrd/thrd.c
 @@ -8,25 +8,28 @@
  #include <threads.h>
-
+ 
  #include <zephyr/kernel.h>
 -#include <pthread.h>
 -#include <sched.h>
  #include <zephyr/sys/clock.h>
 +#include <zephyr/sys/thread.h>
-
+ 
 -struct thrd_trampoline_arg {
 -	thrd_start_t func;
 -	void *arg;
@@ -289,7 +301,7 @@ index 0946e2cb2b9..272c3497fe4 100644
 +
 +	k_thread_exit(INT_TO_POINTER(func(p2)));
 +}
-
+ 
  int thrd_create(thrd_t *thr, thrd_start_t func, void *arg)
  {
 -	typedef void *(*pthread_func_t)(void *arg);
@@ -297,7 +309,7 @@ index 0946e2cb2b9..272c3497fe4 100644
 -	pthread_func_t pfunc = (pthread_func_t)func;
 +	uint32_t options = 0;
 +	int priority = k_thread_priority_get(k_current_get());
-
+ 
 -	switch (pthread_create(thr, NULL, pfunc, arg)) {
 +	switch (sys_thread_create(thr, NULL, 0, 0, thrd_trampoline, (void *)func, arg, NULL,
 +				  priority, options)) {
@@ -309,42 +321,42 @@ index 0946e2cb2b9..272c3497fe4 100644
  	default:
  		return thrd_error;
 @@ -35,12 +38,12 @@ int thrd_create(thrd_t *thr, thrd_start_t func, void *arg)
-
+ 
  int thrd_equal(thrd_t lhs, thrd_t rhs)
  {
 -	return pthread_equal(lhs, rhs);
 +	return lhs == rhs;
  }
-
+ 
  thrd_t thrd_current(void)
  {
 -	return pthread_self();
 +	return k_current_get();
  }
-
+ 
  int thrd_sleep(const struct timespec *duration, struct timespec *remaining)
 @@ -49,36 +52,38 @@ int thrd_sleep(const struct timespec *duration, struct timespec *remaining)
  		return thrd_error;
  	}
-
+ 
 -	return thrd_success;
 +	return 0;
  }
-
+ 
  void thrd_yield(void)
  {
 -	(void)sched_yield();
 +	k_yield();
  }
-
+ 
  FUNC_NORETURN void thrd_exit(int res)
  {
 -	pthread_exit(INT_TO_POINTER(res));
 +	k_thread_exit(INT_TO_POINTER(res));
-
+ 
  	CODE_UNREACHABLE;
  }
-
+ 
  int thrd_detach(thrd_t thr)
  {
 -	switch (pthread_detach(thr)) {
@@ -358,12 +370,12 @@ index 0946e2cb2b9..272c3497fe4 100644
 +
 +	return thrd_success;
  }
-
+ 
  int thrd_join(thrd_t thr, int *res)
  {
 -	void *ret;
 +	void *ret = NULL;
-
+ 
 -	switch (pthread_join(thr, &ret)) {
 +	switch (k_thread_rejoin(thr, &ret, K_FOREVER)) {
  	case 0:
@@ -375,10 +387,10 @@ index dca1a3a7577..205c7e06259 100644
 +++ b/lib/libc/common/source/thrd/tss.c
 @@ -8,16 +8,13 @@
  #include <threads.h>
-
+ 
  #include <zephyr/kernel.h>
 -#include <pthread.h>
-
+ 
  int tss_create(tss_t *key, tss_dtor_t destructor)
  {
 -	switch (pthread_key_create(key, destructor)) {
@@ -393,7 +405,7 @@ index dca1a3a7577..205c7e06259 100644
  	default:
  		return thrd_error;
 @@ -26,15 +23,21 @@ int tss_create(tss_t *key, tss_dtor_t destructor)
-
+ 
  void *tss_get(tss_t key)
  {
 -	return pthread_getspecific(key);
@@ -405,7 +417,7 @@ index dca1a3a7577..205c7e06259 100644
 +
 +	return NULL;
  }
-
+ 
  int tss_set(tss_t key, void *val)
  {
 -	switch (pthread_setspecific(key, val)) {
@@ -418,7 +430,7 @@ index dca1a3a7577..205c7e06259 100644
  	default:
  		return thrd_error;
 @@ -43,5 +46,5 @@ int tss_set(tss_t key, void *val)
-
+ 
  void tss_delete(tss_t key)
  {
 -	(void)pthread_key_delete(key);
@@ -426,30 +438,14 @@ index dca1a3a7577..205c7e06259 100644
  }
 diff --git a/tests/lib/c_lib/thrd/Kconfig b/tests/lib/c_lib/thrd/Kconfig
 new file mode 100644
-index 00000000000..1bfdb05822e
+index 00000000000..478eaa6b2cc
 --- /dev/null
 +++ b/tests/lib/c_lib/thrd/Kconfig
-@@ -0,0 +1,38 @@
+@@ -0,0 +1,22 @@
 +# Copyright (c) 2026, Friedt Professional Engineering Services, Inc
 +# SPDX-License-Identifier: Apache-2.0
 +
 +# Options specific to clock.c / test_realtime
-+
-+config SYS_THREAD_CONDVAR_MIN_ADD_TEST
-+	def_int 2
-+	help
-+	  This option is mainly intended to allow us to verify that the specified minimum number
-+	  of condition variables are in fact statically allocated and available to the application.
-+	  CMake (rather than Kconfig) outputs the guaranteed minimum value as SYS_THREAD_CONDVAR_MIN
-+	  (rather than CONFIG_SYS_THREAD_CONDVAR_MIN) for technical reasons.
-+
-+config SYS_THREAD_MUTEX_MIN_ADD_TEST
-+	def_int 2
-+	help
-+	  This option is mainly intended to allow us to verify that the specified minimum number
-+	  of mutexes are in fact statically allocated and available to the application.
-+	  CMake (rather than Kconfig) outputs the guaranteed minimum value as SYS_THREAD_MUTEX_MIN
-+	  (rather than CONFIG_SYS_THREAD_MUTEX_MIN) for technical reasons.
 +
 +config SYS_THREAD_STACK_MIN_ADD_TEST
 +	def_int 2
@@ -468,14 +464,35 @@ index 00000000000..1bfdb05822e
 +	  (rather than CONFIG_SYS_THREAD_THREAD_MIN) for technical reasons.
 +
 +source "Kconfig.zephyr"
+diff --git a/tests/lib/c_lib/thrd/boards/qemu_x86.conf b/tests/lib/c_lib/thrd/boards/qemu_x86.conf
+index 2fa43926ee4..e280f7d1208 100644
+--- a/tests/lib/c_lib/thrd/boards/qemu_x86.conf
++++ b/tests/lib/c_lib/thrd/boards/qemu_x86.conf
+@@ -1 +1 @@
+-CONFIG_DYNAMIC_THREAD_STACK_SIZE=4096
++CONFIG_SYS_THREAD_STACK_SIZE=4096
+diff --git a/tests/lib/c_lib/thrd/boards/qemu_x86_64.conf b/tests/lib/c_lib/thrd/boards/qemu_x86_64.conf
+index 2fa43926ee4..e280f7d1208 100644
+--- a/tests/lib/c_lib/thrd/boards/qemu_x86_64.conf
++++ b/tests/lib/c_lib/thrd/boards/qemu_x86_64.conf
+@@ -1 +1 @@
+-CONFIG_DYNAMIC_THREAD_STACK_SIZE=4096
++CONFIG_SYS_THREAD_STACK_SIZE=4096
+diff --git a/tests/lib/c_lib/thrd/boards/up_squared.conf b/tests/lib/c_lib/thrd/boards/up_squared.conf
+index 2fa43926ee4..e280f7d1208 100644
+--- a/tests/lib/c_lib/thrd/boards/up_squared.conf
++++ b/tests/lib/c_lib/thrd/boards/up_squared.conf
+@@ -1 +1 @@
+-CONFIG_DYNAMIC_THREAD_STACK_SIZE=4096
++CONFIG_SYS_THREAD_STACK_SIZE=4096
 diff --git a/tests/lib/c_lib/thrd/prj.conf b/tests/lib/c_lib/thrd/prj.conf
-index a595b337ca5..8cc6748ad04 100644
+index a595b337ca5..4ffd7c638fd 100644
 --- a/tests/lib/c_lib/thrd/prj.conf
 +++ b/tests/lib/c_lib/thrd/prj.conf
-@@ -2,10 +2,17 @@ CONFIG_ZTEST=y
+@@ -2,10 +2,15 @@ CONFIG_ZTEST=y
  CONFIG_TEST_USERSPACE=y
  CONFIG_ZTEST_FATAL_HOOK=y
-
+ 
 -CONFIG_POSIX_AEP_CHOICE_BASE=y
  CONFIG_THREAD_STACK_INFO=y
 -CONFIG_DYNAMIC_THREAD=y
@@ -483,8 +500,6 @@ index a595b337ca5..8cc6748ad04 100644
 +CONFIG_SYS_THREAD=y
 +
 +# These need to be >= the corresponding MIN_ADD values in Kconfig
-+CONFIG_SYS_THREAD_CONDVAR_MAX=2
-+CONFIG_SYS_THREAD_MUTEX_MAX=2
 +CONFIG_SYS_THREAD_THREAD_MAX=2
 +CONFIG_SYS_THREAD_STACK_MAX=2
 +
@@ -494,21 +509,21 @@ index a595b337ca5..8cc6748ad04 100644
  # work around for #91620
  CONFIG_MP_MAX_NUM_CPUS=1
 diff --git a/tests/lib/c_lib/thrd/src/cnd.c b/tests/lib/c_lib/thrd/src/cnd.c
-index cf011b23b87..fc93b25c6e6 100644
+index cf011b23b87..a3ca2683e12 100644
 --- a/tests/lib/c_lib/thrd/src/cnd.c
 +++ b/tests/lib/c_lib/thrd/src/cnd.c
 @@ -9,11 +9,14 @@
  #include <stdint.h>
  #include <threads.h>
-
+ 
 +#include <zephyr/kernel.h>
 +#include <zephyr/sys/atomic.h>
 +#include <zephyr/sys/clock.h>
  #include <zephyr/ztest.h>
-
+ 
 -#define WAIT_TIME_MS 100
 +#define WAIT_TIME_MS 200
-
+ 
 -static struct libc_cnd_fixture {
 +static ZTEST_BMEM struct libc_cnd_fixture {
  	/* shared between threads in tests */
@@ -520,7 +535,7 @@ index cf011b23b87..fc93b25c6e6 100644
  	struct timespec time_point;
 +	atomic_t workers_in_wait;
  } _libc_cnd_fixture;
-
+ 
 -ZTEST_F(libc_cnd, test_cnd_init_destroy)
 +ZTEST_USER_F(libc_cnd, test_cnd_init_destroy)
  {
@@ -535,7 +550,7 @@ index cf011b23b87..fc93b25c6e6 100644
 -
  	/* happy path tested in before() / after() */
  }
-
+ 
 -ZTEST_F(libc_cnd, test_cnd_errors)
 -{
 -	/* degenerate test cases */
@@ -562,9 +577,9 @@ index cf011b23b87..fc93b25c6e6 100644
  {
  	int res = thrd_success;
 @@ -72,6 +45,8 @@ static int test_cnd_thread_fn(void *arg)
-
+ 
  	zassert_equal(thrd_success, mtx_lock(&fixture->mutex));
-
+ 
 +	atomic_inc(&fixture->workers_in_wait);
 +
  	if (fixture->do_timedwait) {
@@ -573,17 +588,17 @@ index cf011b23b87..fc93b25c6e6 100644
 @@ -80,31 +55,33 @@ static int test_cnd_thread_fn(void *arg)
  		res = cnd_wait(&fixture->cond, &fixture->mutex);
  	}
-
+ 
 -	if (fixture->is_broadcast) {
 -		/* re-signal so that the next thread wakes up too */
 -		zassert_equal(thrd_success, cnd_signal(&fixture->cond));
 -	}
 -
  	zassert_equal(thrd_success, mtx_unlock(&fixture->mutex));
-
+ 
  	return res;
  }
-
+ 
 -static void tst_cnd_common(struct libc_cnd_fixture *fixture, size_t wait_ms, bool th2, int exp1,
 -			   int exp2)
 +static void tst_cnd_common(struct libc_cnd_fixture *fixture, bool th2, int exp1, int exp2)
@@ -595,12 +610,12 @@ index cf011b23b87..fc93b25c6e6 100644
  		zassert_equal(thrd_success,
  			      thrd_create(&fixture->thrd2, test_cnd_thread_fn, fixture));
  	}
-
+ 
 -	k_msleep(wait_ms);
 +	while (atomic_get(&fixture->workers_in_wait) < n_workers) {
 +		k_yield();
 +	}
-
+ 
 -	if (fixture->is_broadcast) {
 -		zassert_equal(thrd_success, cnd_broadcast(&fixture->cond));
 -	} else {
@@ -614,12 +629,12 @@ index cf011b23b87..fc93b25c6e6 100644
 +		}
 +		zassert_equal(thrd_success, mtx_unlock(&fixture->mutex));
  	}
-
+ 
  	zassert_equal(thrd_success, thrd_join(fixture->thrd1, &fixture->res1));
 @@ -112,33 +89,33 @@ static void tst_cnd_common(struct libc_cnd_fixture *fixture, size_t wait_ms, boo
  		zassert_equal(thrd_success, thrd_join(fixture->thrd2, &fixture->res2));
  	}
-
+ 
 -	zassert_equal(exp1, fixture->res1);
 +	zassert_equal(exp1, fixture->res1, "%d not equal to %d", fixture->res1, exp1);
  	if (th2) {
@@ -627,14 +642,14 @@ index cf011b23b87..fc93b25c6e6 100644
 +		zassert_equal(exp2, fixture->res2, "%d not equal to %d", fixture->res2, exp2);
  	}
  }
-
+ 
 -ZTEST_F(libc_cnd, test_cnd_signal_wait)
 +ZTEST_USER_F(libc_cnd, test_cnd_signal_wait)
  {
 -	tst_cnd_common(fixture, WAIT_TIME_MS / 2, false, thrd_success, DONT_CARE);
 +	tst_cnd_common(fixture, false, thrd_success, DONT_CARE);
  }
-
+ 
 -ZTEST_F(libc_cnd, test_cnd_signal_timedwait)
 +ZTEST_USER_F(libc_cnd, test_cnd_signal_timedwait)
  {
@@ -642,7 +657,7 @@ index cf011b23b87..fc93b25c6e6 100644
 -	tst_cnd_common(fixture, WAIT_TIME_MS / 2, false, thrd_success, DONT_CARE);
 +	tst_cnd_common(fixture, false, thrd_success, DONT_CARE);
  }
-
+ 
 -ZTEST_F(libc_cnd, test_cnd_timedwait_timeout)
 +ZTEST_USER_F(libc_cnd, test_cnd_timedwait_timeout)
  {
@@ -650,7 +665,7 @@ index cf011b23b87..fc93b25c6e6 100644
 -	tst_cnd_common(fixture, WAIT_TIME_MS * 2, false, thrd_timedout, DONT_CARE);
 +	tst_cnd_common(fixture, false, thrd_timedout, DONT_CARE);
  }
-
+ 
 -ZTEST_F(libc_cnd, test_cnd_broadcast_wait)
 +ZTEST_USER_F(libc_cnd, test_cnd_broadcast_wait)
  {
@@ -658,64 +673,57 @@ index cf011b23b87..fc93b25c6e6 100644
 -	tst_cnd_common(fixture, WAIT_TIME_MS, true, thrd_success, thrd_success);
 +	tst_cnd_common(fixture, true, thrd_success, thrd_success);
  }
-
+ 
  static void *setup(void)
 @@ -150,6 +127,8 @@ static void before(void *arg)
  {
  	struct libc_cnd_fixture *const fixture = arg;
-
+ 
 +	ztest_simple_1cpu_before(arg);
 +
  	*fixture = (struct libc_cnd_fixture){
  		.res1 = FORTY_TWO,
  		.res2 = SEVENTY_THREE,
-@@ -157,6 +136,9 @@ static void before(void *arg)
-
- 	zassert_equal(thrd_success, mtx_init(&fixture->mutex, mtx_plain));
- 	zassert_equal(thrd_success, cnd_init(&fixture->cond));
-+
-+	k_object_access_all_grant(fixture->mutex);
-+	k_object_access_all_grant(fixture->cond);
- }
-
- static void after(void *arg)
-@@ -165,6 +147,7 @@ static void after(void *arg)
-
+@@ -165,6 +144,7 @@ static void after(void *arg)
+ 
  	cnd_destroy(&fixture->cond);
  	mtx_destroy(&fixture->mutex);
 -}
-
+ 
 +	ztest_simple_1cpu_after(arg);
 +}
  ZTEST_SUITE(libc_cnd, NULL, setup, before, after, NULL);
 diff --git a/tests/lib/c_lib/thrd/src/mtx.c b/tests/lib/c_lib/thrd/src/mtx.c
-index 8041396983e..99650ebf5d2 100644
+index 8041396983e..aa38171d824 100644
 --- a/tests/lib/c_lib/thrd/src/mtx.c
 +++ b/tests/lib/c_lib/thrd/src/mtx.c
-@@ -9,7 +9,7 @@
+@@ -7,9 +7,10 @@
+ #include "thrd.h"
+ 
  #include <stdint.h>
++#include <string.h>
  #include <threads.h>
-
+ 
 -#include <zephyr/sys_clock.h>
 +#include <zephyr/sys/clock.h>
  #include <zephyr/ztest.h>
-
+ 
  static const int valid_mtx_types[] = {
-@@ -19,20 +19,14 @@ static const int valid_mtx_types[] = {
+@@ -19,20 +20,14 @@ static const int valid_mtx_types[] = {
  	mtx_timed | mtx_recursive,
  };
-
+ 
 -static mtx_t  mutex;
 -static thrd_t th;
 +static ZTEST_BMEM mtx_t mutex;
 +static ZTEST_BMEM thrd_t th;
-
+ 
 -ZTEST(libc_mtx, test_mtx_init)
 +ZTEST_USER(libc_mtx, test_mtx_init)
  {
  	zassert_not_equal(thrd_success, mtx_init(NULL, FORTY_TWO));
  	zassert_not_equal(thrd_success, mtx_init(&mutex, FORTY_TWO));
-
+ 
 -	if (false) {
 -		/* pthread_mutexattr_init() is not hardened against this */
 -		zassert_not_equal(thrd_success, mtx_init(NULL, mtx_plain));
@@ -724,11 +732,11 @@ index 8041396983e..99650ebf5d2 100644
 -
  	for (size_t i = 0; i < ARRAY_SIZE(valid_mtx_types); ++i) {
  		int type = valid_mtx_types[i];
-
-@@ -41,39 +35,21 @@ ZTEST(libc_mtx, test_mtx_init)
+ 
+@@ -41,39 +36,21 @@ ZTEST(libc_mtx, test_mtx_init)
  	}
  }
-
+ 
 -ZTEST(libc_mtx, test_mtx_destroy)
 +ZTEST_USER(libc_mtx, test_mtx_destroy)
  {
@@ -742,7 +750,7 @@ index 8041396983e..99650ebf5d2 100644
  	zassert_equal(thrd_success, mtx_init(&mutex, mtx_plain));
  	mtx_destroy(&mutex);
  }
-
+ 
 -ZTEST(libc_mtx, test_mtx_lock)
 +ZTEST_USER(libc_mtx, test_mtx_lock)
  {
@@ -755,7 +763,7 @@ index 8041396983e..99650ebf5d2 100644
  	/* test plain mutex */
  	for (size_t i = 0; i < ARRAY_SIZE(valid_mtx_types); ++i) {
  		int type = valid_mtx_types[i];
-
+ 
  		zassert_equal(thrd_success, mtx_init(&mutex, type));
  		zassert_equal(thrd_success, mtx_lock(&mutex));
 -		if ((type & mtx_recursive) == 0) {
@@ -768,15 +776,15 @@ index 8041396983e..99650ebf5d2 100644
  			zassert_equal(thrd_success, mtx_lock(&mutex));
  			zassert_equal(thrd_success, mtx_unlock(&mutex));
  		}
-@@ -93,19 +69,25 @@ static int mtx_timedlock_fn(void *arg)
+@@ -93,19 +70,25 @@ static int mtx_timedlock_fn(void *arg)
  {
  	struct timespec time_point;
  	mtx_t *mtx = (mtx_t *)arg;
 +	int ret;
-
+ 
  	zassume_ok(sys_clock_gettime(SYS_CLOCK_MONOTONIC, &time_point));
  	timespec_add_ms(&time_point, TIMEDLOCK_TIMEOUT_MS);
-
+ 
 -	return mtx_timedlock(mtx, &time_point);
 +	ret = mtx_timedlock(mtx, &time_point);
 +	if (ret == thrd_success) {
@@ -785,24 +793,24 @@ index 8041396983e..99650ebf5d2 100644
 +
 +	return ret;
  }
-
+ 
 -ZTEST(libc_mtx, test_mtx_timedlock)
 +ZTEST_USER(libc_mtx, test_mtx_timedlock)
  {
  	int ret;
-
+ 
  	/*
 -	 * mtx_timed here is technically unnecessary, because all pthreads can
 +	 * mtx_timed here is technically unnecessary, because all k_threads can
  	 * be used for timed locks, but that is sort of peeking into the
  	 * implementation
  	 */
-@@ -134,11 +116,17 @@ ZTEST(libc_mtx, test_mtx_timedlock)
+@@ -134,11 +117,17 @@ ZTEST(libc_mtx, test_mtx_timedlock)
  static int mtx_trylock_fn(void *arg)
  {
  	mtx_t *mtx = (mtx_t *)arg;
 +	int ret;
-
+ 
 -	return mtx_trylock(mtx);
 +	ret = mtx_trylock(mtx);
 +	if (ret == thrd_success) {
@@ -811,28 +819,31 @@ index 8041396983e..99650ebf5d2 100644
 +
 +	return ret;
  }
-
+ 
 -ZTEST(libc_mtx, test_mtx_trylock)
 +ZTEST_USER(libc_mtx, test_mtx_trylock)
  {
  	int ret;
-
-@@ -151,16 +139,14 @@ ZTEST(libc_mtx, test_mtx_trylock)
+ 
+@@ -151,16 +140,16 @@ ZTEST(libc_mtx, test_mtx_trylock)
  	/* ensure lock fails */
  	zassert_equal(thrd_busy, ret);
-
+ 
 +	mtx_unlock(&mutex);
  	mtx_destroy(&mutex);
  }
-
+ 
 -ZTEST(libc_mtx, test_mtx_unlock)
 +ZTEST_USER(libc_mtx, test_mtx_unlock)
  {
- 	mtx_t mtx = (mtx_t)BIOS_FOOD;
-
+-	mtx_t mtx = (mtx_t)BIOS_FOOD;
+-
 -	/* degenerate case */
 -	zassert_not_equal(thrd_success, mtx_unlock(&mtx));
--
++	mtx_t mtx;
+ 
++	/* initialization must not depend on prior contents */
++	(void)memset(&mtx, BIOS_FOOD & 0xff, sizeof(mtx));
  	zassert_equal(thrd_success, mtx_init(&mtx, mtx_plain));
  	zassert_equal(thrd_success, mtx_lock(&mtx));
  	zassert_equal(thrd_success, mtx_unlock(&mtx));
@@ -847,28 +858,28 @@ index e239206d9b4..dd137082531 100644
 + * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
   * SPDX-License-Identifier: Apache-2.0
   */
-
+ 
  #include "thrd.h"
-
+ 
 +#include <stdbool.h>
  #include <stdint.h>
  #include <threads.h>
 +#include <time.h>
-
+ 
 +#include <zephyr/sys/util.h>
  #include <zephyr/ztest.h>
-
+ 
 -static size_t number_of_calls;
 -static once_flag flag = ONCE_FLAG_INIT;
 +static ZTEST_BMEM size_t number_of_calls;
 +static ZTEST_BMEM bool once_started;
 +static ZTEST_DMEM once_flag flag = ONCE_FLAG_INIT;
-
+ 
  static void once_func(void)
  {
  	number_of_calls++;
  }
-
+ 
 -ZTEST(libc_once, test_call_once)
 +static void once_slow(void)
 +{
@@ -887,11 +898,11 @@ index e239206d9b4..dd137082531 100644
 +static void call_once_single(void)
  {
  	zassert_equal(number_of_calls, 0);
-
+ 
 @@ -30,4 +47,31 @@ ZTEST(libc_once, test_call_once)
  	zassert_equal(number_of_calls, 1);
  }
-
+ 
 +static void call_once_contended(void)
 +{
 +	thrd_t th;
@@ -927,12 +938,12 @@ index 50751e30bd6..c3f82ed8be6 100644
 @@ -13,10 +13,10 @@
  #include <zephyr/sys/timeutil.h>
  #include <zephyr/ztest.h>
-
+ 
 -static thrd_t     thr;
 -static uintptr_t  param;
 +static ZTEST_BMEM thrd_t thr;
 +static ZTEST_BMEM uintptr_t param;
-
+ 
 -ZTEST(libc_thrd, test_thrd_sleep)
 +ZTEST_USER(libc_thrd, test_thrd_sleep)
  {
@@ -941,15 +952,15 @@ index 50751e30bd6..c3f82ed8be6 100644
 @@ -57,23 +57,13 @@ static int thrd_create_join_fn(void *arg)
  	return FORTY_TWO;
  }
-
+ 
 -ZTEST(libc_thrd, test_thrd_create_join)
 +ZTEST_USER(libc_thrd, test_thrd_create_join)
  {
  	int res = 0;
  	thrd_start_t fun = thrd_create_join_fn;
-
+ 
  	param = 0;
-
+ 
 -	if (false) {
 -		/* pthread_create() is not hardened for degenerate cases like this */
 -		zassert_equal(thrd_error, thrd_create(NULL, NULL, NULL));
@@ -962,60 +973,60 @@ index 50751e30bd6..c3f82ed8be6 100644
 -
  	zassert_equal(thrd_success, thrd_create(&thr, fun, NULL));
  	zassert_equal(thrd_success, thrd_join(thr, NULL));
-
+ 
 @@ -97,7 +87,7 @@ static int thrd_exit_fn(void *arg)
  	CODE_UNREACHABLE;
  }
-
+ 
 -ZTEST(libc_thrd, test_thrd_exit)
 +ZTEST_USER(libc_thrd, test_thrd_exit)
  {
  	int res = 0;
-
+ 
 @@ -109,13 +99,13 @@ ZTEST(libc_thrd, test_thrd_exit)
  	zassert_equal(SEVENTY_THREE, res);
  }
-
+ 
 -ZTEST(libc_thrd, test_thrd_yield)
 +ZTEST_USER(libc_thrd, test_thrd_yield)
  {
  	thrd_yield();
  }
-
+ 
 -static thrd_t child;
 -static thrd_t parent;
 +static ZTEST_BMEM thrd_t child;
 +static ZTEST_BMEM thrd_t parent;
-
+ 
  static int thrd_current_equal_fn(void *arg)
  {
 @@ -130,7 +120,7 @@ static int thrd_current_equal_fn(void *arg)
  	return 0;
  }
-
+ 
 -ZTEST(libc_thrd, test_thrd_current_equal)
 +ZTEST_USER(libc_thrd, test_thrd_current_equal)
  {
  	parent = thrd_current();
-
+ 
 @@ -138,17 +128,20 @@ ZTEST(libc_thrd, test_thrd_current_equal)
  	zassert_equal(thrd_success, thrd_join(child, NULL));
  }
-
+ 
 -static bool detached_thread_is_probably_done;
 +static ZTEST_BMEM bool detached_thread_is_probably_done;
-
+ 
  static int thrd_detach_fn(void *arg)
  {
  	ARG_UNUSED(arg);
-
+ 
 +	struct timespec duration = {1, 0};
 +	thrd_sleep(&duration, NULL);
 +
  	detached_thread_is_probably_done = true;
  	return SEVENTY_THREE;
  }
-
+ 
 -ZTEST(libc_thrd, test_thrd_detach)
 +ZTEST_USER(libc_thrd, test_thrd_detach)
  {
@@ -1024,7 +1035,7 @@ index 50751e30bd6..c3f82ed8be6 100644
 @@ -161,7 +154,7 @@ ZTEST(libc_thrd, test_thrd_detach)
  	zassert_equal(thrd_error, thrd_join(thr, NULL));
  }
-
+ 
 -ZTEST(libc_thrd, test_thrd_reuse)
 +ZTEST_USER(libc_thrd, test_thrd_reuse)
  {
@@ -1037,39 +1048,39 @@ index 35d71eb07ab..db49b8ae7a6 100644
 @@ -10,6 +10,7 @@
  #include <stdint.h>
  #include <time.h>
-
+ 
 +#include <zephyr/kernel.h>
  #include <zephyr/sys_clock.h>
  #include <zephyr/sys/timeutil.h>
-
+ 
 diff --git a/tests/lib/c_lib/thrd/src/tss.c b/tests/lib/c_lib/thrd/src/tss.c
 index 463532809aa..8496d103f07 100644
 --- a/tests/lib/c_lib/thrd/src/tss.c
 +++ b/tests/lib/c_lib/thrd/src/tss.c
 @@ -11,13 +11,13 @@
-
+ 
  #include <zephyr/ztest.h>
-
+ 
 -static tss_t key;
 -static int32_t destroyed_values[2];
 -static const int32_t forty_two = FORTY_TWO;
 -static const int32_t seventy_three = SEVENTY_THREE;
 +static ZTEST_BMEM tss_t key;
 +static ZTEST_BMEM int32_t destroyed_values[2];
-
+ 
 -static thrd_t thread1;
 -static thrd_t thread2;
 +static ZTEST_BMEM thrd_t thread1;
 +static ZTEST_BMEM thrd_t thread2;
 +static ZTEST_BMEM int32_t forty_two;
 +static ZTEST_BMEM int32_t seventy_three;
-
+ 
  static void destroy_fn(void *arg)
  {
 @@ -35,15 +35,9 @@ static void destroy_fn(void *arg)
  	}
  }
-
+ 
 -ZTEST(libc_tss, test_tss_create_delete)
 +ZTEST_USER(libc_tss, test_tss_create_delete)
  {
@@ -1081,19 +1092,19 @@ index 463532809aa..8496d103f07 100644
 -	}
 -	tss_delete(BIOS_FOOD);
 +	tss_delete((tss_t)BIOS_FOOD);
-
+ 
  	/* happy path tested in before() / after() */
  }
 @@ -60,15 +54,17 @@ static int thread_fn(void *arg)
  }
-
+ 
  /* test out separate threads doing tss_get() / tss_set() */
 -ZTEST(libc_tss, test_tss_get_set)
 +ZTEST_USER(libc_tss, test_tss_get_set)
  {
  	int res1 = BIOS_FOOD;
  	int res2 = BIOS_FOOD;
-
+ 
 -	/* degenerate test cases */
 -	zassert_is_null(tss_get(BIOS_FOOD));
 -	zassert_not_equal(thrd_success, tss_set(FORTY_TWO, (void *)BIOS_FOOD));
@@ -1104,7 +1115,7 @@ index 463532809aa..8496d103f07 100644
 +	zassert_is_null(tss_get((tss_t)BIOS_FOOD));
 +	zassert_not_equal(thrd_success, tss_set((tss_t)FORTY_TWO, (void *)BIOS_FOOD));
 +	zassert_is_null(tss_get((tss_t)FORTY_TWO));
-
+ 
  	zassert_equal(thrd_success, thrd_create(&thread1, thread_fn, (void *)&forty_two));
  	zassert_equal(thrd_success, thrd_create(&thread2, thread_fn, (void *)&seventy_three));
 diff --git a/tests/lib/c_lib/thrd/testcase.yaml b/tests/lib/c_lib/thrd/testcase.yaml
@@ -1120,24 +1131,3 @@ index e11360efd2e..99cf50e9931 100644
 +    extra_configs:
 +      - CONFIG_USERSPACE=y
 +      - CONFIG_TEST_USERSPACE=y
-diff --git a/tests/lib/c_lib/thrd/boards/qemu_x86.conf b/tests/lib/c_lib/thrd/boards/qemu_x86.conf
-index 2fa43926ee4..e280f7d1208 100644
---- a/tests/lib/c_lib/thrd/boards/qemu_x86.conf
-+++ b/tests/lib/c_lib/thrd/boards/qemu_x86.conf
-@@ -1 +1 @@
--CONFIG_DYNAMIC_THREAD_STACK_SIZE=4096
-+CONFIG_SYS_THREAD_STACK_SIZE=4096
-diff --git a/tests/lib/c_lib/thrd/boards/qemu_x86_64.conf b/tests/lib/c_lib/thrd/boards/qemu_x86_64.conf
-index 2fa43926ee4..e280f7d1208 100644
---- a/tests/lib/c_lib/thrd/boards/qemu_x86_64.conf
-+++ b/tests/lib/c_lib/thrd/boards/qemu_x86_64.conf
-@@ -1 +1 @@
--CONFIG_DYNAMIC_THREAD_STACK_SIZE=4096
-+CONFIG_SYS_THREAD_STACK_SIZE=4096
-diff --git a/tests/lib/c_lib/thrd/boards/up_squared.conf b/tests/lib/c_lib/thrd/boards/up_squared.conf
-index 2fa43926ee4..e280f7d1208 100644
---- a/tests/lib/c_lib/thrd/boards/up_squared.conf
-+++ b/tests/lib/c_lib/thrd/boards/up_squared.conf
-@@ -1 +1 @@
--CONFIG_DYNAMIC_THREAD_STACK_SIZE=4096
-+CONFIG_SYS_THREAD_STACK_SIZE=4096

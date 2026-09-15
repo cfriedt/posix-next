@@ -75,7 +75,7 @@ diff --git a/kernel/include/kernel_internal.h b/kernel/include/kernel_internal.h
 diff --git a/kernel/process.c b/kernel/process.c
 --- a/kernel/process.c
 +++ b/kernel/process.c
-@@ -328,6 +328,9 @@ static void process_free_locked(struct k_process *proc)
+@@ -322,6 +322,9 @@ static void process_free_locked(struct k_process *proc)
  #ifdef CONFIG_USERSPACE
  	k_object_uninit(proc);
  #endif /* CONFIG_USERSPACE */
@@ -85,7 +85,7 @@ diff --git a/kernel/process.c b/kernel/process.c
  	proc->state = K_PROCESS_UNUSED;
  	/* the single pid-retirement point: the leader handle may be reused now */
  	proc->leader = NULL;
-@@ -410,6 +413,29 @@ void z_process_exit_thread(struct k_thread *thread)
+@@ -404,6 +407,29 @@ void z_process_exit_thread(struct k_thread *thread)
  	}
  }
 
@@ -273,9 +273,9 @@ diff --git a/lib/os/thread.c b/lib/os/thread.c
  #include <zephyr/sys/thread.h>
  #include <zephyr/sys/elastipool.h>
  #include <zephyr/toolchain.h>
-@@ -1048,6 +1049,10 @@ static void print_stats(const struct ztest_unit_test *test, void *data)
- 	const struct sys_elastipool *const pool[] = {&cond_pool, &mutex_pool, &stack_pool,
- 						     &thread_pool};
+@@ -812,6 +813,10 @@ static void print_stats(const struct ztest_unit_test *test, void *data)
+ 	int type[] = {K_OBJ_THREAD_STACK_ELEMENT, K_OBJ_THREAD};
+ 	const struct sys_elastipool *const pool[] = {&stack_pool, &thread_pool};
 
 +#ifdef CONFIG_SYS_PROCESS
 +	/* reclaim pool leaders of reaped processes before counting */

@@ -1,0 +1,600 @@
+diff --git a/doc/kernel/services/synchronization/condvar.rst b/doc/kernel/services/synchronization/condvar.rst
+index 048c60e2791..b8df3dfe633 100644
+--- a/doc/kernel/services/synchronization/condvar.rst
++++ b/doc/kernel/services/synchronization/condvar.rst
+@@ -136,3 +136,12 @@ API Reference
+ **************
+ 
+ .. doxygengroup:: condvar_apis
++
++User Mode Condition Variable API Reference
++******************************************
++
++A sys_condvar resides in user memory and is used together with a
++:c:struct:`sys_mutex`; the kernel is entered only to block a waiter or to
++wake one.
++
++.. doxygengroup:: user_condvar_apis
+diff --git a/include/zephyr/sys/condvar.h b/include/zephyr/sys/condvar.h
+new file mode 100644
+index 00000000000..53741ddca3c
+--- /dev/null
++++ b/include/zephyr/sys/condvar.h
+@@ -0,0 +1,183 @@
++/*
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_INCLUDE_SYS_CONDVAR_H_
++#define ZEPHYR_INCLUDE_SYS_CONDVAR_H_
++
++#include <stdint.h>
++#include <time.h>
++
++#include <zephyr/sys/atomic_types.h>
++#include <zephyr/sys/clock.h>
++#include <zephyr/sys/mutex.h>
++#include <zephyr/toolchain.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/**
++ * @defgroup user_condvar_apis User mode condition variable APIs
++ * @ingroup usermode_apis
++ *
++ * A sys_condvar lives in user memory and is used with a @ref sys_mutex.
++ * Signalling is an atomic operation on the object itself; the kernel is
++ * entered only to block a waiter (k_futex_wait()) or to wake one
++ * (k_futex_wake()). Any thread that can write the object's memory can use it.
++ * @{
++ */
++
++/** @brief Condition variable that lives in user memory */
++struct sys_condvar {
++	/** @cond INTERNAL_HIDDEN */
++	/* the leading words are a struct k_futex: sequence word, kernel-maintained waiter count */
++	atomic_t seq;
++	atomic_t waiters;
++	uint32_t options;
++	/** @endcond */
++};
++
++/**
++ * @brief Statically define and initialize a sys_condvar
++ *
++ * Absolute timeouts of the condition variable are measured against
++ * @ref SYS_CLOCK_REALTIME; see @ref SYS_CONDVAR_DEFINE_EXT for other clocks.
++ * Route this to memory domains using K_APP_DMEM().
++ *
++ * @param name Name of the condition variable.
++ */
++#define SYS_CONDVAR_DEFINE(name) struct sys_condvar name
++
++/**
++ * @brief Statically define and initialize a sys_condvar with options
++ *
++ * @param name Name of the condition variable.
++ * @param opts The clock absolute timeouts are measured against: @ref SYS_CLOCK_REALTIME or
++ *             @ref SYS_CLOCK_MONOTONIC.
++ */
++#define SYS_CONDVAR_DEFINE_EXT(name, opts) struct sys_condvar name = {.options = (opts)}
++
++/**
++ * @brief Initialize a condition variable.
++ *
++ * Absolute timeouts are measured against @ref SYS_CLOCK_REALTIME.
++ *
++ * @param condvar Address of the condition variable.
++ */
++void sys_condvar_init(struct sys_condvar *condvar);
++
++/**
++ * @brief Initialize a condition variable with options.
++ *
++ * @param condvar Address of the condition variable.
++ * @param options The clock absolute timeouts are measured against: @ref SYS_CLOCK_REALTIME or
++ *                @ref SYS_CLOCK_MONOTONIC.
++ *
++ * @retval 0 Condition variable initialized.
++ * @retval -EINVAL Invalid options.
++ */
++int sys_condvar_init_ext(struct sys_condvar *condvar, uint32_t options);
++
++/**
++ * @brief Destroy a condition variable.
++ *
++ * Waits for threads that were woken but have not yet left the wait, then
++ * invalidates the object. The object must be initialized again before any
++ * further use.
++ *
++ * @param condvar Address of the condition variable.
++ *
++ * @retval 0 Condition variable destroyed.
++ */
++int sys_condvar_destroy(struct sys_condvar *condvar);
++
++/**
++ * @brief Return the clock the condition variable measures absolute timeouts against.
++ *
++ * @param condvar Address of the condition variable.
++ * @return @ref SYS_CLOCK_REALTIME or @ref SYS_CLOCK_MONOTONIC.
++ */
++uint32_t sys_condvar_clock(const struct sys_condvar *condvar);
++
++/**
++ * @brief Signal one thread waiting on the condition variable.
++ *
++ * @param condvar Address of the condition variable.
++ *
++ * @retval 0 On success.
++ */
++int sys_condvar_signal(struct sys_condvar *condvar);
++
++/**
++ * @brief Wake every thread waiting on the condition variable.
++ *
++ * @param condvar Address of the condition variable.
++ *
++ * @retval 0 On success.
++ */
++int sys_condvar_broadcast(struct sys_condvar *condvar);
++
++/**
++ * @brief Wait on the condition variable, releasing the mutex.
++ *
++ * The mutex is released while the thread waits and locked again before the
++ * function returns, whatever the outcome. Waits can end spuriously, so the
++ * caller must re-check its condition.
++ *
++ * @param condvar Address of the condition variable.
++ * @param mutex Address of the mutex, locked by the caller.
++ * @param timeout Waiting period, or one of the special values K_NO_WAIT and K_FOREVER.
++ *
++ * @retval 0 On success or spurious wake-up.
++ * @retval -EAGAIN Waiting period timed out.
++ * @retval -EPERM Caller does not own @a mutex.
++ */
++int sys_condvar_wait(struct sys_condvar *condvar, struct sys_mutex *mutex, k_timeout_t timeout);
++
++/**
++ * @brief Wait on the condition variable until an absolute time.
++ *
++ * Like @ref sys_condvar_wait, with @a abstime measured against @a clock.
++ *
++ * @param condvar Address of the condition variable.
++ * @param mutex Address of the mutex, locked by the caller.
++ * @param clock @ref SYS_CLOCK_REALTIME or @ref SYS_CLOCK_MONOTONIC.
++ * @param abstime Absolute time at which the wait ends.
++ *
++ * @retval 0 On success or spurious wake-up.
++ * @retval -ETIMEDOUT The absolute time has passed.
++ * @retval -EINVAL Invalid clock or time.
++ * @retval -EPERM Caller does not own @a mutex.
++ */
++int sys_condvar_clockwait(struct sys_condvar *condvar, struct sys_mutex *mutex, uint32_t clock,
++			  const struct timespec *abstime);
++
++/**
++ * @brief Wait on the condition variable until an absolute time.
++ *
++ * Like @ref sys_condvar_clockwait, with @a abstime measured against the clock
++ * the condition variable was initialized with.
++ *
++ * @param condvar Address of the condition variable.
++ * @param mutex Address of the mutex, locked by the caller.
++ * @param abstime Absolute time at which the wait ends.
++ *
++ * @retval 0 On success or spurious wake-up.
++ * @retval -ETIMEDOUT The absolute time has passed.
++ * @retval -EINVAL Invalid time.
++ * @retval -EPERM Caller does not own @a mutex.
++ */
++int sys_condvar_timedwait(struct sys_condvar *condvar, struct sys_mutex *mutex,
++			  const struct timespec *abstime);
++
++/**
++ * @}
++ */
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* ZEPHYR_INCLUDE_SYS_CONDVAR_H_ */
+diff --git a/lib/os/CMakeLists.txt b/lib/os/CMakeLists.txt
+index 3a632b3a2d8..32598d82851 100644
+--- a/lib/os/CMakeLists.txt
++++ b/lib/os/CMakeLists.txt
+@@ -57,7 +57,7 @@ if(CONFIG_ASSERT OR CONFIG_ASSERT_VERBOSE)
+ zephyr_sources(assert.c)
+ endif()
+ 
+-zephyr_sources_ifdef(CONFIG_MULTITHREADING mutex.c)
++zephyr_sources_ifdef(CONFIG_MULTITHREADING condvar.c mutex.c)
+ 
+ zephyr_sources_ifdef(CONFIG_USERSPACE user_work.c)
+ 
+diff --git a/lib/os/condvar.c b/lib/os/condvar.c
+new file mode 100644
+index 00000000000..3df9bd96a4f
+--- /dev/null
++++ b/lib/os/condvar.c
+@@ -0,0 +1,150 @@
++/*
++ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <errno.h>
++#include <stddef.h>
++#include <stdint.h>
++
++#include <zephyr/kernel.h>
++#include <zephyr/sys/atomic.h>
++#include <zephyr/sys/clock.h>
++#include <zephyr/sys/condvar.h>
++#include <zephyr/sys/mutex.h>
++#include <zephyr/sys/timeutil.h>
++
++BUILD_ASSERT(offsetof(struct sys_condvar, seq) == offsetof(struct k_futex, val));
++BUILD_ASSERT(offsetof(struct sys_condvar, waiters) == offsetof(struct k_futex, waiters));
++
++static inline struct k_futex *condvar_futex(struct sys_condvar *condvar)
++{
++	return (struct k_futex *)&condvar->seq;
++}
++
++static inline void condvar_seq_bump(struct sys_condvar *condvar)
++{
++	(void)atomic_inc(&condvar->seq);
++}
++
++void sys_condvar_init(struct sys_condvar *condvar)
++{
++	(void)sys_condvar_init_ext(condvar, SYS_CLOCK_REALTIME);
++}
++
++int sys_condvar_init_ext(struct sys_condvar *condvar, uint32_t options)
++{
++	switch (options) {
++	case SYS_CLOCK_REALTIME:
++	case SYS_CLOCK_MONOTONIC:
++		break;
++	default:
++		return -EINVAL;
++	}
++
++	*condvar = (struct sys_condvar){.options = options};
++
++	return 0;
++}
++
++int sys_condvar_destroy(struct sys_condvar *condvar)
++{
++	/* woken waiters are already uncounted; a timed-out one uncounts itself before returning */
++	while (atomic_get(&condvar->waiters) != 0) {
++		k_sleep(K_TICKS(1));
++	}
++
++	*condvar = (struct sys_condvar){0};
++
++	return 0;
++}
++
++uint32_t sys_condvar_clock(const struct sys_condvar *condvar)
++{
++	/* a zero-filled object is a valid condition variable on the default clock */
++	return (condvar->options == 0) ? SYS_CLOCK_REALTIME : condvar->options;
++}
++
++/*
++ * A waiter that has released the mutex but not yet blocked is caught by the
++ * sequence compare in k_futex_wait(); one that has blocked is counted by the
++ * kernel. Waking a blocked waiter without moving the sequence keeps a signal
++ * to one thread; the sequence only moves when no blocked waiter was found.
++ */
++int sys_condvar_signal(struct sys_condvar *condvar)
++{
++	if ((atomic_get(&condvar->waiters) != 0) &&
++	    (k_futex_wake(condvar_futex(condvar), false) > 0)) {
++		return 0;
++	}
++
++	condvar_seq_bump(condvar);
++	if (atomic_get(&condvar->waiters) != 0) {
++		(void)k_futex_wake(condvar_futex(condvar), false);
++	}
++
++	return 0;
++}
++
++int sys_condvar_broadcast(struct sys_condvar *condvar)
++{
++	condvar_seq_bump(condvar);
++	if (atomic_get(&condvar->waiters) != 0) {
++		(void)k_futex_wake(condvar_futex(condvar), true);
++	}
++
++	return 0;
++}
++
++int sys_condvar_wait(struct sys_condvar *condvar, struct sys_mutex *mutex, k_timeout_t timeout)
++{
++	int ret;
++	atomic_val_t seq;
++
++	seq = atomic_get(&condvar->seq);
++
++	ret = sys_mutex_unlock(mutex);
++	if (ret < 0) {
++		return ret;
++	}
++
++	ret = k_futex_wait(condvar_futex(condvar), seq, timeout);
++	(void)sys_mutex_lock(mutex, K_FOREVER);
++
++	return (ret == -ETIMEDOUT) ? -EAGAIN : 0;
++}
++
++int sys_condvar_clockwait(struct sys_condvar *condvar, struct sys_mutex *mutex, uint32_t clock,
++			  const struct timespec *abstime)
++{
++	int ret;
++	k_timepoint_t timepoint;
++
++	switch (clock) {
++	case SYS_CLOCK_REALTIME:
++	case SYS_CLOCK_MONOTONIC:
++		break;
++	default:
++		return -EINVAL;
++	}
++
++	if ((abstime == NULL) || !timespec_is_valid(abstime)) {
++		return -EINVAL;
++	}
++
++	timepoint = timespec_abs_to_timepoint(clock, abstime);
++	if (sys_timepoint_expired(timepoint)) {
++		return -ETIMEDOUT;
++	}
++
++	ret = sys_condvar_wait(condvar, mutex, sys_timepoint_timeout(timepoint));
++
++	return (ret == -EAGAIN) ? -ETIMEDOUT : ret;
++}
++
++int sys_condvar_timedwait(struct sys_condvar *condvar, struct sys_mutex *mutex,
++			  const struct timespec *abstime)
++{
++	return sys_condvar_clockwait(condvar, mutex, sys_condvar_clock(condvar), abstime);
++}
+diff --git a/tests/kernel/condvar/sys_condvar/CMakeLists.txt b/tests/kernel/condvar/sys_condvar/CMakeLists.txt
+new file mode 100644
+index 00000000000..5ee01506c99
+--- /dev/null
++++ b/tests/kernel/condvar/sys_condvar/CMakeLists.txt
+@@ -0,0 +1,8 @@
++# SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++# SPDX-License-Identifier: Apache-2.0
++
++cmake_minimum_required(VERSION 3.20.0)
++find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
++project(sys_condvar)
++
++target_sources(app PRIVATE src/main.c)
+diff --git a/tests/kernel/condvar/sys_condvar/prj.conf b/tests/kernel/condvar/sys_condvar/prj.conf
+new file mode 100644
+index 00000000000..0169d3eb602
+--- /dev/null
++++ b/tests/kernel/condvar/sys_condvar/prj.conf
+@@ -0,0 +1,3 @@
++CONFIG_ZTEST=y
++CONFIG_TEST_USERSPACE=y
++CONFIG_MAX_THREAD_BYTES=4
+diff --git a/tests/kernel/condvar/sys_condvar/src/main.c b/tests/kernel/condvar/sys_condvar/src/main.c
+new file mode 100644
+index 00000000000..5c02e89927b
+--- /dev/null
++++ b/tests/kernel/condvar/sys_condvar/src/main.c
+@@ -0,0 +1,178 @@
++/*
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <zephyr/kernel.h>
++#include <zephyr/sys/clock.h>
++#include <zephyr/sys/condvar.h>
++#include <zephyr/sys/mutex.h>
++#include <zephyr/ztest.h>
++
++#define STACK_SIZE (1024 + CONFIG_TEST_EXTRA_STACK_SIZE)
++#define NUM_WAITERS 3
++
++#ifdef CONFIG_USERSPACE
++#define ZTEST_USER_OR_NOT ZTEST_USER
++#define WAITER_OPTIONS    (K_USER | K_INHERIT_PERMS)
++#else
++#define ZTEST_USER_OR_NOT ZTEST
++#define WAITER_OPTIONS    0
++#endif
++
++static K_THREAD_STACK_ARRAY_DEFINE(waiter_stack, NUM_WAITERS, STACK_SIZE);
++static struct k_thread waiter_thread[NUM_WAITERS];
++
++static ZTEST_BMEM SYS_MUTEX_DEFINE(mutex);
++static ZTEST_BMEM SYS_CONDVAR_DEFINE(condvar);
++static ZTEST_DMEM SYS_CONDVAR_DEFINE_EXT(mono_condvar, SYS_CLOCK_MONOTONIC);
++static ZTEST_BMEM int ready;
++static ZTEST_BMEM int woken;
++
++static void waiter(void *p1, void *p2, void *p3)
++{
++	ARG_UNUSED(p1);
++	ARG_UNUSED(p2);
++	ARG_UNUSED(p3);
++
++	zassert_ok(sys_mutex_lock(&mutex, K_FOREVER));
++	while (ready == 0) {
++		zassert_ok(sys_condvar_wait(&condvar, &mutex, K_FOREVER));
++	}
++	woken++;
++	zassert_ok(sys_mutex_unlock(&mutex));
++}
++
++static void start_waiters(int n)
++{
++	for (int i = 0; i < n; ++i) {
++		k_thread_create(&waiter_thread[i], waiter_stack[i], STACK_SIZE, waiter, NULL, NULL,
++				NULL, K_PRIO_PREEMPT(1), WAITER_OPTIONS, K_NO_WAIT);
++	}
++	/* let every waiter block */
++	k_msleep(50);
++}
++
++static void join_waiters(int n)
++{
++	for (int i = 0; i < n; ++i) {
++		zassert_ok(k_thread_join(&waiter_thread[i], K_SECONDS(1)));
++	}
++}
++
++ZTEST_USER_OR_NOT(sys_condvar, test_sys_condvar_init)
++{
++	struct sys_condvar cv;
++
++	sys_condvar_init(&cv);
++	zassert_equal(sys_condvar_clock(&cv), SYS_CLOCK_REALTIME);
++	zassert_ok(sys_condvar_destroy(&cv));
++
++	zassert_ok(sys_condvar_init_ext(&cv, SYS_CLOCK_MONOTONIC));
++	zassert_equal(sys_condvar_clock(&cv), SYS_CLOCK_MONOTONIC);
++	zassert_ok(sys_condvar_destroy(&cv));
++
++	zassert_equal(sys_condvar_init_ext(&cv, 0xff), -EINVAL);
++
++	/* a zero-filled object is a valid condition variable on the default clock */
++	cv = (struct sys_condvar){0};
++	zassert_equal(sys_condvar_clock(&cv), SYS_CLOCK_REALTIME);
++	zassert_equal(sys_condvar_clock(&mono_condvar), SYS_CLOCK_MONOTONIC);
++}
++
++ZTEST_USER_OR_NOT(sys_condvar, test_sys_condvar_signal)
++{
++	ready = 0;
++	woken = 0;
++	start_waiters(NUM_WAITERS);
++
++	zassert_ok(sys_mutex_lock(&mutex, K_FOREVER));
++	ready = 1;
++	zassert_ok(sys_condvar_signal(&condvar));
++	zassert_ok(sys_mutex_unlock(&mutex));
++	k_msleep(50);
++	zassert_equal(woken, 1, "signal woke %d waiters", woken);
++
++	for (int i = 1; i < NUM_WAITERS; ++i) {
++		zassert_ok(sys_condvar_signal(&condvar));
++	}
++	join_waiters(NUM_WAITERS);
++	zassert_equal(woken, NUM_WAITERS);
++
++	/* a signal with nobody waiting is not an error and is not remembered */
++	zassert_ok(sys_condvar_signal(&condvar));
++}
++
++ZTEST_USER_OR_NOT(sys_condvar, test_sys_condvar_broadcast)
++{
++	ready = 0;
++	woken = 0;
++	start_waiters(NUM_WAITERS);
++
++	zassert_ok(sys_mutex_lock(&mutex, K_FOREVER));
++	ready = 1;
++	zassert_ok(sys_condvar_broadcast(&condvar));
++	zassert_ok(sys_mutex_unlock(&mutex));
++	join_waiters(NUM_WAITERS);
++	zassert_equal(woken, NUM_WAITERS, "broadcast woke %d waiters", woken);
++}
++
++ZTEST_USER_OR_NOT(sys_condvar, test_sys_condvar_wait)
++{
++	int64_t start;
++
++	zassert_ok(sys_mutex_lock(&mutex, K_FOREVER));
++
++	start = k_uptime_get();
++	zassert_equal(sys_condvar_wait(&condvar, &mutex, K_MSEC(20)), -EAGAIN);
++	zassert_true(k_uptime_get() - start >= 20);
++	/* the mutex is held again after a timeout */
++	zassert_equal(sys_mutex_lock(&mutex, K_NO_WAIT), 0, "recursive relock");
++	zassert_ok(sys_mutex_unlock(&mutex));
++
++	zassert_equal(sys_condvar_wait(&condvar, &mutex, K_NO_WAIT), -EAGAIN);
++	zassert_ok(sys_mutex_unlock(&mutex));
++
++	/* waiting requires the mutex to be locked */
++	zassert_equal(sys_condvar_wait(&condvar, &mutex, K_NO_WAIT), -EINVAL);
++}
++
++ZTEST_USER_OR_NOT(sys_condvar, test_sys_condvar_clockwait)
++{
++	struct timespec abstime;
++
++	zassert_ok(sys_mutex_lock(&mutex, K_FOREVER));
++
++	zassert_ok(sys_clock_gettime(SYS_CLOCK_MONOTONIC, &abstime));
++	abstime.tv_nsec += 20 * NSEC_PER_MSEC;
++	if (abstime.tv_nsec >= NSEC_PER_SEC) {
++		abstime.tv_nsec -= NSEC_PER_SEC;
++		abstime.tv_sec++;
++	}
++	zassert_equal(sys_condvar_clockwait(&condvar, &mutex, SYS_CLOCK_MONOTONIC, &abstime),
++		      -ETIMEDOUT);
++	/* the condition variable's own clock */
++	zassert_equal(sys_condvar_timedwait(&mono_condvar, &mutex, &abstime), -ETIMEDOUT);
++
++	zassert_ok(sys_clock_gettime(SYS_CLOCK_REALTIME, &abstime));
++	zassert_equal(sys_condvar_timedwait(&condvar, &mutex, &abstime), -ETIMEDOUT);
++
++	zassert_equal(sys_condvar_clockwait(&condvar, &mutex, 0xff, &abstime), -EINVAL);
++	abstime.tv_nsec = -1;
++	zassert_equal(sys_condvar_clockwait(&condvar, &mutex, SYS_CLOCK_REALTIME, &abstime),
++		      -EINVAL);
++
++	zassert_ok(sys_mutex_unlock(&mutex));
++}
++
++static void *setup(void)
++{
++#ifdef CONFIG_USERSPACE
++	k_thread_access_grant(k_current_get(), &waiter_thread[0], &waiter_thread[1],
++			      &waiter_thread[2], &waiter_stack[0], &waiter_stack[1],
++			      &waiter_stack[2]);
++#endif
++	return NULL;
++}
++
++ZTEST_SUITE(sys_condvar, NULL, setup, NULL, NULL, NULL);
+diff --git a/tests/kernel/condvar/sys_condvar/testcase.yaml b/tests/kernel/condvar/sys_condvar/testcase.yaml
+new file mode 100644
+index 00000000000..e108e9f729d
+--- /dev/null
++++ b/tests/kernel/condvar/sys_condvar/testcase.yaml
+@@ -0,0 +1,12 @@
++common:
++  tags:
++    - kernel
++    - condvar
++  min_ram: 32
++tests:
++  kernel.condvar.sys_condvar:
++    filter: CONFIG_ARCH_HAS_USERSPACE
++    tags: userspace
++  kernel.condvar.sys_condvar.nouser:
++    extra_configs:
++      - CONFIG_TEST_USERSPACE=n
