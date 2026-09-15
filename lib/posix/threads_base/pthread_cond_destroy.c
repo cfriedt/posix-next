@@ -6,6 +6,7 @@
 
 #include "threads_base_internal.h"
 
+#include <errno.h>
 #include <pthread.h>
 
 int pthread_cond_destroy(pthread_cond_t *cvar)

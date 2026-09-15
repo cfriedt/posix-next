@@ -12,14 +12,11 @@
 
 #include "posix_internal.h"
 
-#include <errno.h>
 #include <pthread.h>
 #include <time.h>
 
 #include <zephyr/kernel.h>
 #include <zephyr/sys/clock.h>
-#include <zephyr/sys/condvar.h>
-#include <zephyr/sys/mutex.h>
 #include <zephyr/sys/thread.h>
 #include <zephyr/sys/util.h>
 #include <zephyr/toolchain.h>
@@ -59,6 +56,12 @@ static ALWAYS_INLINE void posix_thread_attr_init(struct posix_thread_attr *attr)
 	};
 }
 
+#include <errno.h>
+#include <stddef.h>
+
+#include <zephyr/sys/condvar.h>
+#include <zephyr/sys/mutex.h>
+
 /* PTHREAD_MUTEX_INITIALIZER spells out the K_MUTEX_NORMAL options of a struct sys_mutex */
 BUILD_ASSERT(K_MUTEX_NORMAL == 1);
 
@@ -69,9 +72,13 @@ static ALWAYS_INLINE int pthread_mutex_lock_common(pthread_mutex_t *m, k_timeout
 	return (ret == -ENOMEM) ? EAGAIN : -ret;
 }
 
-static ALWAYS_INLINE int cond_wait(pthread_cond_t *cvar, pthread_mutex_t *mu, clockid_t clock_id, const struct timespec *abstime)
+static ALWAYS_INLINE int cond_wait(pthread_cond_t *cvar, pthread_mutex_t *mu, clockid_t clock_id,
+				   const struct timespec *abstime)
 {
 	uint32_t clock;
+
+	/* cancellation point, taken while the mutex is still held */
+	pthread_testcancel();
 
 	if (abstime == NULL) {
 		return -sys_condvar_wait(cvar, mu, K_FOREVER);
