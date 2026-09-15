@@ -120,10 +120,10 @@ index ba8a82d6ed6..45fefc8c374 100644
  {
  	/* single-threaded boot path: the _locked helpers run without the lock */
 diff --git a/kernel/sched.c b/kernel/sched.c
-index 951e6e79ee9..c543fbf6a84 100644
+index 29920969464..bf9e618c398 100644
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
-@@ -1423,7 +1423,7 @@ static ALWAYS_INLINE void halt_thread(struct k_thread *thread, uint8_t new_state
+@@ -1429,7 +1429,7 @@ static ALWAYS_INLINE void halt_thread(struct k_thread *thread, uint8_t new_state
  #endif /* CONFIG_THREAD_ABORT_NEED_CLEANUP */
  
  #if defined(CONFIG_SYS_THREAD) && defined(CONFIG_THREAD_DETACH)
@@ -132,7 +132,7 @@ index 951e6e79ee9..c543fbf6a84 100644
  			sys_thread_destroy(thread);
  		}
  #endif
-@@ -1499,7 +1499,9 @@ static int z_thread_epilogue(struct k_thread *thread, void **result)
+@@ -1505,7 +1505,9 @@ static int z_thread_epilogue(struct k_thread *thread, void **result)
  	}
  #endif
  #ifdef CONFIG_SYS_THREAD
@@ -270,7 +270,7 @@ index deda88211d1..e3844ddf4d1 100644
  	if (child != NULL) {
  		*child = tid;
 diff --git a/lib/os/thread.c b/lib/os/thread.c
-index 49ec16171ae..20df400e11e 100644
+index cac9b752898..56977d03744 100644
 --- a/lib/os/thread.c
 +++ b/lib/os/thread.c
 @@ -14,6 +14,7 @@
@@ -281,9 +281,9 @@ index 49ec16171ae..20df400e11e 100644
  #include <zephyr/sys/thread.h>
  #include <zephyr/sys/elastipool.h>
  #include <zephyr/toolchain.h>
-@@ -1004,6 +1005,10 @@ static void print_stats(const struct ztest_unit_test *test, void *data)
- 	const struct sys_elastipool *const pool[] = {&cond_pool, &mutex_pool, &stack_pool,
- 						     &thread_pool};
+@@ -812,6 +813,10 @@ static void print_stats(const struct ztest_unit_test *test, void *data)
+ 	int type[] = {K_OBJ_THREAD_STACK_ELEMENT, K_OBJ_THREAD};
+ 	const struct sys_elastipool *const pool[] = {&stack_pool, &thread_pool};
  
 +#ifdef CONFIG_SYS_PROCESS
 +	/* reclaim pool leaders of reaped processes before counting */

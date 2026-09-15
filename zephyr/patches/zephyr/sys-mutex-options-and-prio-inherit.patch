@@ -1,0 +1,1340 @@
+diff --git a/doc/kernel/services/synchronization/mutexes.rst b/doc/kernel/services/synchronization/mutexes.rst
+index fa8781d981f..62855b2c22d 100644
+--- a/doc/kernel/services/synchronization/mutexes.rst
++++ b/doc/kernel/services/synchronization/mutexes.rst
+@@ -183,8 +183,11 @@ management mechanism.
+ User Mode Mutex API Reference
+ *****************************
+ 
+-sys_mutex behaves almost exactly like k_mutex, with the added advantage
+-that a sys_mutex instance can reside in user memory. When user mode isn't
+-enabled, sys_mutex behaves like k_mutex.
++A sys_mutex resides in user memory and is locked and unlocked with atomic
++operations on the object itself; the kernel is entered only to block on a
++contended mutex or to wake a waiter. A mutex created with
++:c:macro:`K_MUTEX_PRIO_INHERIT` is backed by a kernel mutex instead, so that
++its owner inherits the priority of the highest-priority waiter
++(:kconfig:option:`CONFIG_SYS_MUTEX_PRIO_INHERIT`).
+ 
+ .. doxygengroup:: user_mutex_apis
+diff --git a/include/zephyr/kernel.h b/include/zephyr/kernel.h
+index 548a4fd746d..ccb75e13a16 100644
+--- a/include/zephyr/kernel.h
++++ b/include/zephyr/kernel.h
+@@ -3368,6 +3368,12 @@ struct k_lifo {
+ /** Mutex option for error checking */
+ #define K_MUTEX_ERRORCHECK 2
+ 
++/**
++ * Mutex option for priority inheritance: always in effect for a k_mutex, selects the
++ * kernel-backed implementation of a sys_mutex.
++ */
++#define K_MUTEX_PRIO_INHERIT BIT(3)
++
+ /**
+  * @brief Get an element from a LIFO queue.
+  *
+diff --git a/include/zephyr/sys/internal/kobject_internal.h b/include/zephyr/sys/internal/kobject_internal.h
+index 24bb04cfc21..f4d2ff52eea 100644
+--- a/include/zephyr/sys/internal/kobject_internal.h
++++ b/include/zephyr/sys/internal/kobject_internal.h
+@@ -30,11 +30,6 @@ struct z_stack_data {
+ 
+ /* Object extra data. Only some objects use this, determined by object type */
+ union k_object_data {
+-#ifdef CONFIG_SYS_MUTEX_IMPL_K_MUTEX
+-	/* Backing mutex for K_OBJ_SYS_MUTEX */
+-	struct k_mutex *mutex;
+-#endif /* CONFIG_SYS_MUTEX_IMPL_K_MUTEX*/
+-
+ 	/* Numerical thread ID for K_OBJ_THREAD */
+ 	unsigned int thread_id;
+ 
+diff --git a/include/zephyr/sys/mutex.h b/include/zephyr/sys/mutex.h
+index 6daa3da8044..d1413e5b34d 100644
+--- a/include/zephyr/sys/mutex.h
++++ b/include/zephyr/sys/mutex.h
+@@ -1,67 +1,60 @@
+ /*
+- * Copyright (c) 2019 Intel Corporation
+- *
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
+  * SPDX-License-Identifier: Apache-2.0
+  */
+ 
+ #ifndef ZEPHYR_INCLUDE_SYS_MUTEX_H_
+ #define ZEPHYR_INCLUDE_SYS_MUTEX_H_
+ 
+-/*
+- * sys_mutex behaves almost exactly like k_mutex, with the added advantage
+- * that a sys_mutex instance can reside in user memory.
+- *
+- * Depending on CONFIG_SYS_MUTEX_IMPL, sys_mutex is implemented either via
+- * a backing k_mutex (preserving priority inheritance) or via atomics on top
+- * of k_futex (allowing uncontended lock/unlock without syscalls on archs
+- * where reading the current thread and atomic ops are both syscall-free).
+- *
+- * Further enhancements will support priority inheritance with atomics once
+- * a corresponding futex is available.
+- */
++#include <stdint.h>
++
++#include <zephyr/sys/atomic_types.h>
++#include <zephyr/sys/clock.h>
++#include <zephyr/sys/util.h>
++#include <zephyr/toolchain.h>
+ 
+ #ifdef __cplusplus
+ extern "C" {
+ #endif
+ 
+-#ifdef CONFIG_USERSPACE
+-#include <zephyr/kernel.h>
+-#include <zephyr/sys/atomic.h>
+-#include <zephyr/types.h>
+-#include <zephyr/sys_clock.h>
+-
+ /**
+- * @brief Userspace mutex
++ * @defgroup user_mutex_apis User mode mutex APIs
++ * @ingroup usermode_apis
++ *
++ * A sys_mutex lives in user memory. Uncontended lock and unlock operations are
++ * atomic operations on the object itself; the kernel is entered only to block
++ * on a contended mutex (k_futex_wait()) or to wake a waiter (k_futex_wake()).
++ * Any thread that can write the object's memory can use it, so the trust
++ * boundary is the memory domain rather than per-thread kernel object
++ * permissions.
++ *
++ * A mutex created with @c K_MUTEX_PRIO_INHERIT is backed by a kernel mutex
++ * that the kernel associates with the object's address. Every operation on it
++ * is a system call, the kernel enforces ownership, and the owner inherits the
++ * priority of the highest-priority waiter.
++ * @{
+  */
++
++struct k_thread;
++
++/** @brief Mutex that lives in user memory */
+ struct sys_mutex {
+ 	/** @cond INTERNAL_HIDDEN */
+-#ifdef CONFIG_SYS_MUTEX_IMPL_K_MUTEX
++	/* the leading words are a struct k_futex: lock word, kernel-maintained waiter count */
+ 	atomic_t val;
+-#elif defined(CONFIG_SYS_MUTEX_IMPL_FUTEX)
+-	struct k_futex futex;
+-	uint32_t counter;
+-#endif  /* CONFIG_SYS_MUTEX_IMPL_FUTEX */
++	atomic_t waiters;
++	struct k_thread *owner;
++	uint16_t count;
++	uint8_t options;
+ 	/** @endcond */
+ };
+ 
+-#ifdef CONFIG_SYS_MUTEX_IMPL_K_MUTEX
+-__syscall int z_sys_mutex_kernel_lock(struct sys_mutex *mutex, k_timeout_t timeout);
+-
+-__syscall int z_sys_mutex_kernel_unlock(struct sys_mutex *mutex);
+-
+-#include <zephyr/syscalls/mutex.h>
+-#endif /* CONFIG_SYS_MUTEX_IMPL_K_MUTEX */
+-
+-/**
+- * @defgroup user_mutex_apis User mode mutex APIs
+- * @ingroup usermode_apis
+- * @{
+- */
+-
+ /**
+  * @brief Statically define and initialize a sys_mutex
+  *
+- * The mutex can be accessed outside the module where it is defined using:
++ * The mutex is recursive and does not use priority inheritance; see
++ * @ref SYS_MUTEX_DEFINE_EXT for other configurations. It can be accessed
++ * outside the module where it is defined using:
+  *
+  * @code extern struct sys_mutex <name>; @endcode
+  *
+@@ -69,26 +62,59 @@ __syscall int z_sys_mutex_kernel_unlock(struct sys_mutex *mutex);
+  *
+  * @param name Name of the mutex.
+  */
+-#if defined(CONFIG_SYS_MUTEX_IMPL_FUTEX)
+-#define SYS_MUTEX_DEFINE(name) struct sys_mutex name = {.futex = {0}, .counter = 0}
+-#else
+ #define SYS_MUTEX_DEFINE(name) struct sys_mutex name
+-#endif
++
++/**
++ * @brief Statically define and initialize a sys_mutex with options
++ *
++ * @param name Name of the mutex.
++ * @param opts A `K_MUTEX_*` type, optionally combined with @c K_MUTEX_PRIO_INHERIT.
++ */
++#define SYS_MUTEX_DEFINE_EXT(name, opts) struct sys_mutex name = {.options = (opts)}
+ 
+ /**
+  * @brief Initialize a mutex.
+  *
+- * This routine initializes a mutex object, prior to its first use.
++ * This routine initializes a mutex object, prior to its first use. The mutex
++ * is recursive and does not use priority inheritance.
+  *
+  * Upon completion, the mutex is available and does not have an owner.
+  *
+- * This routine is only necessary to call when the mutex was not created
+- * with SYS_MUTEX_DEFINE().
+- *
+  * @param mutex Address of the mutex.
+  */
+ void sys_mutex_init(struct sys_mutex *mutex);
+ 
++/**
++ * @brief Initialize a mutex with options.
++ *
++ * Upon completion, the mutex is available and does not have an owner.
++ *
++ * @param mutex Address of the mutex.
++ * @param options A `K_MUTEX_*` type (@c K_MUTEX_RECURSIVE, @c K_MUTEX_NORMAL or
++ *                @c K_MUTEX_ERRORCHECK), optionally combined with
++ *                @c K_MUTEX_PRIO_INHERIT.
++ *
++ * @retval 0 Mutex initialized.
++ * @retval -EINVAL Invalid options.
++ * @retval -ENOTSUP Priority inheritance requested without
++ *                  @kconfig{CONFIG_SYS_MUTEX_PRIO_INHERIT}.
++ */
++int sys_mutex_init_ext(struct sys_mutex *mutex, uint32_t options);
++
++/**
++ * @brief Destroy a mutex.
++ *
++ * Releases the kernel resources of a priority-inheritance mutex. The mutex
++ * must be unlocked and must be initialized again before any further use.
++ *
++ * @param mutex Address of the mutex.
++ *
++ * @retval 0 Mutex destroyed.
++ * @retval -EBUSY Mutex is locked.
++ * @retval -EACCES Caller has no access to provided mutex address.
++ */
++int sys_mutex_destroy(struct sys_mutex *mutex);
++
+ /**
+  * @brief Lock a mutex.
+  *
+@@ -96,8 +122,10 @@ void sys_mutex_init(struct sys_mutex *mutex);
+  * the calling thread waits until the mutex becomes available or until
+  * a timeout occurs.
+  *
+- * A thread is permitted to lock a mutex it has already locked. The operation
+- * completes immediately and the lock count is increased by 1.
++ * A thread is permitted to lock a @c K_MUTEX_RECURSIVE mutex it has already
++ * locked. The operation completes immediately and the lock count is increased
++ * by 1. Relocking a @c K_MUTEX_ERRORCHECK mutex fails with -EDEADLK, and
++ * relocking a @c K_MUTEX_NORMAL mutex waits like any other contended lock.
+  *
+  * @param mutex Address of the mutex, which may reside in user memory
+  * @param timeout Waiting period to lock the mutex,
+@@ -106,8 +134,9 @@ void sys_mutex_init(struct sys_mutex *mutex);
+  * @retval 0 Mutex locked.
+  * @retval -EBUSY Returned without waiting.
+  * @retval -EAGAIN Waiting period timed out.
++ * @retval -EDEADLK Caller already owns an error-checking mutex.
+  * @retval -EACCES Caller has no access to provided mutex address
+- * @retval -EINVAL Provided mutex not recognized by the kernel
++ * @retval -ENOMEM No kernel mutex is available to back a priority-inheritance mutex.
+  */
+ int sys_mutex_lock(struct sys_mutex *mutex, k_timeout_t timeout);
+ 
+@@ -121,44 +150,24 @@ int sys_mutex_lock(struct sys_mutex *mutex, k_timeout_t timeout);
+  * the calling thread as many times as it was previously locked by that
+  * thread.
+  *
++ * A @c K_MUTEX_NORMAL mutex without priority inheritance does not record its
++ * owner, so it cannot detect an unlock by a thread other than the owner.
++ *
+  * @param mutex Address of the mutex, which may reside in user memory
+  * @retval 0 Mutex unlocked
+  * @retval -EACCES Caller has no access to provided mutex address
+- * @retval -EINVAL Provided mutex not recognized by the kernel or mutex wasn't
+- *                 locked
++ * @retval -EINVAL Mutex wasn't locked
+  * @retval -EPERM Caller does not own the mutex
+  */
+ int sys_mutex_unlock(struct sys_mutex *mutex);
+ 
+-#else
+-#include <zephyr/kernel.h>
+-#include <zephyr/kernel_structs.h>
+-
+-struct sys_mutex {
+-	struct k_mutex kernel_mutex;
+-};
+-
+-#define SYS_MUTEX_DEFINE(name) \
+-	struct sys_mutex name = { \
+-		.kernel_mutex = Z_MUTEX_INITIALIZER(name.kernel_mutex) \
+-	}
+-
+-static inline void sys_mutex_init(struct sys_mutex *mutex)
+-{
+-	k_mutex_init(&mutex->kernel_mutex);
+-}
+-
+-static inline int sys_mutex_lock(struct sys_mutex *mutex, k_timeout_t timeout)
+-{
+-	return k_mutex_lock(&mutex->kernel_mutex, timeout);
+-}
++/** @cond INTERNAL_HIDDEN */
++__syscall int z_sys_mutex_kernel_lock(struct sys_mutex *mutex, k_timeout_t timeout);
+ 
+-static inline int sys_mutex_unlock(struct sys_mutex *mutex)
+-{
+-	return k_mutex_unlock(&mutex->kernel_mutex);
+-}
++__syscall int z_sys_mutex_kernel_unlock(struct sys_mutex *mutex);
+ 
+-#endif /* CONFIG_USERSPACE */
++__syscall int z_sys_mutex_kernel_destroy(struct sys_mutex *mutex);
++/** @endcond */
+ 
+ /**
+  * @}
+@@ -168,4 +177,6 @@ static inline int sys_mutex_unlock(struct sys_mutex *mutex)
+ }
+ #endif
+ 
++#include <zephyr/syscalls/mutex.h>
++
+ #endif /* ZEPHYR_INCLUDE_SYS_MUTEX_H_ */
+diff --git a/kernel/Kconfig b/kernel/Kconfig
+index 0074921bf37..16d1ea453b6 100644
+--- a/kernel/Kconfig
++++ b/kernel/Kconfig
+@@ -1219,28 +1219,6 @@ config BOUNDS_CHECK_BYPASS_MITIGATION
+ 	  in from untrusted sources (user mode threads). When disabled, these
+ 	  macros do nothing.
+ 
+-choice SYS_MUTEX_IMPL
+-	prompt "Implementation for sys_mutex"
+-	depends on USERSPACE
+-	default SYS_MUTEX_IMPL_FUTEX if CURRENT_THREAD_USE_TLS && !ATOMIC_OPERATIONS_C
+-	default SYS_MUTEX_IMPL_K_MUTEX
+-	help
+-	  Choose which implementation to use for sys_mutex.
+-
+-config SYS_MUTEX_IMPL_K_MUTEX
+-	bool "Via k_mutex"
+-	help
+-	  Implement sys_mutex via a k_mutex instance.
+-
+-config SYS_MUTEX_IMPL_FUTEX
+-	bool "Via futex"
+-	help
+-	  Implement sys_mutex via atomics and futex. This allows locking and
+-	  unlocking uncontended mutexes without syscalls provided that the current
+-	  thread pointer and atomics work without syscalls.
+-
+-endchoice
+-
+ config HW_SHADOW_STACK
+ 	bool "Use hardware shadow stack mechanism to provide stack protection [EXPERIMENTAL]"
+ 	depends on ARCH_HAS_HW_SHADOW_STACK
+diff --git a/kernel/userspace.c b/kernel/userspace.c
+index 700819554aa..b4078dacc28 100644
+--- a/kernel/userspace.c
++++ b/kernel/userspace.c
+@@ -424,10 +424,7 @@ static void *z_object_alloc(enum k_objects otype, size_t size)
+ 		break;
+ 	/* The following are currently not allowed at all */
+ 	case K_OBJ_FUTEX:			/* Lives in user memory */
+-#ifdef CONFIG_SYS_MUTEX_IMPL_K_MUTEX
+-	case K_OBJ_SYS_MUTEX:  /* Lives in user memory */
+-#endif                         /* CONFIG_SYS_MUTEX_IMPL_K_MUTEX */
+-	case K_OBJ_NET_SOCKET: /* Indeterminate size */
++	case K_OBJ_NET_SOCKET:			/* Indeterminate size */
+ 		LOG_ERR("forbidden object type '%s' requested",
+ 			otype_to_str(otype));
+ 		return NULL;
+diff --git a/lib/os/CMakeLists.txt b/lib/os/CMakeLists.txt
+index 5875f4d470d..c127423bacb 100644
+--- a/lib/os/CMakeLists.txt
++++ b/lib/os/CMakeLists.txt
+@@ -57,9 +57,9 @@ if(CONFIG_ASSERT OR CONFIG_ASSERT_VERBOSE)
+ zephyr_sources(assert.c)
+ endif()
+ 
++zephyr_sources_ifdef(CONFIG_MULTITHREADING mutex.c)
++
+ zephyr_sources_ifdef(CONFIG_USERSPACE user_work.c)
+-zephyr_sources_ifdef(CONFIG_SYS_MUTEX_IMPL_K_MUTEX mutex_kernel.c)
+-zephyr_sources_ifdef(CONFIG_SYS_MUTEX_IMPL_FUTEX mutex_futex.c)
+ 
+ zephyr_sources_ifdef(CONFIG_MPSC_PBUF mpsc_pbuf.c)
+ 
+diff --git a/lib/os/Kconfig b/lib/os/Kconfig
+index 1e97a60c90c..3efc9a49d9f 100644
+--- a/lib/os/Kconfig
++++ b/lib/os/Kconfig
+@@ -144,6 +144,7 @@ config POWEROFF
+ 	  Enable support for system power off.
+ 
+ rsource "Kconfig.cbprintf"
++rsource "Kconfig.sys_mutex"
+ rsource "zvfs/Kconfig"
+ rsource "cpu_load/Kconfig"
+ 
+diff --git a/lib/os/Kconfig.sys_mutex b/lib/os/Kconfig.sys_mutex
+new file mode 100644
+index 00000000000..7ef799a9bf0
+--- /dev/null
++++ b/lib/os/Kconfig.sys_mutex
+@@ -0,0 +1,35 @@
++# SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++# SPDX-License-Identifier: Apache-2.0
++
++config SYS_MUTEX_PRIO_INHERIT
++	bool "Priority inheritance for sys_mutex"
++	depends on MULTITHREADING
++	select MUTEX_OPTIONS
++	select SYS_ELASTIPOOL
++	select SYS_HASH_MAP
++	select SYS_HASH_FUNC32
++	help
++	  Support the K_MUTEX_PRIO_INHERIT option of sys_mutex_init_ext() and
++	  SYS_MUTEX_DEFINE_EXT(). Such a mutex is backed by a kernel mutex that
++	  the kernel associates with the address of the user object, so every
++	  operation on it is a system call and the owner inherits the priority
++	  of the highest-priority waiter.
++
++if SYS_MUTEX_PRIO_INHERIT
++
++config SYS_MUTEX_PRIO_INHERIT_MIN
++	int "Minimum number of priority-inheritance sys_mutex objects"
++	default 0
++	help
++	  Number of kernel mutexes statically reserved for backing
++	  priority-inheritance sys_mutex objects.
++
++config SYS_MUTEX_PRIO_INHERIT_MAX
++	int "Maximum number of priority-inheritance sys_mutex objects"
++	default SYS_MUTEX_PRIO_INHERIT_MIN
++	help
++	  Maximum number of priority-inheritance sys_mutex objects in use at
++	  once. Backing kernel mutexes beyond SYS_MUTEX_PRIO_INHERIT_MIN come
++	  from the kernel heap.
++
++endif # SYS_MUTEX_PRIO_INHERIT
+diff --git a/lib/os/mutex.c b/lib/os/mutex.c
+new file mode 100644
+index 00000000000..100257332bd
+--- /dev/null
++++ b/lib/os/mutex.c
+@@ -0,0 +1,324 @@
++/*
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <errno.h>
++#include <stddef.h>
++#include <stdint.h>
++
++#include <zephyr/internal/syscall_handler.h>
++#include <zephyr/kernel.h>
++#include <zephyr/sys/atomic.h>
++#include <zephyr/sys/clock.h>
++#include <zephyr/sys/elastipool.h>
++#include <zephyr/sys/hash_map.h>
++#include <zephyr/sys/mutex.h>
++#include <zephyr/sys/util.h>
++
++BUILD_ASSERT(offsetof(struct sys_mutex, val) == offsetof(struct k_futex, val));
++BUILD_ASSERT(offsetof(struct sys_mutex, waiters) == offsetof(struct k_futex, waiters));
++BUILD_ASSERT((K_MUTEX_PRIO_INHERIT & K_MUTEX_TYPE_MASK) == 0);
++BUILD_ASSERT((K_MUTEX_TYPE_MASK | K_MUTEX_PRIO_INHERIT) <= UINT8_MAX);
++
++#define SYS_MUTEX_UNLOCKED  0
++#define SYS_MUTEX_LOCKED    1
++#define SYS_MUTEX_CONTENDED 2
++
++static inline struct k_futex *mutex_futex(struct sys_mutex *mutex)
++{
++	return (struct k_futex *)&mutex->val;
++}
++
++static inline bool mutex_is_pi(const struct sys_mutex *mutex)
++{
++	return (mutex->options & K_MUTEX_PRIO_INHERIT) != 0;
++}
++
++static inline uint32_t mutex_type(const struct sys_mutex *mutex)
++{
++	return K_MUTEX_TYPE(mutex->options);
++}
++
++void sys_mutex_init(struct sys_mutex *mutex)
++{
++	(void)sys_mutex_init_ext(mutex, K_MUTEX_RECURSIVE);
++}
++
++int sys_mutex_init_ext(struct sys_mutex *mutex, uint32_t options)
++{
++	switch (K_MUTEX_TYPE(options)) {
++	case K_MUTEX_RECURSIVE:
++	case K_MUTEX_NORMAL:
++	case K_MUTEX_ERRORCHECK:
++		break;
++	default:
++		return -EINVAL;
++	}
++
++	if ((options & ~(K_MUTEX_TYPE_MASK | K_MUTEX_PRIO_INHERIT)) != 0) {
++		return -EINVAL;
++	}
++
++	if (((options & K_MUTEX_PRIO_INHERIT) != 0) &&
++	    !IS_ENABLED(CONFIG_SYS_MUTEX_PRIO_INHERIT)) {
++		return -ENOTSUP;
++	}
++
++	*mutex = (struct sys_mutex){.options = options};
++
++	return 0;
++}
++
++int sys_mutex_destroy(struct sys_mutex *mutex)
++{
++	int ret;
++
++	if (mutex_is_pi(mutex)) {
++		ret = z_sys_mutex_kernel_destroy(mutex);
++		if (ret < 0) {
++			return ret;
++		}
++	} else if (atomic_get(&mutex->val) != SYS_MUTEX_UNLOCKED) {
++		return -EBUSY;
++	}
++
++	*mutex = (struct sys_mutex){0};
++
++	return 0;
++}
++
++int sys_mutex_lock(struct sys_mutex *mutex, k_timeout_t timeout)
++{
++	int ret;
++	atomic_val_t val;
++	k_timepoint_t end;
++	k_tid_t self = NULL;
++
++	if (mutex_is_pi(mutex)) {
++		return z_sys_mutex_kernel_lock(mutex, timeout);
++	}
++
++	if (mutex_type(mutex) != K_MUTEX_NORMAL) {
++		self = k_current_get();
++		if ((atomic_get(&mutex->val) != SYS_MUTEX_UNLOCKED) && (mutex->owner == self)) {
++			if (mutex_type(mutex) == K_MUTEX_ERRORCHECK) {
++				return -EDEADLK;
++			}
++			if (mutex->count == UINT16_MAX) {
++				return -EAGAIN;
++			}
++			mutex->count++;
++			return 0;
++		}
++	}
++
++	if (!atomic_cas(&mutex->val, SYS_MUTEX_UNLOCKED, SYS_MUTEX_LOCKED)) {
++		if (K_TIMEOUT_EQ(timeout, K_NO_WAIT)) {
++			return -EBUSY;
++		}
++
++		end = sys_timepoint_calc(timeout);
++		val = atomic_set(&mutex->val, SYS_MUTEX_CONTENDED);
++		while (val != SYS_MUTEX_UNLOCKED) {
++			ret = k_futex_wait(mutex_futex(mutex), SYS_MUTEX_CONTENDED,
++					   sys_timepoint_timeout(end));
++			if (ret == -ETIMEDOUT) {
++				return -EAGAIN;
++			}
++			if ((ret < 0) && (ret != -EAGAIN)) {
++				return ret;
++			}
++			val = atomic_set(&mutex->val, SYS_MUTEX_CONTENDED);
++		}
++	}
++
++	if (mutex_type(mutex) != K_MUTEX_NORMAL) {
++		mutex->owner = self;
++		mutex->count = 0;
++	}
++
++	return 0;
++}
++
++int sys_mutex_unlock(struct sys_mutex *mutex)
++{
++	if (mutex_is_pi(mutex)) {
++		return z_sys_mutex_kernel_unlock(mutex);
++	}
++
++	if (atomic_get(&mutex->val) == SYS_MUTEX_UNLOCKED) {
++		return -EINVAL;
++	}
++
++	if (mutex_type(mutex) != K_MUTEX_NORMAL) {
++		if (mutex->owner != k_current_get()) {
++			return -EPERM;
++		}
++		if (mutex->count > 0) {
++			mutex->count--;
++			return 0;
++		}
++		mutex->owner = NULL;
++	}
++
++	if (atomic_dec(&mutex->val) != SYS_MUTEX_LOCKED) {
++		atomic_set(&mutex->val, SYS_MUTEX_UNLOCKED);
++		(void)k_futex_wake(mutex_futex(mutex), false);
++	}
++
++	return 0;
++}
++
++#ifdef CONFIG_SYS_MUTEX_PRIO_INHERIT
++
++BUILD_ASSERT(CONFIG_SYS_MUTEX_PRIO_INHERIT_MIN >= 0);
++BUILD_ASSERT(CONFIG_SYS_MUTEX_PRIO_INHERIT_MAX >= CONFIG_SYS_MUTEX_PRIO_INHERIT_MIN);
++
++/*
++ * The kernel mutex behind a priority-inheritance sys_mutex is found by the
++ * address of the user object, never through its contents. Kernel mutexes are
++ * drawn from this pool on first lock and returned on destroy.
++ */
++#define PI_MUTEX_INIT(idx, name) Z_MUTEX_INITIALIZER(name[idx])
++static struct k_mutex pi_mutex_storage[] = {
++	LISTIFY(CONFIG_SYS_MUTEX_PRIO_INHERIT_MIN, PI_MUTEX_INIT, (,), pi_mutex_storage)};
++SYS_ELASTIPOOL_DEFINE_ADVANCED(pi_mutex_pool, sizeof(struct k_mutex), __alignof(struct k_mutex),
++			       CONFIG_SYS_MUTEX_PRIO_INHERIT_MIN, CONFIG_SYS_MUTEX_PRIO_INHERIT_MAX,
++			       SYS_ELASTIPOOL_THREAD_HEAP_ALLOC_FN(CONFIG_SYS_MUTEX_PRIO_INHERIT_MIN,
++								   CONFIG_SYS_MUTEX_PRIO_INHERIT_MAX),
++			       pi_mutex_storage, static);
++SYS_HASHMAP_DEFAULT_DEFINE_STATIC_ADVANCED(pi_mutex_map, sys_hash32, sys_elastipool_map_alloc,
++					   SYS_HASHMAP_CONFIG(SIZE_MAX,
++							      SYS_HASHMAP_DEFAULT_LOAD_FACTOR));
++static struct k_spinlock pi_mutex_lock;
++
++static struct k_mutex *pi_mutex_get(struct sys_mutex *mutex, bool create)
++{
++	int ret;
++	uint64_t value;
++	k_spinlock_key_t key;
++	struct k_mutex *kmutex = NULL;
++
++	key = k_spin_lock(&pi_mutex_lock);
++	if (sys_hashmap_get(&pi_mutex_map, (uintptr_t)mutex, &value)) {
++		kmutex = (struct k_mutex *)(uintptr_t)value;
++	} else if (create && (sys_elastipool_alloc(&pi_mutex_pool, (void **)&kmutex) == 0)) {
++		(void)z_impl_k_mutex_init_ext(kmutex, K_MUTEX_TYPE(mutex->options));
++		ret = sys_hashmap_insert(&pi_mutex_map, (uintptr_t)mutex, (uintptr_t)kmutex, NULL);
++		if (ret < 0) {
++			(void)sys_elastipool_free(&pi_mutex_pool, kmutex);
++			kmutex = NULL;
++		}
++	}
++	k_spin_unlock(&pi_mutex_lock, key);
++
++	return kmutex;
++}
++
++static void pi_mutex_put(struct sys_mutex *mutex, struct k_mutex *kmutex)
++{
++	k_spinlock_key_t key;
++
++	key = k_spin_lock(&pi_mutex_lock);
++	(void)sys_hashmap_remove(&pi_mutex_map, (uintptr_t)mutex, NULL);
++	(void)sys_elastipool_free(&pi_mutex_pool, kmutex);
++	k_spin_unlock(&pi_mutex_lock, key);
++}
++
++int z_impl_z_sys_mutex_kernel_lock(struct sys_mutex *mutex, k_timeout_t timeout)
++{
++	struct k_mutex *kmutex = pi_mutex_get(mutex, true);
++
++	if (kmutex == NULL) {
++		return -ENOMEM;
++	}
++
++	return k_mutex_lock(kmutex, timeout);
++}
++
++int z_impl_z_sys_mutex_kernel_unlock(struct sys_mutex *mutex)
++{
++	struct k_mutex *kmutex = pi_mutex_get(mutex, false);
++
++	if ((kmutex == NULL) || (kmutex->lock_count == 0U)) {
++		return -EINVAL;
++	}
++
++	return k_mutex_unlock(kmutex);
++}
++
++int z_impl_z_sys_mutex_kernel_destroy(struct sys_mutex *mutex)
++{
++	struct k_mutex *kmutex = pi_mutex_get(mutex, false);
++
++	if (kmutex == NULL) {
++		return 0;
++	}
++
++	if (kmutex->lock_count != 0U) {
++		return -EBUSY;
++	}
++
++	pi_mutex_put(mutex, kmutex);
++
++	return 0;
++}
++
++#else /* CONFIG_SYS_MUTEX_PRIO_INHERIT */
++
++int z_impl_z_sys_mutex_kernel_lock(struct sys_mutex *mutex, k_timeout_t timeout)
++{
++	ARG_UNUSED(mutex);
++	ARG_UNUSED(timeout);
++
++	return -ENOTSUP;
++}
++
++int z_impl_z_sys_mutex_kernel_unlock(struct sys_mutex *mutex)
++{
++	ARG_UNUSED(mutex);
++
++	return -ENOTSUP;
++}
++
++int z_impl_z_sys_mutex_kernel_destroy(struct sys_mutex *mutex)
++{
++	ARG_UNUSED(mutex);
++
++	return -ENOTSUP;
++}
++
++#endif /* CONFIG_SYS_MUTEX_PRIO_INHERIT */
++
++#ifdef CONFIG_USERSPACE
++static inline int z_vrfy_z_sys_mutex_kernel_lock(struct sys_mutex *mutex, k_timeout_t timeout)
++{
++	if (K_SYSCALL_MEMORY_WRITE(mutex, sizeof(struct sys_mutex)) != 0) {
++		return -EACCES;
++	}
++
++	return z_impl_z_sys_mutex_kernel_lock(mutex, timeout);
++}
++#include <zephyr/syscalls/z_sys_mutex_kernel_lock_mrsh.c>
++
++static inline int z_vrfy_z_sys_mutex_kernel_unlock(struct sys_mutex *mutex)
++{
++	if (K_SYSCALL_MEMORY_WRITE(mutex, sizeof(struct sys_mutex)) != 0) {
++		return -EACCES;
++	}
++
++	return z_impl_z_sys_mutex_kernel_unlock(mutex);
++}
++#include <zephyr/syscalls/z_sys_mutex_kernel_unlock_mrsh.c>
++
++static inline int z_vrfy_z_sys_mutex_kernel_destroy(struct sys_mutex *mutex)
++{
++	if (K_SYSCALL_MEMORY_WRITE(mutex, sizeof(struct sys_mutex)) != 0) {
++		return -EACCES;
++	}
++
++	return z_impl_z_sys_mutex_kernel_destroy(mutex);
++}
++#include <zephyr/syscalls/z_sys_mutex_kernel_destroy_mrsh.c>
++#endif /* CONFIG_USERSPACE */
+diff --git a/lib/os/mutex_futex.c b/lib/os/mutex_futex.c
+deleted file mode 100644
+index 73b1087c589..00000000000
+--- a/lib/os/mutex_futex.c
++++ /dev/null
+@@ -1,111 +0,0 @@
+-/*
+- * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
+- * SPDX-License-Identifier: Apache-2.0
+- */
+-
+-#include <zephyr/sys/mutex.h>
+-#include <zephyr/internal/syscall_handler.h>
+-
+-/* Use the LSB of the futex value as indicator that there are waiters;
+- * TID is the address of the thread object, which should be 4-byte aligned, and
+- * therefore leave the lower two bits free
+- */
+-#define HAS_WAITER BIT(0)
+-#define TID_MASK   (~HAS_WAITER)
+-
+-void sys_mutex_init(struct sys_mutex *mutex)
+-{
+-	(void)atomic_set(&mutex->futex.val, 0);
+-	mutex->counter = 0;
+-}
+-
+-int sys_mutex_lock(struct sys_mutex *mutex, k_timeout_t timeout)
+-{
+-	int ret = 0;
+-	atomic_t current_value, new_value, target_value;
+-	k_tid_t tid = k_current_get();
+-	atomic_t *target = &mutex->futex.val;
+-
+-	target_value = (atomic_t)(uintptr_t)tid;
+-	do {
+-		/* Try to lock mutex; if this works, we are the owner */
+-		if (atomic_cas(target, 0, target_value)) {
+-			mutex->counter = 1;
+-			return 0;
+-		}
+-
+-		current_value = atomic_get(target);
+-		/* In the unlikely event that it got unlocked just after our attempt,
+-		 * try locking again
+-		 */
+-		if (unlikely(current_value == 0)) {
+-			continue;
+-		}
+-		/* Increase counter if owner tries to lock again */
+-		if ((current_value & TID_MASK) == (atomic_t)(uintptr_t)tid) {
+-			if (mutex->counter == UINT32_MAX) {
+-				/* Should never happen */
+-				return -EFAULT;
+-			}
+-			mutex->counter++;
+-			return 0;
+-		}
+-
+-		/* Indicate that the mutex is contended */
+-		target_value |= HAS_WAITER;
+-		new_value = current_value | HAS_WAITER;
+-		/* If no other thread is waiting already, set indicator before starting
+-		 * to wait, so that the owner will call k_futex_wake when unlocking;
+-		 * we do not keep track of the number of waiters, which is why the last
+-		 * owner will unnecessarily call wakeup;
+-		 * the bit gets cleared when the mutex is acquired again without
+-		 * contention
+-		 */
+-		if (new_value != current_value) {
+-			(void)atomic_cas(target, current_value, new_value);
+-		}
+-
+-		ret = k_futex_wait(&mutex->futex, new_value, timeout);
+-	} while (ret == 0 || ret == -EAGAIN);
+-
+-	if (ret == -ETIMEDOUT) {
+-		ret = K_TIMEOUT_EQ(timeout, K_NO_WAIT) ? -EBUSY : -EAGAIN;
+-	}
+-
+-	return ret;
+-}
+-
+-int sys_mutex_unlock(struct sys_mutex *mutex)
+-{
+-	int ret = 0;
+-	atomic_t current_value;
+-	k_tid_t tid = k_current_get();
+-	atomic_t *target = &mutex->futex.val;
+-
+-	current_value = atomic_get(target);
+-	if (unlikely(current_value == 0)) {
+-		return -EINVAL;
+-	}
+-	if (unlikely((current_value & TID_MASK) != (atomic_t)(uintptr_t)tid)) {
+-		return -EPERM;
+-	}
+-
+-	if (--mutex->counter == 0) {
+-		if (unlikely(!atomic_cas(target, current_value, 0))) {
+-			/* In the unlikely event that a waiter was added after our read,
+-			 * try again with the waiter bit
+-			 */
+-			current_value |= HAS_WAITER;
+-			if (unlikely(!atomic_cas(target, current_value, 0))) {
+-				/* Should never happen */
+-				return -EFAULT;
+-			}
+-		}
+-
+-		if (current_value & HAS_WAITER) {
+-			ret = k_futex_wake(&mutex->futex, false) >= 0 ? 0 : -EINVAL;
+-		}
+-	}
+-
+-	return ret;
+-}
+diff --git a/lib/os/mutex_kernel.c b/lib/os/mutex_kernel.c
+deleted file mode 100644
+index 327a3750bc0..00000000000
+--- a/lib/os/mutex_kernel.c
++++ /dev/null
+@@ -1,94 +0,0 @@
+-/*
+- * Copyright (c) 2019 Intel Corporation
+- *
+- * SPDX-License-Identifier: Apache-2.0
+- */
+-
+-#include <zephyr/kernel.h>
+-#include <zephyr/sys/mutex.h>
+-#include <zephyr/internal/syscall_handler.h>
+-#include <zephyr/kernel_structs.h>
+-
+-static struct k_mutex *get_k_mutex(struct sys_mutex *mutex)
+-{
+-	struct k_object *obj;
+-
+-	obj = k_object_find(mutex);
+-	if ((obj == NULL) || (obj->type != K_OBJ_SYS_MUTEX)) {
+-		return NULL;
+-	}
+-
+-	return obj->data.mutex;
+-}
+-
+-static bool check_sys_mutex_addr(struct sys_mutex *addr)
+-{
+-	/* sys_mutex memory is never touched, just used to lookup the
+-	 * underlying k_mutex, but we don't want threads using mutexes
+-	 * that are outside their memory domain
+-	 */
+-	return K_SYSCALL_MEMORY_WRITE(addr, sizeof(struct sys_mutex));
+-}
+-
+-int z_impl_z_sys_mutex_kernel_lock(struct sys_mutex *mutex, k_timeout_t timeout)
+-{
+-	struct k_mutex *kernel_mutex = get_k_mutex(mutex);
+-
+-	if (kernel_mutex == NULL) {
+-		return -EINVAL;
+-	}
+-
+-	return k_mutex_lock(kernel_mutex, timeout);
+-}
+-
+-static inline int z_vrfy_z_sys_mutex_kernel_lock(struct sys_mutex *mutex, k_timeout_t timeout)
+-{
+-	if (check_sys_mutex_addr(mutex)) {
+-		return -EACCES;
+-	}
+-
+-	return z_impl_z_sys_mutex_kernel_lock(mutex, timeout);
+-}
+-#include <zephyr/syscalls/z_sys_mutex_kernel_lock_mrsh.c>
+-
+-int z_impl_z_sys_mutex_kernel_unlock(struct sys_mutex *mutex)
+-{
+-	struct k_mutex *kernel_mutex = get_k_mutex(mutex);
+-
+-	if ((kernel_mutex == NULL) || (kernel_mutex->lock_count == 0)) {
+-		return -EINVAL;
+-	}
+-
+-	return k_mutex_unlock(kernel_mutex);
+-}
+-
+-static inline int z_vrfy_z_sys_mutex_kernel_unlock(struct sys_mutex *mutex)
+-{
+-	if (check_sys_mutex_addr(mutex)) {
+-		return -EACCES;
+-	}
+-
+-	return z_impl_z_sys_mutex_kernel_unlock(mutex);
+-}
+-#include <zephyr/syscalls/z_sys_mutex_kernel_unlock_mrsh.c>
+-
+-void sys_mutex_init(struct sys_mutex *mutex)
+-{
+-	ARG_UNUSED(mutex);
+-
+-	/* Nothing to do, kernel-side data structures are initialized at
+-	 * boot
+-	 */
+-}
+-
+-int sys_mutex_lock(struct sys_mutex *mutex, k_timeout_t timeout)
+-{
+-	/* For now, make the syscall unconditionally */
+-	return z_sys_mutex_kernel_lock(mutex, timeout);
+-}
+-
+-int sys_mutex_unlock(struct sys_mutex *mutex)
+-{
+-	/* For now, make the syscall unconditionally */
+-	return z_sys_mutex_kernel_unlock(mutex);
+-}
+diff --git a/scripts/build/gen_kobject_list.py b/scripts/build/gen_kobject_list.py
+index 5ae0516b339..7e54926ca78 100755
+--- a/scripts/build/gen_kobject_list.py
++++ b/scripts/build/gen_kobject_list.py
+@@ -105,7 +105,6 @@ kobjects = OrderedDict(
+         ("device", (None, False, False)),
+         ("NET_SOCKET", (None, False, False)),
+         ("net_if", (None, False, False)),
+-        ("sys_mutex", ("CONFIG_SYS_MUTEX_IMPL_K_MUTEX", True, False)),
+         ("k_futex", (None, True, False)),
+         ("k_condvar", (None, False, True)),
+         ("k_event", ("CONFIG_EVENTS", False, True)),
+@@ -190,7 +189,6 @@ DW_OP_plus_uconst = 0x23
+ DW_OP_fbreg = 0x91
+ STACK_TYPE = "z_thread_stack_element"
+ thread_counter = 0
+-sys_mutex_counter = 0
+ futex_counter = 0
+ stack_counter = 0
+ 
+@@ -527,18 +525,12 @@ def device_get_api_addr(elf, addr):
+ 
+ def find_kobjects(elf, syms):
+     global thread_counter
+-    global sys_mutex_counter
+     global futex_counter
+     global stack_counter
+ 
+     if not elf.has_dwarf_info():
+         sys.exit("ELF file has no DWARF information")
+ 
+-    # sys_mutex should only be considered a kobject if it is implemented
+-    # via k_mutex
+-    if "CONFIG_SYS_MUTEX_IMPL_K_MUTEX" not in syms:
+-        del kobjects["sys_mutex"]
+-
+     app_smem_start = syms["_app_smem_start"]
+     app_smem_end = syms["_app_smem_end"]
+ 
+@@ -689,9 +681,6 @@ def find_kobjects(elf, syms):
+             # permissions to other kernel objects
+             ko.data = thread_counter
+             thread_counter = thread_counter + 1
+-        elif ko.type_obj.name == "sys_mutex":
+-            ko.data = f"&kernel_mutexes[{sys_mutex_counter}]"
+-            sys_mutex_counter += 1
+         elif ko.type_obj.name == "k_futex":
+             ko.data = f"&futex_data[{futex_counter}]"
+             futex_counter += 1
+@@ -787,14 +776,6 @@ void k_object_wordlist_foreach(_wordlist_cb_func_t func, void *context)
+ 
+ def write_gperf_table(fp, syms, objs, little_endian, static_begin, static_end):
+     fp.write(header)
+-    if sys_mutex_counter != 0:
+-        fp.write(f"static struct k_mutex kernel_mutexes[{sys_mutex_counter}] = {{\n")
+-        for i in range(sys_mutex_counter):
+-            fp.write(f"Z_MUTEX_INITIALIZER(kernel_mutexes[{i}])")
+-            if i != sys_mutex_counter - 1:
+-                fp.write(", ")
+-        fp.write("};\n")
+-
+     if futex_counter != 0:
+         fp.write(f"static struct z_futex_data futex_data[{futex_counter}] = {{\n")
+         for i in range(futex_counter):
+@@ -808,9 +789,6 @@ def write_gperf_table(fp, syms, objs, little_endian, static_begin, static_end):
+         "K_OBJ_FUTEX": "futex_data",
+     }
+ 
+-    if "CONFIG_SYS_MUTEX_IMPL_K_MUTEX" in syms:
+-        metadata_names["K_OBJ_SYS_MUTEX"] = "mutex"
+-
+     if "CONFIG_GEN_PRIV_STACKS" in syms:
+         metadata_names["K_OBJ_THREAD_STACK_ELEMENT"] = "stack_data"
+         if stack_counter != 0:
+diff --git a/scripts/build/gen_syscalls.py b/scripts/build/gen_syscalls.py
+index 61ed30d5530..e14f311466c 100755
+--- a/scripts/build/gen_syscalls.py
++++ b/scripts/build/gen_syscalls.py
+@@ -60,6 +60,9 @@ not_cancellation_points = {
+     "k_futex_wake",         # like sem_post(), pthread_cond_signal(), pthread_mutex_unlock()
+     "k_mutex_lock",         # like pthread_mutex_lock()
+     "k_mutex_unlock",       # like pthread_mutex_unlock()
++    "z_sys_mutex_kernel_lock",
++    "z_sys_mutex_kernel_unlock",
++    "z_sys_mutex_kernel_destroy",
+     "k_sem_give",           # like sem_post()
+     "k_sig_action",         # like sigaction(); in both lists
+     "k_sig_mask",           # like pthread_sigmask(), sigprocmask()
+diff --git a/tests/kernel/mutex/sys_mutex/prj.conf b/tests/kernel/mutex/sys_mutex/prj.conf
+index 06290da59b5..be35288b167 100644
+--- a/tests/kernel/mutex/sys_mutex/prj.conf
++++ b/tests/kernel/mutex/sys_mutex/prj.conf
+@@ -2,3 +2,8 @@ CONFIG_MAIN_THREAD_PRIORITY=10
+ CONFIG_ZTEST=y
+ CONFIG_TEST_USERSPACE=y
+ CONFIG_MAX_THREAD_BYTES=8
++CONFIG_SYS_MUTEX_PRIO_INHERIT=y
++CONFIG_SYS_MUTEX_PRIO_INHERIT_MIN=4
++CONFIG_SYS_MUTEX_PRIO_INHERIT_MAX=16
++CONFIG_HEAP_MEM_POOL_SIZE=2048
++CONFIG_ZTEST_FATAL_HOOK=y
+diff --git a/tests/kernel/mutex/sys_mutex/src/main.c b/tests/kernel/mutex/sys_mutex/src/main.c
+index 9da45b0bebe..e71b9810418 100644
+--- a/tests/kernel/mutex/sys_mutex/src/main.c
++++ b/tests/kernel/mutex/sys_mutex/src/main.c
+@@ -48,25 +48,26 @@
+ #include <zephyr/tc_util.h>
+ #include <zephyr/kernel.h>
+ #include <zephyr/ztest.h>
++#include <zephyr/ztest_error_hook.h>
+ #include <zephyr/sys/mutex.h>
+ 
+ #define STACKSIZE (512 + CONFIG_TEST_EXTRA_STACK_SIZE)
+ 
+ static ZTEST_DMEM int tc_rc = TC_PASS;         /* test case return code */
+ 
+-ZTEST_BMEM SYS_MUTEX_DEFINE(private_mutex);
++ZTEST_DMEM SYS_MUTEX_DEFINE_EXT(private_mutex, K_MUTEX_PRIO_INHERIT);
+ 
+ 
+-ZTEST_BMEM SYS_MUTEX_DEFINE(mutex_1);
+-ZTEST_BMEM SYS_MUTEX_DEFINE(mutex_2);
+-ZTEST_BMEM SYS_MUTEX_DEFINE(mutex_3);
+-ZTEST_BMEM SYS_MUTEX_DEFINE(mutex_4);
++ZTEST_DMEM SYS_MUTEX_DEFINE_EXT(mutex_1, K_MUTEX_PRIO_INHERIT);
++ZTEST_DMEM SYS_MUTEX_DEFINE_EXT(mutex_2, K_MUTEX_PRIO_INHERIT);
++ZTEST_DMEM SYS_MUTEX_DEFINE_EXT(mutex_3, K_MUTEX_PRIO_INHERIT);
++ZTEST_DMEM SYS_MUTEX_DEFINE_EXT(mutex_4, K_MUTEX_PRIO_INHERIT);
+ 
+ #ifdef CONFIG_USERSPACE
+-static SYS_MUTEX_DEFINE(no_access_mutex);
++static SYS_MUTEX_DEFINE_EXT(no_access_mutex, K_MUTEX_PRIO_INHERIT);
+ #endif
+-static ZTEST_BMEM SYS_MUTEX_DEFINE(not_my_mutex);
+-static ZTEST_BMEM SYS_MUTEX_DEFINE(bad_count_mutex);
++static ZTEST_DMEM SYS_MUTEX_DEFINE_EXT(not_my_mutex, K_MUTEX_PRIO_INHERIT);
++static ZTEST_DMEM SYS_MUTEX_DEFINE_EXT(bad_count_mutex, K_MUTEX_PRIO_INHERIT);
+ 
+ #ifdef CONFIG_USERSPACE
+ #define ZTEST_USER_OR_NOT ZTEST_USER
+@@ -437,28 +438,10 @@ ZTEST_USER_OR_NOT(mutex_complex, test_mutex)
+ 	TC_PRINT("Recursive locking tests successful\n");
+ }
+ 
+-/* We deliberately disable userspace, even on platforms that
+- * support it, so that the alternate implementation of sys_mutex
+- * (which is just a very thin wrapper to k_mutex) is exercised.
+- * This requires us to not attempt to start the tests in user
+- * mode, as this will otherwise fail an assertion in the thread code.
+- */
+ ZTEST(mutex_complex, test_supervisor_access)
+ {
+ 	int rv;
+ 
+-#ifdef CONFIG_USERSPACE
+-	/* coverage for get_k_mutex checks */
+-	rv = sys_mutex_lock((struct sys_mutex *)NULL, K_NO_WAIT);
+-	zassert_true(rv == -EINVAL, "accepted bad mutex pointer");
+-	rv = sys_mutex_lock((struct sys_mutex *)k_current_get(), K_NO_WAIT);
+-	zassert_true(rv == -EINVAL, "accepted object that was not a mutex");
+-	rv = sys_mutex_unlock((struct sys_mutex *)NULL);
+-	zassert_true(rv == -EINVAL, "accepted bad mutex pointer");
+-	rv = sys_mutex_unlock((struct sys_mutex *)k_current_get());
+-	zassert_true(rv == -EINVAL, "accepted object that was not a mutex");
+-#endif /* CONFIG_USERSPACE */
+-
+ 	rv = sys_mutex_unlock(&not_my_mutex);
+ 	zassert_true(rv == -EPERM, "unlocked a mutex that wasn't owner");
+ 	rv = sys_mutex_unlock(&bad_count_mutex);
+@@ -468,12 +451,10 @@ ZTEST(mutex_complex, test_supervisor_access)
+ ZTEST_USER_OR_NOT(mutex_complex, test_user_access)
+ {
+ #ifdef CONFIG_USERSPACE
+-	int rv;
+-
+-	rv = sys_mutex_lock(&no_access_mutex, K_NO_WAIT);
+-	zassert_true(rv == -EACCES, "accessed mutex not in memory domain");
+-	rv = sys_mutex_unlock(&no_access_mutex);
+-	zassert_true(rv == -EACCES, "accessed mutex not in memory domain");
++	/* the object itself is read before the kernel is entered */
++	ztest_set_fault_valid(true);
++	(void)sys_mutex_lock(&no_access_mutex, K_NO_WAIT);
++	ztest_test_fail();
+ #else
+ 	ztest_test_skip();
+ #endif /* CONFIG_USERSPACE */
+diff --git a/tests/kernel/mutex/sys_mutex/src/thread_competition.c b/tests/kernel/mutex/sys_mutex/src/thread_competition.c
+index 4501127918c..14b33c83575 100644
+--- a/tests/kernel/mutex/sys_mutex/src/thread_competition.c
++++ b/tests/kernel/mutex/sys_mutex/src/thread_competition.c
+@@ -22,7 +22,7 @@ static K_THREAD_STACK_DEFINE(thread_high_stack1, STACKSIZE);
+ static struct k_thread thread_high_data1;
+ static K_THREAD_STACK_DEFINE(thread_high_stack2, STACKSIZE);
+ static struct k_thread thread_high_data2;
+-SYS_MUTEX_DEFINE(mutex);
++SYS_MUTEX_DEFINE_EXT(mutex, K_MUTEX_PRIO_INHERIT);
+ static uint32_t flag[3];
+ 
+ /* The order of threads getting mutex is judged by index
+diff --git a/tests/kernel/mutex/sys_mutex/src/types.c b/tests/kernel/mutex/sys_mutex/src/types.c
+new file mode 100644
+index 00000000000..73481aa97a9
+--- /dev/null
++++ b/tests/kernel/mutex/sys_mutex/src/types.c
+@@ -0,0 +1,134 @@
++/*
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <zephyr/kernel.h>
++#include <zephyr/sys/mutex.h>
++#include <zephyr/ztest.h>
++
++#define STACK_SIZE (1024 + CONFIG_TEST_EXTRA_STACK_SIZE)
++
++#ifdef CONFIG_USERSPACE
++#define ZTEST_USER_OR_NOT ZTEST_USER
++#define OTHER_OPTIONS     (K_USER | K_INHERIT_PERMS)
++#else
++#define ZTEST_USER_OR_NOT ZTEST
++#define OTHER_OPTIONS     0
++#endif
++
++static K_THREAD_STACK_DEFINE(other_stack, STACK_SIZE);
++static struct k_thread other_thread;
++static ZTEST_BMEM SYS_MUTEX_DEFINE(recursive_mutex);
++static ZTEST_DMEM SYS_MUTEX_DEFINE_EXT(normal_mutex, K_MUTEX_NORMAL);
++static ZTEST_DMEM SYS_MUTEX_DEFINE_EXT(errorcheck_mutex, K_MUTEX_ERRORCHECK);
++static ZTEST_BMEM int other_ret;
++/* dynamically initialized; shared with the other thread, so not on this thread's stack */
++static ZTEST_BMEM struct sys_mutex dynamic;
++/* the other thread cannot read this thread's stack */
++static ZTEST_BMEM k_timeout_t other_timeout;
++
++static void other_lock(void *p1, void *p2, void *p3)
++{
++	struct sys_mutex *mutex = p1;
++
++	ARG_UNUSED(p2);
++	ARG_UNUSED(p3);
++
++	other_ret = sys_mutex_lock(mutex, other_timeout);
++	if (other_ret == 0) {
++		other_ret = sys_mutex_unlock(mutex);
++	}
++}
++
++static void other_unlock(void *p1, void *p2, void *p3)
++{
++	ARG_UNUSED(p2);
++	ARG_UNUSED(p3);
++
++	other_ret = sys_mutex_unlock(p1);
++}
++
++static int from_other(k_thread_entry_t entry, struct sys_mutex *mutex, k_timeout_t timeout)
++{
++	other_ret = 1;
++	other_timeout = timeout;
++	k_thread_create(&other_thread, other_stack, STACK_SIZE, entry, mutex, NULL, NULL,
++			K_PRIO_PREEMPT(1), OTHER_OPTIONS, K_NO_WAIT);
++	zassert_ok(k_thread_join(&other_thread, K_SECONDS(2)));
++
++	return other_ret;
++}
++
++static void contended(struct sys_mutex *mutex)
++{
++	zassert_ok(sys_mutex_lock(mutex, K_FOREVER));
++	zassert_equal(from_other(other_lock, mutex, K_NO_WAIT), -EBUSY);
++	zassert_equal(from_other(other_lock, mutex, K_MSEC(10)), -EAGAIN);
++	zassert_ok(sys_mutex_unlock(mutex));
++	zassert_equal(from_other(other_lock, mutex, K_FOREVER), 0);
++	zassert_equal(sys_mutex_unlock(mutex), -EINVAL, "unlocked mutex");
++}
++
++ZTEST_USER_OR_NOT(sys_mutex_types, test_sys_mutex_types)
++{
++	/* recursive: the default of SYS_MUTEX_DEFINE() and sys_mutex_init() */
++	zassert_ok(sys_mutex_lock(&recursive_mutex, K_NO_WAIT));
++	zassert_ok(sys_mutex_lock(&recursive_mutex, K_NO_WAIT));
++	zassert_ok(sys_mutex_unlock(&recursive_mutex));
++	zassert_equal(from_other(other_lock, &recursive_mutex, K_NO_WAIT), -EBUSY);
++	zassert_equal(from_other(other_unlock, &recursive_mutex, K_NO_WAIT), -EPERM);
++	zassert_ok(sys_mutex_unlock(&recursive_mutex));
++	contended(&recursive_mutex);
++
++	/* normal: relocking by the owner is a contended lock */
++	zassert_ok(sys_mutex_lock(&normal_mutex, K_NO_WAIT));
++	zassert_equal(sys_mutex_lock(&normal_mutex, K_NO_WAIT), -EBUSY);
++	zassert_equal(sys_mutex_lock(&normal_mutex, K_MSEC(10)), -EAGAIN);
++	zassert_ok(sys_mutex_unlock(&normal_mutex));
++	contended(&normal_mutex);
++
++	/* error checking: relocking is detected, foreign unlock is refused */
++	zassert_ok(sys_mutex_lock(&errorcheck_mutex, K_NO_WAIT));
++	zassert_equal(sys_mutex_lock(&errorcheck_mutex, K_NO_WAIT), -EDEADLK);
++	zassert_equal(sys_mutex_lock(&errorcheck_mutex, K_FOREVER), -EDEADLK);
++	zassert_equal(from_other(other_unlock, &errorcheck_mutex, K_NO_WAIT), -EPERM);
++	zassert_ok(sys_mutex_unlock(&errorcheck_mutex));
++	contended(&errorcheck_mutex);
++
++	/* dynamic initialization, destroy */
++	sys_mutex_init(&dynamic);
++	zassert_ok(sys_mutex_lock(&dynamic, K_NO_WAIT));
++	zassert_equal(sys_mutex_destroy(&dynamic), -EBUSY);
++	zassert_ok(sys_mutex_unlock(&dynamic));
++	zassert_ok(sys_mutex_destroy(&dynamic));
++	zassert_equal(sys_mutex_init_ext(&dynamic, K_MUTEX_TYPE_MASK), -EINVAL);
++	zassert_equal(sys_mutex_init_ext(&dynamic, BIT(7)), -EINVAL);
++	zassert_ok(sys_mutex_init_ext(&dynamic, K_MUTEX_ERRORCHECK));
++	zassert_ok(sys_mutex_lock(&dynamic, K_NO_WAIT));
++	zassert_equal(sys_mutex_lock(&dynamic, K_NO_WAIT), -EDEADLK);
++	zassert_ok(sys_mutex_unlock(&dynamic));
++	zassert_ok(sys_mutex_destroy(&dynamic));
++
++	/* priority inheritance: the kernel enforces ownership and releases on destroy */
++	zassert_ok(sys_mutex_init_ext(&dynamic, K_MUTEX_RECURSIVE | K_MUTEX_PRIO_INHERIT));
++	zassert_ok(sys_mutex_lock(&dynamic, K_NO_WAIT));
++	zassert_ok(sys_mutex_lock(&dynamic, K_NO_WAIT));
++	zassert_equal(from_other(other_unlock, &dynamic, K_NO_WAIT), -EPERM);
++	zassert_ok(sys_mutex_unlock(&dynamic));
++	zassert_equal(sys_mutex_destroy(&dynamic), -EBUSY);
++	zassert_ok(sys_mutex_unlock(&dynamic));
++	contended(&dynamic);
++	zassert_ok(sys_mutex_destroy(&dynamic));
++	zassert_ok(sys_mutex_destroy(&dynamic), "destroying twice");
++}
++
++static void *types_setup(void)
++{
++#ifdef CONFIG_USERSPACE
++	k_thread_access_grant(k_current_get(), &other_thread, &other_stack);
++#endif
++	return NULL;
++}
++
++ZTEST_SUITE(sys_mutex_types, NULL, types_setup, NULL, NULL, NULL);
+diff --git a/tests/kernel/mutex/sys_mutex/testcase.yaml b/tests/kernel/mutex/sys_mutex/testcase.yaml
+index 0259a73100c..031c56cc2a4 100644
+--- a/tests/kernel/mutex/sys_mutex/testcase.yaml
++++ b/tests/kernel/mutex/sys_mutex/testcase.yaml
+@@ -1,6 +1,6 @@
+ tests:
+-  kernel.mutex.system.k_mutex:
+-    filter: CONFIG_ARCH_HAS_USERSPACE and CONFIG_SYS_MUTEX_IMPL_K_MUTEX
++  kernel.mutex.system:
++    filter: CONFIG_ARCH_HAS_USERSPACE
+     arch_exclude:
+       - posix
+     tags:
+diff --git a/tests/kernel/mutex/sys_mutex_futex/testcase.yaml b/tests/kernel/mutex/sys_mutex_futex/testcase.yaml
+index 974b2593725..dd53b8ed1b7 100644
+--- a/tests/kernel/mutex/sys_mutex_futex/testcase.yaml
++++ b/tests/kernel/mutex/sys_mutex_futex/testcase.yaml
+@@ -1,6 +1,6 @@
+ tests:
+   kernel.mutex.system.futex:
+-    filter: CONFIG_ARCH_HAS_USERSPACE and CONFIG_SYS_MUTEX_IMPL_FUTEX
++    filter: CONFIG_ARCH_HAS_USERSPACE
+     arch_exclude:
+       - posix
+     tags:

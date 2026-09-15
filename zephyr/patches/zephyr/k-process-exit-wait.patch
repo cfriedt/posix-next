@@ -1,11 +1,11 @@
 diff --git a/include/zephyr/kernel.h b/include/zephyr/kernel.h
-index 494a48a330b..c072ef58a31 100644
+index 56298ed8bca..78b653bd2a1 100644
 --- a/include/zephyr/kernel.h
 +++ b/include/zephyr/kernel.h
-@@ -8268,6 +8268,28 @@ __syscall int k_waitpid_pgrp(k_pgrp_t pgrp, k_pid_t *reaped, int *wstatus, uint3
+@@ -8299,6 +8299,28 @@ __syscall int k_waitpid_pgrp(k_pgrp_t pgrp, k_pid_t *reaped, int *wstatus, uint3
  __syscall int k_process_init(struct k_process *proc, const k_tid_t *threads,
  			     size_t num_threads);
-
+ 
 +/**
 + * @brief The kernel clone primitive: a new process, or a thread in this one
 + *
@@ -38,7 +38,7 @@ index c5c05cbf4a9..d40ff8e9830 100644
 @@ -34,6 +34,49 @@ typedef struct k_process_group *k_pgrp_t;
  /** @brief Session handle */
  typedef struct k_session *k_session_t;
-
+ 
 +struct k_thread;
 +
 +/**
@@ -83,7 +83,7 @@ index c5c05cbf4a9..d40ff8e9830 100644
 +};
 +
  #if defined(CONFIG_PROCESS) || defined(__DOXYGEN__)
-
+ 
  /**
 @@ -112,6 +155,7 @@ struct k_thread;
  #define K_PROCESS_WNOHANG BIT(0)
@@ -109,7 +109,7 @@ index f186e9967db..6b801c5ded5 100644
 @@ -358,6 +358,13 @@ struct k_thread {
  	struct _thread_stack_info stack_info;
  #endif /* CONFIG_THREAD_STACK_INFO */
-
+ 
 +#if defined(CONFIG_PROCESS)
 +	/** process (thread group) this thread belongs to */
 +	struct k_process *process;
@@ -221,19 +221,19 @@ index 00000000000..ac784fc88d4
 +
 +#endif /* ZEPHYR_INCLUDE_SYS_PROCESS_H_ */
 diff --git a/include/zephyr/sys/thread.h b/include/zephyr/sys/thread.h
-index c6f2ce485f3..edbe788470d 100644
+index ab5b75813b4..982104722f6 100644
 --- a/include/zephyr/sys/thread.h
 +++ b/include/zephyr/sys/thread.h
-@@ -16,12 +16,78 @@
+@@ -17,12 +17,78 @@
  extern "C" {
  #endif
-
+ 
 -#if defined(CONFIG_SYS_THREAD) || defined(__DOXYGEN__)
 -
  struct k_condvar;
  struct k_mutex;
  struct k_thread;
-
+ 
 +/**
 + * @brief Create the child stopped
 + *
@@ -305,18 +305,18 @@ index c6f2ce485f3..edbe788470d 100644
  /**
   * @defgroup sys_thread_apis System Thread Pool APIs
   * @ingroup kernel_apis
-@@ -243,12 +309,12 @@ __syscall int sys_thread_destroy(struct k_thread *th);
-
+@@ -159,12 +225,12 @@ __syscall int sys_thread_destroy(struct k_thread *th);
+ 
  /** @} */
-
+ 
 +#endif /* defined(CONFIG_SYS_THREAD) || defined(__DOXYGEN__) */
 +
  #ifdef __cplusplus
  }
  #endif
-
+ 
  #include <zephyr/syscalls/thread.h>
-
+ 
 -#endif /* defined(CONFIG_SYS_THREAD) || defined(__DOXYGEN__) */
 -
  #endif /* ZEPHYR_INCLUDE_ZEPHYR_SYS_THREAD_H_ */
@@ -327,7 +327,7 @@ index 87c2ac41e2e..7aaf3dacc0a 100644
 @@ -128,6 +128,41 @@ void z_process_init_thread(struct k_thread *thread);
  /* Remove a dying thread from its process; zombifies the process on last exit */
  void z_process_exit_thread(struct k_thread *thread);
-
+ 
 +/*
 + * Release-side providers and the number query, implemented by lib/os. The
 + * kernel never calls an allocator: it hands memory back to the provider that
@@ -364,12 +364,12 @@ index 87c2ac41e2e..7aaf3dacc0a 100644
 +/* validate a user-supplied group handle and every member record (under lock) */
 +int z_pgrp_validate(k_pgrp_t pgrp);
  #endif /* CONFIG_PROCESS */
-
-
+ 
+ 
 @@ -343,6 +378,11 @@ int z_sig_queue_msgq(k_pid_t pid, int signo, union k_sig_val value);
  int z_sig_queue_aio(k_pid_t pid, int signo, union k_sig_val value);
  #endif /* CONFIG_SYS_AIO && CONFIG_SIGNAL */
-
+ 
 +#if defined(CONFIG_PROCESS) && defined(CONFIG_SIGNAL)
 +/* generation-side plumbing between kernel/process.c and kernel/signal.c (internal) */
 +int z_sig_queue_chld(k_tid_t tid, k_pid_t child_pid, int child_status, bool exited);
@@ -385,7 +385,7 @@ index f7cedb01eb2..1c537abb442 100644
 @@ -249,6 +249,15 @@ bool z_sched_wake(_wait_q_t *wait_q, int swap_retval, void *swap_data);
   */
  void z_sched_wake_thread_locked(struct k_thread *thread);
-
+ 
 +/*
 + * Pend the current thread on @a wait_q under the scheduler lock alone, unless
 + * *gen no longer equals @a expected (returns 1: the condition may have changed,
@@ -1347,13 +1347,13 @@ index 00000000000..8509e29aec7
 +		sigchld_notifier, NULL, NULL, NULL, 0, 0, 0);
 +#endif /* CONFIG_SIGNAL */
 diff --git a/kernel/sched.c b/kernel/sched.c
-index 2311874e2fc..951e6e79ee9 100644
+index c27d1b0e8cc..29920969464 100644
 --- a/kernel/sched.c
 +++ b/kernel/sched.c
 @@ -711,6 +711,22 @@ int z_pend_curr(struct k_spinlock *lock, k_spinlock_key_t key,
  	return z_swap(&_sched_spinlock, key);
  }
-
+ 
 +int z_sched_waitq_pend_if(_wait_q_t *wait_q, k_timeout_t timeout, atomic_t *gen,
 +			  atomic_val_t expected)
 +{
@@ -1373,10 +1373,10 @@ index 2311874e2fc..951e6e79ee9 100644
  struct k_thread *z_unpend1_no_timeout(_wait_q_t *wait_q)
  {
  	struct k_thread *thread = NULL;
-@@ -1398,6 +1414,10 @@ static ALWAYS_INLINE void halt_thread(struct k_thread *thread, uint8_t new_state
+@@ -1404,6 +1420,10 @@ static ALWAYS_INLINE void halt_thread(struct k_thread *thread, uint8_t new_state
  		k_object_uninit(thread);
  #endif /* CONFIG_USERSPACE */
-
+ 
 +#ifdef CONFIG_PROCESS
 +		z_process_exit_thread(thread);
 +#endif /* CONFIG_PROCESS */
@@ -1385,20 +1385,20 @@ index 2311874e2fc..951e6e79ee9 100644
  		k_thread_abort_cleanup(thread);
  #endif /* CONFIG_THREAD_ABORT_NEED_CLEANUP */
 diff --git a/kernel/thread.c b/kernel/thread.c
-index 03d6e57b1de..37cbb507304 100644
+index d881b00f56f..474c3fe2682 100644
 --- a/kernel/thread.c
 +++ b/kernel/thread.c
 @@ -608,8 +608,10 @@ char *z_setup_new_thread(struct k_thread *new_thread,
  	new_thread->stack_obj = stack;
  	new_thread->syscall_frame = NULL;
-
+ 
 +#ifndef CONFIG_PROCESS
  	/* Any given thread has access to itself */
  	k_object_access_grant(new_thread, new_thread);
 +#endif /* !CONFIG_PROCESS */
  #endif /* CONFIG_USERSPACE */
  	z_waitq_init(&new_thread->join_queue);
-
+ 
 @@ -699,6 +701,13 @@ char *z_setup_new_thread(struct k_thread *new_thread,
  		k_thread_perms_inherit(_current, new_thread);
  	}
@@ -1424,13 +1424,13 @@ index 03d6e57b1de..37cbb507304 100644
  	k_thread_system_pool_assign(dummy_thread);
  #else
 diff --git a/lib/os/CMakeLists.txt b/lib/os/CMakeLists.txt
-index 3b001a447e3..eddf3360237 100644
+index 766d36c8037..f1c8856a1c2 100644
 --- a/lib/os/CMakeLists.txt
 +++ b/lib/os/CMakeLists.txt
-@@ -82,9 +82,27 @@ zephyr_syscall_header_ifdef(CONFIG_ZVFS_FDTABLE
+@@ -84,9 +84,27 @@ zephyr_syscall_header_ifdef(CONFIG_ZVFS_FDTABLE
  )
  zephyr_syscall_header_ifdef(CONFIG_ZVFS_FS ${ZEPHYR_BASE}/include/zephyr/sys/zvfs_fs.h)
-
+ 
 +zephyr_sources_ifdef(CONFIG_SYS_PROCESS process.c)
 +zephyr_syscall_header_ifdef(CONFIG_SYS_PROCESS ${ZEPHYR_BASE}/include/zephyr/sys/process.h)
 +if(CONFIG_SYS_PROCESS)
@@ -1453,22 +1453,22 @@ index 3b001a447e3..eddf3360237 100644
 +if(CONFIG_SYS_THREAD OR CONFIG_SYS_PROCESS)
 +  zephyr_syscall_header(${ZEPHYR_BASE}/include/zephyr/sys/thread.h)
 +endif()
-
+ 
  if(CONFIG_SYS_THREAD)
-   foreach(_pool CONDVAR MUTEX STACK THREAD)
+   foreach(_pool STACK THREAD)
 diff --git a/lib/os/Kconfig b/lib/os/Kconfig
-index 40d89f3b25f..dde7e0048da 100644
+index ac5963fe8b7..7e6f1af62b0 100644
 --- a/lib/os/Kconfig
 +++ b/lib/os/Kconfig
 @@ -144,6 +144,8 @@ config POWEROFF
  	  Enable support for system power off.
-
+ 
  rsource "Kconfig.cbprintf"
 +rsource "Kconfig.sys_process"
 +
  rsource "Kconfig.sys_thread"
-
- rsource "Kconfig.sys_timer"
+ rsource "Kconfig.sys_mutex"
+ 
 diff --git a/lib/os/Kconfig.sys_msgq b/lib/os/Kconfig.sys_msgq
 index 2fdce6140b8..28e4efca892 100644
 --- a/lib/os/Kconfig.sys_msgq
@@ -2340,22 +2340,22 @@ index 00000000000..4e65800a620
 +}
 +
 diff --git a/lib/os/thread.c b/lib/os/thread.c
-index c55e0aa2ee5..a6e0702bd1d 100644
+index a575c796483..c29f01668a9 100644
 --- a/lib/os/thread.c
 +++ b/lib/os/thread.c
-@@ -615,7 +615,7 @@ __maybe_unused static void sys_thread_recycle(void)
+@@ -394,7 +394,7 @@ __maybe_unused static void sys_thread_recycle(void)
  	}
  }
-
+ 
 -static int sys_thread_create_common(struct k_thread **th, k_thread_stack_t *stack,
 +int z_sys_thread_create_common(struct k_thread **th, k_thread_stack_t *stack,
  				    uint32_t stack_size, uint32_t guard_size,
  				    k_thread_entry_t entry, void *p1, void *p2, void *p3, int prio,
  				    uint32_t options, k_timeout_t delay)
-@@ -671,12 +671,40 @@ static int sys_thread_create_common(struct k_thread **th, k_thread_stack_t *stac
+@@ -450,12 +450,40 @@ static int sys_thread_create_common(struct k_thread **th, k_thread_stack_t *stac
  	return 0;
  }
-
+ 
 +static int thread_create_clone(struct k_thread **th, k_thread_stack_t *stack,
 +			       uint32_t stack_size, uint32_t guard_size, k_thread_entry_t entry,
 +			       void *p1, void *p2, void *p3, int prio, uint32_t options,
@@ -2393,9 +2393,9 @@ index c55e0aa2ee5..a6e0702bd1d 100644
 +	return thread_create_clone(th, stack, stack_size, guard_size, entry, p1, p2, p3, prio,
 +				   options, 0);
  }
-
+ 
  int sys_thread_create_paused(struct k_thread **th, k_thread_stack_t *stack, uint32_t stack_size,
-@@ -684,8 +712,8 @@ int sys_thread_create_paused(struct k_thread **th, k_thread_stack_t *stack, uint
+@@ -463,8 +491,8 @@ int sys_thread_create_paused(struct k_thread **th, k_thread_stack_t *stack, uint
  			     void *p3, int prio, uint32_t options)
  {
  	/* kernel-mode only: there is no system call for deferred-start creation */
@@ -2404,7 +2404,7 @@ index c55e0aa2ee5..a6e0702bd1d 100644
 +	return thread_create_clone(th, stack, stack_size, guard_size, entry, p1, p2, p3, prio,
 +				   options, SYS_CLONE_PAUSED);
  }
-
+ 
  #ifdef CONFIG_USERSPACE
 diff --git a/tests/kernel/process/CMakeLists.txt b/tests/kernel/process/CMakeLists.txt
 new file mode 100644
