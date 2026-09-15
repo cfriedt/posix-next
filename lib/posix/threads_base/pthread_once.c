@@ -11,11 +11,9 @@
 #include <zephyr/kernel.h>
 #include <zephyr/sys/thread.h>
 
-BUILD_ASSERT(sizeof(pthread_once_t) == sizeof(sys_thread_once_t));
-
 int pthread_once(pthread_once_t *once, void (*init_func)(void))
 {
-	sys_thread_once((sys_thread_once_t *)once, init_func);
+	sys_thread_once(once, init_func);
 
 	return 0;
 }
