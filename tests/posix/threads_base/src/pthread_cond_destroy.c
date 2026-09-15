@@ -20,7 +20,7 @@ static void test_pthread_cond_destroy(void)
 
 	posix_test_skip_if_native_libc();
 
-	for (size_t i = 0; i < 2 * SYS_THREAD_CONDVAR_MIN; ++i) {
+	for (size_t i = 0; i < 8; ++i) {
 		zassert_ok(pthread_cond_init(&cond, NULL), "failed to init cond %zu", i);
 		zassert_ok(pthread_cond_destroy(&cond), "failed to destroy cond %zu", i);
 	}
