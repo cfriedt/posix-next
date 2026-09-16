@@ -4099,3 +4099,18 @@ patches:
       interior free on Zephyr's heap, a heap-buffer-overflow under ASAN on
       the host). The expansion now copies a borrowed result, which is what
       every caller already assumes it owns.
+  - path: toybox/toybox-uname-utsname-fields.patch
+    sha256sum: 3b2ce5304bac8c46750b38e970caa34a254787f2fb8057aa756222a8cc46ec73
+    module: modules/lib/toybox
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-15
+    upstreamable: true
+    comments: |
+      uname: read the utsname fields by name. The applet stepped through the
+      structure with a fixed stride of sizeof(sysname) and wrote its separating
+      space into the byte before each field, which is only correct where every
+      field has the same size, as on Linux. POSIX leaves the sizes to the
+      implementation; on Zephyr they differ, so `uname -a` printed the release,
+      version and machine from inside the node name and clobbered the system
+      name's terminator. Address the fields and print the separator instead.
