@@ -1356,11 +1356,14 @@ No hard links
    ``st_nlink`` is always 1. This is a subsystem limitation, not a file system one: ext2, for
    example, stores hard links on disk, but the subsystem offers no way to create or count them.
 
-No symbolic links
-   The subsystem exposes no symbolic-link operations, so path resolution never follows a symlink
-   and stays purely lexical (see *Working directory* above). As with hard links this is a subsystem
-   limitation, not a file system one - ext2 stores symbolic links on disk, but the subsystem offers
-   no way to create or read them.
+Symbolic links depend on the backend
+   The subsystem exposes ``fs_symlink()``, ``fs_readlink()``, and ``fs_lstat()``, which back
+   :c:func:`symlink`, :c:func:`readlink`, and :c:func:`lstat`, but creating and following a link
+   is the backend's job; among the in-tree backends only ext2 implements it. Elsewhere
+   :c:func:`symlink` fails, :c:func:`readlink` reports ``EINVAL``, and :c:func:`lstat` is
+   equivalent to :c:func:`stat`. A backend that follows links does so component by component
+   inside the driver, after ZVFS has already collapsed ``..`` lexically (see *Working directory*
+   above).
 
 Permission bits are not exposed
    The subsystem's ``struct fs_dirent`` carries no mode bits, so :c:func:`stat` cannot report a
@@ -1431,8 +1434,11 @@ Hard links are not supported
    :c:func:`link` fails with ``EPERM`` and ``st_nlink`` is always 1, though ext2 stores hard links
    on disk.
 
-Symbolic links are not supported
-   Symbolic links are neither created nor followed, though ext2 stores them on disk.
+Symbolic links are fast symbolic links only
+   ext2 creates and follows symbolic links, but only as fast symbolic links: the target is stored
+   in the inode itself, so :c:func:`symlink` rejects a target longer than 60 bytes with
+   ``ENAMETOOLONG``. Resolution follows at most 8 links in one lookup before failing with
+   ``ELOOP``.
 
 Permissions may not be reported accurately
    :c:func:`stat` reports a synthesised mode rather than the file's stored permission bits.
