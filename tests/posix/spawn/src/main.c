@@ -30,9 +30,11 @@ static char *const spawn_envp[] = {NULL};
 #include <stdlib.h>
 #include <zephyr/llext/symbol.h>
 
-/* what the image links against: its own process's malloc */
+/* what the image links against: its own process's malloc and working directory */
 EXPORT_SYMBOL(malloc);
 EXPORT_SYMBOL(free);
+EXPORT_SYMBOL(chdir);
+EXPORT_SYMBOL(getcwd);
 EXPORT_SYMBOL(pthread_atfork);
 
 #define SPAWN_IMAGE "/RAM:/hello.llext"
@@ -129,6 +131,21 @@ static void posix_spawn_image(void)
 	/* reaping unloaded the image: no instance lingers (a kernel-side lookup) */
 	if (!k_is_user_context()) {
 		zassert_is_null(llext_by_name("hello.llext.0"));
+	}
+
+	/* the working directory is per process: inherited at spawn, then the child's own */
+	{
+		char *const cwd_argv[] = {"hello", "cwd", NULL};
+		char buf[sizeof(SPAWN_CWD)];
+
+		zassert_ok(chdir(SPAWN_CWD));
+		zassert_ok(posix_spawn(&pid, SPAWN_IMAGE, NULL, NULL, cwd_argv, envp));
+		zassert_equal(waitpid(pid, &status, 0), pid);
+		zassert_true(WIFEXITED(status));
+		zassert_equal(WEXITSTATUS(status), 44);
+		zassert_equal_ptr(getcwd(buf, sizeof(buf)), buf);
+		zassert_str_equal(buf, SPAWN_CWD);
+		zassert_ok(chdir("/"));
 	}
 
 	/* a loadable object that is not an executable image */
