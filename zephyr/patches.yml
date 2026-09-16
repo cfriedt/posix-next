@@ -3669,6 +3669,26 @@ patches:
       is seeded from the default domain rather than the C library
       partitions alone, minus the boot malloc partition when the process
       owns an arena.
+  - path: zephyr/zvfs-per-process-cwd.patch
+    sha256sum: c4a35058adc5f06f62dda153644a0bce584a44fcf8da803c9f8a5381cc237b3e
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-16
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/zvfs-cwd.patch
+          - zephyr/zvfs-per-process-fds.patch
+    comments: |
+      A per-process working directory: the string lives in the process's
+      ZVFS table next to its descriptors, so a clone starts with a copy of
+      its parent's and chdir() in one process is invisible to the others,
+      as POSIX requires; it survives exec with the table. Threads without a
+      process, and every thread without PROCESS, share the boot directory
+      as before. Resolution is unchanged; only the buffer the cwd calls
+      read and store is selected per caller, kernel-side.
   - path: zephyr/libc-sys-stat-utime-markers.patch
     sha256sum: 8edfcf83058522bb80d601e92c4a9e6be14baec04cf8253ffbd344fbadf05b78
     module: zephyr
