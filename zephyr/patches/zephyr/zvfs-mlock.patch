@@ -26,17 +26,17 @@ diff --git a/doc/services/zvfs/index.rst b/doc/services/zvfs/index.rst
 diff --git a/include/zephyr/sys/internal/fdtable_priv.h b/include/zephyr/sys/internal/fdtable_priv.h
 --- a/include/zephyr/sys/internal/fdtable_priv.h
 +++ b/include/zephyr/sys/internal/fdtable_priv.h
-@@ -87,6 +87,11 @@ static inline void zvfs_fds_cloexec(void)
+@@ -102,6 +102,11 @@ static inline void zvfs_fds_cloexec(void)
  }
  #endif
- 
+
 +#ifdef CONFIG_ZVFS_MLOCK
 +/* the caller's "lock every new mapping" flag: per process, one for the kernel's own */
 +bool *z_zvfs_proc_mlock_future(void);
 +#endif
 +
  struct k_mem_domain;
- 
+
  #if defined(CONFIG_ZVFS_MMAP) && defined(CONFIG_PROCESS_VM)
 diff --git a/include/zephyr/sys/zvfs.h b/include/zephyr/sys/zvfs.h
 --- a/include/zephyr/sys/zvfs.h
@@ -98,7 +98,7 @@ diff --git a/include/zephyr/sys/zvfs.h b/include/zephyr/sys/zvfs.h
 diff --git a/lib/os/zvfs/Kconfig b/lib/os/zvfs/Kconfig
 --- a/lib/os/zvfs/Kconfig
 +++ b/lib/os/zvfs/Kconfig
-@@ -176,6 +176,15 @@ config ZVFS_MMAP_DIRTY_TRACK
+@@ -205,6 +205,15 @@ config ZVFS_MMAP_DIRTY_TRACK
  	  and leaves the rest of the file alone. Without this, the whole range
  	  is written back.
 
@@ -117,21 +117,21 @@ diff --git a/lib/os/zvfs/Kconfig b/lib/os/zvfs/Kconfig
 diff --git a/lib/os/zvfs/zvfs_fdtable.c b/lib/os/zvfs/zvfs_fdtable.c
 --- a/lib/os/zvfs/zvfs_fdtable.c
 +++ b/lib/os/zvfs/zvfs_fdtable.c
-@@ -98,6 +98,10 @@ BUILD_ASSERT(CONFIG_ZVFS_PROC_OPEN_MAX <= ZVFS_OPEN_SIZE,
- struct zvfs_proc_fds {
- 	sys_dnode_t node;
+@@ -105,6 +105,10 @@ struct zvfs_proc_fds {
+ 	char cwd[CONFIG_ZVFS_PATH_MAX];
+ #endif /* CONFIG_ZVFS_FS */
  	struct fd_slot slots[ZVFS_PROC_OPEN_SIZE];
 +#ifdef CONFIG_ZVFS_MLOCK
 +	/* zvfs_mlock(ZVFS_MLOCK_FUTURE) is in force: new mappings are locked */
 +	bool mlock_future;
 +#endif /* CONFIG_ZVFS_MLOCK */
  };
- 
+
  static struct k_spinlock fds_graveyard_lock;
-@@ -117,6 +121,22 @@ SYS_ELASTIPOOL_DEFINE_ADVANCED(fds_pool, sizeof(struct zvfs_proc_fds),
+@@ -124,6 +128,22 @@ SYS_ELASTIPOOL_DEFINE_ADVANCED(fds_pool, sizeof(struct zvfs_proc_fds),
  #endif /* CONFIG_SYS_PROCESS */
  #endif /* CONFIG_PROCESS */
- 
+
 +#ifdef CONFIG_ZVFS_MLOCK
 +static bool boot_mlock_future;
 +

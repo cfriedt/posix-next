@@ -1,0 +1,179 @@
+diff --git a/include/zephyr/sys/internal/fdtable_priv.h b/include/zephyr/sys/internal/fdtable_priv.h
+--- a/include/zephyr/sys/internal/fdtable_priv.h
++++ b/include/zephyr/sys/internal/fdtable_priv.h
+@@ -38,6 +38,21 @@ struct fd_entry *zvfs_fd_entry_get(int fd);
+ struct fd_entry *zvfs_fd_syscall_verify(int fd);
+ 
+ struct k_process;
++#if defined(CONFIG_ZVFS_FDTABLE) && defined(CONFIG_ZVFS_FS) && defined(CONFIG_PROCESS)
++/* the caller's process working directory buffer; NULL shares the boot directory */
++char *z_zvfs_proc_cwd(void);
++#else
++static inline char *z_zvfs_proc_cwd(void)
++{
++	return NULL;
++}
++#endif
++
++#ifdef CONFIG_ZVFS_FS
++/* snapshot the caller's working directory into @a buf */
++void z_zvfs_cwd_copy(char *buf, size_t size);
++#endif /* CONFIG_ZVFS_FS */
++
+ #if defined(CONFIG_ZVFS_FDTABLE) && defined(CONFIG_SYS_PROCESS)
+ /* give @a child its own descriptor table: a copy of the caller's */
+ int z_zvfs_fds_clone(struct k_process *child, k_tid_t leader);
+diff --git a/lib/os/zvfs/zvfs_cwd.c b/lib/os/zvfs/zvfs_cwd.c
+--- a/lib/os/zvfs/zvfs_cwd.c
++++ b/lib/os/zvfs/zvfs_cwd.c
+@@ -7,9 +7,10 @@
+  * @file
+  * @brief ZVFS current working directory.
+  *
+- * Zephyr is a single process, so the working directory is a single
+- * system-wide string, as POSIX defines it per-process. The lock is held only
+- * to snapshot or store the string, never across a file system operation.
++ * Each process owns its working directory, a copy of its parent's at clone,
++ * as POSIX defines it; threads that belong to no process share the boot
++ * directory. The lock is held only to snapshot or store the string, never
++ * across a file system operation.
+  */
+ 
+ #include <errno.h>
+@@ -24,9 +25,25 @@
+ 
+ #include "zvfs_fs_priv.h"
+ 
+-static char zvfs_cwd[CONFIG_ZVFS_PATH_MAX] = "/";
++static char zvfs_boot_cwd[CONFIG_ZVFS_PATH_MAX] = "/";
+ static K_MUTEX_DEFINE(zvfs_cwd_lock);
+ 
++/* the caller's working directory: its process's, or the boot directory */
++static char *cwd_ptr(void)
++{
++	char *cwd = z_zvfs_proc_cwd();
++
++	return (cwd != NULL) ? cwd : zvfs_boot_cwd;
++}
++
++void z_zvfs_cwd_copy(char *buf, size_t size)
++{
++	k_mutex_lock(&zvfs_cwd_lock, K_FOREVER);
++	strncpy(buf, cwd_ptr(), size - 1);
++	buf[size - 1] = '\0';
++	k_mutex_unlock(&zvfs_cwd_lock);
++}
++
+ /*
+  * Resolution is purely lexical: '.', '..', and repeated '/' are collapsed
+  * without consulting the file system. On a backend that supports symbolic
+@@ -49,13 +66,16 @@ int zvfs_resolve_path(const char *in, char *out, size_t outsz)
+ 	}
+ 
+ 	if (in[0] != '/') {
++		const char *cwd;
++
+ 		k_mutex_lock(&zvfs_cwd_lock, K_FOREVER);
+-		o = strlen(zvfs_cwd);
++		cwd = cwd_ptr();
++		o = strlen(cwd);
+ 		if (o >= outsz) {
+ 			k_mutex_unlock(&zvfs_cwd_lock);
+ 			return -ENAMETOOLONG;
+ 		}
+-		memcpy(out, zvfs_cwd, o + 1);
++		memcpy(out, cwd, o + 1);
+ 		k_mutex_unlock(&zvfs_cwd_lock);
+ 
+ 		if (o == 1) {
+@@ -137,7 +157,7 @@ int z_impl_zvfs_chdir(const char *path)
+ 	}
+ 
+ 	k_mutex_lock(&zvfs_cwd_lock, K_FOREVER);
+-	strcpy(zvfs_cwd, r);
++	strcpy(cwd_ptr(), r);
+ 	k_mutex_unlock(&zvfs_cwd_lock);
+ 
+ 	return 0;
+@@ -178,7 +198,7 @@ int z_impl_zvfs_fchdir(int fd)
+ 	}
+ 
+ 	k_mutex_lock(&zvfs_cwd_lock, K_FOREVER);
+-	strcpy(zvfs_cwd, desc->path);
++	strcpy(cwd_ptr(), desc->path);
+ 	k_mutex_unlock(&zvfs_cwd_lock);
+ 
+ 	return 0;
+@@ -199,6 +219,7 @@ static int z_vrfy_zvfs_fchdir(int fd)
+ int z_impl_zvfs_getcwd(char *buf, size_t size)
+ {
+ 	size_t len;
++	const char *cwd;
+ 
+ 	if (buf == NULL || size == 0) {
+ 		errno = EINVAL;
+@@ -206,13 +227,14 @@ int z_impl_zvfs_getcwd(char *buf, size_t size)
+ 	}
+ 
+ 	k_mutex_lock(&zvfs_cwd_lock, K_FOREVER);
+-	len = strlen(zvfs_cwd);
++	cwd = cwd_ptr();
++	len = strlen(cwd);
+ 	if (len >= size) {
+ 		k_mutex_unlock(&zvfs_cwd_lock);
+ 		errno = ERANGE;
+ 		return -1;
+ 	}
+-	memcpy(buf, zvfs_cwd, len + 1);
++	memcpy(buf, cwd, len + 1);
+ 	k_mutex_unlock(&zvfs_cwd_lock);
+ 
+ 	return 0;
+diff --git a/lib/os/zvfs/zvfs_fdtable.c b/lib/os/zvfs/zvfs_fdtable.c
+--- a/lib/os/zvfs/zvfs_fdtable.c
++++ b/lib/os/zvfs/zvfs_fdtable.c
+@@ -97,6 +97,10 @@ BUILD_ASSERT(CONFIG_ZVFS_PROC_OPEN_MAX <= ZVFS_OPEN_SIZE,
+ /* a process's descriptor table; kernel processes share the boot table */
+ struct zvfs_proc_fds {
+ 	sys_dnode_t node;
++#ifdef CONFIG_ZVFS_FS
++	/* the process's working directory, a copy of its parent's at clone */
++	char cwd[CONFIG_ZVFS_PATH_MAX];
++#endif /* CONFIG_ZVFS_FS */
+ 	struct fd_slot slots[ZVFS_PROC_OPEN_SIZE];
+ };
+ 
+@@ -148,6 +152,23 @@ static struct fd_slot *fd_slots(void)
+ 	return fd_slots_n(&unused);
+ }
+ 
++#if defined(CONFIG_PROCESS) && defined(CONFIG_ZVFS_FS)
++char *z_zvfs_proc_cwd(void)
++{
++	/* as fd_slots_n(): only syscall paths, in kernel mode, see the caller's table */
++	if (!k_is_user_context()) {
++		k_tid_t self = k_current_get();
++		struct k_process *proc = (self == NULL) ? NULL : self->process;
++
++		if ((proc != NULL) && (proc->fds != NULL)) {
++			return ((struct zvfs_proc_fds *)proc->fds)->cwd;
++		}
++	}
++
++	return NULL;
++}
++#endif /* CONFIG_PROCESS && CONFIG_ZVFS_FS */
++
+ static int fd_entry_ref(struct fd_entry *entry)
+ {
+ 	return atomic_inc(&entry->refcount) + 1;
+@@ -692,6 +713,9 @@ int z_zvfs_fds_clone(struct k_process *child, k_tid_t leader)
+ 	}
+ 	memset(t, 0, sizeof(*t));
+ 	sys_dnode_init(&t->node);
++#ifdef CONFIG_ZVFS_FS
++	z_zvfs_cwd_copy(t->cwd, sizeof(t->cwd));
++#endif /* CONFIG_ZVFS_FS */
+ 
+ 	(void)k_mutex_lock(&fdtable_lock, K_FOREVER);
+ 	parent = fd_slots_n(&n);
