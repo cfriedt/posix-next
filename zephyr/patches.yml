@@ -3599,6 +3599,26 @@ patches:
       The thread_apis cpu-mask test keeps the -EINVAL expectations for
       PIN_ONLY and otherwise exercises the running caller; the smp affinity
       test moves a running thread between CPUs and checks that it follows.
+  - path: zephyr/zvfs-per-process-cwd.patch
+    sha256sum: 8a827be46fb1e8233b12e67dd8c90f0adaebe73823a69240dcd134c5597a9439
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-16
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/zvfs-cwd.patch
+          - zephyr/zvfs-per-process-fds.patch
+    comments: |
+      A per-process working directory: the string lives in the process's
+      ZVFS table next to its descriptors, so a clone starts with a copy of
+      its parent's and chdir() in one process is invisible to the others,
+      as POSIX requires; it survives exec with the table. Threads without a
+      process, and every thread without PROCESS, share the boot directory
+      as before. Resolution is unchanged; only the buffer the cwd calls
+      read and store is selected per caller, kernel-side.
   - path: zephyr/fs-ext2-symbolic-links.patch
     sha256sum: 98d84e673f648727d1ba1ad0f51a8d8fac10f1b4d34fe2441d2fcb604f10ca64
     module: zephyr
@@ -3615,7 +3635,7 @@ patches:
       zvfs_symlink()/zvfs_readlink()/zvfs_lstat() syscalls for the
       POSIX_SYMBOLIC_LINKS Option Group.
   - path: zephyr/zvfs-stdio-picolibc-write.patch
-    sha256sum: 793efdf8557e09fdb6c67064c5a31a6b2209a695718af30a1aa1192034daeeb8
+    sha256sum: 1a293b73350e5f56f6e2c23474e46969d4dae8ae1a3ffbd63adceb0aee2d69f8
     module: zephyr
     author: Chris Friedt
     email: chris@fr4.co
@@ -3680,7 +3700,7 @@ patches:
       lock before process_lock, so scheduler operations under it would
       invert that order.
   - path: zephyr/zvfs-stdio-isatty.patch
-    sha256sum: 453722987e4e7ca7adb2c4c30d61ba02956f87a3af906d0042ca26005b847d5f
+    sha256sum: f6323c7af05e10f2e2ae94d54a55036e1af0e401ae2c892240a7db08b2928061
     module: zephyr
     author: Chris Friedt
     email: chris@fr4.co
@@ -3712,7 +3732,7 @@ patches:
       wrapper declaring ctermid(), which neither toolchain libc
       provides; posix_stdio.h remains its documented owner.
   - path: zephyr/zvfs-stdin-console.patch
-    sha256sum: 7e24d39df7dd5879bb63db9d939c747589ca27dd028dfe297951a82c5512c271
+    sha256sum: 7af2938c0dcb82d8f981954af5a97ed4f597ec71e26b0fe1cc84d9f826eda515
     module: zephyr
     author: Chris Friedt
     email: chris@fr4.co
@@ -3756,7 +3776,7 @@ patches:
       (symbolic_links_fd, file_system) look load-flaky on every qemu
       platform. Format the UUID through bin2hex() into a stack buffer.
   - path: zephyr/zvfs-stdio-fcntl.patch
-    sha256sum: a432471f886f7e889faf063882b478d46520e70f85d98b54f067ac6e018f0c3b
+    sha256sum: 4d8a77ca86d299c45e648ee4d2afedc67209948a1663cca2bfacd3775ead6f65
     module: zephyr
     author: Chris Friedt
     email: chris@fr4.co
@@ -3844,7 +3864,7 @@ patches:
       its error path. Reproduces on any invalid bracket expression, e.g.
       regcomp(preg, "[abc", REG_EXTENDED).
   - path: zephyr/zvfs-directory-descriptors-at-family.patch
-    sha256sum: a5a58d734dee0a9e4dca0101118b82fdfedd785fb2182a128a74b839f150f475
+    sha256sum: d57cc9a9a1e8c6c8a0f87e6e19ab39d1a25353ea0c78c9727ae73ee293864411
     module: zephyr
     author: Chris Friedt
     email: chris@fr4.co

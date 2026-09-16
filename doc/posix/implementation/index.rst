@@ -1319,10 +1319,11 @@ Zephyr kernel caveats
 These reflect the Zephyr kernel model rather than the file system.
 
 Working directory
-   The current working directory is a single, system-wide string maintained by ZVFS. In a
-   single-process configuration that matches the POSIX per-process model exactly; with
-   :ref:`POSIX_MULTI_PROCESS <posix_option_group_multi_process>` it is shared by all processes
-   rather than copied into a child at :c:func:`fork` :ref:`†<posix_undefined_behaviour>`.
+   ZVFS keeps the current working directory per process. A child created by :c:func:`fork` or
+   :c:func:`posix_spawn` starts with a copy of its parent's, a :c:func:`chdir` in one process is
+   invisible to every other, and the directory survives :c:func:`execve`, as POSIX requires.
+   Threads that belong to no process - every thread when :kconfig:option:`CONFIG_PROCESS` is off
+   - share the boot directory, which is the POSIX per-process model on a single-process system.
    Every path operation resolves its
    argument against it, so relative paths work throughout - including through ISO C
    :c:func:`fopen` and POSIX :c:func:`open`, which share the same ZVFS entry point.

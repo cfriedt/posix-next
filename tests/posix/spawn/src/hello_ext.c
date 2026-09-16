@@ -6,6 +6,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include <zephyr/llext/symbol.h>
 
 /* a file system image: exports main(), whose return value is the exit status */
@@ -30,6 +31,20 @@ int main(int argc, char **argv, char **envp)
 			free(blocks[i]);
 		}
 		return 42;
+	}
+
+	if ((argc == 2) && (strcmp(argv[1], "cwd") == 0)) {
+		/* the parent's directory at spawn; changing it here leaves the parent's alone */
+		char buf[16];
+
+		if ((getcwd(buf, sizeof(buf)) == NULL) || (strcmp(buf, "/RAM:/wd") != 0)) {
+			return 4;
+		}
+		if ((chdir("/") != 0) || (getcwd(buf, sizeof(buf)) == NULL) ||
+		    (strcmp(buf, "/") != 0)) {
+			return 5;
+		}
+		return 44;
 	}
 
 	return 1;
