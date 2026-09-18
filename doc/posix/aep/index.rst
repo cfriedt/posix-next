@@ -243,7 +243,7 @@ defined only while all of them remain enabled.
           :ref:`POSIX_JOB_CONTROL <posix_option_group_job_control>`,,
           :ref:`POSIX_REGEXP <posix_option_group_regexp>`,,
           :ref:`POSIX_SHELL_FUNC <posix_option_group_shell_func>`,,
-          :ref:`POSIX_SYMBOLIC_LINKS <posix_option_group_symbolic_links>`,, :kconfig:option:`CONFIG_POSIX_SYMBOLIC_LINKS`
+          :ref:`POSIX_SYMBOLIC_LINKS <posix_option_group_symbolic_links>`, yes, :kconfig:option:`CONFIG_POSIX_SYMBOLIC_LINKS`
           :ref:`POSIX_SYSTEM_DATABASE <posix_option_group_system_database>`, yes, :kconfig:option:`CONFIG_POSIX_SYSTEM_DATABASE`
           :ref:`POSIX_SYSTEM_DATABASE_R <posix_option_group_system_database_r>`, yes, :kconfig:option:`CONFIG_POSIX_SYSTEM_DATABASE_R`
           :ref:`POSIX_USER_GROUPS <posix_option_group_user_groups>`, yes, :kconfig:option:`CONFIG_POSIX_USER_GROUPS`
