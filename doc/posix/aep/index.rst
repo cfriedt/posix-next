@@ -246,8 +246,8 @@ defined only while all of them remain enabled.
           :ref:`POSIX_SYMBOLIC_LINKS <posix_option_group_symbolic_links>`,,
           :ref:`POSIX_SYSTEM_DATABASE <posix_option_group_system_database>`, yes, :kconfig:option:`CONFIG_POSIX_SYSTEM_DATABASE`
           :ref:`POSIX_SYSTEM_DATABASE_R <posix_option_group_system_database_r>`, yes, :kconfig:option:`CONFIG_POSIX_SYSTEM_DATABASE_R`
-          :ref:`POSIX_USER_GROUPS <posix_option_group_user_groups>`,, :kconfig:option:`CONFIG_POSIX_USER_GROUPS`
-          :ref:`POSIX_USER_GROUPS_R <posix_option_group_user_groups_r>`,, :kconfig:option:`CONFIG_POSIX_USER_GROUPS_R`
+          :ref:`POSIX_USER_GROUPS <posix_option_group_user_groups>`, yes, :kconfig:option:`CONFIG_POSIX_USER_GROUPS`
+          :ref:`POSIX_USER_GROUPS_R <posix_option_group_user_groups_r>`, yes, :kconfig:option:`CONFIG_POSIX_USER_GROUPS_R`
           :ref:`POSIX_WIDE_CHAR_DEVICE_IO <posix_option_group_wide_char_device_io>`,,
           :ref:`XSI_SYSTEM_LOGGING <posix_option_group_xsi_system_logging>`, yes, :kconfig:option:`CONFIG_XSI_SYSTEM_LOGGING`
 
