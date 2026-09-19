@@ -261,7 +261,7 @@ defined only while all of them remain enabled.
           :ref:`_POSIX_REGEXP <posix_option_group_regexp>`, 200809L, :kconfig:option:`CONFIG_POSIX_REGEXP`
           :ref:`_POSIX_SAVED_IDS <posix_option_saved_ids>`, -1,
           :ref:`_POSIX_SHELL <posix_option_shell>`, -1,
-          :ref:`_POSIX_VDISABLE <posix_option_vdisable>`, -1,
+          :ref:`_POSIX_VDISABLE <posix_option_vdisable>`, 0,
           :ref:`_POSIX2_C_DEV <posix_options_posix2>`, -1,
           :ref:`_POSIX2_CHAR_TERM <posix_options_posix2>`, -1,
           :ref:`_POSIX2_FORT_RUN <posix_options_posix2>`, -1,
