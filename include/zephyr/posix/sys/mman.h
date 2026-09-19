@@ -63,6 +63,19 @@
 /** @brief Lock all future mappings into memory. @ingroup posix_option_memlock */
 #define MCL_FUTURE  1
 
+#if defined(_POSIX_ADVISORY_INFO) || defined(__DOXYGEN__)
+/** @brief No advice (default access pattern). @ingroup posix_option_advisory_info */
+#define POSIX_MADV_NORMAL     0
+/** @brief Memory will be accessed in random order. @ingroup posix_option_advisory_info */
+#define POSIX_MADV_RANDOM     1
+/** @brief Memory will be accessed sequentially. @ingroup posix_option_advisory_info */
+#define POSIX_MADV_SEQUENTIAL 2
+/** @brief Memory will be needed in the near future. @ingroup posix_option_advisory_info */
+#define POSIX_MADV_WILLNEED   3
+/** @brief Memory will not be accessed in the near future. @ingroup posix_option_advisory_info */
+#define POSIX_MADV_DONTNEED   4
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -149,6 +162,19 @@ int munlockall(void);
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/munmap.html
  */
 int munmap(void *addr, size_t len);
+
+#if defined(_POSIX_ADVISORY_INFO) || defined(__DOXYGEN__)
+/**
+ * @brief Declare an expected access pattern for a memory region.
+ * @ingroup posix_option_advisory_info
+ * @param addr   Start of the region.
+ * @param len    Length of the region in bytes.
+ * @param advice Access pattern hint (POSIX_MADV_*).
+ * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/posix_madvise.html
+ */
+int posix_madvise(void *addr, size_t len, int advice);
+#endif
 
 /**
  * @brief Open or create a shared memory object.

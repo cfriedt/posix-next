@@ -78,6 +78,19 @@ char *mkdtemp(char *template);
  */
 int mkstemp(char *template);
 #endif
+
+#if defined(_POSIX_ADVISORY_INFO) || defined(__DOXYGEN__)
+/**
+ * @brief Allocate aligned memory.
+ * @ingroup posix_option_advisory_info
+ * @param memptr    Receives the allocated pointer.
+ * @param alignment Power of two that is a multiple of sizeof(void *).
+ * @param size      Bytes to allocate.
+ * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/posix_memalign.html
+ */
+int posix_memalign(void **memptr, size_t alignment, size_t size);
+#endif
 #endif
 
 #if defined(_XOPEN_SOURCE) || defined(__DOXYGEN__)

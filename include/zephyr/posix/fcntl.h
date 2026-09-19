@@ -143,18 +143,18 @@ extern "C" {
 #define AT_REMOVEDIR        ZVFS_AT_REMOVEDIR
 
 #if defined(_POSIX_ADVISORY_INFO) || defined(__DOXYGEN__)
-/** @brief No advice (default access pattern). @ingroup posix_option_group_file_system */
-#define POSIX_FADV_NORMAL     ZVFS_POSIX_FADV_NORMAL
-/** @brief Data will be accessed in random order. @ingroup posix_option_group_file_system */
-#define POSIX_FADV_RANDOM     ZVFS_POSIX_FADV_RANDOM
-/** @brief Data will be accessed sequentially. @ingroup posix_option_group_file_system */
-#define POSIX_FADV_SEQUENTIAL ZVFS_POSIX_FADV_SEQUENTIAL
-/** @brief Data will be needed in the near future. @ingroup posix_option_group_file_system */
-#define POSIX_FADV_WILLNEED   ZVFS_POSIX_FADV_WILLNEED
-/** @brief Data will not be accessed in the near future. @ingroup posix_option_group_file_system */
-#define POSIX_FADV_DONTNEED   ZVFS_POSIX_FADV_DONTNEED
-/** @brief Data will be accessed only once. @ingroup posix_option_group_file_system */
-#define POSIX_FADV_NOREUSE    ZVFS_POSIX_FADV_NOREUSE
+/** @brief No advice (default access pattern). @ingroup posix_option_advisory_info */
+#define POSIX_FADV_NORMAL 0
+/** @brief Data will be accessed in random order. @ingroup posix_option_advisory_info */
+#define POSIX_FADV_RANDOM 1
+/** @brief Data will be accessed sequentially. @ingroup posix_option_advisory_info */
+#define POSIX_FADV_SEQUENTIAL 2
+/** @brief Data will be needed in the near future. @ingroup posix_option_advisory_info */
+#define POSIX_FADV_WILLNEED 3
+/** @brief Data will not be accessed in the near future. @ingroup posix_option_advisory_info */
+#define POSIX_FADV_DONTNEED 4
+/** @brief Data will be accessed only once. @ingroup posix_option_advisory_info */
+#define POSIX_FADV_NOREUSE 5
 #endif
 
 #if !defined(_FLOCK_DECLARED) && !defined(__flock_defined)
@@ -196,7 +196,7 @@ typedef int pid_t;
 
 /**
  * @brief Create or truncate a file.
- * @ingroup posix_option_group_file_system
+ * @ingroup posix_option_advisory_info
  *
  * Equivalent to @c open(path, O_WRONLY|O_CREAT|O_TRUNC, mode).
  *
@@ -244,7 +244,7 @@ int openat(int fd, const char *path, int oflag, ...);
 #if defined(_POSIX_ADVISORY_INFO) || defined(__DOXYGEN__)
 /**
  * @brief Declare an expected access pattern for a file region.
- * @ingroup posix_option_group_file_system
+ * @ingroup posix_option_advisory_info
  * @param fd     File descriptor.
  * @param offset Start of the region.
  * @param len    Length of the region in bytes (0 = to EOF).
@@ -256,7 +256,7 @@ int posix_fadvise(int fd, off_t offset, off_t len, int advice);
 
 /**
  * @brief Guarantee that disk space is allocated for a file region.
- * @ingroup posix_option_group_file_system
+ * @ingroup posix_option_advisory_info
  * @param fd     File descriptor.
  * @param offset Start of the region.
  * @param len    Length of the region in bytes.
