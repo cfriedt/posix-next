@@ -255,7 +255,7 @@ defined only while all of them remain enabled.
          :header: Symbol, Support, Remarks
          :widths: 50, 10, 50
 
-          :ref:`_POSIX_ADVISORY_INFO <posix_option_advisory_info>`, -1,
+          :ref:`_POSIX_ADVISORY_INFO <posix_option_advisory_info>`, 200809L, :kconfig:option:`CONFIG_POSIX_ADVISORY_INFO`
           :ref:`_POSIX_CHOWN_RESTRICTED <posix_option_chown_restricted>`, -1,
           :ref:`_POSIX_JOB_CONTROL <posix_option_job_control>`, -1,
           :ref:`_POSIX_REGEXP <posix_option_group_regexp>`, -1,
