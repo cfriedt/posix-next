@@ -232,7 +232,7 @@ defined only while all of them remain enabled.
          :header: Symbol, Support, Remarks
          :widths: 50, 10, 50
 
-          :ref:`POSIX_C_LANG_WIDE_CHAR <posix_option_group_c_lang_wide_char>`,,
+          :ref:`POSIX_C_LANG_WIDE_CHAR <posix_option_group_c_lang_wide_char>`,, :kconfig:option:`CONFIG_POSIX_C_LANG_WIDE_CHAR`
           :ref:`POSIX_DEVICE_SPECIFIC <posix_option_group_device_specific>`, yes, :kconfig:option:`CONFIG_POSIX_DEVICE_SPECIFIC`
           :ref:`POSIX_DEVICE_SPECIFIC_R <posix_option_group_device_specific_r>`, yes, :kconfig:option:`CONFIG_POSIX_DEVICE_SPECIFIC_R`
           :ref:`POSIX_DYNAMIC_LINKING <posix_option_group_dynamic_linking>`,,
