@@ -21,6 +21,7 @@ zephyr_compile_options("SHELL: $<$<COMPILE_LANGUAGE:CXX>:$<TARGET_PROPERTY:compi
 add_subdirectory(shared)
 
 # zephyr-keep-sorted-start
+add_subdirectory_ifdef(CONFIG_POSIX_ADVISORY_INFO advisory_info)
 add_subdirectory_ifdef(CONFIG_POSIX_ASYNCHRONOUS_IO asynchronous_io)
 add_subdirectory_ifdef(CONFIG_POSIX_BARRIERS barriers)
 add_subdirectory_ifdef(CONFIG_POSIX_CLOCK_SELECTION clock_selection)
