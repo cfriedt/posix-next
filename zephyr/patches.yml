@@ -4114,3 +4114,18 @@ patches:
       implementation; on Zephyr they differ, so `uname -a` printed the release,
       version and machine from inside the node name and clobbered the system
       name's terminator. Address the fields and print the separator instead.
+  - path: picolibc/tinystdio-wide-stream-conformance.patch
+    sha256sum: 42dd7dd3fa77d3ab04f3eed65bdb53cea4cb7dd9c3900dede7742734ecb7140e
+    module: picolibc
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-18
+    upstreamable: true
+    comments: |
+      Two ISO C conformance fixes in tinystdio's wide-character streams.
+      vswprintf() returned the length a truncated result needed and wrote the
+      terminator at that index, past the end of the array; a result that does
+      not fit now terminates what fits and returns -1 with EOVERFLOW. getwc()
+      returned WEOF without setting the stream's end-of-file or error
+      indicator, so feof() and ferror() stayed clear; it now records them as
+      getc() does.
