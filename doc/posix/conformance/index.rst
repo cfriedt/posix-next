@@ -62,7 +62,7 @@ POSIX System Interfaces
    :header: Symbol, Support, Remarks
    :widths: 50, 10, 50
 
-    _POSIX_ADVISORY_INFO, -1,
+    :ref:`_POSIX_ADVISORY_INFO<posix_option_advisory_info>`, 200809L, :kconfig:option:`CONFIG_POSIX_ADVISORY_INFO`
     :ref:`_POSIX_CPUTIME<posix_option_cputime>`, 200809L, :kconfig:option:`CONFIG_POSIX_CPUTIME`
     _POSIX_DEVICE_CONTROL, -1,
     :ref:`_POSIX_FSYNC<posix_option_fsync>`, 200809L, :kconfig:option:`CONFIG_POSIX_FSYNC`
