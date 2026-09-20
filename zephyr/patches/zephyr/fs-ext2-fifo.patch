@@ -1,0 +1,291 @@
+diff --git a/include/zephyr/fs/fs.h b/include/zephyr/fs/fs.h
+--- a/include/zephyr/fs/fs.h
++++ b/include/zephyr/fs/fs.h
+@@ -43,7 +43,9 @@ enum fs_dir_entry_type {
+ 	/** Identifier for directory entry */
+ 	FS_DIR_ENTRY_DIR,
+ 	/** Identifier for symbolic link entry */
+-	FS_DIR_ENTRY_SYMLINK
++	FS_DIR_ENTRY_SYMLINK,
++	/** Identifier for FIFO special file entry */
++	FS_DIR_ENTRY_FIFO
+ };
+ 
+ /** @brief Enumeration to uniquely identify file system types.
+@@ -726,6 +728,23 @@ int fs_symlink(const char *target, const char *path);
+  */
+ ssize_t fs_readlink(const char *path, char *buf, size_t size);
+ 
++/**
++ * @brief Create a FIFO special file
++ *
++ * Creates a named pipe node at @p path. The file system stores only the
++ * node; opening it as a pipe is the work of the layer above.
++ *
++ * @param path Path of the FIFO to create.
++ *
++ * @retval 0 on success;
++ * @retval -EINVAL when a bad file name is given;
++ * @retval -EROFS when the file system is read-only;
++ * @retval -ENOTSUP when the file system does not support FIFOs;
++ * @retval -EEXIST when the path already exists;
++ * @retval <0 an other negative errno code on error.
++ */
++int fs_mkfifo(const char *path);
++
+ /**
+  * @brief Retrieves statistics of the file system volume
+  *
+diff --git a/include/zephyr/fs/fs_sys.h b/include/zephyr/fs/fs_sys.h
+--- a/include/zephyr/fs/fs_sys.h
++++ b/include/zephyr/fs/fs_sys.h
+@@ -225,6 +225,14 @@ struct fs_file_system_t {
+ 	 */
+ 	ssize_t (*readlink)(struct fs_mount_t *mountp, const char *path,
+ 					char *buf, size_t size);
++	/**
++	 * Creates a FIFO special file. Optional.
++	 *
++	 * @param mountp Mount point.
++	 * @param path Path of the FIFO to create.
++	 * @return 0 on success, negative errno code on fail.
++	 */
++	int (*mkfifo)(struct fs_mount_t *mountp, const char *path);
+ 	/**
+ 	 * Returns the total and available space on the file system volume.
+ 	 *
+diff --git a/subsys/fs/ext2/ext2.h b/subsys/fs/ext2/ext2.h
+--- a/subsys/fs/ext2/ext2.h
++++ b/subsys/fs/ext2/ext2.h
+@@ -75,9 +75,16 @@
+ 	 EXT2_S_IRGRP | EXT2_S_IWGRP | EXT2_S_IXGRP | \
+ 	 EXT2_S_IROTH | EXT2_S_IWOTH | EXT2_S_IXOTH)
+ 
++#define EXT2_DEF_FIFO_MODE                            \
++	(EXT2_S_IFIFO |                               \
++	 EXT2_S_IRUSR | EXT2_S_IWUSR |                \
++	 EXT2_S_IRGRP | EXT2_S_IWGRP |                \
++	 EXT2_S_IROTH | EXT2_S_IWOTH)
++
+ #define IS_REG_FILE(mode) (((mode) & EXT2_S_IFMT) == EXT2_S_IFREG)
+ #define IS_DIR(mode) (((mode) & EXT2_S_IFMT) == EXT2_S_IFDIR)
+ #define IS_LNK(mode) (((mode) & EXT2_S_IFMT) == EXT2_S_IFLNK)
++#define IS_FIFO(mode) (((mode) & EXT2_S_IFMT) == EXT2_S_IFIFO)
+ 
+ /* A fast symbolic link stores its target directly in i_block */
+ #define EXT2_FAST_SYMLINK_MAX (EXT2_INODE_BLOCKS * sizeof(uint32_t))
+diff --git a/subsys/fs/ext2/ext2_impl.c b/subsys/fs/ext2/ext2_impl.c
+--- a/subsys/fs/ext2/ext2_impl.c
++++ b/subsys/fs/ext2/ext2_impl.c
+@@ -1056,6 +1056,9 @@ int ext2_get_direntry(struct ext2_file *dir, struct fs_dirent *ent)
+ 	case EXT2_FT_SYMLINK:
+ 		ent->type = FS_DIR_ENTRY_SYMLINK;
+ 		break;
++	case EXT2_FT_FIFO:
++		ent->type = FS_DIR_ENTRY_FIFO;
++		break;
+ 	default:
+ 		ent->type = FS_DIR_ENTRY_FILE;
+ 		break;
+@@ -1109,6 +1112,9 @@ static int ext2_create_inode(struct ext2_data *fs, struct ext2_inode *parent,
+ 	case FS_DIR_ENTRY_SYMLINK:
+ 		inode->i_mode = EXT2_DEF_LINK_MODE;
+ 		break;
++	case FS_DIR_ENTRY_FIFO:
++		inode->i_mode = EXT2_DEF_FIFO_MODE;
++		break;
+ 	default:
+ 		inode->i_mode = EXT2_DEF_FILE_MODE;
+ 		break;
+@@ -1323,6 +1329,42 @@ out:
+ 	return ret;
+ }
+ 
++int ext2_create_fifo(struct ext2_inode *parent, struct ext2_inode *new_inode,
++		struct ext2_lookup_args *args)
++{
++	int rc, ret = 0;
++	struct ext2_direntry *entry;
++	struct ext2_data *fs = parent->i_fs;
++
++	rc = ext2_create_inode(fs, args->inode, new_inode, FS_DIR_ENTRY_FIFO);
++	if (rc < 0) {
++		return rc;
++	}
++
++	/* a FIFO node holds no data: its bytes live in the pipe that opens it */
++	new_inode->i_size = 0;
++	new_inode->i_blocks = 0;
++
++	entry = ext2_create_direntry(args->path + args->name_pos, args->name_len, new_inode->i_id,
++			EXT2_FT_FIFO);
++
++	rc = ext2_add_direntry(parent, entry);
++	if (rc < 0) {
++		ret = rc;
++		goto out;
++	}
++
++	new_inode->i_links_count += 1;
++
++	rc = ext2_commit_inode(new_inode);
++	if (rc < 0) {
++		ret = rc;
++	}
++out:
++	k_heap_free(&direntry_heap, entry);
++	return ret;
++}
++
+ int ext2_create_dir(struct ext2_inode *parent, struct ext2_inode *new_inode,
+ 		struct ext2_lookup_args *args)
+ {
+@@ -1601,7 +1643,7 @@ int ext2_inode_unlink(struct ext2_inode *parent, struct ext2_inode *inode, uint3
+ 		return rc;
+ 	}
+ 
+-	if (((IS_REG_FILE(inode->i_mode) || IS_LNK(inode->i_mode)) &&
++	if (((IS_REG_FILE(inode->i_mode) || IS_LNK(inode->i_mode) || IS_FIFO(inode->i_mode)) &&
+ 			inode->i_links_count == 1) ||
+ 			(IS_DIR(inode->i_mode) && inode->i_links_count == 2)) {
+ 
+diff --git a/subsys/fs/ext2/ext2_impl.h b/subsys/fs/ext2/ext2_impl.h
+--- a/subsys/fs/ext2/ext2_impl.h
++++ b/subsys/fs/ext2/ext2_impl.h
+@@ -309,6 +309,9 @@ int ext2_create_dir(struct ext2_inode *parent, struct ext2_inode *inode,
+ int ext2_create_symlink(struct ext2_inode *parent, struct ext2_inode *inode,
+ 			struct ext2_lookup_args *args, const char *target);
+ 
++int ext2_create_fifo(struct ext2_inode *parent, struct ext2_inode *inode,
++		     struct ext2_lookup_args *args);
++
+ /**
+  * @brief Check whether an inode is a fast symbolic link
+  *
+diff --git a/subsys/fs/ext2/ext2_ops.c b/subsys/fs/ext2/ext2_ops.c
+--- a/subsys/fs/ext2/ext2_ops.c
++++ b/subsys/fs/ext2/ext2_ops.c
+@@ -710,6 +710,55 @@ out:
+ 	return ret;
+ }
+ 
++static int ext2_mkfifo(struct fs_mount_t *mountp, const char *path)
++{
++	int rc, ret = 0;
++	struct ext2_data *fs = mountp->fs_data;
++
++	path = fs_impl_strip_prefix(path, mountp);
++
++	struct ext2_lookup_args args = {
++		.path = path,
++		.inode = NULL,
++		.parent = NULL,
++		.flags = LOOKUP_ARG_CREATE | LOOKUP_ARG_NOFOLLOW,
++	};
++
++	rc = ext2_lookup_inode(fs, &args);
++	if (rc < 0) {
++		return rc;
++	}
++
++	if (args.inode != NULL) {
++		ret = -EEXIST;
++		goto out;
++	}
++
++	struct ext2_inode *new_inode;
++
++	rc = ext2_inode_get(fs, 0, &new_inode);
++	if (rc < 0) {
++		ret = rc;
++		goto out;
++	}
++
++	rc = ext2_create_fifo(args.parent, new_inode, &args);
++	if (rc < 0) {
++		ext2_inode_drop(new_inode);
++		ret = rc;
++		goto out;
++	}
++
++	rc = ext2_inode_drop(new_inode);
++	if (rc < 0) {
++		ret = rc;
++	}
++out:
++	ext2_inode_drop(args.inode);
++	ext2_inode_drop(args.parent);
++	return ret;
++}
++
+ static ssize_t ext2_readlink(struct fs_mount_t *mountp, const char *path, char *buf, size_t size)
+ {
+ 	int rc;
+@@ -960,6 +1009,17 @@ static int ext2_locked_symlink(struct fs_mount_t *mountp, const char *target, co
+ 	return ret;
+ }
+ 
++static int ext2_locked_mkfifo(struct fs_mount_t *mountp, const char *path)
++{
++	int ret;
++
++	(void)k_mutex_lock(&ext2_op_lock, K_FOREVER);
++	ret = ext2_mkfifo(mountp, path);
++	k_mutex_unlock(&ext2_op_lock);
++
++	return ret;
++}
++
+ static ssize_t ext2_locked_readlink(struct fs_mount_t *mountp, const char *path, char *buf, size_t size)
+ {
+ 	ssize_t ret;
+@@ -1015,6 +1075,7 @@ static const struct fs_file_system_t ext2_fs = {
+ 	.stat = ext2_locked_stat,
+ 	.lstat = ext2_locked_lstat,
+ 	.symlink = ext2_locked_symlink,
++	.mkfifo = ext2_locked_mkfifo,
+ 	.readlink = ext2_locked_readlink,
+ 	.statvfs = ext2_locked_statvfs,
+ #if defined(CONFIG_FILE_SYSTEM_MKFS)
+diff --git a/subsys/fs/fs.c b/subsys/fs/fs.c
+--- a/subsys/fs/fs.c
++++ b/subsys/fs/fs.c
+@@ -815,6 +815,38 @@ ssize_t fs_readlink(const char *abs_path, char *buf, size_t size)
+ 	return rc;
+ }
+ 
++int fs_mkfifo(const char *abs_path)
++{
++	struct fs_mount_t *mp;
++	int rc = -EINVAL;
++	size_t mp_len;
++
++	if ((abs_path == NULL) || (abs_path[0] != '/') || (abs_path[1] == '\0')) {
++		LOG_ERR("invalid file or dir name!!");
++		return -EINVAL;
++	}
++
++	rc = fs_get_mnt_point(&mp, abs_path, &mp_len);
++	if (rc < 0) {
++		LOG_ERR("mount point not found!!");
++		return rc;
++	}
++
++	if (mp->flags & FS_MOUNT_FLAG_READ_ONLY) {
++		return -EROFS;
++	}
++
++	CHECKIF(mp->fs->mkfifo == NULL) {
++		return -ENOTSUP;
++	}
++
++	rc = mp->fs->mkfifo(mp, abs_path);
++	if (rc < 0) {
++		LOG_ERR("failed to create fifo (%d)", rc);
++	}
++	return rc;
++}
++
+ int fs_statvfs(const char *abs_path, struct fs_statvfs *stat)
+ {
+ 	struct fs_mount_t *mp;
