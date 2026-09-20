@@ -198,7 +198,10 @@
 #define _POSIX_SHARED_MEMORY_OBJECTS _POSIX_VERSION
 #endif
 
-/* _POSIX_SHELL: not supported */
+#undef _POSIX_SHELL
+#ifdef CONFIG_POSIX_SHELL_FUNC
+#define _POSIX_SHELL _POSIX_VERSION
+#endif
 /* _POSIX_SPAWN: not supported */
 
 #undef _POSIX_SPIN_LOCKS
