@@ -1,0 +1,31 @@
+# SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+config POSIX_SHELL_FUNC
+	bool "POSIX shell and utilities"
+	depends on ZEPHYR_TOYBOX_MODULE
+	depends on ZVFS_FS && LLEXT && FILE_SYSTEM
+	select TOYBOX if !TC_PROVIDES_POSIX_SHELL_FUNC
+	select PROCESS if !TC_PROVIDES_POSIX_SHELL_FUNC
+	select SYS_PROCESS if !TC_PROVIDES_POSIX_SHELL_FUNC
+	select SYS_PROCESS_EXEC if !TC_PROVIDES_POSIX_SHELL_FUNC
+	select ZVFS_PIPE if !TC_PROVIDES_POSIX_SHELL_FUNC
+	select COMMON_LIBC_MALLOC if !TC_PROVIDES_POSIX_SHELL_FUNC
+	help
+	  Select 'y' here and Zephyr will provide implementations of the
+	  POSIX_SHELL_FUNC Option Group: system(), popen(), pclose(),
+	  wordexp(), and wordfree(). The shell is toybox's, run as a process
+	  from the image the application installs at /bin/sh; each call
+	  spawns "sh -c" with the caller's environment.
+
+if POSIX_SHELL_FUNC
+
+config POSIX_SHELL_FUNC_POPEN_MAX
+	int "Maximum number of streams open through popen()"
+	default 4
+	range 1 64
+	help
+	  The number of concurrently open popen() streams, each of which
+	  remembers the process pclose() will wait for.
+
+endif # POSIX_SHELL_FUNC

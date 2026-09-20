@@ -60,6 +60,7 @@
 #include <unistd.h>
 #include <utime.h>
 #include <wchar.h>
+#include <wordexp.h>
 #include <wctype.h>
 
 #include <zephyr/getopt.h>
@@ -475,6 +476,15 @@ EXPORT_SYMBOL(sem_trywait);
 EXPORT_SYMBOL(sem_unlink);
 EXPORT_SYMBOL(sem_wait);
 #endif /* CONFIG_POSIX_SEMAPHORES */
+
+/* SHELL_FUNC */
+#ifdef CONFIG_POSIX_SHELL_FUNC
+EXPORT_SYMBOL(pclose);
+EXPORT_SYMBOL(popen);
+EXPORT_SYMBOL(system);
+EXPORT_SYMBOL(wordexp);
+EXPORT_SYMBOL(wordfree);
+#endif /* CONFIG_POSIX_SHELL_FUNC */
 
 /* SIGNAL_JUMP */
 #ifdef CONFIG_POSIX_SIGNAL_JUMP
