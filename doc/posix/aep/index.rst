@@ -236,7 +236,7 @@ defined only while all of them remain enabled.
           :ref:`POSIX_DEVICE_SPECIFIC <posix_option_group_device_specific>`, yes, :kconfig:option:`CONFIG_POSIX_DEVICE_SPECIFIC`
           :ref:`POSIX_DEVICE_SPECIFIC_R <posix_option_group_device_specific_r>`, yes, :kconfig:option:`CONFIG_POSIX_DEVICE_SPECIFIC_R`
           :ref:`POSIX_DYNAMIC_LINKING <posix_option_group_dynamic_linking>`,,
-          :ref:`POSIX_FIFO <posix_option_group_fifo>`,, :kconfig:option:`CONFIG_POSIX_FIFO`
+          :ref:`POSIX_FIFO <posix_option_group_fifo>`, yes, :kconfig:option:`CONFIG_POSIX_FIFO`
           :ref:`POSIX_FILE_ATTRIBUTES <posix_option_group_file_attributes>`, yes, :kconfig:option:`CONFIG_POSIX_FILE_ATTRIBUTES`
           :ref:`POSIX_FILE_SYSTEM_EXT <posix_option_group_file_system_ext>`, yes, :kconfig:option:`CONFIG_POSIX_FILE_SYSTEM_EXT`
           :ref:`POSIX_FILE_SYSTEM_GLOB <posix_option_group_file_system_glob>`, yes, :kconfig:option:`CONFIG_POSIX_FILE_SYSTEM_GLOB`
