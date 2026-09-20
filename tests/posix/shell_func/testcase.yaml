@@ -1,0 +1,31 @@
+common:
+  tags:
+    - ext2
+    - llext
+    - toybox
+    - posix_shell_func
+  # each shell is an image loaded from ext2, seconds apiece on the simulators
+  timeout: 900
+  # 1 tier0 platform per supported architecture
+  platform_key:
+    - arch
+    - simulation
+tests:
+  portability.posix.shell_func:
+    # toybox needs an off_t story for 32-bit targets first
+    platform_allow:
+      - qemu_cortex_a53
+      - qemu_riscv64
+    integration_platforms:
+      - qemu_riscv64
+    filter: not CONFIG_NATIVE_LIBC
+    extra_conf_files:
+      - toybox.conf
+  portability.posix.shell_func.linux_compat:
+    tags: native
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    filter: CONFIG_NATIVE_LIBC
+    extra_configs:
+      - CONFIG_POSIX_TEST_LINUX_COMPAT=y
