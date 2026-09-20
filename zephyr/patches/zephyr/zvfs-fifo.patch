@@ -1,0 +1,675 @@
+diff --git a/include/zephyr/sys/zvfs_fs.h b/include/zephyr/sys/zvfs_fs.h
+--- a/include/zephyr/sys/zvfs_fs.h
++++ b/include/zephyr/sys/zvfs_fs.h
+@@ -19,6 +19,7 @@
+ #include <time.h>
+ 
+ #include <zephyr/fs/fs.h>
++#include <zephyr/sys/fdtable.h>
+ #include <zephyr/sys/zvfs.h>
+ #include <zephyr/toolchain.h>
+ 
+@@ -298,6 +299,24 @@ __syscall int zvfs_symlinkat(const char *target, int dirfd, const char *path);
+ __syscall ssize_t zvfs_readlink(const char *path, char *buf, size_t size);
+ __syscall ssize_t zvfs_readlinkat(int dirfd, const char *path, char *buf, size_t size);
+ 
++/**
++ * @brief Create a file system node relative to a directory descriptor.
++ *
++ * The type bits of @p mode choose the node: ZVFS_MODE_IFIFO names a pipe,
++ * which opening the node connects to, waiting for the other end unless
++ * ZVFS_O_NONBLOCK; ZVFS_MODE_IFREG, or no type at all, is an empty regular
++ * file. No device special files exist to create. The permission bits are
++ * kept for nothing by the file systems.
++ *
++ * @param dirfd Directory a relative @p path resolves against, or ZVFS_AT_FDCWD.
++ * @param path Path of the node to create.
++ * @param mode Type and permission bits of the node.
++ * @param dev Device number; ignored, since no device nodes exist.
++ *
++ * @return 0 on success, -1 with errno set on error.
++ */
++__syscall int zvfs_mknodat(int dirfd, const char *path, uint32_t mode, unsigned long dev);
++
+ /**
+  * @brief Get statistics of the file system containing @p path.
+  *
+@@ -416,4 +435,29 @@ __syscall int zvfs_getcwd(char *buf, size_t size);
+ 
+ #include <zephyr/syscalls/zvfs_fs.h>
+ 
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/**
++ * @brief Create a file system node.
++ *
++ * Equivalent to zvfs_mknodat() with ZVFS_AT_FDCWD: a relative @p path
++ * resolves against the working directory.
++ *
++ * @param path Path of the node to create.
++ * @param mode Type and permission bits of the node, as for zvfs_mknodat().
++ * @param dev Device number; ignored, since no device nodes exist.
++ *
++ * @return 0 on success, -1 with errno set on error.
++ */
++static inline int zvfs_mknod(const char *path, uint32_t mode, unsigned long dev)
++{
++	return zvfs_mknodat(ZVFS_AT_FDCWD, path, mode, dev);
++}
++
++#ifdef __cplusplus
++}
++#endif
++
+ #endif /* ZEPHYR_INCLUDE_SYS_ZVFS_FS_H_ */
+diff --git a/lib/os/zvfs/Kconfig b/lib/os/zvfs/Kconfig
+--- a/lib/os/zvfs/Kconfig
++++ b/lib/os/zvfs/Kconfig
+@@ -307,6 +307,24 @@ config ZVFS_PIPE_MAX
+ 	help
+ 	  The maximum number of concurrently open pipes.
+ 
++config ZVFS_FIFO
++	bool "ZVFS named pipes"
++	depends on ZVFS_FS
++	help
++	  Enable opening FIFO special files: a node the file system stores
++	  (see fs_mkfifo()) names a pipe, and open() connects to it, waiting
++	  for the other end unless O_NONBLOCK is given. The pipes come from
++	  the same pool as anonymous ones.
++
++config ZVFS_FIFO_OPEN_MAX
++	int "Maximum number of open FIFO descriptions"
++	depends on ZVFS_FIFO
++	default 4
++	range 2 4096
++	help
++	  The number of concurrent open() results on FIFOs, across every
++	  FIFO; each carries its own file status flags.
++
+ config ZVFS_PIPE_BUF_SIZE
+ 	int "ZVFS pipe buffer size"
+ 	default 512
+diff --git a/lib/os/zvfs/zvfs_fs.c b/lib/os/zvfs/zvfs_fs.c
+--- a/lib/os/zvfs/zvfs_fs.c
++++ b/lib/os/zvfs/zvfs_fs.c
+@@ -103,17 +103,20 @@ int z_impl_zvfs_openat(int dirfd, const char *name, int flags, int mode)
+ 	}
+ 	name = r;
+ 
+-	if ((flags & ZVFS_O_DIRECTORY) == 0 && (flags & ZVFS_O_CREAT) == 0) {
++	if ((flags & ZVFS_O_DIRECTORY) == 0) {
+ 		struct fs_dirent entry;
++		int type = (fs_stat(name, &entry) == 0) ? (int)entry.type : -1;
+ 
+ 		/* the root is a directory; fs_stat() cannot say so */
+-		if (name[1] == '\0' ||
+-		    (fs_stat(name, &entry) == 0 && entry.type == FS_DIR_ENTRY_DIR)) {
++		if (name[1] == '\0' || type == FS_DIR_ENTRY_DIR) {
+ 			if ((flags & ZVFS_O_ACCMODE) != ZVFS_O_RDONLY) {
+ 				errno = EISDIR;
+ 				return -1;
+ 			}
+ 			flags |= ZVFS_O_DIRECTORY;
++		} else if (IS_ENABLED(CONFIG_ZVFS_FIFO) && type == FS_DIR_ENTRY_FIFO) {
++			/* the node names a pipe: an existing one is not created again */
++			return zvfs_fifo_open(name, flags);
+ 		}
+ 	}
+ 
+@@ -281,8 +284,20 @@ static int fs_dir_ioctl_vmeth(void *obj, unsigned int request, va_list args)
+ 			return 1;
+ 		}
+ 
+-		ent->d_type = (entry.type == FS_DIR_ENTRY_DIR) ? ZVFS_MODE_IFDIR
+-							       : ZVFS_MODE_IFREG;
++		switch (entry.type) {
++		case FS_DIR_ENTRY_DIR:
++			ent->d_type = ZVFS_MODE_IFDIR;
++			break;
++		case FS_DIR_ENTRY_SYMLINK:
++			ent->d_type = ZVFS_MODE_IFLNK;
++			break;
++		case FS_DIR_ENTRY_FIFO:
++			ent->d_type = ZVFS_MODE_IFIFO;
++			break;
++		default:
++			ent->d_type = ZVFS_MODE_IFREG;
++			break;
++		}
+ 		ent->d_ino = 0;
+ 		ent->d_size = entry.size;
+ 		strncpy(ent->d_name, entry.name, ZVFS_NAME_MAX);
+diff --git a/lib/os/zvfs/zvfs_fs_priv.h b/lib/os/zvfs/zvfs_fs_priv.h
+--- a/lib/os/zvfs/zvfs_fs_priv.h
++++ b/lib/os/zvfs/zvfs_fs_priv.h
+@@ -51,6 +51,11 @@ void zvfs_dirstream_free(struct zvfs_dirstream *d);
+  */
+ int zvfs_resolve_path(const char *in, char *out, size_t outsz);
+ int zvfs_resolve_at(int dirfd, const char *in, char *out, size_t outsz);
++
++#define ZVFS_O_ACCMODE (ZVFS_O_RDONLY | ZVFS_O_WRONLY | ZVFS_O_RDWR)
++
++/* open the pipe a FIFO node names; the node itself has been found at @p path */
++int zvfs_fifo_open(const char *path, int flags);
+ #ifdef CONFIG_USERSPACE
+ int zvfs_dirfd_syscall_verify(int dirfd);
+ #endif /* CONFIG_USERSPACE */
+diff --git a/lib/os/zvfs/zvfs_path.c b/lib/os/zvfs/zvfs_path.c
+--- a/lib/os/zvfs/zvfs_path.c
++++ b/lib/os/zvfs/zvfs_path.c
+@@ -16,6 +16,7 @@
+ #include <zephyr/sys/fdtable.h>
+ #include <zephyr/sys/internal/fdtable_priv.h>
+ #include <zephyr/sys/util.h>
++#include <zephyr/sys/zvfs.h>
+ #include <zephyr/sys/zvfs_fs.h>
+ 
+ #include "zvfs_fs_priv.h"
+@@ -70,6 +71,10 @@ static uint32_t zvfs_synth_mode(enum fs_dir_entry_type type, bool rdonly)
+ 		mode = ZVFS_MODE_IFDIR | ZVFS_S_IRUSR | ZVFS_S_IXUSR | ZVFS_S_IRGRP |
+ 		       ZVFS_S_IXGRP | ZVFS_S_IROTH | ZVFS_S_IXOTH;
+ 		break;
++	case FS_DIR_ENTRY_FIFO:
++		mode = ZVFS_MODE_IFIFO | ZVFS_S_IRUSR | ZVFS_S_IWUSR | ZVFS_S_IRGRP |
++		       ZVFS_S_IWGRP | ZVFS_S_IROTH | ZVFS_S_IWOTH;
++		break;
+ 	case FS_DIR_ENTRY_SYMLINK:
+ 		/* symbolic links conventionally report all permissions */
+ 		mode = ZVFS_MODE_IFLNK | ZVFS_S_IRUSR | ZVFS_S_IWUSR | ZVFS_S_IXUSR |
+@@ -521,6 +526,50 @@ static int z_vrfy_zvfs_fstatvfs(int fd, struct zvfs_statvfs *buf)
+ #include <zephyr/syscalls/zvfs_fstatvfs_mrsh.c>
+ #endif /* CONFIG_USERSPACE */
+ 
++int z_impl_zvfs_mknodat(int dirfd, const char *path, uint32_t mode, unsigned long dev)
++{
++	int fd;
++	char r[CONFIG_ZVFS_PATH_MAX];
++	int rrc = zvfs_resolve_at(dirfd, path, r, sizeof(r));
++
++	ARG_UNUSED(dev);
++
++	if (rrc < 0) {
++		errno = -rrc;
++		return -1;
++	}
++
++	switch (mode & ZVFS_MODE_IFMT) {
++	case ZVFS_MODE_IFIFO:
++		return zvfs_err(fs_mkfifo(r));
++	case 0:
++	case ZVFS_MODE_IFREG:
++		fd = zvfs_open(r, ZVFS_O_WRONLY | ZVFS_O_CREAT | ZVFS_O_EXCL, mode & ~ZVFS_MODE_IFMT);
++		if (fd < 0) {
++			return -1;
++		}
++		return zvfs_close(fd);
++	default:
++		/* no device special files exist to create */
++		errno = EINVAL;
++		return -1;
++	}
++}
++
++#ifdef CONFIG_USERSPACE
++static int z_vrfy_zvfs_mknodat(int dirfd, const char *path, uint32_t mode, unsigned long dev)
++{
++	char kpath[CONFIG_ZVFS_PATH_MAX];
++
++	if (zvfs_dirfd_syscall_verify(dirfd) < 0 || zvfs_copy_user_path(kpath, path) < 0) {
++		return -1;
++	}
++
++	return z_impl_zvfs_mknodat(dirfd, kpath, mode, dev);
++}
++#include <zephyr/syscalls/zvfs_mknodat_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
+ int z_impl_zvfs_mkdirat(int dirfd, const char *path, uint32_t mode)
+ {
+ 	char r[CONFIG_ZVFS_PATH_MAX];
+diff --git a/lib/os/zvfs/zvfs_pipe.c b/lib/os/zvfs/zvfs_pipe.c
+--- a/lib/os/zvfs/zvfs_pipe.c
++++ b/lib/os/zvfs/zvfs_pipe.c
+@@ -13,6 +13,10 @@
+ #include <zephyr/sys/util.h>
+ #include <zephyr/sys/zvfs.h>
+ #include <zephyr/zvfs/pipe.h>
++#ifdef CONFIG_ZVFS_FIFO
++#include <string.h>
++#include "zvfs_fs_priv.h"
++#endif
+ #include <zephyr/internal/syscall_handler.h>
+ 
+ #define ZVFS_PIPE_END_OPEN     BIT(0)
+@@ -22,14 +26,21 @@
+ 
+ struct zvfs_pipe;
+ 
++/* one open file description of a pipe */
+ struct zvfs_pipe_end {
+ 	struct zvfs_pipe *pipe;
++	/* 0 reads, 1 writes */
++	uint8_t side;
+ 	uint32_t flags;
+ };
+ 
+ struct zvfs_pipe {
+-	/* end[0] is the read end, end[1] the write end */
++	/* the descriptions of an anonymous pipe: end[0] reads, end[1] writes */
+ 	struct zvfs_pipe_end end[2];
++	/* open descriptions per side: readers, writers */
++	uint16_t opens[2];
++	/* opens ever made per side: a FIFO opener waits for a newer one on the other side */
++	uint16_t opened[2];
+ 	struct k_poll_signal read_sig;
+ 	struct k_poll_signal write_sig;
+ 	struct k_spinlock lock;
+@@ -41,16 +52,19 @@ SYS_BITARRAY_DEFINE_STATIC(pipes_bitarray, CONFIG_ZVFS_PIPE_MAX);
+ static struct zvfs_pipe pipes[CONFIG_ZVFS_PIPE_MAX];
+ static const struct fd_op_vtable zvfs_pipe_fd_vtable;
+ 
++static bool zvfs_pipe_is_fifo(const struct zvfs_pipe *p);
++static void zvfs_fifo_closed(struct zvfs_pipe_end *end);
++static void zvfs_fifo_wake_side(struct zvfs_pipe *p, uint8_t side);
++
+ static inline bool zvfs_pipe_end_is_open(const struct zvfs_pipe_end *end)
+ {
+ 	return (end->flags & ZVFS_PIPE_END_OPEN) != 0;
+ }
+ 
+-static inline struct zvfs_pipe_end *zvfs_pipe_peer(struct zvfs_pipe_end *end)
++/* whether any description of the other side is open */
++static inline bool zvfs_pipe_peer_open(const struct zvfs_pipe_end *end)
+ {
+-	struct zvfs_pipe *p = end->pipe;
+-
+-	return (end == &p->end[0]) ? &p->end[1] : &p->end[0];
++	return end->pipe->opens[!end->side] > 0;
+ }
+ 
+ /* wake any thread blocked on the description associated with @a end */
+@@ -66,6 +80,13 @@ static void zvfs_pipe_wake(struct zvfs_pipe_end *end)
+ 	k_condvar_broadcast(cond);
+ }
+ 
++/* every description of one side has its own waiters */
++static void zvfs_pipe_wake_side(struct zvfs_pipe *p, uint8_t side)
++{
++	zvfs_pipe_wake(&p->end[side]);
++	zvfs_fifo_wake_side(p, side);
++}
++
+ static int zvfs_pipe_wait(struct zvfs_pipe_end *end)
+ {
+ 	int err;
+@@ -89,7 +110,7 @@ static ssize_t zvfs_pipe_read_op(void *obj, void *buf, size_t sz)
+ 	struct zvfs_pipe_end *end = obj;
+ 	struct zvfs_pipe *p = end->pipe;
+ 
+-	if (end != &p->end[0]) {
++	if (end->side != 0) {
+ 		errno = EBADF;
+ 		return -1;
+ 	}
+@@ -114,16 +135,16 @@ static ssize_t zvfs_pipe_read_op(void *obj, void *buf, size_t sz)
+ 
+ 		n = ring_buf_get(&p->rb, buf, (uint32_t)MIN(sz, (size_t)UINT32_MAX));
+ 		if (n > 0) {
+-			if (ring_buf_is_empty(&p->rb) && zvfs_pipe_end_is_open(&p->end[1])) {
++			if (ring_buf_is_empty(&p->rb) && zvfs_pipe_peer_open(end)) {
+ 				k_poll_signal_reset(&p->read_sig);
+ 			}
+ 			k_poll_signal_raise(&p->write_sig, 0);
+ 			k_spin_unlock(&p->lock, key);
+-			zvfs_pipe_wake(&p->end[1]);
++			zvfs_pipe_wake_side(p, 1);
+ 			return n;
+ 		}
+ 
+-		if (!zvfs_pipe_end_is_open(&p->end[1])) {
++		if (!zvfs_pipe_peer_open(end)) {
+ 			/* write end closed and buffer drained: end-of-file */
+ 			k_spin_unlock(&p->lock, key);
+ 			return 0;
+@@ -160,7 +181,7 @@ static ssize_t zvfs_pipe_write_op(void *obj, const void *buf, size_t sz)
+ 	struct zvfs_pipe *p = end->pipe;
+ 	const bool atomic = sz <= sizeof(p->buf);
+ 
+-	if (end != &p->end[1]) {
++	if (end->side != 1) {
+ 		errno = EBADF;
+ 		return -1;
+ 	}
+@@ -183,7 +204,7 @@ static ssize_t zvfs_pipe_write_op(void *obj, const void *buf, size_t sz)
+ 			return -1;
+ 		}
+ 
+-		if (!zvfs_pipe_end_is_open(&p->end[0])) {
++		if (!zvfs_pipe_peer_open(end)) {
+ 			k_spin_unlock(&p->lock, key);
+ 			if (written > 0) {
+ 				return written;
+@@ -208,7 +229,7 @@ static ssize_t zvfs_pipe_write_op(void *obj, const void *buf, size_t sz)
+ 				k_poll_signal_reset(&p->write_sig);
+ 			}
+ 			k_spin_unlock(&p->lock, key);
+-			zvfs_pipe_wake(&p->end[0]);
++			zvfs_pipe_wake_side(p, 0);
+ 			if (written == sz) {
+ 				return written;
+ 			}
+@@ -255,7 +276,6 @@ static int zvfs_pipe_close_op(void *obj)
+ 	k_spinlock_key_t key;
+ 	struct zvfs_pipe_end *end = obj;
+ 	struct zvfs_pipe *p = end->pipe;
+-	struct zvfs_pipe_end *peer = zvfs_pipe_peer(end);
+ 
+ 	if (k_is_in_isr()) {
+ 		errno = EWOULDBLOCK;
+@@ -270,27 +290,31 @@ static int zvfs_pipe_close_op(void *obj)
+ 		return -1;
+ 	}
+ 
+-	end->flags &= ~ZVFS_PIPE_END_OPEN;
+-	last = !zvfs_pipe_end_is_open(peer);
++	end->flags = 0;
++	p->opens[end->side]--;
++	last = (p->opens[0] == 0) && (p->opens[1] == 0);
+ 
+ 	if (last) {
+-		end->flags = 0;
+-		peer->flags = 0;
+-		err = sys_bitarray_free(&pipes_bitarray, 1, p - pipes);
+-		__ASSERT(err == 0, "sys_bitarray_free() failed: %d", err);
+-	} else if (end == &p->end[0]) {
++		/* a FIFO's slot is released under its own lock, where openers look it up */
++		if (!zvfs_pipe_is_fifo(p)) {
++			err = sys_bitarray_free(&pipes_bitarray, 1, p - pipes);
++			__ASSERT(err == 0, "sys_bitarray_free() failed: %d", err);
++		}
++	} else if (p->opens[0] == 0) {
+ 		/* no readers left: writers and write-pollers must not block */
+ 		k_poll_signal_raise(&p->write_sig, 0);
+-	} else {
++	} else if (p->opens[1] == 0) {
+ 		/* no writers left: readers and read-pollers must not block */
+ 		k_poll_signal_raise(&p->read_sig, 0);
+ 	}
+ 
+ 	k_spin_unlock(&p->lock, key);
+ 
++	zvfs_fifo_closed(end);
++
+ 	zvfs_pipe_wake(end);
+ 	if (!last) {
+-		zvfs_pipe_wake(peer);
++		zvfs_pipe_wake_side(p, !end->side);
+ 	}
+ 
+ 	return 0;
+@@ -308,7 +332,7 @@ static int zvfs_pipe_poll_prepare(struct zvfs_pipe_end *end, struct zvfs_pollfd
+ 		return -1;
+ 	}
+ 
+-	(*pev)->obj = (end == &p->end[0]) ? &p->read_sig : &p->write_sig;
++	(*pev)->obj = (end->side == 0) ? &p->read_sig : &p->write_sig;
+ 	(*pev)->type = K_POLL_TYPE_SIGNAL;
+ 	(*pev)->mode = K_POLL_MODE_NOTIFY_ONLY;
+ 	(*pev)->state = K_POLL_STATE_NOT_READY;
+@@ -322,15 +346,15 @@ static int zvfs_pipe_poll_update(struct zvfs_pipe_end *end, struct zvfs_pollfd *
+ {
+ 	struct zvfs_pipe *p = end->pipe;
+ 
+-	if (end == &p->end[0]) {
++	if (end->side == 0) {
+ 		if (!ring_buf_is_empty(&p->rb)) {
+ 			pfd->revents |= pfd->events & ZVFS_POLLIN;
+ 		}
+-		if (!zvfs_pipe_end_is_open(&p->end[1])) {
++		if (!zvfs_pipe_peer_open(end)) {
+ 			pfd->revents |= ZVFS_POLLHUP;
+ 		}
+ 	} else {
+-		if (!zvfs_pipe_end_is_open(&p->end[0])) {
++		if (!zvfs_pipe_peer_open(end)) {
+ 			pfd->revents |= ZVFS_POLLERR;
+ 		} else if (ring_buf_space_get(&p->rb) > 0) {
+ 			pfd->revents |= pfd->events & ZVFS_POLLOUT;
+@@ -359,7 +383,7 @@ static int zvfs_pipe_ioctl_op(void *obj, unsigned int request, va_list args)
+ 
+ 	switch (request) {
+ 	case ZVFS_F_GETFL:
+-		ret = (end == &p->end[1]) ? ZVFS_O_WRONLY : ZVFS_O_RDONLY;
++		ret = (end->side == 1) ? ZVFS_O_WRONLY : ZVFS_O_RDONLY;
+ 		if ((end->flags & ZVFS_PIPE_END_NONBLOCK) != 0) {
+ 			ret |= ZVFS_O_NONBLOCK;
+ 		}
+@@ -429,6 +453,200 @@ static const struct fd_op_vtable zvfs_pipe_fd_vtable = {
+ 	.ioctl = zvfs_pipe_ioctl_op,
+ };
+ 
++static void zvfs_pipe_init(struct zvfs_pipe *p)
++{
++	ring_buf_init(&p->rb, sizeof(p->buf), p->buf);
++	p->opens[0] = 0;
++	p->opens[1] = 0;
++	k_poll_signal_init(&p->read_sig);
++	k_poll_signal_init(&p->write_sig);
++	k_poll_signal_raise(&p->write_sig, 0);
++}
++
++#ifdef CONFIG_ZVFS_FIFO
++/*
++ * A FIFO node names a pipe for as long as any description of it is open: the
++ * path is kept beside the pipe, and openers of the same path share it. The
++ * descriptions come from their own pool, since each open() has its own
++ * status flags. Opening waits for the other side under the lock.
++ */
++static char fifo_paths[CONFIG_ZVFS_PIPE_MAX][CONFIG_ZVFS_PATH_MAX];
++static struct zvfs_pipe_end fifo_ends[CONFIG_ZVFS_FIFO_OPEN_MAX];
++SYS_BITARRAY_DEFINE_STATIC(fifo_ends_bitarray, CONFIG_ZVFS_FIFO_OPEN_MAX);
++static K_MUTEX_DEFINE(fifo_lock);
++static K_CONDVAR_DEFINE(fifo_cond);
++
++static bool zvfs_pipe_is_fifo(const struct zvfs_pipe *p)
++{
++	return fifo_paths[p - pipes][0] != '\0';
++}
++
++static void zvfs_fifo_wake_side(struct zvfs_pipe *p, uint8_t side)
++{
++	ARRAY_FOR_EACH_PTR(fifo_ends, end) {
++		if (end->pipe == p && end->side == side && zvfs_pipe_end_is_open(end)) {
++			zvfs_pipe_wake(end);
++		}
++	}
++}
++
++static void zvfs_fifo_closed(struct zvfs_pipe_end *end)
++{
++	k_spinlock_key_t key;
++	struct zvfs_pipe *p = end->pipe;
++
++	if (end < fifo_ends || end >= &fifo_ends[CONFIG_ZVFS_FIFO_OPEN_MAX]) {
++		return;
++	}
++
++	(void)k_mutex_lock(&fifo_lock, K_FOREVER);
++	(void)sys_bitarray_free(&fifo_ends_bitarray, 1, end - fifo_ends);
++	/* an opener may have joined since the closer counted: release only a deserted pipe */
++	key = k_spin_lock(&p->lock);
++	if (p->opens[0] == 0 && p->opens[1] == 0) {
++		fifo_paths[p - pipes][0] = '\0';
++		(void)sys_bitarray_free(&pipes_bitarray, 1, p - pipes);
++	}
++	k_spin_unlock(&p->lock, key);
++	k_condvar_broadcast(&fifo_cond);
++	k_mutex_unlock(&fifo_lock);
++}
++
++int zvfs_fifo_open(const char *path, int flags)
++{
++	int fd;
++	int ret;
++	size_t offset;
++	int side;
++	k_spinlock_key_t key;
++	struct zvfs_pipe *p = NULL;
++	struct zvfs_pipe_end *end;
++
++	switch (flags & ZVFS_O_ACCMODE) {
++	case ZVFS_O_RDONLY:
++		side = 0;
++		break;
++	case ZVFS_O_WRONLY:
++		side = 1;
++		break;
++	default:
++		/* undefined by POSIX; a description that can do neither is refused */
++		errno = EINVAL;
++		return -1;
++	}
++
++	if (k_is_in_isr()) {
++		errno = EWOULDBLOCK;
++		return -1;
++	}
++
++	fd = zvfs_reserve_fd();
++	if (fd < 0) {
++		return -1;
++	}
++
++	(void)k_mutex_lock(&fifo_lock, K_FOREVER);
++
++	for (size_t i = 0; i < CONFIG_ZVFS_PIPE_MAX; i++) {
++		if (strcmp(fifo_paths[i], path) == 0) {
++			p = &pipes[i];
++			break;
++		}
++	}
++	if (p == NULL) {
++		if (sys_bitarray_alloc(&pipes_bitarray, 1, &offset) < 0) {
++			ret = -ENFILE;
++			goto out_unlock;
++		}
++		p = &pipes[offset];
++		zvfs_pipe_init(p);
++		strcpy(fifo_paths[offset], path);
++	}
++
++	if (sys_bitarray_alloc(&fifo_ends_bitarray, 1, &offset) < 0) {
++		ret = -ENFILE;
++		goto out_release;
++	}
++	end = &fifo_ends[offset];
++	*end = (struct zvfs_pipe_end){
++		.pipe = p,
++		.side = side,
++		.flags = ZVFS_PIPE_END_OPEN |
++			 (((flags & ZVFS_O_NONBLOCK) != 0) ? ZVFS_PIPE_END_NONBLOCK : 0),
++	};
++
++	key = k_spin_lock(&p->lock);
++	p->opens[side]++;
++	p->opened[side]++;
++	if (side == 1) {
++		/* a fresh writer: readers that saw end-of-file block again */
++		k_poll_signal_reset(&p->read_sig);
++	}
++	uint16_t seen = p->opened[!side];
++
++	k_spin_unlock(&p->lock, key);
++	k_condvar_broadcast(&fifo_cond);
++
++	/* the rendezvous: a reader waits for a writer and a writer for a reader, and one that
++	 * came and went while the waiter was queued for the lock still counts
++	 */
++	while (p->opens[!side] == 0 && p->opened[!side] == seen) {
++		if ((flags & ZVFS_O_NONBLOCK) != 0) {
++			if (side == 0) {
++				break;
++			}
++			ret = -ENXIO;
++			goto out_end;
++		}
++		(void)k_condvar_wait(&fifo_cond, &fifo_lock, K_FOREVER);
++	}
++
++	k_mutex_unlock(&fifo_lock);
++
++	zvfs_finalize_typed_fd(fd, end, &zvfs_pipe_fd_vtable, ZVFS_MODE_IFIFO);
++	if ((flags & ZVFS_O_CLOEXEC) != 0) {
++		(void)zvfs_fcntl(fd, ZVFS_F_SETFD, ZVFS_FD_CLOEXEC);
++	}
++
++	return fd;
++
++out_end:
++	key = k_spin_lock(&p->lock);
++	p->opens[side]--;
++	k_spin_unlock(&p->lock, key);
++	end->flags = 0;
++	(void)sys_bitarray_free(&fifo_ends_bitarray, 1, end - fifo_ends);
++out_release:
++	if (p->opens[0] == 0 && p->opens[1] == 0) {
++		fifo_paths[p - pipes][0] = '\0';
++		(void)sys_bitarray_free(&pipes_bitarray, 1, p - pipes);
++	}
++out_unlock:
++	k_mutex_unlock(&fifo_lock);
++	zvfs_free_fd(fd);
++	errno = -ret;
++	return -1;
++}
++#else
++static bool zvfs_pipe_is_fifo(const struct zvfs_pipe *p)
++{
++	ARG_UNUSED(p);
++
++	return false;
++}
++
++static void zvfs_fifo_closed(struct zvfs_pipe_end *end)
++{
++	ARG_UNUSED(end);
++}
++
++static void zvfs_fifo_wake_side(struct zvfs_pipe *p, uint8_t side)
++{
++	ARG_UNUSED(p);
++	ARG_UNUSED(side);
++}
++#endif /* CONFIG_ZVFS_FIFO */
++
+ int z_impl_zvfs_pipe(int *fildes, int flags)
+ {
+ 	int fd[2];
+@@ -459,19 +677,17 @@ int z_impl_zvfs_pipe(int *fildes, int flags)
+ 		goto free_pipe;
+ 	}
+ 
+-	ring_buf_init(&p->rb, sizeof(p->buf), p->buf);
++	zvfs_pipe_init(p);
+ 
+ 	end_flags = ZVFS_PIPE_END_OPEN;
+ 	if ((flags & ZVFS_O_NONBLOCK) != 0) {
+ 		end_flags |= ZVFS_PIPE_END_NONBLOCK;
+ 	}
+ 
+-	p->end[0] = (struct zvfs_pipe_end){.pipe = p, .flags = end_flags};
+-	p->end[1] = (struct zvfs_pipe_end){.pipe = p, .flags = end_flags};
+-
+-	k_poll_signal_init(&p->read_sig);
+-	k_poll_signal_init(&p->write_sig);
+-	k_poll_signal_raise(&p->write_sig, 0);
++	p->end[0] = (struct zvfs_pipe_end){.pipe = p, .side = 0, .flags = end_flags};
++	p->end[1] = (struct zvfs_pipe_end){.pipe = p, .side = 1, .flags = end_flags};
++	p->opens[0] = 1;
++	p->opens[1] = 1;
+ 
+ 	zvfs_finalize_typed_fd(fd[0], &p->end[0], &zvfs_pipe_fd_vtable, ZVFS_MODE_IFIFO);
+ 	zvfs_finalize_typed_fd(fd[1], &p->end[1], &zvfs_pipe_fd_vtable, ZVFS_MODE_IFIFO);

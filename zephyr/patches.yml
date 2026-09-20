@@ -4172,3 +4172,22 @@ patches:
       with POSIX replacement rules, unlink of open files, utime and
       statvfs against an optional page bound. tests/subsys/fs/tmpfs runs
       the tree's common directory and open-flag tests plus its own.
+  - path: zephyr/zvfs-fifo.patch
+    sha256sum: 28799d410e9acb1eeaf770306236ee3e96d6be3a4ffdada98e10fc15fb21454e
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-20
+    upstreamable: true
+    comments: |
+      zvfs: named pipes. zvfs_mknodat(), with an inline zvfs_mknod() over
+      it, creates a node of the type its mode names, a FIFO or an empty
+      regular file;
+      open() on a FIFO node connects to the pipe the path names, kept for
+      as long as any description of it is open, and waits for the other
+      side unless O_NONBLOCK, where a reader proceeds and a writer fails
+      with ENXIO; an opener that came and went while the waiter was
+      queued still counts. Pipe ends become open file descriptions with a
+      side, the pipe counts open descriptions per side, and wake-ups
+      reach every description of a side, so anonymous pipes and FIFOs
+      share one object. stat, fstat and readdir report the FIFO type.
