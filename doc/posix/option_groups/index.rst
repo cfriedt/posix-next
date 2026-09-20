@@ -22,6 +22,7 @@ For individual POSIX options, see :ref:`posix_options`.
    dynamic_linking
    fd_mgmt
    fifo
+   fifo_fd
    file_attributes
    file_attributes_fd
    file_locking
