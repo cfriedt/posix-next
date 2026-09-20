@@ -209,7 +209,8 @@ enum {
 	COND_CODE_1(CONFIG_POSIX_SEMAPHORES, (_POSIX_SEMAPHORES), (-1L))
 #define __z_posix_sysconf_SC_SHARED_MEMORY_OBJECTS                                                 \
 	COND_CODE_1(CONFIG_POSIX_SHARED_MEMORY_OBJECTS, (_POSIX_SHARED_MEMORY_OBJECTS), (-1L))
-#define __z_posix_sysconf_SC_SHELL                 (-1L)
+#define __z_posix_sysconf_SC_SHELL                                                                 \
+	COND_CODE_1(CONFIG_POSIX_SHELL_FUNC, (_POSIX_SHELL), (-1L))
 #define __z_posix_sysconf_SC_SPAWN                                                                 \
 	COND_CODE_1(CONFIG_POSIX_SPAWN, (_POSIX_SPAWN), (-1L))
 #define __z_posix_sysconf_SC_SPIN_LOCKS                                                            \
