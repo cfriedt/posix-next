@@ -1,0 +1,256 @@
+diff --git a/arch/x86/Kconfig b/arch/x86/Kconfig
+--- a/arch/x86/Kconfig
++++ b/arch/x86/Kconfig
+@@ -81,6 +81,7 @@ config CPU_LAKEMONT_PERF
+ config X86_64
+ 	bool "Run in 64-bit mode"
+ 	select 64BIT
++	select ARCH_HAS_USER_THREAD_POINTER
+ 	select USE_SWITCH
+ 	select USE_SWITCH_SUPPORTED
+ 	select SCHED_IPI_SUPPORTED if SMP
+diff --git a/arch/x86/core/intel64/locore.S b/arch/x86/core/intel64/locore.S
+--- a/arch/x86/core/intel64/locore.S
++++ b/arch/x86/core/intel64/locore.S
+@@ -17,6 +17,7 @@
+ #ifdef CONFIG_HW_SHADOW_STACK
+ #include <zephyr/x86_shstk.h>
+ #endif
++#include "user_thread_pointer.h"
+ 
+ /*
+  * Definitions/macros for enabling paging
+@@ -485,7 +486,18 @@ __resume:
+ 	 */
+ 	movl $X86_FS_BASE, %ecx
+ 	movq _thread_offset_to_tls(%rdi), %rax
+-	movq _thread_offset_to_tls(%rdi), %rdx
++#ifdef CONFIG_USER_THREAD_POINTER
++	/* a thread interrupted in user mode resumes on its own base */
++	testb $X86_THREAD_FLAG_USER_FS, _thread_offset_to_flags(%rdi)
++	jz 1f
++	testb $X86_THREAD_FLAG_ALL, _thread_offset_to_flags(%rdi)
++	jz 1f
++	testb $0x3, _thread_offset_to_cs(%rdi)
++	jz 1f
++	movq _thread_offset_to_user_fs(%rdi), %rax
++1:
++#endif /* CONFIG_USER_THREAD_POINTER */
++	movq %rax, %rdx
+ 	shrq $32, %rdx
+ 	wrmsr
+ #endif
+@@ -699,9 +711,25 @@ except: /*
+ 	pushq %r12
+ 	pushq %rbx
+ #endif /* CONFIG_EXCEPTION_DEBUG */
++#ifdef CONFIG_USER_THREAD_POINTER
++	testb $0x3, __struct_arch_esf_cs_OFFSET(%rsp)
++	jz 2f
++	movq %gs:__x86_tss64_t_cpu_OFFSET, %rdi
++	movq ___cpu_t_current_OFFSET(%rdi), %rdi
++	X86_FS_BASE_KERNEL %rdi
++2:
++#endif /* CONFIG_USER_THREAD_POINTER */
+ 	movq %rsp, %rdi
+ 
+ 	call z_x86_exception
++#ifdef CONFIG_USER_THREAD_POINTER
++	testb $0x3, __struct_arch_esf_cs_OFFSET(%rsp)
++	jz 2f
++	movq %gs:__x86_tss64_t_cpu_OFFSET, %rdi
++	movq ___cpu_t_current_OFFSET(%rdi), %rdi
++	X86_FS_BASE_USER %rdi
++2:
++#endif /* CONFIG_USER_THREAD_POINTER */
+ 
+ 	/* If we returned, the exception was handled successfully and the
+ 	 * thread may resume (the pushed RIP may have been modified)
+@@ -825,6 +853,21 @@ irq:
+ 	pushq (%rsi)	/* Stashed RSI value */
+ 	movq $0, (%rsi) /* Cover our tracks, stashed RSI might be sensitive */
+ #endif /* CONFIG_X86_KPTI */
++#ifdef CONFIG_USER_THREAD_POINTER
++	/* from user mode: the kernel's TLS base before any of its code runs */
++	testb $0x3, 24(%rsp)
++	jz 3f
++	movq %gs:__x86_tss64_t_cpu_OFFSET, %rsi
++	movq ___cpu_t_current_OFFSET(%rsi), %rsi
++	pushq %rax
++	pushq %rcx
++	pushq %rdx
++	X86_FS_BASE_KERNEL %rsi
++	popq %rdx
++	popq %rcx
++	popq %rax
++3:
++#endif /* CONFIG_USER_THREAD_POINTER */
+ #endif /* CONFIG_USERSPACE */
+ 
+ 	movq %gs:__x86_tss64_t_cpu_OFFSET, %rsi
+diff --git a/arch/x86/core/intel64/user_thread_pointer.h b/arch/x86/core/intel64/user_thread_pointer.h
+new file mode 100644
+--- /dev/null
++++ b/arch/x86/core/intel64/user_thread_pointer.h
+@@ -0,0 +1,47 @@
++/*
++ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++/*
++ * A thread that owns its thread-pointer register (CONFIG_USER_THREAD_POINTER)
++ * runs user mode on its own FS base and the kernel on the thread's TLS base:
++ * the register is switched on every entry from and exit to user mode of such
++ * a thread. \thread holds the k_thread; rax, rcx and rdx are clobbered.
++ */
++
++#ifndef ZEPHYR_ARCH_X86_CORE_INTEL64_USER_THREAD_POINTER_H_
++#define ZEPHYR_ARCH_X86_CORE_INTEL64_USER_THREAD_POINTER_H_
++
++#include <zephyr/arch/x86/msr.h>
++#include <zephyr/arch/x86/intel64/thread.h>
++#include <offsets_short.h>
++
++.macro X86_FS_BASE_KERNEL thread
++#ifdef CONFIG_USER_THREAD_POINTER
++	testb $X86_THREAD_FLAG_USER_FS, _thread_offset_to_flags(\thread)
++	jz 8f
++	movl $X86_FS_BASE, %ecx
++	movq _thread_offset_to_tls(\thread), %rax
++	movq %rax, %rdx
++	shrq $32, %rdx
++	wrmsr
++8:
++#endif /* CONFIG_USER_THREAD_POINTER */
++.endm
++
++.macro X86_FS_BASE_USER thread
++#ifdef CONFIG_USER_THREAD_POINTER
++	testb $X86_THREAD_FLAG_USER_FS, _thread_offset_to_flags(\thread)
++	jz 8f
++	movl $X86_FS_BASE, %ecx
++	movq _thread_offset_to_user_fs(\thread), %rax
++	movq %rax, %rdx
++	shrq $32, %rdx
++	wrmsr
++8:
++#endif /* CONFIG_USER_THREAD_POINTER */
++.endm
++
++#endif /* ZEPHYR_ARCH_X86_CORE_INTEL64_USER_THREAD_POINTER_H_ */
+diff --git a/arch/x86/core/intel64/userspace.S b/arch/x86/core/intel64/userspace.S
+--- a/arch/x86/core/intel64/userspace.S
++++ b/arch/x86/core/intel64/userspace.S
+@@ -9,6 +9,7 @@
+ #include <offsets_short.h>
+ #include <zephyr/syscall.h>
+ #include <zephyr/kernel/mm.h>
++#include "user_thread_pointer.h"
+ 
+ /* Imports */
+ #if defined(CONFIG_SIGNAL)
+@@ -158,6 +159,16 @@ _id_ok:
+ 	pushq	%r10
+ 	pushq	%r11	/* RFLAGS */
+ 	pushq	%rcx	/* Return address stored by 'syscall' */
++#ifdef CONFIG_USER_THREAD_POINTER
++	/* the kernel's TLS base for a thread that runs user mode on its own */
++	pushq	%rax
++	pushq	%rdx
++	movq	%gs:__x86_tss64_t_cpu_OFFSET, %r11
++	movq	___cpu_t_current_OFFSET(%r11), %r11
++	X86_FS_BASE_KERNEL %r11
++	popq	%rdx
++	popq	%rax
++#endif /* CONFIG_USER_THREAD_POINTER */
+ 	pushq	%rsp	/* SSF parameter */
+ 
+ 	/* All other args are in the right registers, except arg4 which
+@@ -247,6 +258,13 @@ _skip_z_sig_handle:
+ 	 */
+ .global z_x86_syscall_exit
+ z_x86_syscall_exit:
++#ifdef CONFIG_USER_THREAD_POINTER
++	pushq	%rax
++	movq	%gs:__x86_tss64_t_cpu_OFFSET, %rdi
++	movq	___cpu_t_current_OFFSET(%rdi), %rdi
++	X86_FS_BASE_USER %rdi
++	popq	%rax
++#endif /* CONFIG_USER_THREAD_POINTER */
+ 	popq	%rcx	/* Restore return address for 'sysretq' */
+ 	popq	%r11	/* Restore RFLAGS for 'sysretq' */
+ 	popq	%r10
+diff --git a/arch/x86/core/offsets/intel64_offsets.c b/arch/x86/core/offsets/intel64_offsets.c
+--- a/arch/x86/core/offsets/intel64_offsets.c
++++ b/arch/x86/core/offsets/intel64_offsets.c
+@@ -32,6 +32,10 @@ GEN_OFFSET_SYM(_thread_arch_t, cs);
+ GEN_OFFSET_SYM(_thread_arch_t, psp);
+ #ifndef CONFIG_X86_COMMON_PAGE_TABLE
+ GEN_OFFSET_SYM(_thread_arch_t, ptables);
++#ifdef CONFIG_USER_THREAD_POINTER
++GEN_OFFSET_SYM(_thread_arch_t, user_fs);
++GEN_OFFSET_STRUCT(arch_esf, cs);
++#endif
+ #endif
+ #endif /* CONFIG_USERSPACE */
+ #ifdef CONFIG_HW_SHADOW_STACK
+diff --git a/arch/x86/core/userspace.c b/arch/x86/core/userspace.c
+--- a/arch/x86/core/userspace.c
++++ b/arch/x86/core/userspace.c
+@@ -176,3 +176,17 @@ int arch_thread_priv_stack_space_get(const struct k_thread *thread, size_t *stac
+ 				 sizeof(hdr_stack_obj->privilege_stack),
+ 				 unused_ptr);
+ }
++
++#ifdef CONFIG_USER_THREAD_POINTER
++void arch_user_thread_pointer_set(struct k_thread *thread, uintptr_t tp)
++{
++	thread->arch.user_fs = tp;
++	thread->arch.flags |= X86_THREAD_FLAG_USER_FS;
++}
++
++uintptr_t arch_user_thread_pointer_get(struct k_thread *thread)
++{
++	return ((thread->arch.flags & X86_THREAD_FLAG_USER_FS) != 0U) ? thread->arch.user_fs
++								      : thread->tls;
++}
++#endif /* CONFIG_USER_THREAD_POINTER */
+diff --git a/arch/x86/include/intel64/offsets_short_arch.h b/arch/x86/include/intel64/offsets_short_arch.h
+--- a/arch/x86/include/intel64/offsets_short_arch.h
++++ b/arch/x86/include/intel64/offsets_short_arch.h
+@@ -71,6 +71,11 @@
+ #define _thread_offset_to_cs \
+ 	(___thread_t_arch_OFFSET + ___thread_arch_t_cs_OFFSET)
+ 
++#ifdef CONFIG_USER_THREAD_POINTER
++#define _thread_offset_to_user_fs \
++	(___thread_t_arch_OFFSET + ___thread_arch_t_user_fs_OFFSET)
++#endif /* CONFIG_USER_THREAD_POINTER */
++
+ #ifdef CONFIG_HW_SHADOW_STACK
+ #define _thread_offset_to_shstk_addr \
+ 	(___thread_t_arch_OFFSET + ___thread_arch_t_shstk_addr_OFFSET)
+diff --git a/include/zephyr/arch/x86/intel64/thread.h b/include/zephyr/arch/x86/intel64/thread.h
+--- a/include/zephyr/arch/x86/intel64/thread.h
++++ b/include/zephyr/arch/x86/intel64/thread.h
+@@ -7,6 +7,7 @@
+ #define ZEPHYR_INCLUDE_ARCH_X86_INTEL64_THREAD_H_
+ 
+ #define X86_THREAD_FLAG_ALL 0x01 /* _thread_arch.flags: entire state saved */
++#define X86_THREAD_FLAG_USER_FS 0x02 /* _thread_arch.flags: user mode runs on user_fs */
+ 
+ /*
+  * GDT selectors - these must agree with the GDT layout in locore.S.
+@@ -143,6 +144,10 @@ struct _thread_arch {
+ 	/* SS and CS selectors for this thread when restoring context */
+ 	uint64_t ss;
+ 	uint64_t cs;
++#ifdef CONFIG_USER_THREAD_POINTER
++	/* FS base of user mode; the kernel runs this thread on its tls */
++	uintptr_t user_fs;
++#endif /* CONFIG_USER_THREAD_POINTER */
+ #endif
+ 
+ #ifdef CONFIG_HW_SHADOW_STACK
