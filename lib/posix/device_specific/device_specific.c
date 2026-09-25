@@ -15,8 +15,9 @@
 
 /*
  * The one terminal is the console. Attribute changes are kept so that they
- * round-trip; the console driver itself is unbuffered and synchronous, so
- * the drain, flush, flow, and break operations complete trivially.
+ * round-trip, and the canonical, echo and CR-to-NL input modes reach it;
+ * the console driver itself is unbuffered and synchronous, so the drain,
+ * flush, flow, and break operations complete trivially.
  */
 
 static const char posix_tty_name[] = "/dev/console";
@@ -130,7 +131,7 @@ int tcsetattr(int fildes, int optional_actions, const struct termios *termios_p)
 
 	posix_tty.attrs = *termios_p;
 
-	return 0;
+	return posix_tty_set_mode(fildes, termios_p);
 }
 
 char *ttyname(int fildes)

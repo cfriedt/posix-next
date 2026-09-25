@@ -19,5 +19,6 @@ extern struct posix_tty_state posix_tty;
 
 /* 0 when fd refers to the terminal, else -1 with errno set */
 int posix_tty_check(int fd);
+int posix_tty_set_mode(int fd, const struct termios *attrs);
 
 #endif /* ZEPHYR_LIB_POSIX_POSIX_TTY_H_ */
