@@ -1,0 +1,190 @@
+diff --git a/include/zephyr/sys/zvfs.h b/include/zephyr/sys/zvfs.h
+--- a/include/zephyr/sys/zvfs.h
++++ b/include/zephyr/sys/zvfs.h
+@@ -41,6 +41,14 @@ struct zvfs_stat {
+ 	struct timespec mtime;
+ 	/** Time of last status change, zero when the backend does not record it. */
+ 	struct timespec ctime;
++	/** Device number: the containing mount's index plus one, 0 elsewhere. */
++	uint32_t dev;
++	/**
++	 * File serial number. Zephyr file systems expose no inode numbers, so
++	 * a mounted file's is derived from its resolved path: every path
++	 * reports the same number each time, different paths differ.
++	 */
++	uint64_t ino;
+ };
+
+ /**
+diff --git a/include/zephyr/sys/zvfs_fs.h b/include/zephyr/sys/zvfs_fs.h
+--- a/include/zephyr/sys/zvfs_fs.h
++++ b/include/zephyr/sys/zvfs_fs.h
+@@ -42,7 +42,7 @@ struct zvfs_fs_desc {
+ 	/** Stream object returned by zvfs_opendir(), NULL for plain fds. */
+ 	struct zvfs_dirstream *stream;
+ #if defined(CONFIG_ZVFS_FS) || defined(__DOXYGEN__)
+-	/** Resolved absolute path of directory descriptors, for zvfs_fchdir(). */
++	/** Resolved absolute path, for zvfs_fchdir() and the stat identity. */
+ 	char path[CONFIG_ZVFS_PATH_MAX];
+ #endif
+ 	/** Open flags (ZVFS_O_*) reported by F_GETFL */
+diff --git a/lib/os/zvfs/zvfs_fs.c b/lib/os/zvfs/zvfs_fs.c
+--- a/lib/os/zvfs/zvfs_fs.c
++++ b/lib/os/zvfs/zvfs_fs.c
+@@ -233,6 +233,7 @@ static int fs_dir_ioctl_vmeth(void *obj, unsigned int request, va_list args)
+
+ 		*buf = (struct zvfs_stat){0};
+ 		buf->mode = zvfs_synth_mode(true, (ptr->dir.mp->flags & FS_MOUNT_FLAG_READ_ONLY) != 0);
++		zvfs_fs_identity(ptr->path, buf);
+ 		zvfs_fs_times(ptr->path, buf);
+ 		return 0;
+ 	}
+@@ -376,6 +377,7 @@ static int fs_ioctl_vmeth(void *obj, unsigned int request, va_list args)
+ 			buf->size = current;
+ 			buf->mode = zvfs_synth_mode(ptr->is_dir,
+ 						    (ptr->file.mp->flags & FS_MOUNT_FLAG_READ_ONLY) != 0);
++			zvfs_fs_identity(ptr->path, buf);
+ 			zvfs_fs_times(ptr->path, buf);
+ 		}
+
+diff --git a/lib/os/zvfs/zvfs_fs_priv.h b/lib/os/zvfs/zvfs_fs_priv.h
+--- a/lib/os/zvfs/zvfs_fs_priv.h
++++ b/lib/os/zvfs/zvfs_fs_priv.h
+@@ -19,6 +19,7 @@ extern "C" {
+ #endif
+
+ struct fs_statvfs;
++struct zvfs_stat;
+ struct zvfs_statvfs;
+ struct zvfs_dirstream;
+ struct fd_op_vtable;
+@@ -59,6 +60,7 @@ int zvfs_resolve_path(const char *in, char *out, size_t outsz);
+  * @param rdonly True when the containing mount is read-only.
+  */
+ void zvfs_statvfs_from_fs(struct zvfs_statvfs *buf, const struct fs_statvfs *vfs, bool rdonly);
++void zvfs_fs_identity(const char *path, struct zvfs_stat *buf);
+ void zvfs_statvfs_root(struct zvfs_statvfs *buf);
+
+ /* the mode every stat of a file system entry reports: type plus synthesized permissions */
+diff --git a/lib/os/zvfs/zvfs_mmap.c b/lib/os/zvfs/zvfs_mmap.c
+--- a/lib/os/zvfs/zvfs_mmap.c
++++ b/lib/os/zvfs/zvfs_mmap.c
+@@ -1361,7 +1361,23 @@ int z_impl_zvfs_munmap(void *addr, size_t len)
+ 	return ret;
+ }
+
+-/* other mappings of the same open file hold their own copy of [lo, hi): re-read it */
++/* the same file behind two objects: the same device and serial number */
++static bool mapping_same_file(const struct zvfs_mapping *a, const struct zvfs_mapping *b)
++{
++	struct zvfs_stat sa, sb;
++
++	if (a->obj == b->obj) {
++		return true;
++	}
++	if ((a->obj == NULL) || (b->obj == NULL) ||
++	    (zvfs_fdtable_call_ioctl(a->vtable, a->obj, ZFD_IOCTL_STAT, &sa) < 0) ||
++	    (zvfs_fdtable_call_ioctl(b->vtable, b->obj, ZFD_IOCTL_STAT, &sb) < 0)) {
++		return false;
++	}
++	return (sa.dev == sb.dev) && (sa.ino == sb.ino) && (sa.ino != 0);
++}
++
++/* other mappings of the same file, through any open, hold their own copy of [lo, hi) */
+ static int mapping_refill_others(struct zvfs_mapping *m, size_t lo, size_t hi)
+ {
+ 	struct zvfs_mapping *o;
+@@ -1370,8 +1386,8 @@ static int mapping_refill_others(struct zvfs_mapping *m, size_t lo, size_t hi)
+ 	int ret = 0;
+
+ 	SYS_DLIST_FOR_EACH_CONTAINER(&mappings, o, node) {
+-		if ((o == m) || (o->obj != m->obj) || (mapping_root(o)->mem == NULL) || (o->off >= file_hi) ||
+-		    (o->off + o->len <= file_lo)) {
++		if ((o == m) || (mapping_root(o)->mem == NULL) || (o->off >= file_hi) ||
++		    (o->off + o->len <= file_lo) || !mapping_same_file(m, o)) {
+ 			continue;
+ 		}
+ 		if (mapping_refill(o, MAX(file_lo, o->off) - o->off,
+diff --git a/lib/os/zvfs/zvfs_path.c b/lib/os/zvfs/zvfs_path.c
+--- a/lib/os/zvfs/zvfs_path.c
++++ b/lib/os/zvfs/zvfs_path.c
+@@ -9,6 +9,7 @@
+  */
+
+ #include <errno.h>
++#include <string.h>
+
+ #include <zephyr/fs/fs.h>
+ #include <zephyr/internal/syscall_handler.h>
+@@ -109,6 +110,32 @@ void zvfs_fs_times(const char *path, struct zvfs_stat *buf)
+ #endif
+ }
+
++void zvfs_fs_identity(const char *path, struct zvfs_stat *buf)
++{
++	const char *mnt;
++	size_t best = 0;
++	uint64_t h = 0xcbf29ce484222325ULL;
++
++	buf->dev = 0;
++	for (int i = 0; fs_readmount(&i, &mnt) == 0;) {
++		size_t n = strlen(mnt);
++
++		/* the longest mount point covering the path; i is its index + 1 */
++		if ((n > best) && (strncmp(path, mnt, n) == 0) &&
++		    ((path[n] == '\0') || (path[n] == '/') || (mnt[n - 1] == '/'))) {
++			best = n;
++			buf->dev = (uint32_t)i;
++		}
++	}
++
++	/* FNV-1a */
++	for (const char *s = path; *s != '\0'; s++) {
++		h ^= (uint8_t)*s;
++		h *= 0x100000001b3ULL;
++	}
++	buf->ino = h;
++}
++
+ int z_impl_zvfs_unlink(const char *path)
+ {
+ 	int res;
+@@ -242,6 +269,7 @@ int z_impl_zvfs_stat(const char *path, struct zvfs_stat *buf)
+ 		buf->blksize = vfs.f_bsize;
+ 		buf->blocks = DIV_ROUND_UP(entry.size, 512);
+ 	}
++	zvfs_fs_identity(r, buf);
+
+ 	return 0;
+ }
+diff --git a/tests/lib/zvfs_mmap/src/main.c b/tests/lib/zvfs_mmap/src/main.c
+--- a/tests/lib/zvfs_mmap/src/main.c
++++ b/tests/lib/zvfs_mmap/src/main.c
+@@ -438,6 +438,27 @@ ZTEST_USER(zvfs_mmap, test_zvfs_msync)
+ 	zassert_ok(zvfs_munmap(p, PAGE));
+ 	write_file_byte(fd, 9, file_byte(9));
+
++	/* a store through one mapping reaches the others, including one of a second open */
++	{
++		int fd2 = open_file(ZVFS_O_RDWR);
++		uint8_t *q = map(PAGE, RW, ZVFS_MAP_SHARED, fd, 0);
++		uint8_t *r = map(PAGE, RW, ZVFS_MAP_SHARED, fd2, 0);
++
++		p = map(PAGE, RW, ZVFS_MAP_SHARED, fd, 0);
++		p[11] = (uint8_t)~file_byte(11);
++		zassert_ok(zvfs_msync(p, PAGE, ZVFS_MS_SYNC | ZVFS_MS_INVALIDATE));
++		zassert_equal(q[11], (uint8_t)~file_byte(11));
++		zassert_equal(r[11], (uint8_t)~file_byte(11));
++		expect_file_byte(fd, 11, (uint8_t)~file_byte(11));
++		p[11] = file_byte(11);
++		zassert_ok(zvfs_msync(p, PAGE, ZVFS_MS_SYNC | ZVFS_MS_INVALIDATE));
++		zassert_equal(r[11], file_byte(11));
++		zassert_ok(zvfs_munmap(p, PAGE));
++		zassert_ok(zvfs_munmap(q, PAGE));
++		zassert_ok(zvfs_munmap(r, PAGE));
++		zassert_ok(zvfs_close(fd2));
++	}
++
+ 	zassert_ok(zvfs_close(fd));
+ }
+
