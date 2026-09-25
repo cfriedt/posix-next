@@ -18,6 +18,8 @@ int stat(const char *ZRESTRICT path, struct stat *ZRESTRICT buf)
 	}
 
 	memset(buf, 0, sizeof(*buf));
+	buf->st_dev = zs.dev;
+	buf->st_ino = zs.ino;
 	buf->st_mode = zs.mode;
 	buf->st_size = zs.size;
 	buf->st_nlink = zs.nlink;
