@@ -1,0 +1,209 @@
+diff --git a/arch/Kconfig b/arch/Kconfig
+--- a/arch/Kconfig
++++ b/arch/Kconfig
+@@ -56,6 +56,8 @@ config ARM64
+ 	bool
+ 	select ARCH_IS_SET
+ 	select ARCH_HAS_STACK_JUMP
++	select ARCH_HAS_USER_THREAD_POINTER
++	select ARCH_HAS_USER_SYSCALL_ABI
+ 	select 64BIT
+ 	select ARCH_HAS_FWARGS_HANDLER_HOOK
+ 	select ARCH_SUPPORTS_COREDUMP
+diff --git a/arch/arm64/core/isr_wrapper.S b/arch/arm64/core/isr_wrapper.S
+--- a/arch/arm64/core/isr_wrapper.S
++++ b/arch/arm64/core/isr_wrapper.S
+@@ -32,6 +32,8 @@ GDATA(_sw_isr_table)
+ GTEXT(_isr_wrapper)
+ SECTION_FUNC(TEXT, _isr_wrapper)
+ 
++	z_arm64_user_tp_save x0, x1
++
+ 	/* ++_current_cpu->nested to be checked by arch_is_in_isr() */
+ 	get_cpu	x0
+ 	ldr	w1, [x0, #___cpu_t_nested_OFFSET]
+diff --git a/arch/arm64/core/macro_priv.inc b/arch/arm64/core/macro_priv.inc
+--- a/arch/arm64/core/macro_priv.inc
++++ b/arch/arm64/core/macro_priv.inc
+@@ -52,6 +52,25 @@
+ 	and	\xreg0, \xreg0, #TPIDRROEL0_CURR_CPU
+ .endm
+ 
++/*
++ * On an exception frame from EL0: user mode owns TPIDR_EL0, so keep it for
++ * the return and run on the kernel's TLS base meanwhile.
++ */
++.macro z_arm64_user_tp_save xreg0, xreg1
++#ifdef CONFIG_USER_THREAD_POINTER
++	ldr	\xreg0, [sp, ___esf_t_spsr_elr_OFFSET]
++	tst	\xreg0, #SPSR_MODE_MASK
++	b.ne	7f
++	get_cpu	\xreg0
++	ldr	\xreg0, [\xreg0, #___cpu_t_current_OFFSET]
++	mrs	\xreg1, tpidr_el0
++	str	\xreg1, [\xreg0, #_thread_offset_to_user_tp]
++	ldr	\xreg1, [\xreg0, #_thread_offset_to_tls]
++	msr	tpidr_el0, \xreg1
++7:
++#endif /* CONFIG_USER_THREAD_POINTER */
++.endm
++
+ #endif /* _ASMLANGUAGE */
+ 
+ #endif /* _MACRO_PRIV_INC_ */
+diff --git a/arch/arm64/core/offsets/offsets.c b/arch/arm64/core/offsets/offsets.c
+--- a/arch/arm64/core/offsets/offsets.c
++++ b/arch/arm64/core/offsets/offsets.c
+@@ -33,6 +33,13 @@
+ 
+ GEN_OFFSET_SYM(_thread_arch_t, exception_depth);
+ 
++#ifdef CONFIG_USER_THREAD_POINTER
++GEN_OFFSET_SYM(_thread_arch_t, user_tp);
++#endif
++#ifdef CONFIG_USER_SYSCALL_ABI
++GEN_OFFSET_SYM(_thread_arch_t, syscall_abi);
++#endif
++
+ #ifdef CONFIG_PROCESS_VM
+ GEN_ABSOLUTE_SYM(__thread_fork_x_OFFSET, offsetof(struct k_thread, arch.fork_x));
+ #endif
+diff --git a/arch/arm64/core/switch.S b/arch/arm64/core/switch.S
+--- a/arch/arm64/core/switch.S
++++ b/arch/arm64/core/switch.S
+@@ -173,6 +173,8 @@ SECTION_FUNC(TEXT, z_arm64_sync_exc)
+ 	.cfi_offset 29, (___esf_t_fp_OFFSET - ___esf_t_SIZEOF)
+ #endif
+ 
++	z_arm64_user_tp_save x0, x1
++
+ 	mrs	x0, esr_el1
+ 	lsr	x1, x0, #26
+ 
+@@ -255,6 +257,15 @@ svc_from_user:
+ #ifdef CONFIG_USERSPACE
+ 	cmp	x1, #_SVC_CALL_SYSTEM_CALL
+ 	beq	z_arm64_do_syscall
++#ifdef CONFIG_USER_SYSCALL_ABI
++	/* svc #0 is a system call for a thread on the Linux convention */
++	cbnz	x1, 1f
++	get_cpu	x2
++	ldr	x2, [x2, #___cpu_t_current_OFFSET]
++	ldr	x2, [x2, #_thread_offset_to_syscall_abi]
++	cbnz	x2, z_arm64_do_syscall
++1:
++#endif /* CONFIG_USER_SYSCALL_ABI */
+ #endif
+ 	cmp	x1, #_SVC_CALL_RUNTIME_EXCEPT
+ 	beq	oops
+diff --git a/arch/arm64/core/thread.c b/arch/arm64/core/thread.c
+--- a/arch/arm64/core/thread.c
++++ b/arch/arm64/core/thread.c
+@@ -177,6 +177,11 @@ FUNC_NORETURN void arch_user_mode_enter(k_thread_entry_t user_entry,
+ 	/* Top of the privileged non-user-accessible part of the stack */
+ 	stack_el1 = (uintptr_t)(_current->stack_obj + ARCH_THREAD_STACK_RESERVED);
+ 
++#ifdef CONFIG_USER_THREAD_POINTER
++	/* user mode starts on the kernel's TLS base until it sets its own */
++	_current->arch.user_tp = _current->tls;
++#endif /* CONFIG_USER_THREAD_POINTER */
++
+ 	/* We don't want to be disturbed when playing with SPSR and ELR.
+ 	 *
+ 	 * Lock interrupts before pinning the entry point and arguments into
+@@ -228,6 +233,25 @@ FUNC_NORETURN void arch_user_mode_restart(k_thread_entry_t user_entry, void *p1,
+ }
+ #endif
+ 
++#ifdef CONFIG_USER_THREAD_POINTER
++void arch_user_thread_pointer_set(struct k_thread *thread, uintptr_t tp)
++{
++	thread->arch.user_tp = tp;
++}
++
++uintptr_t arch_user_thread_pointer_get(struct k_thread *thread)
++{
++	return thread->arch.user_tp;
++}
++#endif /* CONFIG_USER_THREAD_POINTER */
++
++#ifdef CONFIG_USER_SYSCALL_ABI
++void arch_user_syscall_abi_set(struct k_thread *thread, enum arch_user_syscall_abi abi)
++{
++	thread->arch.syscall_abi = (abi == ARCH_USER_SYSCALL_ABI_LINUX) ? 1U : 0U;
++}
++#endif /* CONFIG_USER_SYSCALL_ABI */
++
+ int arch_coprocessors_disable(struct k_thread *thread)
+ {
+ #if defined(CONFIG_FPU_SHARING)
+@@ -264,6 +288,12 @@ void *arch_fork_frame_init(struct k_thread *child, void *parent_ssf)
+ 
+ 	(void)memcpy(&child->callee_saved.x19, _current->arch.fork_x,
+ 		     sizeof(_current->arch.fork_x));
++#ifdef CONFIG_USER_THREAD_POINTER
++	child->arch.user_tp = _current->arch.user_tp;
++#endif /* CONFIG_USER_THREAD_POINTER */
++#ifdef CONFIG_USER_SYSCALL_ABI
++	child->arch.syscall_abi = _current->arch.syscall_abi;
++#endif /* CONFIG_USER_SYSCALL_ABI */
+ #ifdef CONFIG_ARM64_SAFE_EXCEPTION_STACK
+ 	child->callee_saved.sp_el0 = pesf->sp;
+ #else
+diff --git a/arch/arm64/core/vector_table.S b/arch/arm64/core/vector_table.S
+--- a/arch/arm64/core/vector_table.S
++++ b/arch/arm64/core/vector_table.S
+@@ -366,6 +366,16 @@ z_arm64_exit_exc_fpu_done:
+ 	sub	x0, x0, x1
+ 	msr	tpidrro_el0, x0
+ 
++#ifdef CONFIG_USER_THREAD_POINTER
++	/* to EL0: back to user mode's own TPIDR_EL0 (no TLS access from here on) */
++	b.ne	7f
++	get_cpu	x0
++	ldr	x0, [x0, #___cpu_t_current_OFFSET]
++	ldr	x1, [x0, #_thread_offset_to_user_tp]
++	msr	tpidr_el0, x1
++7:
++#endif /* CONFIG_USER_THREAD_POINTER */
++
+ #ifdef CONFIG_ARM64_SAFE_EXCEPTION_STACK
+ 	bne	1f
+ 	ldr	x0, [sp, ___esf_t_sp_el0_OFFSET]
+diff --git a/arch/arm64/include/offsets_short_arch.h b/arch/arm64/include/offsets_short_arch.h
+--- a/arch/arm64/include/offsets_short_arch.h
++++ b/arch/arm64/include/offsets_short_arch.h
+@@ -12,6 +12,15 @@
+ #define _thread_offset_to_exception_depth \
+ 	(___thread_t_arch_OFFSET + ___thread_arch_t_exception_depth_OFFSET)
+ 
++#ifdef CONFIG_USER_THREAD_POINTER
++#define _thread_offset_to_user_tp \
++	(___thread_t_arch_OFFSET + ___thread_arch_t_user_tp_OFFSET)
++#endif
++#ifdef CONFIG_USER_SYSCALL_ABI
++#define _thread_offset_to_syscall_abi \
++	(___thread_t_arch_OFFSET + ___thread_arch_t_syscall_abi_OFFSET)
++#endif
++
+ #define _thread_offset_to_callee_saved_x19_x20 \
+ 	(___thread_t_callee_saved_OFFSET + ___callee_saved_t_x19_x20_OFFSET)
+ #define _thread_offset_to_callee_saved_x21_x22 \
+diff --git a/include/zephyr/arch/arm64/thread.h b/include/zephyr/arch/arm64/thread.h
+--- a/include/zephyr/arch/arm64/thread.h
++++ b/include/zephyr/arch/arm64/thread.h
+@@ -83,6 +83,14 @@ struct _thread_arch {
+ 	/* caller's x19..x28 captured at syscall entry (fork frame seed) */
+ 	uint64_t fork_x[10];
+ #endif /* CONFIG_PROCESS_VM */
++#ifdef CONFIG_USER_THREAD_POINTER
++	/* the TPIDR_EL0 user mode runs with; the kernel has its own TLS base */
++	uint64_t user_tp;
++#endif
++#ifdef CONFIG_USER_SYSCALL_ABI
++	/* nonzero: svc #0 from EL0 is a system call, as Linux makes them */
++	uint64_t syscall_abi;
++#endif
+ 	/* Keep large structures at the end to avoid offset issues */
+ #ifdef CONFIG_FPU_SHARING
+ 	struct z_arm64_fp_context saved_fp_context;
