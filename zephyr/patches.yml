@@ -2846,3 +2846,20 @@ patches:
       the common exception exit path: privilege-stack bookkeeping, the
       domain SATP switch and sret included. Floating-point state is not
       inherited.
+  - path: zephyr/arm64-mmu-globalize-partial-block.patch
+    sha256sum: 9fff6fa49381de6b638183ee25143cd788316687589856ea834b2ac608f5a48d
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-25
+    upstreamable: true
+    comments: |
+      arm64: mmu: globalize a range whose global mapping is a block. When a
+      private page table stands in for a block of the global tables (a range
+      inside the block was changed for one domain) and part of that block
+      later goes global again, globalize_table() asserted that the global
+      side had to be a table too and, with assertions off, recursed into a
+      block descriptor as if it were a table. Restore the entries of the
+      partial range in the private table from the block instead, dropping
+      any subtable that stood there. Seen when a forked process's domain is
+      torn down while its sibling keeps private copies under the same block.
