@@ -7,8 +7,8 @@ Enable this Option Group with :kconfig:option:`CONFIG_POSIX_DEVICE_SPECIFIC`.
 
 The console is the one terminal. Attribute changes round-trip; the console driver is
 unbuffered and synchronous, so the drain, flush, flow, and break operations complete
-trivially. Attributes are not yet applied to the UART, and canonical input processing
-awaits console input wiring.
+trivially. The canonical, echo and CR-to-NL input modes reach the console; the other
+attributes are kept for tcgetattr() but not applied to the UART.
 
 .. csv-table:: POSIX_DEVICE_SPECIFIC
    :header: API, Supported
