@@ -1,0 +1,128 @@
+diff --git a/include/zephyr/sys/zvfs.h b/include/zephyr/sys/zvfs.h
+--- a/include/zephyr/sys/zvfs.h
++++ b/include/zephyr/sys/zvfs.h
+@@ -41,6 +41,14 @@ struct zvfs_stat {
+ 	struct timespec mtime;
+ 	/** Time of last status change, zero when the backend does not record it. */
+ 	struct timespec ctime;
++	/** Device number: the containing mount's index plus one, 0 elsewhere. */
++	uint32_t dev;
++	/**
++	 * File serial number. Zephyr file systems expose no inode numbers, so
++	 * a mounted file's is derived from its resolved path: every path
++	 * reports the same number each time, different paths differ.
++	 */
++	uint64_t ino;
+ };
+ 
+ /**
+diff --git a/include/zephyr/sys/zvfs_fs.h b/include/zephyr/sys/zvfs_fs.h
+--- a/include/zephyr/sys/zvfs_fs.h
++++ b/include/zephyr/sys/zvfs_fs.h
+@@ -43,7 +43,7 @@ struct zvfs_fs_desc {
+ 	/** Stream object returned by zvfs_opendir(), NULL for plain fds. */
+ 	struct zvfs_dirstream *stream;
+ #if defined(CONFIG_ZVFS_FS) || defined(__DOXYGEN__)
+-	/** Resolved absolute path of directory descriptors, for zvfs_fchdir(). */
++	/** Resolved absolute path, for zvfs_fchdir() and the stat identity. */
+ 	char path[CONFIG_ZVFS_PATH_MAX];
+ #endif
+ 	/** Open flags (ZVFS_O_*) reported by F_GETFL */
+diff --git a/lib/os/zvfs/zvfs_fs.c b/lib/os/zvfs/zvfs_fs.c
+--- a/lib/os/zvfs/zvfs_fs.c
++++ b/lib/os/zvfs/zvfs_fs.c
+@@ -193,6 +193,7 @@ int z_impl_zvfs_openat(int dirfd, const char *name, int flags, int mode)
+ 
+ 	ptr->stream = NULL;
+ 	ptr->flags = flags & (ZVFS_O_ACCMODE | ZVFS_O_APPEND | ZVFS_O_NONBLOCK);
++	strcpy(ptr->path, name);
+ 	zvfs_finalize_typed_fd(fd, ptr, &fs_fd_op_vtable, ZVFS_MODE_IFREG);
+ 
+ 	return fd;
+@@ -248,6 +249,7 @@ static int fs_dir_ioctl_vmeth(void *obj, unsigned int request, va_list args)
+ 
+ 		*buf = (struct zvfs_stat){0};
+ 		buf->mode = ZVFS_MODE_IFDIR;
++		zvfs_fs_identity(ptr->path, buf);
+ 		return 0;
+ 	}
+ 	case ZFD_IOCTL_STATVFS: {
+@@ -409,6 +411,7 @@ static int fs_ioctl_vmeth(void *obj, unsigned int request, va_list args)
+ 		if (current >= 0) {
+ 			buf->size = current;
+ 			buf->mode = ptr->is_dir ? ZVFS_MODE_IFDIR : ZVFS_MODE_IFREG;
++			zvfs_fs_identity(ptr->path, buf);
+ 		}
+ 
+ 		rc = fs_seek(&ptr->file, offset, FS_SEEK_SET);
+diff --git a/lib/os/zvfs/zvfs_fs_priv.h b/lib/os/zvfs/zvfs_fs_priv.h
+--- a/lib/os/zvfs/zvfs_fs_priv.h
++++ b/lib/os/zvfs/zvfs_fs_priv.h
+@@ -19,6 +19,7 @@ extern "C" {
+ #endif
+ 
+ struct fs_statvfs;
++struct zvfs_stat;
+ struct zvfs_statvfs;
+ struct zvfs_dirstream;
+ struct fd_op_vtable;
+@@ -68,6 +69,7 @@ int zvfs_dirfd_syscall_verify(int dirfd);
+  * @param rdonly True when the containing mount is read-only.
+  */
+ void zvfs_statvfs_from_fs(struct zvfs_statvfs *buf, const struct fs_statvfs *vfs, bool rdonly);
++void zvfs_fs_identity(const char *path, struct zvfs_stat *buf);
+ 
+ #ifdef CONFIG_USERSPACE
+ /**
+diff --git a/lib/os/zvfs/zvfs_path.c b/lib/os/zvfs/zvfs_path.c
+--- a/lib/os/zvfs/zvfs_path.c
++++ b/lib/os/zvfs/zvfs_path.c
+@@ -9,6 +9,7 @@
+  */
+ 
+ #include <errno.h>
++#include <string.h>
+ 
+ #include <zephyr/fs/fs.h>
+ #include <zephyr/internal/syscall_handler.h>
+@@ -106,6 +107,32 @@ static bool zvfs_mount_rdonly(const char *path)
+ 	return (flags & FS_MOUNT_FLAG_READ_ONLY) != 0;
+ }
+ 
++void zvfs_fs_identity(const char *path, struct zvfs_stat *buf)
++{
++	const char *mnt;
++	size_t best = 0;
++	uint64_t h = 0xcbf29ce484222325ULL;
++
++	buf->dev = 0;
++	for (int i = 0; fs_readmount(&i, &mnt) == 0;) {
++		size_t n = strlen(mnt);
++
++		/* the longest mount point covering the path; i is its index + 1 */
++		if ((n > best) && (strncmp(path, mnt, n) == 0) &&
++		    ((path[n] == '\0') || (path[n] == '/') || (mnt[n - 1] == '/'))) {
++			best = n;
++			buf->dev = (uint32_t)i;
++		}
++	}
++
++	/* FNV-1a */
++	for (const char *s = path; *s != '\0'; s++) {
++		h ^= (uint8_t)*s;
++		h *= 0x100000001b3ULL;
++	}
++	buf->ino = h;
++}
++
+ int z_impl_zvfs_unlinkat(int dirfd, const char *path, int flags)
+ {
+ 	int res;
+@@ -288,6 +315,7 @@ int z_impl_zvfs_statat(int dirfd, const char *path, struct zvfs_stat *buf, int f
+ 		buf->blksize = vfs.f_bsize;
+ 		buf->blocks = DIV_ROUND_UP(entry.size, 512);
+ 	}
++	zvfs_fs_identity(r, buf);
+ 
+ 	return 0;
+ }

@@ -4202,3 +4202,18 @@ patches:
       The Picolibc and Newlib <stdio.h> wrappers declare popen() and
       pclose() beside ctermid(): the toolchain headers have neither, so
       the module's implementations were unreachable there.
+  - path: zephyr/zvfs-stat-identity.patch
+    sha256sum: 8404d6b8023b49c6eee56f646a8e09633018fed8574dbf864df03793ddffcc70
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-25
+    upstreamable: true
+    comments: |
+      Report a device and file serial number in struct zvfs_stat. Zephyr
+      file systems expose no inode numbers, so a mounted file's identity is
+      derived from its resolved path (its mount's index and a 64-bit hash of
+      the path), which every stat of the same path repeats and different
+      paths never share; descriptors keep their resolved path so fstat()
+      agrees with stat(). Programs that walk a tree compare these to detect
+      loops, and with zeros every directory looked like its own ancestor.
