@@ -1,0 +1,204 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -896,6 +896,8 @@ get_property(
+   TARGET syscalls_interface
+   PROPERTY INTERFACE_INCLUDE_DIRECTORIES
+ )
++# registered headers outside include/ (subsystems, modules) are parsed too
++get_property(syscalls_file_list TARGET syscalls_interface PROPERTY INTERFACE_SOURCES)
+ list(APPEND SYSCALL_INCLUDE_DIRS ${syscalls_include_list})
+ 
+ foreach(d ${SYSCALL_INCLUDE_DIRS})
+@@ -920,7 +922,7 @@ add_custom_command(
+   --file-list        ${syscalls_file_list_output}
+   $<$<BOOL:${CONFIG_EMIT_ALL_SYSCALLS}>:--emit-all-syscalls>
+   DEPENDS ${syscalls_subdirs_trigger} ${PARSE_SYSCALLS_HEADER_DEPENDS}
+-          ${syscalls_file_list_output} syscalls_interface
++          ${syscalls_file_list_output} ${syscalls_file_list} syscalls_interface
+   )
+ 
+ # Make sure Picolibc is built before the rest of the system; there's no explicit
+@@ -949,6 +951,12 @@ if(CONFIG_TIMEOUT_64BIT)
+   set(SYSCALL_SPLIT_TIMEOUT_ARG --split-type k_timeout_t --split-type k_ticks_t)
+ endif()
+ 
++# System calls with pinned IDs, handed in with zephyr_syscall_reserve()
++get_property(syscall_reserve_files TARGET syscalls_interface PROPERTY SYSCALL_RESERVE_FILES)
++foreach(f ${syscall_reserve_files})
++  list(APPEND SYSCALL_RESERVE_ARGS --reserve ${f})
++endforeach()
++
+ # percepio/TraceRecorder/kernelports/Zephyr/scripts/tz_parse_syscalls.py hardcodes the path
+ # to the `syscall_list.h`, make a copy of the generated file so that percepio is able to build
+ if(CONFIG_LEGACY_GENERATED_INCLUDE_PATH)
+@@ -977,10 +985,11 @@ add_custom_command(
+   $<$<BOOL:${CONFIG_USERSPACE}>:--gen-mrsh-files>
+   ${SYSCALL_LONG_REGISTERS_ARG}
+   ${SYSCALL_SPLIT_TIMEOUT_ARG}
++  ${SYSCALL_RESERVE_ARGS}
+   COMMAND
+   ${LEGACY_SYSCALL_LIST_H_ARGS}
+   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+-  DEPENDS ${syscalls_json}
++  DEPENDS ${syscalls_json} ${syscall_reserve_files}
+   )
+ 
+ include(${ZEPHYR_BASE}/cmake/kobj.cmake)
+@@ -2434,6 +2443,7 @@ if(CONFIG_LLEXT_EDK)
+       $<$<BOOL:${CONFIG_LLEXT_EDK_USERSPACE_ONLY}>:--userspace-only>
+       ${SYSCALL_LONG_REGISTERS_ARG}
+       ${SYSCALL_SPLIT_TIMEOUT_ARG}
++      ${SYSCALL_RESERVE_ARGS}
+     COMMAND ${CMAKE_COMMAND}
+         -DSYSBUILD=${SYSBUILD}
+         -P ${ZEPHYR_BASE}/cmake/llext-edk.cmake
+diff --git a/cmake/modules/extensions.cmake b/cmake/modules/extensions.cmake
+--- a/cmake/modules/extensions.cmake
++++ b/cmake/modules/extensions.cmake
+@@ -1805,6 +1805,34 @@ function(zephyr_linker_sources location)
+   set(rodata_path        "${snippet_base}/snippets-rodata.ld")
+   set(ramfunc_path       "${snippet_base}/snippets-ramfunc-section.ld")
+   set(nocache_path       "${snippet_base}/snippets-nocache-section.ld")
++# Pin system call IDs: each file lists '<name> <id>' lines (see
++# scripts/build/gen_syscalls.py --reserve). The other system calls take the
++# IDs left over, so a listed ID names the same call in every image that
++# includes it.
++function(zephyr_syscall_reserve)
++  foreach(one_file ${ARGV})
++    if(EXISTS ${one_file})
++      set(reserve_file ${one_file})
++    elseif(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/${one_file})
++      set(reserve_file ${CMAKE_CURRENT_SOURCE_DIR}/${one_file})
++    else()
++      message(FATAL_ERROR "Syscall reservation file not found: ${one_file}")
++    endif()
++
++    set_property(
++      TARGET syscalls_interface
++      APPEND PROPERTY SYSCALL_RESERVE_FILES
++      ${reserve_file}
++    )
++  endforeach()
++endfunction()
++
++function(zephyr_syscall_reserve_ifdef feature_toggle)
++  if(${${feature_toggle}})
++    zephyr_syscall_reserve(${ARGN})
++  endif()
++endfunction()
++
+   set(itcm_path          "${snippet_base}/snippets-itcm-section.ld")
+   set(dtcm_path          "${snippet_base}/snippets-dtcm-section.ld")
+ 
+diff --git a/scripts/build/gen_syscalls.py b/scripts/build/gen_syscalls.py
+--- a/scripts/build/gen_syscalls.py
++++ b/scripts/build/gen_syscalls.py
+@@ -572,6 +572,51 @@ def analyze_fn(match_group, fn, userspace_only):
+     return (handler, invocation, marshaller, sys_id, table_entry)
+ 
+ 
++def read_reservations(paths):
++    """Return {K_SYSCALL_<NAME>: id} from '<name> <id>' files ('#' starts a comment)."""
++    reserved = {}
++    by_id = {}
++
++    for path in paths or []:
++        with open(path) as fp:
++            for lineno, line in enumerate(fp, 1):
++                line = line.split("#", 1)[0].strip()
++                if not line:
++                    continue
++                fields = line.split()
++                if len(fields) != 2:
++                    sys.exit(f"{path}:{lineno}: expected '<name> <id>'")
++                name = "K_SYSCALL_" + fields[0].upper()
++                sys_id = int(fields[1], 0)
++                if by_id.get(sys_id, name) != name or reserved.get(name, sys_id) != sys_id:
++                    sys.exit(f"{path}:{lineno}: conflicting reservation for {fields[0]}")
++                reserved[name] = sys_id
++                by_id[sys_id] = name
++
++    return reserved
++
++
++def assign_ids(names, reserved):
++    """Give each emitted system call an ID: reserved ones as pinned, the rest packed
++    in order into the IDs left over. Returns ({name: id}, K_SYSCALL_BAD).
++    """
++    pinned = {name: reserved[name] for name in names if name in reserved}
++    taken = set(pinned.values())
++    ids = {}
++    next_free = 0
++
++    for name in names:
++        if name in pinned:
++            ids[name] = pinned[name]
++            continue
++        while next_free in taken:
++            next_free += 1
++        ids[name] = next_free
++        next_free += 1
++
++    return ids, (max(ids.values(), default=-1) + 1)
++
++
+ def parse_args():
+     global args
+     parser = argparse.ArgumentParser(
+@@ -613,6 +658,13 @@ def parse_args():
+     parser.add_argument(
+         "-w", "--syscall-weakdefs-llext", help="output C system call weak definitions"
+     )
++    parser.add_argument(
++        "-r",
++        "--reserve",
++        action="append",
++        help="File of '<syscall name> <id>' lines pinning system call IDs; "
++        "other system calls take the remaining IDs",
++    )
+     parser.add_argument(
+         "-u",
+         "--userspace-only",
+@@ -673,7 +725,15 @@ def main():
+             mrsh_defs[syscall] = mrsh
+             mrsh_includes[syscall] = f"#include <zephyr/syscalls/{fn}>"
+ 
++    ids_emit.sort()
++    ids, bad_id = assign_ids(ids_emit, read_reservations(args.reserve))
++
+     with open(args.syscall_dispatch, "w") as fp:
++        # reserved IDs without a system call in this image trap as bad calls
++        assigned = set(ids.values())
++        table_entries.extend(
++            f"[{i}] = handler_bad_syscall" for i in range(bad_id) if i not in assigned
++        )
+         table_entries.append("[K_SYSCALL_BAD] = handler_bad_syscall")
+ 
+         weak_defines = "".join(
+@@ -704,12 +764,12 @@ def main():
+             fp.write(llext_exports_template % (extern_refs, exported_symbols))
+ 
+     # Listing header emitted to stdout
+-    ids_emit.sort()
+-    ids_emit.extend(["K_SYSCALL_BAD", "K_SYSCALL_LIMIT"])
++    ids["K_SYSCALL_BAD"] = bad_id
++    ids["K_SYSCALL_LIMIT"] = bad_id + 1
+ 
+     ids_as_defines = ""
+-    for i, item in enumerate(ids_emit):
+-        ids_as_defines += f"#define {item} {i}\n"
++    for item, sys_id in ids.items():
++        ids_as_defines += f"#define {item} {sys_id}\n"
+ 
+     if ids_not_emit:
+         # There are syscalls that are not used in the image but
+@@ -717,7 +777,7 @@ def main():
+         # make them usable but outside the syscall ID range.
+         ids_as_defines += "\n\n/* Following syscalls are not used in image */\n"
+         ids_not_emit.sort()
+-        num_emitted_ids = len(ids_emit)
++        num_emitted_ids = bad_id + 2
+         for i, item in enumerate(ids_not_emit):
+             ids_as_defines += f"#define {item} {i + num_emitted_ids}\n"
+ 
