@@ -3372,6 +3372,21 @@ patches:
       CONFIG_DEMAND_PAGING every page is resident and both calls fail with
       ENOTSUP. The zvfs_mmap test covers the calls, with a demand paging
       scenario on qemu_x86 where locking is real.
+  - path: zephyr/zvfs-stat-identity.patch
+    sha256sum: b5235c61f5d74c076f2f25ee40e090eded52ce3ddd32c9142ce08df4bf7c16fb
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-25
+    upstreamable: true
+    comments: |
+      Report a device and file serial number in struct zvfs_stat. Zephyr
+      file systems expose no inode numbers, so a mounted file's identity is
+      derived from its resolved path (its mount's index and a 64-bit hash of
+      the path), which every stat of the same path repeats and different
+      paths never share; descriptors keep their resolved path so fstat()
+      agrees with stat(). Programs that walk a tree compare these to detect
+      loops, and with zeros every directory looked like its own ancestor.
   - path: zephyr/libc-sys-stat-utime-markers.patch
     sha256sum: 8edfcf83058522bb80d601e92c4a9e6be14baec04cf8253ffbd344fbadf05b78
     module: zephyr
