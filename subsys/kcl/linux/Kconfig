@@ -1,0 +1,102 @@
+# SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+config KCL_LINUX_ARCH
+	string
+	default "x86_64" if X86_64
+	default "i386" if X86
+	default "arm64" if ARM64
+	default "arm" if ARM
+	default "riscv64" if RISCV && 64BIT
+	default "riscv32" if RISCV
+
+config KCL_LINUX
+	bool "Linux kernel compatibility layer"
+	depends on USERSPACE
+	depends on KCL_LINUX_ARCH != ""
+	depends on ARCH_HAS_USER_THREAD_POINTER && THREAD_LOCAL_STORAGE
+	depends on LLEXT && FILE_SYSTEM
+	# the executable's AT_RANDOM and its getrandom() want random bytes
+	depends on ENTROPY_HAS_DRIVER || TEST_RANDOM_GENERATOR
+	select USER_THREAD_POINTER
+	select USER_SYSCALL_ABI if ARCH_HAS_USER_SYSCALL_ABI
+	# what the system calls are built on: all on by default, each one optional
+	imply PROCESS
+	imply SYS_PROCESS
+	imply SYS_PROCESS_EXEC
+	imply SYS_THREAD
+	imply SIGNAL
+	imply ZVFS
+	imply ZVFS_FDTABLE
+	imply ZVFS_FS
+	imply ZVFS_POLL
+	imply ZVFS_PIPE
+	imply ZVFS_FIFO
+	imply PROCESS_STOP
+	help
+	  The Linux system call interface: every Linux system call of this
+	  architecture is a system call of this image at its Linux number, so a
+	  user-mode thread executing Linux binary code has its system calls
+	  dispatched here. Calls the layer does not provide, and calls switched
+	  off (see the system call options), fail with ENOSYS.
+
+if KCL_LINUX
+
+rsource "Kconfig.syscalls"
+
+config KCL_LINUX_EXEC
+	def_bool y
+	depends on SYS_PROCESS_EXEC
+	help
+	  Run static Linux executables (ET_EXEC or position-independent ET_DYN
+	  images without an interpreter) as processes: sys_exec_load() loads
+	  them, so any process creation over it takes them like any image.
+
+config KCL_LINUX_STACK_SIZE
+	int "Initial stack of a Linux process (bytes)"
+	depends on KCL_LINUX_EXEC
+	default 65536
+	help
+	  Size of the stack a loaded Linux executable starts on. Its top holds
+	  the argument, environment and auxiliary vectors.
+
+config KCL_LINUX_BRK_SIZE
+	int "Program break area of a Linux process (bytes)"
+	depends on KCL_LINUX_EXEC
+	default 262144
+	help
+	  Memory reserved after an executable's data for brk() growth; brk()
+	  fails once it is used up, and C libraries then fall back to mmap().
+
+config SIGNAL_SET_SIZE_MIN_KCL_LINUX
+	def_int 64
+	help
+	  Linux numbers its signals 1 to 64. Its C library keeps 32 and 33
+	  for itself, where the kernel's cancellation signal already is; the
+	  kernel's timer and message queue signals take the top two of the
+	  real-time range, as glibc's own helpers take theirs from it.
+
+config SIGNAL_ACTION_DB_SIZE_MIN_KCL_LINUX
+	def_int 64
+	help
+	  Signal handlers of Linux processes, all of them together: a process
+	  installs its own and every fork() copies the parent's, so the
+	  database holds each handler once per process that has it.
+
+config SIGNAL_QUEUE_SIZE_ADD_KCL_LINUX
+	def_int 16
+	help
+	  Signals in flight between Linux processes: kill(), tgkill() and the
+	  child status notifications of their fork() children.
+
+config KCL_LINUX_FUTEX_WAITERS
+	int "Concurrent futex waiters"
+	default 8
+	help
+	  How many threads of Linux processes can block in futex() at once.
+
+module = KCL_LINUX
+module-str = kcl_linux
+source "subsys/logging/Kconfig.template.log_config"
+
+endif # KCL_LINUX
