@@ -1,0 +1,293 @@
+diff --git a/arch/Kconfig b/arch/Kconfig
+index e172bf2fbb2..017b95d3397 100644
+--- a/arch/Kconfig
++++ b/arch/Kconfig
+@@ -152,6 +152,8 @@ config RISCV
+ 	select ARCH_IS_SET
+ 	select ARCH_MEM_DOMAIN_APPLY_CURRENT if RISCV_PMP && USERSPACE
+ 	select ARCH_HAS_STACK_JUMP
++	select ARCH_HAS_USER_THREAD_POINTER
++	select ARCH_HAS_USER_SYSCALL_ABI
+ 	select ATOMIC_OPERATIONS_C if (!RISCV_ISA_EXT_A && !ATOMIC_OPERATIONS_ARCH)
+ 	select ATOMIC_OPERATIONS_BUILTIN if RISCV_ISA_EXT_A
+ 	select ARCH_SUPPORTS_COREDUMP
+@@ -1046,6 +1048,29 @@ config ARCH_HAS_GDBSTUB
+ config ARCH_HAS_THREAD_LOCAL_STORAGE
+ 	bool
+ 
++config ARCH_HAS_USER_THREAD_POINTER
++	bool
++
++config USER_THREAD_POINTER
++	bool "User mode owns the thread-pointer register"
++	depends on ARCH_HAS_USER_THREAD_POINTER && USERSPACE && THREAD_LOCAL_STORAGE
++	help
++	  Let user-mode code of a thread set the architecture's thread-pointer
++	  (TLS base) register itself, through arch_user_thread_pointer_set().
++	  The kernel keeps its own TLS base per thread and switches the register
++	  on every transition of such a thread between user and kernel mode.
++
++config ARCH_HAS_USER_SYSCALL_ABI
++	bool
++
++config USER_SYSCALL_ABI
++	bool "Per-thread user-mode system call convention"
++	depends on ARCH_HAS_USER_SYSCALL_ABI && USERSPACE
++	help
++	  Let a user thread make system calls in a foreign convention, selected
++	  per thread with arch_user_syscall_abi_set(): Linux's, where the
++	  architecture's native trap or register assignment differs from it.
++
+ config ARCH_HAS_SUSPEND_TO_RAM
+ 	bool
+ 	help
+diff --git a/arch/riscv/core/isr.S b/arch/riscv/core/isr.S
+--- a/arch/riscv/core/isr.S
++++ b/arch/riscv/core/isr.S
+@@ -229,6 +229,13 @@ SECTION_FUNC(exception.entry, _isr_wrapper)
+ 	sfence.vma
+ #endif /* CONFIG_RISCV_MMU */
+ 
++#ifdef CONFIG_USER_THREAD_POINTER
++	/* user mode owns tp and gp: keep them for the return */
++	lr t0, ___cpu_t_current_OFFSET(s0)
++	sr tp, _thread_offset_to_user_tp(t0)
++	sr gp, _thread_offset_to_user_gp(t0)
++#endif /* CONFIG_USER_THREAD_POINTER */
++
+ 	/* Make sure tls pointer is sane */
+ 	lr t0, ___cpu_t_current_OFFSET(s0)
+ 	lr tp, _thread_offset_to_tls(t0)
+@@ -708,6 +715,14 @@ close_ecall_done:
+ 	lr a4, __struct_arch_esf_a4_OFFSET(sp)
+ 	lr a5, __struct_arch_esf_a5_OFFSET(sp)
+ 	lr t0, __struct_arch_esf_t0_OFFSET(sp)
++#ifdef CONFIG_USER_SYSCALL_ABI
++	/* a Linux-convention thread passes the number in a7 */
++	lr t1, ___cpu_t_current_OFFSET(s0)
++	lr t1, _thread_offset_to_syscall_abi(t1)
++	beqz t1, 1f
++	lr t0, __struct_arch_esf_a7_OFFSET(sp)
++1:
++#endif /* CONFIG_USER_SYSCALL_ABI */
+ #if defined(CONFIG_RISCV_ISA_RV32E)
+ 	/* Stack alignment for RV32E is 4 bytes */
+ 	addi sp, sp, -4
+@@ -768,6 +783,13 @@ valid_syscall_id:
+ #ifdef CONFIG_SIGNAL
+ 	/* reload the syscall id: t0 is caller-saved and the syscall may have clobbered it */
+ 	lr t0, __struct_arch_esf_t0_OFFSET(sp)
++#ifdef CONFIG_USER_SYSCALL_ABI
++	lr t1, ___cpu_t_current_OFFSET(s0)
++	lr t1, _thread_offset_to_syscall_abi(t1)
++	beqz t1, 1f
++	lr t0, __struct_arch_esf_a7_OFFSET(sp)
++1:
++#endif /* CONFIG_USER_SYSCALL_ABI */
+ 
+ 	li t1, K_SYSCALL_K_SIG_ACTION
+ 	beq t0, t1, skip_z_sig_handle
+@@ -1087,6 +1109,13 @@ fp_trap_exit:
+ 	add t0, sp, __struct_arch_esf_SIZEOF
+ 	sr t0, _curr_cpu_arch_user_exc_sp(s0)
+ 
++#ifdef CONFIG_USER_THREAD_POINTER
++	/* back to user mode's own tp and gp (no TLS access from here on) */
++	lr t0, ___cpu_t_current_OFFSET(s0)
++	lr gp, _thread_offset_to_user_gp(t0)
++	lr tp, _thread_offset_to_user_tp(t0)
++#endif /* CONFIG_USER_THREAD_POINTER */
++
+ #ifdef CONFIG_RISCV_MMU
+ 	/* Switch to the thread's domain SATP before returning to user mode.
+ 	 * This code runs from the exception.entry section which has PTE_USER=0
+diff --git a/arch/riscv/core/offsets/offsets.c b/arch/riscv/core/offsets/offsets.c
+--- a/arch/riscv/core/offsets/offsets.c
++++ b/arch/riscv/core/offsets/offsets.c
+@@ -95,6 +95,14 @@ GEN_OFFSET_SYM(_thread_arch_t, exception_depth);
+ 
+ #endif /* CONFIG_FPU_SHARING */
+ 
++#ifdef CONFIG_USER_THREAD_POINTER
++GEN_OFFSET_SYM(_thread_arch_t, user_tp);
++GEN_OFFSET_SYM(_thread_arch_t, user_gp);
++#endif
++#ifdef CONFIG_USER_SYSCALL_ABI
++GEN_OFFSET_SYM(_thread_arch_t, syscall_abi);
++#endif
++
+ #ifdef CONFIG_RISCV_MMU
+ GEN_OFFSET_SYM(_thread_arch_t, satp);
+ #ifdef CONFIG_PROCESS_VM
+diff --git a/arch/riscv/core/thread.c b/arch/riscv/core/thread.c
+--- a/arch/riscv/core/thread.c
++++ b/arch/riscv/core/thread.c
+@@ -5,6 +5,8 @@
+  * SPDX-License-Identifier: Apache-2.0
+  */
+ 
++#include <string.h>
++
+ #include <zephyr/kernel.h>
+ #include <kernel_internal.h>
+ #include <zephyr/arch/riscv/csr.h>
+@@ -40,6 +42,9 @@ void arch_new_thread(struct k_thread *thread, k_thread_stack_t *stack,
+ 	const struct soc_esf soc_esf_init = {SOC_ESF_INIT};
+ #endif
+ 
++	/* nothing of a previous use of this thread survives: the thread pointer, the ABI */
++	(void)memset(&thread->arch, 0, sizeof(thread->arch));
++
+ 	/* Initial stack frame for thread */
+ 	stack_init = (struct arch_esf *)Z_STACK_PTR_ALIGN(
+ 				Z_STACK_PTR_TO_FRAME(struct arch_esf, stack_ptr)
+@@ -288,9 +293,38 @@ FUNC_NORETURN void arch_user_mode_enter(k_thread_entry_t user_entry,
+ 		     0xaa, Z_STACK_PTR_ALIGN(CONFIG_PRIVILEGED_STACK_SIZE));
+ #endif /* CONFIG_INIT_STACKS */
+ 
++#ifdef CONFIG_USER_THREAD_POINTER
++	/* user mode starts on the kernel's tp and gp until it sets its own */
++	{
++		register unsigned long gp __asm__("gp");
++
++		_current->arch.user_tp = _current->tls;
++		_current->arch.user_gp = gp;
++	}
++#endif /* CONFIG_USER_THREAD_POINTER */
++
+ 	riscv_user_mode_enter(user_entry, p1, p2, p3, top_of_priv_stack);
+ }
+ 
++#ifdef CONFIG_USER_THREAD_POINTER
++void arch_user_thread_pointer_set(struct k_thread *thread, uintptr_t tp)
++{
++	thread->arch.user_tp = tp;
++}
++
++uintptr_t arch_user_thread_pointer_get(struct k_thread *thread)
++{
++	return thread->arch.user_tp;
++}
++#endif /* CONFIG_USER_THREAD_POINTER */
++
++#ifdef CONFIG_USER_SYSCALL_ABI
++void arch_user_syscall_abi_set(struct k_thread *thread, enum arch_user_syscall_abi abi)
++{
++	thread->arch.syscall_abi = (abi == ARCH_USER_SYSCALL_ABI_LINUX) ? 1UL : 0UL;
++}
++#endif /* CONFIG_USER_SYSCALL_ABI */
++
+ FUNC_NORETURN void arch_user_mode_restart(k_thread_entry_t user_entry, void *p1, void *p2, void *p3)
+ {
+ 	/* a user thread in a system call: the privileged stack was set up on the first entry */
+@@ -423,6 +457,13 @@ void *arch_fork_frame_init(struct k_thread *child, void *parent_ssf)
+ 	*esf = *pesf;
+ 	esf->a0 = 0;
+ 	(void)memcpy(child->arch.fork_s, _current->arch.fork_s, sizeof(child->arch.fork_s));
++#ifdef CONFIG_USER_THREAD_POINTER
++	child->arch.user_tp = _current->arch.user_tp;
++	child->arch.user_gp = _current->arch.user_gp;
++#endif /* CONFIG_USER_THREAD_POINTER */
++#ifdef CONFIG_USER_SYSCALL_ABI
++	child->arch.syscall_abi = _current->arch.syscall_abi;
++#endif /* CONFIG_USER_SYSCALL_ABI */
+ 
+ 	return esf;
+ }
+diff --git a/arch/riscv/include/offsets_short_arch.h b/arch/riscv/include/offsets_short_arch.h
+--- a/arch/riscv/include/offsets_short_arch.h
++++ b/arch/riscv/include/offsets_short_arch.h
+@@ -61,6 +61,17 @@
+ 
+ #endif
+ 
++#ifdef CONFIG_USER_THREAD_POINTER
++#define _thread_offset_to_user_tp \
++	(___thread_t_arch_OFFSET + ___thread_arch_t_user_tp_OFFSET)
++#define _thread_offset_to_user_gp \
++	(___thread_t_arch_OFFSET + ___thread_arch_t_user_gp_OFFSET)
++#endif
++#ifdef CONFIG_USER_SYSCALL_ABI
++#define _thread_offset_to_syscall_abi \
++	(___thread_t_arch_OFFSET + ___thread_arch_t_syscall_abi_OFFSET)
++#endif
++
+ #ifdef CONFIG_RISCV_MMU
+ #define _thread_offset_to_satp \
+ 	(___thread_t_arch_OFFSET + ___thread_arch_t_satp_OFFSET)
+diff --git a/include/zephyr/arch/arch_interface.h b/include/zephyr/arch/arch_interface.h
+--- a/include/zephyr/arch/arch_interface.h
++++ b/include/zephyr/arch/arch_interface.h
+@@ -1129,6 +1129,53 @@ FUNC_NORETURN void arch_user_mode_enter(k_thread_entry_t user_entry,
+ FUNC_NORETURN void arch_user_mode_restart(k_thread_entry_t user_entry,
+ 					  void *p1, void *p2, void *p3);
+ 
++#if defined(CONFIG_USER_THREAD_POINTER) || defined(__DOXYGEN__)
++/**
++ * @brief Set the thread-pointer register value a thread runs user mode with
++ *
++ * The kernel keeps running the thread on its own TLS base; the register
++ * holds @a tp whenever the thread executes in user mode from now on.
++ *
++ * @param thread Thread, the current one or one not yet started
++ * @param tp Thread-pointer register value for user mode
++ */
++void arch_user_thread_pointer_set(struct k_thread *thread, uintptr_t tp);
++
++/**
++ * @brief Get the thread-pointer register value a thread runs user mode with
++ *
++ * @param thread Thread
++ * @return The value set with arch_user_thread_pointer_set(), else the TLS base
++ */
++uintptr_t arch_user_thread_pointer_get(struct k_thread *thread);
++#endif /* CONFIG_USER_THREAD_POINTER */
++
++/** @brief System call conventions a user thread may use */
++enum arch_user_syscall_abi {
++	/** Zephyr's own */
++	ARCH_USER_SYSCALL_ABI_NATIVE,
++	/** Linux's, on the architectures where it differs from Zephyr's */
++	ARCH_USER_SYSCALL_ABI_LINUX,
++};
++
++#if defined(CONFIG_USER_SYSCALL_ABI) || defined(__DOXYGEN__)
++/**
++ * @brief Select the system call convention a thread's user mode uses
++ *
++ * @param thread Thread, the current one or one not yet started
++ * @param abi Convention its traps are decoded with from now on
++ */
++void arch_user_syscall_abi_set(struct k_thread *thread, enum arch_user_syscall_abi abi);
++#else
++static inline void arch_user_syscall_abi_set(struct k_thread *thread,
++					     enum arch_user_syscall_abi abi)
++{
++	/* the native convention is the only one, or the Linux one is the same */
++	ARG_UNUSED(thread);
++	ARG_UNUSED(abi);
++}
++#endif /* CONFIG_USER_SYSCALL_ABI */
++
+ /**
+  * @brief Induce a kernel oops that appears to come from a specific location
+  *
+diff --git a/include/zephyr/arch/riscv/thread.h b/include/zephyr/arch/riscv/thread.h
+--- a/include/zephyr/arch/riscv/thread.h
++++ b/include/zephyr/arch/riscv/thread.h
+@@ -70,6 +70,15 @@ struct _thread_arch {
+ 	bool fpu_recently_used;
+ 	uint8_t exception_depth;
+ #endif
++#ifdef CONFIG_USER_THREAD_POINTER
++	/* the thread and global pointers user mode runs with; the kernel has its own */
++	unsigned long user_tp;
++	unsigned long user_gp;
++#endif
++#ifdef CONFIG_USER_SYSCALL_ABI
++	/* nonzero: the system call number arrives in a7, as Linux passes it */
++	unsigned long syscall_abi;
++#endif
+ #ifdef CONFIG_USERSPACE
+ 	unsigned long priv_stack_start;
+ 	unsigned long u_mode_pmpaddr_regs[CONFIG_PMP_SLOTS];

@@ -4245,3 +4245,18 @@ patches:
       over; unassigned IDs below the limit trap as bad system calls. The
       registered headers outside include/ are build dependencies of the
       parser now, so editing them regenerates syscalls.json.
+  - path: zephyr/arch-user-thread-pointer-riscv.patch
+    sha256sum: 2f24fae9378749bc4dbd22086b3ce084fb99f2b2ed08eedd15a05a219f480a2a
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-25
+    upstreamable: true
+    comments: |
+      Let user mode own the thread-pointer register and pick its system
+      call convention, for running programs of another kernel's ABI:
+      CONFIG_USER_THREAD_POINTER keeps the user's tp (and gp, which the
+      kernel repoints too) across every trap of such a thread while the
+      kernel runs on its own TLS base, and CONFIG_USER_SYSCALL_ABI lets
+      arch_user_syscall_abi_set() take a thread's system call number from
+      a7, as Linux passes it, instead of t0. A forked child inherits both.
