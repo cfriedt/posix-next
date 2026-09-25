@@ -1,0 +1,247 @@
+diff --git a/include/zephyr/sys/fdtable.h b/include/zephyr/sys/fdtable.h
+--- a/include/zephyr/sys/fdtable.h
++++ b/include/zephyr/sys/fdtable.h
+@@ -386,6 +386,8 @@ enum {
+ 	ZFD_IOCTL_REWINDDIR,
+ 	/* succeeds only on descriptors referring to a terminal */
+ 	ZFD_IOCTL_ISATTY,
++	/* console input mode, an unsigned int of ZVFS_CONSOLE_* bits */
++	ZFD_IOCTL_CONSOLE_SET_MODE,
+ 
+ 	/* Codes above 0x5400 and below 0x5500 are reserved for termios, FIO, etc */
+ 	/** Get the number of bytes available to read */
+@@ -396,6 +398,18 @@ enum {
+ 	ZFD_IOCTL_FIONWRITE = 0x5411,
+ };
+ 
++/**
++ * @name Console input modes for ZFD_IOCTL_CONSOLE_SET_MODE
++ * @{
++ */
++/** Assemble whole lines: erase with backspace, end of file on Ctrl-D. */
++#define ZVFS_CONSOLE_ICANON 0x1U
++/** Echo input. */
++#define ZVFS_CONSOLE_ECHO 0x2U
++/** Deliver a carriage return as a newline. */
++#define ZVFS_CONSOLE_ICRNL 0x4U
++/** @} */
++
+ #ifdef CONFIG_ZVFS_DEFAULT_FILE_VMETHODS
+ int zvfs_ioctl_vmeth(void *obj, unsigned int request, va_list args);
+ int zvfs_close_vmeth(void *obj);
+diff --git a/lib/os/zvfs/zvfs_fdtable.c b/lib/os/zvfs/zvfs_fdtable.c
+--- a/lib/os/zvfs/zvfs_fdtable.c
++++ b/lib/os/zvfs/zvfs_fdtable.c
+@@ -893,6 +893,8 @@ int z_zvfs_fds_child_close(k_tid_t child, int fd)
+ #endif /* CONFIG_PROCESS */
+ 
+ #if defined(CONFIG_POSIX_DEVICE_IO) || defined(CONFIG_ZVFS_RESERVE_STDIO_FDS)
++/* console input handling, ZVFS_CONSOLE_* bits */
++static unsigned int cons_mode = ZVFS_CONSOLE_ICANON | ZVFS_CONSOLE_ECHO | ZVFS_CONSOLE_ICRNL;
+ /*
+  * fd operations for stdio/stdout/stderr
+  */
+@@ -905,13 +907,61 @@ int z_impl_zephyr_write_stdout(const char *buf, int nbytes);
+  * echo, backspace editing, CR-to-NL translation, and Ctrl-D at the start of
+  * a line reporting end-of-file. One line buffer serves the one console.
+  */
++static const struct device *const cons = DEVICE_DT_GET(DT_CHOSEN(zephyr_console));
++/* readers take turns; a read may hold this for as long as it blocks */
++static K_MUTEX_DEFINE(cons_lock);
++/* one byte taken from the UART on behalf of poll(), handed to the next read */
++static struct k_spinlock cons_byte_lock;
++static int cons_pending = -1;
++static struct k_poll_signal cons_ready = K_POLL_SIGNAL_INITIALIZER(cons_ready);
++
++/* the next input byte: what poll() took, else the UART; -1 when none is there */
++static int cons_getc(void)
++{
++	k_spinlock_key_t key = k_spin_lock(&cons_byte_lock);
++	unsigned char c;
++	int ret = cons_pending;
++
++	if (ret >= 0) {
++		cons_pending = -1;
++		k_poll_signal_reset(&cons_ready);
++	} else if (uart_poll_in(cons, &c) == 0) {
++		ret = c;
++	}
++	k_spin_unlock(&cons_byte_lock, key);
++
++	return ret;
++}
++
++/* poll() support: read the UART until a byte arrives, then flag it */
++static void cons_poller(struct k_work *work)
++{
++	struct k_work_delayable *dwork = k_work_delayable_from_work(work);
++	k_spinlock_key_t key = k_spin_lock(&cons_byte_lock);
++	unsigned char c;
++	bool ready;
++
++	if ((cons_pending < 0) && (uart_poll_in(cons, &c) == 0)) {
++		cons_pending = c;
++	}
++	ready = cons_pending >= 0;
++	k_spin_unlock(&cons_byte_lock, key);
++
++	if (ready) {
++		k_poll_signal_raise(&cons_ready, 0);
++	} else {
++		(void)k_work_reschedule(dwork, K_MSEC(10));
++	}
++}
++
++static K_WORK_DELAYABLE_DEFINE(cons_poll_work, cons_poller);
++
+ static ssize_t stdinout_read_vmeth(void *obj, void *buffer, size_t count)
+ {
+-	static const struct device *const cons = DEVICE_DT_GET(DT_CHOSEN(zephyr_console));
+-	static K_MUTEX_DEFINE(cons_lock);
+ 	static char cons_line[128];
+ 	static size_t cons_len, cons_off;
+ 	size_t n = 0;
++	unsigned int mode;
+ 
+ 	ARG_UNUSED(obj);
+ 
+@@ -920,21 +970,62 @@ static ssize_t stdinout_read_vmeth(void *obj, void *buffer, size_t count)
+ 	}
+ 
+ 	(void)k_mutex_lock(&cons_lock, K_FOREVER);
++	mode = cons_mode;
++
++	if ((cons_off == cons_len) && ((mode & ZVFS_CONSOLE_ICANON) == 0U)) {
++		/* raw: whatever has arrived once there is a byte */
++		unsigned char *out = buffer;
++
++		while (n < count) {
++			int in = cons_getc();
++			unsigned char c;
++
++			if (in < 0) {
++				if (n > 0) {
++					break;
++				}
++				k_msleep(10);
++				continue;
++			}
++			c = (unsigned char)in;
++			if ((c == '\r') && ((mode & ZVFS_CONSOLE_ICRNL) != 0U)) {
++				c = '\n';
++			}
++			if ((mode & ZVFS_CONSOLE_ECHO) != 0U) {
++				uart_poll_out(cons, c);
++			}
++			out[n] = c;
++			n++;
++		}
++
++		k_mutex_unlock(&cons_lock);
++
++		return (ssize_t)n;
++	}
+ 
+ 	if (cons_off == cons_len) {
+ 		/* assemble the next line */
++		const bool echo = (mode & ZVFS_CONSOLE_ECHO) != 0U;
++
+ 		cons_len = 0;
+ 		cons_off = 0;
+ 		while (true) {
+ 			unsigned char c;
++			int in;
+ 
+-			while (uart_poll_in(cons, &c) != 0) {
++			while ((in = cons_getc()) < 0) {
+ 				k_msleep(10);
+ 			}
++			c = (unsigned char)in;
+ 
+-			if ((c == '\r') || (c == '\n')) {
+-				uart_poll_out(cons, '\r');
+-				uart_poll_out(cons, '\n');
++			if ((c == '\r') && ((mode & ZVFS_CONSOLE_ICRNL) != 0U)) {
++				c = '\n';
++			}
++			if (c == '\n') {
++				if (echo) {
++					uart_poll_out(cons, '\r');
++					uart_poll_out(cons, '\n');
++				}
+ 				cons_line[cons_len] = '\n';
+ 				cons_len++;
+ 				break;
+@@ -942,9 +1033,11 @@ static ssize_t stdinout_read_vmeth(void *obj, void *buffer, size_t count)
+ 			if ((c == 0x7f) || (c == '\b')) {
+ 				if (cons_len > 0) {
+ 					cons_len--;
+-					uart_poll_out(cons, '\b');
+-					uart_poll_out(cons, ' ');
+-					uart_poll_out(cons, '\b');
++					if (echo) {
++						uart_poll_out(cons, '\b');
++						uart_poll_out(cons, ' ');
++						uart_poll_out(cons, '\b');
++					}
+ 				}
+ 				continue;
+ 			}
+@@ -959,7 +1052,9 @@ static ssize_t stdinout_read_vmeth(void *obj, void *buffer, size_t count)
+ 			if (cons_len < (sizeof(cons_line) - 1)) {
+ 				cons_line[cons_len] = (char)c;
+ 				cons_len++;
+-				uart_poll_out(cons, c);
++				if (echo) {
++					uart_poll_out(cons, c);
++				}
+ 			}
+ 		}
+ 	}
+@@ -1003,6 +1098,46 @@ static int stdinout_ioctl_vmeth(void *obj, unsigned int request, va_list args)
+ 	case ZFD_IOCTL_ISATTY:
+ 		/* the reserved stdio descriptors refer to the console */
+ 		return 0;
++	case ZFD_IOCTL_CONSOLE_SET_MODE:
++		cons_mode = va_arg(args, unsigned int) &
++			    (ZVFS_CONSOLE_ICANON | ZVFS_CONSOLE_ECHO | ZVFS_CONSOLE_ICRNL);
++		return 0;
++#ifdef CONFIG_ZVFS_STDIN_CONSOLE
++	case ZFD_IOCTL_POLL_PREPARE: {
++		struct zvfs_pollfd *pfd = va_arg(args, struct zvfs_pollfd *);
++		struct k_poll_event **pev = va_arg(args, struct k_poll_event **);
++		struct k_poll_event *pev_end = va_arg(args, struct k_poll_event *);
++
++		if ((pfd->events & (ZVFS_POLLIN | ZVFS_POLLRDNORM)) == 0) {
++			/* output never blocks */
++			return -EALREADY;
++		}
++		if (*pev == pev_end) {
++			errno = ENOMEM;
++			return -1;
++		}
++		(*pev)->obj = &cons_ready;
++		(*pev)->type = K_POLL_TYPE_SIGNAL;
++		(*pev)->mode = K_POLL_MODE_NOTIFY_ONLY;
++		(*pev)->state = K_POLL_STATE_NOT_READY;
++		(*pev)++;
++		(void)k_work_schedule(&cons_poll_work, K_NO_WAIT);
++		return 0;
++	}
++	case ZFD_IOCTL_POLL_UPDATE: {
++		struct zvfs_pollfd *pfd = va_arg(args, struct zvfs_pollfd *);
++		struct k_poll_event **pev = va_arg(args, struct k_poll_event **);
++
++		pfd->revents = pfd->events & (ZVFS_POLLOUT | ZVFS_POLLWRNORM);
++		if ((pfd->events & (ZVFS_POLLIN | ZVFS_POLLRDNORM)) != 0) {
++			if ((*pev)->state == K_POLL_STATE_SIGNALED) {
++				pfd->revents |= pfd->events & (ZVFS_POLLIN | ZVFS_POLLRDNORM);
++			}
++			(*pev)++;
++		}
++		return 0;
++	}
++#endif /* CONFIG_ZVFS_STDIN_CONSOLE */
+ 	case ZVFS_F_GETFL:
+ 		return ZVFS_O_RDWR;
+ 	case ZVFS_F_SETFL:
