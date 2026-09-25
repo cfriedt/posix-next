@@ -47,6 +47,17 @@ static int posix_tty_ioctl(int fd, unsigned long request, ...)
 	return ret;
 }
 
+int posix_tty_set_mode(int fd, const struct termios *attrs)
+{
+	unsigned int mode = 0;
+
+	mode |= ((attrs->c_lflag & ICANON) != 0) ? ZVFS_CONSOLE_ICANON : 0;
+	mode |= ((attrs->c_lflag & ECHO) != 0) ? ZVFS_CONSOLE_ECHO : 0;
+	mode |= ((attrs->c_iflag & ICRNL) != 0) ? ZVFS_CONSOLE_ICRNL : 0;
+
+	return posix_tty_ioctl(fd, ZFD_IOCTL_CONSOLE_SET_MODE, mode);
+}
+
 int posix_tty_check(int fd)
 {
 	if (posix_tty_ioctl(fd, ZFD_IOCTL_ISATTY) < 0) {
