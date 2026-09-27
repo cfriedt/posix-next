@@ -1,0 +1,566 @@
+diff --git a/arch/Kconfig b/arch/Kconfig
+--- a/arch/Kconfig
++++ b/arch/Kconfig
+@@ -1139,6 +1139,14 @@ config CPU_HAS_MMU
+ 	  This hidden option is selected when the CPU has a Memory Management Unit
+ 	  (MMU).
+ 
++config ARCH_HAS_MEM_WRITE_FAULT
++	bool
++	help
++	  This hidden configuration should be selected by the architecture if
++	  its fault handler offers write faults on present pages to
++	  z_mem_write_fault() before treating them as fatal, and if it
++	  implements arch_mem_domain_page_attr_set().
++
+ config ARCH_HAS_DEMAND_PAGING
+ 	bool
+ 	help
+diff --git a/arch/arm64/core/Kconfig b/arch/arm64/core/Kconfig
+--- a/arch/arm64/core/Kconfig
++++ b/arch/arm64/core/Kconfig
+@@ -314,6 +314,7 @@ config ARM_MMU
+ 	default n if CPU_AARCH64_CORTEX_R
+ 	default y
+ 	select MMU
++	select ARCH_HAS_MEM_WRITE_FAULT
+ 	select SRAM_REGION_PERMISSIONS
+ 	select ARCH_MEM_DOMAIN_SYNCHRONOUS_API if USERSPACE
+ 	select ARCH_MEM_DOMAIN_DATA if USERSPACE
+diff --git a/arch/arm64/core/fatal.c b/arch/arm64/core/fatal.c
+--- a/arch/arm64/core/fatal.c
++++ b/arch/arm64/core/fatal.c
+@@ -23,6 +23,7 @@
+ #include <zephyr/sys/poweroff.h>
+ #include <kernel_arch_func.h>
+ #include <kernel_arch_interface.h>
++#include <kernel_internal.h>
+ #include <zephyr/arch/exception.h>
+ 
+ #include "paging.h"
+@@ -469,6 +470,23 @@ static bool is_bti_violation(uint64_t esr)
+  * PAC authentication failures typically manifest as FPAC exceptions
+  * with Exception Class (EC) 0x1c.
+  */
++#ifdef CONFIG_MEM_WRITE_FAULT_HOOK
++/* a data abort caused by a write to a page the translation table protects */
++static bool is_write_permission_fault(uint64_t esr)
++{
++	uint64_t ec = GET_ESR_EC(esr);
++	uint64_t iss = GET_ESR_ISS(esr);
++
++	/* data abort from a lower or the current exception level */
++	if ((ec != 0x24) && (ec != 0x25)) {
++		return false;
++	}
++
++	/* WnR set and a permission fault status code (0b0011LL) */
++	return ((iss & BIT(6)) != 0) && ((iss & 0x3c) == 0x0c);
++}
++#endif /* CONFIG_MEM_WRITE_FAULT_HOOK */
++
+ static bool is_pac_failure(uint64_t esr, uint64_t far)
+ {
+ #ifdef CONFIG_ARM_PAC
+@@ -620,6 +638,13 @@ void z_arm64_fatal_error(unsigned int reason, struct arch_esf *esf)
+ 			reason = K_ERR_CPU_EXCEPTION;
+ 		}
+ 
++#ifdef CONFIG_MEM_WRITE_FAULT_HOOK
++		if ((reason != K_ERR_STACK_CHK_FAIL) && is_write_permission_fault(esr) &&
++		    z_mem_write_fault((void *)far)) {
++			return;
++		}
++#endif /* CONFIG_MEM_WRITE_FAULT_HOOK */
++
+ 		if (IS_ENABLED(CONFIG_DEMAND_PAGING) &&
+ 		    reason != K_ERR_STACK_CHK_FAIL &&
+ 		    z_arm64_do_demand_paging(esf, esr, far)) {
+diff --git a/arch/arm64/core/mmu.c b/arch/arm64/core/mmu.c
+--- a/arch/arm64/core/mmu.c
++++ b/arch/arm64/core/mmu.c
+@@ -1566,6 +1566,28 @@ int arch_mem_domain_partition_remove(struct k_mem_domain *domain,
+ 			 ptn->start, ptn->size);
+ }
+ 
++#ifdef CONFIG_MEM_WRITE_FAULT_HOOK
++int arch_mem_domain_page_attr_set(struct k_mem_domain *domain, void *virt, size_t size,
++				  k_mem_partition_attr_t attr)
++{
++	struct arm_mmu_ptables *domain_ptables = &domain->arch.ptables;
++	uintptr_t va = (uintptr_t)virt;
++	const uintptr_t end = va + size;
++	int ret = 0;
++
++	/* memory-mapped pages are not identity mapped: follow the kernel translation */
++	for (; (va < end) && (ret == 0); va += CONFIG_MMU_PAGE_SIZE) {
++		uintptr_t phys = va;
++
++		(void)arch_page_phys_get((void *)va, &phys);
++		ret = private_map(domain_ptables, "page attr", phys, va, CONFIG_MMU_PAGE_SIZE,
++				  attr.attrs | MT_NORMAL);
++	}
++
++	return ret;
++}
++#endif /* CONFIG_MEM_WRITE_FAULT_HOOK */
++
+ static int map_thread_stack(struct k_thread *thread,
+ 			    struct arm_mmu_ptables *ptables)
+ {
+diff --git a/arch/riscv/Kconfig b/arch/riscv/Kconfig
+--- a/arch/riscv/Kconfig
++++ b/arch/riscv/Kconfig
+@@ -896,6 +896,7 @@ config RISCV_MMU
+ 	bool "RISC-V MMU Support"
+ 	default y
+ 	depends on RISCV_PRIVILEGED
++	select ARCH_HAS_MEM_WRITE_FAULT
+ 	depends on RISCV_S_MODE
+ 	depends on 64BIT
+ 	# All enabled harts must declare an mmu-type ...
+diff --git a/arch/riscv/core/fatal.c b/arch/riscv/core/fatal.c
+--- a/arch/riscv/core/fatal.c
++++ b/arch/riscv/core/fatal.c
+@@ -225,6 +225,14 @@ void z_riscv_fault(struct arch_esf *esf)
+ 		mcause = csr_read(scause);
+ 		mcause &= CONFIG_RISCV_MCAUSE_EXCEPTION_MASK;
+ 
++#ifdef CONFIG_MEM_WRITE_FAULT_HOOK
++		if ((mcause == RISCV_EXC_STORE_PAGE_FAULT) &&
++		    z_mem_write_fault((void *)csr_read(stval))) {
++			/* Write fault resolved, re-try */
++			return;
++		}
++#endif /* CONFIG_MEM_WRITE_FAULT_HOOK */
++
+ 		if (mcause == RISCV_EXC_INST_PAGE_FAULT ||
+ 		    mcause == RISCV_EXC_LOAD_PAGE_FAULT ||
+ 		    mcause == RISCV_EXC_STORE_PAGE_FAULT) {
+diff --git a/arch/riscv/core/mmu.c b/arch/riscv/core/mmu.c
+--- a/arch/riscv/core/mmu.c
++++ b/arch/riscv/core/mmu.c
+@@ -1521,6 +1521,28 @@ int arch_mem_domain_partition_remove(struct k_mem_domain *domain, uint32_t parti
+ 	return 0;
+ }
+ 
++#ifdef CONFIG_MEM_WRITE_FAULT_HOOK
++int arch_mem_domain_page_attr_set(struct k_mem_domain *domain, void *virt, size_t size,
++				  k_mem_partition_attr_t attr)
++{
++	k_spinlock_key_t key;
++	int ret;
++
++	key = k_spin_lock(&xlat_lock);
++
++	ret = ensure_private_tables(domain->arch.ptables, (uintptr_t)virt, size);
++	if (ret == 0) {
++		map_user_range(domain->arch.ptables, (uintptr_t)virt, size,
++			       partition_attr_to_pte(attr));
++		SFENCE_VMA_ASID(domain->arch.asid);
++	}
++
++	k_spin_unlock(&xlat_lock, key);
++
++	return ret;
++}
++#endif /* CONFIG_MEM_WRITE_FAULT_HOOK */
++
+ int arch_mem_domain_thread_add(struct k_thread *thread)
+ {
+ 	struct k_mem_domain *domain = thread->mem_domain_info.mem_domain;
+diff --git a/arch/x86/Kconfig b/arch/x86/Kconfig
+--- a/arch/x86/Kconfig
++++ b/arch/x86/Kconfig
+@@ -330,6 +330,7 @@ config X86_VERY_EARLY_CONSOLE
+ config X86_MMU
+ 	bool "Memory Management Unit"
+ 	select MMU
++	select ARCH_HAS_MEM_WRITE_FAULT
+ 	help
+ 	  This options enables the memory management unit present in x86
+ 	  and creates a set of page tables at boot time that is runtime-
+diff --git a/arch/x86/core/fatal.c b/arch/x86/core/fatal.c
+--- a/arch/x86/core/fatal.c
++++ b/arch/x86/core/fatal.c
+@@ -447,6 +447,21 @@ static const struct z_exc_handle exceptions[] = {
+ 
+ void z_x86_page_fault_handler(struct arch_esf *esf)
+ {
++#ifdef CONFIG_MEM_WRITE_FAULT_HOOK
++	{
++#ifdef CONFIG_X86_64
++		uintptr_t code = esf->code;
++#else
++		uintptr_t code = esf->errorCode;
++#endif
++
++		if (((code & (PF_P | PF_WR)) == (PF_P | PF_WR)) &&
++		    z_mem_write_fault(z_x86_cr2_get())) {
++			/* Write fault resolved, re-try */
++			return;
++		}
++	}
++#endif /* CONFIG_MEM_WRITE_FAULT_HOOK */
+ #ifdef CONFIG_DEMAND_PAGING
+ 	if ((esf->errorCode & PF_P) == 0) {
+ 		/* Page was non-present at time exception happened.
+diff --git a/arch/x86/core/x86_mmu.c b/arch/x86/core/x86_mmu.c
+--- a/arch/x86/core/x86_mmu.c
++++ b/arch/x86/core/x86_mmu.c
+@@ -1558,6 +1558,18 @@ int arch_mem_domain_partition_add(struct k_mem_domain *domain,
+ 	return apply_region(ptn->start, ptn->size, ptn->attr);
+ }
+ 
++#ifdef CONFIG_MEM_WRITE_FAULT_HOOK
++int arch_mem_domain_page_attr_set(struct k_mem_domain *domain, void *virt, size_t size,
++				  k_mem_partition_attr_t attr)
++{
++	if (domain != current_domain) {
++		return 0;
++	}
++
++	return apply_region((uintptr_t)virt, size, attr);
++}
++#endif /* CONFIG_MEM_WRITE_FAULT_HOOK */
++
+ /* Rest of the APIs don't need to do anything */
+ int arch_mem_domain_thread_add(struct k_thread *thread)
+ {
+@@ -1840,6 +1852,22 @@ int arch_mem_domain_partition_add(struct k_mem_domain *domain,
+ 			    partition->size, partition->attr | MMU_P);
+ }
+ 
++#ifdef CONFIG_MEM_WRITE_FAULT_HOOK
++int arch_mem_domain_page_attr_set(struct k_mem_domain *domain, void *virt, size_t size,
++				  k_mem_partition_attr_t attr)
++{
++	int ret = apply_region(domain->arch.ptables, virt, size, attr | MMU_P);
++	uint8_t *pos;
++
++	/* the domain's tables need not be the active ones: flush the pages regardless */
++	for (pos = virt; pos < ((uint8_t *)virt + size); pos += CONFIG_MMU_PAGE_SIZE) {
++		tlb_flush_page(pos);
++	}
++
++	return ret;
++}
++#endif /* CONFIG_MEM_WRITE_FAULT_HOOK */
++
+ /* Invoked from memory domain API calls, as well as during thread creation */
+ int arch_mem_domain_thread_add(struct k_thread *thread)
+ {
+diff --git a/doc/kernel/memory_management/virtual_memory.rst b/doc/kernel/memory_management/virtual_memory.rst
+--- a/doc/kernel/memory_management/virtual_memory.rst
++++ b/doc/kernel/memory_management/virtual_memory.rst
+@@ -191,6 +191,25 @@ mappings must be aligned on page size and have finer access control.
+     function does not check if it is a valid mapped region before unmapping.
+ 
+ 
++Write Faults on Protected Pages
++===============================
++
++An architecture that selects ``ARCH_HAS_MEM_WRITE_FAULT`` can offer a write
++fault on a present, write-protected page to the kernel before it becomes a
++fatal error. With :kconfig:option:`CONFIG_MEM_WRITE_FAULT_HOOK` the fault
++handler calls ``z_mem_write_fault()`` with the faulting address; when that
++returns ``true`` the access is retried, otherwise the fault is fatal as
++before. The hook runs in exception context and must not block.
++
++A subsystem provides the hook to learn which of the pages it manages have
++been modified: it maps them read-only, records the page when the first write
++faults, and makes the page writable again. The kernel's own view changes
++through :c:func:`k_mem_update_flags`; a memory domain's view changes with
++``arch_mem_domain_page_attr_set()``, which applies partition attributes to a
++page range inside an existing partition of the domain without touching the
++kernel mapping.
++
++
+ API Reference
+ *************
+ 
+diff --git a/kernel/Kconfig.vm b/kernel/Kconfig.vm
+--- a/kernel/Kconfig.vm
++++ b/kernel/Kconfig.vm
+@@ -116,6 +116,15 @@ config MMU_PAGE_SIZE
+ 	  Size of memory pages. Varies per MMU but 4K is common. For MMUs that
+ 	  support multiple page sizes, put the smallest one here.
+ 
++config MEM_WRITE_FAULT_HOOK
++	bool
++	depends on ARCH_HAS_MEM_WRITE_FAULT
++	help
++	  Route write faults on present, write-protected pages through
++	  z_mem_write_fault() before they become fatal errors, so a subsystem
++	  can track modifications to pages it manages. Selected by the
++	  subsystem that provides the hook.
++
+ menuconfig DEMAND_PAGING
+ 	bool "Demand paging [EXPERIMENTAL]"
+ 	depends on ARCH_HAS_DEMAND_PAGING
+diff --git a/kernel/include/kernel_arch_interface.h b/kernel/include/kernel_arch_interface.h
+--- a/kernel/include/kernel_arch_interface.h
++++ b/kernel/include/kernel_arch_interface.h
+@@ -373,6 +373,27 @@ int arch_mem_map(void *virt, uintptr_t phys, size_t size, uint32_t flags);
+  */
+ int arch_mem_unmap(void *addr, size_t size);
+ 
++#if defined(CONFIG_MEM_WRITE_FAULT_HOOK) && defined(CONFIG_USERSPACE)
++/**
++ * Change the access attributes of pages inside a memory domain's partition
++ *
++ * The range lies within a partition already added to the domain. Only the
++ * domain's own view changes; the kernel's mapping of the pages is untouched.
++ * The caller may be resolving a fault taken by a thread of the domain, so the
++ * translation must take effect for that thread as soon as this returns.
++ *
++ * @param domain Memory domain
++ * @param virt Page-aligned base virtual address
++ * @param size Page-aligned size
++ * @param attr Partition attributes to apply to the pages
++ *
++ * @retval 0 on success
++ * @retval -errno on failure
++ */
++int arch_mem_domain_page_attr_set(struct k_mem_domain *domain, void *virt, size_t size,
++				  k_mem_partition_attr_t attr);
++#endif /* CONFIG_MEM_WRITE_FAULT_HOOK && CONFIG_USERSPACE */
++
+ /**
+  * Update page frame database with reserved pages
+  *
+diff --git a/kernel/include/kernel_internal.h b/kernel/include/kernel_internal.h
+--- a/kernel/include/kernel_internal.h
++++ b/kernel/include/kernel_internal.h
+@@ -253,6 +253,15 @@ extern uint8_t *z_priv_stack_find(k_thread_stack_t *stack);
+ /* Calculate stack usage. */
+ int z_stack_space_get(const uint8_t *stack_start, size_t size, size_t *unused_ptr);
+ 
++#ifdef CONFIG_MEM_WRITE_FAULT_HOOK
++/*
++ * Offered a write fault on a present page before it is treated as fatal.
++ * Returns true when the fault has been resolved and the access may retry.
++ * Runs in exception context: it must not block.
++ */
++bool z_mem_write_fault(void *addr);
++#endif /* CONFIG_MEM_WRITE_FAULT_HOOK */
++
+ #ifdef CONFIG_USERSPACE
+ bool z_stack_is_user_capable(k_thread_stack_t *stack);
+ 
+diff --git a/tests/kernel/mem_protect/mem_write_fault/CMakeLists.txt b/tests/kernel/mem_protect/mem_write_fault/CMakeLists.txt
+new file mode 100644
+--- /dev/null
++++ b/tests/kernel/mem_protect/mem_write_fault/CMakeLists.txt
+@@ -0,0 +1,10 @@
++# SPDX-License-Identifier: Apache-2.0
++
++cmake_minimum_required(VERSION 3.20.0)
++find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
++project(mem_write_fault)
++
++# the test provides z_mem_write_fault() and calls the kernel-arch interface
++target_include_directories(app PRIVATE ${ZEPHYR_BASE}/kernel/include ${ARCH_DIR}/${ARCH}/include)
++
++target_sources(app PRIVATE src/main.c)
+diff --git a/tests/kernel/mem_protect/mem_write_fault/Kconfig b/tests/kernel/mem_protect/mem_write_fault/Kconfig
+new file mode 100644
+--- /dev/null
++++ b/tests/kernel/mem_protect/mem_write_fault/Kconfig
+@@ -0,0 +1,14 @@
++# SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++# SPDX-License-Identifier: Apache-2.0
++
++mainmenu "Write fault hook test"
++
++source "Kconfig.zephyr"
++
++config TEST_MEM_WRITE_FAULT_HOOK
++	bool
++	default y
++	depends on ARCH_HAS_MEM_WRITE_FAULT && MMU
++	select MEM_WRITE_FAULT_HOOK
++	help
++	  The test provides z_mem_write_fault() itself.
+diff --git a/tests/kernel/mem_protect/mem_write_fault/prj.conf b/tests/kernel/mem_protect/mem_write_fault/prj.conf
+new file mode 100644
+--- /dev/null
++++ b/tests/kernel/mem_protect/mem_write_fault/prj.conf
+@@ -0,0 +1,4 @@
++CONFIG_ZTEST=y
++CONFIG_ZTEST_FATAL_HOOK=y
++CONFIG_MAIN_STACK_SIZE=4096
++CONFIG_ZTEST_STACK_SIZE=4096
+diff --git a/tests/kernel/mem_protect/mem_write_fault/src/main.c b/tests/kernel/mem_protect/mem_write_fault/src/main.c
+new file mode 100644
+--- /dev/null
++++ b/tests/kernel/mem_protect/mem_write_fault/src/main.c
+@@ -0,0 +1,146 @@
++/*
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++/*
++ * CONFIG_MEM_WRITE_FAULT_HOOK: a write to a present, write-protected page is
++ * offered to z_mem_write_fault() before it becomes a fatal error. The test is
++ * the hook's provider: it makes the page writable, in the kernel's view with
++ * k_mem_update_flags() and in the faulting thread's memory domain with
++ * arch_mem_domain_page_attr_set(), and lets the write retry.
++ */
++
++#include <string.h>
++
++#include <zephyr/kernel.h>
++#include <zephyr/kernel/mm.h>
++#include <zephyr/ztest.h>
++#include <zephyr/ztest_error_hook.h>
++
++#include <kernel_arch_interface.h>
++#include <kernel_internal.h>
++
++#define PAGE CONFIG_MMU_PAGE_SIZE
++
++/*
++ * The page the hook resolves faults on, and how often it did. Volatile: the
++ * stores that arm the hook must reach memory before the faulting write.
++ */
++static ZTEST_BMEM uint8_t *volatile tracked;
++static ZTEST_BMEM volatile int resolved;
++#ifdef CONFIG_USERSPACE
++static ZTEST_BMEM volatile bool tracked_user;
++static struct k_mem_partition tracked_part;
++#endif
++
++bool z_mem_write_fault(void *addr)
++{
++	uint8_t *page = tracked;
++
++	if ((page == NULL) || ((uint8_t *)addr < page) || ((uint8_t *)addr >= page + PAGE)) {
++		return false;
++	}
++
++	resolved++;
++	(void)k_mem_update_flags(page, PAGE, K_MEM_PERM_RW);
++#ifdef CONFIG_USERSPACE
++	if (tracked_user) {
++		(void)arch_mem_domain_page_attr_set(&k_mem_domain_default, page, PAGE,
++						    K_MEM_PARTITION_P_RW_U_RW);
++	}
++#endif
++
++	return true;
++}
++
++static void *map_protected(void)
++{
++	uint8_t *page = k_mem_map(PAGE, K_MEM_PERM_RW | K_MEM_MAP_LOCK);
++
++	zassert_not_null(page, "k_mem_map() failed");
++	page[0] = 'A';
++	zassert_ok(k_mem_update_flags(page, PAGE, 0));
++
++	return page;
++}
++
++/* a kernel write to the protected page is resolved by the hook and completes */
++ZTEST(mem_write_fault, test_z_mem_write_fault)
++{
++	/* volatile: the write must reach the page before the hook count is read */
++	volatile uint8_t *page = map_protected();
++
++	resolved = 0;
++	tracked = (uint8_t *)page;
++
++	page[0] = 'B';
++	zassert_equal(page[0], 'B', "the write did not complete");
++	zassert_equal(resolved, 1, "the hook ran %d times", resolved);
++
++	/* writable now: no further fault */
++	page[1] = 'C';
++	zassert_equal(resolved, 1, "the hook ran again");
++
++	tracked = NULL;
++	k_mem_unmap((void *)page, PAGE);
++}
++
++/* a write the hook does not resolve stays fatal */
++ZTEST(mem_write_fault, test_z_mem_write_fault_unresolved)
++{
++	volatile uint8_t *page = map_protected();
++
++	tracked = NULL;
++
++	ztest_set_fault_valid(true);
++	page[0] = 'B';
++	ztest_test_fail();
++}
++
++#ifdef CONFIG_USERSPACE
++static void user_write(void *p1, void *p2, void *p3)
++{
++	volatile uint8_t *page = p1;
++
++	ARG_UNUSED(p2);
++	ARG_UNUSED(p3);
++
++	page[0] = 'U';
++	zassert_equal(page[0], 'U', "the user write did not complete");
++	zassert_equal(resolved, 1, "the hook ran %d times", resolved);
++	page[PAGE - 1] = 'V';
++	zassert_equal(resolved, 1, "the hook ran again");
++}
++
++static K_THREAD_STACK_DEFINE(user_stack, 2048);
++static struct k_thread user_thread;
++
++/* a user write through a read-only partition is resolved for the domain too */
++ZTEST(mem_write_fault, test_arch_mem_domain_page_attr_set)
++{
++	uint8_t *page = map_protected();
++
++	tracked_part = (struct k_mem_partition){
++		.start = (uintptr_t)page,
++		.size = PAGE,
++		.attr = K_MEM_PARTITION_P_RO_U_RO,
++	};
++	zassert_ok(k_mem_domain_add_partition(&k_mem_domain_default, &tracked_part));
++
++	resolved = 0;
++	tracked = page;
++	tracked_user = true;
++
++	k_thread_create(&user_thread, user_stack, K_THREAD_STACK_SIZEOF(user_stack), user_write,
++			page, NULL, NULL, K_PRIO_PREEMPT(0), K_USER | K_INHERIT_PERMS, K_NO_WAIT);
++	zassert_ok(k_thread_join(&user_thread, K_SECONDS(5)));
++
++	tracked_user = false;
++	tracked = NULL;
++	zassert_ok(k_mem_domain_remove_partition(&k_mem_domain_default, &tracked_part));
++	k_mem_unmap(page, PAGE);
++}
++#endif /* CONFIG_USERSPACE */
++
++ZTEST_SUITE(mem_write_fault, NULL, NULL, NULL, NULL, NULL);
+diff --git a/tests/kernel/mem_protect/mem_write_fault/testcase.yaml b/tests/kernel/mem_protect/mem_write_fault/testcase.yaml
+new file mode 100644
+--- /dev/null
++++ b/tests/kernel/mem_protect/mem_write_fault/testcase.yaml
+@@ -0,0 +1,17 @@
++common:
++  ignore_faults: true
++  tags:
++    - kernel
++    - mmu
++    - userspace
++  filter: CONFIG_ARCH_HAS_MEM_WRITE_FAULT and CONFIG_MMU
++  platform_key:
++    - arch
++    - simulation
++tests:
++  kernel.memory_protection.mem_write_fault: {}
++  kernel.memory_protection.mem_write_fault.userspace:
++    filter: CONFIG_ARCH_HAS_USERSPACE
++    extra_configs:
++      - CONFIG_TEST_USERSPACE=y
++      - CONFIG_USERSPACE=y
