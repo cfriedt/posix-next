@@ -2365,3 +2365,40 @@ patches:
       arch_mem_domain_apply_current() rewrites the user view and
       re-activates the kernel entries at once.
 
+  - path: zephyr/zvfs-mmap.patch
+    sha256sum: 0b62ee5dd5fdc61d676c4534f45746afa0ebc9c3323aa18a08136cdb3e2cdae8
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-26
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/kernel-mm-update-flags-per-page.patch
+          - zephyr/arm64-mmu-partition-mapped-pages.patch
+          - zephyr/kernel-mm-write-fault-hook.patch
+          - zephyr/arm-mpu-domain-apply-current.patch
+    comments: |
+      Rebased onto v4.5.0-rc1: the ZVFS documentation joins upstream's service grid next to portability,
+      and the stale *_sched_locked declarations are gone with upstream's heap rework.
+      zvfs: memory mappings of file descriptors and anonymous memory behind
+      CONFIG_ZVFS_MMAP: zvfs_mmap(), zvfs_munmap(), zvfs_msync() and
+      zvfs_mprotect() system calls over a mapping registry. A mapping owns
+      page storage (k_mem_map() pages with an MMU, a kernel-heap block at a
+      64-byte granule without) and counts as a reference on its open file
+      object next to the descriptors. File-backed mappings are filled at
+      creation and, when
+      shared and writable, written back on msync, unmap and owner exit,
+      clipped to the file size. ZFD_IOCTL_MMAP becomes "address of the
+      object's own pages", so shm objects are mapped in place and alias.
+      User threads reach a mapping through a memory-domain partition on
+      its pages, added to the caller's domain; the kernel view of owned
+      pages follows the protection. Mappings belong to the creating thread
+      and are moved to a graveyard by the halt path, released by the next
+      mapping operation. Whole-mapping munmap/mprotect only. With
+      CONFIG_ZVFS_MMAP_DIRTY_TRACK (MMU + write-fault hook) the pages of a
+      shared writable file mapping start write-protected; the first write
+      to a page faults into z_mem_write_fault(), which marks it dirty and
+      makes it writable, and msync writes back only the dirty pages and
+      protects them again.

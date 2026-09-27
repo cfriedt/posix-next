@@ -1,0 +1,1934 @@
+diff --git a/doc/services/index.rst b/doc/services/index.rst
+--- a/doc/services/index.rst
++++ b/doc/services/index.rst
+@@ -155,3 +155,4 @@ different platforms.
+          :maxdepth: 2
+ 
+          portability/index
++         zvfs/index
+diff --git a/doc/services/zvfs/index.rst b/doc/services/zvfs/index.rst
+new file mode 100644
+--- /dev/null
++++ b/doc/services/zvfs/index.rst
+@@ -0,0 +1,57 @@
++.. _zvfs:
++
++Zephyr Virtual File System (ZVFS)
++#################################
++
++ZVFS is the common waypoint for every file descriptor in Zephyr. A descriptor
++is a slot in the file descriptor table that carries an I/O object and a
++vtable; ``zvfs_read()``, ``zvfs_write()``, ``zvfs_close()``, ``zvfs_ioctl()``
++and the other entry points in :file:`include/zephyr/sys/zvfs.h` dispatch
++through that vtable, so a regular file, a socket, an eventfd or a pipe are
++reached through the same calls. The POSIX and C library file interfaces sit on
++top of these entry points.
++
++Memory Mappings
++***************
++
++:kconfig:option:`CONFIG_ZVFS_MMAP` adds ``zvfs_mmap()``, ``zvfs_munmap()``,
++``zvfs_msync()`` and ``zvfs_mprotect()``: file descriptors and anonymous memory
++mapped into the address space, at the granularity of
++:kconfig:option:`CONFIG_ZVFS_MMAP_PAGE_SIZE`.
++
++Storage
++   With an MMU a mapping owns pinned anonymous pages from :c:func:`k_mem_map`,
++   with guard pages on both sides. Without one it owns a block of the kernel
++   heap; under :kconfig:option:`CONFIG_USERSPACE` the block is a power of two
++   aligned to its size, so that it can be a memory-protection region.
++
++File contents
++   A file-backed mapping is a copy: the pages are read from the file when the
++   mapping is created and, for a ``ZVFS_MAP_SHARED`` mapping that has been
++   writable, written back on ``zvfs_msync()``, on ``zvfs_munmap()`` and when
++   the owner exits, clipped to the file's size at that time. ``ZVFS_MS_INVALIDATE``
++   re-reads the pages. An object that owns its pages answers ``ZFD_IOCTL_MMAP``
++   with their address and is mapped in place, so every mapping of it aliases
++   the same memory; as they share the address, unmapping it releases them all.
++
++Modified pages
++   With :kconfig:option:`CONFIG_ZVFS_MMAP_DIRTY_TRACK`, on an MMU that offers
++   write faults to the kernel, the pages of a shared writable file mapping
++   start write-protected. The first write to a page records it as modified and
++   makes it writable, and ``zvfs_msync()`` writes back only the modified pages
++   before protecting them again. Without it the whole range is written back.
++
++Protection
++   A user thread reaches a mapping through a memory-domain partition on its
++   pages, added to the caller's domain when a user thread creates the mapping
++   and removed when it is unmapped. The kernel's view of the pages it owns
++   follows the protection as well.
++
++References and lifetime
++   A mapping counts as a reference on its open file object alongside the
++   descriptors, so the file stays open after the last descriptor is closed
++   until the last mapping of it is released. A mapping belongs to the thread
++   that created it and is released when that thread exits.
++
++``zvfs_munmap()`` and ``zvfs_mprotect()`` operate on whole mappings; a range
++that covers part of a mapping is rejected.
+diff --git a/include/zephyr/sys/fdtable.h b/include/zephyr/sys/fdtable.h
+--- a/include/zephyr/sys/fdtable.h
++++ b/include/zephyr/sys/fdtable.h
+@@ -28,6 +28,7 @@
+ #define ZVFS_O_RDONLY 00
+ #define ZVFS_O_WRONLY 01
+ #define ZVFS_O_RDWR   02
++#define ZVFS_O_ACCMODE (ZVFS_O_RDONLY | ZVFS_O_WRONLY | ZVFS_O_RDWR)
+ 
+ #define ZVFS_O_EXCL     0x0800
+ #define ZVFS_O_NONBLOCK 0x4000
+@@ -361,6 +362,10 @@ enum {
+ 	ZFD_IOCTL_SET_LOCK,
+ 	ZFD_IOCTL_STAT,
+ 	ZFD_IOCTL_TRUNCATE,
++	/**
++	 * Address of the object's own pages for zvfs_mmap(): (size_t off, size_t len,
++	 * void **addr). An object without pages of its own leaves it unimplemented.
++	 */
+ 	ZFD_IOCTL_MMAP,
+ 	ZFD_IOCTL_STATVFS,
+ 	ZFD_IOCTL_READDIR,
+diff --git a/include/zephyr/sys/internal/fdtable_priv.h b/include/zephyr/sys/internal/fdtable_priv.h
+--- a/include/zephyr/sys/internal/fdtable_priv.h
++++ b/include/zephyr/sys/internal/fdtable_priv.h
+@@ -31,6 +31,8 @@ struct fd_entry *zvfs_fd_entry_get(int fd);
+ struct fd_entry *zvfs_fd_syscall_verify(int fd);
+ 
+ int zvfs_fd_obj_refcount(void *obj);
++/* number of memory mappings referencing an I/O object (CONFIG_ZVFS_MMAP) */
++int z_zvfs_mmap_obj_refs(const void *obj);
+ 
+ void zvfs_fd_offset_set(struct fd_entry *entry, size_t offset);
+ 
+diff --git a/include/zephyr/sys/util.h b/include/zephyr/sys/util.h
+--- a/include/zephyr/sys/util.h
++++ b/include/zephyr/sys/util.h
+@@ -73,6 +73,9 @@ extern "C" {
+ /** Number of bits in a long long int. */
+ #define BITS_PER_LONG_LONG (__CHAR_BIT__ * __SIZEOF_LONG_LONG__)
+ 
++/** Number of long ints needed to hold @p nbits bits. */
++#define BITS_TO_LONGS(nbits) DIV_ROUND_UP(nbits, BITS_PER_LONG)
++
+ /**
+  * @brief Create a contiguous bitmask starting at bit position @p l
+  *        and ending at position @p h.
+diff --git a/include/zephyr/sys/zvfs.h b/include/zephyr/sys/zvfs.h
+--- a/include/zephyr/sys/zvfs.h
++++ b/include/zephyr/sys/zvfs.h
+@@ -20,6 +20,7 @@
+ #include <time.h>
+ 
+ #include <zephyr/kernel.h>
++#include <zephyr/sys/util_macro.h>
+ 
+ #ifdef __cplusplus
+ extern "C" {
+@@ -161,6 +162,99 @@ __syscall int zvfs_dup2(int fd, int newfd);
+  */
+ __syscall int zvfs_ioctl(int fd, unsigned long request, va_list args);
+ 
++/**
++ * @name zvfs_mmap() page protections
++ * @{
++ */
++/** Pages may not be accessed */
++#define ZVFS_PROT_NONE  0
++/** Pages may be read */
++#define ZVFS_PROT_READ  BIT(0)
++/** Pages may be written */
++#define ZVFS_PROT_WRITE BIT(1)
++/** Pages may be executed */
++#define ZVFS_PROT_EXEC  BIT(2)
++/** @} */
++
++/**
++ * @name zvfs_mmap() mapping flags
++ * @{
++ */
++/** Modifications are shared with the file and with other shared mappings of it */
++#define ZVFS_MAP_SHARED    BIT(0)
++/** Modifications are private to the mapping */
++#define ZVFS_MAP_PRIVATE   BIT(1)
++/** The mapping is not backed by a file descriptor */
++#define ZVFS_MAP_ANONYMOUS BIT(2)
++/** @} */
++
++/**
++ * @name zvfs_msync() flags
++ * @{
++ */
++/** Write modified pages back without waiting for completion */
++#define ZVFS_MS_ASYNC      BIT(0)
++/** Re-read the pages from the file */
++#define ZVFS_MS_INVALIDATE BIT(1)
++/** Write modified pages back and wait for completion */
++#define ZVFS_MS_SYNC       BIT(2)
++/** @} */
++
++/**
++ * @brief Map a file descriptor or anonymous memory into the address space.
++ *
++ * The mapping covers @p len bytes rounded up to the mapping page size, starting at
++ * offset @p off of the file, and belongs to the calling thread: it is released when
++ * that thread exits. A mapping keeps the file open until it is unmapped.
++ *
++ * @param len Number of bytes to map, greater than zero.
++ * @param prot Page protection, a combination of ZVFS_PROT_* values.
++ * @param flags Exactly one of ZVFS_MAP_SHARED and ZVFS_MAP_PRIVATE, optionally with
++ *              ZVFS_MAP_ANONYMOUS.
++ * @param fd File descriptor to map, ignored with ZVFS_MAP_ANONYMOUS.
++ * @param off Offset into the file, a multiple of the mapping page size.
++ * @param[out] addr Base address of the mapping.
++ *
++ * @return 0 on success, or -1 on error (errno is set).
++ */
++__syscall int zvfs_mmap(size_t len, int prot, int flags, int fd, size_t off, void **addr);
++
++/**
++ * @brief Unmap whole mappings inside an address range.
++ *
++ * Modifications to shared file mappings are written back first. A range that
++ * covers only part of a mapping is rejected.
++ *
++ * @param addr Base address, a multiple of the mapping page size.
++ * @param len Number of bytes, greater than zero.
++ *
++ * @return 0 on success, or -1 on error (errno is set).
++ */
++__syscall int zvfs_munmap(void *addr, size_t len);
++
++/**
++ * @brief Synchronize shared file mappings inside an address range with the file.
++ *
++ * @param addr Base address, a multiple of the mapping page size.
++ * @param len Number of bytes.
++ * @param flags ZVFS_MS_SYNC or ZVFS_MS_ASYNC to write back, optionally with
++ *              ZVFS_MS_INVALIDATE to re-read the pages afterwards.
++ *
++ * @return 0 on success, or -1 on error (errno is set).
++ */
++__syscall int zvfs_msync(void *addr, size_t len, int flags);
++
++/**
++ * @brief Change the protection of whole mappings inside an address range.
++ *
++ * @param addr Base address, a multiple of the mapping page size.
++ * @param len Number of bytes.
++ * @param prot New page protection, a combination of ZVFS_PROT_* values.
++ *
++ * @return 0 on success, or -1 on error (errno is set).
++ */
++__syscall int zvfs_mprotect(void *addr, size_t len, int prot);
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/kernel/include/kernel_internal.h b/kernel/include/kernel_internal.h
+--- a/kernel/include/kernel_internal.h
++++ b/kernel/include/kernel_internal.h
+@@ -253,6 +253,11 @@ extern uint8_t *z_priv_stack_find(k_thread_stack_t *stack);
+ /* Calculate stack usage. */
+ int z_stack_space_get(const uint8_t *stack_start, size_t size, size_t *unused_ptr);
+ 
++#ifdef CONFIG_ZVFS_MMAP
++/* Release the memory mappings an exiting thread owns (lib/os/zvfs) */
++void z_zvfs_mmap_thread_exit(struct k_thread *thread);
++#endif /* CONFIG_ZVFS_MMAP */
++
+ #ifdef CONFIG_MEM_WRITE_FAULT_HOOK
+ /*
+  * Offered a write fault on a present page before it is treated as fatal.
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -930,6 +930,9 @@ static ALWAYS_INLINE void halt_thread(struct k_thread *thread, uint8_t new_state
+ 		SYS_PORT_TRACING_FUNC(k_thread, sched_abort, thread);
+ 
+ 		z_thread_monitor_exit(thread);
++#ifdef CONFIG_ZVFS_MMAP
++		z_zvfs_mmap_thread_exit(thread);
++#endif /* CONFIG_ZVFS_MMAP */
+ #ifdef CONFIG_THREAD_ABORT_HOOK
+ 		thread_abort_hook(thread);
+ #endif /* CONFIG_THREAD_ABORT_HOOK */
+diff --git a/lib/os/zvfs/CMakeLists.txt b/lib/os/zvfs/CMakeLists.txt
+--- a/lib/os/zvfs/CMakeLists.txt
++++ b/lib/os/zvfs/CMakeLists.txt
+@@ -22,5 +22,10 @@ zephyr_library_sources_ifdef(CONFIG_ZVFS_FS
+   zvfs_record_lock.c
+ )
+ zephyr_library_sources_ifdef(CONFIG_ZVFS_EVENTFD zvfs_eventfd.c)
++zephyr_library_sources_ifdef(CONFIG_ZVFS_MMAP zvfs_mmap.c)
++zephyr_library_include_directories_ifdef(CONFIG_ZVFS_MMAP
++  ${ZEPHYR_BASE}/kernel/include
++  ${ARCH_DIR}/${ARCH}/include
++)
+ zephyr_library_sources_ifdef(CONFIG_ZVFS_POLL zvfs_poll.c)
+ zephyr_library_sources_ifdef(CONFIG_ZVFS_SELECT zvfs_select.c)
+diff --git a/lib/os/zvfs/Kconfig b/lib/os/zvfs/Kconfig
+--- a/lib/os/zvfs/Kconfig
++++ b/lib/os/zvfs/Kconfig
+@@ -146,6 +146,46 @@ config ZVFS_OPEN_ADD_SIZE_STDIO
+ 	  Number of file descriptors reserved for stdin, stdout, and stderr in the ZVFS
+ 	  fd table size calculation.
+ 
++config ZVFS_MMAP
++	bool "ZVFS memory mappings"
++	depends on ZVFS_FDTABLE
++	select SYS_ELASTIPOOL
++	help
++	  Map file descriptors and anonymous memory into the address space with
++	  zvfs_mmap(), and manage the mappings with zvfs_munmap(), zvfs_msync()
++	  and zvfs_mprotect(). A mapping keeps its file open like a descriptor
++	  does, belongs to the thread that creates it, and is released when
++	  that thread exits.
++
++if ZVFS_MMAP
++
++config ZVFS_MMAP_MAX
++	int "Maximum number of concurrent ZVFS memory mappings"
++	default 8
++	range 1 1024
++
++config ZVFS_MMAP_DIRTY_TRACK
++	bool "Track the modified pages of shared file mappings"
++	default y
++	depends on MMU && ARCH_HAS_MEM_WRITE_FAULT
++	select MEM_WRITE_FAULT_HOOK
++	help
++	  Write-protect the pages of a shared, writable file mapping and let the
++	  first write to each page fault: the page is recorded as modified and
++	  made writable, so zvfs_msync() writes back only the pages that changed
++	  and leaves the rest of the file alone. Without this, the whole range
++	  is written back.
++
++config ZVFS_MMAP_PAGE_SIZE
++	hex
++	default MMU_PAGE_SIZE if MMU
++	default 0x40
++	help
++	  Granularity of mapping lengths and file offsets: the MMU page size, or
++	  64 bytes when mappings are carved out of the kernel heap.
++
++endif # ZVFS_MMAP
++
+ config ZVFS_EVENTFD
+ 	bool "ZVFS event file descriptor support"
+ 	imply ZVFS_POLL
+diff --git a/lib/os/zvfs/zvfs_fdtable.c b/lib/os/zvfs/zvfs_fdtable.c
+--- a/lib/os/zvfs/zvfs_fdtable.c
++++ b/lib/os/zvfs/zvfs_fdtable.c
+@@ -159,6 +159,11 @@ int zvfs_fd_obj_refcount(void *obj)
+ 		}
+ 	}
+ 
++#ifdef CONFIG_ZVFS_MMAP
++	/* a memory mapping holds the object open like a descriptor does */
++	count += z_zvfs_mmap_obj_refs(obj);
++#endif /* CONFIG_ZVFS_MMAP */
++
+ 	return count;
+ }
+ 
+diff --git a/lib/os/zvfs/zvfs_fs.c b/lib/os/zvfs/zvfs_fs.c
+--- a/lib/os/zvfs/zvfs_fs.c
++++ b/lib/os/zvfs/zvfs_fs.c
+@@ -30,8 +30,6 @@
+ 
+ #include "zvfs_fs_priv.h"
+ 
+-#define ZVFS_O_ACCMODE (ZVFS_O_RDONLY | ZVFS_O_WRONLY | ZVFS_O_RDWR)
+-
+ static struct zvfs_fs_desc desc_array[CONFIG_ZVFS_FS_DESC_MAX];
+ 
+ static struct fd_op_vtable fs_fd_op_vtable;
+diff --git a/lib/os/zvfs/zvfs_ioctl.c b/lib/os/zvfs/zvfs_ioctl.c
+--- a/lib/os/zvfs/zvfs_ioctl.c
++++ b/lib/os/zvfs/zvfs_ioctl.c
+@@ -45,26 +45,6 @@ static int z_vrfy_zvfs_ioctl(int fd, unsigned long request, va_list args)
+ 
+ 		K_OOPS(K_SYSCALL_MEMORY_WRITE(avail, sizeof(*avail)));
+ 	} break;
+-	case ZFD_IOCTL_MMAP: {
+-		void *addr = va_arg(check, void *);
+-		size_t len = va_arg(check, size_t);
+-		int prot = va_arg(check, int);
+-		int flags = va_arg(check, int);
+-		off_t off = va_arg(check, off_t);
+-		void **maddr = va_arg(check, void **);
+-
+-		ARG_UNUSED(addr);
+-		ARG_UNUSED(prot);
+-		ARG_UNUSED(flags);
+-		ARG_UNUSED(off);
+-
+-		if (len == 0) {
+-			errno = EINVAL;
+-			ret = -1;
+-			break;
+-		}
+-		K_OOPS(K_SYSCALL_MEMORY_WRITE(maddr, sizeof(*maddr)));
+-	} break;
+ 	default:
+ 		errno = EOPNOTSUPP;
+ 		ret = -1;
+diff --git a/lib/os/zvfs/zvfs_mmap.c b/lib/os/zvfs/zvfs_mmap.c
+new file mode 100644
+--- /dev/null
++++ b/lib/os/zvfs/zvfs_mmap.c
+@@ -0,0 +1,914 @@
++/*
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++/*
++ * Memory mappings of file descriptors and anonymous memory.
++ *
++ * A mapping owns page-granular storage: anonymously mapped pages when there
++ * is an MMU, a block of the kernel heap otherwise. A file-backed mapping is
++ * filled from the file when it is created and, when shared and writable,
++ * written back on zvfs_msync(), when it is unmapped, and when its owner
++ * exits. The mapping holds a reference on the open file object, counted by
++ * zvfs_fd_obj_refcount(), so the object outlives its descriptors until the
++ * mapping goes. An object that owns its pages (ZFD_IOCTL_MMAP answers with
++ * their address) is mapped in place instead, so every mapping of it aliases
++ * the same memory.
++ *
++ * User threads reach a mapping through a memory-domain partition on its
++ * pages; the kernel view carries the protection of the pages it owns.
++ *
++ * With CONFIG_ZVFS_MMAP_DIRTY_TRACK the pages of a shared, writable file
++ * mapping start write-protected. The first write to a page faults into
++ * z_mem_write_fault(), which records the page as modified and makes it
++ * writable; zvfs_msync() writes back the modified pages only and protects
++ * them again.
++ */
++
++#include <errno.h>
++#include <string.h>
++
++#include <zephyr/internal/syscall_handler.h>
++#include <zephyr/kernel.h>
++#include <zephyr/kernel/mm.h>
++#include <zephyr/sys/dlist.h>
++#include <zephyr/sys/elastipool.h>
++#include <zephyr/sys/fdtable.h>
++#include <zephyr/sys/internal/fdtable_priv.h>
++#include <zephyr/sys/math_extras.h>
++#include <zephyr/sys/util.h>
++
++#if defined(CONFIG_ZVFS_MMAP_DIRTY_TRACK) || defined(CONFIG_ARCH_MEM_DOMAIN_APPLY_CURRENT)
++#include <kernel_arch_interface.h>
++#endif
++
++#define MMAP_PAGE       CONFIG_ZVFS_MMAP_PAGE_SIZE
++#define MMAP_PROT_MASK  (ZVFS_PROT_READ | ZVFS_PROT_WRITE | ZVFS_PROT_EXEC)
++#define MMAP_FLAGS_MASK (ZVFS_MAP_SHARED | ZVFS_MAP_PRIVATE | ZVFS_MAP_ANONYMOUS)
++#define MMAP_MS_MASK    (ZVFS_MS_ASYNC | ZVFS_MS_INVALIDATE | ZVFS_MS_SYNC)
++
++struct zvfs_mapping {
++	sys_dnode_t node;
++	/* page-aligned base and page-rounded length of the mapped range */
++	uint8_t *addr;
++	size_t len;
++	/* file offset of the first page */
++	size_t off;
++	/* storage the mapping owns; NULL when the file object owns the pages */
++	void *mem;
++	size_t mem_size;
++	/* the open file object, referenced until release; NULL for anonymous mappings */
++	void *obj;
++	const struct fd_op_vtable *vtable;
++	k_tid_t owner;
++#ifdef CONFIG_USERSPACE
++	struct k_mem_domain *domain;
++	struct k_mem_partition part;
++	bool granted;
++#endif
++	/* a shared file mapping that has been writable: written back on release */
++	bool dirty;
++#ifdef CONFIG_ZVFS_MMAP_DIRTY_TRACK
++	/* one bit per modified page; NULL when the whole mapping is written back */
++	unsigned long *dirty_map;
++#endif
++	/* the file was opened for writing */
++	bool writable;
++	uint8_t prot;
++	uint8_t flags;
++};
++
++static struct zvfs_mapping mapping_storage[CONFIG_ZVFS_MMAP_MAX];
++SYS_ELASTIPOOL_DEFINE_ADVANCED(mapping_pool, sizeof(struct zvfs_mapping),
++			       __alignof(struct zvfs_mapping), CONFIG_ZVFS_MMAP_MAX,
++			       CONFIG_ZVFS_MMAP_MAX, NULL, mapping_storage, static);
++
++/* serializes mapping operations, including the file I/O they perform */
++static K_MUTEX_DEFINE(mmap_lock);
++/* guards the list structures: also taken on the thread halt path */
++static struct k_spinlock list_lock;
++static sys_dlist_t mappings = SYS_DLIST_STATIC_INIT(&mappings);
++static sys_dlist_t graveyard = SYS_DLIST_STATIC_INIT(&graveyard);
++
++static inline bool page_aligned(uintptr_t v)
++{
++	return (v & (MMAP_PAGE - 1)) == 0;
++}
++
++static bool range_end(uintptr_t start, size_t len, uintptr_t *end)
++{
++	size_t rounded;
++
++	if (size_add_overflow(len, MMAP_PAGE - 1, &rounded)) {
++		return false;
++	}
++	rounded &= ~(size_t)(MMAP_PAGE - 1);
++
++	if (rounded > UINTPTR_MAX - start) {
++		return false;
++	}
++	*end = start + rounded;
++
++	return true;
++}
++
++static bool valid_prot(int prot)
++{
++	return (prot & ~MMAP_PROT_MASK) == 0;
++}
++
++static bool supported_prot(int prot)
++{
++	/* writable and executable pages are never granted */
++	return (prot & (ZVFS_PROT_WRITE | ZVFS_PROT_EXEC)) != (ZVFS_PROT_WRITE | ZVFS_PROT_EXEC);
++}
++
++#ifdef CONFIG_MMU
++static uint32_t prot_to_kernel_flags(int prot)
++{
++	uint32_t flags = 0;
++
++	if ((prot & ZVFS_PROT_WRITE) != 0) {
++		flags |= K_MEM_PERM_RW;
++	}
++	if ((prot & ZVFS_PROT_EXEC) != 0) {
++		flags |= K_MEM_PERM_EXEC;
++	}
++
++	return flags;
++}
++#endif /* CONFIG_MMU */
++
++/* protection of the pages the mapping owns, in the kernel's view */
++static void mapping_kernel_prot(struct zvfs_mapping *m, int prot)
++{
++#ifdef CONFIG_MMU
++	if (m->mem != NULL) {
++		(void)k_mem_update_flags(m->addr, m->len, prot_to_kernel_flags(prot));
++	}
++#else
++	ARG_UNUSED(m);
++	ARG_UNUSED(prot);
++#endif /* CONFIG_MMU */
++}
++
++#ifdef CONFIG_USERSPACE
++static k_mem_partition_attr_t prot_to_attr(int prot)
++{
++	if ((prot & ZVFS_PROT_WRITE) != 0) {
++		return K_MEM_PARTITION_P_RW_U_RW;
++	}
++#ifdef K_MEM_PARTITION_P_RX_U_RX
++	if ((prot & ZVFS_PROT_EXEC) != 0) {
++		return K_MEM_PARTITION_P_RX_U_RX;
++	}
++#endif
++	return K_MEM_PARTITION_P_RO_U_RO;
++}
++
++static struct k_mem_domain *caller_domain(void)
++{
++	if (!k_is_in_user_syscall()) {
++		return NULL;
++	}
++
++	return k_current_get()->mem_domain_info.mem_domain;
++}
++
++/* a domain programmed at context switch would not cover the caller until it is switched */
++static void domain_apply_current(struct k_mem_domain *domain)
++{
++#ifdef CONFIG_ARCH_MEM_DOMAIN_APPLY_CURRENT
++	if (k_current_get()->mem_domain_info.mem_domain == domain) {
++		arch_mem_domain_apply_current();
++	}
++#else
++	ARG_UNUSED(domain);
++#endif
++}
++
++static int mapping_user_grant(struct zvfs_mapping *m, int prot)
++{
++	int ret;
++
++	if ((m->domain == NULL) || (prot == ZVFS_PROT_NONE)) {
++		return 0;
++	}
++
++	m->part = (struct k_mem_partition){
++		.start = (uintptr_t)m->addr,
++		.size = (m->mem != NULL) ? m->mem_size : m->len,
++		.attr = prot_to_attr(prot),
++	};
++	ret = k_mem_domain_add_partition(m->domain, &m->part);
++	if (ret != 0) {
++		return ret;
++	}
++	m->granted = true;
++	domain_apply_current(m->domain);
++
++	return 0;
++}
++
++static void mapping_user_revoke(struct zvfs_mapping *m)
++{
++	if (m->granted) {
++		(void)k_mem_domain_remove_partition(m->domain, &m->part);
++		m->granted = false;
++		domain_apply_current(m->domain);
++	}
++}
++#else
++static inline int mapping_user_grant(struct zvfs_mapping *m, int prot)
++{
++	ARG_UNUSED(m);
++	ARG_UNUSED(prot);
++
++	return 0;
++}
++
++static inline void mapping_user_revoke(struct zvfs_mapping *m)
++{
++	ARG_UNUSED(m);
++}
++#endif /* CONFIG_USERSPACE */
++
++#ifdef CONFIG_ZVFS_MMAP_DIRTY_TRACK
++static inline bool mapping_tracked(const struct zvfs_mapping *m)
++{
++	return m->dirty_map != NULL;
++}
++
++/* the protection the pages carry: tracked pages start write-protected */
++static inline int mapping_page_prot(const struct zvfs_mapping *m, int prot)
++{
++	return mapping_tracked(m) ? (prot & ~ZVFS_PROT_WRITE) : prot;
++}
++
++static void mapping_track_init(struct zvfs_mapping *m)
++{
++	if (m->dirty && (m->mem != NULL)) {
++		/* without a map the whole mapping is written back */
++		m->dirty_map = k_calloc(BITS_TO_LONGS(m->len / MMAP_PAGE), sizeof(unsigned long));
++	}
++}
++
++static void mapping_track_free(struct zvfs_mapping *m)
++{
++	k_free(m->dirty_map);
++	m->dirty_map = NULL;
++}
++
++static inline bool page_dirty(const struct zvfs_mapping *m, size_t idx)
++{
++	return (m->dirty_map[idx / BITS_PER_LONG] & BIT(idx % BITS_PER_LONG)) != 0;
++}
++
++static inline void page_dirty_set(struct zvfs_mapping *m, size_t idx, bool dirty)
++{
++	if (dirty) {
++		m->dirty_map[idx / BITS_PER_LONG] |= BIT(idx % BITS_PER_LONG);
++	} else {
++		m->dirty_map[idx / BITS_PER_LONG] &= ~BIT(idx % BITS_PER_LONG);
++	}
++}
++
++/* change one page's protection in the kernel view and in the granted domain */
++static void page_set_prot(struct zvfs_mapping *m, size_t idx, int prot)
++{
++	uint8_t *page = m->addr + idx * MMAP_PAGE;
++
++	(void)k_mem_update_flags(page, MMAP_PAGE, prot_to_kernel_flags(prot));
++#ifdef CONFIG_USERSPACE
++	if (m->granted) {
++		(void)arch_mem_domain_page_attr_set(m->domain, page, MMAP_PAGE, prot_to_attr(prot));
++	}
++#endif
++}
++
++bool z_mem_write_fault(void *addr)
++{
++	uintptr_t a = (uintptr_t)addr;
++	struct zvfs_mapping *m;
++	bool handled = false;
++
++	K_SPINLOCK(&list_lock) {
++		SYS_DLIST_FOR_EACH_CONTAINER(&mappings, m, node) {
++			if (!mapping_tracked(m) || (a < (uintptr_t)m->addr) ||
++			    (a >= (uintptr_t)m->addr + m->len)) {
++				continue;
++			}
++			if ((m->prot & ZVFS_PROT_WRITE) == 0) {
++				/* a genuine protection violation */
++				break;
++			}
++
++			size_t idx = (a - (uintptr_t)m->addr) / MMAP_PAGE;
++
++			page_dirty_set(m, idx, true);
++			page_set_prot(m, idx, m->prot);
++			handled = true;
++			break;
++		}
++	}
++
++	return handled;
++}
++#else
++static inline bool mapping_tracked(const struct zvfs_mapping *m)
++{
++	ARG_UNUSED(m);
++
++	return false;
++}
++
++static inline int mapping_page_prot(const struct zvfs_mapping *m, int prot)
++{
++	ARG_UNUSED(m);
++
++	return prot;
++}
++
++static inline void mapping_track_init(struct zvfs_mapping *m)
++{
++	ARG_UNUSED(m);
++}
++
++static inline void mapping_track_free(struct zvfs_mapping *m)
++{
++	ARG_UNUSED(m);
++}
++#endif /* CONFIG_ZVFS_MMAP_DIRTY_TRACK */
++
++static int storage_alloc(struct zvfs_mapping *m)
++{
++#ifdef CONFIG_MMU
++	/* pinned: a mapping's pages are present in every domain that maps them */
++	m->mem_size = m->len;
++	m->mem = k_mem_map(m->len, K_MEM_PERM_RW | K_MEM_MAP_LOCK);
++#else
++	size_t align = MMAP_PAGE;
++
++	m->mem_size = m->len;
++	if (IS_ENABLED(CONFIG_USERSPACE)) {
++		/* a memory-protection region: a power of two, aligned to its size */
++		m->mem_size = BIT(32 - u32_count_leading_zeros(m->len - 1));
++		align = m->mem_size;
++	}
++	m->mem = k_aligned_alloc(align, m->mem_size);
++	if (m->mem != NULL) {
++		memset(m->mem, 0, m->mem_size);
++	}
++#endif /* CONFIG_MMU */
++	if (m->mem == NULL) {
++		return -ENOMEM;
++	}
++	m->addr = m->mem;
++
++	return 0;
++}
++
++static void storage_free(struct zvfs_mapping *m)
++{
++	if (m->mem == NULL) {
++		return;
++	}
++#ifdef CONFIG_MMU
++	k_mem_unmap(m->mem, m->mem_size);
++#else
++	k_free(m->mem);
++#endif /* CONFIG_MMU */
++	m->mem = NULL;
++}
++
++/* read [start, end) of the mapping from the file; bytes past EOF read as zero */
++static int mapping_fill(struct zvfs_mapping *m, size_t start, size_t end)
++{
++	size_t pos = start;
++
++	while (pos < end) {
++		ssize_t n = m->vtable->read_offs(m->obj, m->addr + pos, end - pos, m->off + pos);
++
++		if (n < 0) {
++			return -1;
++		}
++		if (n == 0) {
++			memset(m->addr + pos, 0, end - pos);
++			break;
++		}
++		pos += n;
++	}
++
++	return 0;
++}
++
++/* re-read [start, end) of a mapping whose pages may be write-protected */
++static int mapping_refill(struct zvfs_mapping *m, size_t start, size_t end)
++{
++	int ret;
++
++	if ((m->obj == NULL) || (m->mem == NULL)) {
++		return 0;
++	}
++
++	mapping_user_revoke(m);
++	mapping_kernel_prot(m, ZVFS_PROT_WRITE);
++	ret = mapping_fill(m, start, end);
++	mapping_kernel_prot(m, mapping_page_prot(m, m->prot));
++	if (mapping_user_grant(m, mapping_page_prot(m, m->prot)) != 0) {
++		errno = ENOMEM;
++		ret = -1;
++	}
++
++	return ret;
++}
++
++static int mapping_write_range(struct zvfs_mapping *m, size_t pos, size_t end)
++{
++	while (pos < end) {
++		ssize_t n = m->vtable->write_offs(m->obj, m->addr + pos, end - pos, m->off + pos);
++
++		if (n < 0) {
++			return -1;
++		}
++		if (n == 0) {
++			errno = EIO;
++			return -1;
++		}
++		pos += n;
++	}
++
++	return 0;
++}
++
++/* write [start, end) of a dirty shared mapping back, within the file's size */
++static int mapping_writeback(struct zvfs_mapping *m, size_t start, size_t end)
++{
++	struct zvfs_stat st;
++
++	if (!m->dirty || (m->mem == NULL)) {
++		return 0;
++	}
++
++	if (zvfs_fdtable_call_ioctl(m->vtable, m->obj, ZFD_IOCTL_STAT, &st) < 0) {
++		return -1;
++	}
++	if ((st.size < 0) || (m->off + start >= (size_t)st.size)) {
++		return 0;
++	}
++	end = MIN(end, (size_t)st.size - m->off);
++
++	if (!mapping_tracked(m)) {
++		return mapping_write_range(m, start, end);
++	}
++
++#ifdef CONFIG_ZVFS_MMAP_DIRTY_TRACK
++	/* modified pages only; each one is protected again so a later write re-marks it */
++	for (size_t idx = start / MMAP_PAGE; idx * MMAP_PAGE < end; idx++) {
++		size_t ps = idx * MMAP_PAGE;
++
++		if (!page_dirty(m, idx)) {
++			continue;
++		}
++		if (mapping_write_range(m, MAX(ps, start), MIN(ps + MMAP_PAGE, end)) < 0) {
++			return -1;
++		}
++		K_SPINLOCK(&list_lock) {
++			page_dirty_set(m, idx, false);
++			page_set_prot(m, idx, mapping_page_prot(m, m->prot));
++		}
++	}
++#endif /* CONFIG_ZVFS_MMAP_DIRTY_TRACK */
++
++	return 0;
++}
++
++/*
++ * A mapping counts as a reference on its file object: zvfs_fd_obj_refcount()
++ * adds the mappings of the object to its descriptors, so closing the last
++ * descriptor leaves the object open until the last mapping releases it.
++ */
++int z_zvfs_mmap_obj_refs(const void *obj)
++{
++	struct zvfs_mapping *m;
++	int refs = 0;
++
++	K_SPINLOCK(&list_lock) {
++		SYS_DLIST_FOR_EACH_CONTAINER(&mappings, m, node) {
++			refs += (m->obj == obj);
++		}
++		SYS_DLIST_FOR_EACH_CONTAINER(&graveyard, m, node) {
++			refs += (m->obj == obj);
++		}
++	}
++
++	return refs;
++}
++
++/* the mapping is off both lists: close the object if no descriptor holds it */
++static void mapping_obj_unref(struct zvfs_mapping *m)
++{
++	if (m->obj == NULL) {
++		return;
++	}
++	if ((zvfs_fd_obj_refcount(m->obj) == 0) && (m->vtable->close != NULL)) {
++		(void)m->vtable->close(m->obj);
++	}
++	m->obj = NULL;
++}
++
++/* tear a mapping down: write back, revoke, release storage and the file */
++static int mapping_release(struct zvfs_mapping *m)
++{
++	int ret = mapping_writeback(m, 0, m->len);
++
++
++	mapping_user_revoke(m);
++	if (m->mem != NULL) {
++		mapping_kernel_prot(m, ZVFS_PROT_WRITE);
++		storage_free(m);
++	}
++	mapping_track_free(m);
++	mapping_obj_unref(m);
++	(void)sys_elastipool_free(&mapping_pool, m);
++
++	return ret;
++}
++
++static void mapping_unlink(struct zvfs_mapping *m)
++{
++	K_SPINLOCK(&list_lock) {
++		sys_dlist_remove(&m->node);
++	}
++}
++
++static void mapping_link(struct zvfs_mapping *m)
++{
++	K_SPINLOCK(&list_lock) {
++		sys_dlist_append(&mappings, &m->node);
++	}
++}
++
++/* mappings whose owner exited are released by the next mapping operation */
++static void graveyard_drain(void)
++{
++	while (true) {
++		sys_dnode_t *node = NULL;
++
++		K_SPINLOCK(&list_lock) {
++			node = sys_dlist_get(&graveyard);
++		}
++		if (node == NULL) {
++			break;
++		}
++		(void)mapping_release(CONTAINER_OF(node, struct zvfs_mapping, node));
++	}
++}
++
++void z_zvfs_mmap_thread_exit(struct k_thread *thread)
++{
++	struct zvfs_mapping *m, *next;
++
++	K_SPINLOCK(&list_lock) {
++		SYS_DLIST_FOR_EACH_CONTAINER_SAFE(&mappings, m, next, node) {
++			if (m->owner == thread) {
++				sys_dlist_remove(&m->node);
++				sys_dlist_append(&graveyard, &m->node);
++			}
++		}
++	}
++}
++
++static bool mapping_overlap(const struct zvfs_mapping *m, uintptr_t start, uintptr_t end,
++			    size_t *lo, size_t *hi)
++{
++	uintptr_t mstart = (uintptr_t)m->addr;
++	uintptr_t mend = mstart + m->len;
++
++	if ((end <= mstart) || (start >= mend)) {
++		return false;
++	}
++	*lo = MAX(start, mstart) - mstart;
++	*hi = MIN(end, mend) - mstart;
++
++	return true;
++}
++
++static int file_access_mode(int fd)
++{
++	int flags = zvfs_fcntl(fd, ZVFS_F_GETFL, 0);
++
++	/* an object that does not report its flags is treated as read/write */
++	return (flags < 0) ? ZVFS_O_RDWR : (flags & ZVFS_O_ACCMODE);
++}
++
++int z_impl_zvfs_mmap(size_t len, int prot, int flags, int fd, size_t off, void **addr)
++{
++	struct zvfs_mapping *m;
++	struct fd_entry *entry = NULL;
++	void *obj = NULL;
++	bool shared = (flags & ZVFS_MAP_SHARED) != 0;
++	bool anon = (flags & ZVFS_MAP_ANONYMOUS) != 0;
++	int acc = ZVFS_O_RDWR;
++	uintptr_t end;
++	int ret;
++
++	if ((len == 0) || (addr == NULL) || ((flags & ~MMAP_FLAGS_MASK) != 0) ||
++	    (shared == ((flags & ZVFS_MAP_PRIVATE) != 0)) || !valid_prot(prot) ||
++	    !page_aligned(off) || !range_end(0, len, &end)) {
++		errno = EINVAL;
++		return -1;
++	}
++	if (!supported_prot(prot)) {
++		errno = ENOTSUP;
++		return -1;
++	}
++	if (!anon) {
++		entry = zvfs_fd_entry_get(fd);
++		if (entry == NULL) {
++			return -1;
++		}
++		if (!supports_pread_pwrite(entry->mode)) {
++			errno = ENODEV;
++			return -1;
++		}
++		acc = file_access_mode(fd);
++		if ((acc == ZVFS_O_WRONLY) ||
++		    ((acc == ZVFS_O_RDONLY) && shared && ((prot & ZVFS_PROT_WRITE) != 0))) {
++			errno = EACCES;
++			return -1;
++		}
++		if (size_add_overflow(off, (size_t)end, &off)) {
++			errno = EOVERFLOW;
++			return -1;
++		}
++		off -= (size_t)end;
++	}
++
++	(void)k_mutex_lock(&mmap_lock, K_FOREVER);
++	graveyard_drain();
++
++	if (sys_elastipool_alloc(&mapping_pool, &obj) != 0) {
++		errno = ENOMEM;
++		ret = -1;
++		goto unlock;
++	}
++	m = obj;
++	*m = (struct zvfs_mapping){
++		.len = (size_t)end,
++		.off = off,
++		.owner = k_current_get(),
++		.prot = prot,
++		.flags = flags,
++		.writable = acc != ZVFS_O_RDONLY,
++	};
++#ifdef CONFIG_USERSPACE
++	m->domain = caller_domain();
++#endif
++
++	if (!anon) {
++		void *base = NULL;
++
++		/* the object stays open until the mapping is released */
++		m->obj = entry->obj;
++		m->vtable = entry->vtable;
++
++		/* an object that owns its pages is mapped in place */
++		if (zvfs_fdtable_call_ioctl(m->vtable, m->obj, ZFD_IOCTL_MMAP, off, m->len,
++					    &base) == 0) {
++			m->addr = base;
++		} else if ((errno != EOPNOTSUPP) && (errno != ENOTSUP)) {
++			ret = -1;
++			goto free;
++		}
++	}
++
++	m->dirty = !anon && shared && ((prot & ZVFS_PROT_WRITE) != 0);
++
++	if (m->addr == NULL) {
++		ret = storage_alloc(m);
++		if (ret != 0) {
++			errno = ENOMEM;
++			goto free;
++		}
++		if (!anon && (mapping_fill(m, 0, m->len) < 0)) {
++			ret = -1;
++			goto free;
++		}
++		mapping_track_init(m);
++		mapping_kernel_prot(m, mapping_page_prot(m, prot));
++	}
++
++	ret = mapping_user_grant(m, mapping_page_prot(m, prot));
++	if (ret != 0) {
++		errno = ENOMEM;
++		goto free;
++	}
++
++	mapping_link(m);
++	*addr = m->addr;
++	k_mutex_unlock(&mmap_lock);
++
++	return 0;
++
++free:
++	if (m->mem != NULL) {
++		mapping_kernel_prot(m, ZVFS_PROT_WRITE);
++		storage_free(m);
++	}
++	mapping_track_free(m);
++	/* the caller's descriptor still holds the object: nothing to unreference */
++	(void)sys_elastipool_free(&mapping_pool, m);
++	ret = -1;
++unlock:
++	k_mutex_unlock(&mmap_lock);
++
++	return ret;
++}
++
++int z_impl_zvfs_munmap(void *addr, size_t len)
++{
++	struct zvfs_mapping *m, *next;
++	uintptr_t start = (uintptr_t)addr;
++	uintptr_t end;
++	int ret = 0;
++
++	if ((len == 0) || !page_aligned(start) || !range_end(start, len, &end)) {
++		errno = EINVAL;
++		return -1;
++	}
++
++	(void)k_mutex_lock(&mmap_lock, K_FOREVER);
++	graveyard_drain();
++
++	SYS_DLIST_FOR_EACH_CONTAINER_SAFE(&mappings, m, next, node) {
++		size_t lo, hi;
++
++		if (!mapping_overlap(m, start, end, &lo, &hi)) {
++			continue;
++		}
++		if ((lo != 0) || (hi != m->len)) {
++			/* part of a mapping: not supported */
++			errno = EINVAL;
++			ret = -1;
++			continue;
++		}
++		mapping_unlink(m);
++		if (mapping_release(m) < 0) {
++			ret = -1;
++		}
++	}
++
++	k_mutex_unlock(&mmap_lock);
++
++	return ret;
++}
++
++int z_impl_zvfs_msync(void *addr, size_t len, int flags)
++{
++	struct zvfs_mapping *m;
++	uintptr_t start = (uintptr_t)addr;
++	uintptr_t end;
++	bool found = false;
++	int ret = 0;
++
++	if (((flags & ~MMAP_MS_MASK) != 0) ||
++	    ((flags & (ZVFS_MS_SYNC | ZVFS_MS_ASYNC)) == (ZVFS_MS_SYNC | ZVFS_MS_ASYNC)) ||
++	    !page_aligned(start) || !range_end(start, len, &end)) {
++		errno = EINVAL;
++		return -1;
++	}
++
++	(void)k_mutex_lock(&mmap_lock, K_FOREVER);
++	graveyard_drain();
++
++	SYS_DLIST_FOR_EACH_CONTAINER(&mappings, m, node) {
++		size_t lo, hi;
++
++		if (!mapping_overlap(m, start, end, &lo, &hi)) {
++			continue;
++		}
++		found = true;
++		if (((flags & (ZVFS_MS_SYNC | ZVFS_MS_ASYNC)) != 0) &&
++		    (mapping_writeback(m, lo, hi) < 0)) {
++			ret = -1;
++		}
++		if (((flags & ZVFS_MS_INVALIDATE) != 0) && (mapping_refill(m, lo, hi) < 0)) {
++			ret = -1;
++		}
++	}
++
++	k_mutex_unlock(&mmap_lock);
++
++	if (!found && (len != 0)) {
++		errno = ENOMEM;
++		return -1;
++	}
++
++	return ret;
++}
++
++int z_impl_zvfs_mprotect(void *addr, size_t len, int prot)
++{
++	struct zvfs_mapping *m;
++	uintptr_t start = (uintptr_t)addr;
++	uintptr_t end;
++	bool found = false;
++	int ret = 0;
++
++	if (!valid_prot(prot) || !page_aligned(start) || !range_end(start, len, &end)) {
++		errno = EINVAL;
++		return -1;
++	}
++	if (!supported_prot(prot)) {
++		errno = ENOTSUP;
++		return -1;
++	}
++
++	(void)k_mutex_lock(&mmap_lock, K_FOREVER);
++	graveyard_drain();
++
++	SYS_DLIST_FOR_EACH_CONTAINER(&mappings, m, node) {
++		size_t lo, hi;
++		bool shared = (m->flags & ZVFS_MAP_SHARED) != 0;
++
++		if (!mapping_overlap(m, start, end, &lo, &hi)) {
++			continue;
++		}
++		found = true;
++		if ((lo != 0) || (hi != m->len)) {
++			/* part of a mapping: not supported */
++			errno = ENOTSUP;
++			ret = -1;
++			continue;
++		}
++		if (((prot & ZVFS_PROT_WRITE) != 0) && shared && (m->obj != NULL) && !m->writable) {
++			errno = EACCES;
++			ret = -1;
++			continue;
++		}
++
++		mapping_user_revoke(m);
++		m->prot = prot;
++		m->dirty = m->dirty || (shared && (m->obj != NULL) && ((prot & ZVFS_PROT_WRITE) != 0));
++		mapping_kernel_prot(m, mapping_page_prot(m, prot));
++#ifdef CONFIG_USERSPACE
++		if (m->domain == NULL) {
++			m->domain = caller_domain();
++		}
++#endif
++		if (mapping_user_grant(m, mapping_page_prot(m, prot)) != 0) {
++			errno = ENOMEM;
++			ret = -1;
++		}
++	}
++
++	k_mutex_unlock(&mmap_lock);
++
++	if (!found && (len != 0)) {
++		errno = ENOMEM;
++		return -1;
++	}
++
++	return ret;
++}
++
++#ifdef CONFIG_USERSPACE
++static int z_vrfy_zvfs_mmap(size_t len, int prot, int flags, int fd, size_t off, void **addr)
++{
++	void *base = NULL;
++	int ret;
++
++	K_OOPS(K_SYSCALL_MEMORY_WRITE(addr, sizeof(*addr)));
++	if (((flags & ZVFS_MAP_ANONYMOUS) == 0) && (zvfs_fd_syscall_verify(fd) == NULL)) {
++		return -1;
++	}
++
++	ret = z_impl_zvfs_mmap(len, prot, flags, fd, off, &base);
++	if (ret == 0) {
++		K_OOPS(k_usermode_to_copy(addr, &base, sizeof(base)));
++	}
++
++	return ret;
++}
++#include <zephyr/syscalls/zvfs_mmap_mrsh.c>
++
++static int z_vrfy_zvfs_munmap(void *addr, size_t len)
++{
++	return z_impl_zvfs_munmap(addr, len);
++}
++#include <zephyr/syscalls/zvfs_munmap_mrsh.c>
++
++static int z_vrfy_zvfs_msync(void *addr, size_t len, int flags)
++{
++	return z_impl_zvfs_msync(addr, len, flags);
++}
++#include <zephyr/syscalls/zvfs_msync_mrsh.c>
++
++static int z_vrfy_zvfs_mprotect(void *addr, size_t len, int prot)
++{
++	return z_impl_zvfs_mprotect(addr, len, prot);
++}
++#include <zephyr/syscalls/zvfs_mprotect_mrsh.c>
++#endif /* CONFIG_USERSPACE */
+diff --git a/tests/lib/zvfs_mmap/CMakeLists.txt b/tests/lib/zvfs_mmap/CMakeLists.txt
+new file mode 100644
+--- /dev/null
++++ b/tests/lib/zvfs_mmap/CMakeLists.txt
+@@ -0,0 +1,7 @@
++# SPDX-License-Identifier: Apache-2.0
++
++cmake_minimum_required(VERSION 3.20.0)
++find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
++project(zvfs_mmap)
++
++target_sources(app PRIVATE src/main.c)
+diff --git a/tests/lib/zvfs_mmap/app.overlay b/tests/lib/zvfs_mmap/app.overlay
+new file mode 100644
+--- /dev/null
++++ b/tests/lib/zvfs_mmap/app.overlay
+@@ -0,0 +1,13 @@
++/*
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++/ {
++	ramdisk0 {
++		compatible = "zephyr,ram-disk";
++		disk-name = "RAM";
++		sector-size = <512>;
++		sector-count = <160>;
++	};
++};
+diff --git a/tests/lib/zvfs_mmap/prj.conf b/tests/lib/zvfs_mmap/prj.conf
+new file mode 100644
+--- /dev/null
++++ b/tests/lib/zvfs_mmap/prj.conf
+@@ -0,0 +1,13 @@
++CONFIG_ZTEST=y
++CONFIG_ZTEST_FATAL_HOOK=y
++CONFIG_FILE_SYSTEM=y
++CONFIG_FAT_FILESYSTEM_ELM=y
++CONFIG_ZVFS=y
++CONFIG_ZVFS_MMAP=y
++CONFIG_ZVFS_MMAP_MAX=6
++CONFIG_ZVFS_OPEN_IGNORE_MIN=y
++CONFIG_ZVFS_OPEN_MAX=12
++CONFIG_HEAP_MEM_POOL_SIZE=16384
++CONFIG_MAIN_STACK_SIZE=4096
++CONFIG_ZTEST_STACK_SIZE=4096
++CONFIG_TEST_EXTRA_STACK_SIZE=2048
+diff --git a/tests/lib/zvfs_mmap/src/main.c b/tests/lib/zvfs_mmap/src/main.c
+new file mode 100644
+--- /dev/null
++++ b/tests/lib/zvfs_mmap/src/main.c
+@@ -0,0 +1,558 @@
++/*
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <errno.h>
++#include <string.h>
++
++#include <ff.h>
++#include <zephyr/fs/fs.h>
++#include <zephyr/kernel.h>
++#include <zephyr/sys/fdtable.h>
++#include <zephyr/sys/internal/fdtable_priv.h>
++#include <zephyr/sys/zvfs.h>
++#include <zephyr/sys/zvfs_fs.h>
++#include <zephyr/ztest.h>
++#include <zephyr/ztest_error_hook.h>
++
++#define MNT   "/RAM:"
++#define TFILE MNT "/mapped.bin"
++#define PAGE  CONFIG_ZVFS_MMAP_PAGE_SIZE
++
++/* the fixture file holds this many full pages, plus half a page */
++#define FILE_PAGES 3
++#define FILE_SIZE  (FILE_PAGES * PAGE + PAGE / 2)
++#define FILE_SPAN  ((FILE_PAGES + 1) * PAGE)
++
++#define RW (ZVFS_PROT_READ | ZVFS_PROT_WRITE)
++
++static FATFS fat_fs;
++static struct fs_mount_t fs_mnt = {
++	.type = FS_FATFS,
++	.mnt_point = MNT,
++	.fs_data = &fat_fs,
++};
++
++static inline uint8_t file_byte(size_t i)
++{
++	return (uint8_t)(i * 7 + (i >> 8));
++}
++
++static void expect_file_byte(int fd, size_t off, uint8_t expected)
++{
++	uint8_t b = ~expected;
++
++	zassert_equal(zvfs_read_offset(fd, &b, 1, &off), 1, "read at %zu failed: %d", off, errno);
++	zassert_equal(b, expected, "file[%zu] is 0x%02x, expected 0x%02x", off, b, expected);
++}
++
++static void write_file_byte(int fd, size_t off, uint8_t b)
++{
++	zassert_equal(zvfs_write_offset(fd, &b, 1, &off), 1, "write at %zu failed: %d", off, errno);
++}
++
++static void expect_mapped_file(const uint8_t *p, size_t off, size_t len)
++{
++	for (size_t i = 0; i < len; ++i) {
++		zassert_equal(p[i], file_byte(off + i), "mapping[%zu] is 0x%02x, expected 0x%02x", i,
++			      p[i], file_byte(off + i));
++	}
++}
++
++static int open_file(int flags)
++{
++	int fd = zvfs_open(TFILE, flags, 0600);
++
++	zassert_true(fd >= 0, "zvfs_open(%s, %#x) failed: %d", TFILE, flags, errno);
++
++	return fd;
++}
++
++static void *map(size_t len, int prot, int flags, int fd, size_t off)
++{
++	void *p = NULL;
++
++	zassert_ok(zvfs_mmap(len, prot, flags, fd, off, &p), "zvfs_mmap() failed: %d", errno);
++	zassert_not_null(p);
++	zassert_true(((uintptr_t)p % PAGE) == 0, "%p is not page aligned", p);
++
++	return p;
++}
++
++static void expect_mmap_error(size_t len, int prot, int flags, int fd, size_t off, int err)
++{
++	void *p = NULL;
++
++	errno = 0;
++	zassert_equal(zvfs_mmap(len, prot, flags, fd, off, &p), -1);
++	zassert_equal(errno, err, "errno %d, expected %d", errno, err);
++}
++
++ZTEST_USER(zvfs_mmap, test_zvfs_mmap)
++{
++	int fd = open_file(ZVFS_O_RDWR);
++	int other;
++	uint8_t *p;
++	uint8_t *q;
++
++	/* arguments */
++	expect_mmap_error(0, ZVFS_PROT_READ, ZVFS_MAP_PRIVATE, fd, 0, EINVAL);
++	expect_mmap_error(PAGE, ZVFS_PROT_READ, ZVFS_MAP_PRIVATE | ZVFS_MAP_SHARED, fd, 0, EINVAL);
++	expect_mmap_error(PAGE, ZVFS_PROT_READ, 0, fd, 0, EINVAL);
++	expect_mmap_error(PAGE, ZVFS_PROT_READ, ZVFS_MAP_PRIVATE, fd, PAGE + 1, EINVAL);
++	expect_mmap_error(PAGE, 0x80, ZVFS_MAP_PRIVATE, fd, 0, EINVAL);
++	expect_mmap_error(PAGE, ZVFS_PROT_WRITE | ZVFS_PROT_EXEC, ZVFS_MAP_PRIVATE, fd, 0, ENOTSUP);
++
++	/* the descriptor */
++	other = open_file(ZVFS_O_RDONLY);
++	zassert_ok(zvfs_close(other));
++	expect_mmap_error(PAGE, ZVFS_PROT_READ, ZVFS_MAP_PRIVATE, other, 0, EBADF);
++	other = zvfs_open(MNT, ZVFS_O_RDONLY | ZVFS_O_DIRECTORY, 0);
++	zassert_true(other >= 0, "opening the directory failed: %d", errno);
++	expect_mmap_error(PAGE, ZVFS_PROT_READ, ZVFS_MAP_PRIVATE, other, 0, ENODEV);
++	zassert_ok(zvfs_close(other));
++	other = open_file(ZVFS_O_WRONLY);
++	expect_mmap_error(PAGE, ZVFS_PROT_READ, ZVFS_MAP_PRIVATE, other, 0, EACCES);
++	zassert_ok(zvfs_close(other));
++	other = open_file(ZVFS_O_RDONLY);
++	expect_mmap_error(PAGE, RW, ZVFS_MAP_SHARED, other, 0, EACCES);
++	p = map(PAGE, RW, ZVFS_MAP_PRIVATE, other, 0);
++	zassert_ok(zvfs_munmap(p, PAGE));
++	zassert_ok(zvfs_close(other));
++
++	/* anonymous: zero-filled, writable, independent */
++	p = map(2 * PAGE, RW, ZVFS_MAP_PRIVATE | ZVFS_MAP_ANONYMOUS, -1, 0);
++	q = map(PAGE, RW, ZVFS_MAP_SHARED | ZVFS_MAP_ANONYMOUS, -1, 0);
++	for (size_t i = 0; i < 2 * PAGE; ++i) {
++		zassert_equal(p[i], 0, "anonymous page not zero at %zu", i);
++	}
++	p[0] = 0x11;
++	p[2 * PAGE - 1] = 0x22;
++	q[0] = 0x33;
++	zassert_equal(p[0], 0x11);
++	zassert_equal(p[2 * PAGE - 1], 0x22);
++	zassert_equal(q[0], 0x33);
++	zassert_ok(zvfs_munmap(q, PAGE));
++	zassert_ok(zvfs_munmap(p, 2 * PAGE));
++
++	/* private file mapping: the file's contents, modifications stay private */
++	p = map(FILE_SPAN, RW, ZVFS_MAP_PRIVATE, fd, 0);
++	expect_mapped_file(p, 0, FILE_SIZE);
++	for (size_t i = FILE_SIZE; i < FILE_SPAN; ++i) {
++		zassert_equal(p[i], 0, "byte %zu past the end of the file is 0x%02x", i, p[i]);
++	}
++	p[0] = (uint8_t)~file_byte(0);
++	zassert_ok(zvfs_msync(p, FILE_SPAN, ZVFS_MS_SYNC));
++	expect_file_byte(fd, 0, file_byte(0));
++	zassert_ok(zvfs_munmap(p, FILE_SPAN));
++	expect_file_byte(fd, 0, file_byte(0));
++
++	/* shared file mapping: modifications reach the file when synchronized */
++	p = map(FILE_SPAN, RW, ZVFS_MAP_SHARED, fd, 0);
++	expect_mapped_file(p, 0, FILE_SIZE);
++	p[0] = (uint8_t)~file_byte(0);
++	p[FILE_SIZE - 1] = (uint8_t)~file_byte(FILE_SIZE - 1);
++	p[FILE_SIZE] = 0x5a;
++	zassert_ok(zvfs_msync(p, FILE_SPAN, ZVFS_MS_SYNC));
++	expect_file_byte(fd, 0, (uint8_t)~file_byte(0));
++	expect_file_byte(fd, FILE_SIZE - 1, (uint8_t)~file_byte(FILE_SIZE - 1));
++	expect_file_byte(fd, 1, file_byte(1));
++	{
++		struct zvfs_stat st;
++
++		/* writes past the end of the file do not grow it */
++		zassert_ok(zvfs_fstat(fd, &st));
++		zassert_equal((size_t)st.size, FILE_SIZE);
++	}
++	p[0] = file_byte(0);
++	p[FILE_SIZE - 1] = file_byte(FILE_SIZE - 1);
++	zassert_ok(zvfs_munmap(p, FILE_SPAN));
++	expect_file_byte(fd, 0, file_byte(0));
++
++	/* an offset */
++	p = map(PAGE, ZVFS_PROT_READ, ZVFS_MAP_SHARED, fd, PAGE);
++	expect_mapped_file(p, PAGE, PAGE);
++	zassert_ok(zvfs_munmap(p, PAGE));
++
++	/* the mapping keeps the file open after its descriptor is closed */
++	other = open_file(ZVFS_O_RDWR);
++	p = map(PAGE, RW, ZVFS_MAP_SHARED, other, 0);
++	zassert_ok(zvfs_close(other));
++	expect_mapped_file(p, 0, PAGE);
++	p[2] = (uint8_t)~file_byte(2);
++	zassert_ok(zvfs_msync(p, PAGE, ZVFS_MS_SYNC));
++	zassert_ok(zvfs_munmap(p, PAGE));
++	expect_file_byte(fd, 2, (uint8_t)~file_byte(2));
++	write_file_byte(fd, 2, file_byte(2));
++
++	zassert_ok(zvfs_close(fd));
++}
++
++/*
++ * An object that owns its pages: mapped in place, so every mapping of it
++ * aliases the same memory, and kept open by its mappings.
++ */
++struct page_obj {
++	uint8_t mem[PAGE];
++	int closed;
++};
++
++static struct page_obj pobj __aligned(PAGE);
++
++static ssize_t pobj_read(void *obj, void *buf, size_t sz, size_t off)
++{
++	struct page_obj *o = obj;
++
++	sz = (off >= sizeof(o->mem)) ? 0 : MIN(sz, sizeof(o->mem) - off);
++	memcpy(buf, &o->mem[off], sz);
++
++	return sz;
++}
++
++static ssize_t pobj_write(void *obj, const void *buf, size_t sz, size_t off)
++{
++	struct page_obj *o = obj;
++
++	sz = (off >= sizeof(o->mem)) ? 0 : MIN(sz, sizeof(o->mem) - off);
++	memcpy(&o->mem[off], buf, sz);
++
++	return sz;
++}
++
++static int pobj_close(void *obj)
++{
++	((struct page_obj *)obj)->closed++;
++
++	return 0;
++}
++
++static int pobj_ioctl(void *obj, unsigned int request, va_list args)
++{
++	struct page_obj *o = obj;
++
++	switch (request) {
++	case ZFD_IOCTL_MMAP: {
++		size_t off = va_arg(args, size_t);
++		size_t len = va_arg(args, size_t);
++		void **addr = va_arg(args, void **);
++
++		if ((off > sizeof(o->mem)) || (len > sizeof(o->mem) - off)) {
++			errno = ENXIO;
++			return -1;
++		}
++		*addr = &o->mem[off];
++		return 0;
++	}
++	case ZFD_IOCTL_STAT: {
++		struct zvfs_stat *st = va_arg(args, struct zvfs_stat *);
++
++		*st = (struct zvfs_stat){.size = sizeof(o->mem), .mode = ZVFS_MODE_IFSHM};
++		return 0;
++	}
++	default:
++		errno = EOPNOTSUPP;
++		return -1;
++	}
++}
++
++static const struct fd_op_vtable pobj_vtable = {
++	.read_offs = pobj_read,
++	.write_offs = pobj_write,
++	.close = pobj_close,
++	.ioctl = pobj_ioctl,
++};
++
++ZTEST(zvfs_mmap, test_zvfs_mmap_object)
++{
++	int fd;
++	uint8_t *p;
++	uint8_t *q;
++
++	memset(&pobj, 0, sizeof(pobj));
++	fd = zvfs_reserve_fd();
++	zassert_true(fd >= 0);
++	zvfs_finalize_typed_fd(fd, &pobj, &pobj_vtable, ZVFS_MODE_IFSHM);
++
++	/* out of the object's range */
++	expect_mmap_error(PAGE, RW, ZVFS_MAP_SHARED, fd, PAGE, ENXIO);
++
++	/* two mappings of the object alias its page */
++	p = map(PAGE, RW, ZVFS_MAP_SHARED, fd, 0);
++	q = map(PAGE, RW, ZVFS_MAP_SHARED, fd, 0);
++	zassert_equal(p, pobj.mem, "not mapped in place");
++	zassert_equal(q, pobj.mem, "not mapped in place");
++	p[1] = 0x77;
++	zassert_equal(q[1], 0x77);
++	zassert_equal(pobj.mem[1], 0x77);
++
++	/* the object stays open while mapped */
++	zassert_ok(zvfs_close(fd));
++	zassert_equal(pobj.closed, 0, "closed while mapped");
++
++	/* both mappings share the address, so unmapping it releases both and closes the object */
++	zassert_ok(zvfs_munmap(p, PAGE));
++	zassert_equal(pobj.closed, 1, "not closed with the last mapping");
++	zassert_ok(zvfs_munmap(q, PAGE));
++	zassert_equal(pobj.closed, 1);
++}
++
++ZTEST_USER(zvfs_mmap, test_zvfs_munmap)
++{
++	int fd = open_file(ZVFS_O_RDWR);
++	uint8_t *p;
++
++	p = map(2 * PAGE, RW, ZVFS_MAP_PRIVATE | ZVFS_MAP_ANONYMOUS, -1, 0);
++
++	errno = 0;
++	zassert_equal(zvfs_munmap(p, 0), -1);
++	zassert_equal(errno, EINVAL);
++	errno = 0;
++	zassert_equal(zvfs_munmap(p + 1, PAGE), -1);
++	zassert_equal(errno, EINVAL);
++
++	/* part of a mapping is not supported */
++	errno = 0;
++	zassert_equal(zvfs_munmap(p, PAGE), -1);
++	zassert_equal(errno, EINVAL);
++	p[0] = 1;
++
++	zassert_ok(zvfs_munmap(p, 2 * PAGE));
++	/* a range with no mapping in it is not an error */
++	zassert_ok(zvfs_munmap(p, 2 * PAGE));
++
++	/* unmapping a shared mapping writes its modifications back */
++	p = map(PAGE, RW, ZVFS_MAP_SHARED, fd, 0);
++	p[3] = (uint8_t)~file_byte(3);
++	zassert_ok(zvfs_munmap(p, PAGE));
++	expect_file_byte(fd, 3, (uint8_t)~file_byte(3));
++	write_file_byte(fd, 3, file_byte(3));
++
++	/* released mappings free their records */
++	for (int i = 0; i < 2 * CONFIG_ZVFS_MMAP_MAX; ++i) {
++		p = map(PAGE, RW, ZVFS_MAP_PRIVATE | ZVFS_MAP_ANONYMOUS, -1, 0);
++		p[0] = (uint8_t)i;
++		zassert_ok(zvfs_munmap(p, PAGE));
++	}
++
++	zassert_ok(zvfs_close(fd));
++}
++
++ZTEST_USER(zvfs_mmap, test_zvfs_msync)
++{
++	int fd = open_file(ZVFS_O_RDWR);
++	uint8_t *p;
++	uint8_t b;
++
++	p = map(PAGE, RW, ZVFS_MAP_PRIVATE | ZVFS_MAP_ANONYMOUS, -1, 0);
++	errno = 0;
++	zassert_equal(zvfs_msync(p, PAGE, 0x80), -1);
++	zassert_equal(errno, EINVAL);
++	errno = 0;
++	zassert_equal(zvfs_msync(p, PAGE, ZVFS_MS_SYNC | ZVFS_MS_ASYNC), -1);
++	zassert_equal(errno, EINVAL);
++	errno = 0;
++	zassert_equal(zvfs_msync(p + 1, PAGE, ZVFS_MS_SYNC), -1);
++	zassert_equal(errno, EINVAL);
++	zassert_ok(zvfs_msync(p, 0, ZVFS_MS_SYNC));
++	zassert_ok(zvfs_munmap(p, PAGE));
++	errno = 0;
++	zassert_equal(zvfs_msync(p, PAGE, ZVFS_MS_SYNC), -1);
++	zassert_equal(errno, ENOMEM);
++
++	/* synchronous and asynchronous write-back of the requested range */
++	p = map(2 * PAGE, RW, ZVFS_MAP_SHARED, fd, 0);
++	p[PAGE + 7] = (uint8_t)~file_byte(PAGE + 7);
++	zassert_ok(zvfs_msync(p + PAGE, PAGE, ZVFS_MS_SYNC));
++	expect_file_byte(fd, PAGE + 7, (uint8_t)~file_byte(PAGE + 7));
++	p[PAGE + 7] = file_byte(PAGE + 7);
++	zassert_ok(zvfs_msync(p, 2 * PAGE, ZVFS_MS_ASYNC));
++	expect_file_byte(fd, PAGE + 7, file_byte(PAGE + 7));
++
++	if (IS_ENABLED(CONFIG_ZVFS_MMAP_DIRTY_TRACK)) {
++		/* only the page modified through the mapping is written back */
++		b = (uint8_t)~file_byte(PAGE + 3);
++		write_file_byte(fd, PAGE + 3, b);
++		p[5] = (uint8_t)~file_byte(5);
++		zassert_ok(zvfs_msync(p, 2 * PAGE, ZVFS_MS_SYNC));
++		expect_file_byte(fd, 5, (uint8_t)~file_byte(5));
++		expect_file_byte(fd, PAGE + 3, b);
++
++		/* a page written back is tracked again */
++		p[5] = file_byte(5);
++		p[PAGE + 9] = (uint8_t)~file_byte(PAGE + 9);
++		zassert_ok(zvfs_msync(p, 2 * PAGE, ZVFS_MS_SYNC));
++		expect_file_byte(fd, 5, file_byte(5));
++		expect_file_byte(fd, PAGE + 9, (uint8_t)~file_byte(PAGE + 9));
++		p[PAGE + 9] = file_byte(PAGE + 9);
++		zassert_ok(zvfs_msync(p, 2 * PAGE, ZVFS_MS_SYNC));
++		write_file_byte(fd, PAGE + 3, file_byte(PAGE + 3));
++	}
++	zassert_ok(zvfs_munmap(p, 2 * PAGE));
++
++	/* invalidation re-reads the pages from the file */
++	p = map(PAGE, ZVFS_PROT_READ, ZVFS_MAP_SHARED, fd, 0);
++	zassert_equal(p[9], file_byte(9));
++	b = (uint8_t)~file_byte(9);
++	write_file_byte(fd, 9, b);
++	zassert_ok(zvfs_msync(p, PAGE, ZVFS_MS_INVALIDATE));
++	zassert_equal(p[9], b);
++	zassert_ok(zvfs_msync(p, PAGE, ZVFS_MS_SYNC | ZVFS_MS_INVALIDATE));
++	zassert_equal(p[8], file_byte(8));
++	zassert_ok(zvfs_munmap(p, PAGE));
++	write_file_byte(fd, 9, file_byte(9));
++
++	zassert_ok(zvfs_close(fd));
++}
++
++ZTEST_USER(zvfs_mmap, test_zvfs_mprotect)
++{
++	int fd = open_file(ZVFS_O_RDONLY);
++	uint8_t *p;
++
++	p = map(2 * PAGE, RW, ZVFS_MAP_PRIVATE | ZVFS_MAP_ANONYMOUS, -1, 0);
++	errno = 0;
++	zassert_equal(zvfs_mprotect(p + 1, PAGE, ZVFS_PROT_READ), -1);
++	zassert_equal(errno, EINVAL);
++	errno = 0;
++	zassert_equal(zvfs_mprotect(p, PAGE, 0x80), -1);
++	zassert_equal(errno, EINVAL);
++	errno = 0;
++	zassert_equal(zvfs_mprotect(p, 2 * PAGE, ZVFS_PROT_WRITE | ZVFS_PROT_EXEC), -1);
++	zassert_equal(errno, ENOTSUP);
++	/* part of a mapping is not supported */
++	errno = 0;
++	zassert_equal(zvfs_mprotect(p, PAGE, ZVFS_PROT_READ), -1);
++	zassert_equal(errno, ENOTSUP);
++
++	/* transitions */
++	p[0] = 0x11;
++	zassert_ok(zvfs_mprotect(p, 2 * PAGE, ZVFS_PROT_READ));
++	zassert_equal(p[0], 0x11);
++	zassert_ok(zvfs_mprotect(p, 2 * PAGE, ZVFS_PROT_NONE));
++	zassert_ok(zvfs_mprotect(p, 2 * PAGE, RW));
++	p[0] = 0x22;
++	zassert_equal(p[0], 0x22);
++	zassert_ok(zvfs_munmap(p, 2 * PAGE));
++
++	errno = 0;
++	zassert_equal(zvfs_mprotect(p, 2 * PAGE, ZVFS_PROT_READ), -1);
++	zassert_equal(errno, ENOMEM);
++
++	/* a shared mapping of a read-only file cannot become writable */
++	p = map(PAGE, ZVFS_PROT_READ, ZVFS_MAP_SHARED, fd, 0);
++	errno = 0;
++	zassert_equal(zvfs_mprotect(p, PAGE, RW), -1);
++	zassert_equal(errno, EACCES);
++	zassert_ok(zvfs_munmap(p, PAGE));
++
++	zassert_ok(zvfs_close(fd));
++}
++
++/* results of the mapper thread, checked by the test: a non-test thread must not assert */
++static ZTEST_BMEM int mapper_mapped;
++static ZTEST_BMEM int mapper_extra_ret;
++static ZTEST_BMEM int mapper_extra_errno;
++
++static void mapper(void *p1, void *p2, void *p3)
++{
++	void *p = NULL;
++
++	ARG_UNUSED(p1);
++	ARG_UNUSED(p2);
++	ARG_UNUSED(p3);
++
++	/* take every record, then exit without unmapping */
++	mapper_mapped = 0;
++	for (int i = 0; i < CONFIG_ZVFS_MMAP_MAX; ++i) {
++		if (zvfs_mmap(PAGE, RW, ZVFS_MAP_PRIVATE | ZVFS_MAP_ANONYMOUS, -1, 0, &p) != 0) {
++			break;
++		}
++		((uint8_t *)p)[0] = (uint8_t)i;
++		mapper_mapped++;
++	}
++	errno = 0;
++	mapper_extra_ret = zvfs_mmap(PAGE, RW, ZVFS_MAP_PRIVATE | ZVFS_MAP_ANONYMOUS, -1, 0, &p);
++	mapper_extra_errno = errno;
++}
++
++static K_THREAD_STACK_DEFINE(mapper_stack, 4096);
++static struct k_thread mapper_thread;
++
++/* the mappings of a thread are released when it exits */
++ZTEST(zvfs_mmap, test_zvfs_mmap_owner_exit)
++{
++	uint32_t opts = IS_ENABLED(CONFIG_USERSPACE) ? (K_USER | K_INHERIT_PERMS) : 0;
++	uint8_t *p;
++
++	k_thread_create(&mapper_thread, mapper_stack, K_THREAD_STACK_SIZEOF(mapper_stack), mapper,
++			NULL, NULL, NULL, K_PRIO_PREEMPT(0), opts, K_NO_WAIT);
++	zassert_ok(k_thread_join(&mapper_thread, K_SECONDS(5)));
++	zassert_equal(mapper_mapped, CONFIG_ZVFS_MMAP_MAX, "only %d of %d mappings", mapper_mapped,
++		      CONFIG_ZVFS_MMAP_MAX);
++	zassert_equal(mapper_extra_ret, -1, "a mapping beyond the pool succeeded");
++	zassert_equal(mapper_extra_errno, ENOMEM);
++
++	/* the next mapping operation releases them */
++	p = map(PAGE, RW, ZVFS_MAP_PRIVATE | ZVFS_MAP_ANONYMOUS, -1, 0);
++	zassert_equal(p[0], 0);
++	zassert_ok(zvfs_munmap(p, PAGE));
++}
++
++/* a write through a read-only mapping faults */
++ZTEST_USER(zvfs_mmap, test_zvfs_mmap_fault)
++{
++	volatile uint8_t *p;
++
++	if (!IS_ENABLED(CONFIG_MMU) && !IS_ENABLED(CONFIG_USERSPACE)) {
++		ztest_test_skip();
++	}
++
++	p = map(PAGE, ZVFS_PROT_READ, ZVFS_MAP_PRIVATE | ZVFS_MAP_ANONYMOUS, -1, 0);
++	zassert_equal(p[0], 0);
++
++	ztest_set_fault_valid(true);
++	p[0] = 1;
++	ztest_test_fail();
++}
++
++static void file_reset(void)
++{
++	uint8_t buf[64];
++	int fd;
++
++	(void)zvfs_unlink(TFILE);
++	fd = zvfs_open(TFILE, ZVFS_O_WRONLY | ZVFS_O_CREAT | ZVFS_O_TRUNC, 0600);
++	zassert_true(fd >= 0, "creating %s failed: %d", TFILE, errno);
++	for (size_t pos = 0; pos < FILE_SIZE; pos += sizeof(buf)) {
++		size_t n = MIN(sizeof(buf), FILE_SIZE - pos);
++
++		for (size_t i = 0; i < n; ++i) {
++			buf[i] = file_byte(pos + i);
++		}
++		zassert_equal(zvfs_write(fd, buf, n), (ssize_t)n);
++	}
++	zassert_ok(zvfs_close(fd));
++}
++
++static void *suite_setup(void)
++{
++	zassert_ok(fs_mount(&fs_mnt));
++
++	return NULL;
++}
++
++static void suite_before(void *arg)
++{
++	ARG_UNUSED(arg);
++	file_reset();
++}
++
++static void suite_teardown(void *arg)
++{
++	ARG_UNUSED(arg);
++	(void)zvfs_unlink(TFILE);
++	(void)fs_unmount(&fs_mnt);
++}
++
++ZTEST_SUITE(zvfs_mmap, NULL, suite_setup, suite_before, NULL, suite_teardown);
+diff --git a/tests/lib/zvfs_mmap/testcase.yaml b/tests/lib/zvfs_mmap/testcase.yaml
+new file mode 100644
+--- /dev/null
++++ b/tests/lib/zvfs_mmap/testcase.yaml
+@@ -0,0 +1,22 @@
++common:
++  ignore_faults: true
++  tags:
++    - zvfs
++    - fatfs
++  modules:
++    - fatfs
++  min_ram: 128
++  platform_key:
++    - arch
++    - simulation
++tests:
++  libraries.zvfs_mmap: {}
++  libraries.zvfs_mmap.userspace:
++    filter: CONFIG_ARCH_HAS_USERSPACE
++    tags: userspace
++    platform_exclude:
++      # 8-region MPU: one domain slot is left for mappings, the suite holds several at once
++      - mps2/an385
++    extra_configs:
++      - CONFIG_TEST_USERSPACE=y
++      - CONFIG_USERSPACE=y
