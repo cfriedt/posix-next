@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024, Tenstorrent AI ULC
+ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -8,87 +8,54 @@
 #include <stddef.h>
 #include <sys/mman.h>
 #include <sys/types.h>
-#include <unistd.h>
 
-#include <kernel_arch_interface.h>
-#include <zephyr/kernel.h>
-#include <zephyr/kernel/mm.h>
-#include <zephyr/sys/fdtable.h>
 #include <zephyr/sys/zvfs.h>
 
-#define _page_size COND_CODE_1(CONFIG_MMU, (CONFIG_MMU_PAGE_SIZE), (CONFIG_POSIX_PAGE_SIZE))
+#include "posix_mman.h"
 
-static int p2z(int prot, int pflags)
+/* POSIX mapping flags to ZVFS_MAP_*, or -1 for an unknown bit */
+static int flags_to_zvfs(int flags)
 {
-	bool rw = (prot & PROT_WRITE) != 0;
-	bool ex = (prot & PROT_EXEC) != 0;
-	bool fixed = (pflags & MAP_FIXED) != 0;
-	bool shared = (pflags & MAP_SHARED) != 0;
-	bool private = (pflags & MAP_PRIVATE) != 0;
+	int zflags = 0;
 
-	if (!(shared ^ private)) {
+	if ((flags & ~(MAP_SHARED | MAP_PRIVATE | MAP_ANONYMOUS)) != 0) {
 		return -1;
 	}
+	if ((flags & MAP_SHARED) != 0) {
+		zflags |= ZVFS_MAP_SHARED;
+	}
+	if ((flags & MAP_PRIVATE) != 0) {
+		zflags |= ZVFS_MAP_PRIVATE;
+	}
+	if ((flags & MAP_ANONYMOUS) != 0) {
+		zflags |= ZVFS_MAP_ANONYMOUS;
+	}
 
-	return (rw * K_MEM_PERM_RW) | (ex * K_MEM_PERM_EXEC) | (fixed * K_MEM_DIRECT_MAP);
+	return zflags;
 }
 
-static inline int zvfs_ioctl_wrap(int fd, int cmd, ...)
-{
-	int ret;
-	va_list args;
-
-	va_start(args, cmd);
-	ret = zvfs_ioctl(fd, cmd, args);
-	va_end(args);
-
-	return ret;
-}
-
-void *mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off)
+void *mmap(void *addr, size_t len, int prot, int flags, int fildes, off_t off)
 {
 	void *virt;
-	uintptr_t phys;
-	int zflags = p2z(prot, flags);
+	int zprot;
+	int zflags;
 
-	if ((len == 0) || (zflags == -1)) {
-		errno = EINVAL;
-		return MAP_FAILED;
-	}
+	/* the placement hint is not honoured and fixed placement is not supported */
+	ARG_UNUSED(addr);
 
-	if ((flags & MAP_ANONYMOUS) != 0) {
-		/* force behaviour to be in-line with Linux, fd is ignored */
-		fd = -1;
-	}
-
-	if (fd > 0) {
-		/* non-anonymous mapping */
-		virt = NULL;
-		if (zvfs_ioctl_wrap(fd, ZFD_IOCTL_MMAP, addr, len, prot, flags, off, &virt) < 0) {
-			return MAP_FAILED;
-		}
-
-		return virt;
-	}
-
-	if (!IS_ENABLED(CONFIG_MMU)) {
+	if ((flags & MAP_FIXED) != 0) {
 		errno = ENOTSUP;
 		return MAP_FAILED;
 	}
 
-	if ((flags & MAP_FIXED) == 0) {
-		/* anonymous mapping */
-		virt = k_mem_map(len, zflags);
-	} else {
-		/* a physical mapping. Care should be taken not to map the same page twice */
-		virt = NULL;
-		phys = POINTER_TO_UINT(addr);
-		k_mem_map_phys_bare((uint8_t **)&virt, phys, (size_t)ROUND_UP(len, _page_size),
-				    zflags);
+	zprot = posix_prot_to_zvfs(prot);
+	zflags = flags_to_zvfs(flags);
+	if ((zprot < 0) || (zflags < 0) || (off < 0)) {
+		errno = EINVAL;
+		return MAP_FAILED;
 	}
 
-	if (virt == NULL) {
-		errno = ENOMEM;
+	if (zvfs_mmap(len, zprot, zflags, fildes, (size_t)off, &virt) < 0) {
 		return MAP_FAILED;
 	}
 
@@ -97,31 +64,26 @@ void *mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off)
 
 int msync(void *addr, size_t length, int flags)
 {
-	ARG_UNUSED(addr);
-	ARG_UNUSED(length);
-	ARG_UNUSED(flags);
+	int zflags = 0;
 
-	return 0;
+	if ((flags & ~(MS_SYNC | MS_ASYNC | MS_INVALIDATE)) != 0) {
+		errno = EINVAL;
+		return -1;
+	}
+	if ((flags & MS_SYNC) != 0) {
+		zflags |= ZVFS_MS_SYNC;
+	}
+	if ((flags & MS_ASYNC) != 0) {
+		zflags |= ZVFS_MS_ASYNC;
+	}
+	if ((flags & MS_INVALIDATE) != 0) {
+		zflags |= ZVFS_MS_INVALIDATE;
+	}
+
+	return zvfs_msync(addr, length, zflags);
 }
 
 int munmap(void *addr, size_t len)
 {
-	if (len == 0) {
-		errno = EINVAL;
-		return -1;
-	}
-
-	if (!IS_ENABLED(CONFIG_MMU)) {
-		/* cannot munmap without an MPU */
-		errno = ENOTSUP;
-		return -1;
-	}
-
-	uintptr_t phys = 0;
-
-	if (arch_page_phys_get(addr, &phys) == 0) {
-		k_mem_unmap(addr, ROUND_UP(len, _page_size));
-	}
-
-	return 0;
+	return zvfs_munmap(addr, len);
 }
