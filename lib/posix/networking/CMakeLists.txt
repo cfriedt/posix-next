@@ -50,6 +50,8 @@ if(NOT CONFIG_TC_PROVIDES_POSIX_NETWORKING)
   )
 
   # Share storage with Zephyr's net_in6addr_* rather than defining duplicate
-  # POSIX in6addr_any / in6addr_loopback objects (see in6addr_alias.ld).
+  # POSIX in6addr_any / in6addr_loopback objects (see in6addr_alias.ld). The aliased
+  # constants must survive section garbage collection even when nothing else names them.
   zephyr_linker_sources(SECTIONS in6addr_alias.ld)
+  zephyr_ld_options(-Wl,--undefined=net_in6addr_any -Wl,--undefined=net_in6addr_loopback)
 endif()
