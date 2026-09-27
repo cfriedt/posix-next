@@ -1,6 +1,5 @@
 /*
- * Copyright (c) 2024, Tenstorrent AI ULC
- *
+ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -40,12 +39,21 @@
 /** @brief Anonymous mapping; fd argument is ignored. @ingroup posix_option_group_mapped_files */
 #define MAP_ANONYMOUS 0x20
 
-/** @brief Flush modified pages to the underlying file synchronously. @ingroup posix_option_group_mapped_files */
-#define MS_SYNC       0x0
-/** @brief Schedule writes; return immediately. @ingroup posix_option_group_mapped_files */
+/**
+ * @brief Schedule writes; return immediately.
+ * @ingroup posix_option_group_mapped_files
+ */
 #define MS_ASYNC      0x1
-/** @brief Invalidate cached data so subsequent reads reflect the file. @ingroup posix_option_group_mapped_files */
+/**
+ * @brief Invalidate cached data so subsequent reads reflect the file.
+ * @ingroup posix_option_group_mapped_files
+ */
 #define MS_INVALIDATE 0x2
+/**
+ * @brief Flush modified pages to the underlying file synchronously.
+ * @ingroup posix_option_group_mapped_files
+ */
+#define MS_SYNC       0x4
 
 /** @brief Value returned by mmap() on failure. @ingroup posix_option_group_mapped_files */
 #define MAP_FAILED ((void *)-1)
@@ -91,6 +99,17 @@ int mlockall(int flags);
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/mmap.html
  */
 void *mmap(void *addr, size_t len, int prot, int flags, int fildes, off_t off);
+
+/**
+ * @brief Change the protection of a memory mapping.
+ * @ingroup posix_option_group_memory_protection
+ * @param addr Base address of the region (must be page-aligned).
+ * @param len  Length of the region in bytes.
+ * @param prot New memory protection (PROT_* flags).
+ * @return 0 on success, or -1 with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/mprotect.html
+ */
+int mprotect(void *addr, size_t len, int prot);
 
 /**
  * @brief Synchronise a memory mapping with the underlying storage.

@@ -1,10 +1,8 @@
-# Copyright (c) 2024 BayLibre SAS
-#
+# SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
 # SPDX-License-Identifier: Apache-2.0
 
 config POSIX_PAGE_SIZE
 	hex
-	# TODO: something similar and arch-independent for MPUs
 	default MMU_PAGE_SIZE if MMU
 	default 0x40
 	help
@@ -12,9 +10,11 @@ config POSIX_PAGE_SIZE
 
 config POSIX_MAPPED_FILES
 	bool "POSIX memory-mapped files"
+	select ZVFS
+	select ZVFS_FDTABLE
+	select ZVFS_MMAP
 	help
 	  Select 'y' here and Zephyr will provide support for mmap() and munmap().
 
-	  Note: This feature depends on hardware MMU support. If the underlying platform does not
-	  support an MMU, then affected POSIX API functions may return -1 and set errno to ENOTSUP.
-
+	  Anonymous memory and files are mapped at the granularity of CONFIG_POSIX_PAGE_SIZE:
+	  the MMU page size, or 64 bytes when mappings are carved out of the kernel heap.
