@@ -14,8 +14,8 @@ target_sources(app PRIVATE
 )
 
 target_include_directories(app PRIVATE
-  ${ZEPHYR_POSIX_NEXT_MODULE_DIR}/lib/posix/options/timers
-  ${ZEPHYR_POSIX_NEXT_MODULE_DIR}/lib/posix/options/shared
+  ${ZEPHYR_POSIX_NEXT_MODULE_DIR}/lib/posix/timers
+  ${ZEPHYR_POSIX_NEXT_MODULE_DIR}/lib/posix/shared
 )
 
 target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)

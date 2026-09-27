@@ -125,6 +125,8 @@ struct ipv6_mreq {
 #define INADDR_ANY       ((in_addr_t)NET_INADDR_ANY)
 /** @brief IPv4 broadcast address. */
 #define INADDR_BROADCAST ((in_addr_t)NET_INADDR_BROADCAST)
+/** @brief IPv4 loopback address (127.0.0.1), in host byte order. */
+#define INADDR_LOOPBACK  ((in_addr_t)0x7f000001)
 
 /** @brief Maximum length of an IPv4 address string. */
 #define INET_ADDRSTRLEN NET_INET_ADDRSTRLEN
