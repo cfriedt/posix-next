@@ -2306,3 +2306,23 @@ patches:
       phys == virt. Follow the kernel's translation instead, one physically
       contiguous run at a time; memory the kernel does not map keeps its
       identity mapping, so device partitions are unchanged.
+  - path: zephyr/kernel-mm-write-fault-hook.patch
+    sha256sum: 4fc685d81bb753fbfb0c3c078e8a9854580371a07415e6f4feea6c30125c6b08
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-27
+    upstreamable: true
+    comments: |
+      Rebased onto v4.5.0-rc1, which no longer has the *_sched_locked heap and cleanup variants.
+      kernel: a hook for write faults on present pages, so a subsystem can
+      track modifications to pages it manages by write-protecting them.
+      Behind CONFIG_MEM_WRITE_FAULT_HOOK (ARCH_HAS_MEM_WRITE_FAULT, selected
+      by X86_MMU, ARM_MMU and RISCV_MMU) the x86, arm64 and riscv fault
+      handlers offer a write protection fault to z_mem_write_fault() before
+      treating it as fatal; a true return retries the access. The resolver
+      changes one page's protection in a memory domain through the new
+      arch_mem_domain_page_attr_set(): x86 applies the attributes to the
+      domain's tables and flushes the pages, arm64 privately maps the page at
+      the kernel's translation, riscv maps it into the domain's private
+      leaves and fences its ASID.
