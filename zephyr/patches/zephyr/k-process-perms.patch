@@ -15,7 +15,7 @@ diff --git a/include/zephyr/kernel/process.h b/include/zephyr/kernel/process.h
 diff --git a/include/zephyr/sys/internal/kobject_internal.h b/include/zephyr/sys/internal/kobject_internal.h
 --- a/include/zephyr/sys/internal/kobject_internal.h
 +++ b/include/zephyr/sys/internal/kobject_internal.h
-@@ -58,9 +58,16 @@ union k_object_data {
+@@ -55,9 +55,16 @@ union k_object_data {
   * @note This is an internal API. Do not use unless you are extending
   *       functionality in the Zephyr tree.
   */
@@ -264,7 +264,7 @@ diff --git a/kernel/userspace/userspace.c b/kernel/userspace/userspace.c
  
  	k_spinlock_key_t key = k_spin_lock(&lists_lock);
  
-@@ -710,7 +721,7 @@ void *z_impl_k_object_map_size(enum k_objects otype, size_t size)
+@@ -709,7 +720,7 @@ void *z_impl_k_object_map_size(enum k_objects otype, size_t size)
  
  	dyn->kobj.type = otype;
  	dyn->kobj.flags = K_OBJ_FLAG_ALLOC | K_OBJ_FLAG_MAP;
@@ -273,7 +273,7 @@ diff --git a/kernel/userspace/userspace.c b/kernel/userspace/userspace.c
  
  	K_SPINLOCK(&lists_lock) {
  		sys_dlist_append(&obj_list, &dyn->dobj_list);
-@@ -753,6 +764,15 @@ __weak void k_object_wordlist_foreach(_wordlist_cb_func_t func, void *context)
+@@ -752,6 +763,15 @@ __weak void k_object_wordlist_foreach(_wordlist_cb_func_t func, void *context)
  
  static unsigned int thread_index_get(struct k_thread *thread)
  {
@@ -289,7 +289,7 @@ diff --git a/kernel/userspace/userspace.c b/kernel/userspace/userspace.c
  	struct k_object *ko;
  
  	ko = k_object_find(thread);
-@@ -762,8 +782,43 @@ static unsigned int thread_index_get(struct k_thread *thread)
+@@ -761,8 +781,43 @@ static unsigned int thread_index_get(struct k_thread *thread)
  	}
  
  	return ko->data.thread_id;
@@ -333,7 +333,7 @@ diff --git a/kernel/userspace/userspace.c b/kernel/userspace/userspace.c
  
  /* the pool that drew an OWNED object releases its bookkeeping before the object goes */
  __weak void z_kobj_owner_release(struct k_object *ko, bool sched_locked)
-@@ -909,7 +964,7 @@ static void kobj_unref(struct k_object *ko, int index, bool sched_locked)
+@@ -908,7 +963,7 @@ static void kobj_unref(struct k_object *ko, int index, bool sched_locked)
  	k_spinlock_key_t key = k_spin_lock(&obj_lock);
  
  	if (index == KOBJ_UNREF_ALL) {
@@ -342,7 +342,7 @@ diff --git a/kernel/userspace/userspace.c b/kernel/userspace/userspace.c
  	} else if (index >= 0) {
  		sys_bitfield_clear_bit((mem_addr_t)&ko->perms, index);
  	}
-@@ -1150,11 +1205,16 @@ static void clear_perms_cb_locked(struct k_object *ko, void *ctx_ptr)
+@@ -1149,11 +1204,16 @@ static void clear_perms_cb_locked(struct k_object *ko, void *ctx_ptr)
   */
  void k_thread_perms_all_clear(struct k_thread *thread)
  {

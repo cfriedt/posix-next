@@ -1034,7 +1034,7 @@ diff --git a/kernel/userspace/userspace.c b/kernel/userspace/userspace.c
  	switch (otype) {
  	case K_OBJ_THREAD:
  		if (!thread_idx_alloc(&tidx)) {
-@@ -530,6 +558,7 @@ void k_object_free(void *obj)
+@@ -529,6 +557,7 @@ void k_object_free(void *obj)
  {
  	struct dyn_obj *dyn = NULL;
  	bool free_thread_idx = false;
@@ -1042,7 +1042,7 @@ diff --git a/kernel/userspace/userspace.c b/kernel/userspace/userspace.c
  	uintptr_t thread_idx = 0;
  
  	/* This function is intentionally not exposed to user mode.
-@@ -546,12 +575,22 @@ void k_object_free(void *obj)
+@@ -545,12 +574,22 @@ void k_object_free(void *obj)
  	dyn = dyn_object_find_locked(obj);
  
  	if (dyn != NULL) {
@@ -1065,7 +1065,7 @@ diff --git a/kernel/userspace/userspace.c b/kernel/userspace/userspace.c
  	}
  	k_spin_unlock(&lists_lock, key);
  
-@@ -564,47 +603,12 @@ void k_object_free(void *obj)
+@@ -563,47 +602,12 @@ void k_object_free(void *obj)
  	}
  
  	if (dyn != NULL) {
@@ -1117,7 +1117,7 @@ diff --git a/kernel/userspace/userspace.c b/kernel/userspace/userspace.c
  }
  
  struct k_object *k_object_find(const void *obj)
-@@ -648,6 +652,7 @@ void *z_impl_k_object_map_size(enum k_objects otype, size_t size)
+@@ -647,6 +651,7 @@ void *z_impl_k_object_map_size(enum k_objects otype, size_t size)
  {
  	switch (otype) {
  	case K_OBJ_THREAD_STACK_ELEMENT:
@@ -1125,7 +1125,7 @@ diff --git a/kernel/userspace/userspace.c b/kernel/userspace/userspace.c
  		break;
  	default:
  		LOG_WRN_ONCE("%s() does not support object type '%s'",
-@@ -690,7 +695,7 @@ void *z_impl_k_object_map_size(enum k_objects otype, size_t size)
+@@ -689,7 +694,7 @@ void *z_impl_k_object_map_size(enum k_objects otype, size_t size)
  #endif /* CONFIG_GEN_PRIV_STACKS */
  
  	dyn->kobj.type = otype;
@@ -1134,7 +1134,7 @@ diff --git a/kernel/userspace/userspace.c b/kernel/userspace/userspace.c
  	(void)memset(dyn->kobj.perms, 0, CONFIG_MAX_THREAD_BYTES);
  
  	K_SPINLOCK(&lists_lock) {
-@@ -745,35 +750,79 @@ static unsigned int thread_index_get(struct k_thread *thread)
+@@ -744,35 +749,79 @@ static unsigned int thread_index_get(struct k_thread *thread)
  	return ko->data.thread_id;
  }
  
@@ -1235,7 +1235,7 @@ diff --git a/kernel/userspace/userspace.c b/kernel/userspace/userspace.c
  	}
  
  	/* This object has no more references. Some objects may have
-@@ -783,10 +832,10 @@ static void unref_check(struct k_object *ko, uintptr_t index, bool locked)
+@@ -782,10 +831,10 @@ static void unref_check(struct k_object *ko, uintptr_t index, bool locked)
  	 */
  	switch (ko->type) {
  	case K_OBJ_MSGQ:
@@ -1248,7 +1248,7 @@ diff --git a/kernel/userspace/userspace.c b/kernel/userspace/userspace.c
  		break;
  	case K_OBJ_THREAD:
  		/* thread_idx_free() cannot be used here: it takes lists_lock,
-@@ -804,7 +853,7 @@ static void unref_check(struct k_object *ko, uintptr_t index, bool locked)
+@@ -803,7 +852,7 @@ static void unref_check(struct k_object *ko, uintptr_t index, bool locked)
  		 * explicitly here.
  		 */
  		if ((ko->flags & K_OBJ_FLAG_INITIALIZED) != 0U) {
@@ -1257,7 +1257,7 @@ diff --git a/kernel/userspace/userspace.c b/kernel/userspace/userspace.c
  		}
  		break;
  	default:
-@@ -812,14 +861,212 @@ static void unref_check(struct k_object *ko, uintptr_t index, bool locked)
+@@ -811,14 +860,212 @@ static void unref_check(struct k_object *ko, uintptr_t index, bool locked)
  		break;
  	}
  
@@ -1473,7 +1473,7 @@ diff --git a/kernel/userspace/userspace.c b/kernel/userspace/userspace.c
  static void wordlist_cb(struct k_object *ko, void *ctx_ptr)
  {
  	struct perm_ctx *ctx = (struct perm_ctx *)ctx_ptr;
-@@ -866,6 +1113,7 @@ void k_thread_perms_clear(struct k_object *ko, struct k_thread *thread)
+@@ -865,6 +1112,7 @@ void k_thread_perms_clear(struct k_object *ko, struct k_thread *thread)
  
  		unref_check(ko, index, false);
  		k_spin_unlock(&lists_lock, key);
@@ -1519,9 +1519,9 @@ diff --git a/lib/os/Kconfig b/lib/os/Kconfig
  rsource "Kconfig.atomics"
  rsource "Kconfig.cbprintf"
 +rsource "Kconfig.sys_thread"
+ rsource "Kconfig.sys_mutex"
  rsource "zvfs/Kconfig"
  rsource "cpu_load/Kconfig"
- 
 diff --git a/lib/os/Kconfig.sys_thread b/lib/os/Kconfig.sys_thread
 new file mode 100644
 --- /dev/null

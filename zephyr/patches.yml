@@ -729,8 +729,93 @@ patches:
       a registered kernel object, so every futex uses the hashed queues.
       This lets sys_thread_once() block waiters on the once word in every
       configuration instead of polling when userspace is disabled.
+  - path: zephyr/kernel-futex-wait-expected-atomic-val.patch
+    sha256sum: 42dbaad5b593cd34d11139d04ca6f6675dc1e534131f5d2c0c12c07b74d14443
+    module: zephyr
+    author: Christoph Busold
+    email: cbusold@qti.qualcomm.com
+    date: 2026-05-18
+    merge-pr: https://github.com/zephyrproject-rtos/zephyr/pull/108949
+    merge-status: false
+    comments: |
+      kernel: userspace: Change expected futex parameter to atomic_val_t
+      (zephyr#108949, RFC zephyr#117428). k_futex_wait() compared the
+      atomic_t futex word against an int, truncating 64-bit values at the
+      call boundary. Ported to the v4.4.1 layout (kernel/futex.c).
+  - path: zephyr/sys-mutex-based-on-k-futex.patch
+    sha256sum: f066ae07d51d97e8609e6027c208bc5bc0d8615a1b151a0b46ade418c1f38cec
+    module: zephyr
+    author: Christoph Busold
+    email: cbusold@qti.qualcomm.com
+    date: 2026-05-12
+    merge-pr: https://github.com/zephyrproject-rtos/zephyr/pull/108949
+    merge-status: false
+    comments: |
+      Rebased onto v4.5.0-rc1: sys_mutex sources live in kernel/userspace/ (mutex_kernel.c, mutex_futex.c)
+      and the implementation choice sits in kernel/userspace/Kconfig.
+      kernel: userspace: Implement sys_mutex based on k_futex (zephyr#108949).
+      Adds CONFIG_SYS_MUTEX_IMPL as a choice between the kernel-object-backed
+      sys_mutex and a futex-based one whose word holds the owner thread ID,
+      with lock, unlock and init out of line and a dedicated test suite.
+      Ported to the v4.4.1 layout: lib/os/mutex_kernel.c and
+      lib/os/mutex_futex.c, kernel/Kconfig, kernel/userspace.c, and
+      testcase.yaml instead of tests.yaml.
+  - path: zephyr/sys-mutex-options-and-prio-inherit.patch
+    sha256sum: 7ff50a274f12d22aa93ea740a212ecd02f1cbd837bf16861f8959a9bbf1efd79
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-14
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/k-mutex-nonrecursive.patch
+          - zephyr/kernel-futex-without-userspace.patch
+          - zephyr/kernel-futex-wait-expected-atomic-val.patch
+          - zephyr/sys-mutex-based-on-k-futex.patch
+    comments: |
+      Rebased onto v4.5.0-rc1: the unified sys_mutex lives in kernel/sys/mutex.c (built with
+      CONFIG_MULTITHREADING) and the kernel/userspace/ k_mutex- and futex-backed variants go away.
+      On top of zephyr#108949: keep one futex-backed sys_mutex instead of a
+      build-time choice of implementations, and select behaviour per object.
+      The lock word holds the classic unlocked/locked/contended state, with
+      the owner in a side field, so a K_MUTEX_NORMAL mutex never needs
+      k_current_get() on its fast path; sys_mutex_init_ext() takes the
+      K_MUTEX_* type and the new K_MUTEX_PRIO_INHERIT option, defined
+      beside the other K_MUTEX_* options. A
+      priority-inheritance mutex is backed by a kernel mutex that the kernel
+      associates with the address of the user object, never with its
+      contents, so neither kernel-mode nor user-mode callers act on anything
+      read from user memory; the backing mutexes come from a pool sized by
+      CONFIG_SYS_MUTEX_PRIO_INHERIT_MIN and _MAX. Like futex waiters, that
+      association is keyed by virtual address. Drop the sys_mutex kernel
+      object type and the sys_thread mutex and condvar pools: the C library
+      and POSIX layers build their mutexes on this one object.
+  - path: zephyr/sys-condvar.patch
+    sha256sum: f53c149a7423cd4178b8c07019bf7c8695d10c3a4b94f62bd16670fcda489ff6
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-14
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/sys-sem-track-blocked-waiters.patch
+          - zephyr/sys-mutex-options-and-prio-inherit.patch
+    comments: |
+      Rebased onto v4.5.0-rc1: the implementation lives in kernel/sys/condvar.c beside sys_mutex.
+      Add sys_condvar, the condition variable that pairs with sys_mutex: a
+      futex sequence word in user memory with the kernel-maintained waiter
+      count of every k_futex, so that a signal or broadcast with no waiter
+      costs no system call, a signal wakes exactly one blocked waiter, and a
+      woken waiter never touches the object again. Absolute timeouts are
+      measured against the clock the object was initialized with,
+      SYS_CLOCK_REALTIME by default. The C library's cnd_t and POSIX
+      pthread_cond_t are this object.
   - path: zephyr/k-obj-map-size.patch
-    sha256sum: 3ab89293ebbfab5d142c667424889f89e723f27c48f23f68e14b17abbe58c457
+    sha256sum: fd749c918b48fd4c319806b2fceff7a6ef3432c5a348abac7e51e2852b5e259c
     module: zephyr
     author: Chris Friedt
     email: chris@fr4.co
@@ -739,7 +824,7 @@ patches:
     comments: |
       provide a means of using k_mem_map() to map a thread stack instead of using the heap.
   - path: zephyr/sys-thread.patch
-    sha256sum: 5a70cf1b6eff636d7b5f99b1ead1a3fe4c05cde35554dbfcd1ee3aaecaa3b6f8
+    sha256sum: c001560b8f2b85cd8952ae6f6e8274ba86e9a1fb861722eadb1895c6402d8f76
     module: zephyr
     author: Chris Friedt
     email: chris@fr4.co
@@ -959,7 +1044,7 @@ patches:
       lib/os/zvfs/zvfs_fs.c (CONFIG_ZVFS_FS). Reserve fd table slots via
       CONFIG_ZVFS_RESERVE_STDIO_FDS and CONFIG_ZVFS_OPEN_ADD_SIZE_STDIO.
   - path: zephyr/zvfs-introduce-k-obj-file.patch
-    sha256sum: e71164df39d830e67527c70d86527047cb2e42cb1b0bf43e59d656aae6b36abd
+    sha256sum: 43931cfa7799c528ad4979b4338ee6d80d32ddb81c86a152a196fca5ae21fcdc
     module: zephyr
     author: Chris Friedt
     email: chris@fr4.co
@@ -1767,7 +1852,7 @@ patches:
       conversion rule and clock_settime() re-targeting. k_timer_start()
       remains the native tick-domain API.
   - path: zephyr/sys-timer.patch
-    sha256sum: 212390734498ad3f8efb466feae25aba5fc3b62080ef52787f057af2145b2e46
+    sha256sum: 5296beb5c605a1bf53f42a38ae12f5713a03f8d490f2cba0e45eac3383b33605
     module: zephyr
     author: Chris Friedt
     email: chris@fr4.co
@@ -2015,7 +2100,7 @@ patches:
       SYS_ELASTIPOOL_DEFINE storage-sizing case its own per-unit ZTEST.
       A follow-up file because the introducing patch predates this branch.
   - path: zephyr/k-msgq-prio.patch
-    sha256sum: 3e773118c9808216d394ac1e4103ced52c65731508338779f4d0a13a0a16f9ac
+    sha256sum: f53fa5313eb7a20d65d5c52d683cd6695213c4667acfa46df69c16446ccfa7cb
     module: zephyr
     author: Chris Friedt
     email: chris@fr4.co
@@ -2049,7 +2134,7 @@ patches:
       priority ordering, variable-length, error, blocking, purge, and ISR
       sections.
   - path: zephyr/k-msgq-notify.patch
-    sha256sum: 5188b26f6ef1899669509706837b3e84d3044bd3559968baf0ef0d84f72a7421
+    sha256sum: 0fdfca14345013fb8511b32bd843777d41d60cc99120e1a55fd1e5a54d0df33a
     module: zephyr
     author: Chris Friedt
     email: chris@fr4.co
@@ -2095,7 +2180,7 @@ patches:
       consumption, non-empty no-fire, signo-0, EBUSY/EINVAL/ENOTSUP
       errors, disarm, and ISR-generation sections.
   - path: zephyr/sys-msgq.patch
-    sha256sum: 39c3ba8e6235bf2fafa5d94f0ce11f4fdc451dc794689d2f3aa1204c0aa4bbd5
+    sha256sum: d835f8aad89abb2a4b2ee84d5eba234e7253cb81e8e5d88e77f6a2ff09eeff1f
     module: zephyr
     author: Chris Friedt
     email: chris@fr4.co
@@ -2175,7 +2260,7 @@ patches:
       Compare triggered work by the thread that will run it, its work
       queue thread, and treat a queue without one as lowest priority.
   - path: zephyr/sys-aio.patch
-    sha256sum: 43e9beba50fcff80e6c21031421570eba72382a7a76b42623f3bc1a9e265b002
+    sha256sum: 34cecb187978eca92ff0b7a1dd4a60d99fd85d0e7911a4b56de8aa0f5facc29d
     module: zephyr
     author: Chris Friedt
     email: chris@fr4.co
@@ -2613,7 +2698,7 @@ patches:
       create, exclusive, truncate, read/write, unlink semantics, pool
       exhaustion and the aliasing mapping in kernel and user mode.
   - path: zephyr/k-process-core.patch
-    sha256sum: 3dd8ee24618e3870f7b2ba90f6d70c430b916b5eea29e5befc8c8a9166007531
+    sha256sum: 9d028bfde614e3a3f8b958f3536f25d4d75b2587b212959368903e8aee531765
     module: zephyr
     author: Chris Friedt
     email: chris@fr4.co
@@ -2649,7 +2734,7 @@ patches:
       refuses to free a live or unreaped record - its memory is
       reclaimed at reap.
   - path: zephyr/k-process-exit-wait.patch
-    sha256sum: e93698ed06ca2b48599adc7f1b58022c4859884d3bea81b66028f20199aca58f
+    sha256sum: 8339d961c048a05ddeadf7adec780e00c65b89dc8636be195c084e781ffbb8be
     module: zephyr
     author: Chris Friedt
     email: chris@fr4.co
@@ -2818,7 +2903,7 @@ patches:
       thread/stack objects only when they are supplied; the pool path needs
       no caller objects.
   - path: zephyr/sys-clone-sigmask.patch
-    sha256sum: ac424db48714d5cb89bc7f0f39648f3fc320a5c2c7dfb627be6bcaf2370bf16a
+    sha256sum: 60902e89d36c15322c99e84eeee6d2b1b607321a033a7586548666c75f656368
     module: zephyr
     author: Chris Friedt
     email: chris@fr4.co
@@ -2838,7 +2923,7 @@ patches:
       field with the same rule. This gives posix_spawn() a
       caller-mode-independent way to implement POSIX_SPAWN_SETSIGMASK.
   - path: zephyr/k-process-perms.patch
-    sha256sum: 89579dbf91a7117ff03844224ebaacb888dbe84544746382b6f9c05d2dba2789
+    sha256sum: 8230bb25cecf9b10c07c8d341b3826cea9c22b5d41614ca6efc6195bbe03107a
     module: zephyr
     author: Chris Friedt
     email: chris@fr4.co
@@ -2873,7 +2958,7 @@ patches:
       process never parents created threads, so a user thread it created would
       land in init without permission on the objects its creator allocated.
   - path: zephyr/k-process-prune.patch
-    sha256sum: 37d7713f7649d2a7efe00526573d517d99712a73c6a3af4a8d5597308acb26a4
+    sha256sum: da5e6a0f51d23a6025a92b1041c1826e74b7229573d03a1cd26719d63369824f
     module: zephyr
     author: Chris Friedt
     email: chris@fr4.co
@@ -2993,7 +3078,7 @@ patches:
       SYS_CLONE_THREAD, and a seeded signal mask is invalid with it -
       a forked child always inherits the caller's mask.
   - path: zephyr/k-process-vm.patch
-    sha256sum: f24616dc2d3805a39584aa2bc19c1b15b4afb83e8e3235a5f885d3dbf02998ad
+    sha256sum: 238f063f8342a3684ad2efc7c25359e13f17d57b4242440a5abf47e6d2370af0
     module: zephyr
     author: Chris Friedt
     email: chris@fr4.co
@@ -3242,7 +3327,7 @@ patches:
       original its owner has unmapped. tests/lib/zvfs_mmap gains process,
       process.userspace and process.vm scenarios.
   - path: zephyr/k-process-times.patch
-    sha256sum: f3f3deaba67eb274421040c736a7f75654a979098e45a7c6fbe379e5a8e6a6ed
+    sha256sum: e63aa034d68b5acf162709335c1ef8d40606f03498471c4fbf572e64c3d85b2a
     module: zephyr
     author: Chris Friedt
     email: chris@fr4.co
@@ -3336,7 +3421,7 @@ patches:
       report-and-halt behaviour, and the per-C-library stubs are used as
       before.
   - path: zephyr/k-signal-process-conformance.patch
-    sha256sum: 0f991cd01f3f188795486c70b6a2c29ae859722c3033f27ec047946c76c65d31
+    sha256sum: aca30e111508fd856cd3fd0e7bfb0695fdaf3e4bc71ad602a8572e9e2389d587
     module: zephyr
     author: Chris Friedt
     email: chris@fr4.co
