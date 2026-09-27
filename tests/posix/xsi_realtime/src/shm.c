@@ -148,10 +148,14 @@ ZTEST(xsi_realtime, test_shm_read_write)
 		zassert_true(fd[i] >= 0, "shm_open(%s, %x, %04o) failed: %d", VALID_SHM_PATH,
 			     VALID_FLAGS, VALID_MODE, errno);
 		if (i == 0) {
-			/* size 0 on create: nothing to read or write (the host grows the object) */
+			/* size 0 on create: nothing to read, and the object does not grow on
+			 * write (the host grows it)
+			 */
 			IF_NOT_NATIVE_LIBC({
-				zassert_equal(write(fd[0], "", 1), 0,
+				errno = 0;
+				zassert_equal(write(fd[0], "", 1), -1,
 					      "write() should fail on newly create shm fd with size 0");
+				zassert_equal(errno, ENOSPC);
 			})
 			zassert_equal(read(fd[0], &cbuf, 1), 0,
 				      "read() should fail on newly create shm fd with size 0");
