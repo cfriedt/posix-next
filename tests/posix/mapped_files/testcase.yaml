@@ -1,0 +1,47 @@
+common:
+  ignore_faults: true
+  tags:
+    - fatfs
+    - posix_mapped_files
+  min_ram: 128
+  modules:
+    - fatfs
+  # 1 tier0 platform per supported architecture
+  platform_key:
+    - arch
+    - simulation
+tests:
+  portability.posix.mapped_files:
+    filter: not CONFIG_NATIVE_LIBC
+  portability.posix.mapped_files.userspace:
+    filter: (not CONFIG_NATIVE_LIBC) and CONFIG_ARCH_HAS_USERSPACE
+    tags: userspace
+    min_ram: 160
+    platform_exclude:
+      # 8-region MPU: after stack guard, thread stack, libc, malloc and ztest one domain
+      # slot remains, and each mapping a user thread reaches needs one of its own
+      - mps2/an385
+    extra_configs:
+      - CONFIG_TEST_USERSPACE=y
+      - CONFIG_USERSPACE=y
+  portability.posix.mapped_files.minimal:
+    filter: not CONFIG_NATIVE_LIBC
+    extra_configs:
+      - CONFIG_MINIMAL_LIBC=y
+  portability.posix.mapped_files.newlib:
+    filter: (not CONFIG_NATIVE_LIBC) and (TOOLCHAIN_HAS_NEWLIB == 1)
+    extra_configs:
+      - CONFIG_NEWLIB_LIBC=y
+  portability.posix.mapped_files.picolibc:
+    tags: picolibc
+    filter: (not CONFIG_NATIVE_LIBC) and CONFIG_PICOLIBC_SUPPORTED
+    extra_configs:
+      - CONFIG_PICOLIBC=y
+  portability.posix.mapped_files.linux_compat:
+    tags: native
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    filter: CONFIG_NATIVE_LIBC
+    extra_configs:
+      - CONFIG_POSIX_TEST_LINUX_COMPAT=y
