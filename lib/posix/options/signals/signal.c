@@ -496,7 +496,7 @@ int kill(pid_t pid, int sig)
 		return -1;
 	}
 
-	ret = k_sig_queue(tid, ksigno, (union k_sig_val){0});
+	ret = k_sig_queue(tid, ksigno, (union k_sig_val){0}, K_SIG_SCOPE_THREAD);
 	if (ret < 0) {
 		errno = -ret;
 		return -1;
