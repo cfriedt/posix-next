@@ -3004,3 +3004,19 @@ patches:
       pages reach the copies' domains, and the last copy releases an
       original its owner has unmapped. tests/lib/zvfs_mmap gains process,
       process.userspace and process.vm scenarios.
+  - path: zephyr/k-process-times.patch
+    sha256sum: f3f3deaba67eb274421040c736a7f75654a979098e45a7c6fbe379e5a8e6a6ed
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-17
+    upstreamable: true
+    comments: |
+      Per-process CPU accounting for times(): struct k_process gains
+      self_cycles (accumulated as member threads exit) and child_cycles
+      (rolled up from reaped children and their children) under
+      CONFIG_SCHED_THREAD_USAGE. k_process_cpu_stats() returns the calling
+      process's cycles (live members plus exited members) and its reaped
+      children's cycles, letting POSIX times() fill tms_utime and tms_cutime
+      correctly (Zephyr has no user/system split, so tms_stime/tms_cstime
+      are zero).
