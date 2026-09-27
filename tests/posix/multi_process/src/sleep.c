@@ -29,7 +29,7 @@ static void waker_func(struct k_work *work)
 
 	ww = CONTAINER_OF(dwork, struct waker_work, dwork);
 	/* a signal ends the sleep; a bare k_wakeup() does not */
-	(void)k_sig_queue((k_pid_t)ww->tid, K_SIG_USR1, (union k_sig_val){0});
+	(void)k_sig_queue((k_pid_t)ww->tid, K_SIG_USR1, (union k_sig_val){0}, K_SIG_SCOPE_THREAD);
 }
 K_WORK_DELAYABLE_DEFINE(waker, waker_func);
 

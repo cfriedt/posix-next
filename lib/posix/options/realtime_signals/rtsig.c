@@ -73,7 +73,7 @@ int sigqueue(pid_t pid, int signo, union sigval value)
 		tid = to_k_thread(&th);
 	}
 
-	ret = k_sig_queue((k_pid_t)tid, signo, val);
+	ret = k_sig_queue((k_pid_t)tid, signo, val, K_SIG_SCOPE_THREAD);
 	if (ret < 0) {
 		errno = -ret;
 		return -1;

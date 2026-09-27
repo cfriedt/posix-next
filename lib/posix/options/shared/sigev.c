@@ -137,14 +137,14 @@ int posix_sigev_notify_now(const struct sigevent *evp, k_tid_t default_target)
 #ifdef CONFIG_SIGNAL
 	case SIGEV_SIGNAL:
 		return k_sig_queue((k_pid_t)default_target, z_sig_from_posix(evp->sigev_signo),
-				   sigval_to_k(evp->sigev_value));
+				   sigval_to_k(evp->sigev_value), K_SIG_SCOPE_THREAD);
 #ifdef SIGEV_THREAD_ID
 	case SIGEV_THREAD_ID: {
 		pthread_t th = (pthread_t)evp->sigev_notify_thread_id;
 
 		return k_sig_queue((k_pid_t)to_k_thread(&th),
 				   z_sig_from_posix(evp->sigev_signo),
-				   sigval_to_k(evp->sigev_value));
+				   sigval_to_k(evp->sigev_value), K_SIG_SCOPE_THREAD);
 	}
 #endif /* SIGEV_THREAD_ID */
 #endif /* CONFIG_SIGNAL */
