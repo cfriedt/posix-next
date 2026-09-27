@@ -417,7 +417,8 @@ static void test_rt_delivery_deferred(void)
 	rt_handler_called = false;
 	unblock_rt_signal(K_SIG_RTMIN);
 	zassert_ok(k_sig_action(K_SIG_RTMIN, &action, NULL));
-	zassert_ok(k_sig_queue((k_pid_t)k_current_get(), K_SIG_RTMIN, (union k_sig_val){0}));
+	zassert_ok(k_sig_queue((k_pid_t)k_current_get(), K_SIG_RTMIN, (union k_sig_val){0},
+			       K_SIG_SCOPE_THREAD));
 	zassert_true(rt_handler_called,
 		     "handler runs by the time k_sig_queue() returns (syscall check)");
 

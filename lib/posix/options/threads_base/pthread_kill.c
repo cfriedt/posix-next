@@ -29,7 +29,7 @@ int pthread_kill(pthread_t thread, int sig)
 		}
 	}
 
-	ret = k_sig_queue(to_k_thread(&thread), ksigno, (union k_sig_val){0});
+	ret = k_sig_queue(to_k_thread(&thread), ksigno, (union k_sig_val){0}, K_SIG_SCOPE_THREAD);
 
 	return -ret;
 #else
