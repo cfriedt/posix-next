@@ -21,6 +21,8 @@ static void notify_fn(union sigval value)
 	notify_fn_ran = true;
 }
 
+static ZTEST_BMEM int notify_si_code;
+
 static int notify_sig_accept(int ms)
 {
 	siginfo_t info = {0};
@@ -29,7 +31,14 @@ static int notify_sig_accept(int ms)
 		return -1;
 	}
 
+	notify_si_code = info.si_code;
+
 	return info.si_value.sival_int;
+}
+
+static int notify_sig_code(void)
+{
+	return notify_si_code;
 }
 
 static void mq_notify_sigev_none(void)
@@ -72,6 +81,7 @@ static void mq_notify_sigev_signal(void)
 
 	zassert_equal(notify_sig_accept(MQ_TIMEOUT_MS), NOTIFY_SIGVAL,
 		      "notification signal not delivered");
+	zassert_equal(notify_sig_code(), SI_MESGQ);
 
 	/* the registration was consumed: a further arrival does not signal */
 	zassert_equal(mq_receive(mqd, buf, sizeof(buf), NULL), 7);
