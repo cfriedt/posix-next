@@ -37,7 +37,11 @@ struct if_nameindex *if_nameindex(void)
 	struct if_nameindex *ni;
 
 	NET_IFACE_COUNT(&n);
-	ni = malloc((n + 1) * sizeof(*ni));
+	/* Zero-initialised: on an allocation failure part way through the loop
+	 * below, if_freenameindex() walks every entry and frees if_name, so the
+	 * entries not yet populated must hold NULL rather than heap garbage.
+	 */
+	ni = calloc(n + 1, sizeof(*ni));
 	if (ni == NULL) {
 		goto return_err;
 	}
