@@ -469,6 +469,11 @@ unsigned int alarm(unsigned int seconds)
 	k_ticks_t remaining =
 		k_sig_alarm((seconds == 0) ? K_FOREVER : K_SECONDS(seconds));
 
-	return (unsigned int)DIV_ROUND_UP(k_ticks_to_ms_ceil64((uint64_t)remaining),
-					  MSEC_PER_SEC);
+	if (remaining <= 0) {
+		return 0;
+	}
+
+	/* the kernel arms a relative timeout one tick past its deadline: not time left */
+	return MAX(1U, (unsigned int)DIV_ROUND_UP(k_ticks_to_ms_floor64((uint64_t)(remaining - 1)),
+						  MSEC_PER_SEC));
 }
