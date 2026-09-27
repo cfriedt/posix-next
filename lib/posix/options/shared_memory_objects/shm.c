@@ -1,6 +1,5 @@
 /*
- * Copyright (c) 2024, Tenstorrent AI ULC
- *
+ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -22,6 +21,7 @@
 #include <zephyr/sys/dlist.h>
 #include <zephyr/sys/fdtable.h>
 #include <zephyr/sys/hash_function.h>
+#include <zephyr/sys/math_extras.h>
 #include <zephyr/sys/internal/fdtable_priv.h>
 #include <zephyr/sys/zvfs.h>
 
@@ -128,7 +128,16 @@ static int shm_ftruncate(struct shm_obj *shm, off_t length)
 	}
 
 	if (IS_ENABLED(CONFIG_MMU)) {
-		virt = k_mem_map(ROUND_UP(length, _page_size), K_MEM_PERM_RW);
+		/* pinned: the pages are present in every domain that maps them */
+		virt = k_mem_map(ROUND_UP(length, _page_size), K_MEM_PERM_RW | K_MEM_MAP_LOCK);
+	} else if (IS_ENABLED(CONFIG_USERSPACE)) {
+		/* mappable as one memory-protection region: a power of two, aligned to its size */
+		size_t size = BIT(32 - u32_count_leading_zeros(MAX(length, _page_size) - 1));
+
+		virt = k_aligned_alloc(size, size);
+		if (virt != NULL) {
+			memset(virt, 0, size);
+		}
 	} else {
 		virt = k_calloc(1, length);
 	}
@@ -177,35 +186,17 @@ static off_t shm_lseek(struct shm_obj *shm, off_t offset, int whence, size_t cur
 	return offset;
 }
 
-static int shm_mmap(struct shm_obj *shm, void *addr, size_t len, int prot, int flags, off_t off,
-		    void **virt)
+/* the object's own pages back every mapping of it */
+static int shm_mmap(struct shm_obj *shm, size_t off, size_t len, void **addr)
 {
-	ARG_UNUSED(addr);
-	ARG_UNUSED(prot);
-	__ASSERT_NO_MSG(virt != NULL);
+	__ASSERT_NO_MSG(addr != NULL);
 
-	if ((len == 0) || (off < 0) || ((flags & MAP_FIXED) != 0) ||
-	    ((off & (_page_size - 1)) != 0) || ((len + off) > shm->size)) {
-		errno = EINVAL;
+	if ((len == 0) || (off > shm->size) || (len > shm->size - off) || (shm->mem == NULL)) {
+		errno = ENXIO;
 		return -1;
 	}
 
-	if (!IS_ENABLED(CONFIG_MMU)) {
-		errno = ENOTSUP;
-		return -1;
-	}
-
-	if (shm->mem == NULL) {
-		errno = ENOMEM;
-		return -1;
-	}
-
-	/*
-	 * Note: due to Zephyr's page mapping algorithm, physical pages can only have 1
-	 * mapping, so different file handles will have the same virtual memory address
-	 * underneath.
-	 */
-	*virt = shm->mem + off;
+	*addr = shm->mem + off;
 
 	return 0;
 }
@@ -267,14 +258,11 @@ static int shm_ioctl(void *obj, unsigned int request, va_list args)
 		return shm_lseek(shm, offset, whence, cur);
 	} break;
 	case ZFD_IOCTL_MMAP: {
-		void *addr = va_arg(args, void *);
+		size_t off = va_arg(args, size_t);
 		size_t len = va_arg(args, size_t);
-		int prot = va_arg(args, int);
-		int flags = va_arg(args, int);
-		off_t off = va_arg(args, off_t);
-		void **maddr = va_arg(args, void **);
+		void **addr = va_arg(args, void **);
 
-		return shm_mmap(shm, addr, len, prot, flags, off, maddr);
+		return shm_mmap(shm, off, len, addr);
 	} break;
 	case ZFD_IOCTL_SET_LOCK:
 		break;
