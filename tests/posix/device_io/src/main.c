@@ -142,11 +142,6 @@ ZTEST(posix_device_io, test_pread_pwrite_shm)
 	char buf[sizeof(payload)] = {0};
 	int fd;
 
-	if (IS_ENABLED(CONFIG_USERSPACE)) {
-		/* k_mem_map() pages are absent from memory-domain page tables */
-		ztest_test_skip();
-	}
-
 	fd = shm_open("/device_io", O_RDWR | O_CREAT, 0666);
 	zassert_true(fd >= 0, "shm_open() failed, errno=%d", errno);
 	zassert_ok(ftruncate(fd, sizeof(payload)));
