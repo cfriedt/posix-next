@@ -42,11 +42,6 @@ BUILD_ASSERT(N >= 2, "ZVFS_OPEN_SIZE must be > 4");
 
 ZTEST(xsi_realtime, test_shm_open)
 {
-	if (IS_ENABLED(CONFIG_USERSPACE)) {
-		/* k_mem_map() pages are absent from memory-domain page tables */
-		ztest_test_skip();
-	}
-
 	int ret;
 	int fd[N];
 	struct stat st;
@@ -106,11 +101,6 @@ ZTEST(xsi_realtime, test_shm_open)
 
 ZTEST(xsi_realtime, test_shm_unlink)
 {
-	if (IS_ENABLED(CONFIG_USERSPACE)) {
-		/* k_mem_map() pages are absent from memory-domain page tables */
-		ztest_test_skip();
-	}
-
 	int fd;
 
 	{
@@ -134,11 +124,6 @@ ZTEST(xsi_realtime, test_shm_unlink)
 
 ZTEST(xsi_realtime, test_shm_read_write)
 {
-	if (IS_ENABLED(CONFIG_USERSPACE)) {
-		/* k_mem_map() pages are absent from memory-domain page tables */
-		ztest_test_skip();
-	}
-
 	int fd[N];
 
 	for (size_t i = 0; i < N; ++i) {
@@ -181,17 +166,8 @@ ZTEST(xsi_realtime, test_shm_read_write)
 
 ZTEST(xsi_realtime, test_shm_mmap)
 {
-	if (IS_ENABLED(CONFIG_USERSPACE)) {
-		/* k_mem_map() pages are absent from memory-domain page tables */
-		ztest_test_skip();
-	}
-
 	int fd[N];
 	void *addr[N];
-
-	if (!IS_ENABLED(CONFIG_MMU)) {
-		ztest_test_skip();
-	}
 
 	for (size_t i = 0; i < N; ++i) {
 		fd[i] = shm_open(VALID_SHM_PATH, i == 0 ? CREATE_FLAGS : OPEN_FLAGS, VALID_MODE);
