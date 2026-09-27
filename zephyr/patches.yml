@@ -766,3 +766,88 @@ patches:
     upstreamable: true
     comments: |
       provide a means of using k_mem_map() to map a thread stack instead of using the heap.
+  - path: zephyr/kernel-futex-wait-expected-atomic-val.patch
+    sha256sum: 42dbaad5b593cd34d11139d04ca6f6675dc1e534131f5d2c0c12c07b74d14443
+    module: zephyr
+    author: Christoph Busold
+    email: cbusold@qti.qualcomm.com
+    date: 2026-05-18
+    merge-pr: https://github.com/zephyrproject-rtos/zephyr/pull/108949
+    merge-status: false
+    comments: |
+      kernel: userspace: Change expected futex parameter to atomic_val_t
+      (zephyr#108949, RFC zephyr#117428). k_futex_wait() compared the
+      atomic_t futex word against an int, truncating 64-bit values at the
+      call boundary. Ported to the kernel/futex.c layout.
+  - path: zephyr/sys-mutex-based-on-k-futex.patch
+    sha256sum: f066ae07d51d97e8609e6027c208bc5bc0d8615a1b151a0b46ade418c1f38cec
+    module: zephyr
+    author: Christoph Busold
+    email: cbusold@qti.qualcomm.com
+    date: 2026-05-12
+    merge-pr: https://github.com/zephyrproject-rtos/zephyr/pull/108949
+    merge-status: false
+    comments: |
+      Rebased onto v4.5.0-rc1: sys_mutex sources live in kernel/userspace/ (mutex_kernel.c, mutex_futex.c)
+      and the implementation choice sits in kernel/userspace/Kconfig.
+      kernel: userspace: Implement sys_mutex based on k_futex (zephyr#108949).
+      Adds CONFIG_SYS_MUTEX_IMPL as a choice between the kernel-object-backed
+      sys_mutex and a futex-based one whose word holds the owner thread ID,
+      with lock, unlock and init out of line and a dedicated test suite.
+      Ported to the layout with lib/os/mutex_kernel.c and
+      lib/os/mutex_futex.c, kernel/Kconfig, kernel/userspace.c, and
+      testcase.yaml instead of tests.yaml.
+  - path: zephyr/sys-mutex-options-and-prio-inherit.patch
+    sha256sum: 7ff50a274f12d22aa93ea740a212ecd02f1cbd837bf16861f8959a9bbf1efd79
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-14
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/k-mutex-nonrecursive.patch
+          - zephyr/kernel-futex-without-userspace.patch
+          - zephyr/kernel-futex-wait-expected-atomic-val.patch
+          - zephyr/sys-mutex-based-on-k-futex.patch
+    comments: |
+      Rebased onto v4.5.0-rc1: the unified sys_mutex lives in kernel/sys/mutex.c (built with
+      CONFIG_MULTITHREADING) and the kernel/userspace/ k_mutex- and futex-backed variants go away.
+      On top of zephyr#108949: keep one futex-backed sys_mutex instead of a
+      build-time choice of implementations, and select behaviour per object.
+      The lock word holds the classic unlocked/locked/contended state, with
+      the owner in a side field, so a K_MUTEX_NORMAL mutex never needs
+      k_current_get() on its fast path; sys_mutex_init_ext() takes the
+      K_MUTEX_* type and the new K_MUTEX_PRIO_INHERIT option, defined
+      beside the other K_MUTEX_* options. A
+      priority-inheritance mutex is backed by a kernel mutex that the kernel
+      associates with the address of the user object, never with its
+      contents, so neither kernel-mode nor user-mode callers act on anything
+      read from user memory; the backing mutexes come from a pool sized by
+      CONFIG_SYS_MUTEX_PRIO_INHERIT_MIN and _MAX. Like futex waiters, that
+      association is keyed by virtual address. Drop the sys_mutex kernel
+      object type and the sys_thread mutex and condvar pools: the C library
+      and POSIX layers build their mutexes on this one object.
+  - path: zephyr/sys-condvar.patch
+    sha256sum: f53c149a7423cd4178b8c07019bf7c8695d10c3a4b94f62bd16670fcda489ff6
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-14
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/sys-sem-track-blocked-waiters.patch
+          - zephyr/sys-mutex-options-and-prio-inherit.patch
+    comments: |
+      Rebased onto v4.5.0-rc1: the implementation lives in kernel/sys/condvar.c beside sys_mutex.
+      Add sys_condvar, the condition variable that pairs with sys_mutex: a
+      futex sequence word in user memory with the kernel-maintained waiter
+      count of every k_futex, so that a signal or broadcast with no waiter
+      costs no system call, a signal wakes exactly one blocked waiter, and a
+      woken waiter never touches the object again. Absolute timeouts are
+      measured against the clock the object was initialized with,
+      SYS_CLOCK_REALTIME by default. The C library's cnd_t and POSIX
+      pthread_cond_t are this object.
