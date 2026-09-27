@@ -2979,3 +2979,28 @@ patches:
       orders its two-thread start deterministically - the exiting leader
       could abort its sibling before the sibling recorded its pid, a
       latent race made more visible by the k_exit() close sweep.
+  - path: zephyr/zvfs-mmap-per-process.patch
+    sha256sum: b389ec95a07884a299d0895b2ea1226fe6a28f15d9f0a0e02efbaf1bea1380dd
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-27
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/zvfs-mmap.patch
+          - zephyr/zvfs-per-process-fds.patch
+    comments: |
+      zvfs: with CONFIG_PROCESS a mapping belongs to the creating thread's
+      process and mapping operations reach the caller's process's mappings
+      only. A process exiting through k_exit() releases its mappings in its
+      own context, before its descriptors (z_process_mmap_exit()); one whose
+      last thread returns has them marked at the reap (z_process_mmap_drop())
+      and released by the next mapping operation. A process cloned with its
+      address space inherits the parent's mappings as copies leaning on the
+      original for the pages; the clone skips the pages of shared mappings
+      (z_zvfs_mmap_is_shared()) so they stay shared, write faults on tracked
+      pages reach the copies' domains, and the last copy releases an
+      original its owner has unmapped. tests/lib/zvfs_mmap gains process,
+      process.userspace and process.vm scenarios.
