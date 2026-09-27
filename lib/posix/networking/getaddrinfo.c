@@ -9,6 +9,7 @@
 #include <netdb.h>
 
 #include <zephyr/net/socket.h>
+#include <zephyr/net/socket_offload.h>
 #include <zephyr/posix/net/conversion.h>
 
 #if defined(CONFIG_DNS_RESOLVER_AI_MAX_ENTRIES)
@@ -106,6 +107,18 @@ int getaddrinfo(const char *host, const char *service, const struct addrinfo *hi
 	const struct zsock_addrinfo *zhints_p = posix_addrinfo_hints_to_zephyr(hints, &zhints);
 	struct zsock_addrinfo *zres;
 	int ret;
+
+	if (socket_offload_dns_is_enabled()) {
+		/* the offload owns its list: copy it into POSIX entries and give it back */
+		ret = socket_offload_getaddrinfo(host, service, zhints_p, &zres);
+		if (ret != 0) {
+			*res = NULL;
+			return ret;
+		}
+		*res = zephyr_addrinfo_to_posix(zres);
+		socket_offload_freeaddrinfo(zres);
+		return (*res != NULL) ? 0 : EAI_MEMORY;
+	}
 
 	/* The caller owns the result array; the stack only fills what it is handed. */
 	zres = calloc(AI_ARR_MAX, sizeof(*zres));
