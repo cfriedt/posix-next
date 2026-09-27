@@ -1,0 +1,86 @@
+diff --git a/arch/Kconfig b/arch/Kconfig
+--- a/arch/Kconfig
++++ b/arch/Kconfig
+@@ -48,6 +48,7 @@ config ARM
+ 	select ARCH_SUPPORTS_ROM_OFFSET
+ 	select ARCH_HAS_CPU_IDLE_HOOKS if CPU_CORTEX_M
+ 	select ARCH_HAS_DIRECT_INTERRUPTS
++	select ARCH_MEM_DOMAIN_APPLY_CURRENT if ARM_MPU && USERSPACE
+ 	help
+ 	  ARM architecture
+ 
+@@ -1139,6 +1140,14 @@ config CPU_HAS_MMU
+ 	  This hidden option is selected when the CPU has a Memory Management Unit
+ 	  (MMU).
+ 
++config ARCH_MEM_DOMAIN_APPLY_CURRENT
++	bool
++	help
++	  This hidden configuration should be selected by an architecture that
++	  applies memory-domain changes at context switch rather than
++	  synchronously, and implements arch_mem_domain_apply_current() to
++	  make the calling thread's domain effective at once.
++
+ config ARCH_HAS_MEM_WRITE_FAULT
+ 	bool
+ 	help
+diff --git a/arch/arm/core/mpu/arm_core_mpu.c b/arch/arm/core/mpu/arm_core_mpu.c
+--- a/arch/arm/core/mpu/arm_core_mpu.c
++++ b/arch/arm/core/mpu/arm_core_mpu.c
+@@ -350,6 +350,16 @@ void z_arm_configure_dynamic_mpu_regions(struct k_thread *thread)
+ }
+ 
+ #if defined(CONFIG_USERSPACE)
++#ifdef CONFIG_ARCH_MEM_DOMAIN_APPLY_CURRENT
++void arch_mem_domain_apply_current(void)
++{
++	unsigned int key = irq_lock();
++
++	z_arm_configure_dynamic_mpu_regions(k_current_get());
++	irq_unlock(key);
++}
++#endif /* CONFIG_ARCH_MEM_DOMAIN_APPLY_CURRENT */
++
+ int arch_mem_domain_max_partitions_get(void)
+ {
+ 	int available_regions = arm_core_mpu_get_max_available_dyn_regions();
+diff --git a/doc/kernel/memory_management/virtual_memory.rst b/doc/kernel/memory_management/virtual_memory.rst
+--- a/doc/kernel/memory_management/virtual_memory.rst
++++ b/doc/kernel/memory_management/virtual_memory.rst
+@@ -209,6 +209,14 @@ through :c:func:`k_mem_update_flags`; a memory domain's view changes with
+ page range inside an existing partition of the domain without touching the
+ kernel mapping.
+ 
++Architectures that program memory protection from a thread's memory domain
++only at context switch, such as Cortex-M with an MPU, select
++``ARCH_MEM_DOMAIN_APPLY_CURRENT`` and implement
++``arch_mem_domain_apply_current()``, which makes a change to the calling
++thread's own domain effective at once. A partition added from a system call
++would otherwise not cover the caller until it has been switched out and in
++again.
++
+ 
+ API Reference
+ *************
+diff --git a/kernel/include/kernel_arch_interface.h b/kernel/include/kernel_arch_interface.h
+--- a/kernel/include/kernel_arch_interface.h
++++ b/kernel/include/kernel_arch_interface.h
+@@ -373,6 +373,18 @@ int arch_mem_map(void *virt, uintptr_t phys, size_t size, uint32_t flags);
+  */
+ int arch_mem_unmap(void *addr, size_t size);
+ 
++#ifdef CONFIG_ARCH_MEM_DOMAIN_APPLY_CURRENT
++/**
++ * Apply the calling thread's memory domain to the hardware now
++ *
++ * On architectures that program memory protection from the domain at context
++ * switch, a partition added to or removed from the calling thread's domain
++ * would otherwise only take effect once the thread is switched out and in
++ * again. Called from thread context with the domain already updated.
++ */
++void arch_mem_domain_apply_current(void);
++#endif /* CONFIG_ARCH_MEM_DOMAIN_APPLY_CURRENT */
++
+ #if defined(CONFIG_MEM_WRITE_FAULT_HOOK) && defined(CONFIG_USERSPACE)
+ /**
+  * Change the access attributes of pages inside a memory domain's partition
