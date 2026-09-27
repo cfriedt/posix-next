@@ -25,10 +25,12 @@ diff --git a/include/zephyr/sys/fdtable.h b/include/zephyr/sys/fdtable.h
 diff --git a/kernel/userspace/userspace.c b/kernel/userspace/userspace.c
 --- a/kernel/userspace/userspace.c
 +++ b/kernel/userspace/userspace.c
-@@ -511,6 +511,9 @@ static void *z_object_alloc(enum k_objects otype, size_t size)
+@@ -509,7 +509,10 @@ static void *z_object_alloc(enum k_objects otype, size_t size)
+ 		break;
+ 	/* The following are currently not allowed at all */
  	case K_OBJ_FUTEX:			/* Lives in user memory */
- 	case K_OBJ_SYS_MUTEX:			/* Lives in user memory */
- 	case K_OBJ_NET_SOCKET:			/* Indeterminate size */
+-	case K_OBJ_NET_SOCKET: /* Indeterminate size */
++	case K_OBJ_NET_SOCKET:			/* Indeterminate size */
 +#if defined(CONFIG_ZVFS_FDTABLE)
 +	case K_OBJ_FILE:			/* Static fdtable slots only */
 +#endif
@@ -96,15 +98,15 @@ diff --git a/lib/os/zvfs/zvfs_fdtable.c b/lib/os/zvfs/zvfs_fdtable.c
 diff --git a/scripts/build/gen_kobject_list.py b/scripts/build/gen_kobject_list.py
 --- a/scripts/build/gen_kobject_list.py
 +++ b/scripts/build/gen_kobject_list.py
-@@ -108,6 +108,7 @@ kobjects = OrderedDict(
-         ("sys_mutex", (None, True, False)),
+@@ -107,6 +107,7 @@ kobjects = OrderedDict(
+         ("net_if", (None, False, False)),
          ("k_futex", (None, True, False)),
          ("k_condvar", (None, False, True)),
 +        ("fd_entry", ("CONFIG_ZVFS_FDTABLE", False, False)),
          ("k_event", ("CONFIG_EVENTS", False, True)),
          ("ztest_suite_node", ("CONFIG_ZTEST", True, False)),
          ("ztest_suite_stats", ("CONFIG_ZTEST", True, False)),
-@@ -123,6 +124,9 @@ kobjects = OrderedDict(
+@@ -122,6 +123,9 @@ kobjects = OrderedDict(
  
  
  def kobject_to_enum(kobj):
