@@ -2402,3 +2402,27 @@ patches:
       to a page faults into z_mem_write_fault(), which marks it dirty and
       makes it writable, and msync writes back only the dirty pages and
       protects them again.
+  - path: zephyr/zvfs-shm.patch
+    sha256sum: ec0cc5f10bdcff1479f9b0c938b4de6a46243b543c19e3744b5f77464fbfbe7f
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-27
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/zvfs-mmap.patch
+    comments: |
+      zvfs: shared memory objects behind CONFIG_ZVFS_SHM: zvfs_shm_open() and
+      zvfs_shm_unlink() system calls over a pool of named, system-wide
+      objects (CONFIG_ZVFS_SHM_MAX, names below CONFIG_ZVFS_SHM_NAME_MAX,
+      compared by string). An object is sized once with zvfs_ftruncate()
+      (EBUSY afterwards, its pages may be mapped), read and written at
+      offsets, and answers ZFD_IOCTL_MMAP with its own pinned pages so
+      zvfs_mmap() maps it in place and every mapping aliases. The name is a
+      lookup key only: unlink drops it at once, O_CREAT recreates it, and
+      the object is freed with its last descriptor or mapping, counted
+      together by zvfs_fd_obj_refcount(). tests/lib/zvfs_shm covers open,
+      create, exclusive, truncate, read/write, unlink semantics, pool
+      exhaustion and the aliasing mapping in kernel and user mode.
