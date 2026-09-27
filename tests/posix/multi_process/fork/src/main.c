@@ -78,6 +78,37 @@ static void fork_dispositions(void)
 	zassert_ok(sigaction(SIGUSR2, &act, NULL));
 }
 
+/* the child's signal mask is the parent's: a blocked signal pends, an unblocked one acts */
+static void fork_sigmask(void)
+{
+	int status = -1;
+	pid_t pid;
+	sigset_t set;
+	sigset_t old;
+
+	zassert_ok(sigemptyset(&set));
+	zassert_ok(sigaddset(&set, SIGUSR2));
+	zassert_ok(pthread_sigmask(SIG_BLOCK, &set, &old));
+
+	pid = fork();
+	zassert_true(pid >= 0, "fork failed: %d", errno);
+	if (pid == 0) {
+		/* SIGUSR2 stays pending; the default action for SIGTERM ends the child */
+		if (raise(SIGUSR2) != 0) {
+			_exit(6);
+		}
+		(void)raise(SIGTERM);
+		_exit(9);
+	}
+
+	zassert_equal(waitpid(pid, &status, 0), pid);
+	zassert_true(WIFSIGNALED(status), "the child did not inherit the parent's mask (status %d)",
+		     status);
+	zassert_equal(WTERMSIG(status), SIGTERM);
+
+	zassert_ok(pthread_sigmask(SIG_SETMASK, &old, NULL));
+}
+
 ZTEST_USER(posix_fork, test_fork)
 {
 	volatile int on_stack = 20;
@@ -139,6 +170,7 @@ ZTEST_USER(posix_fork, test_fork)
 	zassert_ok(close(efd));
 
 	fork_dispositions();
+	fork_sigmask();
 }
 
 ZTEST_SUITE(posix_fork, NULL, NULL, NULL, NULL, NULL);
