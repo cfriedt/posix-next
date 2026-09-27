@@ -2278,3 +2278,31 @@ patches:
       names could overflow a caller-supplied tmpnam() buffer; two digits
       cover every libc's TMP_MAX, and BUILD_ASSERTs enforce both bounds.
       The unreachable !ZVFS fallback and its LOG registration are dropped.
+  - path: zephyr/kernel-mm-update-flags-per-page.patch
+    sha256sum: df4cd55e9d088f549db88dc258943dd795bda816cb2421292c2c42dfdbf91f57
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-26
+    upstreamable: true
+    comments: |
+      Rebased onto v4.5.0-rc1: the per-page remap keeps upstream's arch_mem_unmap()/arch_mem_map() result checks.
+      kernel: k_mem_update_flags() resolved the physical address of the
+      first page only and remapped the whole range as if it were physically
+      contiguous. Anonymous pages from k_mem_map() are not, so every page
+      after the first was re-pointed at a foreign frame. Resolve and remap
+      each page on its own.
+  - path: zephyr/arm64-mmu-partition-mapped-pages.patch
+    sha256sum: 752658f4e0e20cb877ce4a8d07f245cf4002f7ea11cc202dca7b1b728ca83975
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-26
+    upstreamable: true
+    comments: |
+      arm64: a memory-domain partition on memory-mapped pages (k_mem_map())
+      is not identity mapped and its frames need not be contiguous, but
+      arch_mem_domain_partition_add() mapped the whole partition at
+      phys == virt. Follow the kernel's translation instead, one physically
+      contiguous run at a time; memory the kernel does not map keeps its
+      identity mapping, so device partitions are unchanged.
