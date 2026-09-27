@@ -2326,3 +2326,19 @@ patches:
       domain's tables and flushes the pages, arm64 privately maps the page at
       the kernel's translation, riscv maps it into the domain's private
       leaves and fences its ASID.
+  - path: zephyr/arm-mpu-domain-apply-current.patch
+    sha256sum: 8ba607f060e33806d0b47aeac8b5d66ff6af3fa1f4a315f8b02188a6781e0cf0
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-27
+    upstreamable: true
+    comments: |
+      arm: the MPU is programmed from a thread's memory domain at context
+      switch, so a partition added to or removed from the calling thread's
+      own domain takes effect only once the thread is switched out and in
+      again. ARCH_MEM_DOMAIN_APPLY_CURRENT (selected by ARM_MPU with
+      USERSPACE) declares arch_mem_domain_apply_current(), which rebuilds
+      the calling thread's dynamic regions at once; a caller that changes
+      its own domain from a system call uses it before returning to user
+      mode.
