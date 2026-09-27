@@ -87,12 +87,7 @@ IEEE Std 1003.1 defines POSIX
 `Options <https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap02.html#tag_02_01_03>`_
 and
 `Subprofiling Option Groups <https://pubs.opengroup.org/onlinepubs/9699919799/xrat/V4_subprofiles.html>`_
-separately. Zephyr usually maps each standard Option Group to a directory under
-
-- ``lib/posix/``
-  - for groups such as C extensions that generally do not require OS involvement, and
-- ``lib/posix/options``
-  - for features that generally do require OS involvement.
+separately. Zephyr maps each standard Option Group to a directory under ``lib/posix/``.
 
 When an implementation supports an Option Group (or an Option), it is required to define a constant
 to indicate support for that Option Group (or Option) for C source files. For example, if the
@@ -120,7 +115,7 @@ qualified to be standard Subprofiling Option Groups.
 
 For simplicity and maintainability, Zephyr organizes such Options and Option Groups the same as
 standard Subprofiling Option Groups (at the discretion of the maintainer), under
-``lib/posix/options/``.
+``lib/posix/``.
 
 The general rule is that Option Groups will *always* have an associated Kconfig option and *some*
 Options (but not all) have an associated Kconfig option in Zephyr. The latter is mostly for

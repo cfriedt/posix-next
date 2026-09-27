@@ -12,7 +12,7 @@
 
 #include <zephyr/posix/aio.h>
 #include <zephyr/sys/aio.h>
-#include <zephyr/sys_clock.h>
+#include <zephyr/sys/clock.h>
 
 int aio_suspend(const struct aiocb *const list[], int nent, const struct timespec *timeout)
 {
