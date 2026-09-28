@@ -1749,6 +1749,30 @@ patches:
     comments: |
       POSIX requires <signal.h> to declare pthread_t and pthread_kill() when _POSIX_THREADS is defined;
       have picolibc's <signal.h> shim do so.
+  - path: zephyr/libc-isoc-signal-handling.patch
+    sha256sum: 6175b4578d8cb6435c7071a17bad76119cbc5b9a90cd3072aa6ddc7c700052e6
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-22
+    upstreamable: true
+    comments: |
+      libc: common: implement the ISO C <signal.h> functions in terms of the kernel
+      k_sig_* API, behind COMMON_LIBC_SIGNAL. signal() and raise() were previously a
+      stub returning EINVAL and a declaration with no definition, and abort() panicked
+      the system rather than raising SIGABRT.
+
+      Both are shared with POSIX rather than overridden by it: the calling thread is the
+      same thread in ISO C, POSIX, and the kernel, and signal handling must behave the
+      same regardless of which standard the handler was installed through. When the POSIX
+      layer is linked, weak references pick up its signal number table
+      (z_sig_from_posix()) and its delivery shim (z_sig_shim()), making signal()'s kernel
+      registration identical to sigaction()'s; otherwise only the six ISO C signal
+      numbers are reachable, and those coincide with the kernel's, so handlers take
+      delivery directly.
+
+      Also reduces the minimal libc <signal.h> to what ISO C requires; the POSIX
+      additions already come from <zephyr/posix/posix_signal.h>, which it includes.
   - path: zephyr/libc-picolibc-limits-h.patch
     sha256sum: c215c69901f9cd028c994f9ef07ad551165f672410334468b332b5253244b4eb
     module: zephyr
