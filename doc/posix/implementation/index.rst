@@ -414,3 +414,52 @@ Then set it in your ``prj.conf`` or ``testcase.yaml``:
    CONFIG_SYS_THREAD_MUTEX_MIN_ADD_MYLIB=3
 
 The build system automatically discovers all ``_MIN_ADD_*`` symbols and includes them in the sum.
+
+.. _posix_mapped_files_design:
+
+Memory-Mapped Files
+===================
+
+The :ref:`POSIX_MAPPED_FILES <posix_option_group_mapped_files>` and
+:ref:`POSIX_MEMORY_PROTECTION <posix_option_group_memory_protection>` option groups and the
+:ref:`_POSIX_SHARED_MEMORY_OBJECTS <posix_option_shared_memory_objects>` option are present in
+name but their implementation is a placeholder, and the † markers on their entries in the
+option, conformance and profile tables reflect that. The current behaviour and its
+shortcomings are recorded here so they can be corrected deliberately rather than discovered.
+
+:c:func:`mmap`
+   Anonymous mappings call ``k_mem_map()`` directly: there is no system call, so a user thread
+   calling :c:func:`mmap` faults. ``MAP_FIXED`` treats ``addr`` as a *physical* address and maps
+   it with ``k_mem_map_phys_bare()``, which is not what POSIX means by fixed placement and lets
+   any caller map arbitrary physical memory. A file descriptor is handed to ``ZFD_IOCTL_MMAP``,
+   which only shared memory objects implement, so mapping a regular file fails; descriptor 0 is
+   rejected outright. Without an MMU every mapping fails with ``ENOTSUP``. File contents are
+   never read into a mapping and modifications are never written to a file.
+
+:c:func:`msync`
+   A no-op that returns 0. Nothing is written back, whatever the flags.
+
+:c:func:`munmap`
+   No record of mappings exists, so the call unmaps whatever address it is given, provided a
+   physical page stands behind it, including memory :c:func:`mmap` never mapped.
+
+:c:func:`mprotect`
+   Fails with ``ENOSYS``.
+
+:c:func:`shm_open`, :c:func:`shm_unlink`
+   Shared memory objects are built in the POSIX library from file-descriptor table internals
+   (``zvfs_reserve_fd()``, the kernel heap, a kernel mutex taken by the caller), so neither
+   function can be called from user mode and their tests skip under
+   :kconfig:option:`CONFIG_USERSPACE`. Names are compared by a 32-bit hash, so two distinct
+   names can collide. After :c:func:`shm_unlink` the name stays reserved: reopening it fails
+   with ``EACCES`` instead of creating a new object as POSIX requires. An object is sized once
+   by :c:func:`ftruncate`; :c:func:`mmap` of an object hands out the kernel's own address,
+   which a user thread cannot reach, and without an MMU fails with ``ENOTSUP``.
+
+Protection
+   Page protection is fixed at creation from the ``k_mem_map()`` flags and is never enforced
+   for user threads, which cannot reach the pages at all: they are absent from the memory
+   domains, so the shared memory object tests skip under :kconfig:option:`CONFIG_USERSPACE`.
+
+Lifetime
+   Mappings belong to no one. Nothing is released when the creating thread exits.

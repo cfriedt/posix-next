@@ -11,3 +11,4 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_MEMORY_PROTECTION`.
 
     :c:func:`mprotect`, yes :ref:`†<posix_undefined_behaviour>`
 
+See :ref:`posix_mapped_files_design` for implementation details.
