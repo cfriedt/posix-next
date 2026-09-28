@@ -133,11 +133,11 @@ int sem_init(sem_t *semaphore, int pshared, unsigned int value)
 		return -1;
 	}
 
-	/*
-	 * Zephyr has no concept of process, so only thread shared
-	 * semaphore makes sense in here.
-	 */
-	__ASSERT(pshared == 0, "pshared should be 0");
+	/* a sys_sem is a word in memory: sharing it needs nothing beyond shared memory */
+	if ((pshared != 0) && !IS_ENABLED(CONFIG_POSIX_THREAD_PROCESS_SHARED)) {
+		errno = ENOTSUP;
+		return -1;
+	}
 
 	(void)sys_sem_init(semaphore, value, CONFIG_POSIX_SEM_VALUE_MAX);
 

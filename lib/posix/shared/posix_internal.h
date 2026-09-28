@@ -63,9 +63,7 @@ struct posix_condattr {
 	/* leaves room for CLOCK_REALTIME (1, default) and CLOCK_MONOTONIC (4) */
 	unsigned char clock: 3;
 	char initialized: 1;
-#ifdef _POSIX_THREAD_PROCESS_SHARED
 	unsigned char pshared: 1;
-#endif
 };
 
 struct posix_cond {
@@ -99,6 +97,7 @@ struct pthread_mutexattr {
 	unsigned char type: 2;
 	unsigned char protocol: 2;
 	bool initialized: 1;
+	unsigned char pshared: 1;
 };
 
 BUILD_ASSERT(sizeof(pthread_mutexattr_t) >= sizeof(struct pthread_mutexattr));

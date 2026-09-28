@@ -229,7 +229,8 @@ enum {
 #define __z_posix_sysconf_SC_THREAD_PRIORITY_SCHEDULING                                            \
 	COND_CODE_1(CONFIG_POSIX_THREAD_PRIORITY_SCHEDULING, (_POSIX_THREAD_PRIORITY_SCHEDULING),  \
 		    (-1L))
-#define __z_posix_sysconf_SC_THREAD_PROCESS_SHARED      (-1L)
+#define __z_posix_sysconf_SC_THREAD_PROCESS_SHARED                                                 \
+	COND_CODE_1(CONFIG_POSIX_THREAD_PROCESS_SHARED, (_POSIX_THREAD_PROCESS_SHARED), (-1L))
 #define __z_posix_sysconf_SC_THREAD_ROBUST_PRIO_INHERIT (-1L)
 #define __z_posix_sysconf_SC_THREAD_ROBUST_PRIO_PROTECT (-1L)
 #define __z_posix_sysconf_SC_THREAD_SAFE_FUNCTIONS                                                 \
