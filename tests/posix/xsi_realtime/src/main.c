@@ -19,7 +19,7 @@
  */
 #define NATIVE (IS_ENABLED(CONFIG_NATIVE_LIBC))
 
-ZTEST(xsi_realtime, test_sched_getparam)
+ZTEST_USER(xsi_realtime, test_sched_getparam)
 {
 	struct sched_param param;
 	int rc = sched_getparam(0, &param);
@@ -32,7 +32,7 @@ ZTEST(xsi_realtime, test_sched_getparam)
 	}
 }
 
-ZTEST(xsi_realtime, test_sched_getscheduler)
+ZTEST_USER(xsi_realtime, test_sched_getscheduler)
 {
 	int rc = sched_getscheduler(0);
 	int err = errno;
@@ -43,7 +43,7 @@ ZTEST(xsi_realtime, test_sched_getscheduler)
 		zassert_true((rc == -1 && err == ENOSYS));
 	}
 }
-ZTEST(xsi_realtime, test_sched_setparam)
+ZTEST_USER(xsi_realtime, test_sched_setparam)
 {
 	struct sched_param param = {
 		.sched_priority = 2,
@@ -54,7 +54,7 @@ ZTEST(xsi_realtime, test_sched_setparam)
 	zassert_true((rc == -1 && err == (NATIVE ? EINVAL : ENOSYS)), "rc %d errno %d", rc, err);
 }
 
-ZTEST(xsi_realtime, test_sched_setscheduler)
+ZTEST_USER(xsi_realtime, test_sched_setscheduler)
 {
 	struct sched_param param = {
 		.sched_priority = 2,
@@ -66,7 +66,7 @@ ZTEST(xsi_realtime, test_sched_setscheduler)
 	zassert_true((rc == -1 && err == (NATIVE ? EINVAL : ENOSYS)), "rc %d errno %d", rc, err);
 }
 
-ZTEST(xsi_realtime, test_sched_rr_get_interval)
+ZTEST_USER(xsi_realtime, test_sched_rr_get_interval)
 {
 	struct timespec interval = {
 		.tv_sec = 0,
