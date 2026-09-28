@@ -1121,4 +1121,10 @@ Deviations
    and :c:func:`mprotect` operate on whole mappings: a range covering part of a mapping fails with
    ``EINVAL`` and ``ENOTSUP`` respectively. Writable and executable pages are never granted
    together (``ENOTSUP``). A reference past the end of the file beyond the last mapped page
-   cannot raise ``SIGBUS``; the page is simply not mapped.
+   cannot raise ``SIGBUS``; the page is simply not mapped. With :kconfig:option:`CONFIG_PROCESS`
+   a mapping still belongs to the thread that created it rather than to its process: it is
+   released when that thread exits although the process lives on, it stays behind when the
+   process ends through another thread until the next mapping operation, and a process cloned
+   with a copy of its address space (:kconfig:option:`CONFIG_PROCESS_VM`) gets copies of the
+   mapped pages but no mappings of its own, so shared mappings are not shared with it and it
+   can neither :c:func:`msync` nor :c:func:`munmap` them.
