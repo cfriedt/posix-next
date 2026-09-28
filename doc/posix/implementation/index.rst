@@ -1096,10 +1096,18 @@ Protection
    guaranteed to fault.
 
 Shared memory objects
-   :c:func:`shm_open` and :c:func:`shm_unlink` still build their objects in the POSIX library
-   from file-descriptor table internals, so they cannot be called from user mode, names are
-   compared by a 32-bit hash, and a name stays reserved after :c:func:`shm_unlink` (reopening
-   it fails with ``EACCES``). Their mappings do alias through the in-place path above.
+   :c:func:`shm_open` and :c:func:`shm_unlink` are thin over the ``zvfs_shm_open()`` and
+   ``zvfs_shm_unlink()`` system calls (:kconfig:option:`CONFIG_ZVFS_SHM`), so they work from user
+   mode. An object is a named, system-wide entry in a pool of
+   :kconfig:option:`CONFIG_ZVFS_SHM_MAX`, compared by name (not by hash), sized once with
+   :c:func:`ftruncate`, read and written at offsets, and mapped in place: it owns pinned pages
+   (a power-of-two heap block without an MMU) and hands their address to the mapping layer,
+   so every :c:func:`mmap` of it aliases the same memory and :c:func:`munmap` on that address
+   releases all of them. :c:func:`shm_unlink` removes the name at once, a later
+   :c:func:`shm_open` with ``O_CREAT`` creates a fresh object under it, and the unlinked object
+   is freed when its last descriptor and its last mapping are gone. Resizing a sized object
+   and ``O_TRUNC`` on it fail with ``EBUSY``, since its pages may be mapped; there are no
+   per-process permissions, so ``mode`` is recorded but not enforced.
 
 Ownership
    A mapping belongs to the thread that created it. When that thread exits, its mappings are
