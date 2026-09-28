@@ -5,8 +5,13 @@
  */
 
 #include <fcntl.h>
+#include <pthread.h>
+#include <semaphore.h>
+#include <spawn.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 #include <sys/socket.h>
 
@@ -16,6 +21,7 @@
 #include <zephyr/ztest.h>
 
 #include "../../shared/linux_compat_test.h"
+#include "image_registry.h"
 
 #define _page_size COND_CODE_1(CONFIG_MMU, (CONFIG_MMU_PAGE_SIZE), (CONFIG_POSIX_PAGE_SIZE))
 
@@ -158,6 +164,136 @@ ZTEST(xsi_realtime, test_shm_read_write)
 	zassert_ok(shm_unlink(VALID_SHM_PATH));
 }
 
+#if defined(_POSIX_THREAD_PROCESS_SHARED) && defined(CONFIG_POSIX_SPAWN)
+#define IPC_SHM_PATH "/ipc"
+#define IPC_ROUNDS   4
+
+/* the page both processes map: the turn passes back and forth under the shared lock */
+struct ipc_page {
+	pthread_mutex_t lock;
+	pthread_cond_t turn_changed;
+	sem_t mapped;
+	int turn; /* 0: the parent's, 1: the child's */
+	int rounds;
+};
+/* without an MMU a page is CONFIG_POSIX_PAGE_SIZE bytes, smaller than the struct on 64-bit */
+#define IPC_SHM_SIZE ROUND_UP(sizeof(struct ipc_page), _page_size)
+
+static void ipc_child_entry(void *p1, void *p2, void *p3)
+{
+	int fd = shm_open(IPC_SHM_PATH, O_RDWR, VALID_MODE);
+	struct ipc_page *pg;
+	int rounds = 0;
+
+	ARG_UNUSED(p1);
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	if (fd < 0) {
+		_exit(2);
+	}
+	pg = mmap(NULL, IPC_SHM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+	if (pg == MAP_FAILED) {
+		_exit(3);
+	}
+	if (sem_post(&pg->mapped) != 0) {
+		_exit(4);
+	}
+
+	for (int i = 0; i < IPC_ROUNDS; ++i) {
+		if (pthread_mutex_lock(&pg->lock) != 0) {
+			_exit(5);
+		}
+		while (pg->turn != 1) {
+			if (pthread_cond_wait(&pg->turn_changed, &pg->lock) != 0) {
+				_exit(6);
+			}
+		}
+		pg->rounds++;
+		rounds++;
+		pg->turn = 0;
+		(void)pthread_cond_signal(&pg->turn_changed);
+		(void)pthread_mutex_unlock(&pg->lock);
+	}
+
+	(void)munmap(pg, IPC_SHM_SIZE);
+	(void)close(fd);
+	_exit((rounds == IPC_ROUNDS) ? 0 : 7);
+}
+
+IMAGE_REGISTRY_ENTRY_DEFINE(img_ipc, "/bin/ipc", ipc_child_entry);
+
+/* a deadline for the waits on the child, so a child that died fails the test instead */
+static struct timespec ipc_deadline(void)
+{
+	struct timespec ts;
+
+	zassert_ok(clock_gettime(CLOCK_REALTIME, &ts));
+	ts.tv_sec += 10;
+
+	return ts;
+}
+
+/* synchronization objects in a mapped shared memory object work across processes */
+static void shm_mmap_process_shared(void)
+{
+	struct timespec deadline;
+	int fd = shm_open(IPC_SHM_PATH, CREATE_FLAGS, VALID_MODE);
+	struct ipc_page *pg;
+	pthread_mutexattr_t ma;
+	pthread_condattr_t ca = {0};
+	pid_t pid = -1;
+	int status = -1;
+	char *const argv[] = {"ipc", NULL};
+	char *const envp[] = {NULL};
+
+	zassert_true(fd >= 0, "shm_open(%s) failed: %d", IPC_SHM_PATH, errno);
+	zassert_ok(ftruncate(fd, IPC_SHM_SIZE));
+	pg = mmap(NULL, IPC_SHM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+	zassert_not_equal(pg, MAP_FAILED, "mmap() failed: %d", errno);
+
+	zassert_ok(pthread_mutexattr_init(&ma));
+	zassert_ok(pthread_mutexattr_setpshared(&ma, PTHREAD_PROCESS_SHARED));
+	zassert_ok(pthread_mutex_init(&pg->lock, &ma));
+	zassert_ok(pthread_mutexattr_destroy(&ma));
+	zassert_ok(pthread_condattr_init(&ca));
+	zassert_ok(pthread_condattr_setpshared(&ca, PTHREAD_PROCESS_SHARED));
+	zassert_ok(pthread_cond_init(&pg->turn_changed, &ca));
+	zassert_ok(pthread_condattr_destroy(&ca));
+	zassert_ok(sem_init(&pg->mapped, 1, 0));
+	pg->turn = 0;
+	pg->rounds = 0;
+
+	zassert_ok(posix_spawn(&pid, "/bin/ipc", NULL, NULL, argv, envp));
+	deadline = ipc_deadline();
+	zassert_ok(sem_timedwait(&pg->mapped, &deadline), "the child never mapped the page: %d",
+		   errno);
+
+	for (int i = 0; i < IPC_ROUNDS; ++i) {
+		zassert_ok(pthread_mutex_lock(&pg->lock));
+		pg->turn = 1;
+		zassert_ok(pthread_cond_signal(&pg->turn_changed));
+		while (pg->turn != 0) {
+			zassert_ok(pthread_cond_timedwait(&pg->turn_changed, &pg->lock, &deadline),
+				   "round %d: the child never took its turn", i);
+		}
+		zassert_ok(pthread_mutex_unlock(&pg->lock));
+	}
+
+	zassert_equal(waitpid(pid, &status, 0), pid, "waitpid failed: %d", errno);
+	zassert_true(WIFEXITED(status), "status 0x%x", status);
+	zassert_equal(WEXITSTATUS(status), 0, "the child left with %d", WEXITSTATUS(status));
+	zassert_equal(pg->rounds, IPC_ROUNDS);
+
+	zassert_ok(pthread_cond_destroy(&pg->turn_changed));
+	zassert_ok(pthread_mutex_destroy(&pg->lock));
+	zassert_ok(sem_destroy(&pg->mapped));
+	zassert_ok(munmap(pg, IPC_SHM_SIZE));
+	zassert_ok(close(fd));
+	zassert_ok(shm_unlink(IPC_SHM_PATH));
+}
+#endif /* _POSIX_THREAD_PROCESS_SHARED && CONFIG_POSIX_SPAWN */
+
 ZTEST(xsi_realtime, test_shm_mmap)
 {
 	int fd[N];
@@ -201,4 +337,8 @@ ZTEST(xsi_realtime, test_shm_mmap)
 	}
 
 	zassert_ok(shm_unlink(VALID_SHM_PATH));
+
+#if defined(_POSIX_THREAD_PROCESS_SHARED) && defined(CONFIG_POSIX_SPAWN)
+	shm_mmap_process_shared();
+#endif
 }
