@@ -1022,45 +1022,95 @@ Memory-Mapped Files
 ===================
 
 The :ref:`POSIX_MAPPED_FILES <posix_option_group_mapped_files>` and
-:ref:`POSIX_MEMORY_PROTECTION <posix_option_group_memory_protection>` option groups and the
-:ref:`_POSIX_SHARED_MEMORY_OBJECTS <posix_option_shared_memory_objects>` option are present in
-name but their implementation is a placeholder, and the † markers on their entries in the
-option, conformance and profile tables reflect that. The current behaviour and its
-shortcomings are recorded here so they can be corrected deliberately rather than discovered.
+:ref:`POSIX_MEMORY_PROTECTION <posix_option_group_memory_protection>` option groups are thin layers
+over four ZVFS system calls: ``zvfs_mmap()``, ``zvfs_munmap()``, ``zvfs_msync()``, and
+``zvfs_mprotect()`` (:kconfig:option:`CONFIG_ZVFS_MMAP`). The POSIX functions convert their
+``PROT_*``, ``MAP_*``, and ``MS_*`` arguments to the ZVFS flag namespace and return the result;
+everything else, including the mapping registry, lives in ZVFS, so mappings work from user mode
+when :kconfig:option:`CONFIG_USERSPACE` is enabled.
 
-:c:func:`mmap`
-   Anonymous mappings call ``k_mem_map()`` directly: there is no system call, so a user thread
-   calling :c:func:`mmap` faults. ``MAP_FIXED`` treats ``addr`` as a *physical* address and maps
-   it with ``k_mem_map_phys_bare()``, which is not what POSIX means by fixed placement and lets
-   any caller map arbitrary physical memory. A file descriptor is handed to ``ZFD_IOCTL_MMAP``,
-   which only shared memory objects implement, so mapping a regular file fails; descriptor 0 is
-   rejected outright. Without an MMU every mapping fails with ``ENOTSUP``. File contents are
-   never read into a mapping and modifications are never written to a file.
+.. graphviz::
+   :caption: a mapping is a registry record over page storage and a referenced open file
 
-:c:func:`msync`
-   A no-op that returns 0. Nothing is written back, whatever the flags.
+   digraph {
+       node [shape=rect, style="rounded,filled"];
+       rankdir=LR;
 
-:c:func:`munmap`
-   No record of mappings exists, so the call unmaps whatever address it is given, provided a
-   physical page stands behind it, including memory :c:func:`mmap` never mapped.
+       posix   [label="mmap / msync / munmap / mprotect", fillcolor="#d5e8d4"];
+       zvfs    [label="zvfs_mmap()\nmapping registry", fillcolor="#ffe6cc"];
+       pages   [label="page storage\nk_mem_map() or kernel heap", fillcolor="#dae8fc"];
+       part    [label="memory-domain partition\n(user access)", fillcolor="#dae8fc"];
+       file    [label="open file object\nread_offs / write_offs", fillcolor="#f8cecc"];
 
-:c:func:`mprotect`
-   Fails with ``ENOSYS``.
+       posix -> zvfs;
+       zvfs -> pages;
+       zvfs -> part;
+       zvfs -> file [label="reference, counted\nwith the descriptors"];
+       pages -> file [label="fill at mmap\nwrite back at msync,\nmunmap, owner exit", style=dashed];
+   }
 
-:c:func:`shm_open`, :c:func:`shm_unlink`
-   Shared memory objects are built in the POSIX library from file-descriptor table internals
-   (``zvfs_reserve_fd()``, the kernel heap, a kernel mutex taken by the caller), so neither
-   function can be called from user mode and their tests skip under
-   :kconfig:option:`CONFIG_USERSPACE`. Names are compared by a 32-bit hash, so two distinct
-   names can collide. After :c:func:`shm_unlink` the name stays reserved: reopening it fails
-   with ``EACCES`` instead of creating a new object as POSIX requires. An object is sized once
-   by :c:func:`ftruncate`; :c:func:`mmap` of an object hands out the kernel's own address,
-   which a user thread cannot reach, and without an MMU fails with ``ENOTSUP``.
+Storage
+   With an MMU (:kconfig:option:`CONFIG_MMU`), a mapping owns anonymously mapped pages from
+   ``k_mem_map()``, with guard pages on both sides. The pages are pinned: under
+   :kconfig:option:`CONFIG_DEMAND_PAGING` a lazily backed page would come into existence in the
+   kernel's page tables only, on first touch, and the memory domains that map it would never
+   see it. Pinning also makes every mapping trivially satisfy :c:func:`mlock`. Without an MMU, a
+   mapping owns a block of the kernel heap at a 64-byte granule
+   (:kconfig:option:`CONFIG_ZVFS_MMAP_PAGE_SIZE`, which :c:func:`sysconf` reports as
+   ``_SC_PAGESIZE``). Lengths and file offsets are rounded to that granule.
+
+File contents
+   A file-backed mapping is a copy: the pages are filled from the file when the mapping is
+   created (bytes past the end of the file within the last page read as zero) and, for a
+   ``MAP_SHARED`` mapping that has been writable, written back on :c:func:`msync`, on
+   :c:func:`munmap`, and when the owner exits. Write-back is clipped to the file's size at that
+   time, so writing through a mapping never grows the file. With
+   :kconfig:option:`CONFIG_ZVFS_MMAP_DIRTY_TRACK` (an MMU whose fault handler offers write
+   faults to the kernel) the pages of a shared writable mapping start write-protected: the
+   first write to a page faults, the page is recorded as modified and made writable, and
+   :c:func:`msync` writes back only the modified pages before protecting them again, so a
+   page changed through the descriptor in the meantime is not overwritten by a stale copy.
+   Without it the whole range is written back. ``MS_INVALIDATE`` re-reads the pages
+   from the file. Two mappings of the same file are therefore coherent only through
+   :c:func:`msync`; there is no page cache. A mapping counts as a reference on the open file
+   object alongside its descriptors, so the file stays open after :c:func:`close` until the
+   last mapping of it is released.
+
+Objects that own their pages
+   A file object that already has pages of its own answers ``ZFD_IOCTL_MMAP`` with their
+   address, and the mapping refers to those pages in place. Shared memory objects
+   (:c:func:`shm_open`) work this way, so every mapping of one object aliases the same memory,
+   from kernel and user mode alike; as such mappings share their address, :c:func:`munmap` on
+   it releases them all.
 
 Protection
-   Page protection is fixed at creation from the ``k_mem_map()`` flags and is never enforced
-   for user threads, which cannot reach the pages at all: they are absent from the memory
-   domains, so the shared memory object tests skip under :kconfig:option:`CONFIG_USERSPACE`.
+   A user thread reaches a mapping through a memory-domain partition on its pages, added to the
+   caller's domain when a user thread creates the mapping (or later changes its protection) and
+   removed when it is unmapped. Each mapping is one partition, so the number a user thread can
+   hold at once is bounded by the domain's free partition slots. On MPU platforms the mapping's
+   storage is a power-of-two block aligned to its size, as the protection regions require, and
+   the calling thread's regions are reprogrammed before the system call returns, since Cortex-M
+   otherwise applies domain changes only at the next context switch. The
+   kernel's own view of the pages it owns follows the protection too, but supervisor-mode
+   enforcement is a property of the architecture, not of the API: only user-mode accesses are
+   guaranteed to fault.
 
-Lifetime
-   Mappings belong to no one. Nothing is released when the creating thread exits.
+Shared memory objects
+   :c:func:`shm_open` and :c:func:`shm_unlink` still build their objects in the POSIX library
+   from file-descriptor table internals, so they cannot be called from user mode, names are
+   compared by a 32-bit hash, and a name stays reserved after :c:func:`shm_unlink` (reopening
+   it fails with ``EACCES``). Their mappings do alias through the in-place path above.
+
+Ownership
+   A mapping belongs to the thread that created it. When that thread exits, its mappings are
+   torn down: shared file mappings are written back and every mapping is unmapped, the work
+   happening at the next mapping operation because the exit path itself cannot block.
+   :c:func:`msync` remains the only way to guarantee that modifications have reached the file at a
+   given point.
+
+Deviations
+   ``MAP_FIXED`` is not supported (``ENOTSUP``); the address hint is ignored. :c:func:`munmap`
+   and :c:func:`mprotect` operate on whole mappings: a range covering part of a mapping fails with
+   ``EINVAL`` and ``ENOTSUP`` respectively. Writable and executable pages are never granted
+   together (``ENOTSUP``). A reference past the end of the file beyond the last mapped page
+   cannot raise ``SIGBUS``; the page is simply not mapped.
