@@ -1110,21 +1110,26 @@ Shared memory objects
    per-process permissions, so ``mode`` is recorded but not enforced.
 
 Ownership
-   A mapping belongs to the thread that created it. When that thread exits, its mappings are
-   torn down: shared file mappings are written back and every mapping is unmapped, the work
-   happening at the next mapping operation because the exit path itself cannot block.
-   :c:func:`msync` remains the only way to guarantee that modifications have reached the file at a
-   given point.
+   A mapping belongs to the thread that created it or, with :kconfig:option:`CONFIG_PROCESS`, to
+   that thread's process, and the mapping functions only reach the caller's own process's
+   mappings. When the owner exits its mappings are torn down: shared file mappings are written
+   back and every mapping is unmapped. A process that exits through :c:func:`_exit` does this in
+   its own context, so the file is current by the time the process can be waited for; a thread,
+   or a process whose last thread simply returns, leaves the work to the next mapping operation,
+   because the exit path itself cannot block. :c:func:`msync` remains the only way to guarantee
+   that modifications have reached the file at a given point.
+
+Inheritance
+   A child created with a copy of its parent's address space
+   (:kconfig:option:`CONFIG_PROCESS_VM`) inherits the parent's mappings: ``MAP_SHARED`` mappings
+   keep referring to the same pages, so writes are visible across the two processes and either
+   may :c:func:`msync` them, while ``MAP_PRIVATE`` mappings are copied like the rest of the
+   writable memory. Each side unmaps independently; the pages and the file reference go with
+   the last of them. A child started on a new image has no mappings.
 
 Deviations
    ``MAP_FIXED`` is not supported (``ENOTSUP``); the address hint is ignored. :c:func:`munmap`
    and :c:func:`mprotect` operate on whole mappings: a range covering part of a mapping fails with
    ``EINVAL`` and ``ENOTSUP`` respectively. Writable and executable pages are never granted
    together (``ENOTSUP``). A reference past the end of the file beyond the last mapped page
-   cannot raise ``SIGBUS``; the page is simply not mapped. With :kconfig:option:`CONFIG_PROCESS`
-   a mapping still belongs to the thread that created it rather than to its process: it is
-   released when that thread exits although the process lives on, it stays behind when the
-   process ends through another thread until the next mapping operation, and a process cloned
-   with a copy of its address space (:kconfig:option:`CONFIG_PROCESS_VM`) gets copies of the
-   mapped pages but no mappings of its own, so shared mappings are not shared with it and it
-   can neither :c:func:`msync` nor :c:func:`munmap` them.
+   cannot raise ``SIGBUS``; the page is simply not mapped.
