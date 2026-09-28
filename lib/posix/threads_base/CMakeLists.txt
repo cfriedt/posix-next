@@ -75,6 +75,12 @@ if(NOT CONFIG_TC_PROVIDES_POSIX_THREADS)
       pthread_mutexattr_setprotocol.c
     )
   endif()
+  zephyr_library_sources_ifdef(CONFIG_POSIX_THREAD_PROCESS_SHARED
+    pthread_condattr_getpshared.c
+    pthread_condattr_setpshared.c
+    pthread_mutexattr_getpshared.c
+    pthread_mutexattr_setpshared.c
+  )
   zephyr_library_sources_ifdef(CONFIG_POSIX_THREAD_PRIO_PROTECT
     pthread_mutex_getprioceiling.c
     pthread_mutex_setprioceiling.c
