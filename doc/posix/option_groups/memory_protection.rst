@@ -9,6 +9,6 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_MEMORY_PROTECTION`.
    :header: API, Supported
    :widths: 50,10
 
-    :c:func:`mprotect`, yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`mprotect`,yes
 
 See :ref:`posix_mapped_files_design` for implementation details.
