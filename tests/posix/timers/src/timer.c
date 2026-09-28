@@ -31,29 +31,31 @@ void handler(union sigval val)
 	zassert_equal(val.sival_int, TEST_SIGNAL_VAL);
 }
 
-static void sig_handler(int signo, struct k_sig_info *info, void *ctx)
+static void sig_handler(int signo, siginfo_t *info, void *ctx)
 {
 	ARG_UNUSED(ctx);
 
 	++exp_count;
 	LOG_DBG("Signal %d delivered %d times", signo, exp_count);
 	zassert_equal(signo, TEST_SIGNAL_VAL);
-	zassert_equal(info->value.sival_int, TEST_SIGNAL_VAL);
+	zassert_equal(info->si_value.sival_int, TEST_SIGNAL_VAL);
 }
 
 static void install_sig_handler(void)
 {
 	struct k_sig_set mask;
-	struct k_sig_action act = {
-		.handler = sig_handler,
+	struct sigaction act = {
+		.sa_flags = SA_SIGINFO,
+		.sa_sigaction = sig_handler,
 	};
 
-	zassert_ok(k_sig_action(TEST_SIGNAL_VAL, &act, NULL));
+	zassert_ok(sigemptyset(&act.sa_mask));
+	zassert_ok(sigaction(TEST_SIGNAL_VAL, &act, NULL));
 
 	/*
 	 * Zephyr kernel threads block all signals by default, and some libc
-	 * sigset_t types are too small for realtime signal numbers; install and
-	 * unblock through the kernel API, as the realtime_signals suite does.
+	 * sigset_t types are too small for realtime signal numbers; unblock
+	 * through the kernel API, as the realtime_signals suite does.
 	 */
 	zassert_ok(k_sig_emptyset(&mask));
 	zassert_ok(k_sig_addset(&mask, TEST_SIGNAL_VAL));
@@ -199,7 +201,7 @@ static void after(void *arg)
 		k_msleep(10);
 	}
 	/* queued signals have drained through the still-installed handler */
-	(void)k_sig_action(TEST_SIGNAL_VAL, &(struct k_sig_action){.handler = K_SIG_DFL}, NULL);
+	(void)signal(TEST_SIGNAL_VAL, SIG_DFL);
 }
 
 ZTEST_SUITE(posix_timers, NULL, NULL, NULL, after, NULL);

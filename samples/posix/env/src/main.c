@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <threads.h>
 #include <unistd.h>
 
 #include <zephyr/sys/util.h>
@@ -42,7 +43,7 @@ static void *entry(void *arg)
 	static char alert_msg_buf[42];
 
 	/* Give the shell time to initialize and print its prompt before we print */
-	sleep(1);
+	thrd_sleep(&(struct timespec){.tv_sec = 1}, NULL);
 
 	setenv("BOARD", CONFIG_BOARD, 1);
 	setenv("BUILD_VERSION", VERSION_BUILD, 1);
@@ -51,7 +52,7 @@ static void *entry(void *arg)
 	env();
 
 	while (true) {
-		sleep(1);
+		thrd_sleep(&(struct timespec){.tv_sec = 1}, NULL);
 		if (getenv_r("ALERT", alert_msg_buf, sizeof(alert_msg_buf) - 1) < 0 ||
 		    strlen(alert_msg_buf) == 0) {
 			continue;
