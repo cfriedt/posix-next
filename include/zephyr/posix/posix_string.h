@@ -6,7 +6,7 @@
 
 /**
  * @file
- * @brief POSIX extensions to the C string library (<string.h> supplement)
+ * @brief \<string.h\>: POSIX extensions to the C string library
  *
  * Provides POSIX extensions to the standard @c <string.h> interface, including
  * thread-safe and signal-related string utilities.
