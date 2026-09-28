@@ -213,6 +213,30 @@ access to the futex word. The mechanism needs no MMU or MPU, only atomic operati
 platforms that fall back to ``CONFIG_ATOMIC_OPERATIONS_C`` every user-mode atomic operation is
 itself a system call, so the uncontended path is not free there.
 
+.. _posix_process_shared_synchronization:
+
+Process-shared synchronization
+------------------------------
+
+:ref:`_POSIX_THREAD_PROCESS_SHARED <posix_option_thread_process_shared>`
+(:kconfig:option:`CONFIG_POSIX_THREAD_PROCESS_SHARED`, selected by :kconfig:option:`CONFIG_XSI`)
+needs no mechanism of its own. Every synchronization object is a word, or a few, in the memory
+of the caller: a mutex or condition variable is a futex the kernel identifies by its address, a
+semaphore is a ``sys_sem`` of the same kind, and barriers, read-write locks and spin locks are
+built from them. Two processes that map the same memory at the same address, as they do with a
+shared memory object (``shm_open()`` maps the object's own pages in place), therefore share the
+object by sharing its memory; the ``pshared`` attribute is recorded and reported, and
+:c:func:`sem_init` accepts a non-zero ``pshared``, but neither changes what the object does. A
+priority-inheritance mutex is backed by a kernel mutex that the kernel finds by the same address,
+so it is shared in the same way.
+
+The address is the identity: a mapping of the same object at another address is a different
+object to the kernel, and two unrelated objects at the same address in two address spaces, as
+after a copy of the address space (:kconfig:option:`CONFIG_PROCESS_VM`), are the same object to
+it. Objects meant to be shared belong in memory both processes map at one address, and a
+private object copied along with a forked address space keeps sharing its kernel mutex with the
+parent's copy for as long as both use it :ref:`†<posix_undefined_behaviour>`.
+
 .. _posix_scheduling_priorities:
 
 Scheduling Priorities
