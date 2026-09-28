@@ -66,6 +66,7 @@ Groups. They are documented with the same per-API detail as Option Groups.
    thread_prio_inherit
    thread_prio_protect
    thread_priority_scheduling
+   thread_process_shared
    thread_safe_functions
    timeouts
    xsi_streams
@@ -113,6 +114,11 @@ functionality provided elsewhere.
    interfaces, though execution-time budgets are not enforced
    :ref:`†<posix_undefined_behaviour>`. Enable with
    :kconfig:option:`CONFIG_POSIX_SPORADIC_SERVER`.
+
+:ref:`_POSIX_THREAD_PROCESS_SHARED <posix_option_thread_process_shared>`
+   Mutexes, condition variables, barriers, read-write locks, spin locks and
+   semaphores may be shared between processes through memory both of them
+   map. Enable with :kconfig:option:`CONFIG_POSIX_THREAD_PROCESS_SHARED`.
 
 :ref:`_POSIX_THREAD_SPORADIC_SERVER <posix_option_thread_sporadic_server>`
    The ``SCHED_SPORADIC`` scheduling policy is accepted by the

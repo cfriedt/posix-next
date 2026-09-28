@@ -84,7 +84,7 @@ POSIX System Interfaces
     :ref:`_POSIX_THREAD_PRIO_INHERIT <posix_option_thread_prio_inherit>`, 200809L, :kconfig:option:`CONFIG_POSIX_THREAD_PRIO_INHERIT`
     :ref:`_POSIX_THREAD_PRIO_PROTECT <posix_option_thread_prio_protect>`, 200809L, :kconfig:option:`CONFIG_POSIX_THREAD_PRIO_PROTECT`
     :ref:`_POSIX_THREAD_PRIORITY_SCHEDULING <posix_option_thread_priority_scheduling>`, 200809L, :kconfig:option:`CONFIG_POSIX_THREAD_PRIORITY_SCHEDULING`
-    _POSIX_THREAD_PROCESS_SHARED, -1,
+    :ref:`_POSIX_THREAD_PROCESS_SHARED <posix_option_thread_process_shared>`, 200809L, :kconfig:option:`CONFIG_POSIX_THREAD_PROCESS_SHARED`
     _POSIX_THREAD_ROBUST_PRIO_INHERIT, -1,
     _POSIX_THREAD_ROBUST_PRIO_PROTECT, -1,
     :ref:`_POSIX_THREAD_SPORADIC_SERVER <posix_option_thread_sporadic_server>`, 200809L, :kconfig:option:`CONFIG_POSIX_THREAD_SPORADIC_SERVER` :ref:`†<posix_undefined_behaviour>`
@@ -137,7 +137,7 @@ X/Open System Interfaces
     :ref:`_POSIX_FSYNC<posix_option_fsync>`, 200809L, :kconfig:option:`CONFIG_POSIX_FSYNC`
     :ref:`_POSIX_THREAD_ATTR_STACKADDR<posix_option_thread_attr_stackaddr>`, 200809L, :kconfig:option:`CONFIG_POSIX_THREAD_ATTR_STACKADDR`
     :ref:`_POSIX_THREAD_ATTR_STACKSIZE<posix_option_thread_attr_stacksize>`, 200809L, :kconfig:option:`CONFIG_POSIX_THREAD_ATTR_STACKSIZE`
-    _POSIX_THREAD_PROCESS_SHARED, -1,
+    :ref:`_POSIX_THREAD_PROCESS_SHARED <posix_option_thread_process_shared>`, 200809L, :kconfig:option:`CONFIG_POSIX_THREAD_PROCESS_SHARED`
 
 .. _posix_undefined_behaviour:
 
