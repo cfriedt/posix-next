@@ -19,6 +19,7 @@ int pthread_condattr_init(pthread_condattr_t *att)
 	}
 
 	attr->clock = CLOCK_REALTIME;
+	attr->pshared = 0;
 	attr->initialized = true;
 
 	return 0;
