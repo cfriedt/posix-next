@@ -8,5 +8,9 @@ FILE(GLOB app_sources src/*.c)
 
 target_sources(app PRIVATE ${app_sources})
 
+# the process-shared section spawns a prelinked child image
+target_include_directories(app PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../../lib/posix/shared)
+zephyr_linker_sources(ROM_SECTIONS iterables.ld)
+
 target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
 target_compile_options(app PRIVATE -U_XOPEN_SOURCE -D_XOPEN_SOURCE=700)
