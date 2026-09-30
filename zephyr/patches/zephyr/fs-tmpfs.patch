@@ -1,0 +1,1674 @@
+diff --git a/doc/services/storage/file_system/index.rst b/doc/services/storage/file_system/index.rst
+--- a/doc/services/storage/file_system/index.rst
++++ b/doc/services/storage/file_system/index.rst
+@@ -44,6 +44,27 @@ where
+ 
+ 
+ 
++tmpfs
++*****
++
++:kconfig:option:`CONFIG_FILE_SYSTEM_TMPFS` provides ``FS_TMPFS``, a file system
++that lives entirely in pages mapped on demand: its nodes, the contents of its
++files and its own bookkeeping come from :c:func:`k_mem_map` on targets with an
++MMU and from page-aligned heap blocks elsewhere, one
++:kconfig:option:`CONFIG_TMPFS_PAGE_SIZE` at a time. No device is involved: a
++mount starts empty and unmounting releases every page. Files, directories,
++symbolic links (followed on lookup, read with :c:func:`fs_readlink`) and FIFO
++nodes are supported; a page is only allocated for a part of a file that has
++been written, so a sparse file costs what it holds. A mount needs nothing
++but a mount point:
++
++.. code-block:: c
++
++	static struct fs_mount_t tmp = {
++		.type = FS_TMPFS,
++		.mnt_point = "/tmp",
++	};
++
+ Samples
+ *******
+ 
+diff --git a/include/zephyr/fs/fs.h b/include/zephyr/fs/fs.h
+--- a/include/zephyr/fs/fs.h
++++ b/include/zephyr/fs/fs.h
+@@ -81,6 +81,9 @@ enum {
+ 	/** Identifier for in-tree Native Simulator mount file system. */
+ 	FS_NATIVE_MOUNT,
+ 
++	/** Identifier for in-tree tmpfs, a file system in anonymously mapped pages. */
++	FS_TMPFS,
++
+ 	/** Base identifier for external file systems. */
+ 	FS_TYPE_EXTERNAL_BASE,
+ };
+diff --git a/include/zephyr/fs/fs_interface.h b/include/zephyr/fs/fs_interface.h
+--- a/include/zephyr/fs/fs_interface.h
++++ b/include/zephyr/fs/fs_interface.h
+@@ -23,7 +23,7 @@ extern "C" {
+ 
+ /* No in-tree file system supports name longer than 255 characters */
+ #if (CONFIG_FILE_SYSTEM_LITTLEFS || CONFIG_FAT_FILESYSTEM_ELM ||	\
+-	CONFIG_FILE_SYSTEM_EXT2) && (CONFIG_FILE_SYSTEM_MAX_FILE_NAME > 255)
++	CONFIG_FILE_SYSTEM_EXT2 || CONFIG_FILE_SYSTEM_TMPFS) && (CONFIG_FILE_SYSTEM_MAX_FILE_NAME > 255)
+ #error "Max allowed CONFIG_FILE_SYSTEM_MAX_FILE_NAME is 255 characters, when any in-tree FS enabled"
+ #endif
+ 
+@@ -64,6 +64,10 @@ extern "C" {
+ #define MAX_FILE_NAME 255
+ #endif
+ 
++#if !defined(MAX_FILE_NAME) && defined(CONFIG_FILE_SYSTEM_TMPFS)
++#define MAX_FILE_NAME 255
++#endif
++
+ #if !defined(MAX_FILE_NAME) /* filesystem selection */
+ /**
+  * @brief Maximum length of a file name, without the terminating null character.
+diff --git a/subsys/fs/CMakeLists.txt b/subsys/fs/CMakeLists.txt
+--- a/subsys/fs/CMakeLists.txt
++++ b/subsys/fs/CMakeLists.txt
+@@ -25,6 +25,7 @@ if(CONFIG_FILE_SYSTEM_LIB_LINK)
+   add_subdirectory_ifdef(CONFIG_FILE_SYSTEM_EXT2 ext2)
+   add_subdirectory_ifdef(CONFIG_FUSE_CLIENT fuse_client)
+   add_subdirectory_ifdef(CONFIG_FILE_SYSTEM_VIRTIOFS virtiofs)
++  add_subdirectory_ifdef(CONFIG_FILE_SYSTEM_TMPFS tmpfs)
+ 
+   zephyr_library_link_libraries(FS)
+ 
+@@ -33,6 +34,7 @@ if(CONFIG_FILE_SYSTEM_LIB_LINK)
+   target_link_libraries_ifdef(CONFIG_FILE_SYSTEM_EXT2     FS INTERFACE EXT2)
+   target_link_libraries_ifdef(CONFIG_FUSE_CLIENT          FS INTERFACE FUSE_CLIENT)
+   target_link_libraries_ifdef(CONFIG_FILE_SYSTEM_VIRTIOFS FS INTERFACE VIRTIOFS)
++  target_link_libraries_ifdef(CONFIG_FILE_SYSTEM_TMPFS    FS INTERFACE TMPFS)
+ endif()
+ 
+ add_subdirectory_ifdef(CONFIG_FCB  ./fcb)
+diff --git a/subsys/fs/Kconfig b/subsys/fs/Kconfig
+--- a/subsys/fs/Kconfig
++++ b/subsys/fs/Kconfig
+@@ -199,6 +199,7 @@ rsource "Kconfig.littlefs"
+ rsource "ext2/Kconfig"
+ rsource "fuse_client/Kconfig"
+ rsource "virtiofs/Kconfig"
++rsource "tmpfs/Kconfig"
+ 
+ endif # FILE_SYSTEM_LIB_LINK
+ 
+diff --git a/subsys/fs/tmpfs/CMakeLists.txt b/subsys/fs/tmpfs/CMakeLists.txt
+new file mode 100644
+--- /dev/null
++++ b/subsys/fs/tmpfs/CMakeLists.txt
+@@ -0,0 +1,7 @@
++# SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++# SPDX-License-Identifier: Apache-2.0
++
++zephyr_library_named(TMPFS)
++zephyr_library_include_directories(${ZEPHYR_BASE}/subsys/fs)
++zephyr_library_sources(tmpfs.c)
++zephyr_library_link_libraries(FS)
+diff --git a/subsys/fs/tmpfs/Kconfig b/subsys/fs/tmpfs/Kconfig
+new file mode 100644
+--- /dev/null
++++ b/subsys/fs/tmpfs/Kconfig
+@@ -0,0 +1,47 @@
++# SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++# SPDX-License-Identifier: Apache-2.0
++
++menuconfig FILE_SYSTEM_TMPFS
++	bool "tmpfs: a file system in anonymously mapped pages"
++	depends on FILE_SYSTEM
++	help
++	  A file system that lives entirely in pages mapped on demand: its
++	  nodes, the contents of its files and its own bookkeeping. Nothing is
++	  read from or written to a device, so it is empty at mount and gone at
++	  unmount. Files, directories, symbolic links and FIFO nodes are
++	  supported.
++
++if FILE_SYSTEM_TMPFS
++
++config TMPFS_PAGE_SIZE
++	int "Page size (bytes)"
++	default 4096 if MMU
++	default 1024
++	range 512 65536
++	help
++	  The unit of allocation: the size of a page of file contents or of
++	  nodes. With an MMU the pages come from k_mem_map(), so this is a
++	  multiple of the MMU page size; otherwise they come from the system
++	  heap.
++
++config TMPFS_MAX_PAGES
++	int "Pages a mount may hold"
++	default 0
++	help
++	  Upper bound on the number of pages one mount can allocate, for its
++	  contents and its nodes together; 0 for no bound beyond what the
++	  memory allows. Reported through fs_statvfs().
++
++config TMPFS_MAX_LINK_DEPTH
++	int "Symbolic links followed in one lookup"
++	default 8
++	range 1 40
++	help
++	  A path that goes through more symbolic links than this fails with
++	  ELOOP.
++
++module = TMPFS
++module-str = tmpfs
++source "subsys/logging/Kconfig.template.log_config"
++
++endif # FILE_SYSTEM_TMPFS
+diff --git a/subsys/fs/tmpfs/tmpfs.c b/subsys/fs/tmpfs/tmpfs.c
+new file mode 100644
+--- /dev/null
++++ b/subsys/fs/tmpfs/tmpfs.c
+@@ -0,0 +1,1150 @@
++/*
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++/*
++ * tmpfs: a file system that lives entirely in pages mapped on demand. Nodes
++ * are carved out of pages, a file's contents are pages reached through a
++ * direct, an indirect and a double-indirect table, and a mount's own record
++ * is a page too, so nothing of it exists before a mount or after an unmount.
++ */
++
++#include <errno.h>
++#include <stdlib.h>
++#include <string.h>
++
++#include <zephyr/fs/fs.h>
++#include <zephyr/fs/fs_sys.h>
++#include <zephyr/init.h>
++#include <zephyr/kernel.h>
++#include <zephyr/kernel/mm.h>
++#include <zephyr/logging/log.h>
++#include <zephyr/sys/clock.h>
++#include <zephyr/sys/util.h>
++
++#include "fs_impl.h"
++
++LOG_MODULE_REGISTER(tmpfs, CONFIG_TMPFS_LOG_LEVEL);
++
++#define PAGE_SIZE CONFIG_TMPFS_PAGE_SIZE
++/* page pointers one page holds */
++#define PPP (PAGE_SIZE / sizeof(void *))
++/* pages reached without a table */
++#define NDIRECT 4
++
++struct tmpfs_node {
++	struct tmpfs_node *parent;
++	struct tmpfs_node *next;
++	struct tmpfs_node *children;
++	uint8_t type;
++	uint8_t unlinked;
++	uint16_t opens;
++	size_t size;
++	struct timespec atime;
++	struct timespec mtime;
++	void *direct[NDIRECT];
++	void **indirect;
++	void ***dindirect;
++	char name[MAX_FILE_NAME + 1];
++};
++
++/* an open file or directory: the same size class as a node */
++struct tmpfs_handle {
++	struct tmpfs_node *node;
++	size_t pos;
++	fs_mode_t flags;
++};
++
++union tmpfs_slot {
++	struct tmpfs_node node;
++	struct tmpfs_handle handle;
++	union tmpfs_slot *next_free;
++};
++
++BUILD_ASSERT(sizeof(union tmpfs_slot) <= PAGE_SIZE, "a node must fit a page");
++#ifdef CONFIG_MMU
++BUILD_ASSERT((PAGE_SIZE % CONFIG_MMU_PAGE_SIZE) == 0, "pages are mapped whole");
++#endif
++
++/* a page of slots: the header, then as many slots as fit */
++struct tmpfs_slot_page {
++	struct tmpfs_slot_page *next;
++	union tmpfs_slot slots[];
++};
++
++#define SLOTS_PER_PAGE ((PAGE_SIZE - sizeof(struct tmpfs_slot_page)) / sizeof(union tmpfs_slot))
++
++struct tmpfs_data {
++	struct k_mutex lock;
++	struct tmpfs_node *root;
++	union tmpfs_slot *free_slots;
++	struct tmpfs_slot_page *slot_pages;
++	size_t pages;
++	size_t opens;
++};
++
++BUILD_ASSERT(sizeof(struct tmpfs_data) <= PAGE_SIZE, "the mount record must fit a page");
++
++/* one lookup's outcome: the node, or where it would go */
++struct tmpfs_lookup {
++	struct tmpfs_node *node;
++	struct tmpfs_node *parent;
++	const char *name;
++	size_t name_len;
++};
++
++static void *page_alloc(struct tmpfs_data *fs)
++{
++	void *page;
++
++	if ((CONFIG_TMPFS_MAX_PAGES > 0) && (fs != NULL) && (fs->pages >= CONFIG_TMPFS_MAX_PAGES)) {
++		return NULL;
++	}
++#ifdef CONFIG_MMU
++	/* present from the start: contents are read in any process's context */
++	page = k_mem_map(PAGE_SIZE, K_MEM_PERM_RW | K_MEM_MAP_LOCK);
++#else
++	/* nothing maps these: no alignment beyond the heap's own is needed */
++	page = k_malloc(PAGE_SIZE);
++	if (page != NULL) {
++		(void)memset(page, 0, PAGE_SIZE);
++	}
++#endif
++	if ((page != NULL) && (fs != NULL)) {
++		fs->pages++;
++	}
++
++	return page;
++}
++
++static void page_free(struct tmpfs_data *fs, void *page)
++{
++	if (page == NULL) {
++		return;
++	}
++#ifdef CONFIG_MMU
++	k_mem_unmap(page, PAGE_SIZE);
++#else
++	k_free(page);
++#endif
++	if (fs != NULL) {
++		fs->pages--;
++	}
++}
++
++static union tmpfs_slot *slot_alloc(struct tmpfs_data *fs)
++{
++	union tmpfs_slot *slot = fs->free_slots;
++
++	if (slot == NULL) {
++		struct tmpfs_slot_page *sp = page_alloc(fs);
++
++		if (sp == NULL) {
++			return NULL;
++		}
++		sp->next = fs->slot_pages;
++		fs->slot_pages = sp;
++		for (size_t i = 0; i < SLOTS_PER_PAGE; i++) {
++			sp->slots[i].next_free = fs->free_slots;
++			fs->free_slots = &sp->slots[i];
++		}
++		slot = fs->free_slots;
++	}
++	fs->free_slots = slot->next_free;
++	(void)memset(slot, 0, sizeof(*slot));
++
++	return slot;
++}
++
++static void slot_free(struct tmpfs_data *fs, void *slot)
++{
++	union tmpfs_slot *s = slot;
++
++	s->next_free = fs->free_slots;
++	fs->free_slots = s;
++}
++
++static void now(struct timespec *ts)
++{
++	if (sys_clock_gettime(SYS_CLOCK_REALTIME, ts) != 0) {
++		*ts = (struct timespec){0};
++	}
++}
++
++/* the page holding byte offset off, allocated on demand when asked to */
++static void **page_slot(struct tmpfs_data *fs, struct tmpfs_node *node, size_t index, bool create)
++{
++	if (index < NDIRECT) {
++		return &node->direct[index];
++	}
++	index -= NDIRECT;
++	if (index < PPP) {
++		if (node->indirect == NULL) {
++			if (!create) {
++				return NULL;
++			}
++			node->indirect = page_alloc(fs);
++			if (node->indirect == NULL) {
++				return NULL;
++			}
++		}
++		return &node->indirect[index];
++	}
++	index -= PPP;
++	if (index >= PPP * PPP) {
++		return NULL;
++	}
++	if (node->dindirect == NULL) {
++		if (!create) {
++			return NULL;
++		}
++		node->dindirect = page_alloc(fs);
++		if (node->dindirect == NULL) {
++			return NULL;
++		}
++	}
++	if (node->dindirect[index / PPP] == NULL) {
++		if (!create) {
++			return NULL;
++		}
++		node->dindirect[index / PPP] = page_alloc(fs);
++		if (node->dindirect[index / PPP] == NULL) {
++			return NULL;
++		}
++	}
++	return &node->dindirect[index / PPP][index % PPP];
++}
++
++static void *page_get(struct tmpfs_data *fs, struct tmpfs_node *node, size_t index, bool create)
++{
++	void **slot = page_slot(fs, node, index, create);
++
++	if (slot == NULL) {
++		return NULL;
++	}
++	if ((*slot == NULL) && create) {
++		*slot = page_alloc(fs);
++	}
++	return *slot;
++}
++
++/* drop the pages from byte offset from on; tables that empty go too */
++static void pages_drop(struct tmpfs_data *fs, struct tmpfs_node *node, size_t from)
++{
++	size_t first = DIV_ROUND_UP(from, PAGE_SIZE);
++	size_t last = DIV_ROUND_UP(node->size, PAGE_SIZE);
++
++	for (size_t i = first; i < last; i++) {
++		void **slot = page_slot(fs, node, i, false);
++
++		if ((slot != NULL) && (*slot != NULL)) {
++			page_free(fs, *slot);
++			*slot = NULL;
++		}
++	}
++	if (first <= NDIRECT) {
++		if (node->indirect != NULL) {
++			page_free(fs, node->indirect);
++			node->indirect = NULL;
++		}
++	}
++	if (node->dindirect != NULL) {
++		size_t keep = (first > NDIRECT + PPP) ? DIV_ROUND_UP(first - NDIRECT - PPP, PPP) : 0;
++
++		for (size_t i = keep; i < PPP; i++) {
++			if (node->dindirect[i] != NULL) {
++				page_free(fs, node->dindirect[i]);
++				node->dindirect[i] = NULL;
++			}
++		}
++		if (keep == 0) {
++			page_free(fs, node->dindirect);
++			node->dindirect = NULL;
++		}
++	}
++}
++
++static void node_release(struct tmpfs_data *fs, struct tmpfs_node *node)
++{
++	pages_drop(fs, node, 0);
++	slot_free(fs, node);
++}
++
++static struct tmpfs_node *node_new(struct tmpfs_data *fs, struct tmpfs_node *parent,
++				   const char *name, size_t len, uint8_t type)
++{
++	struct tmpfs_node *node;
++
++	if (len > MAX_FILE_NAME) {
++		return NULL;
++	}
++	node = (struct tmpfs_node *)slot_alloc(fs);
++	if (node == NULL) {
++		return NULL;
++	}
++	(void)memcpy(node->name, name, len);
++	node->name[len] = '\0';
++	node->type = type;
++	now(&node->mtime);
++	node->atime = node->mtime;
++	node->parent = parent;
++	node->next = parent->children;
++	parent->children = node;
++	parent->mtime = node->mtime;
++
++	return node;
++}
++
++static void node_detach(struct tmpfs_node *node)
++{
++	struct tmpfs_node **pp = &node->parent->children;
++
++	while (*pp != node) {
++		pp = &(*pp)->next;
++	}
++	*pp = node->next;
++	now(&node->parent->mtime);
++	node->parent = NULL;
++	node->next = NULL;
++}
++
++static struct tmpfs_node *dir_find(struct tmpfs_node *dir, const char *name, size_t len)
++{
++	for (struct tmpfs_node *n = dir->children; n != NULL; n = n->next) {
++		if ((strlen(n->name) == len) && (memcmp(n->name, name, len) == 0)) {
++			return n;
++		}
++	}
++	return NULL;
++}
++
++/*
++ * Walk path from start. Every symbolic link on the way is followed, the last
++ * component too unless nofollow; a link's target is walked from the link's
++ * directory, or from the root when absolute. Missing components other than
++ * the last one fail; a missing last one leaves node NULL with the parent and
++ * the name filled in, for creation.
++ */
++static int lookup_from(struct tmpfs_data *fs, struct tmpfs_node *start, const char *path,
++		       bool nofollow, struct tmpfs_lookup *out, int depth)
++{
++	struct tmpfs_node *dir = start;
++	struct tmpfs_node *node = start;
++
++	out->node = NULL;
++	if (path[0] == '/') {
++		dir = fs->root;
++		node = dir;
++	}
++	while (*path == '/') {
++		path++;
++	}
++	out->name = NULL;
++	out->name_len = 0;
++	out->parent = dir->parent;
++	while (*path != '\0') {
++		const char *end = strchr(path, '/');
++		size_t len = (end != NULL) ? (size_t)(end - path) : strlen(path);
++		const char *rest = (end != NULL) ? end + 1 : path + len;
++
++		while (*rest == '/') {
++			rest++;
++		}
++		if (len > MAX_FILE_NAME) {
++			return -ENAMETOOLONG;
++		}
++		if (dir->type != FS_DIR_ENTRY_DIR) {
++			return -ENOTDIR;
++		}
++		if ((len == 1) && (path[0] == '.')) {
++			node = dir;
++		} else if ((len == 2) && (path[0] == '.') && (path[1] == '.')) {
++			node = (dir->parent != NULL) ? dir->parent : dir;
++		} else {
++			node = dir_find(dir, path, len);
++		}
++		out->parent = dir;
++		out->name = path;
++		out->name_len = len;
++		if (node == NULL) {
++			return (*rest == '\0') ? 0 : -ENOENT;
++		}
++		if ((node->type == FS_DIR_ENTRY_SYMLINK) && (!nofollow || (*rest != '\0'))) {
++			/* the target sits in the link's first page, terminated by the zero fill */
++			const char *target = page_get(fs, node, 0, false);
++			struct tmpfs_lookup via;
++			int rc;
++
++			if (depth >= CONFIG_TMPFS_MAX_LINK_DEPTH) {
++				return -ELOOP;
++			}
++			if (target == NULL) {
++				return -ENOENT;
++			}
++			rc = lookup_from(fs, dir, target, nofollow && (*rest == '\0'), &via,
++					 depth + 1);
++			if (rc < 0) {
++				return rc;
++			}
++			if (via.node == NULL) {
++				/* a dangling link: creatable through it, not beyond it */
++				if (*rest != '\0') {
++					return -ENOENT;
++				}
++				*out = via;
++				return 0;
++			}
++			node = via.node;
++			out->parent = via.parent;
++			out->name = via.name;
++			out->name_len = via.name_len;
++		}
++		dir = node;
++		path = rest;
++	}
++	out->node = node;
++
++	return 0;
++}
++
++static int lookup(struct tmpfs_data *fs, const char *path, bool nofollow, struct tmpfs_lookup *out)
++{
++	return lookup_from(fs, fs->root, path, nofollow, out, 0);
++}
++
++static ssize_t node_read(struct tmpfs_data *fs, struct tmpfs_node *node, size_t off, void *buf,
++			 size_t len)
++{
++	size_t done = 0;
++
++	if (off >= node->size) {
++		return 0;
++	}
++	len = MIN(len, node->size - off);
++	while (done < len) {
++		size_t in_page = (off + done) % PAGE_SIZE;
++		size_t chunk = MIN(len - done, PAGE_SIZE - in_page);
++		const uint8_t *page = page_get(fs, node, (off + done) / PAGE_SIZE, false);
++
++		if (page != NULL) {
++			(void)memcpy((uint8_t *)buf + done, page + in_page, chunk);
++		} else {
++			(void)memset((uint8_t *)buf + done, 0, chunk);
++		}
++		done += chunk;
++	}
++	return (ssize_t)done;
++}
++
++static ssize_t node_write(struct tmpfs_data *fs, struct tmpfs_node *node, size_t off,
++			  const void *buf, size_t len)
++{
++	size_t done = 0;
++
++	while (done < len) {
++		size_t in_page = (off + done) % PAGE_SIZE;
++		size_t chunk = MIN(len - done, PAGE_SIZE - in_page);
++		uint8_t *page = page_get(fs, node, (off + done) / PAGE_SIZE, true);
++
++		if (page == NULL) {
++			break;
++		}
++		(void)memcpy(page + in_page, (const uint8_t *)buf + done, chunk);
++		done += chunk;
++		if (off + done > node->size) {
++			node->size = off + done;
++		}
++	}
++	if ((done == 0) && (len > 0)) {
++		return -ENOSPC;
++	}
++	now(&node->mtime);
++
++	return (ssize_t)done;
++}
++
++static int node_truncate(struct tmpfs_data *fs, struct tmpfs_node *node, size_t length)
++{
++	if (length < node->size) {
++		size_t tail = length % PAGE_SIZE;
++
++		pages_drop(fs, node, length);
++		if (tail != 0) {
++			uint8_t *page = page_get(fs, node, length / PAGE_SIZE, false);
++
++			if (page != NULL) {
++				(void)memset(page + tail, 0, PAGE_SIZE - tail);
++			}
++		}
++	}
++	/* growing leaves holes, read as zeros until written */
++	node->size = length;
++	now(&node->mtime);
++
++	return 0;
++}
++
++static inline struct tmpfs_data *fs_of(const struct fs_mount_t *mp)
++{
++	return mp->fs_data;
++}
++
++static void fill_dirent(const struct tmpfs_node *node, struct fs_dirent *entry)
++{
++	entry->type = node->type;
++	entry->size = (node->type == FS_DIR_ENTRY_DIR) ? 0 : node->size;
++	strncpy(entry->name, node->name, sizeof(entry->name) - 1);
++	entry->name[sizeof(entry->name) - 1] = '\0';
++#ifdef CONFIG_FS_DIRENT_EXT
++	entry->atime = node->atime;
++	entry->mtime = node->mtime;
++#endif
++}
++
++static int tmpfs_open(struct fs_file_t *filp, const char *fs_path, fs_mode_t flags)
++{
++	struct tmpfs_data *fs = fs_of(filp->mp);
++	const char *path = fs_impl_strip_prefix(fs_path, filp->mp);
++	struct tmpfs_lookup l;
++	struct tmpfs_handle *h;
++	int rc;
++
++	(void)k_mutex_lock(&fs->lock, K_FOREVER);
++	rc = lookup(fs, path, false, &l);
++	if (rc < 0) {
++		goto out;
++	}
++	if (l.node == NULL) {
++		if ((flags & FS_O_CREATE) == 0) {
++			rc = -ENOENT;
++			goto out;
++		}
++		l.node = node_new(fs, l.parent, l.name, l.name_len, FS_DIR_ENTRY_FILE);
++		if (l.node == NULL) {
++			rc = -ENOSPC;
++			goto out;
++		}
++	} else if (l.node->type == FS_DIR_ENTRY_DIR) {
++		rc = -EISDIR;
++		goto out;
++	} else if (l.node->type != FS_DIR_ENTRY_FILE) {
++		/* a FIFO's bytes live in whatever opens it by name above this layer */
++		rc = -ENXIO;
++		goto out;
++	}
++	h = (struct tmpfs_handle *)slot_alloc(fs);
++	if (h == NULL) {
++		rc = -ENOMEM;
++		goto out;
++	}
++	h->node = l.node;
++	h->flags = flags;
++	/* an append handle reports position 0 until it writes, which goes to the end */
++	h->pos = 0;
++	l.node->opens++;
++	fs->opens++;
++	filp->filep = h;
++	rc = 0;
++out:
++	k_mutex_unlock(&fs->lock);
++
++	return rc;
++}
++
++static int tmpfs_close(struct fs_file_t *filp)
++{
++	struct tmpfs_data *fs = fs_of(filp->mp);
++	struct tmpfs_handle *h = filp->filep;
++	struct tmpfs_node *node = h->node;
++
++	(void)k_mutex_lock(&fs->lock, K_FOREVER);
++	node->opens--;
++	fs->opens--;
++	if ((node->opens == 0) && node->unlinked) {
++		node_release(fs, node);
++	}
++	slot_free(fs, h);
++	filp->filep = NULL;
++	k_mutex_unlock(&fs->lock);
++
++	return 0;
++}
++
++static ssize_t tmpfs_read(struct fs_file_t *filp, void *dest, size_t nbytes)
++{
++	struct tmpfs_data *fs = fs_of(filp->mp);
++	struct tmpfs_handle *h = filp->filep;
++	ssize_t rc;
++
++	if ((h->flags & FS_O_READ) == 0) {
++		return -EACCES;
++	}
++	(void)k_mutex_lock(&fs->lock, K_FOREVER);
++	rc = node_read(fs, h->node, h->pos, dest, nbytes);
++	if (rc > 0) {
++		h->pos += (size_t)rc;
++		now(&h->node->atime);
++	}
++	k_mutex_unlock(&fs->lock);
++
++	return rc;
++}
++
++static ssize_t tmpfs_write(struct fs_file_t *filp, const void *src, size_t nbytes)
++{
++	struct tmpfs_data *fs = fs_of(filp->mp);
++	struct tmpfs_handle *h = filp->filep;
++	ssize_t rc;
++
++	if ((h->flags & FS_O_WRITE) == 0) {
++		return -EACCES;
++	}
++	(void)k_mutex_lock(&fs->lock, K_FOREVER);
++	if ((h->flags & FS_O_APPEND) != 0) {
++		h->pos = h->node->size;
++	}
++	rc = node_write(fs, h->node, h->pos, src, nbytes);
++	if (rc > 0) {
++		h->pos += (size_t)rc;
++	}
++	k_mutex_unlock(&fs->lock);
++
++	return rc;
++}
++
++static int tmpfs_lseek(struct fs_file_t *filp, off_t off, int whence)
++{
++	struct tmpfs_data *fs = fs_of(filp->mp);
++	struct tmpfs_handle *h = filp->filep;
++	off_t base;
++	int rc = 0;
++
++	(void)k_mutex_lock(&fs->lock, K_FOREVER);
++	switch (whence) {
++	case FS_SEEK_SET:
++		base = 0;
++		break;
++	case FS_SEEK_CUR:
++		base = (off_t)h->pos;
++		break;
++	case FS_SEEK_END:
++		base = (off_t)h->node->size;
++		break;
++	default:
++		rc = -EINVAL;
++		goto out;
++	}
++	/* beyond the end is allowed: a write there leaves a hole behind it */
++	if (base + off < 0) {
++		rc = -EINVAL;
++		goto out;
++	}
++	h->pos = (size_t)(base + off);
++out:
++	k_mutex_unlock(&fs->lock);
++
++	return rc;
++}
++
++static off_t tmpfs_tell(struct fs_file_t *filp)
++{
++	struct tmpfs_handle *h = filp->filep;
++
++	return (off_t)h->pos;
++}
++
++static int tmpfs_truncate(struct fs_file_t *filp, off_t length)
++{
++	struct tmpfs_data *fs = fs_of(filp->mp);
++	struct tmpfs_handle *h = filp->filep;
++	int rc;
++
++	if ((h->flags & FS_O_WRITE) == 0) {
++		return -EACCES;
++	}
++	if (length < 0) {
++		return -EINVAL;
++	}
++	(void)k_mutex_lock(&fs->lock, K_FOREVER);
++	rc = node_truncate(fs, h->node, (size_t)length);
++	if (h->pos > h->node->size) {
++		h->pos = h->node->size;
++	}
++	k_mutex_unlock(&fs->lock);
++
++	return rc;
++}
++
++static int tmpfs_sync(struct fs_file_t *filp)
++{
++	ARG_UNUSED(filp);
++	return 0;
++}
++
++static int tmpfs_opendir(struct fs_dir_t *dirp, const char *fs_path)
++{
++	struct tmpfs_data *fs = fs_of(dirp->mp);
++	const char *path = fs_impl_strip_prefix(fs_path, dirp->mp);
++	struct tmpfs_lookup l;
++	struct tmpfs_handle *h;
++	int rc;
++
++	(void)k_mutex_lock(&fs->lock, K_FOREVER);
++	rc = lookup(fs, path, false, &l);
++	if (rc < 0) {
++		goto out;
++	}
++	if (l.node == NULL) {
++		rc = -ENOENT;
++		goto out;
++	}
++	if (l.node->type != FS_DIR_ENTRY_DIR) {
++		rc = -ENOTDIR;
++		goto out;
++	}
++	h = (struct tmpfs_handle *)slot_alloc(fs);
++	if (h == NULL) {
++		rc = -ENOMEM;
++		goto out;
++	}
++	h->node = l.node;
++	l.node->opens++;
++	fs->opens++;
++	dirp->dirp = h;
++	rc = 0;
++out:
++	k_mutex_unlock(&fs->lock);
++
++	return rc;
++}
++
++static int tmpfs_readdir(struct fs_dir_t *dirp, struct fs_dirent *entry)
++{
++	struct tmpfs_data *fs = fs_of(dirp->mp);
++	struct tmpfs_handle *h = dirp->dirp;
++	struct tmpfs_node *n = h->node->children;
++
++	(void)k_mutex_lock(&fs->lock, K_FOREVER);
++	/* the position counts entries: an entry removed meanwhile skips one */
++	for (size_t i = 0; (n != NULL) && (i < h->pos); i++) {
++		n = n->next;
++	}
++	if (n == NULL) {
++		entry->name[0] = '\0';
++		entry->type = FS_DIR_ENTRY_FILE;
++		entry->size = 0;
++	} else {
++		fill_dirent(n, entry);
++		h->pos++;
++	}
++	k_mutex_unlock(&fs->lock);
++
++	return 0;
++}
++
++static int tmpfs_rewinddir(struct fs_dir_t *dirp)
++{
++	struct tmpfs_handle *h = dirp->dirp;
++
++	h->pos = 0;
++
++	return 0;
++}
++
++static int tmpfs_closedir(struct fs_dir_t *dirp)
++{
++	struct tmpfs_data *fs = fs_of(dirp->mp);
++	struct tmpfs_handle *h = dirp->dirp;
++
++	(void)k_mutex_lock(&fs->lock, K_FOREVER);
++	h->node->opens--;
++	fs->opens--;
++	slot_free(fs, h);
++	dirp->dirp = NULL;
++	k_mutex_unlock(&fs->lock);
++
++	return 0;
++}
++
++static int tmpfs_mount(struct fs_mount_t *mountp)
++{
++	struct tmpfs_data *fs;
++
++	if ((mountp->flags & FS_MOUNT_FLAG_NO_FORMAT) != 0) {
++		/* nothing survives an unmount: there is nothing to find */
++		return -ENOENT;
++	}
++	fs = page_alloc(NULL);
++	if (fs == NULL) {
++		return -ENOMEM;
++	}
++	fs->pages = 1;
++	k_mutex_init(&fs->lock);
++	fs->root = (struct tmpfs_node *)slot_alloc(fs);
++	if (fs->root == NULL) {
++		page_free(NULL, fs);
++		return -ENOMEM;
++	}
++	fs->root->type = FS_DIR_ENTRY_DIR;
++	now(&fs->root->mtime);
++	fs->root->atime = fs->root->mtime;
++	mountp->fs_data = fs;
++
++	return 0;
++}
++
++static void tree_release(struct tmpfs_data *fs, struct tmpfs_node *dir)
++{
++	struct tmpfs_node *n = dir->children;
++
++	while (n != NULL) {
++		struct tmpfs_node *next = n->next;
++
++		if (n->type == FS_DIR_ENTRY_DIR) {
++			tree_release(fs, n);
++		}
++		pages_drop(fs, n, 0);
++		n = next;
++	}
++}
++
++static int tmpfs_unmount(struct fs_mount_t *mountp)
++{
++	struct tmpfs_data *fs = fs_of(mountp);
++	struct tmpfs_slot_page *sp;
++
++	(void)k_mutex_lock(&fs->lock, K_FOREVER);
++	if (fs->opens > 0) {
++		k_mutex_unlock(&fs->lock);
++		return -EBUSY;
++	}
++	tree_release(fs, fs->root);
++	sp = fs->slot_pages;
++	while (sp != NULL) {
++		struct tmpfs_slot_page *next = sp->next;
++
++		page_free(fs, sp);
++		sp = next;
++	}
++	k_mutex_unlock(&fs->lock);
++	mountp->fs_data = NULL;
++	page_free(NULL, fs);
++
++	return 0;
++}
++
++static int tmpfs_unlink(struct fs_mount_t *mountp, const char *name)
++{
++	struct tmpfs_data *fs = fs_of(mountp);
++	const char *path = fs_impl_strip_prefix(name, mountp);
++	struct tmpfs_lookup l;
++	int rc;
++
++	(void)k_mutex_lock(&fs->lock, K_FOREVER);
++	rc = lookup(fs, path, true, &l);
++	if (rc < 0) {
++		goto out;
++	}
++	if (l.node == NULL) {
++		rc = -ENOENT;
++		goto out;
++	}
++	if (l.node == fs->root) {
++		rc = -EPERM;
++		goto out;
++	}
++	if (l.node->type == FS_DIR_ENTRY_DIR) {
++		if (l.node->children != NULL) {
++			rc = -ENOTEMPTY;
++			goto out;
++		}
++		if (l.node->opens > 0) {
++			rc = -EBUSY;
++			goto out;
++		}
++	}
++	node_detach(l.node);
++	if (l.node->opens > 0) {
++		/* its bytes stay for the open handles, and go with the last */
++		l.node->unlinked = 1U;
++	} else {
++		node_release(fs, l.node);
++	}
++	rc = 0;
++out:
++	k_mutex_unlock(&fs->lock);
++
++	return rc;
++}
++
++static int tmpfs_rename(struct fs_mount_t *mountp, const char *from, const char *to)
++{
++	struct tmpfs_data *fs = fs_of(mountp);
++	const char *path_from = fs_impl_strip_prefix(from, mountp);
++	const char *path_to = fs_impl_strip_prefix(to, mountp);
++	struct tmpfs_lookup src;
++	struct tmpfs_lookup dst;
++	int rc;
++
++	(void)k_mutex_lock(&fs->lock, K_FOREVER);
++	rc = lookup(fs, path_from, true, &src);
++	if (rc < 0) {
++		goto out;
++	}
++	if ((src.node == NULL) || (src.node == fs->root)) {
++		rc = (src.node == NULL) ? -ENOENT : -EPERM;
++		goto out;
++	}
++	rc = lookup(fs, path_to, true, &dst);
++	if (rc < 0) {
++		goto out;
++	}
++	if (dst.node == src.node) {
++		rc = 0;
++		goto out;
++	}
++	if (dst.name_len > MAX_FILE_NAME) {
++		rc = -ENAMETOOLONG;
++		goto out;
++	}
++	/* a directory never moves into itself */
++	for (struct tmpfs_node *d = dst.parent; d != NULL; d = d->parent) {
++		if (d == src.node) {
++			rc = -EINVAL;
++			goto out;
++		}
++	}
++	if (dst.node != NULL) {
++		if (dst.node->type == FS_DIR_ENTRY_DIR) {
++			if (src.node->type != FS_DIR_ENTRY_DIR) {
++				rc = -EISDIR;
++				goto out;
++			}
++			if (dst.node->children != NULL) {
++				rc = -ENOTEMPTY;
++				goto out;
++			}
++		} else if (src.node->type == FS_DIR_ENTRY_DIR) {
++			rc = -ENOTDIR;
++			goto out;
++		}
++		if (dst.node->opens > 0) {
++			rc = -EBUSY;
++			goto out;
++		}
++		node_detach(dst.node);
++		node_release(fs, dst.node);
++	}
++	node_detach(src.node);
++	(void)memcpy(src.node->name, dst.name, dst.name_len);
++	src.node->name[dst.name_len] = '\0';
++	src.node->parent = dst.parent;
++	src.node->next = dst.parent->children;
++	dst.parent->children = src.node;
++	now(&dst.parent->mtime);
++	rc = 0;
++out:
++	k_mutex_unlock(&fs->lock);
++
++	return rc;
++}
++
++static int node_create(struct fs_mount_t *mountp, const char *name, uint8_t type,
++		       const char *target)
++{
++	struct tmpfs_data *fs = fs_of(mountp);
++	const char *path = fs_impl_strip_prefix(name, mountp);
++	struct tmpfs_lookup l;
++	struct tmpfs_node *node;
++	int rc;
++
++	(void)k_mutex_lock(&fs->lock, K_FOREVER);
++	rc = lookup(fs, path, true, &l);
++	if (rc < 0) {
++		goto out;
++	}
++	if (l.node != NULL) {
++		rc = -EEXIST;
++		goto out;
++	}
++	if (l.name == NULL) {
++		rc = -EINVAL;
++		goto out;
++	}
++	node = node_new(fs, l.parent, l.name, l.name_len, type);
++	if (node == NULL) {
++		rc = -ENOSPC;
++		goto out;
++	}
++	if (target != NULL) {
++		rc = (int)node_write(fs, node, 0, target, strlen(target));
++		if (rc < 0) {
++			node_detach(node);
++			node_release(fs, node);
++			goto out;
++		}
++	}
++	rc = 0;
++out:
++	k_mutex_unlock(&fs->lock);
++
++	return rc;
++}
++
++static int tmpfs_mkdir(struct fs_mount_t *mountp, const char *name)
++{
++	return node_create(mountp, name, FS_DIR_ENTRY_DIR, NULL);
++}
++
++static int tmpfs_symlink(struct fs_mount_t *mountp, const char *target, const char *path)
++{
++	if ((target == NULL) || (target[0] == '\0') || (strlen(target) > MAX_FILE_NAME)) {
++		return -EINVAL;
++	}
++	return node_create(mountp, path, FS_DIR_ENTRY_SYMLINK, target);
++}
++
++static int tmpfs_mkfifo(struct fs_mount_t *mountp, const char *path)
++{
++	return node_create(mountp, path, FS_DIR_ENTRY_FIFO, NULL);
++}
++
++static int stat_common(struct fs_mount_t *mountp, const char *path, struct fs_dirent *entry,
++		       bool nofollow)
++{
++	struct tmpfs_data *fs = fs_of(mountp);
++	struct tmpfs_lookup l;
++	int rc;
++
++	path = fs_impl_strip_prefix(path, mountp);
++	(void)k_mutex_lock(&fs->lock, K_FOREVER);
++	rc = lookup(fs, path, nofollow, &l);
++	if ((rc == 0) && (l.node == NULL)) {
++		rc = -ENOENT;
++	}
++	if (rc == 0) {
++		fill_dirent(l.node, entry);
++	}
++	k_mutex_unlock(&fs->lock);
++
++	return rc;
++}
++
++static int tmpfs_stat(struct fs_mount_t *mountp, const char *path, struct fs_dirent *entry)
++{
++	return stat_common(mountp, path, entry, false);
++}
++
++static int tmpfs_lstat(struct fs_mount_t *mountp, const char *path, struct fs_dirent *entry)
++{
++	return stat_common(mountp, path, entry, true);
++}
++
++static ssize_t tmpfs_readlink(struct fs_mount_t *mountp, const char *path, char *buf, size_t size)
++{
++	struct tmpfs_data *fs = fs_of(mountp);
++	struct tmpfs_lookup l;
++	ssize_t rc;
++
++	path = fs_impl_strip_prefix(path, mountp);
++	(void)k_mutex_lock(&fs->lock, K_FOREVER);
++	rc = lookup(fs, path, true, &l);
++	if ((rc == 0) && (l.node == NULL)) {
++		rc = -ENOENT;
++	}
++	if ((rc == 0) && (l.node->type != FS_DIR_ENTRY_SYMLINK)) {
++		rc = -EINVAL;
++	}
++	if (rc == 0) {
++		rc = node_read(fs, l.node, 0, buf, size);
++	}
++	k_mutex_unlock(&fs->lock);
++
++	return rc;
++}
++
++static int tmpfs_statvfs(struct fs_mount_t *mountp, const char *path, struct fs_statvfs *stat)
++{
++	struct tmpfs_data *fs = fs_of(mountp);
++
++	ARG_UNUSED(path);
++	(void)k_mutex_lock(&fs->lock, K_FOREVER);
++	stat->f_bsize = PAGE_SIZE;
++	stat->f_frsize = PAGE_SIZE;
++	if (CONFIG_TMPFS_MAX_PAGES > 0) {
++		stat->f_blocks = CONFIG_TMPFS_MAX_PAGES;
++		stat->f_bfree = CONFIG_TMPFS_MAX_PAGES - fs->pages;
++	} else {
++#ifdef CONFIG_MMU
++		stat->f_blocks = fs->pages + (k_mem_free_get() / PAGE_SIZE);
++		stat->f_bfree = k_mem_free_get() / PAGE_SIZE;
++#else
++		stat->f_blocks = fs->pages;
++		stat->f_bfree = 0;
++#endif
++	}
++	k_mutex_unlock(&fs->lock);
++
++	return 0;
++}
++
++static int tmpfs_utime(struct fs_mount_t *mountp, const char *name, const struct timespec times[2])
++{
++	struct tmpfs_data *fs = fs_of(mountp);
++	const char *path = fs_impl_strip_prefix(name, mountp);
++	struct tmpfs_lookup l;
++	int rc;
++
++	(void)k_mutex_lock(&fs->lock, K_FOREVER);
++	rc = lookup(fs, path, false, &l);
++	if ((rc == 0) && (l.node == NULL)) {
++		rc = -ENOENT;
++	}
++	if (rc == 0) {
++		if (times == NULL) {
++			now(&l.node->mtime);
++			l.node->atime = l.node->mtime;
++		} else {
++			l.node->atime = times[0];
++			l.node->mtime = times[1];
++		}
++	}
++	k_mutex_unlock(&fs->lock);
++
++	return rc;
++}
++
++static const struct fs_file_system_t tmpfs_fs = {
++	.open = tmpfs_open,
++	.close = tmpfs_close,
++	.read = tmpfs_read,
++	.write = tmpfs_write,
++	.lseek = tmpfs_lseek,
++	.tell = tmpfs_tell,
++	.truncate = tmpfs_truncate,
++	.sync = tmpfs_sync,
++	.opendir = tmpfs_opendir,
++	.readdir = tmpfs_readdir,
++	.closedir = tmpfs_closedir,
++	.rewinddir = tmpfs_rewinddir,
++	.mount = tmpfs_mount,
++	.unmount = tmpfs_unmount,
++	.unlink = tmpfs_unlink,
++	.rename = tmpfs_rename,
++	.mkdir = tmpfs_mkdir,
++	.stat = tmpfs_stat,
++	.lstat = tmpfs_lstat,
++	.symlink = tmpfs_symlink,
++	.readlink = tmpfs_readlink,
++	.mkfifo = tmpfs_mkfifo,
++	.statvfs = tmpfs_statvfs,
++	.utime = tmpfs_utime,
++};
++
++static int tmpfs_init(void)
++{
++	return fs_register(FS_TMPFS, &tmpfs_fs);
++}
++
++SYS_INIT(tmpfs_init, POST_KERNEL, CONFIG_FILE_SYSTEM_INIT_PRIORITY);
+diff --git a/tests/subsys/fs/tmpfs/CMakeLists.txt b/tests/subsys/fs/tmpfs/CMakeLists.txt
+new file mode 100644
+--- /dev/null
++++ b/tests/subsys/fs/tmpfs/CMakeLists.txt
+@@ -0,0 +1,13 @@
++# SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++# SPDX-License-Identifier: Apache-2.0
++
++cmake_minimum_required(VERSION 3.20.0)
++find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
++project(tmpfs)
++
++target_sources(app PRIVATE
++  src/main.c
++  ../common/test_fs_util.c
++  ../common/test_fs_dirops.c
++  ../common/test_fs_open_flags.c
++)
+diff --git a/tests/subsys/fs/tmpfs/boards/qemu_cortex_m3.conf b/tests/subsys/fs/tmpfs/boards/qemu_cortex_m3.conf
+new file mode 100644
+--- /dev/null
++++ b/tests/subsys/fs/tmpfs/boards/qemu_cortex_m3.conf
+@@ -0,0 +1,8 @@
++# SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++# SPDX-License-Identifier: Apache-2.0
++
++# 64 KiB of RAM: small pages, and most of the rest as the heap they come from
++CONFIG_TMPFS_PAGE_SIZE=1024
++CONFIG_HEAP_MEM_POOL_SIZE=36864
++CONFIG_ZTEST_STACK_SIZE=4096
++CONFIG_MAIN_STACK_SIZE=2048
+diff --git a/tests/subsys/fs/tmpfs/prj.conf b/tests/subsys/fs/tmpfs/prj.conf
+new file mode 100644
+--- /dev/null
++++ b/tests/subsys/fs/tmpfs/prj.conf
+@@ -0,0 +1,11 @@
++# SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++# SPDX-License-Identifier: Apache-2.0
++
++CONFIG_ZTEST=y
++CONFIG_ZTEST_STACK_SIZE=4096
++CONFIG_MAIN_STACK_SIZE=4096
++CONFIG_FILE_SYSTEM=y
++CONFIG_FILE_SYSTEM_TMPFS=y
++CONFIG_FS_DIRENT_EXT=y
++# pages come from the heap where there is no MMU
++CONFIG_HEAP_MEM_POOL_SIZE=65536
+diff --git a/tests/subsys/fs/tmpfs/src/main.c b/tests/subsys/fs/tmpfs/src/main.c
+new file mode 100644
+--- /dev/null
++++ b/tests/subsys/fs/tmpfs/src/main.c
+@@ -0,0 +1,274 @@
++/*
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <errno.h>
++#include <string.h>
++
++#include <zephyr/fs/fs.h>
++#include <zephyr/kernel.h>
++#include <zephyr/ztest.h>
++
++#define MNT "/tmp"
++
++static struct fs_mount_t tmpfs_mnt = {
++	.type = FS_TMPFS,
++	.mnt_point = MNT,
++};
++
++/* the tree's common file system tests that do not expect a mount to persist */
++void test_fs_dirops(void);
++void test_fs_open_flags(void);
++struct fs_mount_t *fs_dirops_test_mp = &tmpfs_mnt;
++char *test_fs_open_flags_file_path = MNT "/open_flags_file";
++
++static void write_all(const char *path, const void *data, size_t len, fs_mode_t flags)
++{
++	struct fs_file_t f;
++
++	fs_file_t_init(&f);
++	zassert_equal(fs_open(&f, path, FS_O_WRITE | FS_O_CREATE | flags), 0, "open %s", path);
++	zassert_equal(fs_write(&f, data, len), (ssize_t)len, "write %s", path);
++	zassert_equal(fs_close(&f), 0);
++}
++
++static ssize_t read_all(const char *path, void *buf, size_t len)
++{
++	struct fs_file_t f;
++	ssize_t n;
++
++	fs_file_t_init(&f);
++	zassert_equal(fs_open(&f, path, FS_O_READ), 0, "open %s", path);
++	n = fs_read(&f, buf, len);
++	zassert_equal(fs_close(&f), 0);
++
++	return n;
++}
++
++ZTEST(tmpfs, test_dirops)
++{
++	test_fs_dirops();
++}
++
++ZTEST(tmpfs, test_open_flags)
++{
++	zassert_equal(fs_mount(&tmpfs_mnt), 0);
++	test_fs_open_flags();
++	zassert_equal(fs_unmount(&tmpfs_mnt), 0);
++}
++
++ZTEST(tmpfs, test_symlink)
++{
++	struct fs_dirent ent;
++	char buf[64];
++
++	zassert_equal(fs_mount(&tmpfs_mnt), 0);
++	zassert_equal(fs_mkdir(MNT "/bin"), 0);
++	write_all(MNT "/bin/toybox", "toybox", 6, 0);
++	/* relative: resolved from the link's directory; absolute: from the root of the mount */
++	zassert_equal(fs_symlink("toybox", MNT "/bin/ls"), 0);
++	zassert_equal(fs_symlink("/bin/ls", MNT "/ls"), 0);
++	zassert_equal(fs_symlink("nowhere", MNT "/dangling"), 0);
++	zassert_equal(fs_symlink("loop2", MNT "/loop1"), 0);
++	zassert_equal(fs_symlink("loop1", MNT "/loop2"), 0);
++
++	zassert_equal(read_all(MNT "/ls", buf, sizeof(buf)), 6, "read through two links");
++	zassert_mem_equal(buf, "toybox", 6);
++	zassert_equal(fs_stat(MNT "/ls", &ent), 0);
++	zassert_equal(ent.type, FS_DIR_ENTRY_FILE, "stat follows");
++	zassert_equal(ent.size, 6);
++	zassert_equal(fs_lstat(MNT "/ls", &ent), 0);
++	zassert_equal(ent.type, FS_DIR_ENTRY_SYMLINK, "lstat does not");
++	zassert_equal(fs_readlink(MNT "/ls", buf, sizeof(buf)), 7);
++	zassert_mem_equal(buf, "/bin/ls", 7);
++	zassert_equal(fs_readlink(MNT "/bin/toybox", buf, sizeof(buf)), -EINVAL, "not a link");
++	zassert_equal(fs_stat(MNT "/dangling", &ent), -ENOENT);
++	zassert_equal(fs_lstat(MNT "/dangling", &ent), 0);
++	zassert_equal(fs_stat(MNT "/loop1", &ent), -ELOOP);
++	/* a link into a directory is walked through */
++	zassert_equal(fs_symlink("bin", MNT "/b"), 0);
++	zassert_equal(read_all(MNT "/b/ls", buf, sizeof(buf)), 6);
++	/* removing a link removes the link */
++	zassert_equal(fs_unlink(MNT "/bin/ls"), 0);
++	zassert_equal(fs_stat(MNT "/bin/toybox", &ent), 0);
++	zassert_equal(fs_stat(MNT "/ls", &ent), -ENOENT);
++	zassert_equal(fs_unmount(&tmpfs_mnt), 0);
++}
++
++ZTEST(tmpfs, test_fifo)
++{
++	struct fs_dirent ent;
++	struct fs_file_t f;
++
++	zassert_equal(fs_mount(&tmpfs_mnt), 0);
++	zassert_equal(fs_mkfifo(MNT "/pipe"), 0);
++	zassert_equal(fs_mkfifo(MNT "/pipe"), -EEXIST);
++	zassert_equal(fs_stat(MNT "/pipe", &ent), 0);
++	zassert_equal(ent.type, FS_DIR_ENTRY_FIFO);
++	zassert_equal(ent.size, 0);
++	/* the node holds no bytes: opening it as a file is refused */
++	fs_file_t_init(&f);
++	zassert_equal(fs_open(&f, MNT "/pipe", FS_O_READ), -ENXIO);
++	zassert_equal(fs_unlink(MNT "/pipe"), 0);
++	zassert_equal(fs_stat(MNT "/pipe", &ent), -ENOENT);
++	zassert_equal(fs_unmount(&tmpfs_mnt), 0);
++}
++
++ZTEST(tmpfs, test_rename)
++{
++	struct fs_dirent ent;
++	char buf[8];
++
++	zassert_equal(fs_mount(&tmpfs_mnt), 0);
++	zassert_equal(fs_mkdir(MNT "/a"), 0);
++	zassert_equal(fs_mkdir(MNT "/a/sub"), 0);
++	zassert_equal(fs_mkdir(MNT "/empty"), 0);
++	write_all(MNT "/one", "1", 1, 0);
++	write_all(MNT "/two", "2", 1, 0);
++	/* a file over an existing file replaces it */
++	zassert_equal(fs_rename(MNT "/one", MNT "/two"), 0);
++	zassert_equal(fs_stat(MNT "/one", &ent), -ENOENT);
++	zassert_equal(read_all(MNT "/two", buf, sizeof(buf)), 1);
++	zassert_equal(buf[0], '1');
++	/* a file over a directory, a directory over a file: refused */
++	zassert_equal(fs_rename(MNT "/two", MNT "/empty"), -EISDIR);
++	zassert_equal(fs_rename(MNT "/empty", MNT "/two"), -ENOTDIR);
++	/* a directory over an empty directory replaces it; a full one is kept */
++	zassert_equal(fs_rename(MNT "/a", MNT "/empty"), 0);
++	zassert_equal(fs_stat(MNT "/empty/sub", &ent), 0);
++	zassert_equal(fs_mkdir(MNT "/other"), 0);
++	zassert_equal(fs_rename(MNT "/other", MNT "/empty"), -ENOTEMPTY);
++	/* never into itself */
++	zassert_equal(fs_rename(MNT "/empty", MNT "/empty/sub/inner"), -EINVAL);
++	/* a move across directories */
++	zassert_equal(fs_rename(MNT "/two", MNT "/empty/sub/two"), 0);
++	zassert_equal(read_all(MNT "/empty/sub/two", buf, sizeof(buf)), 1);
++	zassert_equal(fs_unmount(&tmpfs_mnt), 0);
++}
++
++ZTEST(tmpfs, test_unlink_open)
++{
++	struct fs_file_t f;
++	struct fs_dirent ent;
++	char buf[8];
++
++	zassert_equal(fs_mount(&tmpfs_mnt), 0);
++	write_all(MNT "/gone", "still", 5, 0);
++	fs_file_t_init(&f);
++	zassert_equal(fs_open(&f, MNT "/gone", FS_O_READ), 0);
++	/* the name goes at once, the bytes with the last handle */
++	zassert_equal(fs_unlink(MNT "/gone"), 0);
++	zassert_equal(fs_stat(MNT "/gone", &ent), -ENOENT);
++	zassert_equal(fs_read(&f, buf, sizeof(buf)), 5);
++	zassert_mem_equal(buf, "still", 5);
++	/* the mount is busy while a handle is open */
++	zassert_equal(fs_unmount(&tmpfs_mnt), -EBUSY);
++	zassert_equal(fs_close(&f), 0);
++	zassert_equal(fs_unmount(&tmpfs_mnt), 0);
++}
++
++ZTEST(tmpfs, test_sparse_and_large)
++{
++	const size_t page = CONFIG_TMPFS_PAGE_SIZE;
++	/* past the direct pages and the indirect table, when memory allows */
++	const size_t far = (4 + page / sizeof(void *) + 2) * page;
++	struct fs_file_t f;
++	struct fs_statvfs vfs;
++	uint8_t pattern[64];
++	uint8_t buf[64];
++	size_t written = 0;
++	ssize_t n;
++
++	for (size_t i = 0; i < sizeof(pattern); i++) {
++		pattern[i] = (uint8_t)i;
++	}
++	zassert_equal(fs_mount(&tmpfs_mnt), 0);
++	zassert_equal(fs_statvfs(MNT, &vfs), 0);
++	zassert_equal(vfs.f_bsize, page);
++
++	fs_file_t_init(&f);
++	zassert_equal(fs_open(&f, MNT "/big", FS_O_RDWR | FS_O_CREATE), 0);
++	/* a hole: the size grows, no page is spent, and it reads as zeros */
++	zassert_equal(fs_truncate(&f, 3 * page + 7), 0);
++	zassert_equal(fs_seek(&f, page + 3, FS_SEEK_SET), 0);
++	zassert_equal(fs_read(&f, buf, sizeof(buf)), (ssize_t)sizeof(buf));
++	for (size_t i = 0; i < sizeof(buf); i++) {
++		zassert_equal(buf[i], 0, "a hole reads as zero");
++	}
++	/* one page's worth of pattern, on a page boundary and across one */
++	zassert_equal(fs_seek(&f, 2 * page - 32, FS_SEEK_SET), 0);
++	zassert_equal(fs_write(&f, pattern, sizeof(pattern)), (ssize_t)sizeof(pattern));
++	zassert_equal(fs_seek(&f, 2 * page - 32, FS_SEEK_SET), 0);
++	zassert_equal(fs_read(&f, buf, sizeof(buf)), (ssize_t)sizeof(buf));
++	zassert_mem_equal(buf, pattern, sizeof(buf), "a write across a page boundary");
++
++	/* as far as memory goes, up to the double-indirect range */
++	for (size_t off = 4 * page; off < far; off += page) {
++		zassert_equal(fs_seek(&f, off, FS_SEEK_SET), 0);
++		n = fs_write(&f, pattern, sizeof(pattern));
++		if (n == -ENOSPC) {
++			break;
++		}
++		zassert_equal(n, (ssize_t)sizeof(pattern), "write at %zu", off);
++		written = off;
++	}
++	TC_PRINT("%zu pages of %zu bytes in the file\n", written / page + 1, page);
++	if (written >= 4 * page) {
++		zassert_equal(fs_seek(&f, written, FS_SEEK_SET), 0);
++		zassert_equal(fs_read(&f, buf, sizeof(buf)), (ssize_t)sizeof(buf));
++		zassert_mem_equal(buf, pattern, sizeof(buf), "the last page written");
++	}
++	/* shrinking frees the tail and the tables it no longer needs */
++	zassert_equal(fs_truncate(&f, page + 1), 0);
++	zassert_equal(fs_seek(&f, 0, FS_SEEK_END), 0);
++	zassert_equal(fs_tell(&f), (off_t)(page + 1));
++	zassert_equal(fs_close(&f), 0);
++	zassert_equal(fs_statvfs(MNT, &vfs), 0);
++	zassert_equal(fs_unlink(MNT "/big"), 0);
++	zassert_equal(fs_unmount(&tmpfs_mnt), 0);
++}
++
++ZTEST(tmpfs, test_bounded)
++{
++	struct fs_statvfs vfs;
++	struct fs_file_t f;
++	uint8_t page[CONFIG_TMPFS_PAGE_SIZE > 256 ? 256 : CONFIG_TMPFS_PAGE_SIZE];
++	ssize_t n;
++	size_t total = 0;
++
++	if (CONFIG_TMPFS_MAX_PAGES == 0) {
++		ztest_test_skip();
++	}
++	zassert_equal(fs_mount(&tmpfs_mnt), 0);
++	zassert_equal(fs_statvfs(MNT, &vfs), 0);
++	zassert_equal(vfs.f_blocks, CONFIG_TMPFS_MAX_PAGES);
++	zassert_true(vfs.f_bfree < vfs.f_blocks, "the mount record and the root node count");
++	(void)memset(page, 0xa5, sizeof(page));
++	fs_file_t_init(&f);
++	zassert_equal(fs_open(&f, MNT "/fill", FS_O_WRITE | FS_O_CREATE), 0);
++	do {
++		n = fs_write(&f, page, sizeof(page));
++		if (n > 0) {
++			total += (size_t)n;
++		}
++	} while (n == (ssize_t)sizeof(page));
++	zassert_equal(n, -ENOSPC, "the bound holds: %zd after %zu bytes", n, total);
++	zassert_true(total < (size_t)CONFIG_TMPFS_MAX_PAGES * CONFIG_TMPFS_PAGE_SIZE);
++	zassert_equal(fs_close(&f), 0);
++	zassert_equal(fs_statvfs(MNT, &vfs), 0);
++	zassert_equal(vfs.f_bfree, 0);
++	zassert_equal(fs_unlink(MNT "/fill"), 0);
++	zassert_equal(fs_statvfs(MNT, &vfs), 0);
++	zassert_true(vfs.f_bfree > 0, "unlinking gives the pages back");
++	zassert_equal(fs_unmount(&tmpfs_mnt), 0);
++}
++
++/* a failed test leaves its mount behind: the next one starts unmounted */
++static void after(void *fixture)
++{
++	ARG_UNUSED(fixture);
++	(void)fs_unmount(&tmpfs_mnt);
++}
++
++ZTEST_SUITE(tmpfs, NULL, NULL, NULL, after, NULL);
+diff --git a/tests/subsys/fs/tmpfs/testcase.yaml b/tests/subsys/fs/tmpfs/testcase.yaml
+new file mode 100644
+--- /dev/null
++++ b/tests/subsys/fs/tmpfs/testcase.yaml
+@@ -0,0 +1,27 @@
++common:
++  tags:
++    - filesystem
++    - tmpfs
++  platform_allow:
++    - native_sim
++    - native_sim/native/64
++    - qemu_x86
++    - qemu_x86_64
++    - qemu_cortex_a53
++    - qemu_riscv64
++    - qemu_riscv32
++    - qemu_cortex_m3
++  integration_platforms:
++    - native_sim
++    - qemu_x86_64
++tests:
++  filesystem.tmpfs: {}
++  # a bound on the pages a mount may hold, reported and enforced: enough of
++  # them for the directory tests, and a heap above the bound where pages are
++  # heap blocks, so the bound is what stops the fill (cortex_m3 has no room)
++  filesystem.tmpfs.bounded:
++    platform_exclude:
++      - qemu_cortex_m3
++    extra_configs:
++      - CONFIG_TMPFS_MAX_PAGES=40
++      - CONFIG_HEAP_MEM_POOL_SIZE=131072
