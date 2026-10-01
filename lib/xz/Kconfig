@@ -1,0 +1,30 @@
+# SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
+# SPDX-License-Identifier: Apache-2.0
+
+menuconfig XZ_DEC
+	bool "XZ decompression (XZ Embedded)"
+	help
+	  The XZ Embedded decoder (0BSD): .xz streams with LZMA2 data and no
+	  branch/call/jump filter, CRC32-checked; streams with another check
+	  decode unverified.
+
+if XZ_DEC
+
+config XZ_DEC_DICT_MAX
+	int "Largest LZMA2 dictionary accepted (bytes)"
+	default 4194304
+	help
+	  A stream's dictionary is allocated from the system heap while it is
+	  decoded; one larger than this is refused. Compress with a dictionary
+	  no larger than the data (xz --lzma2=preset=9e,dict=2MiB, say): a
+	  larger one gains nothing on a file smaller than it.
+
+config XZ_EXTRACT
+	bool "Extract an .xz stream into a file"
+	depends on FILE_SYSTEM
+	default y
+	help
+	  xz_extract(): decode a stream held in memory, writing the data to a
+	  file on a mounted file system, a page at a time.
+
+endif # XZ_DEC
