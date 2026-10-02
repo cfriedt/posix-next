@@ -398,6 +398,28 @@ patches:
     comments: |
       Accept POSIX fcntl constants in zsock_fcntl() while translating them to ZVFS constants used by
       socket backends.
+  - path: zephyr/kernel-userspace-dynamic-thread-index-leak.patch
+    sha256sum: ba3e39c6d4b4dc9869397901ffa23970bf402d8116ec5814c0f86e2a039270d4
+    module: zephyr
+    author: Lauren Murphy
+    email: lauren.murphy@intel.com
+    date: 2026-08-31
+    merge-pr: https://github.com/zephyrproject-rtos/zephyr/pull/118248
+    comments: |
+      Backport kernel: userspace: partial fix of dynamic thread index leak
+      (zephyr#118248, open upstream: resync if it changes before it merges).
+      A thread object disposed by its last permission drop never returned
+      its index to _thread_idx_map (zephyr#17023), so repeated allocation
+      and refcount disposal exhausted the map. thread_idx_map_set() is
+      factored out of thread_idx_free() and unref_check() gains a
+      K_OBJ_THREAD case that sets the bit (no permission sweep there: the
+      caller holds lists_lock and the sweep would re-enter; thread_idx_alloc()
+      clears the permissions of the index it hands out). With the PR's
+      tests: dynamic_thread gains test_thread_index_recycled_on_unref, and
+      mem_protect's test_thread_alloc_out_of_idx probes the pool before
+      asserting the map is full. Adapted to v4.4.1: kernel/userspace.c; the
+      new case sits before default: (no K_OBJ_TIMER case: zephyr#109977 is
+      not backported, it needs z_try_abort_timeout()).
   - path: zephyr/x86-z-mapped-size-after-iterable-sections.patch
     sha256sum: d695b1c01da6803476ca1ad4a0c1453863df3038907d913163594c956f24ca04
     module: zephyr
@@ -552,7 +574,7 @@ patches:
     comments: |
       use finalize in the k_mem_paging API rather than free.
   - path: zephyr/kernel-futex-per-object-wait-queues.patch
-    sha256sum: b99625f8063618e2733cebe9346a79f1ae3c9eb4317912bf8c34e79453828193
+    sha256sum: 2003a9814c5795df8f51341d6a358adcaba87360347ab3667f80992350d11fe0
     module: zephyr
     author: Chris Friedt
     email: chris@fr4.co
@@ -646,7 +668,7 @@ patches:
       This lets sys_thread_once() block waiters on the once word in every
       configuration instead of polling when userspace is disabled.
   - path: zephyr/k-obj-map-size.patch
-    sha256sum: a490528e70769c7d22d9029f19b972603270dc4acbead1c98f761f9e0b25a3df
+    sha256sum: 3ab89293ebbfab5d142c667424889f89e723f27c48f23f68e14b17abbe58c457
     module: zephyr
     author: Chris Friedt
     email: chris@fr4.co
@@ -655,7 +677,7 @@ patches:
     comments: |
       provide a means of using k_mem_map() to map a thread stack instead of using the heap.
   - path: zephyr/sys-thread.patch
-    sha256sum: 30257170f3ea50e5bc6369cdb919c0ef8ae64cd08ba6eed79b98293ab9a4ab99
+    sha256sum: 5a70cf1b6eff636d7b5f99b1ead1a3fe4c05cde35554dbfcd1ee3aaecaa3b6f8
     module: zephyr
     author: Chris Friedt
     email: chris@fr4.co
@@ -839,7 +861,7 @@ patches:
       lib/os/zvfs/zvfs_fs.c (CONFIG_ZVFS_FS). Reserve fd table slots via
       CONFIG_ZVFS_RESERVE_STDIO_FDS and CONFIG_ZVFS_OPEN_ADD_SIZE_STDIO.
   - path: zephyr/zvfs-introduce-k-obj-file.patch
-    sha256sum: 8e998ba66a865b1d7096f853f40f6d6af19c636e4603eb9cc8d2ce6cd938be2d
+    sha256sum: e71164df39d830e67527c70d86527047cb2e42cb1b0bf43e59d656aae6b36abd
     module: zephyr
     author: Chris Friedt
     email: chris@fr4.co
@@ -1065,7 +1087,7 @@ patches:
       Fixes '_EXC_IRQ_DEFAULT_PRIO undeclared' and the CONFIG_SIGNAL circular
       include on Cortex-M.
   - path: zephyr/kernel-dyn-stack-priv-placement.patch
-    sha256sum: ff5066d458d701b302f46a8789908f18fb744def3498f442bd99cf1e5244e56b
+    sha256sum: e5196f7246f6d2d70007d3c7499af90db152a46968545f102043847745fbfba1
     module: zephyr
     author: Chris Friedt
     email: chris@fr4.co

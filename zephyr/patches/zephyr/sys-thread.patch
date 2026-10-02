@@ -1021,7 +1021,7 @@ diff --git a/kernel/userspace/userspace.c b/kernel/userspace/userspace.c
  extern struct k_object *z_object_gperf_find(const void *obj);
  extern void z_object_gperf_wordlist_foreach(_wordlist_cb_func_t func,
  					     void *context);
-@@ -468,6 +490,12 @@ static void *z_object_alloc(enum k_objects otype, size_t size)
+@@ -472,6 +494,12 @@ static void *z_object_alloc(enum k_objects otype, size_t size)
  		return NULL;
  	}
  
@@ -1034,7 +1034,7 @@ diff --git a/kernel/userspace/userspace.c b/kernel/userspace/userspace.c
  	switch (otype) {
  	case K_OBJ_THREAD:
  		if (!thread_idx_alloc(&tidx)) {
-@@ -526,6 +554,7 @@ void k_object_free(void *obj)
+@@ -530,6 +558,7 @@ void k_object_free(void *obj)
  {
  	struct dyn_obj *dyn = NULL;
  	bool free_thread_idx = false;
@@ -1042,7 +1042,7 @@ diff --git a/kernel/userspace/userspace.c b/kernel/userspace/userspace.c
  	uintptr_t thread_idx = 0;
  
  	/* This function is intentionally not exposed to user mode.
-@@ -542,12 +571,22 @@ void k_object_free(void *obj)
+@@ -546,12 +575,22 @@ void k_object_free(void *obj)
  	dyn = dyn_object_find_locked(obj);
  
  	if (dyn != NULL) {
@@ -1065,7 +1065,7 @@ diff --git a/kernel/userspace/userspace.c b/kernel/userspace/userspace.c
  	}
  	k_spin_unlock(&lists_lock, key);
  
-@@ -560,47 +599,12 @@ void k_object_free(void *obj)
+@@ -564,47 +603,12 @@ void k_object_free(void *obj)
  	}
  
  	if (dyn != NULL) {
@@ -1117,7 +1117,7 @@ diff --git a/kernel/userspace/userspace.c b/kernel/userspace/userspace.c
  }
  
  struct k_object *k_object_find(const void *obj)
-@@ -644,6 +648,7 @@ void *z_impl_k_object_map_size(enum k_objects otype, size_t size)
+@@ -648,6 +652,7 @@ void *z_impl_k_object_map_size(enum k_objects otype, size_t size)
  {
  	switch (otype) {
  	case K_OBJ_THREAD_STACK_ELEMENT:
@@ -1125,7 +1125,7 @@ diff --git a/kernel/userspace/userspace.c b/kernel/userspace/userspace.c
  		break;
  	default:
  		LOG_WRN_ONCE("%s() does not support object type '%s'",
-@@ -686,7 +691,7 @@ void *z_impl_k_object_map_size(enum k_objects otype, size_t size)
+@@ -690,7 +695,7 @@ void *z_impl_k_object_map_size(enum k_objects otype, size_t size)
  #endif /* CONFIG_GEN_PRIV_STACKS */
  
  	dyn->kobj.type = otype;
@@ -1134,7 +1134,7 @@ diff --git a/kernel/userspace/userspace.c b/kernel/userspace/userspace.c
  	(void)memset(dyn->kobj.perms, 0, CONFIG_MAX_THREAD_BYTES);
  
  	K_SPINLOCK(&lists_lock) {
-@@ -741,35 +746,79 @@ static unsigned int thread_index_get(struct k_thread *thread)
+@@ -745,35 +750,79 @@ static unsigned int thread_index_get(struct k_thread *thread)
  	return ko->data.thread_id;
  }
  
@@ -1235,7 +1235,7 @@ diff --git a/kernel/userspace/userspace.c b/kernel/userspace/userspace.c
  	}
  
  	/* This object has no more references. Some objects may have
-@@ -779,10 +828,10 @@ static void unref_check(struct k_object *ko, uintptr_t index, bool locked)
+@@ -783,10 +832,10 @@ static void unref_check(struct k_object *ko, uintptr_t index, bool locked)
  	 */
  	switch (ko->type) {
  	case K_OBJ_MSGQ:
@@ -1246,9 +1246,9 @@ diff --git a/kernel/userspace/userspace.c b/kernel/userspace/userspace.c
 -		(void)z_stack_cleanup((struct k_stack *)ko->name, locked);
 +		(void)z_stack_cleanup((struct k_stack *)ko->name, sched_locked);
  		break;
- 	case K_OBJ_TIMER:
- 		/* k_timer_cleanup() does not check whether the timer has
-@@ -791,7 +840,7 @@ static void unref_check(struct k_object *ko, uintptr_t index, bool locked)
+ 	case K_OBJ_THREAD:
+ 		/* thread_idx_free() cannot be used here: it takes lists_lock,
+@@ -804,7 +853,7 @@ static void unref_check(struct k_object *ko, uintptr_t index, bool locked)
  		 * explicitly here.
  		 */
  		if ((ko->flags & K_OBJ_FLAG_INITIALIZED) != 0U) {
@@ -1257,7 +1257,7 @@ diff --git a/kernel/userspace/userspace.c b/kernel/userspace/userspace.c
  		}
  		break;
  	default:
-@@ -799,14 +848,212 @@ static void unref_check(struct k_object *ko, uintptr_t index, bool locked)
+@@ -812,14 +861,212 @@ static void unref_check(struct k_object *ko, uintptr_t index, bool locked)
  		break;
  	}
  
@@ -1473,7 +1473,7 @@ diff --git a/kernel/userspace/userspace.c b/kernel/userspace/userspace.c
  static void wordlist_cb(struct k_object *ko, void *ctx_ptr)
  {
  	struct perm_ctx *ctx = (struct perm_ctx *)ctx_ptr;
-@@ -853,6 +1100,7 @@ void k_thread_perms_clear(struct k_object *ko, struct k_thread *thread)
+@@ -866,6 +1113,7 @@ void k_thread_perms_clear(struct k_object *ko, struct k_thread *thread)
  
  		unref_check(ko, index, false);
  		k_spin_unlock(&lists_lock, key);
@@ -2471,8 +2471,8 @@ diff --git a/tests/kernel/threads/dynamic_thread/src/main.c b/tests/kernel/threa
  
  #define STACKSIZE (256 + CONFIG_TEST_EXTRA_STACK_SIZE)
  
-@@ -227,6 +228,104 @@ ZTEST(thread_dynamic, test_dyn_thread_index_recycle)
- 	}
+@@ -271,6 +272,104 @@ ZTEST(thread_dynamic, test_thread_index_recycled_on_unref)
+ 	zassert_mem_equal(before, _thread_idx_map, sizeof(before), "thread indexes leaked");
  }
  
 +/* allocate thread objects until none is left, then release them all: the number tells
