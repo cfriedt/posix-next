@@ -1,0 +1,54 @@
+diff --git a/drivers/disk/ramdisk.c b/drivers/disk/ramdisk.c
+--- a/drivers/disk/ramdisk.c
++++ b/drivers/disk/ramdisk.c
+@@ -32,6 +32,8 @@ struct ram_disk_config {
+ 	const size_t sector_count;
+ 	const size_t size;
+ 	uint8_t *const buf;
++	/* buf is the physical address of a ram-region, otherwise a buffer in the image */
++	const bool ram_region;
+ #if defined(CONFIG_DISK_RAM_DECOMPRESS)
+ 	uint8_t *unpacked_buf; /* The buffer for decompressing */
+ #endif /* CONFIG_DISK_RAM_DECOMPRESS */
+@@ -42,6 +44,10 @@ static uint8_t *disk_ram_external_map(const struct ram_disk_config *conf)
+ {
+ 	uint8_t *virt_start;
+ 
++	if (!conf->ram_region) {
++		return conf->buf;
++	}
++
+ 	k_mem_map_phys_bare(&virt_start, POINTER_TO_UINT(conf->buf),
+ 				conf->size, K_MEM_CACHE_WB | K_MEM_PERM_RW);
+ 
+@@ -49,9 +55,11 @@ static uint8_t *disk_ram_external_map(const struct ram_disk_config *conf)
+ }
+ 
+ #if defined(CONFIG_DISK_RAM_DECOMPRESS)
+-static void disk_ram_external_unmap(char *virt_start, size_t size)
++static void disk_ram_external_unmap(const struct ram_disk_config *conf, char *virt_start)
+ {
+-	k_mem_unmap_phys_bare(virt_start, size);
++	if (conf->ram_region) {
++		k_mem_unmap_phys_bare(virt_start, conf->size);
++	}
+ }
+ #endif /* CONFIG_DISK_RAM_DECOMPRESS */
+ #endif /* CONFIG_MMU */
+@@ -227,7 +235,7 @@ static int disk_ram_init(const struct device *dev)
+ 		}
+ #if defined(CONFIG_MMU)
+ 		LOG_INF("Freeing compressed initrd");
+-		disk_ram_external_unmap(data->ramdisk_buf, config->size);
++		disk_ram_external_unmap(config, data->ramdisk_buf);
+ #endif /* CONFIG_MMU */
+ 		data->ramdisk_buf = config->unpacked_buf;
+ 	}
+@@ -264,6 +272,7 @@ static const struct disk_operations ram_disk_ops = {
+ 		.sector_count = DT_INST_PROP(n, sector_count),				\
+ 		.size = RAMDISK_DEVICE_SIZE(n),						\
+ 		.buf = UINT_TO_POINTER(DT_REG_ADDR(DT_INST_PHANDLE(n, ram_region))),	\
++		.ram_region = true,							\
+ 		IF_ENABLED(CONFIG_DISK_RAM_DECOMPRESS,					\
+ 			   (.unpacked_buf = unpacked_buf_##n,)				\
+ 		)									\
