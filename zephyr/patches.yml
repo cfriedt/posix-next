@@ -2342,3 +2342,26 @@ patches:
       the calling thread's dynamic regions at once; a caller that changes
       its own domain from a system call uses it before returning to user
       mode.
+  - path: zephyr/riscv-pmp-domain-apply-current.patch
+    sha256sum: 8be7c21167d1081eb360a4c9c0b46b4587d310d2aa328c313d2a04598c372e38
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-10-05
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/arm-mpu-domain-apply-current.patch
+    comments: |
+      riscv: pmp: apply memory-domain changes to the calling thread
+
+      With PMP_KERNEL_MODE_DYNAMIC the kernel runs with MPRV set, behind the
+      PMP entries of the user thread it serves, and v4.5 no longer clears
+      those entries when it activates the kernel-mode set. A partition
+      removed or changed from a system call therefore stays in force for the
+      kernel until the thread returns to user mode: the refill of a
+      read-only file mapping faults in the kernel. The RISC-V
+      arch_mem_domain_apply_current() rewrites the user view and
+      re-activates the kernel entries at once.
+
