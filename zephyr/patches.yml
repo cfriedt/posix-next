@@ -1,4 +1,26 @@
 patches:
+  - path: zephyr/net-lib-zero-init-sockaddr-storage.patch
+    sha256sum: 3273e70c0ee337ea2d3ca1338a6e2ff93f13ccbcfa977b90a3d3fd7fd9de39bf
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-10-06
+    upstreamable: true
+    comments: |
+      Upstream Zephyr bug, independent of posix-next: v4.5.0-rc1 does not
+      build subsys/net/lib/sntp/sntp_server.c and subsys/net/lib/ptp/
+      transport.c with -Wmaybe-uninitialized under -O0 -fprofile-arcs
+      (coverage builds). Carried here until the fix lands upstream.
+
+      net: lib: zero-initialize sockaddr storage handed to net_sad()
+
+      net_sad() takes a const net_sockaddr_storage pointer, so GCC assumes
+      the callee reads the object. sntp_server.c and ptp/transport.c pass
+      an uninitialized local that is filled in through the cast-away
+      pointer, and unoptimized coverage builds (-O0 -fprofile-arcs) fail
+      with -Werror=maybe-uninitialized ("by argument 1 of type const
+      struct net_sockaddr_storage * to net_sad"). Zero-initialize the
+      locals.
   - path: zephyr/posix-tests-enable-dynamic-threads.patch
     sha256sum: 45c9570f58be300e043e41e85731c06aa7060256551ec54535682155b686dbc6
     module: zephyr
