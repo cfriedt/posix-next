@@ -1258,3 +1258,20 @@ patches:
       leaving leaves that carry PTE_USER (the domain's own) alone, so that
       late mappings stay reachable while a domain SATP is active - a trap
       from user mode stores into the privilege stack before switching SATP.
+  - path: zephyr/intc-plic-supervisor-context.patch
+    sha256sum: 5ffcbaee49fe80299952d5ac27b2c1a8848af28d4c2b22dca016a24568c7f3a7
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-10-05
+    upstreamable: true
+    comments: |
+      drivers: intc: plic: use the supervisor hart context under RISCV_S_MODE
+
+      The driver connects the PLIC to the first interrupt of its
+      interrupts-extended list, the machine external interrupt, and takes
+      the hart contexts listed with that number. A kernel built for
+      supervisor mode never sees machine interrupts: connect the supervisor
+      external interrupt and use the supervisor contexts instead, so that
+      external interrupts (virtio-net on qemu_riscv64) reach the kernel.
+
