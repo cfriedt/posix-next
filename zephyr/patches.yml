@@ -1988,3 +1988,30 @@ patches:
 
       Covered by a new tests/lib/sys_msgq suite with per-unit ZTEST_USERs
       and libraries.sys_msgq{,.static_only,.userspace} variants.
+  - path: zephyr/k-poll-triggered-work-poller-priority.patch
+    sha256sum: bb3a36d816aac12a7cf1d88c50fc348523e4c0d83167827e024bcc9f0fe58ab5
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-10-06
+    upstreamable: true
+    comments: |
+      Kernel bug, independent of posix-next: add_event() in kernel/poll.c
+      reads the priority of a triggered-work poller through a k_thread it
+      is not embedded in. sys_aio is the first consumer that pends two
+      k_work_poll items on one object, which is how AddressSanitizer
+      caught it.
+
+      kernel: poll: order triggered work by its queue thread's priority
+
+      add_event() keeps an object's poll events sorted by poller priority
+      and reads that priority through poller_thread(), which assumes every
+      z_poller is embedded in a struct k_thread. Triggered work registers
+      the z_poller embedded in its struct k_work_poll, so the CONTAINER_OF
+      yields a bogus thread pointer and the priority is read from whatever
+      happens to precede the work item in memory. AddressSanitizer reports
+      it as a global-buffer-overflow as soon as two pollers wait on the
+      same object.
+
+      Compare triggered work by the thread that will run it, its work
+      queue thread, and treat a queue without one as lowest priority.
