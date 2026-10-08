@@ -5,9 +5,11 @@
  */
 
 #include <pthread.h>
+#include <sched.h>
 #include <unistd.h>
 
 #include <zephyr/logging/log.h>
+#include <zephyr/sys/atomic.h>
 #include <zephyr/sys/util.h>
 #include <zephyr/ztest.h>
 
@@ -48,6 +50,74 @@ static void *thread_top(void *p1)
 	zassert_ok(pthread_rwlock_unlock(&rwlock), "Failed to unlock");
 
 	return NULL;
+}
+
+#define N_READERS      (N_THR - 1)
+#define N_EXCL_CYCLES  200
+
+static ZTEST_BMEM atomic_t readers_inside;
+static ZTEST_BMEM atomic_t writer_inside;
+
+static void *exclusion_reader(void *arg)
+{
+	ARG_UNUSED(arg);
+
+	for (int i = 0; i < N_EXCL_CYCLES; i++) {
+		zassert_ok(pthread_rwlock_rdlock(&rwlock));
+		atomic_inc(&readers_inside);
+		zassert_equal(atomic_get(&writer_inside), 0, "writer active under a read lock");
+		sched_yield();
+		atomic_dec(&readers_inside);
+		zassert_ok(pthread_rwlock_unlock(&rwlock));
+		sched_yield();
+	}
+
+	return NULL;
+}
+
+static void *exclusion_writer(void *arg)
+{
+	ARG_UNUSED(arg);
+
+	for (int i = 0; i < N_EXCL_CYCLES; i++) {
+		zassert_ok(pthread_rwlock_wrlock(&rwlock));
+		atomic_inc(&writer_inside);
+		zassert_equal(atomic_get(&readers_inside), 0, "reader active under the write lock");
+		sched_yield();
+		atomic_dec(&writer_inside);
+		zassert_ok(pthread_rwlock_unlock(&rwlock));
+		sched_yield();
+	}
+
+	return NULL;
+}
+
+/*
+ * Readers and a writer churn through the lock; a read unlock that hands the writer gate back
+ * while a new first reader is arriving must not let the writer in beside that reader.
+ */
+ZTEST_USER(posix_rw_locks, test_pthread_rwlock_unlock)
+{
+	pthread_t threads[N_THR];
+
+	if (CONFIG_SYS_THREAD_STACK_MAX == 0) {
+		ztest_test_skip();
+	}
+
+	atomic_set(&readers_inside, 0);
+	atomic_set(&writer_inside, 0);
+	zassert_ok(pthread_rwlock_init(&rwlock, NULL));
+
+	for (int i = 0; i < N_READERS; i++) {
+		zassert_ok(pthread_create(&threads[i], NULL, exclusion_reader, NULL));
+	}
+	zassert_ok(pthread_create(&threads[N_READERS], NULL, exclusion_writer, NULL));
+
+	for (int i = 0; i < N_THR; i++) {
+		zassert_ok(pthread_join(threads[i], NULL));
+	}
+
+	zassert_ok(pthread_rwlock_destroy(&rwlock));
 }
 
 ZTEST_USER(posix_rw_locks, test_rw_lock)

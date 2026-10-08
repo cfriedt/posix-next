@@ -274,8 +274,8 @@ static uint32_t read_lock_acquire(struct posix_rwlock *rwl, k_timeout_t timeout)
 
 	if (sys_sem_take(&rwl->wr_sem, timeout) == 0) {
 		if (atomic_inc(&rwl->rd_count) == 0) {
-			/* First reader, lock writer */
-			(void)sys_sem_take(&rwl->reader_active, K_NO_WAIT);
+			/* First reader; a departing last reader may still hold the writer gate */
+			(void)sys_sem_take(&rwl->reader_active, K_FOREVER);
 		}
 		(void)sys_sem_give(&rwl->wr_sem);
 	} else {
