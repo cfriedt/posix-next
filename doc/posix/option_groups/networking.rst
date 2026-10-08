@@ -6,6 +6,11 @@ POSIX_NETWORKING
 The function ``sockatmark()`` is not yet supported and is expected to fail setting ``errno``
 to ``ENOSYS`` :ref:`†<posix_undefined_behaviour>`.
 
+The IPv6 address tests of ``<netinet/in.h>`` are declared but unusable: the ``IN6_IS_ADDR_*()``
+macros do not accept a pointer to ``struct in6_addr``, ``IN6_IS_ADDR_LINKLOCAL()`` and
+``IN6_IS_ADDR_SITELOCAL()`` match only ``fe80::/16`` and ``fec0::/16``, and
+``IN6_IS_ADDR_V4COMPAT()`` is missing :ref:`†<posix_undefined_behaviour>`.
+
 Enable this option group with :kconfig:option:`CONFIG_POSIX_NETWORKING`.
 
 .. csv-table:: POSIX_NETWORKING
