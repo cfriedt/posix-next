@@ -11,7 +11,7 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_BARRIERS`.
 
     :c:func:`pthread_barrier_destroy`,yes
     :c:func:`pthread_barrier_init`,yes
-    :c:func:`pthread_barrier_wait`,yes
+    :c:func:`pthread_barrier_wait`,yes :ref:`†<posix_undefined_behaviour>`
     :c:func:`pthread_barrierattr_destroy`,yes
     :c:func:`pthread_barrierattr_getpshared`,yes
     :c:func:`pthread_barrierattr_init`,yes
