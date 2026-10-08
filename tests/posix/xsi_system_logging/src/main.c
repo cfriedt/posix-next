@@ -5,18 +5,27 @@
  */
 
 #include <syslog.h>
-#undef LOG_ERR
 #include <unistd.h>
+
+#if defined(CONFIG_NATIVE_LIBC)
+/* the host libc's object-like LOG_ERR cannot coexist with Zephyr's function-like LOG_ERR() */
+#undef LOG_ERR
+#define POSIX_LOG_ERR 3
+#else
+#define POSIX_LOG_ERR LOG_ERR
+#endif
+
+#include <zephyr/logging/log.h>
 #include <zephyr/ztest.h>
 
-#define N_PRIOS  8
-/* avoid clashing with Zephyr's LOG_ERR() */
-#define _LOG_ERR 3
+LOG_MODULE_REGISTER(xsi_system_logging_test);
+
+#define N_PRIOS 8
 
 ZTEST_USER(xsi_system_logging, test_syslog)
 {
 	int prios[N_PRIOS] = {
-		LOG_EMERG,   LOG_ALERT,  LOG_CRIT, _LOG_ERR,
+		LOG_EMERG,   LOG_ALERT,  LOG_CRIT, POSIX_LOG_ERR,
 		LOG_WARNING, LOG_NOTICE, LOG_INFO, LOG_DEBUG,
 	};
 
@@ -31,6 +40,9 @@ ZTEST_USER(xsi_system_logging, test_syslog)
 	for (size_t i = 0; i < N_PRIOS; ++i) {
 		syslog(i, "syslog priority %d", prios[i]);
 	}
+
+	/* Zephyr's function-like LOG_ERR() is usable alongside the <syslog.h> priority */
+	LOG_ERR("zephyr log priority %d", POSIX_LOG_ERR);
 
 	closelog();
 
