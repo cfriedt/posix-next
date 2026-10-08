@@ -377,12 +377,12 @@ Networking
 ``<netinet/in.h>`` address tests
 --------------------------------
 
-The ``IN6_IS_ADDR_*()`` macros forward to Zephyr's ``ZSOCK_IN6_IS_ADDR_*()`` helpers, which take
-a ``struct net_in6_addr``; a POSIX ``struct in6_addr`` is a different type, so every use fails to
-compile with an incompatible pointer type, and no test exercises them. ``IN6_IS_ADDR_LINKLOCAL()``
-and ``IN6_IS_ADDR_SITELOCAL()`` compare the first 16 bits of the address with ``fe80`` and
-``fec0`` instead of the 10-bit prefixes of RFC 4291, and ``IN6_IS_ADDR_V4COMPAT()`` is not
-defined at all. The † on the group records this.
+The ``IN6_IS_ADDR_*()`` macros take a pointer to any 16-byte IPv6 address, a POSIX
+``struct in6_addr`` of any alignment, and forward it to the Zephyr helpers behind
+``ZSOCK_IN6_IS_ADDR_*()``, which read the bytes without alignment assumptions. The link-local and
+site-local tests match the ``fe80::/10`` and ``fec0::/10`` prefixes of RFC 4291.
+``IN6_IS_ADDR_V4COMPAT()`` is implemented in the header itself, as Zephyr has no notion of the
+deprecated IPv4-compatible form (``::a.b.c.d`` other than ``::`` and ``::1``).
 
 Distributed Kconfig
 ===================
