@@ -53,7 +53,15 @@
 #define LOG_EMERG   0 /**< System is unusable. */
 #define LOG_ALERT   1 /**< Action must be taken immediately. */
 #define LOG_CRIT    2 /**< Critical conditions. */
-#define LOG_ERR     3 /**< Error conditions. */
+/*
+ * An enumerator rather than a macro: Zephyr's <zephyr/logging/log.h> defines a function-like
+ * LOG_ERR(...), and a name that is not followed by '(' is never substituted, so both are usable
+ * in one translation unit. Note: this is only a workaround to accomodate Zephyr bugs that have
+ * not been addressed, See e.g. #82726, #93321, #107843.
+ */
+enum {
+	LOG_ERR = 3, /**< Error conditions. */
+};
 #define LOG_WARNING 4 /**< Warning conditions. */
 #define LOG_NOTICE  5 /**< Normal but significant condition. */
 #define LOG_INFO    6 /**< Informational message. */
