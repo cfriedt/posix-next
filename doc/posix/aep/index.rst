@@ -39,7 +39,7 @@ disabled individually.
          :widths: 50, 10, 50
 
           :ref:`_POSIX_ASYNCHRONOUS_IO<posix_option_asynchronous_io>`, 200809L, :kconfig:option:`CONFIG_POSIX_ASYNCHRONOUS_IO` :ref:`†<posix_undefined_behaviour>`
-          :ref:`_POSIX_BARRIERS<posix_option_barriers>`, 200809L, :kconfig:option:`CONFIG_POSIX_BARRIERS`
+          :ref:`_POSIX_BARRIERS<posix_option_barriers>`, 200809L, :kconfig:option:`CONFIG_POSIX_BARRIERS` :ref:`†<posix_undefined_behaviour>`
           :ref:`_POSIX_CLOCK_SELECTION<posix_option_clock_selection>`, 200809L, :kconfig:option:`CONFIG_POSIX_CLOCK_SELECTION`
           :ref:`_POSIX_MAPPED_FILES<posix_option_mapped_files>`, 200809L, :kconfig:option:`CONFIG_POSIX_MAPPED_FILES` :ref:`†<posix_undefined_behaviour>`
           :ref:`_POSIX_MEMORY_PROTECTION<posix_option_memory_protection>`, 200809L, :kconfig:option:`CONFIG_POSIX_MEMORY_PROTECTION` :ref:`†<posix_undefined_behaviour>`
