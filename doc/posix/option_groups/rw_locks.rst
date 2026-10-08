@@ -16,7 +16,7 @@ Enable this option with :kconfig:option:`CONFIG_POSIX_RW_LOCKS`.
     :c:func:`pthread_rwlock_rdlock`,yes
     :c:func:`pthread_rwlock_tryrdlock`,yes
     :c:func:`pthread_rwlock_trywrlock`,yes
-    :c:func:`pthread_rwlock_unlock`,yes :ref:`†<posix_undefined_behaviour>`
+    :c:func:`pthread_rwlock_unlock`,yes
     :c:func:`pthread_rwlock_wrlock`,yes
     :c:func:`pthread_rwlockattr_destroy`,yes
     :c:func:`pthread_rwlockattr_getpshared`,yes
