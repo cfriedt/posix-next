@@ -121,6 +121,75 @@ The general rule is that Option Groups will *always* have an associated Kconfig 
 Options (but not all) have an associated Kconfig option in Zephyr. The latter is mostly for
 maintainability.
 
+.. _posix_os_dependent_functions:
+
+OS-dependent and OS-independent functions
+=========================================
+
+Not every POSIX function needs an operating system. The C library implements the
+*OS-independent* ones: string and memory functions, character classification, ``qsort()``,
+``strtol()``, the ``printf()`` family's formatting, ``getopt()``, ``regcomp()``, and so on.
+They are pure library code, the same on every system, and each of Zephyr's C libraries (the
+minimal libc, newlib, picolibc, or the host libc on ``native_sim``) ships its own.
+
+The *OS-dependent* functions are the ones that touch kernel state: threads and scheduling,
+mutexes and condition variables, clocks, timers and sleeps, signals, file descriptors, files and
+directories, sockets, memory mappings, processes. On a self-hosted system the C library
+implements these over the kernel's system calls. On Zephyr, posix-next implements them in
+``lib/posix/<option_group>/`` over Zephyr system calls, one directory per
+:ref:`Option Group <posix_option_groups>`, and the C library's headers declare them.
+
+Which side provides a function is not fixed by the standard but by the toolchain. A C library
+that ships its own implementation of an Option Group, a libc with its own pthreads for example,
+declares it with :kconfig:option:`CONFIG_TC_PROVIDES_POSIX_THREADS` and the other
+``CONFIG_TC_PROVIDES_<OPTION_GROUP>`` symbols, and posix-next then omits its own; the
+remaining groups come from the module. This is also how the host libc is used unmodified by the
+``linux_compat`` test configurations on ``native_sim``.
+
+Overriding C library functions
+------------------------------
+
+A C library is a static archive, and the linker extracts an archive member only to satisfy a
+symbol that is still undefined. A function defined in an object file of the application, or in
+any library linked before ``libc.a``, is therefore already defined when the archive is searched,
+and the library's own copy is never pulled in. No flag is needed: with gcc on Linux,
+
+.. code-block:: c
+   :caption: `mypthread.c`: a replacement for the libc's ``pthread_create()``
+
+    #include <pthread.h>
+    #include <stdio.h>
+
+    int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
+                       void *(*start)(void *), void *arg)
+    {
+        /* create the thread with the clone() system call ... */
+        printf("pthread_create() succeeded\n");
+        return 0;
+    }
+
+.. code-block:: console
+
+    $ gcc -o foo main.c mypthread.c -lc
+    $ ./foo
+    pthread_create() succeeded
+
+The same rule applies in Zephyr: application and module objects are linked before the C
+library, so a definition in them overrides the library's. posix-next relies on it for the
+OS-dependent functions that a prebuilt libc also contains, ``sysconf()`` in full newlib for
+instance. Three things to keep in mind:
+
+#. The replacement is called by code *inside* the library too, with the library's own ABI. A
+   prebuilt newlib calls ``sysconf(_SC_PAGESIZE)`` from ``malloc()`` with *its* value of the
+   constant, so the replacement must agree with the headers the library was built against, not
+   with a private numbering.
+#. Only calls through the public symbol are redirected. Internal entry points keep their own
+   names (newlib's reentrant ``_write_r()`` is not ``write()``), and a library built with
+   internal aliases or link-time optimisation may bypass the public name entirely.
+#. When the original must stay reachable, link with ``-Wl,--wrap=name`` instead: calls to
+   ``name`` go to ``__wrap_name`` and the original is available as ``__real_name``. In Zephyr,
+   ``zephyr_link_libraries(-Wl,--wrap=name)`` adds the flag.
+
 .. _posix_non_portable_extensions:
 
 Non-Portable Extensions
