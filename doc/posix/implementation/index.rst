@@ -333,6 +333,25 @@ In the threading subsystem, the pools are instantiated in ``zephyr/lib/os/thread
        SYS_THREAD_MUTEX_MIN, CONFIG_SYS_THREAD_MUTEX_MAX,
        mutex_pool_heap_alloc, sys_mutex_pool, static);
 
+.. _posix_barriers_design:
+
+Barriers
+========
+
+:ref:`POSIX_BARRIERS <posix_option_group_barriers>` is implemented, but a barrier only works for
+one cycle, and the † on :c:func:`pthread_barrier_wait` in the option, conformance and profile
+tables records that. The behaviour is kept here so it can be corrected deliberately.
+
+:c:func:`pthread_barrier_wait`
+   Arrivals are counted under the barrier's mutex. The last arrival resets the count, returns
+   ``PTHREAD_BARRIER_SERIAL_THREAD`` and signals one waiter; each waiter wakes, sees the count
+   back at zero, and signals the next one on its way out. The chain breaks as soon as a thread
+   that has already returned enters the barrier again for the next cycle before every waiter of
+   the previous cycle has run: its arrival makes the count non-zero again, the remaining waiters
+   go back to sleep without passing the signal on, and they never wake. POSIX requires that a
+   barrier can be reused by the same threads immediately after a successful return, so a barrier
+   used in a loop deadlocks (upstream issue #118999).
+
 Distributed Kconfig
 ===================
 
