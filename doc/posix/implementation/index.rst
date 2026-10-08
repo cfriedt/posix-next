@@ -518,19 +518,16 @@ In the threading subsystem, the pools are instantiated in ``zephyr/lib/os/thread
 Barriers
 ========
 
-:ref:`POSIX_BARRIERS <posix_option_group_barriers>` is implemented, but a barrier only works for
-one cycle, and the † on :c:func:`pthread_barrier_wait` in the option, conformance and profile
-tables records that. The behaviour is kept here so it can be corrected deliberately.
-
-:c:func:`pthread_barrier_wait`
-   Arrivals are counted under the barrier's mutex. The last arrival resets the count, returns
-   ``PTHREAD_BARRIER_SERIAL_THREAD`` and signals one waiter; each waiter wakes, sees the count
-   back at zero, and signals the next one on its way out. The chain breaks as soon as a thread
-   that has already returned enters the barrier again for the next cycle before every waiter of
-   the previous cycle has run: its arrival makes the count non-zero again, the remaining waiters
-   go back to sleep without passing the signal on, and they never wake. POSIX requires that a
-   barrier can be reused by the same threads immediately after a successful return, so a barrier
-   used in a loop deadlocks (upstream issue #118999).
+A barrier is an elastipool object holding a mutex, a condition variable, the member count, the
+number of arrivals in the current cycle and a cycle number. :c:func:`pthread_barrier_wait`
+records the cycle number on entry, under the mutex, and counts its arrival. The last arrival
+advances the cycle, resets the arrival count, wakes every waiter with one broadcast and returns
+``PTHREAD_BARRIER_SERIAL_THREAD``; every other caller sleeps on the condition variable until the
+cycle number has moved on, then returns 0. Because a waiter watches the cycle number rather than
+the arrival count, a thread that returns and re-enters for the next cycle cannot stall the
+threads still waking up from the previous one, so a barrier can be reused immediately, as POSIX
+requires. :c:func:`pthread_barrier_destroy` returns the object to the pool; the attribute object
+holds only the ``pshared`` value.
 
 .. _posix_rw_locks_design:
 
