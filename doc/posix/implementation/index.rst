@@ -369,6 +369,21 @@ unlock can hand the writer gate back while a reader still holds the lock, and th
    it and runs beside the new reader (upstream issue #104908). The window is a few instructions
    wide, so it is rarely hit, but the exclusion the lock exists to provide is not guaranteed.
 
+.. _posix_networking_design:
+
+Networking
+==========
+
+``<netinet/in.h>`` address tests
+--------------------------------
+
+The ``IN6_IS_ADDR_*()`` macros forward to Zephyr's ``ZSOCK_IN6_IS_ADDR_*()`` helpers, which take
+a ``struct net_in6_addr``; a POSIX ``struct in6_addr`` is a different type, so every use fails to
+compile with an incompatible pointer type, and no test exercises them. ``IN6_IS_ADDR_LINKLOCAL()``
+and ``IN6_IS_ADDR_SITELOCAL()`` compare the first 16 bits of the address with ``fe80`` and
+``fec0`` instead of the 10-bit prefixes of RFC 4291, and ``IN6_IS_ADDR_V4COMPAT()`` is not
+defined at all. The † on the group records this.
+
 Distributed Kconfig
 ===================
 
