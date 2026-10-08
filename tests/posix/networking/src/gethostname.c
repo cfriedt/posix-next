@@ -19,8 +19,17 @@ ZTEST(posix_networking, test_gethostname)
 	zassert_equal(ret, 0, "gethostname() failed: %d", ret);
 
 	IF_NOT_NATIVE_LIBC({
-		zassert_equal(strcmp(hostname, CONFIG_NET_HOSTNAME), 0, "unexpected hostname: %s",
-			      hostname);
+		if (IS_ENABLED(CONFIG_NET_HOSTNAME_UNIQUE)) {
+			/* CONFIG_NET_HOSTNAME followed by the link address */
+			zassert_equal(strncmp(hostname, CONFIG_NET_HOSTNAME,
+					      strlen(CONFIG_NET_HOSTNAME)),
+				      0, "unexpected hostname: %s", hostname);
+			zassert_true(strlen(hostname) > strlen(CONFIG_NET_HOSTNAME),
+				     "hostname not made unique: %s", hostname);
+		} else {
+			zassert_equal(strcmp(hostname, CONFIG_NET_HOSTNAME), 0,
+				      "unexpected hostname: %s", hostname);
+		}
 	});
 
 	if (IS_ENABLED(CONFIG_NATIVE_LIBC)) {
