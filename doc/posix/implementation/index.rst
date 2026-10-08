@@ -774,17 +774,17 @@ holds only the ``pshared`` value.
 Reader-writer locks
 ===================
 
-:ref:`POSIX_RW_LOCKS <posix_option_group_rw_locks>` is implemented over semaphores, but a read
-unlock can hand the writer gate back while a reader still holds the lock, and the † on
-:c:func:`pthread_rwlock_unlock` in the option, conformance and profile tables records that.
-
-:c:func:`pthread_rwlock_unlock`
-   Readers share a writer gate: the first reader takes it and the last reader gives it back. The
-   last reader decides that it is the last one and gives the gate back in two separate steps,
-   and a reader that arrives between them finds the gate still taken, does not wait for it, and
-   proceeds as if it held it. The departing reader then gives the gate back, and a writer takes
-   it and runs beside the new reader (upstream issue #104908). The window is a few instructions
-   wide, so it is rarely hit, but the exclusion the lock exists to provide is not guaranteed.
+A reader-writer lock is an elastipool object holding an atomic reader count, a writer
+semaphore, a writer gate semaphore and the owner of the write lock. Readers and writers alike
+first take the writer semaphore, so a writer that is waiting keeps new readers out while it
+holds it. A reader increments the reader count and, if it is the first reader, takes the writer
+gate, then gives the writer semaphore back so other readers may follow. A writer keeps the
+writer semaphore and then takes the writer gate, which the readers hold until the last of them
+has left. The last reader decrements the count and gives the writer gate back; a new first
+reader that arrives in between waits for the gate instead of assuming it is free, which closes
+the window in which a writer could run beside a reader. The timed and try variants follow the
+same path with a bounded or zero timeout on the writer semaphore. The attribute object holds
+the ``pshared`` value.
 
 .. _posix_networking_design:
 
