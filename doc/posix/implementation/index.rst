@@ -352,6 +352,23 @@ tables records that. The behaviour is kept here so it can be corrected deliberat
    barrier can be reused by the same threads immediately after a successful return, so a barrier
    used in a loop deadlocks (upstream issue #118999).
 
+.. _posix_rw_locks_design:
+
+Reader-writer locks
+===================
+
+:ref:`POSIX_RW_LOCKS <posix_option_group_rw_locks>` is implemented over semaphores, but a read
+unlock can hand the writer gate back while a reader still holds the lock, and the † on
+:c:func:`pthread_rwlock_unlock` in the option, conformance and profile tables records that.
+
+:c:func:`pthread_rwlock_unlock`
+   Readers share a writer gate: the first reader takes it and the last reader gives it back. The
+   last reader decides that it is the last one and gives the gate back in two separate steps,
+   and a reader that arrives between them finds the gate still taken, does not wait for it, and
+   proceeds as if it held it. The departing reader then gives the gate back, and a writer takes
+   it and runs beside the new reader (upstream issue #104908). The window is a few instructions
+   wide, so it is rarely hit, but the exclusion the lock exists to provide is not guaranteed.
+
 Distributed Kconfig
 ===================
 
