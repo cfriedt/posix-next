@@ -153,29 +153,53 @@ struct ipv6_mreq {
 /** @brief Restrict the socket to IPv6 communication only. */
 #define IPV6_V6ONLY ZSOCK_IPV6_V6ONLY
 
-/* IPv6 address tests. Each takes a pointer to a struct in6_addr and evaluates non-zero on match. */
+/*
+ * IPv6 address tests. Each takes a pointer to a struct in6_addr (16 address bytes, any alignment)
+ * and evaluates non-zero on match.
+ */
 /** @brief Test whether an IPv6 address is the unspecified address (`::`). */
-#define IN6_IS_ADDR_UNSPECIFIED(addr) ZSOCK_IN6_IS_ADDR_UNSPECIFIED(addr)
+#define IN6_IS_ADDR_UNSPECIFIED(addr)                                                              \
+	ZSOCK_IN6_IS_ADDR_UNSPECIFIED((const struct net_in6_addr *)(addr))
 /** @brief Test whether an IPv6 address is the loopback address (`::1`). */
-#define IN6_IS_ADDR_LOOPBACK(addr) ZSOCK_IN6_IS_ADDR_LOOPBACK(addr)
+#define IN6_IS_ADDR_LOOPBACK(addr) ZSOCK_IN6_IS_ADDR_LOOPBACK((const struct net_in6_addr *)(addr))
 /** @brief Test whether an IPv6 address is a multicast address (`ff00::/8`). */
-#define IN6_IS_ADDR_MULTICAST(addr) ZSOCK_IN6_IS_ADDR_MULTICAST(addr)
+#define IN6_IS_ADDR_MULTICAST(addr) ZSOCK_IN6_IS_ADDR_MULTICAST((const struct net_in6_addr *)(addr))
 /** @brief Test whether an IPv6 address is link-local unicast (`fe80::/10`). */
-#define IN6_IS_ADDR_LINKLOCAL(addr) ZSOCK_IN6_IS_ADDR_LINKLOCAL(addr)
+#define IN6_IS_ADDR_LINKLOCAL(addr) ZSOCK_IN6_IS_ADDR_LINKLOCAL((const struct net_in6_addr *)(addr))
 /** @brief Test whether an IPv6 address is site-local unicast (`fec0::/10`). */
-#define IN6_IS_ADDR_SITELOCAL(addr) ZSOCK_IN6_IS_ADDR_SITELOCAL(addr)
+#define IN6_IS_ADDR_SITELOCAL(addr) ZSOCK_IN6_IS_ADDR_SITELOCAL((const struct net_in6_addr *)(addr))
 /** @brief Test whether an IPv6 address is an IPv4-mapped IPv6 address. */
-#define IN6_IS_ADDR_V4MAPPED(addr) ZSOCK_IN6_IS_ADDR_V4MAPPED(addr)
+#define IN6_IS_ADDR_V4MAPPED(addr) ZSOCK_IN6_IS_ADDR_V4MAPPED((const struct net_in6_addr *)(addr))
+/** @cond INTERNAL_HIDDEN */
+static inline int __z_posix_in6_is_addr_v4compat(const void *addr)
+{
+	const uint8_t *p = (const uint8_t *)addr;
+
+	for (int i = 0; i < 12; i++) {
+		if (p[i] != 0) {
+			return 0;
+		}
+	}
+
+	return p[12] != 0 || p[13] != 0 || p[14] != 0 || p[15] > 1;
+}
+/** @endcond */
+/** @brief Test whether an IPv6 address is IPv4-compatible (`::` followed by an IPv4 address). */
+#define IN6_IS_ADDR_V4COMPAT(addr) __z_posix_in6_is_addr_v4compat(addr)
 /** @brief Test whether an IPv6 multicast address has node-local scope (`ff01::/8`). */
-#define IN6_IS_ADDR_MC_NODELOCAL(addr) ZSOCK_IN6_IS_ADDR_MC_NODELOCAL(addr)
+#define IN6_IS_ADDR_MC_NODELOCAL(addr)                                                             \
+	ZSOCK_IN6_IS_ADDR_MC_NODELOCAL((const struct net_in6_addr *)(addr))
 /** @brief Test whether an IPv6 multicast address has link-local scope (`ff02::/8`). */
-#define IN6_IS_ADDR_MC_LINKLOCAL(addr) ZSOCK_IN6_IS_ADDR_MC_LINKLOCAL(addr)
+#define IN6_IS_ADDR_MC_LINKLOCAL(addr)                                                             \
+	ZSOCK_IN6_IS_ADDR_MC_LINKLOCAL((const struct net_in6_addr *)(addr))
 /** @brief Test whether an IPv6 multicast address has site-local scope (`ff03::/8`). */
-#define IN6_IS_ADDR_MC_SITELOCAL(addr) ZSOCK_IN6_IS_ADDR_MC_SITELOCAL(addr)
+#define IN6_IS_ADDR_MC_SITELOCAL(addr)                                                             \
+	ZSOCK_IN6_IS_ADDR_MC_SITELOCAL((const struct net_in6_addr *)(addr))
 /** @brief Test whether an IPv6 multicast address has organization-local scope (`ff04::/8`). */
-#define IN6_IS_ADDR_MC_ORGLOCAL(addr) ZSOCK_IN6_IS_ADDR_MC_ORGLOCAL(addr)
+#define IN6_IS_ADDR_MC_ORGLOCAL(addr)                                                              \
+	ZSOCK_IN6_IS_ADDR_MC_ORGLOCAL((const struct net_in6_addr *)(addr))
 /** @brief Test whether an IPv6 multicast address has global scope (`ff00::/8`). */
-#define IN6_IS_ADDR_MC_GLOBAL(addr) ZSOCK_IN6_IS_ADDR_MC_GLOBAL(addr)
+#define IN6_IS_ADDR_MC_GLOBAL(addr) ZSOCK_IN6_IS_ADDR_MC_GLOBAL((const struct net_in6_addr *)(addr))
 
 #ifdef __cplusplus
 }
