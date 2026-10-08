@@ -160,6 +160,44 @@ POSIX :ref:`Option Groups <posix_option_groups>`, as needed.
 Further fine-tuning may be accomplished via
 :ref:`additional POSIX-related Kconfig options <posix_kconfig_options>`.
 
+.. _posix_application_conformance:
+
+Application conformance macros
+++++++++++++++++++++++++++++++
+
+IEEE 1003.1 reserves ``_POSIX_C_SOURCE`` and ``_XOPEN_SOURCE`` for the *application*: a source
+file states the version of the standard it is written to by defining one of them before it
+includes any header, and the headers then expose the matching set of declarations. The
+implementation never defines them. Zephyr and posix-next therefore set neither macro globally,
+and a library must not either; the global ``_POSIX_C_SOURCE=200809`` of earlier releases was both
+the wrong value (the standard's is ``200809L``) and a conflict for every application that
+defined the right one.
+
+An application chooses its conformance level in its own build files or sources, for example
+
+.. code-block:: cmake
+   :caption: `CMakeLists.txt`: the whole application targets POSIX.1-2017
+
+    target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+
+.. code-block:: c
+   :caption: or per source file, before the first ``#include``
+
+    #define _POSIX_C_SOURCE 200809L
+    #include <time.h>
+
+The ``-U`` first undefines the value some toolchains predefine, so the application's definition
+is not reported as a redefinition. Defining neither macro is also a valid choice: each C library
+then applies its own default namespace. A library that needs a particular level defines it
+locally, on its own sources, with ``target_compile_definitions`` or ``zephyr_library_compile_definitions``.
+
+There is deliberately no Kconfig choice for the application conformance level: the macro
+belongs to a translation unit, not to the system configuration, and a Kconfig symbol would turn
+it back into a global definition for every library in the image. The *implementation*
+conformance macros that answer it (``_POSIX_VERSION``, ``_POSIX_THREADS``, ``_POSIX_TIMERS``
+and the other constants of ``<unistd.h>``) are what Kconfig controls, and they report exactly
+the Option Groups that are enabled.
+
 Legacy
 ++++++
 
