@@ -185,6 +185,11 @@ static const struct sysconf_case sysconf_cases[] = {
 	{_SC_TZNAME_MAX, SYSCONF_OPTION},
 };
 
+#if defined(CONFIG_NEWLIB_LIBC) || defined(CONFIG_PICOLIBC)
+/* a prebuilt libc calls sysconf() with its own numbering: dlmalloc uses sysconf(8) */
+BUILD_ASSERT(_SC_PAGESIZE == 8, "sysconf() does not use the libc's _SC_* numbering");
+#endif
+
 ZTEST(posix_single_process, test_sysconf_known_values)
 {
 	long page_size;
@@ -197,6 +202,9 @@ ZTEST(posix_single_process, test_sysconf_known_values)
 
 	page_size = sysconf(_SC_PAGE_SIZE);
 	zassert_equal(sysconf(_SC_PAGESIZE), page_size);
+	/* a prebuilt libc allocator aligns with (page_size - 1) */
+	zassert_true((page_size & (page_size - 1)) == 0, "page size %ld is not a power of two",
+		     page_size);
 }
 
 ZTEST(posix_single_process, test_sysconf_invalid_name)
