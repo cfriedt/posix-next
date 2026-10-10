@@ -1,0 +1,536 @@
+diff --git a/doc/services/zvfs/index.rst b/doc/services/zvfs/index.rst
+--- a/doc/services/zvfs/index.rst
++++ b/doc/services/zvfs/index.rst
+@@ -71,6 +71,21 @@ to user mode on a board without an MMU, whose protection region covers it whole:
+ a partial ``zvfs_munmap()`` of those fails with ``EINVAL``. ``zvfs_mprotect()``
+ operates on whole mappings; a range that covers part of one is rejected.
+
++Memory Locking
++**************
++
++:kconfig:option:`CONFIG_ZVFS_MLOCK` adds ``zvfs_mlock()`` and ``zvfs_munlock()``.
++A locked page is resident and exempt from eviction, a distinction that only
++exists under :kconfig:option:`CONFIG_DEMAND_PAGING`; without it every page is
++resident already and both calls succeed without effect. Called with no scope
++flag they lock or unlock the pages of a range; from user mode a range the
++caller cannot read is ``ENOMEM``.
++``ZVFS_MLOCK_CURRENT`` is the caller's mappings and, from user mode, the
++partitions of its memory domain; ``ZVFS_MLOCK_FUTURE`` records, per process,
++that every mapping created from then on is locked, until an unlock with the
++same flag clears it. The pages of a mapping are pinned for its lifetime, as
++Storage describes, so an unlock passes over them.
++
+ Shared Memory Objects
+ *********************
+
+diff --git a/include/zephyr/sys/internal/fdtable_priv.h b/include/zephyr/sys/internal/fdtable_priv.h
+--- a/include/zephyr/sys/internal/fdtable_priv.h
++++ b/include/zephyr/sys/internal/fdtable_priv.h
+@@ -87,6 +87,11 @@ static inline void zvfs_fds_cloexec(void)
+ }
+ #endif
+ 
++#ifdef CONFIG_ZVFS_MLOCK
++/* the caller's "lock every new mapping" flag: per process, one for the kernel's own */
++bool *z_zvfs_proc_mlock_future(void);
++#endif
++
+ struct k_mem_domain;
+ 
+ #if defined(CONFIG_ZVFS_MMAP) && defined(CONFIG_PROCESS_VM)
+diff --git a/include/zephyr/sys/zvfs.h b/include/zephyr/sys/zvfs.h
+--- a/include/zephyr/sys/zvfs.h
++++ b/include/zephyr/sys/zvfs.h
+@@ -255,6 +255,53 @@ __syscall int zvfs_msync(void *addr, size_t len, int flags);
+  */
+ __syscall int zvfs_mprotect(void *addr, size_t len, int prot);
+
++/**
++ * @name zvfs_mlock() scopes
++ * @{
++ */
++/** The caller's mappings and, from user mode, the memory its domain grants */
++#define ZVFS_MLOCK_CURRENT BIT(0)
++/** Every mapping the caller creates afterwards */
++#define ZVFS_MLOCK_FUTURE  BIT(1)
++/** @} */
++
++/**
++ * @brief Lock pages into memory.
++ *
++ * Locked pages are resident and exempt from eviction. With @p flags zero the
++ * pages of @p len bytes at @p addr, rounded to the mapping page size, are
++ * locked. Otherwise @p addr is NULL and @p len zero, and the flags select the
++ * scope: ZVFS_MLOCK_CURRENT locks the caller's mappings and, from user mode,
++ * the partitions of its memory domain; ZVFS_MLOCK_FUTURE locks every mapping
++ * the caller creates until zvfs_munlock() clears it.
++ *
++ * Without CONFIG_DEMAND_PAGING every page is resident already: the call
++ * validates its arguments and succeeds without effect. From user mode a
++ * range the caller cannot read is ENOMEM.
++ *
++ * @param addr Base address, or NULL with a scope in @p flags.
++ * @param len Number of bytes, or zero with a scope in @p flags.
++ * @param flags Zero, or a combination of ZVFS_MLOCK_* scopes.
++ *
++ * @return 0 on success, or -1 on error (errno is set).
++ */
++__syscall int zvfs_mlock(const void *addr, size_t len, int flags);
++
++/**
++ * @brief Unlock pages locked with zvfs_mlock().
++ *
++ * The pages a mapping owns stay resident for the life of the mapping and are
++ * left alone. With ZVFS_MLOCK_FUTURE in @p flags, mappings the caller creates
++ * afterwards are no longer locked.
++ *
++ * @param addr Base address, or NULL with a scope in @p flags.
++ * @param len Number of bytes, or zero with a scope in @p flags.
++ * @param flags Zero, or a combination of ZVFS_MLOCK_* scopes.
++ *
++ * @return 0 on success, or -1 on error (errno is set).
++ */
++__syscall int zvfs_munlock(const void *addr, size_t len, int flags);
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/lib/os/zvfs/Kconfig b/lib/os/zvfs/Kconfig
+--- a/lib/os/zvfs/Kconfig
++++ b/lib/os/zvfs/Kconfig
+@@ -176,6 +176,15 @@ config ZVFS_MMAP_DIRTY_TRACK
+ 	  and leaves the rest of the file alone. Without this, the whole range
+ 	  is written back.
+
++config ZVFS_MLOCK
++	bool "ZVFS memory locking"
++	help
++	  Lock pages into memory with zvfs_mlock() and release them with
++	  zvfs_munlock(): a range of pages, the caller's mappings and the memory
++	  its domain grants, or every mapping it creates from then on. Locking
++	  keeps pages resident under CONFIG_DEMAND_PAGING; without it every page
++	  is resident already and the calls succeed without effect.
++
+ endif # ZVFS_MMAP
+
+ config ZVFS_SHM
+diff --git a/lib/os/zvfs/zvfs_fdtable.c b/lib/os/zvfs/zvfs_fdtable.c
+--- a/lib/os/zvfs/zvfs_fdtable.c
++++ b/lib/os/zvfs/zvfs_fdtable.c
+@@ -98,6 +98,10 @@ BUILD_ASSERT(CONFIG_ZVFS_PROC_OPEN_MAX <= ZVFS_OPEN_SIZE,
+ struct zvfs_proc_fds {
+ 	sys_dnode_t node;
+ 	struct fd_slot slots[ZVFS_PROC_OPEN_SIZE];
++#ifdef CONFIG_ZVFS_MLOCK
++	/* zvfs_mlock(ZVFS_MLOCK_FUTURE) is in force: new mappings are locked */
++	bool mlock_future;
++#endif /* CONFIG_ZVFS_MLOCK */
+ };
+ 
+ static struct k_spinlock fds_graveyard_lock;
+@@ -117,6 +121,22 @@ SYS_ELASTIPOOL_DEFINE_ADVANCED(fds_pool, sizeof(struct zvfs_proc_fds),
+ #endif /* CONFIG_SYS_PROCESS */
+ #endif /* CONFIG_PROCESS */
+ 
++#ifdef CONFIG_ZVFS_MLOCK
++static bool boot_mlock_future;
++
++bool *z_zvfs_proc_mlock_future(void)
++{
++#ifdef CONFIG_PROCESS
++	struct k_process *proc = k_current_get()->process;
++
++	if ((proc != NULL) && (proc->fds != NULL)) {
++		return &((struct zvfs_proc_fds *)proc->fds)->mlock_future;
++	}
++#endif /* CONFIG_PROCESS */
++	return &boot_mlock_future;
++}
++#endif /* CONFIG_ZVFS_MLOCK */
++
+ /* the calling thread's descriptor table */
+ static struct fd_slot *fd_slots_n(int *n)
+ {
+diff --git a/lib/os/zvfs/zvfs_mmap.c b/lib/os/zvfs/zvfs_mmap.c
+--- a/lib/os/zvfs/zvfs_mmap.c
++++ b/lib/os/zvfs/zvfs_mmap.c
+@@ -40,6 +40,7 @@
+ #include <zephyr/internal/syscall_handler.h>
+ #include <zephyr/kernel.h>
+ #include <zephyr/kernel/mm.h>
++#include <zephyr/kernel/mm/demand_paging.h>
+ #include <zephyr/sys/dlist.h>
+ #include <zephyr/sys/elastipool.h>
+ #include <zephyr/sys/fdtable.h>
+@@ -48,10 +49,9 @@
+ #include <zephyr/sys/util.h>
+
+ #include <kernel_internal.h>
++#include <mmu.h>
+
+-#if defined(CONFIG_ZVFS_MMAP_DIRTY_TRACK) || defined(CONFIG_ARCH_MEM_DOMAIN_APPLY_CURRENT)
+ #include <kernel_arch_interface.h>
+-#endif
+
+ #define MMAP_PAGE       CONFIG_ZVFS_MMAP_PAGE_SIZE
+ #define MMAP_PROT_MASK  (ZVFS_PROT_READ | ZVFS_PROT_WRITE | ZVFS_PROT_EXEC)
+@@ -893,6 +893,200 @@ static int file_access_mode(int fd)
+ 	return (flags < 0) ? ZVFS_O_RDWR : (flags & ZVFS_O_ACCMODE);
+ }
+
++#ifdef CONFIG_ZVFS_MLOCK
++#define MLOCK_FLAGS_MASK (ZVFS_MLOCK_CURRENT | ZVFS_MLOCK_FUTURE)
++
++static inline bool mlock_future(void)
++{
++	return *z_zvfs_proc_mlock_future();
++}
++
++#ifdef CONFIG_DEMAND_PAGING
++/* a mapping's pages are locked for its lifetime: an unlock passes over them */
++static bool mapped_page(uintptr_t page)
++{
++	struct zvfs_mapping *m;
++
++	SYS_DLIST_FOR_EACH_CONTAINER(&mappings, m, node) {
++		if (IN_RANGE(page, (uintptr_t)m->addr, (uintptr_t)m->addr + m->len - 1)) {
++			return true;
++		}
++	}
++
++	return false;
++}
++
++/* every page of [start, end) is one the pager manages: k_mem_pin() panics on any other */
++static bool pages_paged(uintptr_t start, uintptr_t end)
++{
++	for (uintptr_t page = start; page < end; page += MMAP_PAGE) {
++		uintptr_t phys;
++
++		if ((arch_page_info_get((void *)page, &phys, false) & ARCH_DATA_PAGE_NOT_MAPPED) !=
++		    0) {
++			return false;
++		}
++	}
++
++	return true;
++}
++
++static void pages_lock(uintptr_t start, uintptr_t end, bool lock)
++{
++	uintptr_t run = start;
++
++	if (lock) {
++		k_mem_pin((void *)start, end - start);
++		return;
++	}
++	for (uintptr_t page = start; page < end; page += MMAP_PAGE) {
++		if (!mapped_page(page)) {
++			continue;
++		}
++		if (run < page) {
++			k_mem_unpin((void *)run, page - run);
++		}
++		run = page + MMAP_PAGE;
++	}
++	if (run < end) {
++		k_mem_unpin((void *)run, end - run);
++	}
++}
++
++/* pages of memory: the pager cannot pin what lies outside */
++static bool pages_in_memory(uintptr_t start, uintptr_t end)
++{
++	const uintptr_t lo = (uintptr_t)K_MEM_VIRT_RAM_START;
++	const uintptr_t hi = (uintptr_t)K_MEM_VIRT_RAM_END - 1;
++
++	return IN_RANGE(start, lo, hi) && IN_RANGE(end - 1, lo, hi);
++}
++
++static int range_lock(const void *addr, size_t len, bool lock)
++{
++	uintptr_t start = ROUND_DOWN((uintptr_t)addr, MMAP_PAGE);
++	uintptr_t end;
++
++	if (len == 0) {
++		return 0;
++	}
++	if (!range_end(start, (uintptr_t)addr + len - start, &end) ||
++	    !pages_in_memory(start, end) || !pages_paged(start, end)) {
++		errno = ENOMEM;
++		return -1;
++	}
++	pages_lock(start, end, lock);
++
++	return 0;
++}
++
++/* the caller's mappings and, from user mode, the partitions of its domain */
++static void current_lock(bool lock)
++{
++	struct zvfs_mapping *m;
++#ifdef CONFIG_USERSPACE
++	struct k_mem_domain *domain = caller_domain();
++
++	if (domain != NULL) {
++		for (int i = 0; i < CONFIG_MAX_DOMAIN_PARTITIONS; i++) {
++			const struct k_mem_partition *part = &domain->partitions[i];
++			uintptr_t start = ROUND_DOWN(part->start, MMAP_PAGE);
++			uintptr_t end;
++
++			if ((part->size == 0) ||
++			    !range_end(start, part->start + part->size - start, &end) ||
++			    !pages_in_memory(start, end) || !pages_paged(start, end)) {
++				continue;
++			}
++			pages_lock(start, end, lock);
++		}
++	}
++#endif /* CONFIG_USERSPACE */
++	if (!lock) {
++		return;
++	}
++	SYS_DLIST_FOR_EACH_CONTAINER(&mappings, m, node) {
++		if (mapping_mine(m)) {
++			pages_lock((uintptr_t)m->addr, (uintptr_t)m->addr + m->len, true);
++		}
++	}
++}
++#else
++static void pages_lock(uintptr_t start, uintptr_t end, bool lock)
++{
++	ARG_UNUSED(start);
++	ARG_UNUSED(end);
++	ARG_UNUSED(lock);
++}
++
++static int range_lock(const void *addr, size_t len, bool lock)
++{
++	ARG_UNUSED(addr);
++	ARG_UNUSED(len);
++	ARG_UNUSED(lock);
++
++	return 0;
++}
++
++static void current_lock(bool lock)
++{
++	ARG_UNUSED(lock);
++}
++#endif /* CONFIG_DEMAND_PAGING */
++
++static int mlock_op(const void *addr, size_t len, int flags, bool lock)
++{
++	int ret = 0;
++
++	if (((flags & ~MLOCK_FLAGS_MASK) != 0) ||
++	    ((flags != 0) && ((addr != NULL) || (len != 0))) ||
++	    ((flags == 0) && Z_DETECT_POINTER_OVERFLOW(addr, len))) {
++		errno = EINVAL;
++		return -1;
++	}
++
++	(void)k_mutex_lock(&mmap_lock, K_FOREVER);
++	orphans_release();
++
++	if (flags == 0) {
++		ret = range_lock(addr, len, lock);
++	} else {
++		if ((flags & ZVFS_MLOCK_CURRENT) != 0) {
++			current_lock(lock);
++		}
++		if ((flags & ZVFS_MLOCK_FUTURE) != 0) {
++			*z_zvfs_proc_mlock_future() = lock;
++		}
++	}
++
++	k_mutex_unlock(&mmap_lock);
++
++	return ret;
++}
++
++int z_impl_zvfs_mlock(const void *addr, size_t len, int flags)
++{
++	return mlock_op(addr, len, flags, true);
++}
++
++int z_impl_zvfs_munlock(const void *addr, size_t len, int flags)
++{
++	return mlock_op(addr, len, flags, false);
++}
++#else
++static inline bool mlock_future(void)
++{
++	return false;
++}
++
++static void pages_lock(uintptr_t start, uintptr_t end, bool lock)
++{
++	ARG_UNUSED(start);
++	ARG_UNUSED(end);
++	ARG_UNUSED(lock);
++}
++#endif /* CONFIG_ZVFS_MLOCK */
++
+ int z_impl_zvfs_mmap(size_t len, int prot, int flags, int fd, size_t off, void **addr)
+ {
+ 	struct zvfs_mapping *m;
+@@ -997,6 +1191,9 @@ int z_impl_zvfs_mmap(size_t len, int prot, int flags, int fd, size_t off, void *
+ 	}
+
+ 	mapping_link(m);
++	if (mlock_future()) {
++		pages_lock((uintptr_t)m->addr, (uintptr_t)m->addr + m->len, true);
++	}
+ 	*addr = m->addr;
+ 	k_mutex_unlock(&mmap_lock);
+
+@@ -1341,4 +1538,42 @@ static int z_vrfy_zvfs_mprotect(void *addr, size_t len, int prot)
+ 	return z_impl_zvfs_mprotect(addr, len, prot);
+ }
+ #include <zephyr/syscalls/zvfs_mprotect_mrsh.c>
++
++#ifdef CONFIG_ZVFS_MLOCK
++static int z_vrfy_zvfs_mlock(const void *addr, size_t len, int flags)
++{
++	if ((flags == 0) && (len != 0)) {
++		if (Z_DETECT_POINTER_OVERFLOW(addr, len)) {
++			errno = EINVAL;
++			return -1;
++		}
++		/* a range the caller cannot read is not memory it has */
++		if (arch_buffer_validate((void *)addr, len, false) != 0) {
++			errno = ENOMEM;
++			return -1;
++		}
++	}
++
++	return z_impl_zvfs_mlock(addr, len, flags);
++}
++#include <zephyr/syscalls/zvfs_mlock_mrsh.c>
++
++static int z_vrfy_zvfs_munlock(const void *addr, size_t len, int flags)
++{
++	if ((flags == 0) && (len != 0)) {
++		if (Z_DETECT_POINTER_OVERFLOW(addr, len)) {
++			errno = EINVAL;
++			return -1;
++		}
++		/* a range the caller cannot read is not memory it has */
++		if (arch_buffer_validate((void *)addr, len, false) != 0) {
++			errno = ENOMEM;
++			return -1;
++		}
++	}
++
++	return z_impl_zvfs_munlock(addr, len, flags);
++}
++#include <zephyr/syscalls/zvfs_munlock_mrsh.c>
++#endif /* CONFIG_ZVFS_MLOCK */
+ #endif /* CONFIG_USERSPACE */
+diff --git a/tests/lib/zvfs_mmap/prj.conf b/tests/lib/zvfs_mmap/prj.conf
+--- a/tests/lib/zvfs_mmap/prj.conf
++++ b/tests/lib/zvfs_mmap/prj.conf
+@@ -5,6 +5,7 @@ CONFIG_FAT_FILESYSTEM_ELM=y
+ CONFIG_ZVFS=y
+ CONFIG_ZVFS_MMAP=y
+ CONFIG_ZVFS_MMAP_MAX=6
++CONFIG_ZVFS_MLOCK=y
+ CONFIG_ZVFS_OPEN_IGNORE_MIN=y
+ CONFIG_ZVFS_OPEN_MAX=12
+ CONFIG_HEAP_MEM_POOL_SIZE=16384
+diff --git a/tests/lib/zvfs_mmap/src/main.c b/tests/lib/zvfs_mmap/src/main.c
+--- a/tests/lib/zvfs_mmap/src/main.c
++++ b/tests/lib/zvfs_mmap/src/main.c
+@@ -706,6 +706,71 @@ ZTEST_USER(zvfs_mmap, test_zvfs_mmap_fork)
+ }
+ #endif /* CONFIG_PROCESS_VM */
+
++/* without demand paging every page is resident already: locking succeeds without effect */
++static void expect_mlock(int ret)
++{
++	zassert_ok(ret, "errno %d", errno);
++}
++
++ZTEST_USER(zvfs_mmap, test_zvfs_mlock)
++{
++	uint8_t *p, *q;
++
++	errno = 0;
++	zassert_equal(zvfs_mlock(NULL, 0, BIT(2)), -1);
++	zassert_equal(errno, EINVAL);
++	zassert_equal(zvfs_mlock(&p, 0, ZVFS_MLOCK_CURRENT), -1);
++	zassert_equal(errno, EINVAL);
++	zassert_equal(zvfs_mlock(NULL, 1, ZVFS_MLOCK_FUTURE), -1);
++	zassert_equal(errno, EINVAL);
++	zassert_equal(zvfs_mlock((void *)UINTPTR_MAX, 2, 0), -1);
++	zassert_equal(errno, EINVAL);
++	if (k_is_user_context()) {
++		/* memory the caller cannot read is not its to lock */
++		zassert_equal(zvfs_mlock(&fs_mnt, sizeof(fs_mnt), 0), -1);
++		zassert_equal(errno, ENOMEM);
++	}
++
++	p = map(PAGE, RW, ZVFS_MAP_PRIVATE | ZVFS_MAP_ANONYMOUS, -1, 0);
++	p[0] = 1;
++	expect_mlock(zvfs_mlock(p, 0, 0));
++	expect_mlock(zvfs_mlock(p, PAGE, 0));
++	zassert_equal(p[0], 1);
++
++	/* every mapping from now on is locked at creation */
++	expect_mlock(zvfs_mlock(NULL, 0, ZVFS_MLOCK_CURRENT | ZVFS_MLOCK_FUTURE));
++	q = map(PAGE, RW, ZVFS_MAP_PRIVATE | ZVFS_MAP_ANONYMOUS, -1, 0);
++	q[0] = 2;
++	expect_mlock(zvfs_munlock(NULL, 0, ZVFS_MLOCK_FUTURE));
++	expect_mlock(zvfs_munlock(NULL, 0, ZVFS_MLOCK_CURRENT));
++	zassert_equal(p[0], 1);
++	zassert_equal(q[0], 2);
++
++	zassert_ok(zvfs_munmap(p, PAGE));
++	zassert_ok(zvfs_munmap(q, PAGE));
++}
++
++ZTEST_USER(zvfs_mmap, test_zvfs_munlock)
++{
++	uint8_t *p;
++
++	errno = 0;
++	zassert_equal(zvfs_munlock(NULL, 0, BIT(2)), -1);
++	zassert_equal(errno, EINVAL);
++	zassert_equal(zvfs_munlock(&p, 0, ZVFS_MLOCK_CURRENT), -1);
++	zassert_equal(errno, EINVAL);
++	zassert_equal(zvfs_munlock((void *)UINTPTR_MAX, 2, 0), -1);
++	zassert_equal(errno, EINVAL);
++
++	/* a mapping's pages stay resident: unlocking them is accepted and changes nothing */
++	p = map(PAGE, RW, ZVFS_MAP_PRIVATE | ZVFS_MAP_ANONYMOUS, -1, 0);
++	p[0] = 3;
++	expect_mlock(zvfs_munlock(p, 0, 0));
++	expect_mlock(zvfs_munlock(p, PAGE, 0));
++	zassert_equal(p[0], 3);
++	zassert_ok(zvfs_munmap(p, PAGE));
++}
++
+ /* the faulting test cannot unmap: with processes its mapping outlives the aborted thread */
+ static ZTEST_BMEM void *fault_leftover;
+
+diff --git a/tests/lib/zvfs_mmap/testcase.yaml b/tests/lib/zvfs_mmap/testcase.yaml
+--- a/tests/lib/zvfs_mmap/testcase.yaml
++++ b/tests/lib/zvfs_mmap/testcase.yaml
+@@ -20,6 +20,16 @@ tests:
+     extra_configs:
+       - CONFIG_TEST_USERSPACE=y
+       - CONFIG_USERSPACE=y
++  libraries.zvfs_mmap.demand_paging:
++    # locking tells resident pages from evictable ones only here
++    platform_allow:
++      - qemu_x86
++    extra_configs:
++      - CONFIG_TEST_USERSPACE=y
++      - CONFIG_USERSPACE=y
++      - CONFIG_DEMAND_PAGING=y
++      - CONFIG_BACKING_STORE_RAM=y
++      - CONFIG_BACKING_STORE_RAM_PAGES=24
+   libraries.zvfs_mmap.process:
+     extra_configs:
+       - CONFIG_PROCESS=y
