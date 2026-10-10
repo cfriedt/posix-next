@@ -1,0 +1,283 @@
+common:
+  # 1 tier0 platform per supported architecture
+  platform_key:
+    - arch
+    - simulation
+  # a POSIX program is a user process: every stressor runs as a user thread
+  filter: (not CONFIG_NATIVE_LIBC) and CONFIG_ARCH_HAS_USERSPACE
+  tags:
+    - posix
+    - stress_ng
+    - userspace
+  harness: ztest
+tests:
+  portability.posix.stress_ng.asynchronous_io:
+    platform_exclude:
+      # aio: the alarm is taken but the stressor loop never stops (open)
+      - qemu_riscv32
+    timeout: 80
+    extra_configs:
+      - CONFIG_STRESS_NG_STRESSOR_AIO=y
+  portability.posix.stress_ng.c_lang_support:
+    timeout: 820
+    extra_configs:
+      - CONFIG_STRESS_NG_STRESSOR_BESSELMATH=y
+      - CONFIG_STRESS_NG_STRESSOR_BIGHEAP=y
+      - CONFIG_STRESS_NG_STRESSOR_BITOPS=y
+      - CONFIG_STRESS_NG_STRESSOR_BRANCH=y
+      - CONFIG_STRESS_NG_STRESSOR_CHYPERBOLIC=y
+      - CONFIG_STRESS_NG_STRESSOR_CRC=y
+      - CONFIG_STRESS_NG_STRESSOR_CTRIG=y
+      - CONFIG_STRESS_NG_STRESSOR_EXPMATH=y
+      - CONFIG_STRESS_NG_STRESSOR_FLUSHCACHE=y
+      - CONFIG_STRESS_NG_STRESSOR_FP_ERROR=y
+      - CONFIG_STRESS_NG_STRESSOR_FP_MISC=y
+      - CONFIG_STRESS_NG_STRESSOR_FUNCCALL=y
+      - CONFIG_STRESS_NG_STRESSOR_FUNCRET=y
+      - CONFIG_STRESS_NG_STRESSOR_GAMMA=y
+      - CONFIG_STRESS_NG_STRESSOR_GOTO=y
+      - CONFIG_STRESS_NG_STRESSOR_HASH=y
+      - CONFIG_STRESS_NG_STRESSOR_HSEARCH=y
+      - CONFIG_STRESS_NG_STRESSOR_HYPERBOLIC=y
+      - CONFIG_STRESS_NG_STRESSOR_INTMATH=y
+      - CONFIG_STRESS_NG_STRESSOR_IO=y
+      - CONFIG_STRESS_NG_STRESSOR_LOGMATH=y
+      - CONFIG_STRESS_NG_STRESSOR_LONGJMP=y
+      - CONFIG_STRESS_NG_STRESSOR_LSEARCH=y
+      - CONFIG_STRESS_NG_STRESSOR_MONTE_CARLO=y
+      - CONFIG_STRESS_NG_STRESSOR_POWMATH=y
+      - CONFIG_STRESS_NG_STRESSOR_REGEX=y
+      - CONFIG_STRESS_NG_STRESSOR_REGS=y
+      - CONFIG_STRESS_NG_STRESSOR_ROTATE=y
+      - CONFIG_STRESS_NG_STRESSOR_SKIPLIST=y
+      - CONFIG_STRESS_NG_STRESSOR_STR=y
+      - CONFIG_STRESS_NG_STRESSOR_SYMLINK=y
+      - CONFIG_STRESS_NG_STRESSOR_SYNCLOAD=y
+      - CONFIG_STRESS_NG_STRESSOR_TIME_WARP=y
+      - CONFIG_STRESS_NG_STRESSOR_TRIG=y
+      - CONFIG_STRESS_NG_STRESSOR_TSEARCH=y
+      - CONFIG_STRESS_NG_STRESSOR_VNNI=y
+      - CONFIG_STRESS_NG_STRESSOR_WAITCPU=y
+      - CONFIG_STRESS_NG_STRESSOR_X86CPUID=y
+  portability.posix.stress_ng.c_lang_support.anon_pages:
+    filter: (not CONFIG_NATIVE_LIBC) and (CONFIG_ARCH_HAS_USERSPACE) and (CONFIG_MMU)
+    timeout: 700
+    extra_configs:
+      - CONFIG_STRESS_NG_STRESSOR_BITONICSORT=y
+      - CONFIG_STRESS_NG_STRESSOR_BSEARCH=y
+      - CONFIG_STRESS_NG_STRESSOR_BUBBLESORT=y
+      - CONFIG_STRESS_NG_STRESSOR_CACHE=y
+      - CONFIG_STRESS_NG_STRESSOR_CPU=y
+      - CONFIG_STRESS_NG_STRESSOR_FAR_BRANCH=y
+      - CONFIG_STRESS_NG_STRESSOR_FIBSEARCH=y
+      - CONFIG_STRESS_NG_STRESSOR_FMA=y
+      - CONFIG_STRESS_NG_STRESSOR_FP=y
+      - CONFIG_STRESS_NG_STRESSOR_FP_SUBNORMAL=y
+      - CONFIG_STRESS_NG_STRESSOR_FRACTAL=y
+      - CONFIG_STRESS_NG_STRESSOR_HEAPSORT=y
+      - CONFIG_STRESS_NG_STRESSOR_INSERTIONSORT=y
+      - CONFIG_STRESS_NG_STRESSOR_LIST=y
+      - CONFIG_STRESS_NG_STRESSOR_MALLOC=y
+      - CONFIG_STRESS_NG_STRESSOR_MATRIX=y
+      - CONFIG_STRESS_NG_STRESSOR_MATRIX_3D=y
+      - CONFIG_STRESS_NG_STRESSOR_MEMCPY=y
+      - CONFIG_STRESS_NG_STRESSOR_MEMTHRASH=y
+      - CONFIG_STRESS_NG_STRESSOR_MERGESORT=y
+      - CONFIG_STRESS_NG_STRESSOR_NOP=y
+      - CONFIG_STRESS_NG_STRESSOR_PREFETCH=y
+      - CONFIG_STRESS_NG_STRESSOR_PTR_CHASE=y
+      - CONFIG_STRESS_NG_STRESSOR_QSORT=y
+      - CONFIG_STRESS_NG_STRESSOR_RADIXSORT=y
+      - CONFIG_STRESS_NG_STRESSOR_RANDLIST=y
+      - CONFIG_STRESS_NG_STRESSOR_SHELLSORT=y
+      - CONFIG_STRESS_NG_STRESSOR_SPARSEMATRIX=y
+      - CONFIG_STRESS_NG_STRESSOR_SPEC_ROLLBACK=y
+      - CONFIG_STRESS_NG_STRESSOR_STREAM=y
+      - CONFIG_STRESS_NG_STRESSOR_TREE=y
+      - CONFIG_STRESS_NG_STRESSOR_TSC=y
+  portability.posix.stress_ng.device_io:
+    timeout: 80
+    extra_configs:
+      - CONFIG_STRESS_NG_STRESSOR_FILE_IOCTL=y
+  portability.posix.stress_ng.device_io.anon_pages:
+    filter: (not CONFIG_NATIVE_LIBC) and (CONFIG_ARCH_HAS_USERSPACE) and (CONFIG_MMU)
+    timeout: 100
+    extra_configs:
+      - CONFIG_STRESS_NG_STRESSOR_NULL=y
+      - CONFIG_STRESS_NG_STRESSOR_ZERO=y
+  portability.posix.stress_ng.fd_mgmt:
+    timeout: 100
+    extra_configs:
+      - CONFIG_STRESS_NG_STRESSOR_FCNTL=y
+      - CONFIG_STRESS_NG_STRESSOR_SEEK=y
+  portability.posix.stress_ng.fd_mgmt.anon_pages:
+    filter: (not CONFIG_NATIVE_LIBC) and (CONFIG_ARCH_HAS_USERSPACE) and (CONFIG_MMU)
+    timeout: 80
+    extra_configs:
+      - CONFIG_STRESS_NG_STRESSOR_DUP=y
+  portability.posix.stress_ng.file_attributes:
+    timeout: 100
+    extra_configs:
+      - CONFIG_STRESS_NG_STRESSOR_CHMOD=y
+      - CONFIG_STRESS_NG_STRESSOR_CHOWN=y
+  portability.posix.stress_ng.file_system:
+    timeout: 220
+    extra_configs:
+      - CONFIG_STRESS_NG_STRESSOR_CHDIR=y
+      - CONFIG_STRESS_NG_STRESSOR_DENTRYCACHE=y
+      - CONFIG_STRESS_NG_STRESSOR_DIRDEEP=y
+      - CONFIG_STRESS_NG_STRESSOR_DIRMANY=y
+      - CONFIG_STRESS_NG_STRESSOR_HDD=y
+      - CONFIG_STRESS_NG_STRESSOR_RENAME=y
+      - CONFIG_STRESS_NG_STRESSOR_REVIO=y
+      - CONFIG_STRESS_NG_STRESSOR_UTIME=y
+  portability.posix.stress_ng.file_system.anon_pages:
+    filter: (not CONFIG_NATIVE_LIBC) and (CONFIG_ARCH_HAS_USERSPACE) and (CONFIG_MMU)
+    timeout: 80
+    extra_configs:
+      - CONFIG_STRESS_NG_STRESSOR_DENTRY=y
+  portability.posix.stress_ng.mapped_files.anon_pages:
+    filter: (not CONFIG_NATIVE_LIBC) and (CONFIG_ARCH_HAS_USERSPACE) and (CONFIG_MMU)
+    timeout: 200
+    extra_configs:
+      - CONFIG_STRESS_NG_STRESSOR_FAULT=y
+      - CONFIG_STRESS_NG_STRESSOR_MMAP=y
+      - CONFIG_STRESS_NG_STRESSOR_MMAPADDR=y
+      - CONFIG_STRESS_NG_STRESSOR_MMAPFIXED=y
+      - CONFIG_STRESS_NG_STRESSOR_MMAPMANY=y
+      - CONFIG_STRESS_NG_STRESSOR_VM=y
+      - CONFIG_STRESS_NG_STRESSOR_VM_ADDR=y
+  portability.posix.stress_ng.memlock_range.anon_pages:
+    filter: (not CONFIG_NATIVE_LIBC) and (CONFIG_ARCH_HAS_USERSPACE) and (CONFIG_MMU)
+    timeout: 80
+    extra_configs:
+      - CONFIG_STRESS_NG_STRESSOR_MLOCK=y
+  portability.posix.stress_ng.multi_process:
+    filter: (not CONFIG_NATIVE_LIBC) and (CONFIG_ARCH_HAS_USERSPACE) and (CONFIG_ARCH_HAS_PROCESS_VM)
+    timeout: 320
+    extra_configs:
+      # fork(): a per-process address space and the arch current-thread lookup
+      - CONFIG_PROCESS_VM=y
+      - CONFIG_CURRENT_THREAD_USE_TLS=n
+      - CONFIG_SYS_PROCESS_MAX=32
+      # a forked child privatizes a leaf table per copied range: a chain of live
+      # children (daemon, zombie) runs past the board's 32 tables
+      - platform:qemu_cortex_a53/qemu_cortex_a53:CONFIG_MAX_XLAT_TABLES=64
+      # PROCESS_VM needs the kernel on the process's page tables (no KPTI); every
+      # forked child holds a memory domain
+      - platform:qemu_x86/atom:CONFIG_X86_KPTI=n
+      - platform:qemu_x86/atom:CONFIG_X86_MAX_ADDITIONAL_MEM_DOMAINS=16
+      - platform:qemu_x86_64/atom:CONFIG_X86_KPTI=n
+      - platform:qemu_x86_64/atom:CONFIG_X86_MAX_ADDITIONAL_MEM_DOMAINS=16
+      - CONFIG_STRESS_NG_STRESSOR_DAEMON=y
+      - CONFIG_STRESS_NG_STRESSOR_EXEC=y
+      - CONFIG_STRESS_NG_STRESSOR_FD_FORK=y
+      - CONFIG_STRESS_NG_STRESSOR_FORK=y
+      - CONFIG_STRESS_NG_STRESSOR_FORKHEAVY=y
+      - CONFIG_STRESS_NG_STRESSOR_PIPEHERD=y
+      - CONFIG_STRESS_NG_STRESSOR_SESSION=y
+      - CONFIG_STRESS_NG_STRESSOR_SIGCHLD=y
+      - CONFIG_STRESS_NG_STRESSOR_SIGHUP=y
+      - CONFIG_STRESS_NG_STRESSOR_WAIT=y
+      - CONFIG_STRESS_NG_STRESSOR_ZOMBIE=y
+  portability.posix.stress_ng.multi_process.anon_pages:
+    filter: (not CONFIG_NATIVE_LIBC) and (CONFIG_ARCH_HAS_USERSPACE) and (CONFIG_MMU) and (CONFIG_ARCH_HAS_PROCESS_VM)
+    timeout: 100
+    extra_configs:
+      # fork(): a per-process address space and the arch current-thread lookup
+      - CONFIG_PROCESS_VM=y
+      - CONFIG_CURRENT_THREAD_USE_TLS=n
+      - CONFIG_SYS_PROCESS_MAX=32
+      # a forked child privatizes a leaf table per copied range: a chain of live
+      # children (daemon, zombie) runs past the board's 32 tables
+      - platform:qemu_cortex_a53/qemu_cortex_a53:CONFIG_MAX_XLAT_TABLES=64
+      # PROCESS_VM needs the kernel on the process's page tables (no KPTI); every
+      # forked child holds a memory domain
+      - platform:qemu_x86/atom:CONFIG_X86_KPTI=n
+      - platform:qemu_x86/atom:CONFIG_X86_MAX_ADDITIONAL_MEM_DOMAINS=16
+      - platform:qemu_x86_64/atom:CONFIG_X86_KPTI=n
+      - platform:qemu_x86_64/atom:CONFIG_X86_MAX_ADDITIONAL_MEM_DOMAINS=16
+      # kill: a flood of an ignored signal fills the shared ring and kill() fails EAGAIN (open)
+      - CONFIG_STRESS_NG_STRESSOR_SCHEDMIX=y
+  portability.posix.stress_ng.pipe.anon_pages:
+    filter: (not CONFIG_NATIVE_LIBC) and (CONFIG_ARCH_HAS_USERSPACE) and (CONFIG_MMU)
+    timeout: 80
+    extra_configs:
+      - CONFIG_STRESS_NG_STRESSOR_SIGPIPE=y
+  portability.posix.stress_ng.semaphores.anon_pages:
+    filter: (not CONFIG_NATIVE_LIBC) and (CONFIG_ARCH_HAS_USERSPACE) and (CONFIG_MMU)
+    timeout: 80
+    extra_configs:
+      - CONFIG_STRESS_NG_STRESSOR_SEM=y
+  portability.posix.stress_ng.signals:
+    timeout: 80
+    extra_configs:
+      - CONFIG_STRESS_NG_STRESSOR_SIGNAL=y
+  portability.posix.stress_ng.signals.anon_pages:
+    filter: (not CONFIG_NATIVE_LIBC) and (CONFIG_ARCH_HAS_USERSPACE) and (CONFIG_MMU)
+    timeout: 80
+    extra_configs:
+      - CONFIG_STRESS_NG_STRESSOR_SIGPENDING=y
+  portability.posix.stress_ng.single_process:
+    timeout: 100
+    extra_configs:
+      - CONFIG_NETWORKING=y
+      - CONFIG_NET_TEST=y
+      - CONFIG_NET_DRIVERS=y
+      - CONFIG_NET_LOOPBACK=y
+      - CONFIG_NET_IPV4=y
+      - CONFIG_NET_IPV6=y
+      - CONFIG_NET_SOCKETS=y
+      - CONFIG_NET_TCP=y
+      - CONFIG_NET_UDP=y
+      - CONFIG_STRESS_NG_STRESSOR_SET=y
+      - CONFIG_STRESS_NG_STRESSOR_SYSINFO=y
+  portability.posix.stress_ng.single_process.anon_pages:
+    filter: (not CONFIG_NATIVE_LIBC) and (CONFIG_ARCH_HAS_USERSPACE) and (CONFIG_MMU)
+    timeout: 80
+    extra_configs:
+      - CONFIG_STRESS_NG_STRESSOR_ENV=y
+  portability.posix.stress_ng.synchronized_io:
+    platform_exclude:
+      # msyncmany faulted
+      - qemu_riscv32
+    timeout: 80
+    extra_configs:
+      - CONFIG_STRESS_NG_STRESSOR_MSYNCMANY=y
+  portability.posix.stress_ng.synchronized_io.anon_pages:
+    filter: (not CONFIG_NATIVE_LIBC) and (CONFIG_ARCH_HAS_USERSPACE) and (CONFIG_MMU)
+    timeout: 80
+    extra_configs:
+      - CONFIG_STRESS_NG_STRESSOR_MSYNC=y
+  portability.posix.stress_ng.threads_base:
+    platform_exclude:
+      # mtx hung, mutex crashed
+      - qemu_riscv32
+    timeout: 140
+    extra_configs:
+      - CONFIG_STRESS_NG_STRESSOR_LOADAVG=y
+      - CONFIG_STRESS_NG_STRESSOR_MTX=y
+      - CONFIG_STRESS_NG_STRESSOR_MUTEX=y
+      - CONFIG_STRESS_NG_STRESSOR_PTHREAD=y
+  portability.posix.stress_ng.threads_base.anon_pages:
+    filter: (not CONFIG_NATIVE_LIBC) and (CONFIG_ARCH_HAS_USERSPACE) and (CONFIG_MMU)
+    timeout: 100
+    extra_configs:
+      - CONFIG_STRESS_NG_STRESSOR_VARYLOAD=y
+      - CONFIG_STRESS_NG_STRESSOR_WORKLOAD=y
+  portability.posix.stress_ng.timers:
+    timeout: 100
+    extra_configs:
+      - CONFIG_STRESS_NG_STRESSOR_CLOCK=y
+      - CONFIG_STRESS_NG_STRESSOR_TIMERMIX=y
+  portability.posix.stress_ng.timers.anon_pages:
+    filter: (not CONFIG_NATIVE_LIBC) and (CONFIG_ARCH_HAS_USERSPACE) and (CONFIG_MMU)
+    platform_exclude:
+      # sleep crashed
+      - qemu_riscv64
+    timeout: 140
+    extra_configs:
+      - CONFIG_STRESS_NG_STRESSOR_MIN_NANOSLEEP=y
+      - CONFIG_STRESS_NG_STRESSOR_NANOSLEEP=y
+      - CONFIG_STRESS_NG_STRESSOR_SLEEP=y
+      - CONFIG_STRESS_NG_STRESSOR_TIMER=y
