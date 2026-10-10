@@ -27,8 +27,9 @@ ZTEST(posix_c_lib_ext, test_getentropy)
 		zexpect_equal(errno, EIO);
 	}
 
-	if ((dev == NULL) || !device_is_ready(dev)) {
-		/* verify that getentropy fails when no entropy device is available */
+	if (((dev == NULL) || !device_is_ready(dev)) &&
+	    !(IS_ENABLED(CONFIG_CSPRNG_ENABLED) || IS_ENABLED(CONFIG_TEST_CSPRNG_GENERATOR))) {
+		/* no entropy device and no generator to stand in for it: EIO */
 		{
 			uint8_t buf[16] = {0};
 			int ret;
