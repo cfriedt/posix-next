@@ -4375,3 +4375,53 @@ patches:
       arch return path claims it for delivery before the waiter looks) or
       due now. The pipe wait returns -EINTR in both cases and read()/write()
       return EINTR, or the count already transferred, per POSIX.
+  - path: stress-ng/stress-ng-zephyr-module.patch
+    sha256sum: 9412fbd836952f19b6a0901c8b2bcbff496323a180ca8c88661a1479449a5b3b
+    module: modules/lib/stress-ng
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-10-09
+    upstreamable: true
+    comments: |
+      The Zephyr module glue the stress-ng fork does not carry itself (its
+      zephyr branch holds only module.yml and license-only Kconfig and
+      CMakeLists): the umbrella CONFIG_STRESS_NG with the option groups the
+      stress-ng core needs, one generated Kconfig symbol per stressor with
+      hidden STRESS_NG_NEEDS_<group> aggregators that select the POSIX
+      Option Groups the enabled stressors exercise (hundreds of per-stressor
+      selects overflow Kconfig's reverse-dependency recursion), the library
+      build of the core and the selected stressors, a generated config.h
+      whose HAVE_* probes are gated on the CONFIG_POSIX_* symbols and the
+      architecture, and the in-process runner: stress_ng_run() runs one
+      stressor instance on a dedicated thread in place of the forked child,
+      with alarm() plus a kernel timer bounding the run, the stressor's
+      signals unmasked, verify mode on and the OOM wrapper inlined. The
+      runner then waits for the children the stressor left behind, which a
+      forked stressor would have left to init.
+      The runner takes its SIGALRM handler down only after blocking the
+      signal, cancelling the alarm and draining what is queued: an alarm
+      that fired after the stop would otherwise be delivered under the
+      restored default disposition and terminate the test process.
+  - path: stress-ng/stress-ng-zephyr-platform.patch
+    sha256sum: a37ec0026c5759fe6a2a3418b0eef741f928db18da923cfb232a819e06c3ab01
+    module: modules/lib/stress-ng
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-10-09
+    upstreamable: true
+    comments: |
+      Port stress-ng's platform layer to Zephyr, each change upstreamable:
+      guard STRESS_PROCS_MAX and ALWAYS_INLINE, no mlocked_text section, text
+      bounds from the linker's __text_region_start/end, HAVE_GETRUSAGE and
+      HAVE_SETHOSTNAME probes and guards, portability guards for d_reclen,
+      si_value.sival_ptr and struct rlimit, pr_fail_reset() for a
+      process-lifetime failure counter, a CPUID max-leaf check before trusting
+      feature flags, a scratch file in the temp directory in place of /dev/zero
+      and /dev/null (zero, null, dup), the temp path instead of "/" as the
+      probed mount point, ESRCH accepted from kill(-1, 0) when no other
+      process exists, bounded on-stack bookkeeping for pthread and dirdeep,
+      a private name for the RISC-V CBO byte swap, the rdtime probe (which
+      catches SIGILL) left out, and skips rather than failures when stream or
+      mergesort cannot map their buffers, the fork stressor counting the
+      child it forked as the run ended so that it is waited for, and the
+      daemon stressor's /dev/null stand-in.
