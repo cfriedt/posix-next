@@ -59,9 +59,9 @@
 #define MAP_FAILED ((void *)-1)
 
 /** @brief Lock all currently mapped pages into memory. @ingroup posix_option_memlock */
-#define MCL_CURRENT 0
+#define MCL_CURRENT 1
 /** @brief Lock all future mappings into memory. @ingroup posix_option_memlock */
-#define MCL_FUTURE  1
+#define MCL_FUTURE  2
 
 #ifdef __cplusplus
 extern "C" {

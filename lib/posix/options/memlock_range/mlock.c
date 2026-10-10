@@ -1,40 +1,19 @@
 /*
- * Copyright (c) 2024, Tenstorrent AI ULC
- *
+ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include <stddef.h>
 
-#include <zephyr/kernel.h>
 #include <sys/mman.h>
-
-#include <zephyr/kernel/mm/demand_paging.h>
+#include <zephyr/sys/zvfs.h>
 
 int mlock(const void *addr, size_t len)
 {
-	if (IS_ENABLED(CONFIG_DEMAND_PAGING)) {
-		void *const _addr = (void *)addr;
-
-		k_mem_pin(_addr, len);
-
-		return 0;
-	}
-
-	errno = ENOTSUP;
-	return -1;
+	return zvfs_mlock(addr, len, 0);
 }
 
 int munlock(const void *addr, size_t len)
 {
-	if (IS_ENABLED(CONFIG_DEMAND_PAGING)) {
-		void *const _addr = (void *)addr;
-
-		k_mem_unpin(_addr, len);
-
-		return 0;
-	}
-
-	errno = ENOTSUP;
-	return -1;
+	return zvfs_munlock(addr, len, 0);
 }
