@@ -1,0 +1,84 @@
+diff --git a/kernel/include/ksem.h b/kernel/include/ksem.h
+new file mode 100644
+index 00000000000..c75bbbcca6d
+--- /dev/null
++++ b/kernel/include/ksem.h
+@@ -0,0 +1,24 @@
++/*
++ * Copyright (c) 2026 Yavuz Murat Tas
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_KERNEL_INCLUDE_KSEM_H_
++#define ZEPHYR_KERNEL_INCLUDE_KSEM_H_
++
++#include <zephyr/kernel.h>
++
++/**
++ * @brief Give a semaphore unless its count is already at the limit.
++ *
++ * Like k_sem_give(), but the limit check and the increment happen under the
++ * semaphore lock, so concurrent callers cannot both succeed on the last free
++ * slot. For supervisor-mode kernel subsystems only (e.g. POSIX sem_post()).
++ *
++ * @retval 0 the semaphore was given
++ * @retval -EOVERFLOW the count is already at the limit; nothing was changed
++ */
++int z_sem_give_checked(struct k_sem *sem);
++
++#endif /* ZEPHYR_KERNEL_INCLUDE_KSEM_H_ */
+diff --git a/kernel/sem.c b/kernel/sem.c
+index 906d902897a..485fd4d5ede 100644
+--- a/kernel/sem.c
++++ b/kernel/sem.c
+@@ -21,6 +21,7 @@
+ 
+ #include <zephyr/toolchain.h>
+ #include <wait_q.h>
++#include <ksem.h>
+ #include <zephyr/sys/dlist.h>
+ #include <ksched.h>
+ #include <scheduler.h>
+@@ -113,7 +114,7 @@ static inline bool sem_handle_poll_events(struct k_sem *sem)
+ #endif /* CONFIG_POLL */
+ }
+ 
+-void z_impl_k_sem_give(struct k_sem *sem)
++static int sem_give(struct k_sem *sem, bool checked)
+ {
+ 	struct k_spinlock *lock = sem_spinlock_get(sem);
+ 	k_spinlock_key_t key = k_spin_lock(lock);
+@@ -121,6 +122,13 @@ void z_impl_k_sem_give(struct k_sem *sem)
+ 
+ 	SYS_PORT_TRACING_OBJ_FUNC_ENTER(k_sem, give, sem);
+ 
++	if (checked && (sem->count == sem->limit)) {
++		/* no thread can be pending on a semaphore at its limit */
++		k_spin_unlock(lock, key);
++		SYS_PORT_TRACING_OBJ_FUNC_EXIT(k_sem, give, sem);
++		return -EOVERFLOW;
++	}
++
+ 	if (z_sched_wake(&sem->wait_q, 0, NULL)) {
+ 		resched = true;
+ 	} else {
+@@ -135,6 +143,18 @@ void z_impl_k_sem_give(struct k_sem *sem)
+ 	}
+ 
+ 	SYS_PORT_TRACING_OBJ_FUNC_EXIT(k_sem, give, sem);
++
++	return 0;
++}
++
++void z_impl_k_sem_give(struct k_sem *sem)
++{
++	(void)sem_give(sem, false);
++}
++
++int z_sem_give_checked(struct k_sem *sem)
++{
++	return sem_give(sem, true);
+ }
+ 
+ #ifdef CONFIG_USERSPACE
