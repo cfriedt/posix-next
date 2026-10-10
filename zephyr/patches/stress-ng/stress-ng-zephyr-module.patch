@@ -1,0 +1,4553 @@
+diff --git a/zephyr/CMakeLists.txt b/zephyr/CMakeLists.txt
+--- a/zephyr/CMakeLists.txt
++++ b/zephyr/CMakeLists.txt
+@@ -1,2 +1,118 @@
+ # SPDX-License-Identifier: GPL-2.0-or-later
+ # Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++#
++# Build the stress-ng core and the selected stressors as a Zephyr library.
++#
++# config.h is the hand-maintained zephyr/config/config.h rather than the
++# output of Makefile.config's compile probes: it maps Zephyr's Kconfig
++# symbols onto stress-ng's HAVE_* feature macros, so a stressor whose
++# interfaces are not configured in collapses to stress_unimplemented()
++# exactly as it does on any other platform that lacks them.
++
++if(CONFIG_STRESS_NG)
++
++set(sng_dir ${ZEPHYR_CURRENT_MODULE_DIR})
++
++file(STRINGS ${sng_dir}/Makefile sng_ver_line REGEX "^VERSION=")
++string(REGEX REPLACE "^VERSION=" "" sng_ver "${sng_ver_line}")
++
++zephyr_library_named(stress_ng)
++zephyr_include_directories(${sng_dir}/zephyr/include)
++
++# the headers the Makefile generates: the commit id, and the PER_*,
++# IORING_OP_* and PERF_COUNT_* lists it extracts from the Linux headers,
++# which are empty here
++set(sng_gen_dir ${CMAKE_CURRENT_BINARY_DIR}/generated)
++execute_process(
++  COMMAND git -C ${sng_dir} rev-parse HEAD
++  OUTPUT_VARIABLE sng_commit OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET
++)
++file(CONFIGURE OUTPUT ${sng_gen_dir}/git-commit-id.h
++  CONTENT "#define STRESS_GIT_COMMIT_ID \"${sng_commit}\"\n" @ONLY)
++foreach(sng_h io-uring.h personality.h core-perf-event.h)
++  file(CONFIGURE OUTPUT ${sng_gen_dir}/${sng_h} CONTENT "" @ONLY)
++endforeach()
++
++zephyr_library_include_directories(${sng_dir}/zephyr/config ${sng_gen_dir} ${sng_dir})
++
++# the core, less the command line driver (stress-ng.c), the job file
++# parser (core-job.c) and Linux resctrl (core-resctrl.c); zephyr.c stands
++# in for the driver
++zephyr_library_sources(
++  ${sng_dir}/core-affinity.c
++  ${sng_dir}/core-arch.c
++  ${sng_dir}/core-asm-ret.c
++  ${sng_dir}/core-capabilities.c
++  ${sng_dir}/core-clocksource.c
++  ${sng_dir}/core-config-check.c
++  ${sng_dir}/core-cpu.c
++  ${sng_dir}/core-cpu-cache.c
++  ${sng_dir}/core-cpu-freq.c
++  ${sng_dir}/core-cpuidle.c
++  ${sng_dir}/core-filesystem.c
++  ${sng_dir}/core-ftrace.c
++  ${sng_dir}/core-hash.c
++  ${sng_dir}/core-helper.c
++  ${sng_dir}/core-ignite-cpu.c
++  ${sng_dir}/core-interrupts.c
++  ${sng_dir}/core-io-priority.c
++  ${sng_dir}/core-io-uring.c
++  ${sng_dir}/core-ioctl.c
++  ${sng_dir}/core-killpid.c
++  ${sng_dir}/core-klog.c
++  ${sng_dir}/core-limit.c
++  ${sng_dir}/core-lock.c
++  ${sng_dir}/core-log.c
++  ${sng_dir}/core-madvise.c
++  ${sng_dir}/core-memory.c
++  ${sng_dir}/core-mincore.c
++  ${sng_dir}/core-mlock.c
++  ${sng_dir}/core-mmap.c
++  ${sng_dir}/core-module.c
++  ${sng_dir}/core-mounts.c
++  ${sng_dir}/core-mwc.c
++  ${sng_dir}/core-net.c
++  ${sng_dir}/core-numa.c
++  ${sng_dir}/core-opts.c
++  ${sng_dir}/core-out-of-memory.c
++  ${sng_dir}/core-parse-opts.c
++  ${sng_dir}/core-perf.c
++  ${sng_dir}/core-prime.c
++  ${sng_dir}/core-processes.c
++  ${sng_dir}/core-rapl.c
++  ${sng_dir}/core-resources.c
++  ${sng_dir}/core-sched.c
++  ${sng_dir}/core-setting.c
++  ${sng_dir}/core-shared-cache.c
++  ${sng_dir}/core-shared-heap.c
++  ${sng_dir}/core-shim.c
++  ${sng_dir}/core-signal.c
++  ${sng_dir}/core-smart.c
++  ${sng_dir}/core-sort.c
++  ${sng_dir}/core-stack.c
++  ${sng_dir}/core-sync.c
++  ${sng_dir}/core-thermal-zone.c
++  ${sng_dir}/core-thrash.c
++  ${sng_dir}/core-time.c
++  ${sng_dir}/core-try-open.c
++  ${sng_dir}/core-vmstat.c
++  ${sng_dir}/core-workload.c
++  ${sng_dir}/zephyr/zephyr.c
++)
++include(${sng_dir}/zephyr/stressors.cmake)
++
++zephyr_library_compile_definitions(
++  VERSION="${sng_ver}"
++  STRESS_PROCS_MAX=${CONFIG_STRESS_NG_PROCS_MAX}
++)
++zephyr_library_compile_options(
++  -std=gnu99
++  -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L
++  -U_XOPEN_SOURCE -D_XOPEN_SOURCE=700
++  # upstream builds without -Werror; these fire on paths its platforms never take
++  -Wno-format-truncation
++  -Wno-unused-variable
++  -Wno-unused-const-variable
++)
++
++endif()
+diff --git a/zephyr/Kconfig b/zephyr/Kconfig
+--- a/zephyr/Kconfig
++++ b/zephyr/Kconfig
+@@ -1,2 +1,95 @@
+ # SPDX-License-Identifier: GPL-2.0-or-later
+ # Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++
++menuconfig STRESS_NG
++	bool "stress-ng stressors"
++	select POSIX_SYSTEM_INTERFACES
++	select POSIX_TIMERS
++	select POSIX_SIGNALS
++	select POSIX_SIGNALS_EXT
++	select POSIX_SIGNAL_JUMP if !NATIVE_BUILD || NATIVE_LIBC
++	select POSIX_DEVICE_IO
++	select POSIX_FILE_SYSTEM
++	select POSIX_FILE_SYSTEM_EXT
++	select POSIX_PIPE
++	select POSIX_THREADS
++	select POSIX_C_LIB_EXT
++	select POSIX_FD_MGMT
++	select POSIX_MAPPED_FILES
++	select POSIX_SINGLE_PROCESS
++	select POSIX_MULTI_PROCESS
++	select POSIX_USER_GROUPS
++	# the pthread headers claim _POSIX_THREAD_PRIORITY_SCHEDULING with POSIX_THREADS
++	select POSIX_THREAD_PRIORITY_SCHEDULING if POSIX_THREADS
++	select XSI
++	select XSI_SINGLE_PROCESS
++	# long double on 32-bit x86 needs the x87 unit (soft-float libgcc has no XFmode
++	# helpers) and picolibc's hard-float libm touches the SSE control register
++	select FPU if X86 && CPU_HAS_FPU
++	select FPU_SHARING if X86 && CPU_HAS_FPU
++	# soft-float math on an emulated RISC-V core takes minutes per bogo op
++	select FPU if RISCV && CPU_HAS_FPU
++	select FPU_SHARING if RISCV && CPU_HAS_FPU
++	select X86_SSE if X86 && CPU_HAS_FPU && X86_CPU_HAS_SSE
++	help
++	  Build the stress-ng core and the stressors selected below as a
++	  library. A stressor runs in the calling thread through
++	  stress_ng_run() instead of as a forked child of the stress-ng
++	  command line driver; each one selects the POSIX Option Groups it
++	  exercises.
++
++if STRESS_NG
++
++config STRESS_NG_PROCS_MAX
++	int "Maximum instances per stressor"
++	range 1 8192
++	default 8
++	help
++	  Sizes the shared futex and lock tables (STRESS_PROCS_MAX). The
++	  upstream default of 8192 costs about 100 KiB of shared memory.
++
++config STRESS_NG_STACK_SIZE
++	int "Stack size of the thread a stressor runs on"
++	default 131072
++	help
++	  stress_ng_run() runs the stressor on a dedicated thread with this much
++	  stack. Stressors keep sizeable arrays on the stack (upstream runs them
++	  as processes with an 8 MiB stack), so the caller's stack is not used.
++
++config STRESS_NG_CACHE_SIZE
++	int "Shared cache buffer size in bytes"
++	default 65536
++	help
++	  Size of the shared buffer the cache stressors thrash (--cache-size).
++	  The command line driver sizes it from the CPU's largest cache, which
++	  is 2 MiB when it cannot be determined.
++
++config STRESS_NG_DEFAULT_TIMEOUT
++	int "Default stressor run time in seconds"
++	default 5
++	help
++	  Run time used by stress_ng_run() when the caller passes none, as
++	  --timeout does for the command line driver.
++
++config STRESS_NG_TEMP_PATH
++	string "Directory for temporary files"
++	default "/tmp"
++	help
++	  Where stressors create their temporary files and directories (the
++	  --temp-path of the command line driver). It must be a writable
++	  mount point; tests mount a tmpfs there.
++
++config STRESS_NG_MINIMIZE
++	bool "Minimize stressor resource usage"
++	default y
++	help
++	  Run every stressor with its smallest parameters (the --minimize of
++	  the command line driver): fewest threads, smallest buffers and
++	  files. Suits targets with megabytes rather than gigabytes of RAM.
++
++config STRESS_NG_LOG_DEBUG
++	bool "Print stress-ng debug messages"
++
++rsource "Kconfig.stressors"
++
++endif # STRESS_NG
+diff --git a/zephyr/Kconfig.stressors b/zephyr/Kconfig.stressors
+new file mode 100644
+--- /dev/null
++++ b/zephyr/Kconfig.stressors
+@@ -0,0 +1,1736 @@
++# SPDX-License-Identifier: GPL-2.0-or-later
++# Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++#
++# One Kconfig symbol per stressor. Enabling a stressor pulls in the POSIX
++# Option Groups it exercises (see the STRESS_NG_NEEDS_* symbols at the end).
++# Generated by zephyr/scripts/gen_glue.py from core-stressors.h; do not edit.
++
++menu "Stressors"
++
++config STRESS_NG_STRESSOR_ACL
++	bool "acl"
++	help
++	  Start N workers exercising valid ACL file mode bits .
++
++config STRESS_NG_STRESSOR_ACCT
++	bool "acct"
++	help
++	  Start N workers exercising process accounting.
++
++config STRESS_NG_STRESSOR_AF_ALG
++	bool "af-alg"
++	help
++	  Start N workers that stress AF_ALG socket domain.
++
++config STRESS_NG_STRESSOR_AFFINITY
++	bool "affinity"
++	help
++	  Start N workers that rapidly change CPU affinity.
++
++config STRESS_NG_STRESSOR_AIO
++	bool "aio"
++	help
++	  Start N workers that issue async I/O requests.
++
++config STRESS_NG_STRESSOR_AIOL
++	bool "aiol"
++	help
++	  Start N workers that exercise Linux async I/O.
++
++config STRESS_NG_STRESSOR_APPARMOR
++	bool "apparmor"
++
++config STRESS_NG_STRESSOR_BESSELMATH
++	bool "besselmath"
++	help
++	  Start N workers exercising bessel math functions.
++
++config STRESS_NG_STRESSOR_BIGHEAP
++	bool "bigheap"
++
++config STRESS_NG_STRESSOR_BINDERFS
++	bool "binderfs"
++	help
++	  Start N workers exercising binderfs.
++
++config STRESS_NG_STRESSOR_BIND_MOUNT
++	bool "bind-mount"
++	help
++	  Start N workers exercising bind mounts.
++
++config STRESS_NG_STRESSOR_BITONICSORT
++	bool "bitonicsort"
++	help
++	  Start N workers bitonic sorting 32 bit random integers.
++
++config STRESS_NG_STRESSOR_BITOPS
++	bool "bitops"
++	help
++	  Start N workers that perform CPU only loading.
++
++config STRESS_NG_STRESSOR_BPF
++	bool "bpf"
++	help
++	  Start N workers exercising random BPF instructions.
++
++config STRESS_NG_STRESSOR_BRANCH
++	bool "branch"
++	help
++	  Start N workers that force branch misprediction.
++
++config STRESS_NG_STRESSOR_BRK
++	bool "brk"
++	help
++	  Start N workers performing rapid brk calls.
++
++config STRESS_NG_STRESSOR_BSEARCH
++	bool "bsearch"
++	help
++	  Start N workers that exercise a binary search.
++
++config STRESS_NG_STRESSOR_BUBBLESORT
++	bool "bubblesort"
++	help
++	  Start N workers bubble sorting 32 bit random integers.
++
++config STRESS_NG_STRESSOR_CACHE
++	bool "cache"
++
++config STRESS_NG_STRESSOR_CAP
++	bool "cap"
++	help
++	  Start N workers exercising capget.
++
++config STRESS_NG_STRESSOR_CGROUP
++	bool "cgroup"
++	help
++	  Start N workers exercising cgroup mount/read/write/umounts.
++
++config STRESS_NG_STRESSOR_CHATTR
++	bool "chattr"
++	help
++	  Start N workers thrashing chattr file mode bits .
++
++config STRESS_NG_STRESSOR_CHDIR
++	bool "chdir"
++	help
++	  Start N workers thrashing chdir on many paths.
++
++config STRESS_NG_STRESSOR_CHMOD
++	bool "chmod"
++	help
++	  Start N workers thrashing chmod file mode bits .
++
++config STRESS_NG_STRESSOR_CHOWN
++	bool "chown"
++	help
++	  Start N workers thrashing chown file ownership.
++
++config STRESS_NG_STRESSOR_CHROOT
++	bool "chroot"
++	help
++	  Start N workers thrashing chroot.
++
++config STRESS_NG_STRESSOR_CHYPERBOLIC
++	bool "chyperbolic"
++	help
++	  Start N workers exercising complex hyperbolic functions.
++
++config STRESS_NG_STRESSOR_CLOCK
++	bool "clock"
++	help
++	  Start N workers thrashing clocks and POSIX timers.
++
++config STRESS_NG_STRESSOR_CLONE
++	bool "clone"
++	help
++	  Start N workers that rapidly create and reap clones.
++
++config STRESS_NG_STRESSOR_CONTEXT
++	bool "context"
++	help
++	  Start N workers exercising user context.
++
++config STRESS_NG_STRESSOR_COPY_FILE
++	bool "copy-file"
++	help
++	  Start N workers that copy file data.
++
++config STRESS_NG_STRESSOR_CPU
++	bool "cpu"
++
++config STRESS_NG_STRESSOR_CPU_ONLINE
++	bool "cpu-online"
++	help
++	  Start N workers offlining/onlining the CPUs.
++
++config STRESS_NG_STRESSOR_CPU_SCHED
++	bool "cpu-sched"
++	help
++	  Start N workers that exercise cpu scheduling.
++
++config STRESS_NG_STRESSOR_CRC
++	bool "crc"
++	help
++	  Start N workers performing Cyclic Rundundancy Check ops.
++
++config STRESS_NG_STRESSOR_CRYPT
++	bool "crypt"
++	help
++	  Start N workers performing password encryption.
++
++config STRESS_NG_STRESSOR_CTRIG
++	bool "ctrig"
++	help
++	  Start N workers exercising complex trigonometric functions.
++
++# forks: needs CONFIG_PROCESS_VM at run time
++config STRESS_NG_STRESSOR_DAEMON
++	bool "daemon"
++	help
++	  Start N workers creating multiple daemons.
++
++config STRESS_NG_STRESSOR_DCCP
++	bool "dccp"
++	help
++	  Start N workers exercising network DCCP I/O.
++
++config STRESS_NG_STRESSOR_DENTRY
++	bool "dentry"
++
++config STRESS_NG_STRESSOR_DENTRYCACHE
++	bool "dentrycache"
++	help
++	  Start N dentry thrashing stressors.
++
++config STRESS_NG_STRESSOR_DEV_SHM
++	bool "dev-shm"
++	help
++	  Start N /dev/shm file and mmap stressors.
++
++config STRESS_NG_STRESSOR_DFP
++	bool "dfp"
++	help
++	  Start N workers performing decimal floating point math ops.
++
++config STRESS_NG_STRESSOR_DIRDEEP
++	bool "dirdeep"
++	help
++	  Start N directory depth stressors.
++
++config STRESS_NG_STRESSOR_DIRMANY
++	bool "dirmany"
++	help
++	  Start N directory file populating stressors.
++
++config STRESS_NG_STRESSOR_DNOTIFY
++	bool "dnotify"
++	help
++	  Start N workers exercising dnotify events.
++
++config STRESS_NG_STRESSOR_DUP
++	bool "dup"
++	help
++	  Start N workers exercising dup/close.
++
++config STRESS_NG_STRESSOR_DYNLIB
++	bool "dynlib"
++	help
++	  Start N workers exercising dlopen/dlclose.
++
++config STRESS_NG_STRESSOR_EFIVAR
++	bool "efivar"
++	help
++	  Start N workers that read EFI variables.
++
++config STRESS_NG_STRESSOR_EIGEN
++	bool "eigen"
++	help
++	  Start N workers exercising eigen operations.
++
++config STRESS_NG_STRESSOR_ENV
++	bool "env"
++	help
++	  Start N workers setting environment vars.
++
++config STRESS_NG_STRESSOR_EPOLLMANY
++	bool "epollmany"
++	help
++	  Start N workers doing epoll exercising.
++
++config STRESS_NG_STRESSOR_ETH_SNIFF
++	bool "eth-sniff"
++
++config STRESS_NG_STRESSOR_EVENTFD
++	bool "eventfd"
++	help
++	  Start N workers stressing eventfd read/writes.
++
++# forks: needs CONFIG_PROCESS_VM at run time
++config STRESS_NG_STRESSOR_EXEC
++	bool "exec"
++	help
++	  Start N workers spinning on fork() and exec().
++
++config STRESS_NG_STRESSOR_EXIT_GROUP
++	bool "exit-group"
++	help
++	  Start N workers that exercise exit_group.
++
++config STRESS_NG_STRESSOR_EXPMATH
++	bool "expmath"
++	help
++	  Start N workers exercising exponential math functions.
++
++config STRESS_NG_STRESSOR_FACTOR
++	bool "factor"
++	help
++	  Start N workers performing large integer factorization.
++
++config STRESS_NG_STRESSOR_FALLOCATE
++	bool "fallocate"
++	help
++	  Start N workers fallocating 16MB files.
++
++config STRESS_NG_STRESSOR_FANOTIFY
++	bool "fanotify"
++	help
++	  Start N workers exercising fanotify events.
++
++config STRESS_NG_STRESSOR_FAR_BRANCH
++	bool "far-branch"
++	help
++	  Start N far branching workers.
++
++config STRESS_NG_STRESSOR_FAULT
++	bool "fault"
++	help
++	  Start N workers producing page faults.
++
++config STRESS_NG_STRESSOR_FCNTL
++	bool "fcntl"
++	help
++	  Start N workers exercising fcntl commands.
++
++# forks: needs CONFIG_PROCESS_VM at run time
++config STRESS_NG_STRESSOR_FD_FORK
++	bool "fd-fork"
++	help
++	  Start N workers exercising dup/fork/close.
++
++config STRESS_NG_STRESSOR_FD_RACE
++	bool "fd-race"
++	help
++	  Start N workers sending file descriptors over sockets.
++
++config STRESS_NG_STRESSOR_FIBSEARCH
++	bool "fibsearch"
++	help
++	  Start N workers that exercise a Fibonacci search.
++
++config STRESS_NG_STRESSOR_FIEMAP
++	bool "fiemap"
++	help
++	  Start N workers exercising the FIEMAP ioctl.
++
++config STRESS_NG_STRESSOR_FILE_IOCTL
++	bool "file-ioctl"
++	help
++	  Start N workers exercising file specific ioctls.
++
++config STRESS_NG_STRESSOR_FILEHOLE
++	bool "filehole"
++	help
++	  Start N workers punching holes in a 16MB file.
++
++config STRESS_NG_STRESSOR_FLIPFLOP
++	bool "flipflop"
++	help
++	  Start N workers exercising flipflop.
++
++config STRESS_NG_STRESSOR_FLOCK
++	bool "flock"
++	help
++	  Start N workers locking a single file.
++
++config STRESS_NG_STRESSOR_FLUSHCACHE
++	bool "flushcache"
++	help
++	  Start N CPU instruction + data cache flush workers.
++
++config STRESS_NG_STRESSOR_FMA
++	bool "fma"
++	help
++	  Start N workers performing floating point multiply-add ops.
++
++# forks: needs CONFIG_PROCESS_VM at run time
++config STRESS_NG_STRESSOR_FORK
++	bool "fork"
++
++# forks: needs CONFIG_PROCESS_VM at run time
++config STRESS_NG_STRESSOR_FORKHEAVY
++	bool "forkheavy"
++	help
++	  Start N workers that rapidly fork and reap resource heavy processes.
++
++config STRESS_NG_STRESSOR_FP
++	bool "fp"
++	help
++	  Start N workers performing floating point math ops.
++
++config STRESS_NG_STRESSOR_FP_ERROR
++	bool "fp-error"
++	help
++	  Start N workers exercising floating point errors.
++
++config STRESS_NG_STRESSOR_FP_MISC
++	bool "fp-misc"
++	help
++	  Start N workers performing miscellaneous floating point operations.
++
++config STRESS_NG_STRESSOR_FP_SUBNORMAL
++	bool "fp-subnormal"
++	help
++	  Start N workers performing subnormal floating point math ops.
++
++config STRESS_NG_STRESSOR_FPUNCH
++	bool "fpunch"
++	help
++	  Start N workers punching holes in a 16MB file.
++
++config STRESS_NG_STRESSOR_FRACTAL
++	bool "fractal"
++	help
++	  Start N workers performing large integer fractalization.
++
++config STRESS_NG_STRESSOR_FSIZE
++	bool "fsize"
++	help
++	  Start N workers exercising file size limits.
++
++config STRESS_NG_STRESSOR_FULL
++	bool "full"
++	help
++	  Start N workers exercising /dev/full.
++
++config STRESS_NG_STRESSOR_FUNCCALL
++	bool "funccall"
++	help
++	  Start N workers exercising 1 to 9 arg functions.
++
++config STRESS_NG_STRESSOR_FUNCRET
++	bool "funcret"
++	help
++	  Start N workers exercising function return copying.
++
++config STRESS_NG_STRESSOR_FUTEX
++	bool "futex"
++	help
++	  Start N workers exercising a fast mutex.
++
++config STRESS_NG_STRESSOR_GAMMA
++	bool "gamma"
++	help
++	  Start N workers exercising gamma functions.
++
++config STRESS_NG_STRESSOR_GETDENT
++	bool "getdent"
++	help
++	  Start N workers reading directories using getdents.
++
++config STRESS_NG_STRESSOR_GETRANDOM
++	bool "getrandom"
++	help
++	  Start N workers fetching random data via getrandom().
++
++config STRESS_NG_STRESSOR_GOTO
++	bool "goto"
++	help
++	  Start N workers that exercise heavy branching.
++
++config STRESS_NG_STRESSOR_GPU
++	bool "gpu"
++	help
++	  Start N GPU worker.
++
++config STRESS_NG_STRESSOR_HANDLE
++	bool "handle"
++	help
++	  Start N workers exercising name_to_handle_at.
++
++config STRESS_NG_STRESSOR_HASH
++	bool "hash"
++	help
++	  Start N workers that exercise various hash functions.
++
++config STRESS_NG_STRESSOR_HDD
++	bool "hdd"
++
++config STRESS_NG_STRESSOR_HEAPSORT
++	bool "heapsort"
++	help
++	  Start N workers heap sorting 32 bit random integers.
++
++config STRESS_NG_STRESSOR_HSEARCH
++	bool "hsearch"
++	help
++	  Start N workers that exercise a hash table search.
++
++config STRESS_NG_STRESSOR_HUGEPAGE
++	bool "hugepage"
++	help
++	  Start N workers that split and merge pages on huge pages.
++
++config STRESS_NG_STRESSOR_HYPERBOLIC
++	bool "hyperbolic"
++	help
++	  Start N workers exercising hyperbolic functions.
++
++config STRESS_NG_STRESSOR_ICACHE
++	bool "icache"
++	help
++	  Start N CPU instruction cache thrashing workers.
++
++config STRESS_NG_STRESSOR_IDLE_PAGE
++	bool "idle-page"
++	help
++	  Start N idle page scanning workers.
++
++config STRESS_NG_STRESSOR_INODE_FLAGS
++	bool "inode-flags"
++	help
++	  Start N workers exercising various inode flags.
++
++config STRESS_NG_STRESSOR_INOTIFY
++	bool "inotify"
++	help
++	  Start N workers exercising inotify events.
++
++config STRESS_NG_STRESSOR_INSERTIONSORT
++	bool "insertionsort"
++	help
++	  Start N workers insertion sorting 32 bit random integers.
++
++config STRESS_NG_STRESSOR_INTMATH
++	bool "intmath"
++	help
++	  Start N workers that exercising signed integer math operations.
++
++config STRESS_NG_STRESSOR_IO
++	bool "io"
++
++config STRESS_NG_STRESSOR_IOPORT
++	bool "ioport"
++	help
++	  Start N workers exercising port I/O.
++
++config STRESS_NG_STRESSOR_IOPRIO
++	bool "ioprio"
++	help
++	  Start N workers exercising set/get iopriority.
++
++config STRESS_NG_STRESSOR_IO_URING
++	bool "io-uring"
++	help
++	  Start N workers that issue io-uring I/O requests.
++
++config STRESS_NG_STRESSOR_IPSEC_MB
++	bool "ipsec-mb"
++	help
++	  Start N workers exercising the IPSec MB encoding.
++
++config STRESS_NG_STRESSOR_ITIMER
++	bool "itimer"
++	help
++	  Start N workers exercising interval timers.
++
++config STRESS_NG_STRESSOR_JPEG
++	bool "jpeg"
++	help
++	  Start N workers that perform jpeg image compression.
++
++config STRESS_NG_STRESSOR_JUDY
++	bool "judy"
++	help
++	  Start N workers that exercise a judy array search.
++
++config STRESS_NG_STRESSOR_KCMP
++	bool "kcmp"
++	help
++	  Start N workers exercising kcmp.
++
++config STRESS_NG_STRESSOR_KEY
++	bool "key"
++	help
++	  Start N workers exercising key operations.
++
++# forks: needs CONFIG_PROCESS_VM at run time
++config STRESS_NG_STRESSOR_KILL
++	bool "kill"
++	help
++	  Start N workers killing with SIGUSR1.
++
++config STRESS_NG_STRESSOR_KLOG
++	bool "klog"
++	help
++	  Start N workers exercising kernel syslog interface.
++
++config STRESS_NG_STRESSOR_KVM
++	bool "kvm"
++	help
++	  Start N workers exercising /dev/kvm.
++
++config STRESS_NG_STRESSOR_L1CACHE
++	bool "l1cache"
++	help
++	  Start N CPU level 1 cache thrashing workers.
++
++config STRESS_NG_STRESSOR_LANDLOCK
++	bool "landlock"
++	help
++	  Start N workers stressing landlock file operations.
++
++config STRESS_NG_STRESSOR_LEASE
++	bool "lease"
++	help
++	  Start N workers holding and breaking a lease.
++
++config STRESS_NG_STRESSOR_LED
++	bool "led"
++	help
++	  Start N workers that read and set LED settings.
++
++config STRESS_NG_STRESSOR_LINK
++	bool "link"
++	help
++	  Start N workers creating hard links.
++
++config STRESS_NG_STRESSOR_LIST
++	bool "list"
++	help
++	  Start N workers that exercise list structures.
++
++config STRESS_NG_STRESSOR_LLC_AFFINITY
++	bool "llc-affinity"
++	help
++	  Start N workers exercising low level cache over all CPUs.
++
++config STRESS_NG_STRESSOR_LOADAVG
++	bool "loadavg"
++	help
++	  Start N workers that create a large load average.
++
++config STRESS_NG_STRESSOR_LOCKBUS
++	bool "lockbus"
++	help
++	  Start N workers locking a memory increment.
++
++config STRESS_NG_STRESSOR_LOCKF
++	bool "lockf"
++	help
++	  Start N workers locking a single file via lockf.
++
++config STRESS_NG_STRESSOR_LOCKOFD
++	bool "lockofd"
++	help
++	  Start N workers using open file description locking.
++
++config STRESS_NG_STRESSOR_LOGMATH
++	bool "logmath"
++	help
++	  Start N workers exercising logarithmic math functions.
++
++config STRESS_NG_STRESSOR_LONGJMP
++	bool "longjmp"
++	help
++	  Start N workers exercising setjmp/longjmp.
++
++config STRESS_NG_STRESSOR_LOOP
++	bool "loop"
++	help
++	  Start N workers exercising loopback devices.
++
++config STRESS_NG_STRESSOR_LSEARCH
++	bool "lsearch"
++	help
++	  Start N workers that exercise a linear search.
++
++config STRESS_NG_STRESSOR_LSM
++	bool "lsm"
++	help
++	  Start N workers that exercise lsm kernel system calls.
++
++config STRESS_NG_STRESSOR_MADVISE
++	bool "madvise"
++	help
++	  Start N workers exercising madvise on memory.
++
++config STRESS_NG_STRESSOR_MALLOC
++	bool "malloc"
++	help
++	  Start N workers exercising malloc/realloc/free.
++
++config STRESS_NG_STRESSOR_MATRIX
++	bool "matrix"
++	help
++	  Start N workers exercising matrix operations.
++
++config STRESS_NG_STRESSOR_MATRIX_3D
++	bool "matrix-3d"
++	help
++	  Start N workers exercising 3D matrix operations.
++
++config STRESS_NG_STRESSOR_MEMBARRIER
++	bool "membarrier"
++	help
++	  Start N workers performing membarrier system calls.
++
++config STRESS_NG_STRESSOR_MEMCPY
++	bool "memcpy"
++	help
++	  Start N workers performing memory copies.
++
++config STRESS_NG_STRESSOR_MEMFD
++	bool "memfd"
++	help
++	  Start N workers allocating memory with memfd_create.
++
++config STRESS_NG_STRESSOR_MEMHOTPLUG
++	bool "memhotplug"
++	help
++	  Start N workers that exercise memory hotplug.
++
++config STRESS_NG_STRESSOR_MEMRATE
++	bool "memrate"
++	help
++	  Start N workers exercised memory read/writes.
++
++config STRESS_NG_STRESSOR_MEMTHRASH
++	bool "memthrash"
++	help
++	  Start N workers thrashing a 16MB memory buffer.
++
++config STRESS_NG_STRESSOR_MERGESORT
++	bool "mergesort"
++	help
++	  Start N workers merge sorting 32 bit random integers.
++
++config STRESS_NG_STRESSOR_MIN_NANOSLEEP
++	bool "min-nanosleep"
++	help
++	  Start N workers performing short sleeps.
++
++config STRESS_NG_STRESSOR_MKNOD
++	bool "mknod"
++	help
++	  Start N workers that exercise mknod.
++
++config STRESS_NG_STRESSOR_MLOCK
++	bool "mlock"
++	help
++	  Start N workers exercising mlock/munlock.
++
++config STRESS_NG_STRESSOR_MMAP
++	bool "mmap"
++	help
++	  Start N workers stressing mmap and munmap.
++
++config STRESS_NG_STRESSOR_MMAPADDR
++	bool "mmapaddr"
++	help
++	  Start N workers stressing mmap with random addresses.
++
++config STRESS_NG_STRESSOR_MMAPCOW
++	bool "mmapcow"
++	help
++	  Start N workers stressing copy-on-write and munmaps.
++
++config STRESS_NG_STRESSOR_MMAPFILES
++	bool "mmapfiles"
++	help
++	  Start N workers stressing many mmaps and munmaps.
++
++config STRESS_NG_STRESSOR_MMAPFIXED
++	bool "mmapfixed"
++	help
++	  Start N workers stressing mmap with fixed mappings.
++
++config STRESS_NG_STRESSOR_MMAPFORK
++	bool "mmapfork"
++	help
++	  Start N workers stressing many forked mmaps/munmaps.
++
++config STRESS_NG_STRESSOR_MMAPHUGE
++	bool "mmaphuge"
++	help
++	  Start N workers stressing mmap with huge mappings.
++
++config STRESS_NG_STRESSOR_MMAPMANY
++	bool "mmapmany"
++	help
++	  Start N workers stressing many mmaps and munmaps.
++
++config STRESS_NG_STRESSOR_MMAPRANDOM
++	bool "mmaprandom"
++	help
++	  Start N workers stressing random memory mapping operations.
++
++config STRESS_NG_STRESSOR_MODULE
++	bool "module"
++	help
++	  Start N workers performing module requests.
++
++config STRESS_NG_STRESSOR_MONTE_CARLO
++	bool "monte-carlo"
++	help
++	  Start N workers performing monte-carlo computations.
++
++config STRESS_NG_STRESSOR_MPFR
++	bool "mpfr"
++	help
++	  Start N workers performing multi-precision floating point operations.
++
++config STRESS_NG_STRESSOR_MREMAP
++	bool "mremap"
++	help
++	  Start N workers stressing mremap.
++
++config STRESS_NG_STRESSOR_MSEAL
++	bool "mseal"
++	help
++	  Start N workers exercising sealing of mmap'd memory.
++
++config STRESS_NG_STRESSOR_MSG
++	bool "msg"
++	help
++	  Start N workers stressing System V messages.
++
++config STRESS_NG_STRESSOR_MSYNC
++	bool "msync"
++	help
++	  Start N workers syncing mmap'd data with msync.
++
++config STRESS_NG_STRESSOR_MSYNCMANY
++	bool "msyncmany"
++	help
++	  Start N workers stressing msync on many mapped pages.
++
++config STRESS_NG_STRESSOR_MTX
++	bool "mtx"
++	help
++	  Start N workers exercising ISO C mutex operations.
++
++config STRESS_NG_STRESSOR_MUNMAP
++	bool "munmap"
++	help
++	  Start N workers stressing munmap.
++
++config STRESS_NG_STRESSOR_MUTEX
++	bool "mutex"
++	help
++	  Start N workers exercising mutex operations.
++
++config STRESS_NG_STRESSOR_NANOSLEEP
++	bool "nanosleep"
++	help
++	  Start N workers performing short sleeps.
++
++config STRESS_NG_STRESSOR_NETDEV
++	bool "netdev"
++	help
++	  Start N workers exercising netdevice ioctls.
++
++config STRESS_NG_STRESSOR_NETLINK_PROC
++	bool "netlink-proc"
++	help
++	  Start N workers exercising netlink process events.
++
++config STRESS_NG_STRESSOR_NETLINK_TASK
++	bool "netlink-task"
++	help
++	  Start N workers exercising netlink tasks events.
++
++config STRESS_NG_STRESSOR_NICE
++	bool "nice"
++	help
++	  Start N workers that randomly re-adjust nice levels.
++
++config STRESS_NG_STRESSOR_NOP
++	bool "nop"
++	help
++	  Start N workers that burn cycles with no-ops.
++
++config STRESS_NG_STRESSOR_NULL
++	bool "null"
++	help
++	  Exercising /dev/null with write, ioctl, lseek, fcntl, fallocate and fdatasync.
++
++config STRESS_NG_STRESSOR_NUMA
++	bool "numa"
++	help
++	  Start N workers stressing NUMA interfaces.
++
++config STRESS_NG_STRESSOR_NUMACOPY
++	bool "numacopy"
++	help
++	  Start N workers copying pagess between NUMA nodes.
++
++config STRESS_NG_STRESSOR_OOM_PIPE
++	bool "oom-pipe"
++	help
++	  Start N workers exercising large pipes.
++
++config STRESS_NG_STRESSOR_OVPN
++	bool "ovpn"
++	help
++	  Start N workers exercising ovpn tasks events.
++
++config STRESS_NG_STRESSOR_PAGEMOVE
++	bool "pagemove"
++	help
++	  Start N workers that shuffle move pages.
++
++config STRESS_NG_STRESSOR_PAGESWAP
++	bool "pageswap"
++	help
++	  Start N workers that swap pages out and in.
++
++config STRESS_NG_STRESSOR_PCI
++	bool "pci"
++	help
++	  Start N workers that read and mmap PCI regions.
++
++config STRESS_NG_STRESSOR_PERSONALITY
++	bool "personality"
++	help
++	  Start N workers that change their personality.
++
++config STRESS_NG_STRESSOR_PHYSPAGE
++	bool "physpage"
++	help
++	  Start N workers performing physical page lookup.
++
++config STRESS_NG_STRESSOR_PHYSMMAP
++	bool "physmmap"
++	help
++	  Start N workers performing /dev/mem physical page mmaps/munmaps.
++
++config STRESS_NG_STRESSOR_PIDFD
++	bool "pidfd"
++	help
++	  Start N workers exercising pidfd system call.
++
++config STRESS_NG_STRESSOR_PING_SOCK
++	bool "ping-sock"
++	help
++	  Start N workers that exercises a ping socket.
++
++# forks: needs CONFIG_PROCESS_VM at run time
++config STRESS_NG_STRESSOR_PIPEHERD
++	bool "pipeherd"
++
++config STRESS_NG_STRESSOR_PKEY
++	bool "pkey"
++	help
++	  Start N workers exercising pkey_mprotect.
++
++config STRESS_NG_STRESSOR_PLUGIN
++	bool "plugin"
++	help
++	  Start N workers exercising random plugins.
++
++config STRESS_NG_STRESSOR_POWMATH
++	bool "powmath"
++	help
++	  Start N workers exercising power math functions.
++
++config STRESS_NG_STRESSOR_PRCTL
++	bool "prctl"
++	help
++	  Start N workers exercising prctl system call.
++
++config STRESS_NG_STRESSOR_PREFETCH
++	bool "prefetch"
++	help
++	  Start N workers exercising memory prefetching .
++
++config STRESS_NG_STRESSOR_PRIME
++	bool "prime"
++	help
++	  Start N workers that find prime numbers.
++
++config STRESS_NG_STRESSOR_PRIO_INV
++	bool "prio-inv"
++
++config STRESS_NG_STRESSOR_PROCFS
++	bool "procfs"
++	help
++	  Start N workers reading portions of /proc.
++
++config STRESS_NG_STRESSOR_PTHREAD
++	bool "pthread"
++	help
++	  Start N workers that create multiple threads.
++
++config STRESS_NG_STRESSOR_PTRACE
++	bool "ptrace"
++	help
++	  Start N workers that trace a child using ptrace.
++
++config STRESS_NG_STRESSOR_PTR_CHASE
++	bool "ptr-chase"
++	help
++	  Start N workers that chase pointers around many nodes.
++
++config STRESS_NG_STRESSOR_PTY
++	bool "pty"
++	help
++	  Start N workers that exercise pseudoterminals.
++
++config STRESS_NG_STRESSOR_QSORT
++	bool "qsort"
++
++config STRESS_NG_STRESSOR_QUOTA
++	bool "quota"
++	help
++	  Start N workers exercising quotactl commands.
++
++config STRESS_NG_STRESSOR_RACE_SCHED
++	bool "race-sched"
++	help
++	  Start N workers that race cpu affinity.
++
++config STRESS_NG_STRESSOR_RADIXSORT
++	bool "radixsort"
++	help
++	  Start N workers radix sorting random strings.
++
++config STRESS_NG_STRESSOR_RAMFS
++	bool "ramfs"
++	help
++	  Start N workers exercising ramfs mounts.
++
++config STRESS_NG_STRESSOR_RANDLIST
++	bool "randlist"
++	help
++	  Start N workers that exercise random ordered list.
++
++config STRESS_NG_STRESSOR_RAWDEV
++	bool "rawdev"
++	help
++	  Start N workers that read a raw device.
++
++config STRESS_NG_STRESSOR_RAWPKT
++	bool "rawpkt"
++	help
++	  Start N workers exercising raw packets.
++
++config STRESS_NG_STRESSOR_RAWSOCK
++	bool "rawsock"
++	help
++	  Start N workers performing raw socket send/receives .
++
++config STRESS_NG_STRESSOR_RAWUDP
++	bool "rawudp"
++	help
++	  Start N workers exercising raw UDP socket I/O.
++
++config STRESS_NG_STRESSOR_RDRAND
++	bool "rdrand"
++	help
++	  Start N workers exercising rdrand (x86 only).
++
++config STRESS_NG_STRESSOR_READAHEAD
++	bool "readahead"
++	help
++	  Start N workers exercising file readahead.
++
++config STRESS_NG_STRESSOR_REBOOT
++	bool "reboot"
++	help
++	  Start N workers that exercise bad reboot calls.
++
++config STRESS_NG_STRESSOR_REGEX
++	bool "regex"
++	help
++	  Start N workers exercise POSIX regular expressions.
++
++config STRESS_NG_STRESSOR_REGS
++	bool "regs"
++	help
++	  Start N workers exercising CPU generic registers.
++
++config STRESS_NG_STRESSOR_REMAP
++	bool "remap"
++	help
++	  Start N workers exercising page remappings.
++
++config STRESS_NG_STRESSOR_RENAME
++	bool "rename"
++
++config STRESS_NG_STRESSOR_RESCHED
++	bool "resched"
++	help
++	  Start N workers that spawn renicing child processes.
++
++config STRESS_NG_STRESSOR_REVIO
++	bool "revio"
++	help
++	  Start N workers performing reverse I/O.
++
++config STRESS_NG_STRESSOR_RING_PIPE
++	bool "ring-pipe"
++	help
++	  Start N workers exercising a ring of pipes.
++
++config STRESS_NG_STRESSOR_ROFS
++	bool "rofs"
++	help
++	  Start N workers exercising read-only filesystem.
++
++config STRESS_NG_STRESSOR_ROTATE
++	bool "rotate"
++	help
++	  Start N workers performing rotate ops.
++
++config STRESS_NG_STRESSOR_RSEQ
++	bool "rseq"
++	help
++	  Start N workers that exercise restartable sequences.
++
++config STRESS_NG_STRESSOR_RTC
++	bool "rtc"
++	help
++	  Start N workers that exercise the RTC interfaces.
++
++# forks: needs CONFIG_PROCESS_VM at run time
++config STRESS_NG_STRESSOR_SCHEDMIX
++	bool "schedmix"
++	help
++	  Start N workers that exercise a mix of scheduling loads.
++
++config STRESS_NG_STRESSOR_SCTP
++	bool "sctp"
++	help
++	  Start N workers performing SCTP send/receives .
++
++config STRESS_NG_STRESSOR_SEAL
++	bool "seal"
++	help
++	  Start N workers performing fcntl SEAL commands.
++
++config STRESS_NG_STRESSOR_SECCOMP
++	bool "seccomp"
++	help
++	  Start N workers performing seccomp call filtering.
++
++config STRESS_NG_STRESSOR_SECRETMEM
++	bool "secretmem"
++	help
++	  Start N workers that use secretmem mappings.
++
++config STRESS_NG_STRESSOR_SEEK
++	bool "seek"
++	help
++	  Start N workers performing random seek r/w IO.
++
++config STRESS_NG_STRESSOR_SEM
++	bool "sem"
++	help
++	  Start N workers doing semaphore operations.
++
++config STRESS_NG_STRESSOR_SEM_SYSV
++	bool "sem-sysv"
++	help
++	  Start N workers doing System V semaphore operations.
++
++config STRESS_NG_STRESSOR_SENDFILE
++	bool "sendfile"
++	help
++	  Start N workers exercising sendfile.
++
++# forks: needs CONFIG_PROCESS_VM at run time
++config STRESS_NG_STRESSOR_SESSION
++	bool "session"
++	help
++	  Start N workers that exercise new sessions.
++
++config STRESS_NG_STRESSOR_SET
++	bool "set"
++	help
++	  Start N workers exercising the set*() system calls.
++
++config STRESS_NG_STRESSOR_SHELLSORT
++	bool "shellsort"
++	help
++	  Start N workers shell sorting 32 bit random integers.
++
++config STRESS_NG_STRESSOR_SHM_SYSV
++	bool "shm-sysv"
++	help
++	  Start N workers that exercise System V shared memory.
++
++# forks: needs CONFIG_PROCESS_VM at run time
++config STRESS_NG_STRESSOR_SIGCHLD
++	bool "sigchld"
++	help
++	  Start N workers that handle SIGCHLD.
++
++config STRESS_NG_STRESSOR_SIGFD
++	bool "sigfd"
++	help
++	  Start N workers reading signals via signalfd reads .
++
++# forks: needs CONFIG_PROCESS_VM at run time
++config STRESS_NG_STRESSOR_SIGHUP
++	bool "sighup"
++	help
++	  Start N workers generating SIGHUP signals.
++
++config STRESS_NG_STRESSOR_SIGIO
++	bool "sigio"
++	help
++	  Start N workers that exercise SIGIO signals.
++
++config STRESS_NG_STRESSOR_SIGNAL
++	bool "signal"
++	help
++	  Start N workers that exercise signal.
++
++config STRESS_NG_STRESSOR_SIGPENDING
++	bool "sigpending"
++	help
++	  Start N workers exercising sigpending.
++
++config STRESS_NG_STRESSOR_SIGPIPE
++	bool "sigpipe"
++	help
++	  Start N workers exercising SIGPIPE.
++
++config STRESS_NG_STRESSOR_SIGURG
++	bool "sigurg"
++	help
++	  Start N workers exercising SIGURG on MSB_OOB socket sends.
++
++config STRESS_NG_STRESSOR_SIGVTALRM
++	bool "sigvtalrm"
++	help
++	  Start N workers exercising SIGVTALRM signals.
++
++config STRESS_NG_STRESSOR_SIGXCPU
++	bool "sigxcpu"
++	help
++	  Start N workers that exercise SIGXCPU signals.
++
++config STRESS_NG_STRESSOR_SIGXFSZ
++	bool "sigxfsz"
++	help
++	  Start N workers that exercise SIGXFSZ signals.
++
++config STRESS_NG_STRESSOR_SKIPLIST
++	bool "skiplist"
++	help
++	  Start N workers that exercise a skiplist search.
++
++config STRESS_NG_STRESSOR_SLEEP
++	bool "sleep"
++	help
++	  Start N workers performing various duration sleeps.
++
++config STRESS_NG_STRESSOR_SMI
++	bool "smi"
++	help
++	  Start N workers that trigger SMIs.
++
++config STRESS_NG_STRESSOR_SOCKDIAG
++	bool "sockdiag"
++	help
++	  Start N workers exercising sockdiag netlink.
++
++config STRESS_NG_STRESSOR_SOCKFD
++	bool "sockfd"
++	help
++	  Start N workers sending file descriptors over sockets.
++
++config STRESS_NG_STRESSOR_SPARSEMATRIX
++	bool "sparsematrix"
++	help
++	  Start N workers that exercise a sparse matrix.
++
++config STRESS_NG_STRESSOR_SPAWN
++	bool "spawn"
++	help
++	  Start N workers spawning stress-ng using posix_spawn.
++
++config STRESS_NG_STRESSOR_SPEC_ROLLBACK
++	bool "spec-rollback"
++	help
++	  Start N workers exercising speculation rollbacks.
++
++config STRESS_NG_STRESSOR_SPLICE
++	bool "splice"
++	help
++	  Start N workers reading/writing using splice.
++
++config STRESS_NG_STRESSOR_STATMOUNT
++	bool "statmount"
++	help
++	  Start N workers exercising statmount and listmount.
++
++config STRESS_NG_STRESSOR_STR
++	bool "str"
++	help
++	  Start N workers exercising lib C string functions.
++
++config STRESS_NG_STRESSOR_STREAM
++	bool "stream"
++	help
++	  Start N workers exercising memory bandwidth.
++
++config STRESS_NG_STRESSOR_SWAP
++	bool "swap"
++	help
++	  Start N workers exercising swapon/swapoff.
++
++config STRESS_NG_STRESSOR_SYMLINK
++	bool "symlink"
++	help
++	  Start N workers creating symbolic links.
++
++config STRESS_NG_STRESSOR_SYNC_FILE
++	bool "sync-file"
++	help
++	  Start N workers exercise sync_file_range.
++
++config STRESS_NG_STRESSOR_SYNCLOAD
++	bool "syncload"
++	help
++	  Start N workers that synchronize load spikes.
++
++config STRESS_NG_STRESSOR_SYSFS
++	bool "sysfs"
++	help
++	  Start N workers reading files from /sys.
++
++config STRESS_NG_STRESSOR_SYSINFO
++	bool "sysinfo"
++	help
++	  Start N workers reading system information.
++
++config STRESS_NG_STRESSOR_TEE
++	bool "tee"
++	help
++	  Start N workers exercising the tee system call.
++
++config STRESS_NG_STRESSOR_TIMER
++	bool "timer"
++
++config STRESS_NG_STRESSOR_TIMERFD
++	bool "timerfd"
++	help
++	  Start N workers producing timerfd events.
++
++config STRESS_NG_STRESSOR_TIMERMIX
++	bool "timermix"
++	help
++	  Start N workers producing a mix of timer events.
++
++config STRESS_NG_STRESSOR_TIME_WARP
++	bool "time-warp"
++	help
++	  Start N workers checking for timer/clock warping.
++
++config STRESS_NG_STRESSOR_TLB_NUMA
++	bool "tlb-numa"
++	help
++	  Start N workers that force TLB shootdowns on NUMA systems.
++
++config STRESS_NG_STRESSOR_TLB_SHOOTDOWN
++	bool "tlb-shootdown"
++	help
++	  Start N workers that force TLB shootdowns.
++
++config STRESS_NG_STRESSOR_TMPFS
++	bool "tmpfs"
++	help
++	  Start N workers mmap'ing a file on tmpfs.
++
++config STRESS_NG_STRESSOR_TREE
++	bool "tree"
++	help
++	  Start N workers that exercise tree structures.
++
++config STRESS_NG_STRESSOR_TRIG
++	bool "trig"
++	help
++	  Start N workers exercising trigonometric functions.
++
++config STRESS_NG_STRESSOR_TSC
++	bool "tsc"
++	help
++	  Start N workers reading the time stamp counter.
++
++config STRESS_NG_STRESSOR_TSEARCH
++	bool "tsearch"
++	help
++	  Start N workers that exercise a tree search.
++
++config STRESS_NG_STRESSOR_TUN
++	bool "tun"
++	help
++	  Start N workers exercising tun interface.
++
++config STRESS_NG_STRESSOR_UMOUNT
++	bool "umount"
++	help
++	  Start N workers exercising umount races.
++
++config STRESS_NG_STRESSOR_UNSHARE
++	bool "unshare"
++	help
++	  Start N workers exercising resource unsharing.
++
++config STRESS_NG_STRESSOR_UPROBE
++	bool "uprobe"
++	help
++	  Start N workers that generate uprobe events.
++
++config STRESS_NG_STRESSOR_URANDOM
++	bool "urandom"
++
++config STRESS_NG_STRESSOR_USERFAULTFD
++	bool "userfaultfd"
++	help
++	  Start N page faulting workers with userspace handling.
++
++config STRESS_NG_STRESSOR_USERSYSCALL
++	bool "usersyscall"
++	help
++	  Start N workers exercising a userspace system call handler.
++
++config STRESS_NG_STRESSOR_UTIME
++	bool "utime"
++	help
++	  Start N workers updating file timestamps.
++
++config STRESS_NG_STRESSOR_VARYLOAD
++	bool "varyload"
++	help
++	  Start N workers that exercise a mix of scheduling loads.
++
++config STRESS_NG_STRESSOR_VDSO
++	bool "vdso"
++	help
++	  Start N workers exercising functions in the VDSO.
++
++config STRESS_NG_STRESSOR_VECCMP
++	bool "veccmp"
++	help
++	  Start N workers performing integer vector comparison ops.
++
++config STRESS_NG_STRESSOR_VECFP
++	bool "vecfp"
++	help
++	  Start N workers performing vector math ops.
++
++config STRESS_NG_STRESSOR_VECMATH
++	bool "vecmath"
++	help
++	  Start N workers performing vector math ops.
++
++config STRESS_NG_STRESSOR_VECSHUF
++	bool "vecshuf"
++	help
++	  Start N workers performing vector shuffle ops.
++
++config STRESS_NG_STRESSOR_VECWIDE
++	bool "vecwide"
++	help
++	  Start N workers performing vector math ops.
++
++config STRESS_NG_STRESSOR_VERITY
++	bool "verity"
++	help
++	  Start N workers exercising file verity ioctls.
++
++# forks: needs CONFIG_PROCESS_VM at run time
++config STRESS_NG_STRESSOR_VFORK
++	bool "vfork"
++	help
++	  Start N workers spinning on vfork() and exit().
++
++# forks: needs CONFIG_PROCESS_VM at run time
++config STRESS_NG_STRESSOR_VFORKMANY
++	bool "vforkmany"
++	help
++	  Start N workers spawning many vfork children.
++
++config STRESS_NG_STRESSOR_VM
++	bool "vm"
++
++config STRESS_NG_STRESSOR_VM_ADDR
++	bool "vm-addr"
++	help
++	  Start N vm address exercising workers.
++
++config STRESS_NG_STRESSOR_VM_RW
++	bool "vm-rw"
++	help
++	  Start N vm read/write process_vm* copy workers.
++
++config STRESS_NG_STRESSOR_VM_SPLICE
++	bool "vm-splice"
++	help
++	  Start N workers reading/writing using vmsplice.
++
++config STRESS_NG_STRESSOR_VNNI
++	bool "vnni"
++	help
++	  Start N workers performing vector neural network ops.
++
++# forks: needs CONFIG_PROCESS_VM at run time
++config STRESS_NG_STRESSOR_WAIT
++	bool "wait"
++	help
++	  Start N workers waiting on child being stop/resumed.
++
++config STRESS_NG_STRESSOR_WAITCPU
++	bool "waitcpu"
++	help
++	  Start N workers exercising wait/pause/nop instructions.
++
++config STRESS_NG_STRESSOR_WATCHDOG
++	bool "watchdog"
++	help
++	  Start N workers that exercise /dev/watchdog.
++
++config STRESS_NG_STRESSOR_WCS
++	bool "wcs"
++	help
++	  Start N workers on lib C wide char string functions.
++
++config STRESS_NG_STRESSOR_WORKLOAD
++	bool "workload"
++	help
++	  Start N workers that exercise a mix of scheduling loads.
++
++config STRESS_NG_STRESSOR_X86CPUID
++	bool "x86cpuid"
++	help
++	  Start N workers exercising the x86 cpuid instruction.
++
++config STRESS_NG_STRESSOR_X86SYSCALL
++	bool "x86syscall"
++	help
++	  Start N workers exercising functions using syscall.
++
++config STRESS_NG_STRESSOR_XATTR
++	bool "xattr"
++	help
++	  Start N workers stressing file extended attributes.
++
++config STRESS_NG_STRESSOR_YIELD
++	bool "yield"
++
++config STRESS_NG_STRESSOR_ZERO
++	bool "zero"
++	help
++	  Start N workers exercising /dev/zero with read, mmap, ioctl, lseek.
++
++config STRESS_NG_STRESSOR_ZLIB
++	bool "zlib"
++	help
++	  Start N workers compressing data with zlib.
++
++# forks: needs CONFIG_PROCESS_VM at run time
++config STRESS_NG_STRESSOR_ZOMBIE
++	bool "zombie"
++	help
++	  Start N workers that rapidly create and reap zombies.
++
++endmenu # Stressors
++
++# The POSIX Option Groups the enabled stressors exercise, one hidden symbol per
++# group: hundreds of per-stressor selects would make the reverse dependencies
++# of the POSIX symbols too large for Kconfig to process.
++
++config STRESS_NG_NEEDS_POSIX_ADVISORY_INFO
++	bool
++	default y if STRESS_NG_STRESSOR_FAULT || STRESS_NG_STRESSOR_HDD || STRESS_NG_STRESSOR_MALLOC || STRESS_NG_STRESSOR_REVIO
++	select POSIX_ADVISORY_INFO
++
++config STRESS_NG_NEEDS_POSIX_ASYNCHRONOUS_IO
++	bool
++	default y if STRESS_NG_STRESSOR_AIO
++	select POSIX_ASYNCHRONOUS_IO
++
++config STRESS_NG_NEEDS_POSIX_CLOCK_SELECTION
++	bool
++	default y if STRESS_NG_STRESSOR_CLOCK
++	select POSIX_CLOCK_SELECTION
++
++config STRESS_NG_NEEDS_POSIX_C_LIB_EXT
++	bool
++	default y if STRESS_NG_STRESSOR_CHDIR || STRESS_NG_STRESSOR_HSEARCH || STRESS_NG_STRESSOR_STR
++	select POSIX_C_LIB_EXT
++
++config STRESS_NG_NEEDS_POSIX_DEVICE_IO
++	bool
++	default y if STRESS_NG_STRESSOR_AIO || STRESS_NG_STRESSOR_CHDIR || STRESS_NG_STRESSOR_CHMOD || STRESS_NG_STRESSOR_CHOWN || STRESS_NG_STRESSOR_CPU || STRESS_NG_STRESSOR_DAEMON || STRESS_NG_STRESSOR_DENTRY || STRESS_NG_STRESSOR_DENTRYCACHE || STRESS_NG_STRESSOR_DIRDEEP || STRESS_NG_STRESSOR_DIRMANY || STRESS_NG_STRESSOR_DUP || STRESS_NG_STRESSOR_EXEC || STRESS_NG_STRESSOR_FAR_BRANCH || STRESS_NG_STRESSOR_FAULT || STRESS_NG_STRESSOR_FCNTL || STRESS_NG_STRESSOR_FD_FORK || STRESS_NG_STRESSOR_FILE_IOCTL || STRESS_NG_STRESSOR_HDD || STRESS_NG_STRESSOR_LINK || STRESS_NG_STRESSOR_MMAP || STRESS_NG_STRESSOR_MMAPFILES || STRESS_NG_STRESSOR_MSYNC || STRESS_NG_STRESSOR_MSYNCMANY || STRESS_NG_STRESSOR_NULL || STRESS_NG_STRESSOR_PIPEHERD || STRESS_NG_STRESSOR_RENAME || STRESS_NG_STRESSOR_REVIO || STRESS_NG_STRESSOR_RING_PIPE || STRESS_NG_STRESSOR_ROFS || STRESS_NG_STRESSOR_SCHEDMIX || STRESS_NG_STRESSOR_SEEK || STRESS_NG_STRESSOR_SESSION || STRESS_NG_STRESSOR_SIGHUP || STRESS_NG_STRESSOR_SIGPIPE || STRESS_NG_STRESSOR_SLEEP || STRESS_NG_STRESSOR_SYMLINK || STRESS_NG_STRESSOR_URANDOM || STRESS_NG_STRESSOR_UTIME || STRESS_NG_STRESSOR_VARYLOAD || STRESS_NG_STRESSOR_ZERO
++	select POSIX_DEVICE_IO
++
++config STRESS_NG_NEEDS_POSIX_FD_MGMT
++	bool
++	default y if STRESS_NG_STRESSOR_DAEMON || STRESS_NG_STRESSOR_DENTRY || STRESS_NG_STRESSOR_DUP || STRESS_NG_STRESSOR_EXEC || STRESS_NG_STRESSOR_FAR_BRANCH || STRESS_NG_STRESSOR_FCNTL || STRESS_NG_STRESSOR_FD_FORK || STRESS_NG_STRESSOR_FILE_IOCTL || STRESS_NG_STRESSOR_HDD || STRESS_NG_STRESSOR_MMAP || STRESS_NG_STRESSOR_MSYNC || STRESS_NG_STRESSOR_NULL || STRESS_NG_STRESSOR_PIPEHERD || STRESS_NG_STRESSOR_REVIO || STRESS_NG_STRESSOR_RING_PIPE || STRESS_NG_STRESSOR_ROFS || STRESS_NG_STRESSOR_SEEK || STRESS_NG_STRESSOR_URANDOM || STRESS_NG_STRESSOR_ZERO
++	select POSIX_FD_MGMT
++
++config STRESS_NG_NEEDS_POSIX_FILE_ATTRIBUTES
++	bool
++	default y if STRESS_NG_STRESSOR_CHDIR || STRESS_NG_STRESSOR_CHMOD || STRESS_NG_STRESSOR_CHOWN || STRESS_NG_STRESSOR_DAEMON
++	select POSIX_FILE_ATTRIBUTES
++
++config STRESS_NG_NEEDS_POSIX_FILE_ATTRIBUTES_FD
++	bool
++	default y if STRESS_NG_STRESSOR_CHMOD
++	select POSIX_FILE_ATTRIBUTES_FD
++
++config STRESS_NG_NEEDS_POSIX_FILE_SYSTEM
++	bool
++	default y if STRESS_NG_STRESSOR_CHDIR || STRESS_NG_STRESSOR_CHMOD || STRESS_NG_STRESSOR_CHOWN || STRESS_NG_STRESSOR_DAEMON || STRESS_NG_STRESSOR_DENTRY || STRESS_NG_STRESSOR_DENTRYCACHE || STRESS_NG_STRESSOR_DIRDEEP || STRESS_NG_STRESSOR_FCNTL || STRESS_NG_STRESSOR_HDD || STRESS_NG_STRESSOR_IDLE_PAGE || STRESS_NG_STRESSOR_LINK || STRESS_NG_STRESSOR_MMAPFILES || STRESS_NG_STRESSOR_RENAME || STRESS_NG_STRESSOR_ROFS || STRESS_NG_STRESSOR_SYMLINK || STRESS_NG_STRESSOR_SYSINFO || STRESS_NG_STRESSOR_UTIME
++	select POSIX_FILE_SYSTEM
++
++config STRESS_NG_NEEDS_POSIX_FILE_SYSTEM_EXT
++	bool
++	default y if STRESS_NG_STRESSOR_DIRDEEP
++	select POSIX_FILE_SYSTEM_EXT
++
++config STRESS_NG_NEEDS_POSIX_FILE_SYSTEM_FD
++	bool
++	default y if STRESS_NG_STRESSOR_DIRDEEP || STRESS_NG_STRESSOR_RENAME || STRESS_NG_STRESSOR_UTIME
++	select POSIX_FILE_SYSTEM_FD
++
++config STRESS_NG_NEEDS_POSIX_FSYNC
++	bool
++	default y if STRESS_NG_STRESSOR_LINK || STRESS_NG_STRESSOR_ROFS || STRESS_NG_STRESSOR_SYMLINK
++	select POSIX_FSYNC
++
++config STRESS_NG_NEEDS_POSIX_MAPPED_FILES
++	bool
++	default y if STRESS_NG_STRESSOR_BITONICSORT || STRESS_NG_STRESSOR_BSEARCH || STRESS_NG_STRESSOR_BUBBLESORT || STRESS_NG_STRESSOR_CACHE || STRESS_NG_STRESSOR_CPU || STRESS_NG_STRESSOR_DENTRY || STRESS_NG_STRESSOR_DUP || STRESS_NG_STRESSOR_ENV || STRESS_NG_STRESSOR_EXEC || STRESS_NG_STRESSOR_FAR_BRANCH || STRESS_NG_STRESSOR_FAULT || STRESS_NG_STRESSOR_FD_FORK || STRESS_NG_STRESSOR_FIBSEARCH || STRESS_NG_STRESSOR_FLUSHCACHE || STRESS_NG_STRESSOR_FMA || STRESS_NG_STRESSOR_FP || STRESS_NG_STRESSOR_FP_SUBNORMAL || STRESS_NG_STRESSOR_FRACTAL || STRESS_NG_STRESSOR_HEAPSORT || STRESS_NG_STRESSOR_ICACHE || STRESS_NG_STRESSOR_INSERTIONSORT || STRESS_NG_STRESSOR_L1CACHE || STRESS_NG_STRESSOR_LOCKBUS || STRESS_NG_STRESSOR_MALLOC || STRESS_NG_STRESSOR_MATRIX || STRESS_NG_STRESSOR_MATRIX_3D || STRESS_NG_STRESSOR_MEMCPY || STRESS_NG_STRESSOR_MEMRATE || STRESS_NG_STRESSOR_MEMTHRASH || STRESS_NG_STRESSOR_MERGESORT || STRESS_NG_STRESSOR_MIN_NANOSLEEP || STRESS_NG_STRESSOR_MLOCK || STRESS_NG_STRESSOR_MMAP || STRESS_NG_STRESSOR_MMAPADDR || STRESS_NG_STRESSOR_MMAPFILES || STRESS_NG_STRESSOR_MMAPFIXED || STRESS_NG_STRESSOR_MMAPMANY || STRESS_NG_STRESSOR_MSEAL || STRESS_NG_STRESSOR_MSYNC || STRESS_NG_STRESSOR_MSYNCMANY || STRESS_NG_STRESSOR_PREFETCH || STRESS_NG_STRESSOR_PTR_CHASE || STRESS_NG_STRESSOR_QSORT || STRESS_NG_STRESSOR_RANDLIST || STRESS_NG_STRESSOR_RING_PIPE || STRESS_NG_STRESSOR_ROFS || STRESS_NG_STRESSOR_SCHEDMIX || STRESS_NG_STRESSOR_SEM || STRESS_NG_STRESSOR_SHELLSORT || STRESS_NG_STRESSOR_SIGHUP || STRESS_NG_STRESSOR_SPARSEMATRIX || STRESS_NG_STRESSOR_SPEC_ROLLBACK || STRESS_NG_STRESSOR_STREAM || STRESS_NG_STRESSOR_URANDOM || STRESS_NG_STRESSOR_VARYLOAD || STRESS_NG_STRESSOR_VFORKMANY || STRESS_NG_STRESSOR_VM || STRESS_NG_STRESSOR_VM_ADDR || STRESS_NG_STRESSOR_WORKLOAD || STRESS_NG_STRESSOR_ZERO
++	select POSIX_MAPPED_FILES
++
++config STRESS_NG_NEEDS_POSIX_MEMLOCK_RANGE
++	bool
++	default y if STRESS_NG_STRESSOR_L1CACHE || STRESS_NG_STRESSOR_MLOCK || STRESS_NG_STRESSOR_MMAP || STRESS_NG_STRESSOR_MMAPADDR || STRESS_NG_STRESSOR_MMAPFIXED || STRESS_NG_STRESSOR_MMAPMANY || STRESS_NG_STRESSOR_MSYNC || STRESS_NG_STRESSOR_STREAM || STRESS_NG_STRESSOR_VM_ADDR
++	select POSIX_MEMLOCK_RANGE
++
++config STRESS_NG_NEEDS_POSIX_MEMORY_PROTECTION
++	bool
++	default y if STRESS_NG_STRESSOR_FAR_BRANCH || STRESS_NG_STRESSOR_FLUSHCACHE || STRESS_NG_STRESSOR_ICACHE || STRESS_NG_STRESSOR_MMAP || STRESS_NG_STRESSOR_MSEAL
++	select POSIX_MEMORY_PROTECTION
++
++config STRESS_NG_NEEDS_POSIX_MESSAGE_PASSING
++	bool
++	default y if STRESS_NG_STRESSOR_WORKLOAD
++	select POSIX_MESSAGE_PASSING
++
++config STRESS_NG_NEEDS_POSIX_MULTI_PROCESS
++	bool
++	default y if STRESS_NG_STRESSOR_CHMOD || STRESS_NG_STRESSOR_CHOWN || STRESS_NG_STRESSOR_CPU || STRESS_NG_STRESSOR_DAEMON || STRESS_NG_STRESSOR_DENTRYCACHE || STRESS_NG_STRESSOR_ENV || STRESS_NG_STRESSOR_EXEC || STRESS_NG_STRESSOR_FCNTL || STRESS_NG_STRESSOR_FD_FORK || STRESS_NG_STRESSOR_FORK || STRESS_NG_STRESSOR_FORKHEAVY || STRESS_NG_STRESSOR_HDD || STRESS_NG_STRESSOR_KILL || STRESS_NG_STRESSOR_LINK || STRESS_NG_STRESSOR_MIN_NANOSLEEP || STRESS_NG_STRESSOR_MONTE_CARLO || STRESS_NG_STRESSOR_PIPEHERD || STRESS_NG_STRESSOR_PTHREAD || STRESS_NG_STRESSOR_SCHEDMIX || STRESS_NG_STRESSOR_SESSION || STRESS_NG_STRESSOR_SET || STRESS_NG_STRESSOR_SIGHUP || STRESS_NG_STRESSOR_SIGNAL || STRESS_NG_STRESSOR_SYMLINK || STRESS_NG_STRESSOR_SYSINFO || STRESS_NG_STRESSOR_VARYLOAD || STRESS_NG_STRESSOR_VFORK || STRESS_NG_STRESSOR_VFORKMANY || STRESS_NG_STRESSOR_VM || STRESS_NG_STRESSOR_WAIT || STRESS_NG_STRESSOR_WORKLOAD || STRESS_NG_STRESSOR_ZOMBIE
++	select POSIX_MULTI_PROCESS
++
++config STRESS_NG_NEEDS_POSIX_NETWORKING
++	bool
++	default y if STRESS_NG_STRESSOR_FORKHEAVY || STRESS_NG_STRESSOR_SET
++	select POSIX_NETWORKING
++	select NETWORKING
++
++config STRESS_NG_NEEDS_POSIX_NON_PORTABLE
++	bool
++	default y if STRESS_NG_STRESSOR_MUTEX
++	select POSIX_NON_PORTABLE
++
++config STRESS_NG_NEEDS_POSIX_PIPE
++	bool
++	default y if STRESS_NG_STRESSOR_DAEMON || STRESS_NG_STRESSOR_PIPEHERD || STRESS_NG_STRESSOR_RING_PIPE || STRESS_NG_STRESSOR_SESSION || STRESS_NG_STRESSOR_SIGHUP || STRESS_NG_STRESSOR_SIGPIPE || STRESS_NG_STRESSOR_VARYLOAD
++	select POSIX_PIPE
++
++config STRESS_NG_NEEDS_POSIX_PRIORITY_SCHEDULING
++	bool
++	default y if STRESS_NG_STRESSOR_EXEC || STRESS_NG_STRESSOR_MUTEX || STRESS_NG_STRESSOR_PIPEHERD || STRESS_NG_STRESSOR_SCHEDMIX || STRESS_NG_STRESSOR_VARYLOAD || STRESS_NG_STRESSOR_WORKLOAD
++	select POSIX_PRIORITY_SCHEDULING
++
++config STRESS_NG_NEEDS_POSIX_REGEXP
++	bool
++	default y if STRESS_NG_STRESSOR_REGEX
++	select POSIX_REGEXP
++
++config STRESS_NG_NEEDS_POSIX_SEMAPHORES
++	bool
++	default y if STRESS_NG_STRESSOR_SCHEDMIX || STRESS_NG_STRESSOR_SEM
++	select POSIX_SEMAPHORES
++
++config STRESS_NG_NEEDS_POSIX_SIGNALS
++	bool
++	default y if STRESS_NG_STRESSOR_AIO || STRESS_NG_STRESSOR_BIGHEAP || STRESS_NG_STRESSOR_DAEMON || STRESS_NG_STRESSOR_EXEC || STRESS_NG_STRESSOR_FAR_BRANCH || STRESS_NG_STRESSOR_KILL || STRESS_NG_STRESSOR_LOADAVG || STRESS_NG_STRESSOR_MEMTHRASH || STRESS_NG_STRESSOR_PTHREAD || STRESS_NG_STRESSOR_SCHEDMIX || STRESS_NG_STRESSOR_SIGCHLD || STRESS_NG_STRESSOR_SIGHUP || STRESS_NG_STRESSOR_SIGPENDING || STRESS_NG_STRESSOR_SLEEP || STRESS_NG_STRESSOR_TIMER || STRESS_NG_STRESSOR_TIMERMIX || STRESS_NG_STRESSOR_VARYLOAD
++	select POSIX_SIGNALS
++
++config STRESS_NG_NEEDS_POSIX_SIGNAL_JUMP
++	bool
++	default y if STRESS_NG_STRESSOR_BIGHEAP || STRESS_NG_STRESSOR_BITONICSORT || STRESS_NG_STRESSOR_BUBBLESORT || STRESS_NG_STRESSOR_CACHE || STRESS_NG_STRESSOR_FAR_BRANCH || STRESS_NG_STRESSOR_FAULT || STRESS_NG_STRESSOR_HEAPSORT || STRESS_NG_STRESSOR_INSERTIONSORT || STRESS_NG_STRESSOR_LIST || STRESS_NG_STRESSOR_LOCKBUS || STRESS_NG_STRESSOR_MALLOC || STRESS_NG_STRESSOR_MERGESORT || STRESS_NG_STRESSOR_MMAP || STRESS_NG_STRESSOR_MSYNC || STRESS_NG_STRESSOR_NOP || STRESS_NG_STRESSOR_QSORT || STRESS_NG_STRESSOR_RADIXSORT || STRESS_NG_STRESSOR_SHELLSORT || STRESS_NG_STRESSOR_TREE
++	select POSIX_SIGNAL_JUMP if !NATIVE_BUILD || NATIVE_LIBC
++
++config STRESS_NG_NEEDS_POSIX_SINGLE_PROCESS
++	bool
++	default y if STRESS_NG_STRESSOR_ENV || STRESS_NG_STRESSOR_MLOCK || STRESS_NG_STRESSOR_MMAPMANY || STRESS_NG_STRESSOR_MSYNCMANY
++	select POSIX_SINGLE_PROCESS
++
++config STRESS_NG_NEEDS_POSIX_SPAWN
++	bool
++	default y if STRESS_NG_STRESSOR_EXEC || STRESS_NG_STRESSOR_SPAWN
++	select POSIX_SPAWN
++
++config STRESS_NG_NEEDS_POSIX_SPIN_LOCKS
++	bool
++	default y if STRESS_NG_STRESSOR_PTHREAD
++	select POSIX_SPIN_LOCKS
++
++config STRESS_NG_NEEDS_POSIX_SYMBOLIC_LINKS
++	bool
++	default y if STRESS_NG_STRESSOR_CHOWN || STRESS_NG_STRESSOR_DENTRYCACHE || STRESS_NG_STRESSOR_DIRDEEP || STRESS_NG_STRESSOR_LINK || STRESS_NG_STRESSOR_ROFS || STRESS_NG_STRESSOR_SYMLINK
++	select POSIX_SYMBOLIC_LINKS
++
++config STRESS_NG_NEEDS_POSIX_SYMBOLIC_LINKS_FD
++	bool
++	default y if STRESS_NG_STRESSOR_LINK || STRESS_NG_STRESSOR_SYMLINK
++	select POSIX_SYMBOLIC_LINKS_FD
++
++config STRESS_NG_NEEDS_POSIX_THREADS
++	bool
++	default y if STRESS_NG_STRESSOR_DENTRYCACHE || STRESS_NG_STRESSOR_EXEC || STRESS_NG_STRESSOR_LINK || STRESS_NG_STRESSOR_LOADAVG || STRESS_NG_STRESSOR_MALLOC || STRESS_NG_STRESSOR_MEMTHRASH || STRESS_NG_STRESSOR_MLOCK || STRESS_NG_STRESSOR_MTX || STRESS_NG_STRESSOR_MUTEX || STRESS_NG_STRESSOR_NANOSLEEP || STRESS_NG_STRESSOR_PIPEHERD || STRESS_NG_STRESSOR_PTHREAD || STRESS_NG_STRESSOR_SCHEDMIX || STRESS_NG_STRESSOR_SEM || STRESS_NG_STRESSOR_SIGNAL || STRESS_NG_STRESSOR_SLEEP || STRESS_NG_STRESSOR_SYMLINK || STRESS_NG_STRESSOR_SYNCLOAD || STRESS_NG_STRESSOR_TIMERMIX || STRESS_NG_STRESSOR_VFORKMANY || STRESS_NG_STRESSOR_WAIT || STRESS_NG_STRESSOR_WORKLOAD
++	select POSIX_THREADS
++
++config STRESS_NG_NEEDS_POSIX_THREAD_PRIORITY_SCHEDULING
++	bool
++	default y if STRESS_NG_STRESSOR_MUTEX
++	select POSIX_THREAD_PRIORITY_SCHEDULING
++
++config STRESS_NG_NEEDS_POSIX_TIMERS
++	bool
++	default y if STRESS_NG_STRESSOR_CLOCK || STRESS_NG_STRESSOR_CPU || STRESS_NG_STRESSOR_LOCKBUS || STRESS_NG_STRESSOR_MEMRATE || STRESS_NG_STRESSOR_MIN_NANOSLEEP || STRESS_NG_STRESSOR_NANOSLEEP || STRESS_NG_STRESSOR_PTHREAD || STRESS_NG_STRESSOR_SCHEDMIX || STRESS_NG_STRESSOR_SEM || STRESS_NG_STRESSOR_SLEEP || STRESS_NG_STRESSOR_TIMER || STRESS_NG_STRESSOR_TIMERMIX || STRESS_NG_STRESSOR_WORKLOAD
++	select POSIX_TIMERS
++
++config STRESS_NG_NEEDS_POSIX_USER_GROUPS
++	bool
++	default y if STRESS_NG_STRESSOR_CHOWN || STRESS_NG_STRESSOR_IDLE_PAGE || STRESS_NG_STRESSOR_SET || STRESS_NG_STRESSOR_SPAWN
++	select POSIX_USER_GROUPS
++
++config STRESS_NG_NEEDS_XSI_SINGLE_PROCESS
++	bool
++	default y if STRESS_NG_STRESSOR_UTIME
++	select XSI_SINGLE_PROCESS
++
++config STRESS_NG_NEEDS_XSI_STREAMS
++	bool
++	default y if STRESS_NG_STRESSOR_FILE_IOCTL || STRESS_NG_STRESSOR_NULL || STRESS_NG_STRESSOR_ROFS || STRESS_NG_STRESSOR_URANDOM || STRESS_NG_STRESSOR_ZERO
++	select XSI_STREAMS
+diff --git a/zephyr/config/config.h b/zephyr/config/config.h
+new file mode 100644
+--- /dev/null
++++ b/zephyr/config/config.h
+@@ -0,0 +1,760 @@
++/*
++ * SPDX-License-Identifier: GPL-2.0-or-later
++ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++ *
++ * stress-ng feature configuration for Zephyr.
++ *
++ * Makefile.config normally writes config.h after probing the build host with
++ * the programs under test/. On Zephyr what is available is decided by Kconfig,
++ * so this file maps Kconfig symbols onto the HAVE_* macros instead: each
++ * POSIX function is enabled by the Option Group that implements it, the
++ * toolchain features by the architecture. It was seeded by compiling the
++ * test/ probes with the Zephyr SDK against the posix-next headers for
++ * qemu_x86, qemu_x86_64, qemu_cortex_a53, qemu_riscv32, qemu_riscv64 and
++ * mps2/an385, then linking every declared function to find the ones that
++ * have no implementation (zephyr/scripts/gen_config.py).
++ */
++#ifndef STRESS_NG_ZEPHYR_CONFIG_H
++#define STRESS_NG_ZEPHYR_CONFIG_H
++
++/* Zephyr's toolchain macros first, so that stress-ng adopts rather than redefines them */
++#include <zephyr/toolchain.h>
++
++/* toolchain, C library and headers: every configuration */
++#define HAVE_ALIGNED_128
++#define HAVE_ALIGNED_64
++#define HAVE_ALIGNED_64K
++#define HAVE_ALIGNED_ALLOC
++#define HAVE_ARC4RANDOM
++#define HAVE_ASM_MB
++#define HAVE_ASM_NOP
++#define HAVE_ASM_NOTHING
++#define HAVE_ATOMIC
++#define HAVE_ATOMIC_ADD_FETCH
++#define HAVE_ATOMIC_AND_FETCH
++#define HAVE_ATOMIC_CLEAR
++#define HAVE_ATOMIC_COMPARE_EXCHANGE
++#define HAVE_ATOMIC_FETCH_ADD
++#define HAVE_ATOMIC_FETCH_ADD_2
++#define HAVE_ATOMIC_FETCH_ADD_4
++#define HAVE_ATOMIC_FETCH_AND
++#define HAVE_ATOMIC_FETCH_NAND
++#define HAVE_ATOMIC_FETCH_OR
++#define HAVE_ATOMIC_FETCH_SUB
++#define HAVE_ATOMIC_FETCH_XOR
++#define HAVE_ATOMIC_LOAD
++#define HAVE_ATOMIC_LOAD_DOUBLE
++#define HAVE_ATOMIC_LOAD_N
++#define HAVE_ATOMIC_NAND_FETCH
++#define HAVE_ATOMIC_OR_FETCH
++#define HAVE_ATOMIC_STORE
++#define HAVE_ATOMIC_STORE_DOUBLE
++#define HAVE_ATOMIC_STORE_N
++#define HAVE_ATOMIC_SUB_FETCH
++#define HAVE_ATOMIC_TEST_AND_SET
++#define HAVE_ATOMIC_XOR_FETCH
++#define HAVE_ATTRIBUTE_ALWAYS_INLINE
++#define HAVE_ATTRIBUTE_CONST
++#define HAVE_ATTRIBUTE_FAST_MATH
++#define HAVE_ATTRIBUTE_NOINLINE
++#define HAVE_ATTRIBUTE_NORETURN
++#define HAVE_ATTRIBUTE_PACKED
++#define HAVE_ATTRIBUTE_PURE
++#define HAVE_ATTRIBUTE_RETURNS_NONNULL
++#define HAVE_ATTRIBUTE_WARN_UNUSED_RESULT
++#define HAVE_ATTRIBUTE_WEAK
++#define HAVE_BSEARCH
++#define HAVE_BUILTIN_ASSUME_ALIGNED
++#define HAVE_BUILTIN_BSWAP32
++#define HAVE_BUILTIN_CABS
++#define HAVE_BUILTIN_CABSF
++#define HAVE_BUILTIN_CABSL
++#define HAVE_BUILTIN_CBRT
++#define HAVE_BUILTIN_CBRTF
++#define HAVE_BUILTIN_CBRTL
++#define HAVE_BUILTIN_CCOS
++#define HAVE_BUILTIN_CCOSF
++#define HAVE_BUILTIN_CCOSH
++#define HAVE_BUILTIN_CCOSHF
++#define HAVE_BUILTIN_CCOSHL
++#define HAVE_BUILTIN_CCOSL
++#define HAVE_BUILTIN_CEXP
++#define HAVE_BUILTIN_CEXPF
++#define HAVE_BUILTIN_CEXPL
++#define HAVE_BUILTIN_CLOG
++#define HAVE_BUILTIN_CLOGF
++#define HAVE_BUILTIN_CLOGL
++#define HAVE_BUILTIN_CLZ
++#define HAVE_BUILTIN_CLZL
++#define HAVE_BUILTIN_CLZLL
++#define HAVE_BUILTIN_COMPLEX
++#define HAVE_BUILTIN_CONSTANT_P
++#define HAVE_BUILTIN_COS
++#define HAVE_BUILTIN_COSF
++#define HAVE_BUILTIN_COSH
++#define HAVE_BUILTIN_COSHF
++#define HAVE_BUILTIN_COSHL
++#define HAVE_BUILTIN_COSL
++#define HAVE_BUILTIN_CPOW
++#define HAVE_BUILTIN_CPOWF
++#define HAVE_BUILTIN_CPOWL
++#define HAVE_BUILTIN_CSIN
++#define HAVE_BUILTIN_CSINF
++#define HAVE_BUILTIN_CSINH
++#define HAVE_BUILTIN_CSINHF
++#define HAVE_BUILTIN_CSINHL
++#define HAVE_BUILTIN_CSINL
++#define HAVE_BUILTIN_CSQRT
++#define HAVE_BUILTIN_CSQRTF
++#define HAVE_BUILTIN_CSQRTL
++#define HAVE_BUILTIN_CTAN
++#define HAVE_BUILTIN_CTANF
++#define HAVE_BUILTIN_CTANH
++#define HAVE_BUILTIN_CTANHF
++#define HAVE_BUILTIN_CTANHL
++#define HAVE_BUILTIN_CTANL
++#define HAVE_BUILTIN_CTZ
++#define HAVE_BUILTIN_EXP
++#define HAVE_BUILTIN_EXP10
++#define HAVE_BUILTIN_EXP10F
++#define HAVE_BUILTIN_EXP10L
++#define HAVE_BUILTIN_EXP2
++#define HAVE_BUILTIN_EXP2F
++#define HAVE_BUILTIN_EXP2L
++#define HAVE_BUILTIN_EXPECT
++#define HAVE_BUILTIN_EXPF
++#define HAVE_BUILTIN_EXPL
++#define HAVE_BUILTIN_FABS
++#define HAVE_BUILTIN_FABSF
++#define HAVE_BUILTIN_FABSL
++#define HAVE_BUILTIN_FMA
++#define HAVE_BUILTIN_FMAF
++#define HAVE_BUILTIN_HYPOT
++#define HAVE_BUILTIN_HYPOTF
++#define HAVE_BUILTIN_HYPOTL
++#define HAVE_BUILTIN_J0
++#define HAVE_BUILTIN_J0F
++#define HAVE_BUILTIN_J0L
++#define HAVE_BUILTIN_J1
++#define HAVE_BUILTIN_J1F
++#define HAVE_BUILTIN_J1L
++#define HAVE_BUILTIN_JN
++#define HAVE_BUILTIN_JNF
++#define HAVE_BUILTIN_JNL
++#define HAVE_BUILTIN_LGAMMA
++#define HAVE_BUILTIN_LGAMMAF
++#define HAVE_BUILTIN_LGAMMAL
++#define HAVE_BUILTIN_LLABS
++#define HAVE_BUILTIN_LOG
++#define HAVE_BUILTIN_LOG10
++#define HAVE_BUILTIN_LOG10F
++#define HAVE_BUILTIN_LOG10L
++#define HAVE_BUILTIN_LOG2
++#define HAVE_BUILTIN_LOG2F
++#define HAVE_BUILTIN_LOG2L
++#define HAVE_BUILTIN_LOGB
++#define HAVE_BUILTIN_LOGBF
++#define HAVE_BUILTIN_LOGBL
++#define HAVE_BUILTIN_LOGF
++#define HAVE_BUILTIN_LOGL
++#define HAVE_BUILTIN_MEMCMP
++#define HAVE_BUILTIN_MEMCPY
++#define HAVE_BUILTIN_MEMMOVE
++#define HAVE_BUILTIN_MEMSET
++#define HAVE_BUILTIN_PARITY
++#define HAVE_BUILTIN_POPCOUNT
++#define HAVE_BUILTIN_POPCOUNTL
++#define HAVE_BUILTIN_POPCOUNTLL
++#define HAVE_BUILTIN_POW
++#define HAVE_BUILTIN_POWF
++#define HAVE_BUILTIN_POWL
++#define HAVE_BUILTIN_PREFETCH
++#define HAVE_BUILTIN_RINT
++#define HAVE_BUILTIN_RINTL
++#define HAVE_BUILTIN_ROUNDL
++#define HAVE_BUILTIN_SHUFFLE
++#define HAVE_BUILTIN_SIN
++#define HAVE_BUILTIN_SINCOS
++#define HAVE_BUILTIN_SINCOSF
++#define HAVE_BUILTIN_SINCOSL
++#define HAVE_BUILTIN_SINF
++#define HAVE_BUILTIN_SINH
++#define HAVE_BUILTIN_SINHF
++#define HAVE_BUILTIN_SINHL
++#define HAVE_BUILTIN_SINL
++#define HAVE_BUILTIN_SQRT
++#define HAVE_BUILTIN_SQRTF
++#define HAVE_BUILTIN_SQRTL
++#define HAVE_BUILTIN_STRCHR
++#define HAVE_BUILTIN_STRCMP
++#define HAVE_BUILTIN_STRCSPN
++#define HAVE_BUILTIN_STRDUP
++#define HAVE_BUILTIN_STRLEN
++#define HAVE_BUILTIN_STRNCMP
++#define HAVE_BUILTIN_STRRCHR
++#define HAVE_BUILTIN_STRSTR
++#define HAVE_BUILTIN_TAN
++#define HAVE_BUILTIN_TANF
++#define HAVE_BUILTIN_TANH
++#define HAVE_BUILTIN_TANHF
++#define HAVE_BUILTIN_TANHL
++#define HAVE_BUILTIN_TANL
++#define HAVE_BUILTIN_TGAMMA
++#define HAVE_BUILTIN_TGAMMAF
++#define HAVE_BUILTIN_TGAMMAL
++#define HAVE_BUILTIN_THREAD_POINTER
++#define HAVE_BUILTIN_Y0
++#define HAVE_BUILTIN_Y0F
++#define HAVE_BUILTIN_Y0L
++#define HAVE_BUILTIN_Y1
++#define HAVE_BUILTIN_Y1F
++#define HAVE_BUILTIN_Y1L
++#define HAVE_BUILTIN_YN
++#define HAVE_BUILTIN_YNF
++#define HAVE_BUILTIN_YNL
++#define HAVE_BUILTIN___CLEAR_CACHE
++#define HAVE_CABSL
++#define HAVE_CBRT
++#define HAVE_CBRTF
++#define HAVE_CBRTL
++#define HAVE_CCOS
++#define HAVE_CCOSF
++#define HAVE_CCOSH
++#define HAVE_CCOSHF
++#define HAVE_CCOSHL
++#define HAVE_CCOSL
++#define HAVE_CEXP
++#define HAVE_CEXPF
++#define HAVE_CEXPL
++#define HAVE_CIMAG
++#define HAVE_CIMAGF
++#define HAVE_CIMAGL
++#define HAVE_CLOG
++#define HAVE_CLOGF
++#define HAVE_CLOGL
++#define HAVE_COMPLEX
++#define HAVE_COMPLEX_H
++#define HAVE_COSH
++#define HAVE_COSHF
++#define HAVE_COSHL
++#define HAVE_COSL
++#define HAVE_CPOW
++#define HAVE_CPOWF
++#define HAVE_CPOWL
++#define HAVE_CREAL
++#define HAVE_CREALF
++#define HAVE_CREALL
++#define HAVE_CSIN
++#define HAVE_CSINF
++#define HAVE_CSINH
++#define HAVE_CSINHF
++#define HAVE_CSINHL
++#define HAVE_CSINL
++#define HAVE_CSQRT
++#define HAVE_CSQRTF
++#define HAVE_CSQRTL
++#define HAVE_CTAN
++#define HAVE_CTANF
++#define HAVE_CTANH
++#define HAVE_CTANHF
++#define HAVE_CTANHL
++#define HAVE_CTANL
++#define HAVE_DADDR_T
++#define HAVE_DRAND48
++#define HAVE_EXP
++#define HAVE_EXP10
++#define HAVE_EXP10F
++#define HAVE_EXP10L
++#define HAVE_EXP2
++#define HAVE_EXP2F
++#define HAVE_EXP2L
++#define HAVE_EXPF
++#define HAVE_EXPL
++#define HAVE_FAST_MATH
++#define HAVE_FENV_H
++#define HAVE_FLOAT_H
++#define HAVE_FMA
++#define HAVE_FMAF
++#define HAVE_GETAUXVAL
++#define HAVE_GETPAGESIZE
++#define HAVE_HSEARCH
++#define HAVE_HYPOT
++#define HAVE_HYPOTF
++#define HAVE_HYPOTL
++#define HAVE_INT_FAST16_T
++#define HAVE_INT_FAST32_T
++#define HAVE_INT_FAST64_T
++#define HAVE_INT_FAST8_T
++#define HAVE_IOVEC
++#define HAVE_J0
++#define HAVE_J0F
++#define HAVE_J1
++#define HAVE_J1F
++#define HAVE_JN
++#define HAVE_JNF
++#define HAVE_LABEL_AS_VALUE
++#define HAVE_LGAMMA
++#define HAVE_LGAMMAF
++#define HAVE_LGAMMAL
++#define HAVE_LIBGEN_H
++#define HAVE_LIB_RT
++#define HAVE_LOCALE_H
++#define HAVE_LOCALTIME_R
++#define HAVE_LOG
++#define HAVE_LOG10
++#define HAVE_LOG10F
++#define HAVE_LOG10L
++#define HAVE_LOG2
++#define HAVE_LOG2F
++#define HAVE_LOG2L
++#define HAVE_LOGB
++#define HAVE_LOGBF
++#define HAVE_LOGBL
++#define HAVE_LOGF
++#define HAVE_LOGL
++#define HAVE_LRAND48
++#define HAVE_MALLOC_H
++#define HAVE_MODE_T
++#define HAVE_MTX_T
++#define HAVE_OFF64_T
++#define HAVE_OFF_T
++#define HAVE_POW
++#define HAVE_POWF
++#define HAVE_POWL
++#define HAVE_PRAGMA
++#define HAVE_PRAGMA_INSIDE
++#define HAVE_PRAGMA_PREFETCH
++#define HAVE_PTHREAD_MUTEXATTR_T
++#define HAVE_PTHREAD_MUTEX_T
++#define HAVE_QSORT
++#define HAVE_RANDOM
++#define HAVE_RINTL
++#define HAVE_ROUNDL
++#define HAVE_SEARCH_H
++#define HAVE_SEED48
++#define HAVE_SETVBUF
++#define HAVE_SINCOS
++#define HAVE_SINCOSF
++#define HAVE_SINCOSL
++#define HAVE_SINH
++#define HAVE_SINHF
++#define HAVE_SINHL
++#define HAVE_SINL
++#define HAVE_SQRT
++#define HAVE_SQRTF
++#define HAVE_SQRTL
++#define HAVE_SRAND48
++#define HAVE_SRANDOM
++#define HAVE_STRINGS_H
++#define HAVE_STRTOK_R
++#define HAVE_SYNC_BOOL_COMPARE_AND_SWAP
++#define HAVE_SYNC_SYNCHRONIZE
++#define HAVE_SYNC_VAL_COMPARE_AND_SWAP
++#define HAVE_SYS_AUXV_H
++#define HAVE_SYS_FILE_H
++#define HAVE_SYS_PARAM_H
++#define HAVE_SYS_QUEUE_H
++#define HAVE_SYS_UIO_H
++#define HAVE_TANHL
++#define HAVE_TANL
++#define HAVE_TGAMMA
++#define HAVE_TGAMMAF
++#define HAVE_TGAMMAL
++#define HAVE_TIME
++#define HAVE_TSEARCH
++#define HAVE_TYPEOF
++#define HAVE_VLA_ARG
++#define HAVE_WCHAR_H
++#define HAVE_Y0
++#define HAVE_Y0F
++#define HAVE_Y1
++#define HAVE_Y1F
++#define HAVE_YN
++#define HAVE_YNF
++#define HAVE___RESTRICT
++#define HAVE___RSEQ_OFFSET
++
++#if defined(CONFIG_COMMON_LIBC_THRD)
++#define HAVE_MTX_DESTROY
++#define HAVE_MTX_INIT
++#define HAVE_THREADS_H
++#endif
++
++#if defined(CONFIG_EVENTFD)
++#define HAVE_EVENTFD
++#define HAVE_SYS_EVENTFD_H
++#endif
++
++#if defined(CONFIG_POSIX_ADVISORY_INFO)
++#define HAVE_POSIX_FADVISE
++#define HAVE_POSIX_FALLOCATE
++#define HAVE_POSIX_MADVISE
++#define HAVE_POSIX_MEMALIGN
++#endif
++
++#if defined(CONFIG_POSIX_ASYNCHRONOUS_IO)
++#define HAVE_AIO_CANCEL
++#define HAVE_AIO_FSYNC
++#define HAVE_AIO_H
++#define HAVE_AIO_READ
++#define HAVE_AIO_WRITE
++#endif
++
++#if defined(CONFIG_POSIX_BARRIERS)
++#define HAVE_PTHREAD_BARRIER
++#endif
++
++#if defined(CONFIG_POSIX_CLOCK_SELECTION)
++#define HAVE_CLOCK_NANOSLEEP
++#endif
++
++#if defined(CONFIG_POSIX_C_LIB_EXT)
++#define HAVE_GETENTROPY
++#endif
++
++#if defined(CONFIG_POSIX_DEVICE_IO)
++#define HAVE_POLL
++#define HAVE_POLL_H
++#define HAVE_PREAD
++#define HAVE_PSELECT
++#define HAVE_PWRITE
++#define HAVE_SELECT
++#define HAVE_SYS_SELECT_H
++#endif
++
++#if defined(CONFIG_POSIX_DEVICE_SPECIFIC)
++#define HAVE_TCDRAIN
++#define HAVE_TCFLOW
++#define HAVE_TCFLUSH
++#define HAVE_TCGETATTR
++#define HAVE_TERMIOS_H
++#define HAVE_TTYNAME
++#endif
++
++#if defined(CONFIG_POSIX_FIFO)
++#define HAVE_MKFIFO
++#endif
++
++#if defined(CONFIG_POSIX_FIFO_FD)
++#define HAVE_MKNODAT
++#endif
++
++#if defined(CONFIG_POSIX_FILE_ATTRIBUTES_FD)
++#define HAVE_FCHMODAT
++#define HAVE_FCHOWNAT
++#endif
++
++#if defined(CONFIG_POSIX_FILE_SYSTEM)
++#define HAVE_FSTAT
++#define HAVE_PATHCONF
++#define HAVE_STAT
++#define HAVE_SYS_STATVFS_H
++#define HAVE_UTIMBUF
++#define HAVE_UTIME
++#define HAVE_UTIME_H
++#endif
++
++#if defined(CONFIG_POSIX_FILE_SYSTEM_FD)
++#define HAVE_FACCESSAT
++#define HAVE_FSTATAT
++#define HAVE_LINKAT
++#define HAVE_MKDIRAT
++#define HAVE_OPENAT
++#define HAVE_RENAMEAT
++#define HAVE_UNLINKAT
++#define HAVE_UTIMENSAT
++#endif
++
++#if defined(CONFIG_POSIX_FSYNC)
++#define HAVE_FSYNC
++#endif
++
++#if defined(CONFIG_POSIX_MAPPED_FILES)
++#define HAVE_MSYNC
++#endif
++
++#if defined(CONFIG_POSIX_MEMLOCK)
++#define HAVE_MUNLOCKALL
++#endif
++
++#if CONFIG_POSIX_MEMLOCK_RANGE && CONFIG_DEMAND_PAGING
++#define HAVE_MLOCK
++#define HAVE_MUNLOCK
++#endif
++
++#if defined(CONFIG_POSIX_MEMORY_PROTECTION)
++#define HAVE_MPROTECT
++#endif
++
++#if defined(CONFIG_POSIX_MESSAGE_PASSING)
++#define HAVE_MQUEUE_H
++#define HAVE_MQ_POSIX
++#endif
++
++#if defined(CONFIG_POSIX_MULTI_PROCESS)
++#define HAVE_GETPGID
++#define HAVE_GETPGRP
++#define HAVE_GETSID
++#define HAVE_SETPGID
++#define HAVE_WAITID
++#define HAVE_WAITPID
++#endif
++
++#if defined(CONFIG_POSIX_NETWORKING)
++#define HAVE_GETHOSTNAME
++#define HAVE_ICMPHDR
++#define HAVE_IFADDRS_H
++#define HAVE_IFREQ
++#define HAVE_IPHDR
++#define HAVE_NETINET_IP_H
++#define HAVE_NETINET_IP_ICMP_H
++#define HAVE_NETINET_TCP_H
++#define HAVE_NET_IF_H
++#define HAVE_SOCKADDR_UN
++#define HAVE_SYS_UN_H
++#endif
++
++#if defined(CONFIG_POSIX_NON_PORTABLE)
++#define HAVE_PTHREAD_SETAFFINITY_NP
++#endif
++
++#if defined(CONFIG_POSIX_PRIORITY_SCHEDULING)
++#define HAVE_SCHED_GET_PRIORITY_MAX
++#define HAVE_SCHED_GET_PRIORITY_MIN
++#define HAVE_SCHED_RR_GET_INTERVAL
++#define HAVE_SCHED_SETSCHEDULER
++#endif
++
++#if defined(CONFIG_POSIX_REALTIME_SIGNALS)
++#define HAVE_SIGQUEUE
++#define HAVE_SIGWAITINFO
++#endif
++
++#if defined(CONFIG_POSIX_REGEXP)
++#define HAVE_REGCOMP
++#define HAVE_REGERROR
++#define HAVE_REGEXEC
++#define HAVE_REGEX_H
++#define HAVE_REGFREE
++#endif
++
++#if defined(CONFIG_POSIX_SEMAPHORES)
++#define HAVE_SEMAPHORE_H
++#define HAVE_SEM_POSIX
++#endif
++
++#if defined(CONFIG_POSIX_SHARED_MEMORY_OBJECTS)
++#define HAVE_SHM_OPEN
++#define HAVE_SHM_UNLINK
++#endif
++
++#if defined(CONFIG_POSIX_SIGNALS)
++#define HAVE_PAUSE
++#endif
++
++#if defined(CONFIG_POSIX_SIGNAL_JUMP)
++#define HAVE_SIGLONGJMP
++#endif
++
++#if defined(CONFIG_POSIX_SINGLE_PROCESS)
++#define HAVE_SYS_UTSNAME_H
++#define HAVE_UNAME
++#endif
++
++#if defined(CONFIG_POSIX_SPAWN)
++#define HAVE_POSIX_SPAWN
++#define HAVE_SPAWN_H
++#endif
++
++#if defined(CONFIG_POSIX_SPIN_LOCKS)
++#define HAVE_LIB_PTHREAD_SPINLOCK
++#endif
++
++#if defined(CONFIG_POSIX_SYMBOLIC_LINKS)
++#define HAVE_LSTAT
++#endif
++
++#if defined(CONFIG_POSIX_SYMBOLIC_LINKS_FD)
++#define HAVE_READLINKAT
++#define HAVE_SYMLINKAT
++#endif
++
++#if defined(CONFIG_POSIX_SYNCHRONIZED_IO)
++#define HAVE_FDATASYNC
++#endif
++
++#if defined(CONFIG_POSIX_SYSTEM_DATABASE)
++#define HAVE_GRP_H
++#endif
++
++#if defined(CONFIG_POSIX_SYSTEM_DATABASE_R)
++#define HAVE_GETPWUID_R
++#endif
++
++#if defined(CONFIG_POSIX_THREADS)
++#define HAVE_LIB_PTHREAD
++#define HAVE_PTHREAD_ATTR_SETSTACK
++#define HAVE_PTHREAD_H
++#define HAVE_PTHREAD_MUTEXATTR_DESTROY
++#define HAVE_PTHREAD_MUTEXATTR_INIT
++#define HAVE_PTHREAD_MUTEXATTR_SETPRIOCEILING
++#define HAVE_PTHREAD_MUTEX_DESTROY
++#define HAVE_PTHREAD_MUTEX_INIT
++#define HAVE_PTHREAD_PRIO_NONE
++#define HAVE_SCHED_YIELD
++#endif
++
++#if defined(CONFIG_POSIX_THREAD_PRIORITY_SCHEDULING)
++#define HAVE_PTHREAD_SETSCHEDPARAM
++#endif
++
++#if defined(CONFIG_POSIX_THREAD_PRIO_INHERIT)
++#define HAVE_PTHREAD_PRIO_INHERIT
++#endif
++
++#if CONFIG_POSIX_THREAD_PRIO_INHERIT || CONFIG_POSIX_THREAD_PRIO_PROTECT
++#define HAVE_PTHREAD_MUTEXATTR_SETPROTOCOL
++#endif
++
++#if defined(CONFIG_POSIX_THREAD_PRIO_PROTECT)
++#define HAVE_PTHREAD_PRIO_PROTECT
++#endif
++
++#if defined(CONFIG_POSIX_TIMERS)
++#define HAVE_CLOCK_GETRES
++#define HAVE_CLOCK_GETTIME
++#define HAVE_CLOCK_SETTIME
++#define HAVE_NANOSLEEP
++#define HAVE_TIMER_CREATE
++#define HAVE_TIMER_DELETE
++#define HAVE_TIMER_GETOVERRUN
++#define HAVE_TIMER_GETTIME
++#define HAVE_TIMER_SETTIME
++#endif
++
++#if defined(CONFIG_POSIX_USER_GROUPS)
++#define HAVE_GETGROUPS
++#define HAVE_GETLOGIN
++#endif
++
++#if defined(CONFIG_XSI_SINGLE_PROCESS)
++#define HAVE_GETHOSTID
++#endif
++
++#if defined(CONFIG_XSI_SYSTEM_LOGGING)
++#define HAVE_SYSLOG_H
++#endif
++
++#if defined(CONFIG_64BIT)
++#define HAVE_ATOMIC_FETCH_ADD_8
++#define HAVE_INT128_T
++#endif
++
++#if CONFIG_ARM || CONFIG_ARM64
++#define HAVE_ASM_ARM_DMB_SY
++#define HAVE_ASM_ARM_ISB
++#define HAVE_ASM_ARM_YIELD
++#endif
++
++#if defined(CONFIG_ARM64)
++#define HAVE_ASM_ARM_PRFM
++#define HAVE_ASM_ARM_TLBI
++#endif
++
++#if defined(CONFIG_RISCV)
++#define HAVE_ASM_RISCV_CBO_MNEMONIC
++#define HAVE_ASM_RISCV_FENCE
++#define HAVE_ASM_RISCV_FENCE_I
++#define HAVE_ASM_RISCV_FENCE_RW
++#define HAVE_ASM_RISCV_SFENCE_VMA
++#endif
++
++#if defined(CONFIG_X86)
++#define HAVE_ASM_X86_CLDEMOTE
++#define HAVE_ASM_X86_CLFLUSH
++#define HAVE_ASM_X86_CLFLUSHOPT
++#define HAVE_ASM_X86_CLTS
++#define HAVE_ASM_X86_CLWB
++#define HAVE_ASM_X86_HLT
++#define HAVE_ASM_X86_INVD
++#define HAVE_ASM_X86_INVLPG
++#define HAVE_ASM_X86_LFENCE
++#define HAVE_ASM_X86_LGDT
++#define HAVE_ASM_X86_LLDT
++#define HAVE_ASM_X86_LMSW
++#define HAVE_ASM_X86_MFENCE
++#define HAVE_ASM_X86_MOVDIRI
++#define HAVE_ASM_X86_MOV_CR0
++#define HAVE_ASM_X86_MOV_DR0
++#define HAVE_ASM_X86_PAUSE
++#define HAVE_ASM_X86_PREFETCHNTA
++#define HAVE_ASM_X86_PREFETCHT0
++#define HAVE_ASM_X86_PREFETCHT1
++#define HAVE_ASM_X86_PREFETCHT2
++#define HAVE_ASM_X86_PREFETCHW
++#define HAVE_ASM_X86_PREFETCHWT1
++#define HAVE_ASM_X86_RDMSR
++#define HAVE_ASM_X86_RDPMC
++#define HAVE_ASM_X86_RDRAND
++#define HAVE_ASM_X86_RDSEED
++#define HAVE_ASM_X86_RDTSC
++#define HAVE_ASM_X86_RDTSCP
++#define HAVE_ASM_X86_SFENCE
++#define HAVE_ASM_X86_WRINVD
++#define HAVE_ASM_X86_WRMSR
++#define HAVE_BUILTIN_SUPPORTS
++#define HAVE_IMMINTRIN_H
++#define HAVE_INTRINSIC_ROLB
++#define HAVE_INTRINSIC_ROLD
++#define HAVE_INTRINSIC_ROLW
++#define HAVE_INTRINSIC_RORB
++#define HAVE_INTRINSIC_RORD
++#define HAVE_INTRINSIC_RORW
++#define HAVE_M128I_U
++#define HAVE_MM_ADD_EPI8
++#define HAVE_MM_DPBUSD_EPI32
++#define HAVE_MM_DPWSSD_EPI32
++#define HAVE_MM_LOADU_SI128
++#define HAVE_MM_STOREU_SI128
++#define HAVE_V2DI
++#define HAVE_X86INTRIN_H
++#define HAVE_XMMINTRIN_H
++#endif
++
++#if defined(CONFIG_X86_64)
++#define HAVE_ASM_X86_LAHF
++#define HAVE_ASM_X86_MOVNTDQA
++#define HAVE_ASM_X86_REP_STOSB
++#define HAVE_ASM_X86_REP_STOSD
++#define HAVE_ASM_X86_REP_STOSQ
++#define HAVE_ASM_X86_REP_STOSW
++#define HAVE_ASM_X86_SERIALIZE
++#define HAVE_ASM_X86_TPAUSE
++#define HAVE_BUILTIN_IA32_MOVNTDQ
++#define HAVE_BUILTIN_IA32_MOVNTI
++#define HAVE_BUILTIN_IA32_MOVNTI64
++#define HAVE_BUILTIN_SFENCE
++#define HAVE_INTRINSIC_ROLQ
++#define HAVE_INTRINSIC_RORQ
++#define HAVE_MM_GETCSR
++#define HAVE_MM_SETCSR
++#endif
++
++/*
++ * Declared by the headers but implemented nowhere, or unsafe to use (the
++ * picolibc allocator entry points would displace the Zephyr heap):
++ * HAVE_BRK HAVE_CHROOT HAVE_DUP3 HAVE_ENDPWENT HAVE_EXECUTABLE_START HAVE_FEXECVE
++ * HAVE_FGETXATTR HAVE_FLISTXATTR HAVE_FLOCK HAVE_FREMOVEXATTR HAVE_FSETXATTR HAVE_FUTIMENS
++ * HAVE_GETDOMAINNAME HAVE_GETDTABLESIZE HAVE_GETPWENT HAVE_GETRUSAGE HAVE_GETXATTR HAVE_J0L
++ * HAVE_J1L HAVE_JNL HAVE_LD_WRAP_CPU_INDICATOR_INIT HAVE_LGETXATTR HAVE_LIB_GENL HAVE_LIB_NL
++ * HAVE_LISTXATTR HAVE_LISTXATTRAT HAVE_LLISTXATTR HAVE_LOCKF HAVE_LREMOVEXATTR HAVE_LSEEK64
++ * HAVE_LSETXATTR HAVE_M256I_U HAVE_MALLOC_TRIM HAVE_MALLOC_USABLE_SIZE HAVE_MALLOPT HAVE_MEMALIGN
++ * HAVE_MKNOD HAVE_MM256_ADD_EPI8 HAVE_MM256_DPBUSD_EPI32 HAVE_MM256_DPWSSD_EPI32 HAVE_MM256_LOADU_SI256 HAVE_MM256_STOREU_SI256
++ * HAVE_MM512_ADD_EPI8 HAVE_MM512_DPBUSD_EPI32 HAVE_MM512_DPWSSD_EPI32 HAVE_MM512_LOADU_SI512 HAVE_MM512_STOREU_SI512 HAVE_NICE
++ * HAVE_PIPE2 HAVE_PTHREAD_MUTEXATTR_SETROBUST HAVE_READV HAVE_REMOVEXATTR HAVE_SBRK HAVE_SCHED_GETCPU
++ * HAVE_SETGROUPS HAVE_SETPGRP HAVE_SETPWENT HAVE_SETREGID HAVE_SETREUID HAVE_SETTIMEOFDAY
++ * HAVE_SETXATTR HAVE_SIGALTSTACK HAVE_SYNC HAVE_SYS_TREE_H HAVE_UTIMES HAVE_VALLOC
++ * HAVE_VFORK HAVE_VHANGUP HAVE_WRITEV HAVE_Y0L HAVE_Y1L HAVE_YNL
++ */
++
++#endif /* STRESS_NG_ZEPHYR_CONFIG_H */
+diff --git a/zephyr/include/stress_ng.h b/zephyr/include/stress_ng.h
+new file mode 100644
+--- /dev/null
++++ b/zephyr/include/stress_ng.h
+@@ -0,0 +1,64 @@
++/*
++ * SPDX-License-Identifier: GPL-2.0-or-later
++ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++ */
++
++#ifndef STRESS_NG_ZEPHYR_STRESS_NG_H_
++#define STRESS_NG_ZEPHYR_STRESS_NG_H_
++
++#include <stddef.h>
++#include <stdint.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/** Exit statuses of stress_ng_run(), as the stress-ng driver reports them */
++enum stress_ng_exit {
++	STRESS_NG_EXIT_SUCCESS = 0,
++	STRESS_NG_EXIT_FAILURE = 1,
++	STRESS_NG_EXIT_NOT_SUCCESS = 2,
++	STRESS_NG_EXIT_NO_RESOURCE = 3,
++	STRESS_NG_EXIT_NOT_IMPLEMENTED = 4,
++	STRESS_NG_EXIT_SIGNALED = 5,
++	STRESS_NG_EXIT_BY_SYS_EXIT = 6,
++	STRESS_NG_EXIT_METRICS_UNTRUSTWORTHY = 7,
++};
++
++struct stress_ng_opts {
++	/** run time in seconds, 0 for CONFIG_STRESS_NG_DEFAULT_TIMEOUT */
++	uint32_t timeout_s;
++	/** stop after this many bogo operations, 0 for no limit */
++	uint64_t max_ops;
++};
++
++/**
++ * Run one instance of a stressor in the calling thread
++ *
++ * @param name stressor name as the command line driver spells it, e.g. "nanosleep"
++ * @param opts run options, or NULL for the defaults
++ * @return an @ref stress_ng_exit status
++ */
++int stress_ng_run(const char *name, const struct stress_ng_opts *opts);
++
++/**
++ * Release the runner after a thread stuck in stress_ng_run() was aborted
++ *
++ * For test harnesses that run stressors in a thread with a watchdog.
++ */
++void stress_ng_reset(void);
++
++/** Describe an @ref stress_ng_exit status */
++const char *stress_ng_strexit(int status);
++
++/** Number of stressors built in */
++size_t stress_ng_stressor_count(void);
++
++/** Name of the i-th stressor built in, or NULL */
++const char *stress_ng_stressor_name(size_t i);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* STRESS_NG_ZEPHYR_STRESS_NG_H_ */
+diff --git a/zephyr/include/stress_ng_stressors.h b/zephyr/include/stress_ng_stressors.h
+new file mode 100644
+--- /dev/null
++++ b/zephyr/include/stress_ng_stressors.h
+@@ -0,0 +1,943 @@
++/*
++ * SPDX-License-Identifier: GPL-2.0-or-later
++ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++ *
++ * Generated by zephyr/scripts/gen_glue.py from core-stressors.h; do not edit.
++ * The includer defines STRESS_NG_STRESSOR(symbol, name).
++ */
++#ifdef CONFIG_STRESS_NG_STRESSOR_ACL
++STRESS_NG_STRESSOR(acl, "acl")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_ACCT
++STRESS_NG_STRESSOR(acct, "acct")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_AF_ALG
++STRESS_NG_STRESSOR(af_alg, "af-alg")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_AFFINITY
++STRESS_NG_STRESSOR(affinity, "affinity")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_AIO
++STRESS_NG_STRESSOR(aio, "aio")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_AIOL
++STRESS_NG_STRESSOR(aiol, "aiol")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_APPARMOR
++STRESS_NG_STRESSOR(apparmor, "apparmor")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_BESSELMATH
++STRESS_NG_STRESSOR(besselmath, "besselmath")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_BIGHEAP
++STRESS_NG_STRESSOR(bigheap, "bigheap")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_BINDERFS
++STRESS_NG_STRESSOR(binderfs, "binderfs")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_BIND_MOUNT
++STRESS_NG_STRESSOR(bind_mount, "bind-mount")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_BITONICSORT
++STRESS_NG_STRESSOR(bitonicsort, "bitonicsort")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_BITOPS
++STRESS_NG_STRESSOR(bitops, "bitops")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_BPF
++STRESS_NG_STRESSOR(bpf, "bpf")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_BRANCH
++STRESS_NG_STRESSOR(branch, "branch")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_BRK
++STRESS_NG_STRESSOR(brk, "brk")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_BSEARCH
++STRESS_NG_STRESSOR(bsearch, "bsearch")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_BUBBLESORT
++STRESS_NG_STRESSOR(bubblesort, "bubblesort")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_CACHE
++STRESS_NG_STRESSOR(cache, "cache")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_CAP
++STRESS_NG_STRESSOR(cap, "cap")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_CGROUP
++STRESS_NG_STRESSOR(cgroup, "cgroup")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_CHATTR
++STRESS_NG_STRESSOR(chattr, "chattr")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_CHDIR
++STRESS_NG_STRESSOR(chdir, "chdir")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_CHMOD
++STRESS_NG_STRESSOR(chmod, "chmod")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_CHOWN
++STRESS_NG_STRESSOR(chown, "chown")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_CHROOT
++STRESS_NG_STRESSOR(chroot, "chroot")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_CHYPERBOLIC
++STRESS_NG_STRESSOR(chyperbolic, "chyperbolic")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_CLOCK
++STRESS_NG_STRESSOR(clock, "clock")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_CLONE
++STRESS_NG_STRESSOR(clone, "clone")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_CONTEXT
++STRESS_NG_STRESSOR(context, "context")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_COPY_FILE
++STRESS_NG_STRESSOR(copy_file, "copy-file")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_CPU
++STRESS_NG_STRESSOR(cpu, "cpu")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_CPU_ONLINE
++STRESS_NG_STRESSOR(cpu_online, "cpu-online")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_CPU_SCHED
++STRESS_NG_STRESSOR(cpu_sched, "cpu-sched")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_CRC
++STRESS_NG_STRESSOR(crc, "crc")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_CRYPT
++STRESS_NG_STRESSOR(crypt, "crypt")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_CTRIG
++STRESS_NG_STRESSOR(ctrig, "ctrig")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_DAEMON
++STRESS_NG_STRESSOR(daemon, "daemon")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_DCCP
++STRESS_NG_STRESSOR(dccp, "dccp")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_DENTRY
++STRESS_NG_STRESSOR(dentry, "dentry")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_DENTRYCACHE
++STRESS_NG_STRESSOR(dentrycache, "dentrycache")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_DEV_SHM
++STRESS_NG_STRESSOR(dev_shm, "dev-shm")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_DFP
++STRESS_NG_STRESSOR(dfp, "dfp")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_DIRDEEP
++STRESS_NG_STRESSOR(dirdeep, "dirdeep")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_DIRMANY
++STRESS_NG_STRESSOR(dirmany, "dirmany")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_DNOTIFY
++STRESS_NG_STRESSOR(dnotify, "dnotify")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_DUP
++STRESS_NG_STRESSOR(dup, "dup")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_DYNLIB
++STRESS_NG_STRESSOR(dynlib, "dynlib")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_EFIVAR
++STRESS_NG_STRESSOR(efivar, "efivar")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_EIGEN
++STRESS_NG_STRESSOR(eigen, "eigen")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_ENV
++STRESS_NG_STRESSOR(env, "env")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_EPOLLMANY
++STRESS_NG_STRESSOR(epollmany, "epollmany")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_ETH_SNIFF
++STRESS_NG_STRESSOR(eth_sniff, "eth-sniff")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_EVENTFD
++STRESS_NG_STRESSOR(eventfd, "eventfd")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_EXEC
++STRESS_NG_STRESSOR(exec, "exec")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_EXIT_GROUP
++STRESS_NG_STRESSOR(exit_group, "exit-group")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_EXPMATH
++STRESS_NG_STRESSOR(expmath, "expmath")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_FACTOR
++STRESS_NG_STRESSOR(factor, "factor")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_FALLOCATE
++STRESS_NG_STRESSOR(fallocate, "fallocate")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_FANOTIFY
++STRESS_NG_STRESSOR(fanotify, "fanotify")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_FAR_BRANCH
++STRESS_NG_STRESSOR(far_branch, "far-branch")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_FAULT
++STRESS_NG_STRESSOR(fault, "fault")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_FCNTL
++STRESS_NG_STRESSOR(fcntl, "fcntl")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_FD_FORK
++STRESS_NG_STRESSOR(fd_fork, "fd-fork")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_FD_RACE
++STRESS_NG_STRESSOR(fd_race, "fd-race")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_FIBSEARCH
++STRESS_NG_STRESSOR(fibsearch, "fibsearch")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_FIEMAP
++STRESS_NG_STRESSOR(fiemap, "fiemap")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_FILE_IOCTL
++STRESS_NG_STRESSOR(file_ioctl, "file-ioctl")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_FILEHOLE
++STRESS_NG_STRESSOR(filehole, "filehole")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_FLIPFLOP
++STRESS_NG_STRESSOR(flipflop, "flipflop")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_FLOCK
++STRESS_NG_STRESSOR(flock, "flock")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_FLUSHCACHE
++STRESS_NG_STRESSOR(flushcache, "flushcache")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_FMA
++STRESS_NG_STRESSOR(fma, "fma")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_FORK
++STRESS_NG_STRESSOR(fork, "fork")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_FORKHEAVY
++STRESS_NG_STRESSOR(forkheavy, "forkheavy")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_FP
++STRESS_NG_STRESSOR(fp, "fp")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_FP_ERROR
++STRESS_NG_STRESSOR(fp_error, "fp-error")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_FP_MISC
++STRESS_NG_STRESSOR(fp_misc, "fp-misc")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_FP_SUBNORMAL
++STRESS_NG_STRESSOR(fp_subnormal, "fp-subnormal")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_FPUNCH
++STRESS_NG_STRESSOR(fpunch, "fpunch")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_FRACTAL
++STRESS_NG_STRESSOR(fractal, "fractal")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_FSIZE
++STRESS_NG_STRESSOR(fsize, "fsize")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_FULL
++STRESS_NG_STRESSOR(full, "full")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_FUNCCALL
++STRESS_NG_STRESSOR(funccall, "funccall")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_FUNCRET
++STRESS_NG_STRESSOR(funcret, "funcret")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_FUTEX
++STRESS_NG_STRESSOR(futex, "futex")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_GAMMA
++STRESS_NG_STRESSOR(gamma, "gamma")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_GETDENT
++STRESS_NG_STRESSOR(getdent, "getdent")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_GETRANDOM
++STRESS_NG_STRESSOR(getrandom, "getrandom")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_GOTO
++STRESS_NG_STRESSOR(goto, "goto")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_GPU
++STRESS_NG_STRESSOR(gpu, "gpu")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_HANDLE
++STRESS_NG_STRESSOR(handle, "handle")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_HASH
++STRESS_NG_STRESSOR(hash, "hash")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_HDD
++STRESS_NG_STRESSOR(hdd, "hdd")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_HEAPSORT
++STRESS_NG_STRESSOR(heapsort, "heapsort")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_HSEARCH
++STRESS_NG_STRESSOR(hsearch, "hsearch")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_HUGEPAGE
++STRESS_NG_STRESSOR(hugepage, "hugepage")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_HYPERBOLIC
++STRESS_NG_STRESSOR(hyperbolic, "hyperbolic")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_ICACHE
++STRESS_NG_STRESSOR(icache, "icache")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_IDLE_PAGE
++STRESS_NG_STRESSOR(idle_page, "idle-page")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_INODE_FLAGS
++STRESS_NG_STRESSOR(inode_flags, "inode-flags")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_INOTIFY
++STRESS_NG_STRESSOR(inotify, "inotify")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_INSERTIONSORT
++STRESS_NG_STRESSOR(insertionsort, "insertionsort")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_INTMATH
++STRESS_NG_STRESSOR(intmath, "intmath")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_IO
++STRESS_NG_STRESSOR(io, "io")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_IOPORT
++STRESS_NG_STRESSOR(ioport, "ioport")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_IOPRIO
++STRESS_NG_STRESSOR(ioprio, "ioprio")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_IO_URING
++STRESS_NG_STRESSOR(io_uring, "io-uring")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_IPSEC_MB
++STRESS_NG_STRESSOR(ipsec_mb, "ipsec-mb")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_ITIMER
++STRESS_NG_STRESSOR(itimer, "itimer")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_JPEG
++STRESS_NG_STRESSOR(jpeg, "jpeg")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_JUDY
++STRESS_NG_STRESSOR(judy, "judy")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_KCMP
++STRESS_NG_STRESSOR(kcmp, "kcmp")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_KEY
++STRESS_NG_STRESSOR(key, "key")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_KILL
++STRESS_NG_STRESSOR(kill, "kill")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_KLOG
++STRESS_NG_STRESSOR(klog, "klog")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_KVM
++STRESS_NG_STRESSOR(kvm, "kvm")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_L1CACHE
++STRESS_NG_STRESSOR(l1cache, "l1cache")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_LANDLOCK
++STRESS_NG_STRESSOR(landlock, "landlock")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_LEASE
++STRESS_NG_STRESSOR(lease, "lease")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_LED
++STRESS_NG_STRESSOR(led, "led")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_LINK
++STRESS_NG_STRESSOR(link, "link")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_LIST
++STRESS_NG_STRESSOR(list, "list")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_LLC_AFFINITY
++STRESS_NG_STRESSOR(llc_affinity, "llc-affinity")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_LOADAVG
++STRESS_NG_STRESSOR(loadavg, "loadavg")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_LOCKBUS
++STRESS_NG_STRESSOR(lockbus, "lockbus")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_LOCKF
++STRESS_NG_STRESSOR(lockf, "lockf")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_LOCKOFD
++STRESS_NG_STRESSOR(lockofd, "lockofd")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_LOGMATH
++STRESS_NG_STRESSOR(logmath, "logmath")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_LONGJMP
++STRESS_NG_STRESSOR(longjmp, "longjmp")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_LOOP
++STRESS_NG_STRESSOR(loop, "loop")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_LSEARCH
++STRESS_NG_STRESSOR(lsearch, "lsearch")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_LSM
++STRESS_NG_STRESSOR(lsm, "lsm")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_MADVISE
++STRESS_NG_STRESSOR(madvise, "madvise")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_MALLOC
++STRESS_NG_STRESSOR(malloc, "malloc")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_MATRIX
++STRESS_NG_STRESSOR(matrix, "matrix")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_MATRIX_3D
++STRESS_NG_STRESSOR(matrix_3d, "matrix-3d")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_MEMBARRIER
++STRESS_NG_STRESSOR(membarrier, "membarrier")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_MEMCPY
++STRESS_NG_STRESSOR(memcpy, "memcpy")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_MEMFD
++STRESS_NG_STRESSOR(memfd, "memfd")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_MEMHOTPLUG
++STRESS_NG_STRESSOR(memhotplug, "memhotplug")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_MEMRATE
++STRESS_NG_STRESSOR(memrate, "memrate")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_MEMTHRASH
++STRESS_NG_STRESSOR(memthrash, "memthrash")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_MERGESORT
++STRESS_NG_STRESSOR(mergesort, "mergesort")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_MIN_NANOSLEEP
++STRESS_NG_STRESSOR(min_nanosleep, "min-nanosleep")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_MKNOD
++STRESS_NG_STRESSOR(mknod, "mknod")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_MLOCK
++STRESS_NG_STRESSOR(mlock, "mlock")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_MMAP
++STRESS_NG_STRESSOR(mmap, "mmap")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_MMAPADDR
++STRESS_NG_STRESSOR(mmapaddr, "mmapaddr")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_MMAPCOW
++STRESS_NG_STRESSOR(mmapcow, "mmapcow")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_MMAPFILES
++STRESS_NG_STRESSOR(mmapfiles, "mmapfiles")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_MMAPFIXED
++STRESS_NG_STRESSOR(mmapfixed, "mmapfixed")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_MMAPFORK
++STRESS_NG_STRESSOR(mmapfork, "mmapfork")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_MMAPHUGE
++STRESS_NG_STRESSOR(mmaphuge, "mmaphuge")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_MMAPMANY
++STRESS_NG_STRESSOR(mmapmany, "mmapmany")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_MMAPRANDOM
++STRESS_NG_STRESSOR(mmaprandom, "mmaprandom")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_MODULE
++STRESS_NG_STRESSOR(module, "module")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_MONTE_CARLO
++STRESS_NG_STRESSOR(monte_carlo, "monte-carlo")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_MPFR
++STRESS_NG_STRESSOR(mpfr, "mpfr")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_MREMAP
++STRESS_NG_STRESSOR(mremap, "mremap")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_MSEAL
++STRESS_NG_STRESSOR(mseal, "mseal")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_MSG
++STRESS_NG_STRESSOR(msg, "msg")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_MSYNC
++STRESS_NG_STRESSOR(msync, "msync")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_MSYNCMANY
++STRESS_NG_STRESSOR(msyncmany, "msyncmany")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_MTX
++STRESS_NG_STRESSOR(mtx, "mtx")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_MUNMAP
++STRESS_NG_STRESSOR(munmap, "munmap")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_MUTEX
++STRESS_NG_STRESSOR(mutex, "mutex")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_NANOSLEEP
++STRESS_NG_STRESSOR(nanosleep, "nanosleep")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_NETDEV
++STRESS_NG_STRESSOR(netdev, "netdev")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_NETLINK_PROC
++STRESS_NG_STRESSOR(netlink_proc, "netlink-proc")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_NETLINK_TASK
++STRESS_NG_STRESSOR(netlink_task, "netlink-task")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_NICE
++STRESS_NG_STRESSOR(nice, "nice")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_NOP
++STRESS_NG_STRESSOR(nop, "nop")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_NULL
++STRESS_NG_STRESSOR(null, "null")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_NUMA
++STRESS_NG_STRESSOR(numa, "numa")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_NUMACOPY
++STRESS_NG_STRESSOR(numacopy, "numacopy")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_OOM_PIPE
++STRESS_NG_STRESSOR(oom_pipe, "oom-pipe")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_OVPN
++STRESS_NG_STRESSOR(ovpn, "ovpn")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_PAGEMOVE
++STRESS_NG_STRESSOR(pagemove, "pagemove")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_PAGESWAP
++STRESS_NG_STRESSOR(pageswap, "pageswap")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_PCI
++STRESS_NG_STRESSOR(pci, "pci")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_PERSONALITY
++STRESS_NG_STRESSOR(personality, "personality")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_PHYSPAGE
++STRESS_NG_STRESSOR(physpage, "physpage")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_PHYSMMAP
++STRESS_NG_STRESSOR(physmmap, "physmmap")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_PIDFD
++STRESS_NG_STRESSOR(pidfd, "pidfd")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_PING_SOCK
++STRESS_NG_STRESSOR(ping_sock, "ping-sock")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_PIPEHERD
++STRESS_NG_STRESSOR(pipeherd, "pipeherd")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_PKEY
++STRESS_NG_STRESSOR(pkey, "pkey")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_PLUGIN
++STRESS_NG_STRESSOR(plugin, "plugin")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_POWMATH
++STRESS_NG_STRESSOR(powmath, "powmath")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_PRCTL
++STRESS_NG_STRESSOR(prctl, "prctl")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_PREFETCH
++STRESS_NG_STRESSOR(prefetch, "prefetch")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_PRIME
++STRESS_NG_STRESSOR(prime, "prime")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_PRIO_INV
++STRESS_NG_STRESSOR(prio_inv, "prio-inv")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_PROCFS
++STRESS_NG_STRESSOR(procfs, "procfs")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_PTHREAD
++STRESS_NG_STRESSOR(pthread, "pthread")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_PTRACE
++STRESS_NG_STRESSOR(ptrace, "ptrace")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_PTR_CHASE
++STRESS_NG_STRESSOR(ptr_chase, "ptr-chase")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_PTY
++STRESS_NG_STRESSOR(pty, "pty")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_QSORT
++STRESS_NG_STRESSOR(qsort, "qsort")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_QUOTA
++STRESS_NG_STRESSOR(quota, "quota")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_RACE_SCHED
++STRESS_NG_STRESSOR(race_sched, "race-sched")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_RADIXSORT
++STRESS_NG_STRESSOR(radixsort, "radixsort")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_RAMFS
++STRESS_NG_STRESSOR(ramfs, "ramfs")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_RANDLIST
++STRESS_NG_STRESSOR(randlist, "randlist")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_RAWDEV
++STRESS_NG_STRESSOR(rawdev, "rawdev")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_RAWPKT
++STRESS_NG_STRESSOR(rawpkt, "rawpkt")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_RAWSOCK
++STRESS_NG_STRESSOR(rawsock, "rawsock")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_RAWUDP
++STRESS_NG_STRESSOR(rawudp, "rawudp")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_RDRAND
++STRESS_NG_STRESSOR(rdrand, "rdrand")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_READAHEAD
++STRESS_NG_STRESSOR(readahead, "readahead")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_REBOOT
++STRESS_NG_STRESSOR(reboot, "reboot")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_REGEX
++STRESS_NG_STRESSOR(regex, "regex")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_REGS
++STRESS_NG_STRESSOR(regs, "regs")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_REMAP
++STRESS_NG_STRESSOR(remap, "remap")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_RENAME
++STRESS_NG_STRESSOR(rename, "rename")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_RESCHED
++STRESS_NG_STRESSOR(resched, "resched")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_REVIO
++STRESS_NG_STRESSOR(revio, "revio")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_RING_PIPE
++STRESS_NG_STRESSOR(ring_pipe, "ring-pipe")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_ROFS
++STRESS_NG_STRESSOR(rofs, "rofs")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_ROTATE
++STRESS_NG_STRESSOR(rotate, "rotate")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_RSEQ
++STRESS_NG_STRESSOR(rseq, "rseq")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_RTC
++STRESS_NG_STRESSOR(rtc, "rtc")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_SCHEDMIX
++STRESS_NG_STRESSOR(schedmix, "schedmix")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_SCTP
++STRESS_NG_STRESSOR(sctp, "sctp")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_SEAL
++STRESS_NG_STRESSOR(seal, "seal")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_SECCOMP
++STRESS_NG_STRESSOR(seccomp, "seccomp")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_SECRETMEM
++STRESS_NG_STRESSOR(secretmem, "secretmem")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_SEEK
++STRESS_NG_STRESSOR(seek, "seek")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_SEM
++STRESS_NG_STRESSOR(sem, "sem")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_SEM_SYSV
++STRESS_NG_STRESSOR(sem_sysv, "sem-sysv")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_SENDFILE
++STRESS_NG_STRESSOR(sendfile, "sendfile")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_SESSION
++STRESS_NG_STRESSOR(session, "session")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_SET
++STRESS_NG_STRESSOR(set, "set")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_SHELLSORT
++STRESS_NG_STRESSOR(shellsort, "shellsort")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_SHM_SYSV
++STRESS_NG_STRESSOR(shm_sysv, "shm-sysv")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_SIGCHLD
++STRESS_NG_STRESSOR(sigchld, "sigchld")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_SIGFD
++STRESS_NG_STRESSOR(sigfd, "sigfd")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_SIGHUP
++STRESS_NG_STRESSOR(sighup, "sighup")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_SIGIO
++STRESS_NG_STRESSOR(sigio, "sigio")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_SIGNAL
++STRESS_NG_STRESSOR(signal, "signal")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_SIGPENDING
++STRESS_NG_STRESSOR(sigpending, "sigpending")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_SIGPIPE
++STRESS_NG_STRESSOR(sigpipe, "sigpipe")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_SIGURG
++STRESS_NG_STRESSOR(sigurg, "sigurg")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_SIGVTALRM
++STRESS_NG_STRESSOR(sigvtalrm, "sigvtalrm")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_SIGXCPU
++STRESS_NG_STRESSOR(sigxcpu, "sigxcpu")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_SIGXFSZ
++STRESS_NG_STRESSOR(sigxfsz, "sigxfsz")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_SKIPLIST
++STRESS_NG_STRESSOR(skiplist, "skiplist")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_SLEEP
++STRESS_NG_STRESSOR(sleep, "sleep")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_SMI
++STRESS_NG_STRESSOR(smi, "smi")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_SOCKDIAG
++STRESS_NG_STRESSOR(sockdiag, "sockdiag")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_SOCKFD
++STRESS_NG_STRESSOR(sockfd, "sockfd")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_SPARSEMATRIX
++STRESS_NG_STRESSOR(sparsematrix, "sparsematrix")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_SPAWN
++STRESS_NG_STRESSOR(spawn, "spawn")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_SPEC_ROLLBACK
++STRESS_NG_STRESSOR(spec_rollback, "spec-rollback")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_SPLICE
++STRESS_NG_STRESSOR(splice, "splice")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_STATMOUNT
++STRESS_NG_STRESSOR(statmount, "statmount")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_STR
++STRESS_NG_STRESSOR(str, "str")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_STREAM
++STRESS_NG_STRESSOR(stream, "stream")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_SWAP
++STRESS_NG_STRESSOR(swap, "swap")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_SYMLINK
++STRESS_NG_STRESSOR(symlink, "symlink")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_SYNC_FILE
++STRESS_NG_STRESSOR(sync_file, "sync-file")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_SYNCLOAD
++STRESS_NG_STRESSOR(syncload, "syncload")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_SYSFS
++STRESS_NG_STRESSOR(sysfs, "sysfs")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_SYSINFO
++STRESS_NG_STRESSOR(sysinfo, "sysinfo")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_TEE
++STRESS_NG_STRESSOR(tee, "tee")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_TIMER
++STRESS_NG_STRESSOR(timer, "timer")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_TIMERFD
++STRESS_NG_STRESSOR(timerfd, "timerfd")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_TIMERMIX
++STRESS_NG_STRESSOR(timermix, "timermix")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_TIME_WARP
++STRESS_NG_STRESSOR(time_warp, "time-warp")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_TLB_NUMA
++STRESS_NG_STRESSOR(tlb_numa, "tlb-numa")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_TLB_SHOOTDOWN
++STRESS_NG_STRESSOR(tlb_shootdown, "tlb-shootdown")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_TMPFS
++STRESS_NG_STRESSOR(tmpfs, "tmpfs")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_TREE
++STRESS_NG_STRESSOR(tree, "tree")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_TRIG
++STRESS_NG_STRESSOR(trig, "trig")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_TSC
++STRESS_NG_STRESSOR(tsc, "tsc")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_TSEARCH
++STRESS_NG_STRESSOR(tsearch, "tsearch")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_TUN
++STRESS_NG_STRESSOR(tun, "tun")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_UMOUNT
++STRESS_NG_STRESSOR(umount, "umount")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_UNSHARE
++STRESS_NG_STRESSOR(unshare, "unshare")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_UPROBE
++STRESS_NG_STRESSOR(uprobe, "uprobe")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_URANDOM
++STRESS_NG_STRESSOR(urandom, "urandom")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_USERFAULTFD
++STRESS_NG_STRESSOR(userfaultfd, "userfaultfd")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_USERSYSCALL
++STRESS_NG_STRESSOR(usersyscall, "usersyscall")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_UTIME
++STRESS_NG_STRESSOR(utime, "utime")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_VARYLOAD
++STRESS_NG_STRESSOR(varyload, "varyload")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_VDSO
++STRESS_NG_STRESSOR(vdso, "vdso")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_VECCMP
++STRESS_NG_STRESSOR(veccmp, "veccmp")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_VECFP
++STRESS_NG_STRESSOR(vecfp, "vecfp")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_VECMATH
++STRESS_NG_STRESSOR(vecmath, "vecmath")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_VECSHUF
++STRESS_NG_STRESSOR(vecshuf, "vecshuf")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_VECWIDE
++STRESS_NG_STRESSOR(vecwide, "vecwide")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_VERITY
++STRESS_NG_STRESSOR(verity, "verity")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_VFORK
++STRESS_NG_STRESSOR(vfork, "vfork")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_VFORKMANY
++STRESS_NG_STRESSOR(vforkmany, "vforkmany")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_VM
++STRESS_NG_STRESSOR(vm, "vm")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_VM_ADDR
++STRESS_NG_STRESSOR(vm_addr, "vm-addr")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_VM_RW
++STRESS_NG_STRESSOR(vm_rw, "vm-rw")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_VM_SPLICE
++STRESS_NG_STRESSOR(vm_splice, "vm-splice")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_VNNI
++STRESS_NG_STRESSOR(vnni, "vnni")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_WAIT
++STRESS_NG_STRESSOR(wait, "wait")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_WAITCPU
++STRESS_NG_STRESSOR(waitcpu, "waitcpu")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_WATCHDOG
++STRESS_NG_STRESSOR(watchdog, "watchdog")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_WCS
++STRESS_NG_STRESSOR(wcs, "wcs")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_WORKLOAD
++STRESS_NG_STRESSOR(workload, "workload")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_X86CPUID
++STRESS_NG_STRESSOR(x86cpuid, "x86cpuid")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_X86SYSCALL
++STRESS_NG_STRESSOR(x86syscall, "x86syscall")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_XATTR
++STRESS_NG_STRESSOR(xattr, "xattr")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_YIELD
++STRESS_NG_STRESSOR(yield, "yield")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_ZERO
++STRESS_NG_STRESSOR(zero, "zero")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_ZLIB
++STRESS_NG_STRESSOR(zlib, "zlib")
++#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_ZOMBIE
++STRESS_NG_STRESSOR(zombie, "zombie")
++#endif
+diff --git a/zephyr/stressors.cmake b/zephyr/stressors.cmake
+new file mode 100644
+--- /dev/null
++++ b/zephyr/stressors.cmake
+@@ -0,0 +1,317 @@
++# SPDX-License-Identifier: GPL-2.0-or-later
++# Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++# Generated by zephyr/scripts/gen_glue.py from core-stressors.h; do not edit.
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_ACL ${sng_dir}/stress-acl.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_ACCT ${sng_dir}/stress-acct.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_AF_ALG ${sng_dir}/stress-af-alg.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_AFFINITY ${sng_dir}/stress-affinity.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_AIO ${sng_dir}/stress-aio.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_AIOL ${sng_dir}/stress-aiol.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_APPARMOR ${sng_dir}/stress-apparmor.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_BESSELMATH ${sng_dir}/stress-besselmath.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_BIGHEAP ${sng_dir}/stress-bigheap.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_BINDERFS ${sng_dir}/stress-binderfs.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_BIND_MOUNT ${sng_dir}/stress-bind-mount.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_BITONICSORT ${sng_dir}/stress-bitonicsort.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_BITOPS ${sng_dir}/stress-bitops.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_BPF ${sng_dir}/stress-bpf.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_BRANCH ${sng_dir}/stress-branch.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_BRK ${sng_dir}/stress-brk.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_BSEARCH ${sng_dir}/stress-bsearch.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_BUBBLESORT ${sng_dir}/stress-bubblesort.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_CACHE ${sng_dir}/stress-cache.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_CAP ${sng_dir}/stress-cap.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_CGROUP ${sng_dir}/stress-cgroup.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_CHATTR ${sng_dir}/stress-chattr.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_CHDIR ${sng_dir}/stress-chdir.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_CHMOD ${sng_dir}/stress-chmod.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_CHOWN ${sng_dir}/stress-chown.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_CHROOT ${sng_dir}/stress-chroot.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_CHYPERBOLIC ${sng_dir}/stress-chyperbolic.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_CLOCK ${sng_dir}/stress-clock.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_CLONE ${sng_dir}/stress-clone.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_CONTEXT ${sng_dir}/stress-context.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_COPY_FILE ${sng_dir}/stress-copy-file.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_CPU ${sng_dir}/stress-cpu.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_CPU_ONLINE ${sng_dir}/stress-cpu-online.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_CPU_SCHED ${sng_dir}/stress-cpu-sched.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_CRC ${sng_dir}/stress-crc.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_CRYPT ${sng_dir}/stress-crypt.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_CTRIG ${sng_dir}/stress-ctrig.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_DAEMON ${sng_dir}/stress-daemon.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_DCCP ${sng_dir}/stress-dccp.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_DENTRY ${sng_dir}/stress-dentry.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_DENTRYCACHE ${sng_dir}/stress-dentrycache.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_DEV_SHM ${sng_dir}/stress-dev-shm.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_DFP ${sng_dir}/stress-dfp.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_DIRDEEP ${sng_dir}/stress-dirdeep.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_DIRMANY ${sng_dir}/stress-dirmany.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_DNOTIFY ${sng_dir}/stress-dnotify.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_DUP ${sng_dir}/stress-dup.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_DYNLIB ${sng_dir}/stress-dynlib.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_EFIVAR ${sng_dir}/stress-efivar.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_EIGEN ${sng_dir}/stress-eigen.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_ENV ${sng_dir}/stress-env.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_EPOLLMANY ${sng_dir}/stress-epollmany.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_ETH_SNIFF ${sng_dir}/stress-eth-sniff.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_EVENTFD ${sng_dir}/stress-eventfd.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_EXEC ${sng_dir}/stress-exec.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_EXIT_GROUP ${sng_dir}/stress-exit-group.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_EXPMATH ${sng_dir}/stress-expmath.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_FACTOR ${sng_dir}/stress-factor.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_FALLOCATE ${sng_dir}/stress-fallocate.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_FANOTIFY ${sng_dir}/stress-fanotify.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_FAR_BRANCH ${sng_dir}/stress-far-branch.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_FAULT ${sng_dir}/stress-fault.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_FCNTL ${sng_dir}/stress-fcntl.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_FD_FORK ${sng_dir}/stress-fd-fork.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_FD_RACE ${sng_dir}/stress-fd-race.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_FIBSEARCH ${sng_dir}/stress-fibsearch.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_FIEMAP ${sng_dir}/stress-fiemap.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_FILE_IOCTL ${sng_dir}/stress-file-ioctl.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_FILEHOLE ${sng_dir}/stress-filehole.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_FLIPFLOP ${sng_dir}/stress-flipflop.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_FLOCK ${sng_dir}/stress-flock.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_FLUSHCACHE ${sng_dir}/stress-flushcache.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_FMA ${sng_dir}/stress-fma.c)
++if(CONFIG_STRESS_NG_STRESSOR_FORK OR CONFIG_STRESS_NG_STRESSOR_VFORK)
++  zephyr_library_sources(${sng_dir}/stress-fork.c)
++endif()
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_FORKHEAVY ${sng_dir}/stress-forkheavy.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_FP ${sng_dir}/stress-fp.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_FP_ERROR ${sng_dir}/stress-fp-error.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_FP_MISC ${sng_dir}/stress-fp-misc.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_FP_SUBNORMAL ${sng_dir}/stress-fp-subnormal.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_FPUNCH ${sng_dir}/stress-fpunch.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_FRACTAL ${sng_dir}/stress-fractal.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_FSIZE ${sng_dir}/stress-fsize.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_FULL ${sng_dir}/stress-full.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_FUNCCALL ${sng_dir}/stress-funccall.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_FUNCRET ${sng_dir}/stress-funcret.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_FUTEX ${sng_dir}/stress-futex.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_GAMMA ${sng_dir}/stress-gamma.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_GETDENT ${sng_dir}/stress-getdent.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_GETRANDOM ${sng_dir}/stress-getrandom.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_GOTO ${sng_dir}/stress-goto.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_GPU ${sng_dir}/stress-gpu.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_HANDLE ${sng_dir}/stress-handle.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_HASH ${sng_dir}/stress-hash.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_HDD ${sng_dir}/stress-hdd.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_HEAPSORT ${sng_dir}/stress-heapsort.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_HSEARCH ${sng_dir}/stress-hsearch.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_HUGEPAGE ${sng_dir}/stress-hugepage.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_HYPERBOLIC ${sng_dir}/stress-hyperbolic.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_ICACHE ${sng_dir}/stress-icache.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_IDLE_PAGE ${sng_dir}/stress-idle-page.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_INODE_FLAGS ${sng_dir}/stress-inode-flags.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_INOTIFY ${sng_dir}/stress-inotify.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_INSERTIONSORT ${sng_dir}/stress-insertionsort.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_INTMATH ${sng_dir}/stress-intmath.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_IO ${sng_dir}/stress-io.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_IOPORT ${sng_dir}/stress-ioport.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_IOPRIO ${sng_dir}/stress-ioprio.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_IO_URING ${sng_dir}/stress-io-uring.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_IPSEC_MB ${sng_dir}/stress-ipsec-mb.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_ITIMER ${sng_dir}/stress-itimer.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_JPEG ${sng_dir}/stress-jpeg.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_JUDY ${sng_dir}/stress-judy.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_KCMP ${sng_dir}/stress-kcmp.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_KEY ${sng_dir}/stress-key.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_KILL ${sng_dir}/stress-kill.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_KLOG ${sng_dir}/stress-klog.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_KVM ${sng_dir}/stress-kvm.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_L1CACHE ${sng_dir}/stress-l1cache.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_LANDLOCK ${sng_dir}/stress-landlock.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_LEASE ${sng_dir}/stress-lease.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_LED ${sng_dir}/stress-led.c)
++if(CONFIG_STRESS_NG_STRESSOR_LINK OR CONFIG_STRESS_NG_STRESSOR_SYMLINK)
++  zephyr_library_sources(${sng_dir}/stress-link.c)
++endif()
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_LIST ${sng_dir}/stress-list.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_LLC_AFFINITY ${sng_dir}/stress-llc-affinity.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_LOADAVG ${sng_dir}/stress-loadavg.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_LOCKBUS ${sng_dir}/stress-lockbus.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_LOCKF ${sng_dir}/stress-lockf.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_LOCKOFD ${sng_dir}/stress-lockofd.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_LOGMATH ${sng_dir}/stress-logmath.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_LONGJMP ${sng_dir}/stress-longjmp.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_LOOP ${sng_dir}/stress-loop.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_LSEARCH ${sng_dir}/stress-lsearch.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_LSM ${sng_dir}/stress-lsm.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_MADVISE ${sng_dir}/stress-madvise.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_MALLOC ${sng_dir}/stress-malloc.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_MATRIX ${sng_dir}/stress-matrix.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_MATRIX_3D ${sng_dir}/stress-matrix-3d.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_MEMBARRIER ${sng_dir}/stress-membarrier.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_MEMCPY ${sng_dir}/stress-memcpy.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_MEMFD ${sng_dir}/stress-memfd.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_MEMHOTPLUG ${sng_dir}/stress-memhotplug.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_MEMRATE ${sng_dir}/stress-memrate.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_MEMTHRASH ${sng_dir}/stress-memthrash.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_MERGESORT ${sng_dir}/stress-mergesort.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_MIN_NANOSLEEP ${sng_dir}/stress-min-nanosleep.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_MKNOD ${sng_dir}/stress-mknod.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_MLOCK ${sng_dir}/stress-mlock.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_MMAP ${sng_dir}/stress-mmap.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_MMAPADDR ${sng_dir}/stress-mmapaddr.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_MMAPCOW ${sng_dir}/stress-mmapcow.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_MMAPFILES ${sng_dir}/stress-mmapfiles.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_MMAPFIXED ${sng_dir}/stress-mmapfixed.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_MMAPFORK ${sng_dir}/stress-mmapfork.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_MMAPHUGE ${sng_dir}/stress-mmaphuge.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_MMAPMANY ${sng_dir}/stress-mmapmany.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_MMAPRANDOM ${sng_dir}/stress-mmaprandom.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_MODULE ${sng_dir}/stress-module.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_MONTE_CARLO ${sng_dir}/stress-monte-carlo.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_MPFR ${sng_dir}/stress-mpfr.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_MREMAP ${sng_dir}/stress-mremap.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_MSEAL ${sng_dir}/stress-mseal.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_MSG ${sng_dir}/stress-msg.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_MSYNC ${sng_dir}/stress-msync.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_MSYNCMANY ${sng_dir}/stress-msyncmany.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_MTX ${sng_dir}/stress-mtx.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_MUNMAP ${sng_dir}/stress-munmap.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_MUTEX ${sng_dir}/stress-mutex.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_NANOSLEEP ${sng_dir}/stress-nanosleep.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_NETDEV ${sng_dir}/stress-netdev.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_NETLINK_PROC ${sng_dir}/stress-netlink-proc.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_NETLINK_TASK ${sng_dir}/stress-netlink-task.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_NICE ${sng_dir}/stress-nice.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_NOP ${sng_dir}/stress-nop.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_NULL ${sng_dir}/stress-null.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_NUMA ${sng_dir}/stress-numa.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_NUMACOPY ${sng_dir}/stress-numacopy.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_OOM_PIPE ${sng_dir}/stress-oom-pipe.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_OVPN ${sng_dir}/stress-ovpn.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_PAGEMOVE ${sng_dir}/stress-pagemove.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_PAGESWAP ${sng_dir}/stress-pageswap.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_PCI ${sng_dir}/stress-pci.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_PERSONALITY ${sng_dir}/stress-personality.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_PHYSPAGE ${sng_dir}/stress-physpage.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_PHYSMMAP ${sng_dir}/stress-physmmap.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_PIDFD ${sng_dir}/stress-pidfd.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_PING_SOCK ${sng_dir}/stress-ping-sock.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_PIPEHERD ${sng_dir}/stress-pipeherd.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_PKEY ${sng_dir}/stress-pkey.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_PLUGIN ${sng_dir}/stress-plugin.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_POWMATH ${sng_dir}/stress-powmath.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_PRCTL ${sng_dir}/stress-prctl.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_PREFETCH ${sng_dir}/stress-prefetch.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_PRIME ${sng_dir}/stress-prime.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_PRIO_INV ${sng_dir}/stress-prio-inv.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_PROCFS ${sng_dir}/stress-procfs.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_PTHREAD ${sng_dir}/stress-pthread.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_PTRACE ${sng_dir}/stress-ptrace.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_PTR_CHASE ${sng_dir}/stress-ptr-chase.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_PTY ${sng_dir}/stress-pty.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_QSORT ${sng_dir}/stress-qsort.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_QUOTA ${sng_dir}/stress-quota.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_RACE_SCHED ${sng_dir}/stress-race-sched.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_RADIXSORT ${sng_dir}/stress-radixsort.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_RAMFS ${sng_dir}/stress-ramfs.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_RANDLIST ${sng_dir}/stress-randlist.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_RAWDEV ${sng_dir}/stress-rawdev.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_RAWPKT ${sng_dir}/stress-rawpkt.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_RAWSOCK ${sng_dir}/stress-rawsock.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_RAWUDP ${sng_dir}/stress-rawudp.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_RDRAND ${sng_dir}/stress-rdrand.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_READAHEAD ${sng_dir}/stress-readahead.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_REBOOT ${sng_dir}/stress-reboot.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_REGEX ${sng_dir}/stress-regex.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_REGS ${sng_dir}/stress-regs.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_REMAP ${sng_dir}/stress-remap.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_RENAME ${sng_dir}/stress-rename.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_RESCHED ${sng_dir}/stress-resched.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_REVIO ${sng_dir}/stress-revio.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_RING_PIPE ${sng_dir}/stress-ring-pipe.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_ROFS ${sng_dir}/stress-rofs.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_ROTATE ${sng_dir}/stress-rotate.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_RSEQ ${sng_dir}/stress-rseq.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_RTC ${sng_dir}/stress-rtc.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_SCHEDMIX ${sng_dir}/stress-schedmix.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_SCTP ${sng_dir}/stress-sctp.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_SEAL ${sng_dir}/stress-seal.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_SECCOMP ${sng_dir}/stress-seccomp.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_SECRETMEM ${sng_dir}/stress-secretmem.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_SEEK ${sng_dir}/stress-seek.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_SEM ${sng_dir}/stress-sem.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_SEM_SYSV ${sng_dir}/stress-sem-sysv.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_SENDFILE ${sng_dir}/stress-sendfile.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_SESSION ${sng_dir}/stress-session.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_SET ${sng_dir}/stress-set.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_SHELLSORT ${sng_dir}/stress-shellsort.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_SHM_SYSV ${sng_dir}/stress-shm-sysv.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_SIGCHLD ${sng_dir}/stress-sigchld.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_SIGFD ${sng_dir}/stress-sigfd.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_SIGHUP ${sng_dir}/stress-sighup.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_SIGIO ${sng_dir}/stress-sigio.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_SIGNAL ${sng_dir}/stress-signal.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_SIGPENDING ${sng_dir}/stress-sigpending.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_SIGPIPE ${sng_dir}/stress-sigpipe.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_SIGURG ${sng_dir}/stress-sigurg.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_SIGVTALRM ${sng_dir}/stress-sigvtalrm.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_SIGXCPU ${sng_dir}/stress-sigxcpu.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_SIGXFSZ ${sng_dir}/stress-sigxfsz.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_SKIPLIST ${sng_dir}/stress-skiplist.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_SLEEP ${sng_dir}/stress-sleep.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_SMI ${sng_dir}/stress-smi.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_SOCKDIAG ${sng_dir}/stress-sockdiag.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_SOCKFD ${sng_dir}/stress-sockfd.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_SPARSEMATRIX ${sng_dir}/stress-sparsematrix.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_SPAWN ${sng_dir}/stress-spawn.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_SPEC_ROLLBACK ${sng_dir}/stress-spec-rollback.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_SPLICE ${sng_dir}/stress-splice.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_STATMOUNT ${sng_dir}/stress-statmount.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_STR ${sng_dir}/stress-str.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_STREAM ${sng_dir}/stress-stream.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_SWAP ${sng_dir}/stress-swap.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_SYNC_FILE ${sng_dir}/stress-sync-file.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_SYNCLOAD ${sng_dir}/stress-syncload.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_SYSFS ${sng_dir}/stress-sysfs.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_SYSINFO ${sng_dir}/stress-sysinfo.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_TEE ${sng_dir}/stress-tee.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_TIMER ${sng_dir}/stress-timer.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_TIMERFD ${sng_dir}/stress-timerfd.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_TIMERMIX ${sng_dir}/stress-timermix.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_TIME_WARP ${sng_dir}/stress-time-warp.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_TLB_NUMA ${sng_dir}/stress-tlb-numa.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_TLB_SHOOTDOWN ${sng_dir}/stress-tlb-shootdown.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_TMPFS ${sng_dir}/stress-tmpfs.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_TREE ${sng_dir}/stress-tree.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_TRIG ${sng_dir}/stress-trig.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_TSC ${sng_dir}/stress-tsc.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_TSEARCH ${sng_dir}/stress-tsearch.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_TUN ${sng_dir}/stress-tun.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_UMOUNT ${sng_dir}/stress-umount.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_UNSHARE ${sng_dir}/stress-unshare.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_UPROBE ${sng_dir}/stress-uprobe.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_URANDOM ${sng_dir}/stress-urandom.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_USERFAULTFD ${sng_dir}/stress-userfaultfd.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_USERSYSCALL ${sng_dir}/stress-usersyscall.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_UTIME ${sng_dir}/stress-utime.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_VARYLOAD ${sng_dir}/stress-varyload.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_VDSO ${sng_dir}/stress-vdso.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_VECCMP ${sng_dir}/stress-veccmp.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_VECFP ${sng_dir}/stress-vecfp.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_VECMATH ${sng_dir}/stress-vecmath.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_VECSHUF ${sng_dir}/stress-vecshuf.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_VECWIDE ${sng_dir}/stress-vecwide.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_VERITY ${sng_dir}/stress-verity.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_VFORKMANY ${sng_dir}/stress-vforkmany.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_VM ${sng_dir}/stress-vm.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_VM_ADDR ${sng_dir}/stress-vm-addr.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_VM_RW ${sng_dir}/stress-vm-rw.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_VM_SPLICE ${sng_dir}/stress-vm-splice.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_VNNI ${sng_dir}/stress-vnni.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_WAIT ${sng_dir}/stress-wait.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_WAITCPU ${sng_dir}/stress-waitcpu.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_WATCHDOG ${sng_dir}/stress-watchdog.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_WCS ${sng_dir}/stress-wcs.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_WORKLOAD ${sng_dir}/stress-workload.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_X86CPUID ${sng_dir}/stress-x86cpuid.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_X86SYSCALL ${sng_dir}/stress-x86syscall.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_XATTR ${sng_dir}/stress-xattr.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_YIELD ${sng_dir}/stress-yield.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_ZERO ${sng_dir}/stress-zero.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_ZLIB ${sng_dir}/stress-zlib.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_ZOMBIE ${sng_dir}/stress-zombie.c)
+diff --git a/zephyr/zephyr.c b/zephyr/zephyr.c
+new file mode 100644
+--- /dev/null
++++ b/zephyr/zephyr.c
+@@ -0,0 +1,482 @@
++/*
++ * SPDX-License-Identifier: GPL-2.0-or-later
++ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++ *
++ * Zephyr stand-in for the stress-ng command line driver (stress-ng.c):
++ * the globals and the handful of driver functions the core and the
++ * stressors reference, plus stress_ng_run(), which runs one stressor
++ * instance in the calling thread the way stress_child_run() does in a
++ * forked child.
++ */
++#include "stress-ng.h"
++#include "core-builtin.h"
++#include "core-mmap.h"
++#include "core-shared-cache.h"
++#include "core-shared-heap.h"
++
++#include <stress_ng.h>
++
++#include <zephyr/kernel.h>
++#include <pthread.h>
++#include <sys/wait.h>
++
++#define DEFAULT_CACHE_LEVEL (3)
++
++stress_list_item_t *g_item_current;
++uint64_t g_opt_timeout = TIMEOUT_NOT_SET;
++/* verify results; no forked wrapper child around the stressor (--oom-no-child) */
++uint64_t g_opt_flags = OPT_FLAGS_MMAP_MADVISE | OPT_FLAGS_VERIFY | OPT_FLAGS_NO_OOM_ADJUST |
++		       OPT_FLAGS_OOM_NO_CHILD |
++		       (IS_ENABLED(CONFIG_STRESS_NG_MINIMIZE) ? OPT_FLAGS_MINIMIZE : 0);
++uint32_t g_pr_log_flags = PR_LOG_FLAGS_ERROR | PR_LOG_FLAGS_INFO | PR_LOG_FLAGS_FAIL |
++			  PR_LOG_FLAGS_WARN | PR_LOG_FLAGS_LOCKLESS | PR_LOG_FLAGS_STDOUT |
++			  (IS_ENABLED(CONFIG_STRESS_NG_LOG_DEBUG) ? PR_LOG_FLAGS_DEBUG : 0);
++volatile bool g_stress_continue_flag = true;
++const char g_prog_name[] = "stress-ng";
++stress_shared_t *g_shared;
++jmp_buf g_error_env;
++stress_put_val_t g_put_val;
++void *g_nowt;
++
++struct stress_ng_stressor {
++	const char *name;
++	const stressor_info_t *info;
++};
++
++static const struct stress_ng_stressor stressors[] = {
++#define STRESS_NG_STRESSOR(sym, str) {str, &stress_##sym##_info},
++#include <stress_ng_stressors.h>
++#undef STRESS_NG_STRESSOR
++};
++
++static K_SEM_DEFINE(run_lock, 1, 1);
++static sigjmp_buf abort_env;
++static k_tid_t runner_tid;
++
++/*
++ * abort() in a stressor would end the calling thread. In the runner thread, report it as the
++ * driver reports a child killed by a signal; in one of the stressor's own threads, let that
++ * thread go (a jump across threads would corrupt the runner's stack).
++ */
++static void stress_ng_sigabrt_handler(int signum)
++{
++	if (k_current_get() != runner_tid) {
++		pthread_exit(NULL);
++	}
++	siglongjmp(abort_env, signum);
++}
++static bool shared_init_failed;
++static stress_stressor_t current_stressor;
++static stress_list_item_t current_item;
++static stress_stats_t *current_stats;
++static stress_metrics_info_t current_metrics;
++static stress_args_t *current_args;
++
++/* driver functions referenced by the core and the stressors */
++
++void stress_bogo_max_ops_zero(void)
++{
++	if (current_args != NULL) {
++		stress_bogo_stop(current_args);
++	}
++}
++
++stress_args_t *stress_args_pid_find(const pid_t pid)
++{
++	if ((current_args != NULL) && (current_args->pid == pid)) {
++		return current_args;
++	}
++
++	return NULL;
++}
++
++ssize_t stress_stressor_find(const char *name)
++{
++	for (size_t i = 0; i < ARRAY_SIZE(stressors); i++) {
++		if (stress_strcmp_munged(name, stressors[i].name) == 0) {
++			return (ssize_t)i;
++		}
++	}
++
++	return -1;
++}
++
++void stress_shared_readonly(void)
++{
++}
++
++void stress_system_memory_info_log(void)
++{
++}
++
++void stress_metrics_set(stress_args_t *args, const char *description, const double value,
++			const int mean_type)
++{
++	stress_metrics_info_t *mi;
++	size_t i;
++
++	if ((args == NULL) || (args->stats == NULL) || (args->stats->item == NULL)) {
++		return;
++	}
++	mi = args->stats->item->metrics_info;
++	if ((mi == NULL) || (mi->metrics_desc == NULL)) {
++		return;
++	}
++	for (i = 0; i < mi->num_metrics_items; i++) {
++		if ((mi->metrics_desc[i].mean_type == mean_type) &&
++		    (strcmp(mi->metrics_desc[i].description, description) == 0)) {
++			break;
++		}
++	}
++	if (i == mi->num_metrics_items) {
++		if (i >= mi->max_metrics_items) {
++			mi->overflow_metrics_items = true;
++			return;
++		}
++		(void)shim_strscpy(mi->metrics_desc[i].description, description,
++				   sizeof(mi->metrics_desc[i].description));
++		mi->metrics_desc[i].mean_type = mean_type;
++		mi->num_metrics_items++;
++	}
++	args->stats->metrics_values[i] = value;
++}
++
++/* one-time shared state, as stress_shared_mmap() and main() set it up */
++
++static int stress_ng_shared_init(void)
++{
++	const size_t page_size = stress_memory_page_size_get();
++	size_t sz;
++
++	if (shared_init_failed) {
++		return -1;
++	}
++	if (g_shared != NULL) {
++		return 0;
++	}
++	shared_init_failed = true;
++
++	sz = sizeof(stress_shared_t) + sizeof(stress_stats_t);
++	sz = (sz + page_size - 1) & ~(page_size - 1);
++	g_shared = (stress_shared_t *)stress_mmap_anon_shared(sz, PROT_READ | PROT_WRITE);
++	if (g_shared == MAP_FAILED) {
++		g_shared = NULL;
++		pr_err("mmap %zu byte shared memory region failed, errno=%d (%s)\n", sz, errno,
++		       strerror(errno));
++		return -1;
++	}
++	(void)shim_memset(g_shared, 0, sz);
++	g_shared->length = sz;
++	g_shared->time_started = stress_time_now();
++#if defined(HAVE_VFORK)
++	g_shared->vfork = vfork;
++#else
++	g_shared->vfork = fork;
++#endif
++
++	if (stress_lock_mem_map() < 0) {
++		pr_err("failed to map the lock table\n");
++		return -1;
++	}
++	if (stress_shared_heap_init(page_size) == NULL) {
++		pr_err("failed to create the shared heap\n");
++		return -1;
++	}
++	g_shared->warn_once.lock = stress_lock_create("warn-once");
++	g_shared->net_port_map.lock = stress_lock_create("net-port");
++	g_shared->metrics.lock = stress_lock_create("metrics");
++	g_shared->drop_caches.lock = stress_lock_create("drop_caches");
++	if ((g_shared->warn_once.lock == NULL) || (g_shared->net_port_map.lock == NULL) ||
++	    (g_shared->metrics.lock == NULL) || (g_shared->drop_caches.lock == NULL)) {
++		pr_err("failed to create the global locks\n");
++		return -1;
++	}
++
++	g_shared->mapped.page_none = stress_mmap_anon_shared(page_size, PROT_NONE);
++	g_shared->mapped.page_ro = stress_mmap_anon_shared(page_size, PROT_READ);
++	g_shared->mapped.page_wo = stress_mmap_anon_shared(page_size, PROT_WRITE);
++
++	current_stats = &g_shared->stats[0];
++
++	(void)stress_setting_global_set("temp-path", TYPE_ID_STR, CONFIG_STRESS_NG_TEMP_PATH);
++	if (access(CONFIG_STRESS_NG_TEMP_PATH, R_OK | W_OK) < 0) {
++		pr_warn("temp-path '%s' is not accessible, errno=%d (%s): file system stressors "
++			"will fail\n", CONFIG_STRESS_NG_TEMP_PATH, errno, strerror(errno));
++	}
++	g_shared->mem_cache.level = DEFAULT_CACHE_LEVEL;
++	g_shared->mem_cache.size = CONFIG_STRESS_NG_CACHE_SIZE;
++	if (stress_shared_cache_alloc("shared cache allocate") < 0) {
++		pr_err("failed to allocate the shared cache\n");
++		return -1;
++	}
++	shared_init_failed = false;
++
++	return 0;
++}
++
++/*
++ * A stressor spinning in a compute loop never makes a system call, so a
++ * signal cannot reach it; the timer takes away its bogo-op budget directly.
++ */
++static void stress_ng_stop_expiry(struct k_timer *timer)
++{
++	ARG_UNUSED(timer);
++	stress_continue_set_flag(false);
++}
++
++static K_TIMER_DEFINE(stop_timer, stress_ng_stop_expiry, NULL);
++
++static void MLOCKED_TEXT stress_ng_sigalrm_handler(int signum)
++{
++	const int saved_errno = errno;
++
++	(void)signum;
++
++	stress_continue_set_flag(false);
++	/* keep interrupting blocking calls until the stressor notices */
++	(void)alarm(1);
++	errno = saved_errno;
++}
++
++static int stress_ng_run_locked(const struct stress_ng_stressor *s, const struct stress_ng_opts *opts)
++{
++	const stressor_info_t *info = s->info;
++	const uint32_t timeout = (opts && opts->timeout_s) ? opts->timeout_s
++							   : CONFIG_STRESS_NG_DEFAULT_TIMEOUT;
++	const uint64_t max_ops = (opts && opts->max_ops) ? opts->max_ops : NEVER_END_OPS;
++	size_t n_metrics = info->max_metrics_items ? info->max_metrics_items
++						   : STRESS_METRICS_ITEMS_DEFAULT_SIZE;
++	stress_stats_t *stats;
++	stress_args_t *args;
++	struct sigaction sa, old_sa, old_abrt;
++	sigset_t set, old_set;
++	double start, finish;
++	int rc, signum;
++
++	if (info->stressor == stress_unimplemented) {
++		pr_inf_skip("%s: stressor is not implemented on this system, skipping\n", s->name);
++		return EXIT_NOT_IMPLEMENTED;
++	}
++	if ((info->supported != NULL) && (info->supported(s->name) < 0)) {
++		return EXIT_NOT_IMPLEMENTED;
++	}
++	if (stress_ng_shared_init() < 0) {
++		return EXIT_NO_RESOURCE;
++	}
++	stats = current_stats;
++	args = &stats->args;
++
++	(void)shim_memset(&current_stressor, 0, sizeof(current_stressor));
++	current_stressor.info = info;
++	(void)shim_strscpy(current_stressor.name, s->name, sizeof(current_stressor.name));
++
++	(void)shim_memset(&current_metrics, 0, sizeof(current_metrics));
++	current_metrics.metrics_desc = calloc(n_metrics, sizeof(*current_metrics.metrics_desc));
++	current_metrics.max_metrics_items = n_metrics;
++
++	(void)shim_memset(stats, 0, sizeof(*stats));
++	stats->metrics_values = calloc(n_metrics, sizeof(*stats->metrics_values));
++	if ((current_metrics.metrics_desc == NULL) || (stats->metrics_values == NULL)) {
++		free(current_metrics.metrics_desc);
++		free(stats->metrics_values);
++		pr_err("%s: cannot allocate metrics\n", s->name);
++		return EXIT_NO_RESOURCE;
++	}
++	stats->item = &current_item;
++	stats->s_pid.pid = getpid();
++
++	(void)shim_memset(&current_item, 0, sizeof(current_item));
++	current_item.stressor = &current_stressor;
++	current_item.stats = &current_stats;
++	current_item.metrics_info = &current_metrics;
++	current_item.instances = 1;
++	current_item.bogo_max_ops = (max_ops == NEVER_END_OPS) ? 0 : max_ops;
++	g_item_current = &current_item;
++
++	stress_mwc_reseed();
++	stress_clear_warn_once();
++	pr_fail_reset();
++	if (info->default_set != NULL) {
++		info->default_set();
++	}
++	if (info->init != NULL) {
++		info->init(1);
++	}
++
++	/* a forked stressor starts with nothing masked; kernel threads start with everything masked */
++	(void)sigemptyset(&set);
++	(void)pthread_sigmask(SIG_SETMASK, &set, &old_set);
++	(void)shim_memset(&sa, 0, sizeof(sa));
++	sa.sa_handler = stress_ng_sigalrm_handler;
++	(void)sigemptyset(&sa.sa_mask);
++	(void)sigaction(SIGALRM, &sa, &old_sa);
++	sa.sa_handler = stress_ng_sigabrt_handler;
++	(void)sigaction(SIGABRT, &sa, &old_abrt);
++
++	g_stress_continue_flag = true;
++	g_opt_timeout = timeout;
++	runner_tid = k_current_get();
++
++	args->bogo.max_ops = max_ops;
++	args->bogo.count.counter = 0;
++	args->bogo.count.counter_ready = true;
++	args->bogo.possibly_oom_killed = false;
++	args->name = s->name;
++	args->instance = 0;
++	args->instances = 1;
++	args->pid = getpid();
++	args->page_size = stress_memory_page_size_get();
++	args->time_end = stress_time_now() + (double)timeout;
++	args->mapped = &g_shared->mapped;
++	args->stats = stats;
++	args->info = info;
++	current_args = args;
++
++	pr_dbg("%s: started (instance 0, %" PRIu32 " second%s)\n", s->name, timeout,
++	       timeout == 1 ? "" : "s");
++	start = stress_time_now();
++	k_timer_start(&stop_timer, K_SECONDS(timeout), K_NO_WAIT);
++	(void)alarm(timeout);
++	signum = sigsetjmp(abort_env, 1);
++	if (signum == 0) {
++		rc = info->stressor(args);
++	} else {
++		pr_err("%s: terminated by signal %d (%s)\n", s->name, signum, strsignal(signum));
++		rc = EXIT_SIGNALED;
++	}
++	(void)alarm(0);
++	k_timer_stop(&stop_timer);
++	finish = stress_time_now();
++	stress_continue_set_flag(false);
++	pr_dbg("%s: stressor returned %d\n", s->name, rc);
++	pr_fail_check(&rc);
++
++	/*
++	 * A forked stressor leaves unwaited children to init. This one ran in the
++	 * test process, so wait for them here, bounded for a child that never exits.
++	 */
++	for (uint32_t t0 = k_uptime_get_32(); waitpid(-1, NULL, WNOHANG) >= 0;) {
++		if ((k_uptime_get_32() - t0) > 5000U) {
++			pr_err("%s: a child is still running\n", s->name);
++			break;
++		}
++		k_msleep(10);
++	}
++
++	(void)sigaction(SIGALRM, &old_sa, NULL);
++	(void)sigaction(SIGABRT, &old_abrt, NULL);
++	(void)pthread_sigmask(SIG_SETMASK, &old_set, NULL);
++
++	if (info->deinit != NULL) {
++		info->deinit();
++	}
++	current_args = NULL;
++	g_item_current = NULL;
++
++	pr_inf("%s: %s, %" PRIu64 " bogo ops in %.2f secs\n", s->name, stress_ng_strexit(rc),
++	       args->bogo.count.counter, finish - start);
++
++	free(current_metrics.metrics_desc);
++	free(stats->metrics_values);
++	current_metrics.metrics_desc = NULL;
++	stats->metrics_values = NULL;
++
++	return rc;
++}
++
++/* stressors keep sizeable arrays on the stack: run them on a stack sized for that */
++static K_THREAD_STACK_DEFINE(stress_stack, CONFIG_STRESS_NG_STACK_SIZE);
++static struct k_thread stress_thread;
++static bool stress_thread_live;
++
++struct stress_ng_job {
++	const struct stress_ng_stressor *s;
++	const struct stress_ng_opts *opts;
++	int rc;
++};
++
++static void stress_ng_thread(void *p1, void *p2, void *p3)
++{
++	struct stress_ng_job *job = p1;
++
++	ARG_UNUSED(p2);
++	ARG_UNUSED(p3);
++	job->rc = stress_ng_run_locked(job->s, job->opts);
++}
++
++int stress_ng_run(const char *name, const struct stress_ng_opts *opts)
++{
++	struct stress_ng_job job = { .opts = opts, .rc = EXIT_FAILURE };
++	ssize_t i;
++
++	if (name == NULL) {
++		return EXIT_NOT_IMPLEMENTED;
++	}
++	i = stress_stressor_find(name);
++	if (i < 0) {
++		pr_inf_skip("%s: stressor is not built in, skipping\n", name);
++		return EXIT_NOT_IMPLEMENTED;
++	}
++	job.s = &stressors[i];
++
++	k_sem_take(&run_lock, K_FOREVER);
++	stress_thread_live = true;
++	(void)k_thread_create(&stress_thread, stress_stack, K_THREAD_STACK_SIZEOF(stress_stack),
++			      stress_ng_thread, &job, NULL, NULL,
++			      k_thread_priority_get(k_current_get()), 0, K_NO_WAIT);
++	(void)k_thread_name_set(&stress_thread, "stress-ng");
++	(void)k_thread_join(&stress_thread, K_FOREVER);
++	stress_thread_live = false;
++	k_sem_give(&run_lock);
++
++	return job.rc;
++}
++
++void stress_ng_reset(void)
++{
++	if (stress_thread_live) {
++		k_thread_abort(&stress_thread);
++		stress_thread_live = false;
++	}
++	k_timer_stop(&stop_timer);
++	stress_continue_set_flag(false);
++	(void)alarm(0);
++	current_args = NULL;
++	g_item_current = NULL;
++	k_sem_reset(&run_lock);
++	k_sem_give(&run_lock);
++}
++
++const char *stress_ng_strexit(int status)
++{
++	switch (status) {
++	case EXIT_SUCCESS:
++		return "passed";
++	case EXIT_FAILURE:
++		return "failed";
++	case EXIT_NOT_SUCCESS:
++		return "not successful";
++	case EXIT_NO_RESOURCE:
++		return "no resource";
++	case EXIT_NOT_IMPLEMENTED:
++		return "not implemented";
++	case EXIT_SIGNALED:
++		return "signaled";
++	case EXIT_BY_SYS_EXIT:
++		return "exited";
++	case EXIT_METRICS_UNTRUSTWORTHY:
++		return "metrics untrustworthy";
++	default:
++		return "unknown";
++	}
++}
++
++size_t stress_ng_stressor_count(void)
++{
++	return ARRAY_SIZE(stressors);
++}
++
++const char *stress_ng_stressor_name(size_t i)
++{
++	return (i < ARRAY_SIZE(stressors)) ? stressors[i].name : NULL;
++}
