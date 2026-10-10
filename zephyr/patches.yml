@@ -3042,3 +3042,30 @@ patches:
       stress-ng's cache stressors call directly, reads CTR_EL0 for the cache
       line sizes and then cleans by DC CVAU / IC IVAU; from a user thread
       each of these trapped to EL1 and killed the thread.
+  - path: zephyr/zvfs-mlock.patch
+    sha256sum: 482219c71052f71995842b142442dd3a378313e0be35846ad0745a41fcdf33b7
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-10-10
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/zvfs-mmap-per-process.patch
+    comments: |
+      zvfs: memory locking behind CONFIG_ZVFS_MLOCK: zvfs_mlock() and
+      zvfs_munlock() system calls over the mapping registry, so that the
+      POSIX mlock(), munlock(), mlockall() and munlockall() work from user
+      mode instead of calling the privileged k_mem_pin() directly. With no
+      scope flag the pages of a range are pinned or unpinned with the demand
+      paging API; a user thread may only lock memory it can read, a wrapping
+      range is EINVAL, one outside memory ENOMEM. ZVFS_MLOCK_CURRENT is the
+      caller's mappings and, from user mode, the partitions of its memory
+      domain; ZVFS_MLOCK_FUTURE is a per-process flag (the kernel's own
+      threads share one, it is not inherited at clone) that locks every
+      mapping at creation until an unlock clears it. The pages of a mapping
+      are pinned for its lifetime, so an unlock passes over them. Without
+      CONFIG_DEMAND_PAGING every page is resident and both calls fail with
+      ENOTSUP. The zvfs_mmap test covers the calls, with a demand paging
+      scenario on qemu_x86 where locking is real.
