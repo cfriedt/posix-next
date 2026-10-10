@@ -13,6 +13,7 @@
 #include <fcntl.h>
 #include <pthread.h>
 #include <semaphore.h>
+#include <ksem.h>
 
 struct nsem_obj {
 	sys_snode_t snode;
@@ -158,12 +159,36 @@ int sem_init(sem_t *semaphore, int pshared, unsigned int value)
  */
 int sem_post(sem_t *semaphore)
 {
+	int ret;
+
 	if (semaphore == NULL) {
 		errno = EINVAL;
 		return -1;
 	}
 
-	k_sem_give(semaphore);
+#ifdef CONFIG_USERSPACE
+	if (k_is_user_context()) {
+		/*
+		 * User threads cannot take the semaphore lock, so the check is
+		 * best effort here: a concurrent post may still saturate.
+		 */
+		if (k_sem_count_get(semaphore) >= CONFIG_POSIX_SEM_VALUE_MAX) {
+			errno = EOVERFLOW;
+			return -1;
+		}
+
+		k_sem_give(semaphore);
+		return 0;
+	}
+#endif
+
+	ret = z_sem_give_checked(semaphore);
+	if (ret < 0) {
+		/* the value would exceed SEM_VALUE_MAX */
+		errno = -ret;
+		return -1;
+	}
+
 	return 0;
 }
 
