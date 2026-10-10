@@ -1142,3 +1142,35 @@ Deviations
    with a copy of its address space (:kconfig:option:`CONFIG_PROCESS_VM`) gets copies of the
    mapped pages but no mappings of its own, so shared mappings are not shared with it and it
    can neither :c:func:`msync` nor :c:func:`munmap` them.
+
+.. _posix_memory_locking_design:
+
+Memory Locking
+==============
+
+:c:func:`mlock`, :c:func:`munlock`, :c:func:`mlockall` and :c:func:`munlockall` are thin over
+the ``zvfs_mlock()`` and ``zvfs_munlock()`` system calls (:kconfig:option:`CONFIG_ZVFS_MLOCK`),
+so they work from user mode and validate their arguments in the kernel. A locked page is
+resident and exempt from eviction, which only means something under
+:kconfig:option:`CONFIG_DEMAND_PAGING`: without it every page is resident already, and all four
+validate their arguments and succeed without effect.
+
+Ranges
+   :c:func:`mlock` and :c:func:`munlock` round the range to pages and pin or unpin them with the
+   kernel's demand paging API. A user thread may only lock memory it can read: anything else,
+   like a range outside memory, is not memory the process has and fails with ``ENOMEM``. A
+   range that wraps fails with ``EINVAL``. A length of zero does nothing.
+
+Whole address space
+   ``MCL_CURRENT`` locks the caller's mappings and, from user mode, every partition of its
+   memory domain, which is the memory a thread of the process can reach. ``MCL_FUTURE`` is a
+   per-process flag (the kernel's own threads share one) that makes every mapping created from
+   then on locked at creation; :c:func:`munlockall` clears it and unlocks the same set. The flag
+   is not inherited by a child process.
+
+Mappings
+   The pages of a mapping are pinned for its lifetime, as :ref:`posix_mapped_files_design`
+   describes, so locking them changes nothing and unlocking passes over them: a range or a
+   partition that covers a mapping is unlocked around it. Locking is a property of pages, not
+   of the process: pages shared with another process through a partition are locked and
+   unlocked for both.
