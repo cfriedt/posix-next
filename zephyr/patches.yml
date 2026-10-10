@@ -4969,3 +4969,72 @@ patches:
       the requested mode with one fs_chmod() when, and only when, they
       created the node. ZVFS keeps no identity and enforces nothing. Tests
       in tests/lib/zvfs_fs over a second, tmpfs mount; kernel and user mode.
+  - path: stress-ng/stress-ng-zephyr-module.patch
+    sha256sum: 5f8cf161fffc206b7f5929639f9d6979739897f0ae989959997cb7237e9a8db9
+    module: modules/lib/stress-ng
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-10-09
+    upstreamable: true
+    comments: |
+      The Zephyr module glue the stress-ng fork does not carry itself (its
+      zephyr branch holds only module.yml and license-only Kconfig and
+      CMakeLists): the umbrella CONFIG_STRESS_NG with the option groups the
+      stress-ng core needs, one generated Kconfig symbol per stressor with
+      hidden STRESS_NG_NEEDS_<group> aggregators that select the POSIX
+      Option Groups the enabled stressors exercise (hundreds of per-stressor
+      selects overflow Kconfig's reverse-dependency recursion), the library
+      build of the core and the selected stressors, a generated config.h
+      whose HAVE_* probes are gated on the CONFIG_POSIX_* symbols and the
+      architecture, and the in-process runner: stress_ng_run() runs one
+      stressor instance on a dedicated thread in place of the forked child,
+      with alarm() plus a kernel timer bounding the run, the stressor's
+      signals unmasked, verify mode on and the OOM wrapper inlined. The
+      runner then waits for the children the stressor left behind, which a
+      forked stressor would have left to init.
+      The runner takes its SIGALRM handler down only after blocking the
+      signal, cancelling the alarm and draining what is queued: an alarm
+      that fired after the stop would otherwise be delivered under the
+      restored default disposition and terminate the test process.
+      The wide-character functions are configured with
+      POSIX_C_LANG_WIDE_CHAR, the eventfd stressor forks and sizes two
+      event file descriptors, vfork/vforkmany are not enabled (Zephyr
+      does not support vfork()), and sched_getaffinity()/sched_setaffinity()
+      come with POSIX_NON_PORTABLE for the affinity and yield stressors.
+      The fault-class stressors that pass once faults generate signals are
+      enabled: sigsegv, sigbus, sigill, sigtrap, sigfpe, misaligned, stack,
+      mprotect, get, vm-segv and fd-abuse, each selecting the groups it uses.
+      Every stressor is classified in zephyr/scripts/requirements.json and the
+      generated Kconfig, cmake and stressor table follow: the enabled set is exactly
+      the set that runs in a scenario. The ones not enabled carry their reason:
+      stress-ng's own "not implemented on this system" stub for Linux-only
+      interfaces or XSI functions posix-next does not have, no /dev/urandom, no hard
+      links on tmpfs, no read-only file system, mappings larger than the targets,
+      PROT_EXEC anonymous memory, cache geometry from /sys, running as root, mseal,
+      rdrand, vfork(), and mmapaddr/mmapfixed for MAP_FIXED, which zvfs does not
+      support yet. Stressors a later option group makes possible are enabled by a patch of
+      their own after it. The runner also waits, bounded, for the processes a
+      stressor daemonizes and init adopts, so a stressor leaves no live child behind.
+  - path: stress-ng/stress-ng-zephyr-platform.patch
+    sha256sum: b6eb6fc8b92e3ea0fbe749332d958cb85898075f7964bafaa3088792a848563c
+    module: modules/lib/stress-ng
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-10-09
+    upstreamable: true
+    comments: |
+      Port stress-ng's platform layer to Zephyr, each change upstreamable:
+      guard STRESS_PROCS_MAX and ALWAYS_INLINE, no mlocked_text section, text
+      bounds from the linker's __text_region_start/end, HAVE_GETRUSAGE and
+      HAVE_SETHOSTNAME probes and guards, portability guards for d_reclen,
+      si_value.sival_ptr and struct rlimit, pr_fail_reset() for a
+      process-lifetime failure counter, a CPUID max-leaf check before trusting
+      feature flags, a scratch file in the temp directory in place of /dev/zero
+      and /dev/null (zero, null, dup), the temp path instead of "/" as the
+      probed mount point, ESRCH accepted from kill(-1, 0) when no other
+      process exists, bounded on-stack bookkeeping for pthread and dirdeep,
+      a private name for the RISC-V CBO byte swap, the rdtime probe (which
+      catches SIGILL) left out, and skips rather than failures when stream or
+      mergesort cannot map their buffers, the fork stressor counting the
+      child it forked as the run ended so that it is waited for, and the
+      daemon stressor's /dev/null stand-in.
