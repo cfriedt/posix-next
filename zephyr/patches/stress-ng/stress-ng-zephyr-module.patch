@@ -1,7 +1,7 @@
 diff --git a/zephyr/CMakeLists.txt b/zephyr/CMakeLists.txt
 --- a/zephyr/CMakeLists.txt
 +++ b/zephyr/CMakeLists.txt
-@@ -1,2 +1,118 @@
+@@ -1,2 +1,120 @@
  # SPDX-License-Identifier: GPL-2.0-or-later
  # Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
 +#
@@ -21,6 +21,8 @@ diff --git a/zephyr/CMakeLists.txt b/zephyr/CMakeLists.txt
 +string(REGEX REPLACE "^VERSION=" "" sng_ver "${sng_ver_line}")
 +
 +zephyr_library_named(stress_ng)
++# a stressor is user code: its state lives with the C library's, readable from user mode
++zephyr_library_app_memory(z_libc_partition)
 +zephyr_include_directories(${sng_dir}/zephyr/include)
 +
 +# the headers the Makefile generates: the commit id, and the PER_*,
@@ -123,7 +125,7 @@ diff --git a/zephyr/CMakeLists.txt b/zephyr/CMakeLists.txt
 diff --git a/zephyr/Kconfig b/zephyr/Kconfig
 --- a/zephyr/Kconfig
 +++ b/zephyr/Kconfig
-@@ -1,2 +1,95 @@
+@@ -1,2 +1,113 @@
  # SPDX-License-Identifier: GPL-2.0-or-later
  # Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
 +
@@ -174,6 +176,13 @@ diff --git a/zephyr/Kconfig b/zephyr/Kconfig
 +	  Sizes the shared futex and lock tables (STRESS_PROCS_MAX). The
 +	  upstream default of 8192 costs about 100 KiB of shared memory.
 +
++config ZVFS_OPEN_ADD_SIZE_STRESS_NG
++	int
++	default 56
++	help
++	  File descriptors the stressors open at once on top of the descriptors
++	  the other subsystems request: files, pipes, duplicated descriptors.
++
 +config STRESS_NG_STACK_SIZE
 +	int "Stack size of the thread a stressor runs on"
 +	default 131072
@@ -181,6 +190,17 @@ diff --git a/zephyr/Kconfig b/zephyr/Kconfig
 +	  stress_ng_run() runs the stressor on a dedicated thread with this much
 +	  stack. Stressors keep sizeable arrays on the stack (upstream runs them
 +	  as processes with an 8 MiB stack), so the caller's stack is not used.
++
++config STRESS_NG_SHARED_ARENA_SIZE
++	int "Static arena for the shared state on boards without an MMU"
++	default 196608
++	depends on !MMU
++	help
++	  Without an MMU every anonymous mapping granted to a user thread costs a
++	  memory-protection region, so the shared state of a run (the shared
++	  structure, lock table, shared heap, cache buffers and probe pages) comes
++	  from this static arena instead. The shared structure alone is about 66 KiB
++	  and the cache buffer is STRESS_NG_CACHE_SIZE.
 +
 +config STRESS_NG_CACHE_SIZE
 +	int "Shared cache buffer size in bytes"
@@ -223,7 +243,7 @@ diff --git a/zephyr/Kconfig.stressors b/zephyr/Kconfig.stressors
 new file mode 100644
 --- /dev/null
 +++ b/zephyr/Kconfig.stressors
-@@ -0,0 +1,1736 @@
+@@ -0,0 +1,1741 @@
 +# SPDX-License-Identifier: GPL-2.0-or-later
 +# Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
 +#
@@ -1188,6 +1208,11 @@ new file mode 100644
 +config STRESS_NG_STRESSOR_PRIO_INV
 +	bool "prio-inv"
 +
++config STRESS_NG_STRESSOR_PRIV_INSTR
++	bool "priv-instr"
++	help
++	  Start N workers exercising privileged instruction.
++
 +config STRESS_NG_STRESSOR_PROCFS
 +	bool "procfs"
 +	help
@@ -1842,7 +1867,7 @@ new file mode 100644
 +
 +config STRESS_NG_NEEDS_POSIX_MAPPED_FILES
 +	bool
-+	default y if STRESS_NG_STRESSOR_BITONICSORT || STRESS_NG_STRESSOR_BSEARCH || STRESS_NG_STRESSOR_BUBBLESORT || STRESS_NG_STRESSOR_CACHE || STRESS_NG_STRESSOR_CPU || STRESS_NG_STRESSOR_DENTRY || STRESS_NG_STRESSOR_DUP || STRESS_NG_STRESSOR_ENV || STRESS_NG_STRESSOR_EXEC || STRESS_NG_STRESSOR_FAR_BRANCH || STRESS_NG_STRESSOR_FAULT || STRESS_NG_STRESSOR_FD_FORK || STRESS_NG_STRESSOR_FIBSEARCH || STRESS_NG_STRESSOR_FLUSHCACHE || STRESS_NG_STRESSOR_FMA || STRESS_NG_STRESSOR_FP || STRESS_NG_STRESSOR_FP_SUBNORMAL || STRESS_NG_STRESSOR_FRACTAL || STRESS_NG_STRESSOR_HEAPSORT || STRESS_NG_STRESSOR_ICACHE || STRESS_NG_STRESSOR_INSERTIONSORT || STRESS_NG_STRESSOR_L1CACHE || STRESS_NG_STRESSOR_LOCKBUS || STRESS_NG_STRESSOR_MALLOC || STRESS_NG_STRESSOR_MATRIX || STRESS_NG_STRESSOR_MATRIX_3D || STRESS_NG_STRESSOR_MEMCPY || STRESS_NG_STRESSOR_MEMRATE || STRESS_NG_STRESSOR_MEMTHRASH || STRESS_NG_STRESSOR_MERGESORT || STRESS_NG_STRESSOR_MIN_NANOSLEEP || STRESS_NG_STRESSOR_MLOCK || STRESS_NG_STRESSOR_MMAP || STRESS_NG_STRESSOR_MMAPADDR || STRESS_NG_STRESSOR_MMAPFILES || STRESS_NG_STRESSOR_MMAPFIXED || STRESS_NG_STRESSOR_MMAPMANY || STRESS_NG_STRESSOR_MSEAL || STRESS_NG_STRESSOR_MSYNC || STRESS_NG_STRESSOR_MSYNCMANY || STRESS_NG_STRESSOR_PREFETCH || STRESS_NG_STRESSOR_PTR_CHASE || STRESS_NG_STRESSOR_QSORT || STRESS_NG_STRESSOR_RANDLIST || STRESS_NG_STRESSOR_RING_PIPE || STRESS_NG_STRESSOR_ROFS || STRESS_NG_STRESSOR_SCHEDMIX || STRESS_NG_STRESSOR_SEM || STRESS_NG_STRESSOR_SHELLSORT || STRESS_NG_STRESSOR_SIGHUP || STRESS_NG_STRESSOR_SPARSEMATRIX || STRESS_NG_STRESSOR_SPEC_ROLLBACK || STRESS_NG_STRESSOR_STREAM || STRESS_NG_STRESSOR_URANDOM || STRESS_NG_STRESSOR_VARYLOAD || STRESS_NG_STRESSOR_VFORKMANY || STRESS_NG_STRESSOR_VM || STRESS_NG_STRESSOR_VM_ADDR || STRESS_NG_STRESSOR_WORKLOAD || STRESS_NG_STRESSOR_ZERO
++	default y if STRESS_NG_STRESSOR_BITONICSORT || STRESS_NG_STRESSOR_BSEARCH || STRESS_NG_STRESSOR_BUBBLESORT || STRESS_NG_STRESSOR_CACHE || STRESS_NG_STRESSOR_CPU || STRESS_NG_STRESSOR_DENTRY || STRESS_NG_STRESSOR_DUP || STRESS_NG_STRESSOR_ENV || STRESS_NG_STRESSOR_EXEC || STRESS_NG_STRESSOR_FAR_BRANCH || STRESS_NG_STRESSOR_FAULT || STRESS_NG_STRESSOR_FD_FORK || STRESS_NG_STRESSOR_FIBSEARCH || STRESS_NG_STRESSOR_FLUSHCACHE || STRESS_NG_STRESSOR_FMA || STRESS_NG_STRESSOR_FP || STRESS_NG_STRESSOR_FP_SUBNORMAL || STRESS_NG_STRESSOR_FRACTAL || STRESS_NG_STRESSOR_HEAPSORT || STRESS_NG_STRESSOR_ICACHE || STRESS_NG_STRESSOR_INSERTIONSORT || STRESS_NG_STRESSOR_L1CACHE || STRESS_NG_STRESSOR_LOCKBUS || STRESS_NG_STRESSOR_MALLOC || STRESS_NG_STRESSOR_MATRIX || STRESS_NG_STRESSOR_MATRIX_3D || STRESS_NG_STRESSOR_MEMCPY || STRESS_NG_STRESSOR_MEMRATE || STRESS_NG_STRESSOR_MEMTHRASH || STRESS_NG_STRESSOR_MERGESORT || STRESS_NG_STRESSOR_MIN_NANOSLEEP || STRESS_NG_STRESSOR_MLOCK || STRESS_NG_STRESSOR_MMAP || STRESS_NG_STRESSOR_MMAPADDR || STRESS_NG_STRESSOR_MMAPFILES || STRESS_NG_STRESSOR_MMAPFIXED || STRESS_NG_STRESSOR_MMAPMANY || STRESS_NG_STRESSOR_MSEAL || STRESS_NG_STRESSOR_MSYNC || STRESS_NG_STRESSOR_MSYNCMANY || STRESS_NG_STRESSOR_PREFETCH || STRESS_NG_STRESSOR_PRIV_INSTR || STRESS_NG_STRESSOR_PTR_CHASE || STRESS_NG_STRESSOR_QSORT || STRESS_NG_STRESSOR_RANDLIST || STRESS_NG_STRESSOR_RING_PIPE || STRESS_NG_STRESSOR_ROFS || STRESS_NG_STRESSOR_SCHEDMIX || STRESS_NG_STRESSOR_SEM || STRESS_NG_STRESSOR_SHELLSORT || STRESS_NG_STRESSOR_SIGHUP || STRESS_NG_STRESSOR_SPARSEMATRIX || STRESS_NG_STRESSOR_SPEC_ROLLBACK || STRESS_NG_STRESSOR_STREAM || STRESS_NG_STRESSOR_URANDOM || STRESS_NG_STRESSOR_VARYLOAD || STRESS_NG_STRESSOR_VFORKMANY || STRESS_NG_STRESSOR_VM || STRESS_NG_STRESSOR_VM_ADDR || STRESS_NG_STRESSOR_WORKLOAD || STRESS_NG_STRESSOR_ZERO
 +	select POSIX_MAPPED_FILES
 +
 +config STRESS_NG_NEEDS_POSIX_MEMLOCK_RANGE
@@ -1903,7 +1928,7 @@ new file mode 100644
 +
 +config STRESS_NG_NEEDS_POSIX_SIGNAL_JUMP
 +	bool
-+	default y if STRESS_NG_STRESSOR_BIGHEAP || STRESS_NG_STRESSOR_BITONICSORT || STRESS_NG_STRESSOR_BUBBLESORT || STRESS_NG_STRESSOR_CACHE || STRESS_NG_STRESSOR_FAR_BRANCH || STRESS_NG_STRESSOR_FAULT || STRESS_NG_STRESSOR_HEAPSORT || STRESS_NG_STRESSOR_INSERTIONSORT || STRESS_NG_STRESSOR_LIST || STRESS_NG_STRESSOR_LOCKBUS || STRESS_NG_STRESSOR_MALLOC || STRESS_NG_STRESSOR_MERGESORT || STRESS_NG_STRESSOR_MMAP || STRESS_NG_STRESSOR_MSYNC || STRESS_NG_STRESSOR_NOP || STRESS_NG_STRESSOR_QSORT || STRESS_NG_STRESSOR_RADIXSORT || STRESS_NG_STRESSOR_SHELLSORT || STRESS_NG_STRESSOR_TREE
++	default y if STRESS_NG_STRESSOR_BIGHEAP || STRESS_NG_STRESSOR_BITONICSORT || STRESS_NG_STRESSOR_BUBBLESORT || STRESS_NG_STRESSOR_CACHE || STRESS_NG_STRESSOR_FAR_BRANCH || STRESS_NG_STRESSOR_FAULT || STRESS_NG_STRESSOR_HEAPSORT || STRESS_NG_STRESSOR_INSERTIONSORT || STRESS_NG_STRESSOR_LIST || STRESS_NG_STRESSOR_LOCKBUS || STRESS_NG_STRESSOR_MALLOC || STRESS_NG_STRESSOR_MERGESORT || STRESS_NG_STRESSOR_MMAP || STRESS_NG_STRESSOR_MSYNC || STRESS_NG_STRESSOR_NOP || STRESS_NG_STRESSOR_PRIV_INSTR || STRESS_NG_STRESSOR_QSORT || STRESS_NG_STRESSOR_RADIXSORT || STRESS_NG_STRESSOR_SHELLSORT || STRESS_NG_STRESSOR_TREE
 +	select POSIX_SIGNAL_JUMP if !NATIVE_BUILD || NATIVE_LIBC
 +
 +config STRESS_NG_NEEDS_POSIX_SINGLE_PROCESS
@@ -1964,7 +1989,7 @@ diff --git a/zephyr/config/config.h b/zephyr/config/config.h
 new file mode 100644
 --- /dev/null
 +++ b/zephyr/config/config.h
-@@ -0,0 +1,760 @@
+@@ -0,0 +1,761 @@
 +/*
 + * SPDX-License-Identifier: GPL-2.0-or-later
 + * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
@@ -2441,10 +2466,11 @@ new file mode 100644
 +#endif
 +
 +#if defined(CONFIG_POSIX_MEMLOCK)
++#define HAVE_MLOCKALL
 +#define HAVE_MUNLOCKALL
 +#endif
 +
-+#if CONFIG_POSIX_MEMLOCK_RANGE && CONFIG_DEMAND_PAGING
++#if defined(CONFIG_POSIX_MEMLOCK_RANGE)
 +#define HAVE_MLOCK
 +#define HAVE_MUNLOCK
 +#endif
@@ -2798,7 +2824,7 @@ diff --git a/zephyr/include/stress_ng_stressors.h b/zephyr/include/stress_ng_str
 new file mode 100644
 --- /dev/null
 +++ b/zephyr/include/stress_ng_stressors.h
-@@ -0,0 +1,943 @@
+@@ -0,0 +1,946 @@
 +/*
 + * SPDX-License-Identifier: GPL-2.0-or-later
 + * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
@@ -3388,6 +3414,9 @@ new file mode 100644
 +#ifdef CONFIG_STRESS_NG_STRESSOR_PRIO_INV
 +STRESS_NG_STRESSOR(prio_inv, "prio-inv")
 +#endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_PRIV_INSTR
++STRESS_NG_STRESSOR(priv_instr, "priv-instr")
++#endif
 +#ifdef CONFIG_STRESS_NG_STRESSOR_PROCFS
 +STRESS_NG_STRESSOR(procfs, "procfs")
 +#endif
@@ -3746,7 +3775,7 @@ diff --git a/zephyr/stressors.cmake b/zephyr/stressors.cmake
 new file mode 100644
 --- /dev/null
 +++ b/zephyr/stressors.cmake
-@@ -0,0 +1,317 @@
+@@ -0,0 +1,318 @@
 +# SPDX-License-Identifier: GPL-2.0-or-later
 +# Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
 +# Generated by zephyr/scripts/gen_glue.py from core-stressors.h; do not edit.
@@ -3948,6 +3977,7 @@ new file mode 100644
 +zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_PREFETCH ${sng_dir}/stress-prefetch.c)
 +zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_PRIME ${sng_dir}/stress-prime.c)
 +zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_PRIO_INV ${sng_dir}/stress-prio-inv.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_PRIV_INSTR ${sng_dir}/stress-priv-instr.c)
 +zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_PROCFS ${sng_dir}/stress-procfs.c)
 +zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_PTHREAD ${sng_dir}/stress-pthread.c)
 +zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_PTRACE ${sng_dir}/stress-ptrace.c)
@@ -4068,7 +4098,7 @@ diff --git a/zephyr/zephyr.c b/zephyr/zephyr.c
 new file mode 100644
 --- /dev/null
 +++ b/zephyr/zephyr.c
-@@ -0,0 +1,482 @@
+@@ -0,0 +1,500 @@
 +/*
 + * SPDX-License-Identifier: GPL-2.0-or-later
 + * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
@@ -4087,6 +4117,7 @@ new file mode 100644
 +
 +#include <stress_ng.h>
 +
++#include <zephyr/init.h>
 +#include <zephyr/kernel.h>
 +#include <pthread.h>
 +#include <sys/wait.h>
@@ -4455,6 +4486,18 @@ new file mode 100644
 +	return rc;
 +}
 +
++#ifdef CONFIG_USERSPACE
++/* the runner's kernel objects, for stressors run from user threads */
++static int stress_ng_grant(void)
++{
++	k_object_access_all_grant(&run_lock);
++	k_object_access_all_grant(&stop_timer);
++
++	return 0;
++}
++SYS_INIT(stress_ng_grant, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);
++#endif /* CONFIG_USERSPACE */
++
 +/* stressors keep sizeable arrays on the stack: run them on a stack sized for that */
 +static K_THREAD_STACK_DEFINE(stress_stack, CONFIG_STRESS_NG_STACK_SIZE);
 +static struct k_thread stress_thread;
@@ -4491,13 +4534,18 @@ new file mode 100644
 +	job.s = &stressors[i];
 +
 +	k_sem_take(&run_lock, K_FOREVER);
-+	stress_thread_live = true;
-+	(void)k_thread_create(&stress_thread, stress_stack, K_THREAD_STACK_SIZEOF(stress_stack),
-+			      stress_ng_thread, &job, NULL, NULL,
-+			      k_thread_priority_get(k_current_get()), 0, K_NO_WAIT);
-+	(void)k_thread_name_set(&stress_thread, "stress-ng");
-+	(void)k_thread_join(&stress_thread, K_FOREVER);
-+	stress_thread_live = false;
++	if (k_is_user_context()) {
++		/* a user thread brings its own (sized) stack and cannot hand out kernel objects */
++		stress_ng_thread(&job, NULL, NULL);
++	} else {
++		stress_thread_live = true;
++		(void)k_thread_create(&stress_thread, stress_stack, K_THREAD_STACK_SIZEOF(stress_stack),
++				      stress_ng_thread, &job, NULL, NULL,
++				      k_thread_priority_get(k_current_get()), 0, K_NO_WAIT);
++		(void)k_thread_name_set(&stress_thread, "stress-ng");
++		(void)k_thread_join(&stress_thread, K_FOREVER);
++		stress_thread_live = false;
++	}
 +	k_sem_give(&run_lock);
 +
 +	return job.rc;

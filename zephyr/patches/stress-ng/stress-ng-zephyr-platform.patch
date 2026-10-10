@@ -235,6 +235,72 @@ diff --git a/core-log.h b/core-log.h
  extern int pr_yaml(FILE *fp, const char *const fmt, ...) FORMAT(printf, 2, 3);
  extern void pr_closelog(void);
  extern void pr_openlog(const char *filename);
+diff --git a/core-mmap.c b/core-mmap.c
+--- a/core-mmap.c
++++ b/core-mmap.c
+@@ -247,6 +247,37 @@ void *stress_mmap_populate(
+  *	simplified anonymous shared mmap, use SYSV shm for
+  *	systems that don't support this feature
+  */
++#if defined(__ZEPHYR__) && !defined(CONFIG_MMU)
++/*
++ *  Without an MMU every anonymous mapping granted to a user thread costs one
++ *  memory-protection region, of which a board has a handful: the shared state
++ *  of an in-process run comes from one static arena instead, and is never
++ *  returned (a run maps it once).
++ */
++static uint8_t stress_shared_arena[CONFIG_STRESS_NG_SHARED_ARENA_SIZE] ALIGN64;
++static size_t stress_shared_arena_used;
++
++void *stress_mmap_anon_shared(const size_t length, const int prot)
++{
++	const size_t offset = (stress_shared_arena_used + 63) & ~(size_t)63;
++
++	(void)prot;
++	if (offset + length > sizeof(stress_shared_arena)) {
++		errno = ENOMEM;
++		return MAP_FAILED;
++	}
++	stress_shared_arena_used = offset + length;
++	return &stress_shared_arena[offset];
++}
++
++int stress_munmap_anon_shared(void *addr, const size_t length)
++{
++	(void)addr;
++	(void)length;
++
++	return 0;
++}
++#else
+ void *stress_mmap_anon_shared(const size_t length, const int prot)
+ {
+ #if defined(HAVE_SYS_SHM_H) &&	\
+@@ -334,6 +365,8 @@ static size_t stress_mapping_hugetlb_size(void *addr)
+ }
+ #endif
+
++#endif /* __ZEPHYR__ && !CONFIG_MMU */
++
+ /*
+  *  stress_munmap_force()
+  *	force retry munmap on ENOMEM or EINVAL errors as these can be due
+@@ -404,6 +437,7 @@ int stress_munmap_force(void *addr, const size_t length)
+ 	return ret;
+ }
+
++#if !(defined(__ZEPHYR__) && !defined(CONFIG_MMU))
+ /*
+  *  stress_munmap_anon_shared()
+  *	unmap for stress_mmap_anon_shared, use SYSV shm for
+@@ -420,6 +454,7 @@ int stress_munmap_anon_shared(void *addr, const size_t length)
+ 	return munmap(addr, length);
+ #endif
+ }
++#endif /* !(__ZEPHYR__ && !CONFIG_MMU) */
+
+ #define STRESS_PAGE_SOFT_DIRTY	(STRESS_BIT_ULL(55))
+ #define STRESS_PAGE_EXCLUSIVE	(STRESS_BIT_ULL(56))
 diff --git a/core-mounts.c b/core-mounts.c
 --- a/core-mounts.c
 +++ b/core-mounts.c
@@ -287,6 +353,19 @@ diff --git a/core-mwc.c b/core-mwc.c
 
  		/*
  		 *  Mix in some initial system values
+diff --git a/core-shim.c b/core-shim.c
+--- a/core-shim.c
++++ b/core-shim.c
+@@ -2895,7 +2895,8 @@ int shim_kill(pid_t pid, int sig)
+ 		errno = EPERM;
+ 		return -1;
+ 	}
+-	if (UNLIKELY(pid == 1)) {
++	if (UNLIKELY((pid == 1) && (getpid() != 1))) {
++		/* init, unless that is us: the first process on some systems */
+ 		errno = EPERM;
+ 		return -1;
+ 	}
 diff --git a/stress-daemon.c b/stress-daemon.c
 --- a/stress-daemon.c
 +++ b/stress-daemon.c
@@ -669,15 +748,14 @@ diff --git a/stress-timermix.c b/stress-timermix.c
 diff --git a/stress-tsc.c b/stress-tsc.c
 --- a/stress-tsc.c
 +++ b/stress-tsc.c
-@@ -69,8 +69,10 @@ static inline uint64_t rdtsc(void)
-
+@@ -70,7 +70,9 @@ static inline uint64_t rdtsc(void)
  #endif
 
-+/* the rdtime probe relies on catching SIGILL, which a kernel-mode thread cannot */
  #if defined(STRESS_ARCH_RISCV) &&	\
 -    defined(SIGILL)
-+    defined(SIGILL) &&		\
-+    !defined(__ZEPHYR__)
++    defined(SIGILL) &&			\
++    (!defined(__ZEPHYR__) || defined(CONFIG_RISCV_ISA_EXT_ZICNTR))
++/* Zephyr: rdtime traps as an illegal instruction unless the SoC declares Zicntr */
 
  #define HAVE_STRESS_TSC_CAPABILITY
 
