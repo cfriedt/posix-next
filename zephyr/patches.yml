@@ -551,6 +551,30 @@ patches:
       POSIX sem_destroy() EBUSY detection, which lets sem_t be exactly
       struct sys_sem and the POSIX semaphore layer be a thin spelling
       adapter over the sys_sem API.
+  - path: zephyr/k-sem-give-checked.patch
+    sha256sum: 13eeaf5582d68ac5f0f0d68757ad617e893fb7f346c80b20395c62babf3722ce
+    module: zephyr
+    author: Yavuz Murat TAŞ
+    email: yavuzmurattas3@gmail.com
+    date: 2026-10-10
+    upstreamable: true
+    merge-pr: https://github.com/zephyrproject-rtos/zephyr/pull/121788
+    comments: |
+      kernel: sem: add an internal give that reports a full semaphore
+
+      k_sem_give() saturates silently at the semaphore limit, which is the
+      documented native behaviour. Callers that must report the overflow,
+      such as POSIX sem_post(), cannot implement the check on top of it:
+      reading the count and giving are two separate steps, so two concurrent
+      callers can both see one free slot and both succeed while only one
+      increment is kept.
+
+      Add z_sem_give_checked(), a supervisor-only variant that performs the
+      limit check under the semaphore lock and returns -EOVERFLOW without
+      changing anything when the count is already at the limit. The public
+      k_sem_give() API and its behaviour are unchanged.
+
+      Ported from the first commit of zephyr#121788 (7c56ccd8180c).
   - path: zephyr/k-obj-map-size.patch
     sha256sum: a490528e70769c7d22d9029f19b972603270dc4acbead1c98f761f9e0b25a3df
     module: zephyr
