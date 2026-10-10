@@ -2121,3 +2121,17 @@ patches:
       the flag in kernel bss, any such call from user mode (e.g. Picolibc's
       getc_unlocked()) faults. Zephyr's own code already builds with
       -mno-outline-atomics under CONFIG_USERSPACE.
+  - path: zephyr/arm64-userspace-cache-maintenance.patch
+    sha256sum: 2e42fc6bdc1fec89817fa1326b6d9ac8fe57cb5096b98a4201c9b175676babf7
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-10-10
+    upstreamable: true
+    comments: |
+      arch: arm64: with CONFIG_USERSPACE let EL0 read CTR_EL0 and issue the
+      cache maintenance instructions (SCTLR_EL1.UCT and UCI, as Linux does).
+      libgcc's __clear_cache(), which GCC emits for self-modifying code and
+      stress-ng's cache stressors call directly, reads CTR_EL0 for the cache
+      line sizes and then cleans by DC CVAU / IC IVAU; from a user thread
+      each of these trapped to EL1 and killed the thread.

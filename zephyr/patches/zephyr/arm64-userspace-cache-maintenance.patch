@@ -1,0 +1,26 @@
+diff --git a/arch/arm64/core/reset.c b/arch/arm64/core/reset.c
+--- a/arch/arm64/core/reset.c
++++ b/arch/arm64/core/reset.c
+@@ -292,6 +292,10 @@ void z_arm64_el1_init(void)
+ 		SCTLR_I_BIT |		/* Enable i-cache */
+ 		SCTLR_C_BIT |		/* Enable d-cache */
+ 		SCTLR_SA_BIT);		/* Enable SP alignment check */
++	if (IS_ENABLED(CONFIG_USERSPACE)) {
++		/* user code maintains its own caches (libgcc's __clear_cache) */
++		reg |= SCTLR_UCT_BIT | SCTLR_UCI_BIT;
++	}
+ 
+ #ifdef CONFIG_ARM_PAC
+ 	/* Set a default APIA key BEFORE enabling PAC */
+diff --git a/include/zephyr/arch/arm64/cpu.h b/include/zephyr/arch/arm64/cpu.h
+--- a/include/zephyr/arch/arm64/cpu.h
++++ b/include/zephyr/arch/arm64/cpu.h
+@@ -54,6 +54,8 @@
+ #define SCTLR_C_BIT		BIT(2)
+ #define SCTLR_SA_BIT		BIT(3)
+ #define SCTLR_I_BIT		BIT(12)
++#define SCTLR_UCT_BIT		BIT(15)	/* EL0 may read CTR_EL0 */
++#define SCTLR_UCI_BIT		BIT(26)	/* EL0 may issue DC CVAU/CIVAC/CVAC and IC IVAU */
+ #define SCTLR_BR_BIT		BIT(17)
+ #define SCTLR_EnIA_BIT		BIT(31)	/* Enable Instruction address signing using key A */
+ #define SCTLR_BT0_BIT		BIT(35)	/* PAC Branch Type compatibility for EL0 */
