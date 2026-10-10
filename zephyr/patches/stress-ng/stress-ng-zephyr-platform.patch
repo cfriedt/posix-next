@@ -1,0 +1,920 @@
+diff --git a/Makefile.config b/Makefile.config
+--- a/Makefile.config
++++ b/Makefile.config
+@@ -3009,6 +3009,7 @@ functions: \
+ 	SETFSGID \
+ 	SETFSUID \
+ 	SETGROUPS \
++	SETHOSTNAME \
+ 	SETITIMER \
+ 	SETRLIMIT \
+ 	SETMNTENT \
+@@ -4182,6 +4183,9 @@ GETGROUPS:
+ GETHOSTNAME:
+ 	$(call check,test-gethostname,HAVE_GETHOSTNAME,gethostname)
+
++SETHOSTNAME:
++	$(call check,test-sethostname,HAVE_SETHOSTNAME,sethostname)
++
+ GETHOSTID:
+ 	$(call check,test-gethostid,HAVE_GETHOSTID,gethostid)
+
+diff --git a/core-asm-riscv.h b/core-asm-riscv.h
+--- a/core-asm-riscv.h
++++ b/core-asm-riscv.h
+@@ -39,13 +39,13 @@
+ #if defined(__BYTE_ORDER__) &&	\
+     defined(__ORDER_BIG_ENDIAN__)
+ #if __BYTE_ORDER__  == __ORDER_BIG_ENDIAN__
+-#define __bswap32(x) ((uint32_t)__builtin_bswap32(x))
++#define stress_cbo_bswap32(x) ((uint32_t)__builtin_bswap32(x))
+ #else
+-#define __bswap32(x) (x)
++#define stress_cbo_bswap32(x) (x)
+ #endif
+ #endif
+
+-#define MK_CBO(op) __bswap32((uint32_t)(op) << 20 |                             \
++#define MK_CBO(op) stress_cbo_bswap32((uint32_t)(op) << 20 |                             \
+                              STRESS_CBO_RS1 << 15 |                             \
+                           STRESS_CBO_FUNCT3 << 12 |                             \
+                                            0 << 7 |                             \
+diff --git a/core-attribute.h b/core-attribute.h
+--- a/core-attribute.h
++++ b/core-attribute.h
+@@ -66,9 +66,13 @@
+ #endif
+
+ #if defined(ALWAYS_INLINE)
++#if !defined(__ZEPHYR__)
+ #undef ALWAYS_INLINE
+ #endif
++#endif
+ /* force inlining hint */
++/* Zephyr defines it in <zephyr/toolchain.h>, with the inline keyword its headers rely on */
++#if !defined(ALWAYS_INLINE)
+ #if defined(HAVE_ATTRIBUTE_ALWAYS_INLINE) &&					\
+     !defined(BUILD_SMALL) &&							\
+     ((defined(HAVE_COMPILER_GCC_OR_MUSL) && NEED_GNUC(3, 4, 0) 			\
+@@ -78,6 +82,7 @@
+ #else
+ #define ALWAYS_INLINE
+ #endif
++#endif
+
+ /* force no inlining hint */
+ #if defined(HAVE_ATTRIBUTE_NOINLINE) &&					\
+@@ -173,6 +178,7 @@
+      (defined(HAVE_COMPILER_CLANG) && NEED_CLANG(3, 0, 0)))) &&		\
+     !defined(__sun__) &&						\
+     !defined(__APPLE__) &&						\
++    !defined(__ZEPHYR__) &&						\
+     !defined(BUILD_STATIC)
+ #define MLOCKED_TEXT	__attribute__((__section__("mlocked_text")))
+ #define MLOCKED_SECTION	(1)
+diff --git a/core-cpu.c b/core-cpu.c
+--- a/core-cpu.c
++++ b/core-cpu.c
+@@ -30,6 +30,24 @@
+ #include <ximmintrin.h>
+ #endif
+
++#if defined(STRESS_ARCH_X86)
++/*
++ *  stress_cpu_x86_has_leaf()
++ *	is the cpuid leaf within the range the CPU reports? Leaves
++ *	beyond the maximum return the data of the highest supported
++ *	leaf, which must not be taken for feature flags (e.g. QEMU's
++ *	qemu32 model stops short of leaf 7).
++ */
++static bool stress_cpu_x86_has_leaf(const uint32_t leaf)
++{
++	uint32_t eax = leaf & 0x80000000;
++	uint32_t ebx = 0, ecx = 0, edx = 0;
++
++	stress_asm_x86_cpuid(eax, ebx, ecx, edx);
++	return leaf <= eax;
++}
++#endif
++
+ /*
+  *  STRESS_CPU_X86_HAS()
+  *	check if a CPU is a recognized x86 processor and has
+@@ -45,7 +63,8 @@ do {									\
+ 	if (!tmp ## name ## _cached) {					\
+ 		tmp ## name ## _cached = true;				\
+ 									\
+-		if (UNLIKELY(stress_cpu_is_x86())) {			\
++		if (UNLIKELY(stress_cpu_is_x86()) &&			\
++		    stress_cpu_x86_has_leaf(EAX)) {			\
+ 			uint32_t eax = EAX;				\
+ 			uint32_t ebx = EBX;				\
+ 			uint32_t ecx = ECX;				\
+diff --git a/core-filesystem.c b/core-filesystem.c
+--- a/core-filesystem.c
++++ b/core-filesystem.c
+@@ -711,6 +711,50 @@ int stress_fs_temp_dir_rm_args(stress_args_t *args)
+ 	return stress_fs_temp_dir_rm(args->name, args->pid, args->instance);
+ }
+
++/*
++ *  stress_fs_dev_scratch_open()
++ *	open a scratch file in the per-instance temporary directory to stand
++ *	in for a device node (/dev/zero, /dev/null) on systems that have none,
++ *	such as Zephyr; it starts as one page of zeros, and the caller keeps
++ *	it small by rewinding after its reads and writes
++ */
++int stress_fs_dev_scratch_open(stress_args_t *args, const int flags)
++{
++	char filename[PATH_MAX];
++	const size_t page_size = args->page_size;
++	void *zeros;
++	int fd;
++
++	(void)flags;
++
++	if (stress_fs_temp_dir_make_args(args) < 0)
++		return -1;
++	(void)stress_fs_temp_filename_args(args, filename, sizeof(filename), stress_mwc32());
++	fd = open(filename, O_CREAT | O_RDWR | O_TRUNC, S_IRUSR | S_IWUSR);
++	if (fd < 0) {
++		(void)stress_fs_temp_dir_rm_args(args);
++		return -1;
++	}
++	zeros = calloc(1, page_size);
++	if (zeros) {
++		VOID_RET(ssize_t, write(fd, zeros, page_size));
++		free(zeros);
++	}
++	(void)lseek(fd, 0, SEEK_SET);
++	(void)shim_unlink(filename);
++	return fd;
++}
++
++/*
++ *  stress_fs_dev_scratch_close()
++ *	close a scratch file from stress_fs_dev_scratch_open()
++ */
++void stress_fs_dev_scratch_close(stress_args_t *args, const int fd)
++{
++	(void)close(fd);
++	(void)stress_fs_temp_dir_rm_args(args);
++}
++
+ /*
+  *  stress_fs_file_write()
+  *	write a buffer to a named file, e.g. a /sys or /proc entry
+diff --git a/core-filesystem.h b/core-filesystem.h
+--- a/core-filesystem.h
++++ b/core-filesystem.h
+@@ -61,6 +61,8 @@ extern WARN_UNUSED int stress_fs_temp_dir_make_args(stress_args_t *args);
+ extern int stress_fs_temp_dir_rm(const char *name, const pid_t pid,
+ 	const uint32_t instance);
+ extern int stress_fs_temp_dir_rm_args(stress_args_t *args);
++extern int stress_fs_dev_scratch_open(stress_args_t *args, const int flags);
++extern void stress_fs_dev_scratch_close(stress_args_t *args, const int fd);
+ extern ssize_t stress_fs_file_write(const char *path, const char *buf,
+ 	const size_t buf_len);
+ extern ssize_t stress_fs_discard(const char *path);
+diff --git a/core-helper.c b/core-helper.c
+--- a/core-helper.c
++++ b/core-helper.c
+@@ -1054,7 +1054,10 @@ char *stress_const_optdup(const char *opt)
+  */
+ size_t stress_exec_text_addr(char **start, char **end)
+ {
+-#if defined(HAVE_EXECUTABLE_START)
++#if defined(__ZEPHYR__)
++	extern char __text_region_start[];
++	intptr_t text_start = (intptr_t)__text_region_start;
++#elif defined(HAVE_EXECUTABLE_START)
+ 	extern char __executable_start;
+ 	intptr_t text_start = (intptr_t)&__executable_start;
+ #elif defined(__APPLE__)
+@@ -1074,7 +1077,10 @@ size_t stress_exec_text_addr(char **start, char **end)
+ 	intptr_t text_start = (intptr_t)&_start;
+ #endif
+
+-#if defined(__APPLE__)
++#if defined(__ZEPHYR__)
++	extern char __text_region_end[];
++	intptr_t text_end = (intptr_t)__text_region_end;
++#elif defined(__APPLE__)
+ 	extern void *get_etext(void);
+ 	intptr_t text_end = (intptr_t)get_etext();
+ #elif defined(HAVE_COMPILER_TCC)
+diff --git a/core-log.c b/core-log.c
+--- a/core-log.c
++++ b/core-log.c
+@@ -160,6 +160,17 @@ void pr_block_end(void)
+  *	that each stressor doing it's own failure exit
+  *	return accounting
+  */
++/*
++ *  pr_fail_reset()
++ *	forget the failures seen so far, for a driver that runs stressors
++ *	one after another in the same process
++ */
++void pr_fail_reset(void)
++{
++	abort_fails = 0;
++	abort_msg_emitted = false;
++}
++
+ void pr_fail_check(int *const rc)
+ {
+ 	if (abort_msg_emitted && (*rc == EXIT_SUCCESS))
+diff --git a/core-log.h b/core-log.h
+--- a/core-log.h
++++ b/core-log.h
+@@ -44,6 +44,7 @@ extern WARN_UNUSED int pr_fd(void);
+ extern void pr_block_begin(void);
+ extern void pr_block_end(void);
+ extern void pr_fail_check(int *const rc);
++extern void pr_fail_reset(void);
+ extern int pr_yaml(FILE *fp, const char *const fmt, ...) FORMAT(printf, 2, 3);
+ extern void pr_closelog(void);
+ extern void pr_openlog(const char *filename);
+diff --git a/core-mmap.c b/core-mmap.c
+--- a/core-mmap.c
++++ b/core-mmap.c
+@@ -247,6 +247,37 @@ void *stress_mmap_populate(
+  *	simplified anonymous shared mmap, use SYSV shm for
+  *	systems that don't support this feature
+  */
++#if defined(__ZEPHYR__) && !defined(CONFIG_MMU)
++/*
++ *  Without an MMU every anonymous mapping granted to a user thread costs one
++ *  memory-protection region, of which a board has a handful: the shared state
++ *  of an in-process run comes from one static arena instead, and is never
++ *  returned (a run maps it once).
++ */
++static uint8_t stress_shared_arena[CONFIG_STRESS_NG_SHARED_ARENA_SIZE] ALIGN64;
++static size_t stress_shared_arena_used;
++
++void *stress_mmap_anon_shared(const size_t length, const int prot)
++{
++	const size_t offset = (stress_shared_arena_used + 63) & ~(size_t)63;
++
++	(void)prot;
++	if (offset + length > sizeof(stress_shared_arena)) {
++		errno = ENOMEM;
++		return MAP_FAILED;
++	}
++	stress_shared_arena_used = offset + length;
++	return &stress_shared_arena[offset];
++}
++
++int stress_munmap_anon_shared(void *addr, const size_t length)
++{
++	(void)addr;
++	(void)length;
++
++	return 0;
++}
++#else
+ void *stress_mmap_anon_shared(const size_t length, const int prot)
+ {
+ #if defined(HAVE_SYS_SHM_H) &&	\
+@@ -334,6 +365,8 @@ static size_t stress_mapping_hugetlb_size(void *addr)
+ }
+ #endif
+
++#endif /* __ZEPHYR__ && !CONFIG_MMU */
++
+ /*
+  *  stress_munmap_force()
+  *	force retry munmap on ENOMEM or EINVAL errors as these can be due
+@@ -404,6 +437,7 @@ int stress_munmap_force(void *addr, const size_t length)
+ 	return ret;
+ }
+
++#if !(defined(__ZEPHYR__) && !defined(CONFIG_MMU))
+ /*
+  *  stress_munmap_anon_shared()
+  *	unmap for stress_mmap_anon_shared, use SYSV shm for
+@@ -420,6 +454,7 @@ int stress_munmap_anon_shared(void *addr, const size_t length)
+ 	return munmap(addr, length);
+ #endif
+ }
++#endif /* !(__ZEPHYR__ && !CONFIG_MMU) */
+
+ #define STRESS_PAGE_SOFT_DIRTY	(STRESS_BIT_ULL(55))
+ #define STRESS_PAGE_EXCLUSIVE	(STRESS_BIT_ULL(56))
+diff --git a/core-mounts.c b/core-mounts.c
+--- a/core-mounts.c
++++ b/core-mounts.c
+@@ -19,6 +19,7 @@
+  */
+ #include "stress-ng.h"
+ #include "core-builtin.h"
++#include "core-filesystem.h"
+ #include "core-mounts.h"
+
+ /* *BSD systems */
+@@ -123,9 +124,14 @@ int stress_mount_get(char *mnts[], const int max)
+ 	int n = 0;
+
+ 	(void)shim_memset(mnts, 0, max * sizeof(*mnts));
++#if defined(__ZEPHYR__)
++	/* the root is a directory of mount points, not a file system */
++	stress_mount_add(mnts, max, &n, stress_fs_temp_path_get());
++#else
+ 	stress_mount_add(mnts, max, &n, "/");
+ 	stress_mount_add(mnts, max, &n, "/dev");
+ 	stress_mount_add(mnts, max, &n, "/tmp");
++#endif
+
+ 	return n;
+ }
+diff --git a/core-mwc.c b/core-mwc.c
+--- a/core-mwc.c
++++ b/core-mwc.c
+@@ -129,7 +129,9 @@ void stress_mwc_reseed(void)
+ 		mwc.z = STRESS_MWC_SEED_Z;
+ 	} else {
+ 		struct timeval tv;
++#if defined(HAVE_GETRUSAGE)
+ 		struct rusage r;
++#endif
+ 		stress_load_average_info_t load_average_info;
+ 		union {
+ 			double d_now;
+@@ -152,10 +154,12 @@ void stress_mwc_reseed(void)
+ 			mwc.z += (uint64_t)(128.0 * (load_average_info.min1 + load_average_info.min15));
+ 			mwc.w += (uint64_t)(256.0 * load_average_info.min5);
+ 		}
++#if defined(HAVE_GETRUSAGE)
+ 		if (getrusage(RUSAGE_SELF, &r) == 0) {
+ 			mwc.z += r.ru_utime.tv_usec;
+ 			mwc.w += r.ru_utime.tv_sec;
+ 		}
++#endif
+
+ 		/*
+ 		 *  Mix in some initial system values
+diff --git a/core-shim.c b/core-shim.c
+--- a/core-shim.c
++++ b/core-shim.c
+@@ -2895,7 +2895,8 @@ int shim_kill(pid_t pid, int sig)
+ 		errno = EPERM;
+ 		return -1;
+ 	}
+-	if (UNLIKELY(pid == 1)) {
++	if (UNLIKELY((pid == 1) && (getpid() != 1))) {
++		/* init, unless that is us: the first process on some systems */
+ 		errno = EPERM;
+ 		return -1;
+ 	}
+diff --git a/stress-daemon.c b/stress-daemon.c
+--- a/stress-daemon.c
++++ b/stress-daemon.c
+@@ -105,9 +105,16 @@ static int stress_make_daemon(
+ 	 *  these so we can re-try. We can't report them
+ 	 *  as stdout/stderr are now closed
+ 	 */
++#if defined(__ZEPHYR__)
++	/* no device nodes: a scratch file stands in for /dev/null */
++	if ((fds[0] = stress_fs_dev_scratch_open(args, O_RDWR)) < 0) {
++		goto err_close_fd;
++	}
++#else
+ 	if ((fds[0] = open("/dev/null", O_RDWR)) < 0) {
+ 		goto err_close_fd;
+ 	}
++#endif
+ 	if ((fds[1] = dup(0)) < 0)
+ 		goto err_close_fds0;
+ 	if ((fds[2] = dup(0)) < 0)
+diff --git a/stress-dir.c b/stress-dir.c
+--- a/stress-dir.c
++++ b/stress-dir.c
+@@ -144,7 +144,8 @@ static int stress_dir_read(
+ 		struct stat statbuf;
+ 		int fd;
+
+-#if !defined(__CYGWIN__)
++#if !defined(__CYGWIN__) &&	\
++    !defined(__ZEPHYR__)
+ 		if (de->d_reclen == 0) {
+ 			pr_fail("%s: read a zero sized directory entry\n", args->name);
+ 			break;
+@@ -190,7 +191,8 @@ static int stress_dir_rename(
+ 	while (LIKELY(stress_continue(args) && ((de = readdir(dp)) != NULL))) {
+ 		char old_filename[PATH_MAX];
+
+-#if !defined(__CYGWIN__)
++#if !defined(__CYGWIN__) &&	\
++    !defined(__ZEPHYR__)
+ 		if (de->d_reclen == 0) {
+ 			pr_fail("%s: read a zero sized directory entry\n", args->name);
+ 			break;
+diff --git a/stress-dirdeep.c b/stress-dirdeep.c
+--- a/stress-dirdeep.c
++++ b/stress-dirdeep.c
+@@ -97,6 +97,11 @@ static bool stress_dirdeep_make(
+ 	}
+ 	if (len + 2 >= path_len)
+ 		return true;
++#if defined(__ZEPHYR__)
++	/* each level recurses; keep the depth within a kernel thread's stack */
++	if (depth >= 64)
++		return true;
++#endif
+ 	if (UNLIKELY(!stress_continue(args)))
+ 		return true;
+
+diff --git a/stress-dup.c b/stress-dup.c
+--- a/stress-dup.c
++++ b/stress-dup.c
+@@ -254,7 +254,11 @@ static int stress_dup(stress_args_t *args)
+ 	}
+ #endif
+
++#if defined(__ZEPHYR__)
++	fds[0] = stress_fs_dev_scratch_open(args, O_RDONLY);
++#else
+ 	fds[0] = open("/dev/zero", O_RDONLY);
++#endif
+ 	if (fds[0] < 0) {
+ 		pr_dbg("%s: open '/dev/zero' failed, errno=%d (%s)\n",
+ 			args->name, errno, strerror(errno));
+@@ -422,7 +426,11 @@ static int stress_dup(stress_args_t *args)
+
+ tidy_fds:
+ 	stress_proc_state_set(args->name, STRESS_STATE_DEINIT);
++#if defined(__ZEPHYR__)
++	stress_fs_dev_scratch_close(args, fds[0]);
++#else
+ 	(void)close(fds[0]);
++#endif
+
+ 	rate = (dup_count > 0.0) ? dup_duration / dup_count : 0.0;
+ 	stress_metrics_set(args, "nanosecs per dup call",
+diff --git a/stress-fork.c b/stress-fork.c
+--- a/stress-fork.c
++++ b/stress-fork.c
+@@ -433,8 +433,11 @@ static int stress_fork_fn(
+ 				info[n].err = errno;
+ 			}
+ 			info[n].pid = pid;
+-			if (UNLIKELY(!stress_continue(args)))
++			if (UNLIKELY(!stress_continue(args))) {
++				/* this child counts too: it is waited for below */
++				n++;
+ 				break;
++			}
+ 		}
+ 		for (i = 0; i < n; i++) {
+ 			if (info[i].pid > 0) {
+diff --git a/stress-kill.c b/stress-kill.c
+--- a/stress-kill.c
++++ b/stress-kill.c
+@@ -120,7 +120,8 @@ static int stress_kill(stress_args_t *args)
+ 		if (LIKELY(ret == 0)) {
+ 			duration += stress_time_now() - t;
+ 			count += 1.0;
+-		} else if (UNLIKELY((ret < 0) && (g_opt_flags & OPT_FLAGS_VERIFY))) {
++		} else if (UNLIKELY((ret < 0) && (errno != ESRCH) && (g_opt_flags & OPT_FLAGS_VERIFY))) {
++			/* ESRCH: no other process exists to be signalled */
+ 			pr_fail("%s: kill PID -1 with signal 0 failed, errno=%d (%s)\n",
+ 				args->name, errno, strerror(errno));
+ 		}
+diff --git a/stress-mergesort.c b/stress-mergesort.c
+--- a/stress-mergesort.c
++++ b/stress-mergesort.c
+@@ -353,6 +353,12 @@ static int stress_mergesort(stress_args_t *args)
+ 		t = stress_time_now();
+ 		/* Sort "random" data */
+ 		if (UNLIKELY(mergesort_func(data, n, sizeof(*data), stress_sort_cmp_fwd_int32) < 0)) {
++			if (errno == ENOMEM) {
++				pr_inf_skip("%s: mergesort of random data failed, errno=%d (%s), skipping stressor\n",
++					args->name, errno, strerror(errno));
++				rc = EXIT_NO_RESOURCE;
++				break;
++			}
+ 			pr_fail("%s: mergesort of random data failed, errno=%d (%s)\n",
+ 				args->name, errno, strerror(errno));
+ 			rc = EXIT_FAILURE;
+@@ -381,6 +387,12 @@ static int stress_mergesort(stress_args_t *args)
+ 		stress_sort_compare_reset();
+ 		t = stress_time_now();
+ 		if (mergesort_func(data, n, sizeof(*data), stress_sort_cmp_rev_int32) < 0) {
++			if (errno == ENOMEM) {
++				pr_inf_skip("%s: reversed mergesort of random data failed, errno=%d (%s), skipping stressor\n",
++					args->name, errno, strerror(errno));
++				rc = EXIT_NO_RESOURCE;
++				break;
++			}
+ 			pr_fail("%s: reversed mergesort of random data failed, errno=%d (%s)\n",
+ 				args->name, errno, strerror(errno));
+ 			rc = EXIT_FAILURE;
+@@ -413,6 +425,12 @@ static int stress_mergesort(stress_args_t *args)
+ 		stress_sort_compare_reset();
+ 		t = stress_time_now();
+ 		if (mergesort_func(data, n, sizeof(*data), stress_sort_cmp_rev_int32) < 0) {
++			if (errno == ENOMEM) {
++				pr_inf_skip("%s: reversed mergesort of random data failed, errno=%d (%s), skipping stressor\n",
++					args->name, errno, strerror(errno));
++				rc = EXIT_NO_RESOURCE;
++				break;
++			}
+ 			pr_fail("%s: reversed mergesort of random data failed, errno=%d (%s)\n",
+ 				args->name, errno, strerror(errno));
+ 			rc = EXIT_FAILURE;
+diff --git a/stress-ng.h b/stress-ng.h
+--- a/stress-ng.h
++++ b/stress-ng.h
+@@ -394,7 +394,9 @@ do {				\
+ #define CLOBBERED	volatile
+ #define UNCLOBBER(ptr) 	((void *)(uintptr_t)(ptr))
+
++#if !defined(STRESS_PROCS_MAX)
+ #define STRESS_PROCS_MAX	(8192)		/* Max number of processes per stressor */
++#endif
+
+ /* Stressor classes */
+ #define CLASS_COMPUTE		STRESS_BIT_UL(0)	/* CPU computations */
+diff --git a/stress-null.c b/stress-null.c
+--- a/stress-null.c
++++ b/stress-null.c
+@@ -37,6 +37,12 @@ static const stress_help_t help[] = {
+  *  stress_null
+  *	stress writing to /dev/null
+  */
++#if defined(__ZEPHYR__)
++#define STRESS_NULL_CLOSE(fd)	stress_fs_dev_scratch_close(args, fd)
++#else
++#define STRESS_NULL_CLOSE(fd)	close(fd)
++#endif
++
+ static int stress_null(stress_args_t *args)
+ {
+ 	int fd;
+@@ -64,7 +70,13 @@ static int stress_null(stress_args_t *args)
+ #if defined(O_NONBLOCK)
+ 	fcntl_mask |= O_NONBLOCK;
+ #endif
+-	if ((fd = open("/dev/null", O_RDWR)) < 0) {
++#if defined(__ZEPHYR__)
++	/* no device nodes: a scratch file sinks the writes, rewound after each one */
++	fd = stress_fs_dev_scratch_open(args, O_RDWR);
++#else
++	fd = open("/dev/null", O_RDWR);
++#endif
++	if (fd < 0) {
+ 		pr_fail("%s: open '/dev/null' failed, errno=%d (%s)\n",
+ 			args->name, errno, strerror(errno));
+ 		return EXIT_FAILURE;
+@@ -82,6 +94,11 @@ static int stress_null(stress_args_t *args)
+
+ 		t = stress_time_now();
+ 		do {
++#if defined(__ZEPHYR__)
++			/* O_APPEND and random seeks are exercised below, so truncate and rewind */
++			(void)ftruncate(fd, 0);
++			(void)lseek(fd, 0, SEEK_SET);
++#endif
+ 			ret = write(fd, buffer, sizeof(buffer));
+ 			if (UNLIKELY(ret <= 0)) {
+ 				if ((errno == EAGAIN) || (errno == EINTR))
+@@ -89,7 +106,7 @@ static int stress_null(stress_args_t *args)
+ 				if (errno) {
+ 					pr_fail("%s: write failed, errno=%d (%s)\n",
+ 						args->name, errno, strerror(errno));
+-					(void)close(fd);
++					(void)STRESS_NULL_CLOSE(fd);
+ 					return EXIT_FAILURE;
+ 				}
+ 				continue;
+@@ -115,6 +132,11 @@ static int stress_null(stress_args_t *args)
+
+ 			if (UNLIKELY(metrics_count == 0))
+ 				t = stress_time_now();
++#if defined(__ZEPHYR__)
++			/* O_APPEND and random seeks are exercised below, so truncate and rewind */
++			(void)ftruncate(fd, 0);
++			(void)lseek(fd, 0, SEEK_SET);
++#endif
+ 			ret = write(fd, buffer, sizeof(buffer));
+ 			if (UNLIKELY(ret <= 0)) {
+ 				if ((errno == EAGAIN) || (errno == EINTR))
+@@ -122,7 +144,7 @@ static int stress_null(stress_args_t *args)
+ 				if (errno) {
+ 					pr_fail("%s: write failed, errno=%d (%s)\n",
+ 						args->name, errno, strerror(errno));
+-					(void)close(fd);
++					(void)STRESS_NULL_CLOSE(fd);
+ 					return EXIT_FAILURE;
+ 				}
+ 				continue;
+@@ -187,7 +209,7 @@ static int stress_null(stress_args_t *args)
+ 			stress_bogo_inc(args);
+ 		} while (stress_continue(args));
+ 	}
+-	(void)close(fd);
++	(void)STRESS_NULL_CLOSE(fd);
+
+ 	stress_proc_state_set(args->name, STRESS_STATE_DEINIT);
+
+diff --git a/stress-pthread.c b/stress-pthread.c
+--- a/stress-pthread.c
++++ b/stress-pthread.c
+@@ -36,8 +36,14 @@
+ #endif
+
+ #define MIN_PTHREAD		(1)
++#if defined(__ZEPHYR__)
++/* the per-pthread bookkeeping lives on the stressor's stack */
++#define MAX_PTHREAD		(64)
++#define DEFAULT_PTHREAD		(16)
++#else
+ #define MAX_PTHREAD		(30000)
+ #define DEFAULT_PTHREAD		(1024)
++#endif
+
+ #if defined(__NR_get_thread_area)
+ #define HAVE_GET_THREAD_AREA
+diff --git a/stress-set.c b/stress-set.c
+--- a/stress-set.c
++++ b/stress-set.c
+@@ -44,13 +44,13 @@ UNEXPECTED
+
+ #define GIDS_MAX 	(1024)
+
++#if defined(HAVE_GETRLIMIT) &&	\
++    defined(HAVE_SETRLIMIT)
+ typedef struct {
+ 	int	ret;
+ 	struct rlimit rlim;
+ } stress_rlimit_info_t;
+
+-#if defined(HAVE_GETRLIMIT) &&	\
+-    defined(HAVE_SETRLIMIT)
+ static const shim_rlimit_resource_t rlimit_resources[] = {
+ #if defined(RLIMIT_AS)
+ 	RLIMIT_AS,
+@@ -191,10 +191,12 @@ static int stress_set(stress_args_t *args)
+ 		if (UNLIKELY(!stress_continue(args)))
+ 			break;
+
++#if defined(HAVE_SETHOSTNAME)
+ 		if (*longname) {
+ 			VOID_RET(int, sethostname(longname, max_longname_len));
+ 			VOID_RET(int, sethostname(hostname, hostname_len));
+ 		}
++#endif
+
+ #if defined(HAVE_GETPGID) &&	\
+     defined(HAVE_SETPGID)
+diff --git a/stress-stream.c b/stress-stream.c
+--- a/stress-stream.c
++++ b/stress-stream.c
+@@ -904,7 +904,7 @@ static inline void *stress_stream_mmap(
+ 		MAP_ANONYMOUS, -1, 0);
+ 	/* Coverity Scan believes NULL can be returned, doh */
+ 	if (!ptr || (ptr == MAP_FAILED)) {
+-		pr_err("%s: mmap %" PRIu64 " bytes failed%s, errno=%d (%s)\n",
++		pr_inf_skip("%s: mmap %" PRIu64 " bytes failed%s, errno=%d (%s), skipping stressor\n",
+ 			args->name, sz,
+ 			stress_memory_free_get(), errno, strerror(errno));
+ 		ptr = MAP_FAILED;
+@@ -1266,34 +1266,46 @@ static int stress_stream(stress_args_t *args)
+ 	}
+
+ 	a = (double *)stress_stream_mmap(args, sz, stream_mlock);
+-	if (a == MAP_FAILED)
++	if (a == MAP_FAILED) {
++		rc = EXIT_NO_RESOURCE;
+ 		goto err_unmap;
++	}
+ 	b = (double *)stress_stream_mmap(args, sz, stream_mlock);
+-	if (b == MAP_FAILED)
++	if (b == MAP_FAILED) {
++		rc = EXIT_NO_RESOURCE;
+ 		goto err_unmap;
++	}
+ 	c = (double *)stress_stream_mmap(args, sz, stream_mlock);
+-	if (c == MAP_FAILED)
++	if (c == MAP_FAILED) {
++		rc = EXIT_NO_RESOURCE;
+ 		goto err_unmap;
++	}
+
+ 	switch (stream_index) {
+ 	case 3:
+ 		idx3 = (size_t *)stress_stream_mmap(args, sz_idx, stream_mlock);
+-		if (idx3 == MAP_FAILED)
++		if (idx3 == MAP_FAILED) {
++			rc = EXIT_NO_RESOURCE;
+ 			goto err_unmap;
++		}
+ 		stress_stream_init_index(idx3, n);
+ 		goto case_stream_index_2;
+ 	case 2:
+ case_stream_index_2:
+ 		idx2 = (size_t *)stress_stream_mmap(args, sz_idx, stream_mlock);
+-		if (idx2 == MAP_FAILED)
++		if (idx2 == MAP_FAILED) {
++			rc = EXIT_NO_RESOURCE;
+ 			goto err_unmap;
++		}
+ 		stress_stream_init_index(idx2, n);
+ 		goto case_stream_index_1;
+ 	case 1:
+ case_stream_index_1:
+ 		idx1 = (size_t *)stress_stream_mmap(args, sz_idx, stream_mlock);
+-		if (idx1 == MAP_FAILED)
++		if (idx1 == MAP_FAILED) {
++			rc = EXIT_NO_RESOURCE;
+ 			goto err_unmap;
++		}
+ 		stress_stream_init_index(idx1, n);
+ 		break;
+ 	case 0:
+diff --git a/stress-timermix.c b/stress-timermix.c
+--- a/stress-timermix.c
++++ b/stress-timermix.c
+@@ -154,7 +154,8 @@ static void MLOCKED_TEXT OPTIMIZE3 stress_timermix_timer_action(int sig, siginfo
+ #if defined(__NetBSD__) ||	\
+     defined(__FreeBSD__) || 	\
+     defined(__sun__) ||		\
+-    defined(__CYGWIN__)
++    defined(__CYGWIN__) ||	\
++    defined(__ZEPHYR__)
+ 	if (LIKELY(siginfo && siginfo->si_value.sival_ptr)) {
+ 		stress_timer_info_t *info = (stress_timer_info_t *)siginfo->si_value.sival_ptr;
+ 		info->count++;
+diff --git a/stress-tsc.c b/stress-tsc.c
+--- a/stress-tsc.c
++++ b/stress-tsc.c
+@@ -70,7 +70,9 @@ static inline uint64_t rdtsc(void)
+ #endif
+
+ #if defined(STRESS_ARCH_RISCV) &&	\
+-    defined(SIGILL)
++    defined(SIGILL) &&			\
++    (!defined(__ZEPHYR__) || defined(CONFIG_RISCV_ISA_EXT_ZICNTR))
++/* Zephyr: rdtime traps as an illegal instruction unless the SoC declares Zicntr */
+
+ #define HAVE_STRESS_TSC_CAPABILITY
+
+diff --git a/stress-workload.c b/stress-workload.c
+--- a/stress-workload.c
++++ b/stress-workload.c
+@@ -517,7 +517,20 @@ static void *stress_workload_thread(void *ctxt)
+ 		ssize_t ret;
+ 		stress_workload_t wl;
+
++#if defined(__ZEPHYR__)
++		/* a bounded wait: cancellation is only acted on by a thread about to block */
++		struct timespec ts;
++
++		(void)clock_gettime(CLOCK_REALTIME, &ts);
++		ts.tv_nsec += 100000000;
++		if (ts.tv_nsec >= 1000000000) {
++			ts.tv_nsec -= 1000000000;
++			ts.tv_sec++;
++		}
++		ret = mq_timedreceive(info->mq, (char *)&wl, sizeof(wl), &prio, &ts);
++#else
+ 		ret = mq_receive(info->mq, (char *)&wl, sizeof(wl), &prio);
++#endif
+ 		if (ret == sizeof(wl))
+ 			stress_workload_waste_time(info->args->name, info->workload_method, wl.run_duration_sec, workload_thread->buffer, info->buffer_len);
+ 		else {
+diff --git a/stress-zero.c b/stress-zero.c
+--- a/stress-zero.c
++++ b/stress-zero.c
+@@ -67,6 +67,12 @@ static const mmap_flags_t mmap_flags[] = {
+  *  stress_zero
+  *	stress reading of /dev/zero
+  */
++#if defined(__ZEPHYR__)
++#define STRESS_ZERO_CLOSE(fd)	stress_fs_dev_scratch_close(args, fd)
++#else
++#define STRESS_ZERO_CLOSE(fd)	close(fd)
++#endif
++
+ static int stress_zero(stress_args_t *args)
+ {
+ 	int fd;
+@@ -112,7 +118,13 @@ static int stress_zero(stress_args_t *args)
+ 	stress_memory_anon_name_set(wr_buffer, page_size, "write-buffer");
+ 	(void)stress_madvise_mergeable(wr_buffer, page_size);
+
+-	if ((fd = open("/dev/zero", flags)) < 0) {
++#if defined(__ZEPHYR__)
++	/* no device nodes: a page of zeros in a scratch file, rewound after each pass */
++	fd = stress_fs_dev_scratch_open(args, flags);
++#else
++	fd = open("/dev/zero", flags);
++#endif
++	if (fd < 0) {
+ 		pr_fail("%s: open '/dev/zero' failed, errno=%d (%s)\n",
+ 			args->name, errno, strerror(errno));
+ 		(void)munmap(wr_buffer, page_size);
+@@ -139,13 +151,16 @@ static int stress_zero(stress_args_t *args)
+ 					continue;
+ 				pr_fail("%s: read failed, errno=%d (%s)\n",
+ 					args->name, errno, strerror(errno));
+-				(void)close(fd);
++				(void)STRESS_ZERO_CLOSE(fd);
+ 				(void)munmap(wr_buffer, page_size);
+ 				(void)munmap(rd_buffer, page_size);
+ 				return EXIT_FAILURE;
+ 			}
+ 			stress_bogo_inc(args);
+ 			bytes += ret;
++#if defined(__ZEPHYR__)
++			(void)lseek(fd, 0, SEEK_SET);
++#endif
+ 		} while (stress_continue(args));
+ 		duration += stress_time_now() - t;
+
+@@ -176,13 +191,16 @@ static int stress_zero(stress_args_t *args)
+ 						continue;
+ 					pr_fail("%s: read failed, errno=%d (%s)\n",
+ 						args->name, errno, strerror(errno));
+-					(void)close(fd);
++					(void)STRESS_ZERO_CLOSE(fd);
+ 					(void)munmap(wr_buffer, page_size);
+ 					(void)munmap(rd_buffer, page_size);
+ 					return EXIT_FAILURE;
+ 				}
+ 				stress_bogo_inc(args);
+ 				bytes += ret;
++#if defined(__ZEPHYR__)
++				(void)lseek(fd, 0, SEEK_SET);
++#endif
+ 			}
+ 			duration += stress_time_now() - t;
+
+@@ -194,12 +212,15 @@ static int stress_zero(stress_args_t *args)
+ #if !defined(__minix__)
+ 			/* One can also write to /dev/zero w/o failure */
+ 			ret = write(fd, wr_buffer, page_size);
++#if defined(__ZEPHYR__)
++			(void)lseek(fd, 0, SEEK_SET);
++#endif
+ 			if (UNLIKELY(ret < 0)) {
+ 				if ((errno == EAGAIN) || (errno == EINTR))
+ 					continue;
+ 				pr_fail("%s: write failed, errno=%d (%s)\n",
+ 					args->name, errno, strerror(errno));
+-				(void)close(fd);
++				(void)STRESS_ZERO_CLOSE(fd);
+ 				(void)munmap(wr_buffer, page_size);
+ 				(void)munmap(rd_buffer, page_size);
+ 				return EXIT_FAILURE;
+@@ -225,7 +246,7 @@ static int stress_zero(stress_args_t *args)
+ 						continue;
+ 					pr_fail("%s: mmap '/dev/zero' using %s failed, errno=%d (%s)\n",
+ 						args->name, mmap_flags[mmap_index].flag_str, errno, strerror(errno));
+-					(void)close(fd);
++					(void)STRESS_ZERO_CLOSE(fd);
+ 					(void)munmap(wr_buffer, page_size);
+ 					(void)munmap(rd_buffer, page_size);
+ 					return EXIT_FAILURE;
+@@ -270,7 +291,7 @@ static int stress_zero(stress_args_t *args)
+ 		} while ((rc == EXIT_SUCCESS) && stress_continue(args));
+ 	}
+ 	stress_proc_state_set(args->name, STRESS_STATE_DEINIT);
+-	(void)close(fd);
++	(void)STRESS_ZERO_CLOSE(fd);
+
+ 	(void)munmap(wr_buffer, page_size);
+ 	(void)munmap(rd_buffer, page_size);
+diff --git a/test/test-sethostname.c b/test/test-sethostname.c
+new file mode 100644
+--- /dev/null
++++ b/test/test-sethostname.c
+@@ -0,0 +1,28 @@
++/*
++ * Copyright (C) 2013-2021 Canonical, Ltd.
++ * Copyright (C) 2022-2026 Colin Ian King
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License
++ * as published by the Free Software Foundation; either version 2
++ * of the License, or (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
++ *
++ */
++
++#include <unistd.h>
++
++int main(void)
++{
++	char name[128] = "localhost";
++
++	return sethostname(name, sizeof(name));
++}
