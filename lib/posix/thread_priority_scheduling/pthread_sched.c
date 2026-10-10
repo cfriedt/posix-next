@@ -74,6 +74,8 @@ int pthread_attr_setinheritsched(pthread_attr_t *_attr, int inheritsched)
 
 int pthread_setschedparam(pthread_t pthread, int policy, const struct sched_param *param)
 {
+	int prio;
+
 	if (param == NULL || !valid_posix_policy(policy) ||
 	    !is_posix_policy_prio_valid(param->sched_priority, policy)) {
 		return EINVAL;
@@ -85,8 +87,13 @@ int pthread_setschedparam(pthread_t pthread, int policy, const struct sched_para
 	}
 #endif
 
-	k_thread_priority_set(to_k_thread(&pthread),
-			      posix_to_zephyr_priority(param->sched_priority, policy));
+	prio = posix_to_zephyr_priority(param->sched_priority, policy);
+	if (k_is_user_context() && !IS_ENABLED(CONFIG_USERSPACE_THREAD_MAY_RAISE_PRIORITY) &&
+	    (prio < k_thread_priority_get(to_k_thread(&pthread)))) {
+		/* the kernel lets a user thread lower a priority, never raise one */
+		return EPERM;
+	}
+	k_thread_priority_set(to_k_thread(&pthread), prio);
 
 	return 0;
 }
