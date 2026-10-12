@@ -5,6 +5,7 @@
 
 #include "_main.h"
 
+#include <aio.h>
 #include <errno.h>
 #include <pthread.h>
 #include <signal.h>
@@ -18,11 +19,46 @@
 #include "../../shared/linux_compat_test.h"
 
 #ifndef CONFIG_NATIVE_LIBC
+#if defined(CONFIG_POSIX_ASYNCHRONOUS_IO) && defined(CONFIG_POSIX_PIPE)
+static void sigpending_aio_worker(void)
+{
+	int fds[2];
+	char buf[1] = {0};
+	struct aiocb cb = {
+		.aio_buf = buf,
+		.aio_nbytes = sizeof(buf),
+		.aio_sigevent = {.sigev_notify = SIGEV_SIGNAL, .sigev_signo = SIGUSR1},
+	};
+	const struct aiocb *list[1] = {&cb};
+	int accepted = 0;
+	sigset_t set;
+
+	zassert_ok(pipe(fds));
+	zassert_equal(write(fds[1], "x", 1), 1);
+	cb.aio_fildes = fds[0];
+	zassert_ok(aio_read(&cb));
+	zassert_ok(aio_suspend(list, 1, NULL));
+	zassert_equal(aio_return(&cb), 1);
+	zassert_ok(sigemptyset(&set));
+	zassert_ok(sigaddset(&set, SIGUSR1));
+	zassert_ok(sigwait(&set, &accepted));
+	zassert_equal(SIGUSR1, accepted);
+	zassert_ok(close(fds[0]));
+	zassert_ok(close(fds[1]));
+}
+#else
+static void sigpending_aio_worker(void)
+{
+}
+#endif
+
 /* SIGUSR1 is blocked on entry */
 static void sigpending_process_directed(const sigset_t *set)
 {
 	int accepted = 0;
 	sigset_t pending;
+
+	sigpending_aio_worker();
 
 	zassert_ok(kill(getpid(), SIGUSR1));
 	zassert_ok(sigpending(&pending));
@@ -71,7 +107,9 @@ ZTEST_USER(posix_signals, test_sigpending)
 
 	/*
 	 * A process-directed signal that every thread blocks pends for the process and is
-	 * reported by any of its threads.
+	 * reported by any of its threads. The aio request first: its completion is delivered by
+	 * a kernel worker born inside this thread's system call, which must not become a
+	 * delivery target for the process.
 	 */
 	/* the host delivers a process-directed signal to any of the simulator's threads */
 	IF_NOT_NATIVE_LIBC(sigpending_process_directed(&set);)
