@@ -75,6 +75,7 @@ if [ "$EVENT_NAME" = "pull_request" ]; then
 ./scripts/twister \
   -i -c \
   -O "$POSIX_NEXT_PATH"/twister-out \
+  --quarantine-list "$POSIX_NEXT_PATH"/.github/twister-quarantine.yaml \
   --load-tests "$POSIX_NEXT_PATH"/testplan.json \
   $(platforms) \
   $(roots)
@@ -84,6 +85,7 @@ else
 ./scripts/twister \
   -i -c \
   -O "$POSIX_NEXT_PATH"/twister-out \
+  --quarantine-list "$POSIX_NEXT_PATH"/.github/twister-quarantine.yaml \
   $(platforms) \
   $(roots)
 fi
