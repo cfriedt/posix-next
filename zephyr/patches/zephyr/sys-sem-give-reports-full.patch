@@ -1,0 +1,56 @@
+diff --git a/kernel/sys/sem.c b/kernel/sys/sem.c
+index 3c383c4f79b..e9da5968600 100644
+--- a/kernel/sys/sem.c
++++ b/kernel/sys/sem.c
+@@ -6,6 +6,7 @@
+ #include <zephyr/kernel.h>
+ #include <zephyr/sys/sem.h>
+ #include <wait_q.h>
++#include <ksem.h>
+ 
+ int sys_sem_init(struct sys_sem *sem, unsigned int initial_count,
+ 		 unsigned int limit)
+@@ -17,7 +18,9 @@ int sys_sem_init(struct sys_sem *sem, unsigned int initial_count,
+ 
+ int sys_sem_give(struct sys_sem *sem)
+ {
+-	k_sem_give(&sem->kernel_sem);
++	if (z_sem_give_checked(&sem->kernel_sem) < 0) {
++		return -EAGAIN;
++	}
+ 
+ 	return 0;
+ }
+diff --git a/tests/kernel/mem_protect/sys_sem/src/main.c b/tests/kernel/mem_protect/sys_sem/src/main.c
+index 350e3ac73e4..4136f87cf6e 100644
+--- a/tests/kernel/mem_protect/sys_sem/src/main.c
++++ b/tests/kernel/mem_protect/sys_sem/src/main.c
+@@ -224,6 +224,13 @@ ZTEST(sys_sem, test_sys_sem_simple_from_isr)
+ 			     (i + 1), signal_count);
+ 	}
+ 
++	/* a give at the limit is reported and leaves the count unchanged */
++	sys_sem_init(&simple_sem, SEM_MAX_VAL, SEM_MAX_VAL);
++	zassert_equal(sys_sem_give(&simple_sem), -EAGAIN);
++	zassert_equal(sys_sem_count_get(&simple_sem), SEM_MAX_VAL);
++	zassert_ok(sys_sem_take(&simple_sem, K_NO_WAIT));
++	zassert_ok(sys_sem_give(&simple_sem));
++	zassert_equal(sys_sem_count_get(&simple_sem), SEM_MAX_VAL);
+ }
+ 
+ /**
+@@ -258,6 +265,14 @@ ZTEST_USER(sys_sem, test_sys_sem_simple_from_task)
+ 			     "signal count mismatch Expected %d, got %d",
+ 			     (i + 1), signal_count);
+ 	}
++
++	/* a give at the limit is reported and leaves the count unchanged */
++	sys_sem_init(&simple_sem, SEM_MAX_VAL, SEM_MAX_VAL);
++	zassert_equal(sys_sem_give(&simple_sem), -EAGAIN);
++	zassert_equal(sys_sem_count_get(&simple_sem), SEM_MAX_VAL);
++	zassert_ok(sys_sem_take(&simple_sem, K_NO_WAIT));
++	zassert_ok(sys_sem_give(&simple_sem));
++	zassert_equal(sys_sem_count_get(&simple_sem), SEM_MAX_VAL);
+ }
+ 
+ /**
