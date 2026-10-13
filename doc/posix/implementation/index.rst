@@ -381,6 +381,21 @@ it. Objects meant to be shared belong in memory both processes map at one addres
 private object copied along with a forked address space keeps sharing its kernel mutex with the
 parent's copy for as long as both use it :ref:`†<posix_undefined_behaviour>`.
 
+.. _posix_thread_specific_data:
+
+Thread-specific data
+--------------------
+
+A ``pthread_key_t`` is a kernel thread-specific storage key, and a value is a kernel association
+between the key and the thread, kept on the key's list and on the thread's list under one lock.
+:c:func:`pthread_key_delete` drops every value still associated with the key, in any thread,
+without calling the destructor, and the key is free for reuse at once. A thread that exits pops
+its remaining values and calls the destructor of each non-``NULL`` one; a destructor may store a
+value again, so the passes continue, each visiting the values stored when it started, for at
+most :kconfig:option:`CONFIG_THREAD_SPECIFIC_STORAGE_DESTRUCTOR_ITERATIONS` passes, which
+``PTHREAD_DESTRUCTOR_ITERATIONS`` reports; the values left after that are dropped. Cleanup handlers run before the destructors, and both run in the exiting thread's
+own context and privilege level.
+
 .. _posix_scheduling_priorities:
 
 Scheduling Priorities
@@ -965,6 +980,30 @@ In the threading subsystem, the pools are instantiated in ``zephyr/lib/os/thread
        SYS_THREAD_THREAD_MIN, CONFIG_SYS_THREAD_THREAD_MAX,
        thread_pool_heap_alloc, sys_thread_pool, static);
 
+.. _posix_semaphores_design:
+
+Semaphores
+==========
+
+A ``sem_t`` is a ``sys_sem``: a counting semaphore in the memory of the caller, usable from user
+mode and shared between processes by sharing its memory (see
+:ref:`posix_process_shared_synchronization`). :c:func:`sem_post` fails with ``EOVERFLOW`` when
+the count is already at ``SEM_VALUE_MAX`` (:kconfig:option:`CONFIG_POSIX_SEM_VALUE_MAX`); the
+limit check and the increment are one atomic step on both the user-mode futex path and the
+kernel path, so two concurrent posts cannot both take the last free slot. :c:func:`sem_wait` and
+:c:func:`sem_timedwait` are cancellation points that test for cancellation only when they are
+about to block.
+
+Named semaphores are elastipool objects (:kconfig:option:`CONFIG_POSIX_SEM_NSEMS_MAX`) on a list
+keyed by name, each holding a ``sys_sem``, a reference count and a ``linked`` flag.
+:c:func:`sem_open` reads its ``mode`` and ``value`` arguments only when ``O_CREAT`` is set. An
+existing name is returned with its reference count raised and the creation attributes ignored,
+unless ``O_EXCL`` is also set; ``value`` is validated only when a semaphore is created.
+:c:func:`sem_close` accepts only a pointer returned by :c:func:`sem_open` and fails with
+``EINVAL`` for anything else, such as an unnamed semaphore. :c:func:`sem_unlink` drops the
+name's reference; the object returns to the pool when the last reference, from the name or from
+an open, is gone.
+
 .. _posix_barriers_design:
 
 Barriers
@@ -997,6 +1036,10 @@ reader that arrives in between waits for the gate instead of assuming it is free
 the window in which a writer could run beside a reader. The timed and try variants follow the
 same path with a bounded or zero timeout on the writer semaphore. The attribute object holds
 the ``pshared`` value.
+
+A lock that still holds ``PTHREAD_RWLOCK_INITIALIZER`` is allocated and initialized by the first
+lock call, under the pool lock, so threads racing on a statically initialized lock share one
+object; :c:func:`pthread_rwlock_init` takes the same path.
 
 .. _posix_networking_design:
 
