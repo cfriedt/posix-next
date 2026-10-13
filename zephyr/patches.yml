@@ -679,6 +679,26 @@ patches:
       k_sem_give() API and its behaviour are unchanged.
 
       Ported from the first commit of zephyr#121788 (7c56ccd8180c).
+  - path: zephyr/sys-sem-give-reports-full.patch
+    sha256sum: ba2e291bb82c232187db14f54934fc1f03f93004e0c383b68a4771e804218966
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-10-13
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/k-sem-give-checked.patch
+    comments: |
+      sys: sem: report a full semaphore from the kernel-mode sys_sem_give()
+
+      sys_sem_give() documents -EAGAIN when the count has reached the limit,
+      and the user-mode futex implementation returns it, but the kernel-mode
+      wrapper over k_sem_give() returned 0 and let the give saturate. Use
+      z_sem_give_checked() so both implementations report a full semaphore,
+      and the check and the increment stay one atomic step. Cover the limit
+      in the sys_sem test from kernel and user mode.
   - path: zephyr/k-obj-map-size.patch
     sha256sum: a490528e70769c7d22d9029f19b972603270dc4acbead1c98f761f9e0b25a3df
     module: zephyr
