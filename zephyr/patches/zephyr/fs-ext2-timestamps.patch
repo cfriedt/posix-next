@@ -1,0 +1,448 @@
+diff --git a/subsys/fs/ext2/ext2_diskops.c b/subsys/fs/ext2/ext2_diskops.c
+--- a/subsys/fs/ext2/ext2_diskops.c
++++ b/subsys/fs/ext2/ext2_diskops.c
+@@ -107,6 +107,9 @@ static void fill_inode(struct ext2_inode *inode, struct ext2_disk_inode *dino)
+ {
+ 	inode->i_mode        = sys_le16_to_cpu(dino->i_mode);
+ 	inode->i_size        = sys_le32_to_cpu(dino->i_size);
++	inode->i_atime       = sys_le32_to_cpu(dino->i_atime);
++	inode->i_ctime       = sys_le32_to_cpu(dino->i_ctime);
++	inode->i_mtime       = sys_le32_to_cpu(dino->i_mtime);
+ 	inode->i_links_count = sys_le16_to_cpu(dino->i_links_count);
+ 	inode->i_blocks      = sys_le32_to_cpu(dino->i_blocks);
+ 	for (int i = 0; i < EXT2_INODE_BLOCKS; i++) {
+@@ -118,6 +121,9 @@ static void fill_disk_inode(struct ext2_disk_inode *dino, struct ext2_inode *ino
+ {
+ 	dino->i_mode        = sys_cpu_to_le16(inode->i_mode);
+ 	dino->i_size        = sys_cpu_to_le32(inode->i_size);
++	dino->i_atime       = sys_cpu_to_le32(inode->i_atime);
++	dino->i_ctime       = sys_cpu_to_le32(inode->i_ctime);
++	dino->i_mtime       = sys_cpu_to_le32(inode->i_mtime);
+ 	dino->i_links_count = sys_cpu_to_le16(inode->i_links_count);
+ 	dino->i_blocks      = sys_cpu_to_le32(inode->i_blocks);
+ 	for (int i = 0; i < EXT2_INODE_BLOCKS; i++) {
+@@ -842,6 +848,7 @@ int ext2_commit_inode(struct ext2_inode *inode)
+ 
+ 	/* fill dinode */
+ 	fill_disk_inode(dino, inode);
++	inode->flags &= ~INODE_TIMES_DIRTY;
+ 
+ 	return ext2_write_block(fs, fs->bgroup.inode_table);
+ }
+diff --git a/subsys/fs/ext2/ext2_impl.c b/subsys/fs/ext2/ext2_impl.c
+--- a/subsys/fs/ext2/ext2_impl.c
++++ b/subsys/fs/ext2/ext2_impl.c
+@@ -11,6 +11,7 @@
+ #include <zephyr/sys/util.h>
+ #include <zephyr/sys/minmax.h>
+ #include <zephyr/sys/byteorder.h>
++#include <zephyr/sys/clock.h>
+ 
+ #include "ext2.h"
+ #include "ext2_impl.h"
+@@ -692,6 +693,25 @@ success:
+ 
+ /* Inode operations --------------------------------------------------------- */
+ 
++/* the on-disk format counts whole seconds since the Epoch */
++uint32_t ext2_now(void)
++{
++	struct timespec ts;
++
++	if (sys_clock_gettime(SYS_CLOCK_REALTIME, &ts) != 0) {
++		return 0;
++	}
++
++	return (uint32_t)ts.tv_sec;
++}
++
++void ext2_inode_modified(struct ext2_inode *inode)
++{
++	inode->i_mtime = ext2_now();
++	inode->i_ctime = inode->i_mtime;
++	inode->flags |= INODE_TIMES_DIRTY;
++}
++
+ ssize_t ext2_inode_read(struct ext2_inode *inode, void *buf, uint32_t offset, size_t nbytes)
+ {
+ 	int rc = 0;
+@@ -767,6 +787,7 @@ ssize_t ext2_inode_write(struct ext2_inode *inode, const void *buf, uint32_t off
+ 		/* Preserve the size of data committed before the failed block. */
+ 		if (offset > inode->i_size) {
+ 			inode->i_size = offset;
++			ext2_inode_modified(inode);
+ 			rc = ext2_commit_inode(inode);
+ 			if (rc < 0) {
+ 				return rc;
+@@ -776,6 +797,7 @@ ssize_t ext2_inode_write(struct ext2_inode *inode, const void *buf, uint32_t off
+ 		return written;
+ 	}
+ 
++	ext2_inode_modified(inode);
+ 	if (offset > inode->i_size) {
+ 		LOG_DBG("New inode size: %d -> %u", inode->i_size, offset);
+ 		inode->i_size = offset;
+@@ -855,6 +877,7 @@ int ext2_inode_trunc(struct ext2_inode *inode, off_t length)
+ 	}
+ 
+ 	inode->i_size = new_size;
++	ext2_inode_modified(inode);
+ 
+ 	LOG_DBG("New inode size: %d (blocks: %d)", inode->i_size, inode->i_blocks);
+ 
+@@ -882,6 +905,13 @@ int ext2_inode_sync(struct ext2_inode *inode)
+ 	int ret;
+ 	struct ext2_data *fs = inode->i_fs;
+ 
++	if ((inode->flags & INODE_TIMES_DIRTY) != 0) {
++		ret = ext2_commit_inode(inode);
++		if (ret < 0) {
++			return ret;
++		}
++	}
++
+ 	for (int i = 0; i < 4; ++i) {
+ 		if (inode->blocks[i] == NULL) {
+ 			break;
+@@ -961,13 +991,19 @@ int ext2_get_direntry(struct ext2_file *dir, struct fs_dirent *ent)
+ 	/* Get size only for files. Directories have size 0. */
+ 	size_t size = 0;
+ 
+-	if (ent->type == FS_DIR_ENTRY_FILE) {
++	if ((ent->type == FS_DIR_ENTRY_FILE) || IS_ENABLED(CONFIG_FS_DIRENT_EXT)) {
+ 		rc = ext2_inode_get(fs, de->de_inode, &inode);
+ 		if (rc < 0) {
+ 			ret = rc;
+ 			goto out;
+ 		}
+-		size = inode->i_size;
++		if (ent->type == FS_DIR_ENTRY_FILE) {
++			size = inode->i_size;
++		}
++#ifdef CONFIG_FS_DIRENT_EXT
++		ent->atime = (struct timespec){.tv_sec = inode->i_atime};
++		ent->mtime = (struct timespec){.tv_sec = inode->i_mtime};
++#endif
+ 	}
+ 
+ 	ent->size = size;
+@@ -1002,6 +1038,9 @@ static int ext2_create_inode(struct ext2_data *fs, struct ext2_inode *parent,
+ 	inode->i_size = 0;
+ 	inode->i_mode = type == FS_DIR_ENTRY_FILE ? EXT2_DEF_FILE_MODE : EXT2_DEF_DIR_MODE;
+ 	inode->i_links_count = 0;
++	inode->i_atime = ext2_now();
++	inode->i_ctime = inode->i_atime;
++	inode->i_mtime = inode->i_atime;
+ 	memset(inode->i_block, 0, 15 * 4);
+ 
+ 	if (type == FS_DIR_ENTRY_DIR) {
+@@ -1139,6 +1178,7 @@ static int ext2_add_direntry(struct ext2_inode *dir, struct ext2_direntry *entry
+ 	de = EXT2_DISK_DIRENTRY_BY_OFFSET(inode_current_block_mem(dir), offset);
+ 	ext2_write_direntry(de, entry);
+ 
++	ext2_inode_modified(dir);
+ 	rc = ext2_commit_inode_block(dir);
+ 	return rc;
+ }
+@@ -1270,6 +1310,7 @@ out:
+ 
+ static int ext2_del_direntry(struct ext2_inode *parent, uint32_t offset)
+ {
++	ext2_inode_modified(parent);
+ 	int rc = 0;
+ 	uint32_t block_size = parent->i_fs->block_size;
+ 
+@@ -1679,6 +1720,15 @@ int ext2_inode_drop(struct ext2_inode *inode)
+ 			return -EINVAL;
+ 		}
+ 
++		if (((inode->flags & INODE_TIMES_DIRTY) != 0) &&
++		    ((inode->flags & INODE_REMOVE) == 0)) {
++			int rc = ext2_commit_inode(inode);
++
++			if (rc < 0) {
++				LOG_ERR("inode %d: committing timestamps failed (%d)", inode->i_id, rc);
++			}
++		}
++
+ 		ext2_inode_drop_blocks(inode);
+ 
+ 		if (inode->flags & INODE_REMOVE) {
+diff --git a/subsys/fs/ext2/ext2_impl.h b/subsys/fs/ext2/ext2_impl.h
+--- a/subsys/fs/ext2/ext2_impl.h
++++ b/subsys/fs/ext2/ext2_impl.h
+@@ -221,6 +221,23 @@ int ext2_inode_trunc(struct ext2_inode *inode, off_t size);
+  */
+ int ext2_inode_sync(struct ext2_inode *inode);
+ 
++/**
++ * @brief Current time in the on-disk format
++ *
++ * @return Whole seconds since the Epoch, 0 when no real-time clock is available
++ */
++uint32_t ext2_now(void);
++
++/**
++ * @brief Mark an inode's contents as modified now
++ *
++ * Sets the modification and status change times; the inode reaches the disk with
++ * its next commit or sync.
++ *
++ * @param inode Inode to stamp
++ */
++void ext2_inode_modified(struct ext2_inode *inode);
++
+ /* Directory operations */
+ 
+ /**
+diff --git a/subsys/fs/ext2/ext2_ops.c b/subsys/fs/ext2/ext2_ops.c
+--- a/subsys/fs/ext2/ext2_ops.c
++++ b/subsys/fs/ext2/ext2_ops.c
+@@ -13,6 +13,7 @@
+ 
+ #include "../fs_impl.h"
+ #include "ext2.h"
++#include "ext2_diskops.h"
+ #include "ext2_impl.h"
+ #include "ext2_struct.h"
+ 
+@@ -314,7 +315,6 @@ static int ext2_opendir(struct fs_dir_t *dirp, const char *fs_path)
+ 		goto out;
+ 	}
+ 
+-
+ 	if (!dir) {
+ 		ret = -ENOMEM;
+ 		goto out;
+@@ -618,8 +618,35 @@ static int ext2_statvfs(struct fs_mount_t *mountp, const char *path, struct fs_s
+ 	return 0;
+ }
+ 
+-/* File system interface */
++static int ext2_utime(struct fs_mount_t *mountp, const char *path, const struct timespec times[2])
++{
++	int rc;
++	struct ext2_data *fs = mountp->fs_data;
++
++	path = fs_impl_strip_prefix(path, mountp);
++
++	struct ext2_lookup_args args = {
++		.path = path,
++		.inode = NULL,
++		.flags = LOOKUP_ARG_OPEN,
++	};
++
++	rc = ext2_lookup_inode(fs, &args);
++	if (rc < 0) {
++		return rc;
++	}
+ 
++	args.inode->i_atime = (uint32_t)times[0].tv_sec;
++	args.inode->i_mtime = (uint32_t)times[1].tv_sec;
++	args.inode->i_ctime = ext2_now();
++
++	rc = ext2_commit_inode(args.inode);
++
++	ext2_inode_drop(args.inode);
++	return rc;
++}
++
++/* File system interface */
+ 
+ /*
+  * The driver was written assuming external serialization - the lookup and
+@@ -649,6 +676,7 @@ static int ext2_locked_close(struct fs_file_t *filp)
+ 	k_mutex_unlock(&ext2_op_lock);
+ 
+ 	return ret;
++
+ }
+ 
+ static ssize_t ext2_locked_read(struct fs_file_t *filp, void *dest, size_t nbytes)
+@@ -827,6 +855,18 @@ static int ext2_locked_statvfs(struct fs_mount_t *mountp, const char *path, stru
+ 	return ret;
+ }
+ 
++static int ext2_locked_utime(struct fs_mount_t *mountp, const char *path,
++			     const struct timespec times[2])
++{
++	int ret;
++
++	(void)k_mutex_lock(&ext2_op_lock, K_FOREVER);
++	ret = ext2_utime(mountp, path, times);
++	k_mutex_unlock(&ext2_op_lock);
++
++	return ret;
++}
++
+ #if defined(CONFIG_FILE_SYSTEM_MKFS)
+ static int ext2_locked_mkfs(uintptr_t dev_id, void *vcfg, int flags)
+ {
+@@ -858,6 +898,7 @@ static const struct fs_file_system_t ext2_fs = {
+ 	.unlink = ext2_locked_unlink,
+ 	.rename = ext2_locked_rename,
+ 	.stat = ext2_locked_stat,
++	.utime = ext2_locked_utime,
+ 	.statvfs = ext2_locked_statvfs,
+ #if defined(CONFIG_FILE_SYSTEM_MKFS)
+ 	.mkfs = ext2_locked_mkfs,
+diff --git a/subsys/fs/ext2/ext2_struct.h b/subsys/fs/ext2/ext2_struct.h
+--- a/subsys/fs/ext2/ext2_struct.h
++++ b/subsys/fs/ext2/ext2_struct.h
+@@ -163,6 +163,7 @@ struct ext2_bgroup {
+ /* Flags for inode */
+ #define INODE_FETCHED_BLOCK BIT(0)
+ #define INODE_REMOVE BIT(1)
++#define INODE_TIMES_DIRTY BIT(2)
+ 
+ struct ext2_inode {
+ 	struct ext2_data *i_fs;      /* pointer to file system data */
+@@ -173,6 +174,9 @@ struct ext2_inode {
+ 	uint16_t i_mode;           /* mode */
+ 	uint16_t i_links_count;    /* link count */
+ 	uint32_t i_size;           /* size */
++	uint32_t i_atime;          /* access time */
++	uint32_t i_ctime;          /* status change time */
++	uint32_t i_mtime;          /* modification time */
+ 	uint32_t i_blocks;         /* number of reserved blocks (of size 512B) */
+ 	uint32_t i_block[15];      /* numbers of blocks */
+ 
+diff --git a/tests/subsys/fs/ext2/prj.conf b/tests/subsys/fs/ext2/prj.conf
+--- a/tests/subsys/fs/ext2/prj.conf
++++ b/tests/subsys/fs/ext2/prj.conf
+@@ -1,6 +1,7 @@
+ CONFIG_FILE_SYSTEM=y
+ CONFIG_FILE_SYSTEM_EXT2=y
+ CONFIG_FILE_SYSTEM_MKFS=y
++CONFIG_FS_DIRENT_EXT=y
+ 
+ CONFIG_DISK_ACCESS=y
+ 
+diff --git a/tests/subsys/fs/ext2/prj_big.conf b/tests/subsys/fs/ext2/prj_big.conf
+--- a/tests/subsys/fs/ext2/prj_big.conf
++++ b/tests/subsys/fs/ext2/prj_big.conf
+@@ -1,6 +1,7 @@
+ CONFIG_FILE_SYSTEM=y
+ CONFIG_FILE_SYSTEM_EXT2=y
+ CONFIG_FILE_SYSTEM_MKFS=y
++CONFIG_FS_DIRENT_EXT=y
+ 
+ CONFIG_DISK_ACCESS=y
+ 
+diff --git a/tests/subsys/fs/ext2/src/testfs_timestamps.c b/tests/subsys/fs/ext2/src/testfs_timestamps.c
+new file mode 100644
+--- /dev/null
++++ b/tests/subsys/fs/ext2/src/testfs_timestamps.c
+@@ -0,0 +1,111 @@
++/*
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <string.h>
++
++#include <zephyr/fs/fs.h>
++#include <zephyr/sys/clock.h>
++#include <zephyr/ztest.h>
++
++#include "utils.h"
++
++#define TS_FILE "/sml/stamped.txt"
++#define TS_DIR  "/sml/stamped.d"
++
++#ifdef CONFIG_FS_DIRENT_EXT
++static void set_clock(time_t sec)
++{
++	struct timespec ts = {.tv_sec = sec};
++
++	zassert_ok(sys_clock_settime(SYS_CLOCK_REALTIME, &ts));
++}
++
++static void stat_times(const char *path, struct timespec *atime, struct timespec *mtime)
++{
++	struct fs_dirent ent;
++
++	zassert_ok(fs_stat(path, &ent), "stat %s", path);
++	*atime = ent.atime;
++	*mtime = ent.mtime;
++}
++#endif /* CONFIG_FS_DIRENT_EXT */
++
++ZTEST(ext2tests, test_timestamps)
++{
++#ifdef CONFIG_FS_DIRENT_EXT
++	const time_t t0 = 1700000000;
++	const struct timespec times[2] = {
++		{.tv_sec = 1600000000},
++		{.tv_sec = 1600000100},
++	};
++	struct fs_file_t file;
++	struct fs_dir_t dir;
++	struct fs_dirent ent;
++	struct timespec atime, mtime;
++	bool seen = false;
++
++	zassert_ok(fs_mount(&testfs_mnt));
++
++	/* creation stamps the new inode with the current time */
++	set_clock(t0);
++	fs_file_t_init(&file);
++	zassert_ok(fs_open(&file, TS_FILE, FS_O_CREATE | FS_O_RDWR));
++	stat_times(TS_FILE, &atime, &mtime);
++	zassert_true(atime.tv_sec >= t0 && atime.tv_sec < t0 + 60, "atime %lld", (long long)atime.tv_sec);
++	zassert_true(mtime.tv_sec >= t0 && mtime.tv_sec < t0 + 60, "mtime %lld", (long long)mtime.tv_sec);
++
++	/* a write moves the modification time forward, and close puts it on disk */
++	set_clock(t0 + 100);
++	zassert_equal(fs_write(&file, "abc", 3), 3);
++	zassert_ok(fs_close(&file));
++	stat_times(TS_FILE, &atime, &mtime);
++	zassert_true(mtime.tv_sec >= t0 + 100, "mtime %lld", (long long)mtime.tv_sec);
++
++	/* explicit times are stored as given and reported by stat and readdir alike */
++	zassert_ok(fs_utime(TS_FILE, times));
++	stat_times(TS_FILE, &atime, &mtime);
++	zassert_equal(atime.tv_sec, times[0].tv_sec);
++	zassert_equal(mtime.tv_sec, times[1].tv_sec);
++
++	fs_dir_t_init(&dir);
++	zassert_ok(fs_opendir(&dir, "/sml"));
++	while (fs_readdir(&dir, &ent) == 0 && ent.name[0] != '\0') {
++		if (strcmp(ent.name, "stamped.txt") == 0) {
++			zassert_equal(ent.mtime.tv_sec, times[1].tv_sec);
++			seen = true;
++		}
++	}
++	zassert_ok(fs_closedir(&dir));
++	zassert_true(seen, "readdir did not list the file");
++
++	/* a directory is stamped at creation, and a new entry modifies it */
++	set_clock(t0 + 200);
++	zassert_ok(fs_mkdir(TS_DIR));
++	stat_times(TS_DIR, &atime, &mtime);
++	zassert_true(mtime.tv_sec >= t0 + 200, "dir mtime %lld", (long long)mtime.tv_sec);
++
++	set_clock(t0 + 300);
++	fs_file_t_init(&file);
++	zassert_ok(fs_open(&file, TS_DIR "/entry", FS_O_CREATE | FS_O_WRITE));
++	zassert_ok(fs_close(&file));
++	stat_times(TS_DIR, &atime, &mtime);
++	zassert_true(mtime.tv_sec >= t0 + 300, "dir mtime %lld", (long long)mtime.tv_sec);
++
++	/* the times survive a remount */
++	zassert_ok(fs_unmount(&testfs_mnt));
++	zassert_ok(fs_mount(&testfs_mnt));
++	stat_times(TS_FILE, &atime, &mtime);
++	zassert_equal(atime.tv_sec, times[0].tv_sec);
++	zassert_equal(mtime.tv_sec, times[1].tv_sec);
++
++	zassert_ok(fs_utime(TS_FILE, NULL));
++	stat_times(TS_FILE, &atime, &mtime);
++	zassert_true(mtime.tv_sec >= t0 + 300, "mtime %lld", (long long)mtime.tv_sec);
++
++	zassert_equal(fs_utime("/sml/nope", times), -ENOENT);
++#else
++	ztest_test_skip();
++#endif /* CONFIG_FS_DIRENT_EXT */
++}
+ 
