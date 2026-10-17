@@ -16,7 +16,7 @@ on:
       - v*-branch
   # Redeploy with fresh badge data when a metrics producer finishes on main.
   workflow_run:
-    workflows: [Twister, Coverage, ASAN, UBSAN, Scan-Build]
+    workflows: [Twister, Coverage, ASAN, UBSAN, Scan-Build, Web Demo]
     types: [completed]
     branches: [main]
   workflow_dispatch:
@@ -65,17 +65,17 @@ jobs:
         run: |
           set -u
           fetch() {
-            local wf="$1" artifact="$2" id
+            local wf="$1" artifact="$2" dir="${3:-doc/metrics}" id
             for id in $(gh run list -R "$GITHUB_REPOSITORY" --workflow "$wf" \
                 --branch main --status completed --limit 10 \
                 --json databaseId --jq '.[].databaseId'); do
               if gh run download -R "$GITHUB_REPOSITORY" "$id" \
-                  --name "$artifact" --dir doc/metrics; then
+                  --name "$artifact" --dir "$dir"; then
                 echo "$wf: fetched $artifact from run $id"
                 return 0
               fi
             done
-            echo "$wf: no $artifact artifact found; badges will be absent"
+            echo "$wf: no $artifact artifact found; it will be absent from the site"
           }
           fetch Twister twister-summary
           fetch Coverage coverage-json-snapshot
@@ -83,6 +83,9 @@ jobs:
           fetch UBSAN ubsan-summary
           fetch Scan-Build static-analysis-summary
           ls -l doc/metrics
+          # the toybox sample page's in-browser demo (scripts/web-demo)
+          fetch "Web Demo" web-demo doc/_static/demo
+          ls -l doc/_static/demo || true
 
       # Docs build against the same Zephyr revision the manifest pins, without
       # a full west workspace; deriving the ref from west.yml keeps this from
