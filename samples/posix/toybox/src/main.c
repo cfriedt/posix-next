@@ -63,17 +63,11 @@ static int write_file(const char *path, const void *data, size_t len)
 	return (ret < 0) ? ret : 0;
 }
 
-static int run(const char *path, char *const argv[])
+static int spawn_wait(const char *path, char *const argv[])
 {
 	pid_t pid;
 	int status = 0;
 	int ret;
-
-	printf("\n$ %s", argv[0]);
-	for (int i = 1; argv[i] != NULL; i++) {
-		printf(" %s", argv[i]);
-	}
-	printf("\n");
 
 	ret = posix_spawn(&pid, path, NULL, NULL, argv, spawn_env);
 	if (ret != 0) {
@@ -95,70 +89,31 @@ static int run(const char *path, char *const argv[])
 	return status;
 }
 
+/* echo the command line the way a shell would, then run it */
+static int run(const char *path, char *const argv[])
+{
+	printf("\n$ %s", argv[0]);
+	for (int i = 1; argv[i] != NULL; i++) {
+		printf(" %s", argv[i]);
+	}
+	printf("\n");
+
+	return spawn_wait(path, argv);
+}
+
 /* toybox dispatches on argv[0]: "toybox CMD ..." or the command name itself */
-#define RUN(...) run(TOYBOX_PATH, (char *const[]){"toybox", __VA_ARGS__, NULL})
+#define RUN(...)          run(TOYBOX_PATH, (char *const[]){"toybox", __VA_ARGS__, NULL})
 #define RUN_AS(name, ...) run("/bin/" name, (char *const[]){name, __VA_ARGS__, NULL})
 
-int main(void)
+/* the scripted tour: what the command set and the shell can do */
+static void tour(void)
 {
-#ifdef CONFIG_USERSPACE
-	/* what toybox's processes touch of the system's shared state: directory streams
-	 * and the user and group databases
-	 */
-	extern struct k_mem_partition zvfs_dir_partition;
-	extern struct k_mem_partition posix_system_database_partition;
-
-	(void)k_mem_domain_add_partition(&k_mem_domain_default, &zvfs_dir_partition);
-	(void)k_mem_domain_add_partition(&k_mem_domain_default, &posix_system_database_partition);
-#endif /* CONFIG_USERSPACE */
-	static const char passwd[] = "root:x:0:0:root:/root:/bin/sh\n";
-	static const char group[] = "root:x:0:\n";
-	static const char motd[] = "Hello from toybox on Zephyr!\n";
-	int ret;
-
-	ret = fs_mkfs(FS_EXT2, (uintptr_t)"RAM", NULL, 0);
-	if (ret < 0) {
-		printf("mkfs failed: %d\n", ret);
-		return ret;
-	}
-
-	ret = fs_mount(&root_mnt);
-	if (ret < 0) {
-		printf("mount failed: %d\n", ret);
-		return ret;
-	}
-
-	(void)fs_mkdir("/bin");
-	(void)fs_mkdir("/etc");
-
-	if (write_file("/etc/passwd", passwd, strlen(passwd)) < 0 ||
-	    write_file("/etc/group", group, strlen(group)) < 0 ||
-	    write_file("/etc/motd", motd, strlen(motd)) < 0 ||
-	    write_file(TOYBOX_PATH, toybox_image, sizeof(toybox_image)) < 0) {
-		return -1;
-	}
-
-	/* the usual install: each command is a /bin symlink to the binary,
-	 * exec follows the link, and toybox dispatches on argv[0]
-	 */
-	for (size_t i = 0; i < ARRAY_SIZE(toybox_commands); i++) {
-		char link[32];
-
-		snprintf(link, sizeof(link), "/bin/%s", toybox_commands[i]);
-		ret = fs_symlink("toybox", link);
-		if (ret < 0) {
-			printf("linking %s failed: %d\n", link, ret);
-			return ret;
-		}
-	}
-	printf("%zu commands linked in /bin\n", ARRAY_SIZE(toybox_commands));
-
 	/* no arguments: list the available commands */
 	run(TOYBOX_PATH, (char *const[]){"toybox", NULL});
 	RUN("uname", "-a");
 	RUN("echo", "hello", "world");
 	RUN("cat", "/etc/motd");
-	RUN("mkdir", "/tmp");
+	RUN("mkdir", "/tmp/scratch");
 	RUN("pwd");
 	RUN("ls", "-l", "/etc");
 	RUN("printf", "hex of %d is %x\\n", "42", "42");
@@ -210,10 +165,71 @@ int main(void)
 #endif
 
 	printf("\ntoybox sample complete\n");
+	printf("\nstarting an interactive shell\n");
+}
+
+int main(void)
+{
+#ifdef CONFIG_USERSPACE
+	/* what toybox's processes touch of the system's shared state: directory streams
+	 * and the user and group databases
+	 */
+	extern struct k_mem_partition zvfs_dir_partition;
+	extern struct k_mem_partition posix_system_database_partition;
+
+	(void)k_mem_domain_add_partition(&k_mem_domain_default, &zvfs_dir_partition);
+	(void)k_mem_domain_add_partition(&k_mem_domain_default, &posix_system_database_partition);
+#endif /* CONFIG_USERSPACE */
+	static const char passwd[] = "root:x:0:0:root:/root:/bin/sh\n";
+	static const char group[] = "root:x:0:\n";
+	static const char motd[] = "Hello from toybox on Zephyr!\n";
+	int ret;
+
+	ret = fs_mkfs(FS_EXT2, (uintptr_t)"RAM", NULL, 0);
+	if (ret < 0) {
+		printf("mkfs failed: %d\n", ret);
+		return ret;
+	}
+
+	ret = fs_mount(&root_mnt);
+	if (ret < 0) {
+		printf("mount failed: %d\n", ret);
+		return ret;
+	}
+
+	(void)fs_mkdir("/bin");
+	(void)fs_mkdir("/etc");
+	(void)fs_mkdir("/root");
+	(void)fs_mkdir("/tmp");
+
+	if (write_file("/etc/passwd", passwd, strlen(passwd)) < 0 ||
+	    write_file("/etc/group", group, strlen(group)) < 0 ||
+	    write_file("/etc/motd", motd, strlen(motd)) < 0 ||
+	    write_file(TOYBOX_PATH, toybox_image, sizeof(toybox_image)) < 0) {
+		return -1;
+	}
+
+	/* the usual install: each command is a /bin symlink to the binary,
+	 * exec follows the link, and toybox dispatches on argv[0]
+	 */
+	for (size_t i = 0; i < ARRAY_SIZE(toybox_commands); i++) {
+		char link[32];
+
+		snprintf(link, sizeof(link), "/bin/%s", toybox_commands[i]);
+		ret = fs_symlink("toybox", link);
+		if (ret < 0) {
+			printf("linking %s failed: %d\n", link, ret);
+			return ret;
+		}
+	}
+	printf("%zu commands linked in /bin\n", ARRAY_SIZE(toybox_commands));
+
+	if (IS_ENABLED(CONFIG_SAMPLE_TOYBOX_TOUR)) {
+		tour();
+	}
 
 	/* and finally: a shell on the console. Ctrl-D or 'exit' leaves it. */
-	printf("\nstarting an interactive shell\n");
-	RUN("sh");
+	spawn_wait(TOYBOX_PATH, (char *const[]){"toybox", "sh", NULL});
 	printf("goodbye\n");
 
 	return 0;
