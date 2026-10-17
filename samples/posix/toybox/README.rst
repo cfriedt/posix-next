@@ -28,4 +28,16 @@ Building and Running
    :goals: run
    :compact:
 
+Try it in your browser
+**********************
+
+.. web-demo::
+   :button: Run toybox on Zephyr in your browser
+
+   The ``qemu_riscv64`` build of this sample with :kconfig:option:`CONFIG_SAMPLE_TOYBOX_TOUR`
+   disabled, so that it boots straight into the shell, running under `QEMU compiled to
+   WebAssembly <https://github.com/ktock/qemu-wasm>`_. Everything runs in your browser; the
+   download is about 6 MB. ``scripts/web-demo`` in the posix-next repository builds the bundle
+   from this sample's build directory.
+
 .. _toybox: https://landley.net/toybox/
