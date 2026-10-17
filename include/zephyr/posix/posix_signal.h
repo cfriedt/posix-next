@@ -614,7 +614,9 @@ int sigwaitinfo(const sigset_t *ZRESTRICT set, siginfo_t *ZRESTRICT info);
 #define SIGXFSZ   25 /**< File size limit exceeded */
 #define SIGVTALRM 26 /**< Virtual timer expired */
 #define SIGPROF   27 /**< Profiling timer expired */
-/* 28 not used */
+#if !defined(SIGWINCH) || defined(__DOXYGEN__)
+#define SIGWINCH 28 /**< Window size changed */
+#endif
 #define SIGPOLL   29 /**< Pollable event occurred */
 /* 30 not used */
 #define SIGSYS    31 /**< Bad system call */
