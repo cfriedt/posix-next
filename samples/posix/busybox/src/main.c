@@ -153,6 +153,13 @@ int main(void)
 #ifdef CONFIG_NET_CONFIG_SETTINGS
 	/* a real interface is configured: reach past the loopback */
 	RUN("ping", "-c", "1", CONFIG_NET_CONFIG_MY_IPV4_GW);
+#ifdef CONFIG_NET_CONFIG_NEED_IPV6
+	RUN("ping6", "-c", "1", "fec0::2");
+#endif
+#ifdef CONFIG_DNS_RESOLVER
+	/* a name, through the resolver; the echo itself needs the host's internet */
+	RUN("ping", "-c", "1", "dns.google");
+#endif
 #endif
 	RUN_AS("ls", "-l", "/bin");
 
