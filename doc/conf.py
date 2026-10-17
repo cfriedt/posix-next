@@ -55,6 +55,8 @@ extensions = [
     "posix_symbols",
     # Option Group badges from checked-in metrics (local extension)
     "posix_badges",
+    # .. web-demo:: — a Zephyr image under QEMU for WebAssembly (local extension)
+    "posix_web_demo",
     # Quality-of-life
     "sphinx_copybutton",
     "sphinx_tabs.tabs",
@@ -179,6 +181,8 @@ html_static_path = [
     str(Path(__file__).parent / "_static"),
 ]
 html_css_files = []
+# served from the site root: the demo's service worker must control the demo page
+html_extra_path = [str(Path(__file__).parent / "_root")]
 html_logo = str(Path(__file__).parent / "_static" / "posix-next-logo.png")
 html_favicon = str(ZEPHYR_BASE / "doc" / "_static" / "images" / "favicon.png")
 
