@@ -279,8 +279,7 @@ static inline pthread_t to_pthread_thread(const struct k_thread *kth)
 	 (K_SIG_TSTP == SIGTSTP) && (K_SIG_TTIN == SIGTTIN) && (K_SIG_TTOU == SIGTTOU) &&      \
 	 (K_SIG_URG == SIGURG) && (K_SIG_XCPU == SIGXCPU) && (K_SIG_XFSZ == SIGXFSZ) &&        \
 	 (K_SIG_VTALRM == SIGVTALRM) && (K_SIG_PROF == SIGPROF) &&                             \
-	 /* 28: SIGWINCH — no K_SIG_* */                                                         \
-	 (K_SIG_POLL == SIGPOLL) &&                                                            \
+	 (K_SIG_WINCH == SIGWINCH) && (K_SIG_POLL == SIGPOLL) &&                                \
 	 /* 30: SIGPWR — no K_SIG_* */                                                           \
 	 (K_SIG_SYS == SIGSYS) && (K_SIG_CANCEL == CONFIG_THREAD_CANCEL_SIGNAL_NUMBER) &&      \
 	 (K_SIG_RTMIN == SIGRTMIN) && (K_SIG_CANCEL < K_SIG_RTMIN) &&                          \

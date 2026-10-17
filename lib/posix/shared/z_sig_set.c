@@ -97,7 +97,7 @@ static const uint8_t z_posix_to_k_std[Z_SIG_STD_MAP_MAX + 1] = {
 	[SIGXFSZ] = K_SIG_XFSZ,
 	[SIGVTALRM] = K_SIG_VTALRM,
 	[SIGPROF] = K_SIG_PROF,
-	/* 28: SIGWINCH — no K_SIG_* */
+	[SIGWINCH] = K_SIG_WINCH,
 	[SIGPOLL] = K_SIG_POLL,
 	/* 30: SIGPWR — no K_SIG_* */
 	[SIGSYS] = K_SIG_SYS,
@@ -134,7 +134,7 @@ static const uint8_t z_k_to_posix_std[Z_SIG_STD_MAP_MAX + 1] = {
 	[K_SIG_XFSZ] = SIGXFSZ,
 	[K_SIG_VTALRM] = SIGVTALRM,
 	[K_SIG_PROF] = SIGPROF,
-	/* 28: SIGWINCH — no K_SIG_* */
+	[K_SIG_WINCH] = SIGWINCH,
 	[K_SIG_POLL] = SIGPOLL,
 	/* 30: SIGPWR — no K_SIG_* */
 	[K_SIG_SYS] = SIGSYS,
@@ -173,7 +173,7 @@ static void sig_words_remap(const unsigned long *src, size_t src_nlongs, unsigne
 			/*
 			 * A signal with no counterpart is dropped rather than carried across by
 			 * its number. The two namespaces have different gaps -- the kernel has no
-			 * name for 16, 28, or 30, and a C library is free to number signals however
+			 * name for 16 or 30, and a C library is free to number signals however
 			 * it likes -- so an unmapped number aliases onto an unrelated signal. Under
 			 * the Cygwin numbering picolibc and newlib use, carrying kernel signal 30
 			 * across would land on SIGUSR1.

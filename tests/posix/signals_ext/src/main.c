@@ -95,6 +95,7 @@ ZTEST_USER(posix_signals_ext, test_strsignal)
 		decl_strenum(SIGXFSZ),
 		decl_strenum(SIGVTALRM),
 		decl_strenum(SIGPROF),
+		decl_strenum(SIGWINCH),
 		decl_strenum(SIGPOLL),
 		decl_strenum(SIGSYS),
 	};
