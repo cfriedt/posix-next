@@ -1,0 +1,140 @@
+# SPDX-License-Identifier: Apache-2.0
+# Build the in-browser demo bundle for the toybox sample's documentation
+# page: the sample for qemu_riscv64 plus QEMU compiled to WebAssembly. The
+# Documentation workflow fetches the newest web-demo artifact and ships it
+# with the site; see scripts/web-demo/README.rst.
+
+name: Web Demo
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/web-demo.yml
+      - samples/posix/toybox/**
+      - scripts/web-demo/**
+      - west.yml
+      - zephyr/patches/**
+  schedule:
+    # weekly: the artifact expires after 90 days and the sample follows the tree
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: web-demo-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci-image-check:
+    runs-on: ubuntu-24.04
+    outputs:
+      image: ${{ steps.ensure.outputs.image }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Resolve CI image
+        id: ensure
+        uses: ./.github/actions/ensure-ci-image
+        with:
+          can-push: "false"
+
+  # QEMU for the browser takes about an hour to build from source, so the
+  # build is published as a content-addressed GHCR image (holding only its
+  # outputs) and reused until scripts/web-demo changes.
+  qemu-wasm:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Resolve or build the browser QEMU image
+        env:
+          TOKEN: ${{ github.token }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          tag=$(scripts/web-demo/qemu-wasm-image.sh)
+          image="ghcr.io/${GITHUB_REPOSITORY,,}/qemu-wasm:${tag}"
+          echo "${TOKEN}" | docker login ghcr.io -u "${ACTOR}" --password-stdin
+
+          if docker pull "${image}"; then
+            echo "Prebuilt browser QEMU: ${image}"
+            scripts/web-demo/extract-qemu-wasm.sh -i "${image}" -o qemu-wasm
+            exit 0
+          fi
+
+          echo "Building ${image}"
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+            /usr/local/.ghcup /usr/local/share/boost || true
+          df -h /
+          scripts/web-demo/build-qemu-wasm.sh -i "${image}" -w "${RUNNER_TEMP}/qemu-wasm" -o qemu-wasm
+          # the source label links the GHCR package to the repository
+          docker build -q -t "${image}" \
+            --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+            - <<EOT
+          FROM ${image}
+          EOT
+          docker push "${image}" || echo "::warning::could not push ${image}; the next run builds it again"
+
+      - name: Upload browser QEMU
+        uses: actions/upload-artifact@v4
+        with:
+          name: qemu-wasm
+          path: qemu-wasm
+          if-no-files-found: error
+          retention-days: 7
+
+  bundle:
+    needs: [ci-image-check, qemu-wasm]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    container: ${{ needs.ci-image-check.outputs.image }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up workspace
+        uses: ./.github/actions/setup-workspace
+        with:
+          toolchains: riscv64-zephyr-elf
+          ccache-key-prefix: web-demo
+
+      - name: Build the toybox sample for qemu_riscv64
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "${MANIFEST_PATH}"
+          west build -p -b qemu_riscv64 -d "${GITHUB_WORKSPACE}/build/toybox-qemu_riscv64" \
+            samples/posix/toybox -- -DCONFIG_SAMPLE_TOYBOX_TOUR=n
+
+      - name: Download browser QEMU
+        uses: actions/download-artifact@v4
+        with:
+          name: qemu-wasm
+          path: qemu-wasm
+
+      - name: Pack the bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 "${MANIFEST_PATH}/scripts/web-demo/pack.py" \
+            -q qemu-wasm -b build/toybox-qemu_riscv64 -o web-demo \
+            --sample samples/posix/toybox --commit "${GITHUB_SHA}"
+          du -sh web-demo
+
+      - name: Upload bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-demo
+          path: web-demo
+          if-no-files-found: error
