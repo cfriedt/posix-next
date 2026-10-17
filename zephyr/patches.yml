@@ -4485,3 +4485,19 @@ patches:
       poll() support through a signal raised by a work item that watches the
       UART while a poll is outstanding. A full-screen program can then take
       the console raw and wait for keys.
+  - path: zephyr/k-signal-sigwinch.patch
+    sha256sum: 4eeaf9c54d87aa32b45cf831c4e494372d4efe986150eadfa845016a88cc32fc
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-10-17
+    upstreamable: true
+    comments: |
+      Number the window-size-change signal. The kernel's signal numbers follow
+      the usual layout with 16, 28 and 30 left unused; 28 is SIGWINCH on every
+      system a terminal program is written for, and such programs install a
+      handler for it before they draw: toybox's vi, hexedit and watch all do,
+      and sigaction() had to refuse them because the number mapped to nothing.
+      K_SIG_WINCH gets a name and the default of being ignored; nothing here
+      generates it, since the console has no window to resize, but a handler
+      can be installed and the signal can be sent. Layered over k-signal.patch.
