@@ -2345,6 +2345,22 @@ patches:
       modification timespecs behind the new CONFIG_FS_DIRENT_EXT so timestamp
       support costs nothing when disabled. Backends that implement neither
       operation report -ENOTSUP through the existing CHECKIF convention.
+  - path: zephyr/fs-ext2-timestamps.patch
+    sha256sum: 27e0d120d658776de80725139f2e06ab7244665ce8bd4a158d1dcf6279f396cb
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-10-17
+    upstreamable: true
+    comments: |
+      ext2 left the inode's access, modification and status-change times at
+      zero and reported none. Carry them in the in-memory inode: creation
+      stamps all three, writes and truncation stamp the modification and
+      status-change times (committed with the size change, on sync, or with the
+      last reference), directories are stamped when an entry is added or
+      removed, and a utime operation stores the times given; stat() and
+      readdir() report them through the extended dirent fields. Reads do not
+      update the access time. The ext2 test suite gains test_timestamps.
   - path: zephyr/arm64-userspace-cache-maintenance.patch
     sha256sum: 2e42fc6bdc1fec89817fa1326b6d9ac8fe57cb5096b98a4201c9b175676babf7
     module: zephyr
