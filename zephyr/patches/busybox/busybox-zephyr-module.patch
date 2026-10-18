@@ -1,6 +1,6 @@
 diff --git a/zephyr/CMakeLists.txt b/zephyr/CMakeLists.txt
 new file mode 100644
-index 000000000..1a41239c3
+index 000000000..f53e39aa6
 --- /dev/null
 +++ b/zephyr/CMakeLists.txt
 @@ -0,0 +1,161 @@
@@ -70,7 +70,6 @@ index 000000000..1a41239c3
 +  libbb/alloc_affinity\\.c
 +  libbb/herror_msg\\.c
 +  libbb/inet_common\\.c
-+  libbb/xconnect\\.c
 +  libbb/xgethostbyname\\.c
 +  ${BUSYBOX_EXCLUDE_SOURCES}
 +)
@@ -154,7 +153,8 @@ index 000000000..1a41239c3
 +    ${LLEXT_APPEND_FLAGS}
 +    -nostdlib -nodefaultlibs
 +    $<TARGET_OBJECTS:busybox_main>
-+    $<TARGET_FILE:busybox_lib>
++    # group: a member pulled late may need one the single pass already skipped
++    -Wl,--start-group $<TARGET_FILE:busybox_lib> -Wl,--end-group
 +    -o ${bb_llext}
 +  COMMAND ${CMAKE_OBJCOPY} --strip-debug ${bb_llext}
 +  DEPENDS busybox_main busybox_lib $<TARGET_OBJECTS:busybox_main> $<TARGET_FILE:busybox_lib>
@@ -184,10 +184,10 @@ index 000000000..afc3920fe
 +	  the busybox module.
 diff --git a/zephyr/busybox.frag b/zephyr/busybox.frag
 new file mode 100644
-index 000000000..32e6ea022
+index 000000000..f286cb360
 --- /dev/null
 +++ b/zephyr/busybox.frag
-@@ -0,0 +1,62 @@
+@@ -0,0 +1,66 @@
 +# SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
 +# SPDX-License-Identifier: GPL-2.0-only
 +#
@@ -236,6 +236,10 @@ index 000000000..32e6ea022
 +CONFIG_EGREP=y
 +CONFIG_FGREP=y
 +CONFIG_FEATURE_GREP_CONTEXT=y
++CONFIG_PING=y
++CONFIG_PING6=y
++CONFIG_FEATURE_FANCY_PING=y
++CONFIG_FEATURE_IPV6=y
 +CONFIG_SED=y
 +CONFIG_PRINTF=y
 +CONFIG_TEST=y
