@@ -1,0 +1,256 @@
+diff --git a/include/zephyr/sys/fdtable.h b/include/zephyr/sys/fdtable.h
+--- a/include/zephyr/sys/fdtable.h
++++ b/include/zephyr/sys/fdtable.h
+@@ -361,6 +361,8 @@ enum {
+ 	ZFD_IOCTL_SET_LOCK,
+ 	ZFD_IOCTL_STAT,
+ 	ZFD_IOCTL_TRUNCATE,
++	/** Set the access and modification times: (const struct timespec times[2]) */
++	ZFD_IOCTL_UTIME,
+ 	ZFD_IOCTL_MMAP,
+ 	ZFD_IOCTL_STATVFS,
+ 	ZFD_IOCTL_READDIR,
+diff --git a/include/zephyr/sys/zvfs_fs.h b/include/zephyr/sys/zvfs_fs.h
+--- a/include/zephyr/sys/zvfs_fs.h
++++ b/include/zephyr/sys/zvfs_fs.h
+@@ -280,6 +280,17 @@ __syscall int zvfs_truncate(const char *path, off_t length);
+  */
+ __syscall int zvfs_access(const char *path, int amode);
+ 
++/**
++ * @brief Set the timestamps of an open file or directory.
++ *
++ * @param fd Descriptor of the file or directory.
++ * @param times Pointer to two timespecs, access time first and modification
++ *              time second, or NULL to set both to the current time.
++ *
++ * @return 0 on success, -1 with errno set on error.
++ */
++__syscall int zvfs_futime(int fd, const struct timespec *times);
++
+ /**
+  * @brief Set file or directory timestamps.
+  *
+diff --git a/lib/os/zvfs/CMakeLists.txt b/lib/os/zvfs/CMakeLists.txt
+--- a/lib/os/zvfs/CMakeLists.txt
++++ b/lib/os/zvfs/CMakeLists.txt
+@@ -18,6 +18,7 @@ zephyr_library_sources_ifdef(CONFIG_ZVFS_FS
+   zvfs_cwd.c
+   zvfs_dirent.c
+   zvfs_fs.c
++  zvfs_futime.c
+   zvfs_path.c
+   zvfs_record_lock.c
+ )
+diff --git a/lib/os/zvfs/zvfs_fs.c b/lib/os/zvfs/zvfs_fs.c
+--- a/lib/os/zvfs/zvfs_fs.c
++++ b/lib/os/zvfs/zvfs_fs.c
+@@ -178,6 +178,8 @@ int z_impl_zvfs_open(const char *name, int flags, int mode)
+ 
+ 	ptr->stream = NULL;
+ 	ptr->flags = flags & (ZVFS_O_ACCMODE | ZVFS_O_APPEND | ZVFS_O_NONBLOCK);
++	/* the path, for the requests the file system API serves by name */
++	strcpy(ptr->path, name);
+ 	zvfs_finalize_typed_fd(fd, ptr, &fs_fd_op_vtable, ZVFS_MODE_IFREG);
+ 
+ 	return fd;
+@@ -233,6 +235,7 @@ static int fs_dir_ioctl_vmeth(void *obj, unsigned int request, va_list args)
+ 
+ 		*buf = (struct zvfs_stat){0};
+ 		buf->mode = zvfs_synth_mode(true, (ptr->dir.mp->flags & FS_MOUNT_FLAG_READ_ONLY) != 0);
++		zvfs_fs_times(ptr->path, buf);
+ 		return 0;
+ 	}
+ 	case ZFD_IOCTL_STATVFS: {
+@@ -286,6 +289,12 @@ static int fs_dir_ioctl_vmeth(void *obj, unsigned int request, va_list args)
+ 		rc = fs_rewinddir(&ptr->dir);
+ 		break;
+ 	}
++	case ZFD_IOCTL_UTIME: {
++		const struct timespec *times = va_arg(args, const struct timespec *);
++
++		rc = fs_utime(ptr->path, times);
++		break;
++	}
+ 	case ZVFS_F_GETFL:
+ 		return ptr->flags;
+ 	case ZVFS_F_SETFL: {
+@@ -369,6 +378,7 @@ static int fs_ioctl_vmeth(void *obj, unsigned int request, va_list args)
+ 			buf->size = current;
+ 			buf->mode = zvfs_synth_mode(ptr->is_dir,
+ 						    (ptr->file.mp->flags & FS_MOUNT_FLAG_READ_ONLY) != 0);
++			zvfs_fs_times(ptr->path, buf);
+ 		}
+ 
+ 		rc = fs_seek(&ptr->file, offset, FS_SEEK_SET);
+@@ -435,6 +445,12 @@ static int fs_ioctl_vmeth(void *obj, unsigned int request, va_list args)
+ 		}
+ 		break;
+ 	}
++	case ZFD_IOCTL_UTIME: {
++		const struct timespec *times = va_arg(args, const struct timespec *);
++
++		rc = fs_utime(ptr->path, times);
++		break;
++	}
+ 	case ZVFS_F_GETFL:
+ 		return ptr->flags;
+ 	case ZVFS_F_SETFL: {
+diff --git a/lib/os/zvfs/zvfs_fs_priv.h b/lib/os/zvfs/zvfs_fs_priv.h
+--- a/lib/os/zvfs/zvfs_fs_priv.h
++++ b/lib/os/zvfs/zvfs_fs_priv.h
+@@ -64,6 +64,9 @@ void zvfs_statvfs_root(struct zvfs_statvfs *buf);
+ /* the mode every stat of a file system entry reports: type plus synthesized permissions */
+ uint32_t zvfs_synth_mode(bool is_dir, bool rdonly);
+ 
++/** @brief Fill the timestamps of @p buf from the file system entry at @p path, when recorded. */
++void zvfs_fs_times(const char *path, struct zvfs_stat *buf);
++
+ #ifdef CONFIG_USERSPACE
+ /**
+  * @brief Copy a user-supplied path into a kernel buffer of CONFIG_ZVFS_PATH_MAX bytes.
+diff --git a/lib/os/zvfs/zvfs_futime.c b/lib/os/zvfs/zvfs_futime.c
+new file mode 100644
+--- /dev/null
++++ b/lib/os/zvfs/zvfs_futime.c
+@@ -0,0 +1,58 @@
++/*
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <stdarg.h>
++#include <time.h>
++
++#include <zephyr/sys/fdtable.h>
++#include <zephyr/sys/internal/fdtable_priv.h>
++#include <zephyr/sys/zvfs_fs.h>
++#include <zephyr/internal/syscall_handler.h>
++
++static inline int zvfs_futime_wrap(struct fd_entry *entry, int cmd, ...)
++{
++	int res;
++	va_list args;
++
++	(void)k_mutex_lock(&entry->lock, K_FOREVER);
++	va_start(args, cmd);
++	res = entry->vtable->ioctl(entry->obj, cmd, args);
++	va_end(args);
++	k_mutex_unlock(&entry->lock);
++
++	return res;
++}
++
++int z_impl_zvfs_futime(int fd, const struct timespec *times)
++{
++	struct fd_entry *entry = zvfs_fd_entry_get(fd);
++
++	if (entry == NULL) {
++		return -1;
++	}
++
++	return zvfs_futime_wrap(entry, ZFD_IOCTL_UTIME, times);
++}
++
++#ifdef CONFIG_USERSPACE
++static int z_vrfy_zvfs_futime(int fd, const struct timespec *times)
++{
++	struct timespec ktimes[2];
++	const struct timespec *tp = NULL;
++
++	if (times != NULL) {
++		K_OOPS(k_usermode_from_copy(ktimes, times, sizeof(ktimes)));
++		tp = ktimes;
++	}
++
++	if (zvfs_fd_syscall_verify(fd) == NULL) {
++		return -1;
++	}
++
++	return z_impl_zvfs_futime(fd, tp);
++}
++
++#include <zephyr/syscalls/zvfs_futime_mrsh.c>
++#endif /* CONFIG_USERSPACE */
+diff --git a/lib/os/zvfs/zvfs_path.c b/lib/os/zvfs/zvfs_path.c
+--- a/lib/os/zvfs/zvfs_path.c
++++ b/lib/os/zvfs/zvfs_path.c
+@@ -92,6 +92,23 @@ static bool zvfs_mount_rdonly(const char *path)
+ 	return (flags & FS_MOUNT_FLAG_READ_ONLY) != 0;
+ }
+ 
++void zvfs_fs_times(const char *path, struct zvfs_stat *buf)
++{
++#ifdef CONFIG_FS_DIRENT_EXT
++	struct fs_dirent entry;
++
++	if (fs_stat(path, &entry) == 0) {
++		buf->atime = entry.atime;
++		buf->mtime = entry.mtime;
++		/* Zephyr file systems track no status-change time */
++		buf->ctime = entry.mtime;
++	}
++#else
++	ARG_UNUSED(path);
++	ARG_UNUSED(buf);
++#endif
++}
++
+ int z_impl_zvfs_unlink(const char *path)
+ {
+ 	int res;
+diff --git a/tests/lib/zvfs_fs/src/main.c b/tests/lib/zvfs_fs/src/main.c
+--- a/tests/lib/zvfs_fs/src/main.c
++++ b/tests/lib/zvfs_fs/src/main.c
+@@ -313,6 +313,50 @@ ZTEST_USER(zvfs_fs, test_zvfs_utime)
+ 	zassert_true(errno == ENOENT || errno == ENOTSUP);
+ }
+ 
++ZTEST_USER(zvfs_fs, test_zvfs_futime)
++{
++	const struct timespec times[2] = {
++		{.tv_sec = 1700000000},
++		{.tv_sec = 1700000100},
++	};
++	struct zvfs_stat st;
++	int fd = zvfs_open(TFILE, ZVFS_O_RDWR, 0);
++	int rc;
++
++	zassert_true(fd >= 0);
++
++	/* FatFs without FF_USE_CHMOD reports ENOTSUP through the core CHECKIF */
++	rc = zvfs_futime(fd, times);
++	if (rc < 0) {
++		zassert_equal(errno, ENOTSUP, "expected ENOTSUP got %d", errno);
++	} else if (IS_ENABLED(CONFIG_FS_DIRENT_EXT)) {
++		/* what was set through the descriptor is what the descriptor reports */
++		zassert_ok(zvfs_fstat(fd, &st));
++		zassert_equal(st.mtime.tv_sec, times[1].tv_sec);
++		zassert_ok(zvfs_stat(TFILE, &st));
++		zassert_equal(st.mtime.tv_sec, times[1].tv_sec);
++	}
++
++	rc = zvfs_futime(fd, NULL);
++	if (rc < 0) {
++		zassert_equal(errno, ENOTSUP, "expected ENOTSUP got %d", errno);
++	}
++	zassert_ok(zvfs_close(fd));
++
++	/* a directory descriptor is a descriptor too */
++	fd = zvfs_open(TDIR, ZVFS_O_RDONLY | ZVFS_O_DIRECTORY, 0);
++	zassert_true(fd >= 0);
++	rc = zvfs_futime(fd, NULL);
++	if (rc < 0) {
++		zassert_equal(errno, ENOTSUP, "expected ENOTSUP got %d", errno);
++	}
++	zassert_ok(zvfs_close(fd));
++
++	errno = 0;
++	zassert_equal(zvfs_futime(fd, NULL), -1);
++	zassert_equal(errno, EBADF);
++}
++
+ ZTEST_USER(zvfs_fs, test_zvfs_opendir)
+ {
+ 	struct zvfs_dirstream *d, *d2;
+ 
