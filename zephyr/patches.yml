@@ -21,6 +21,20 @@ patches:
       with -Werror=maybe-uninitialized ("by argument 1 of type const
       struct net_sockaddr_storage * to net_sad"). Zero-initialize the
       locals.
+  - path: zephyr/random-test-csprng-syscall-handler.patch
+    sha256sum: f76bd4ccbfefcacb64e18f10ed5d101ed875af45fc20509770adb05303582fdd
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-10-10
+    upstreamable: true
+    comments: |
+      Upstream Zephyr bug, independent of posix-next: the sys_csrand_get()
+      system call handler is compiled only with CONFIG_CSPRNG_ENABLED, but
+      CONFIG_TEST_CSPRNG_GENERATOR also implements z_impl_sys_csrand_get()
+      (over sys_rand_get()). A user thread calling sys_csrand_get() in that
+      configuration hits an unimplemented system call and oopses instead of
+      reaching the generator. Compile the handler for both providers.
   - path: zephyr/posix-network-appliance-subprofile.patch
     sha256sum: 4bdadaa91684601e6c1bb1cad164f64b84ac21bb303334da659fbb6ea05d82eb
     module: zephyr
@@ -124,3 +138,60 @@ patches:
       The hostap module selects the Option Groups it uses directly; this
       requires the hostap change that includes the standard POSIX headers
       instead of gating them on CONFIG_POSIX_API.
+  - path: zephyr/kernel-dyn-stack-priv-placement.patch
+    sha256sum: ff5066d458d701b302f46a8789908f18fb744def3498f442bd99cf1e5244e56b
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-04
+    upstreamable: true
+    comments: |
+      kernel: userspace: place dynamic-stack privileged stacks past the object
+
+      Upstream d6071319b53 ("kernel/userspace: Dynamically allocate
+      privileged stack after user stack", v4.4.0) moved dynamically
+      allocated privileged stacks from the object base to the end of the
+      user stack, but computed the end from the requested size.
+
+      dynamic_object_create() places the privileged stack for a dynamically
+      allocated user thread stack at ROUND_UP(data + size, obj_align), but
+      the user buffer laid out by setup_thread_stack() spans
+      K_THREAD_STACK_LEN(size) bytes: K_THREAD_STACK_RESERVED (the PMP
+      stack guard) plus any power-of-two size rounding. On RISC-V with
+      CONFIG_PMP_STACK_GUARD and CONFIG_PMP_POWER_OF_TWO_ALIGNMENT a
+      4 KiB request yields an 8 KiB user object, and the privileged stack
+      lands in its top half: every syscall and interrupt then writes kernel
+      exception frames over the live user stack top - the thread's TLS area
+      and any caller spill slots - so a user thread on an oversized dynamic
+      stack corrupts itself as soon as it makes a syscall (observed as the
+      syscall wrapper reloading a spilled argument as 0 and oopsing with
+      "0 is not a valid k_thread").
+
+      Place the privileged stack after the full K_THREAD_STACK_LEN(size)
+      footprint instead. On MPU targets K_THREAD_STACK_RESERVED is 0 and
+      the two expressions coincide, so only PMP-guarded configurations
+      change. STACK_ELEMENT_DATA_SIZE() already budgets an extra
+      Z_THREAD_STACK_OBJ_ALIGN(size) of slack, which covers the moved
+      placement.
+  - path: zephyr/net-mgmt-test-wait-for-async-delivery.patch
+    sha256sum: c2a1b0c7c3a5d05ea4c7774d7a7de1c328728e3cb2561211227eb98deac8ac7c
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-18
+    upstreamable: true
+    comments: |
+      Make tests/net/mgmt deterministic: poll rx_calls for async net_mgmt event
+      delivery instead of a single fixed k_msleep(THREAD_SLEEP), which races on
+      platforms where the worker drains its queue slower than the sleep (e.g.
+      mps2/an385 under QEMU deterministic icount). Upstream test fragility,
+      not specific to the POSIX module.
+  - path: zephyr/tracing-ctf-forward-declare-zvfs-pollfd.patch
+    sha256sum: 3a919118df16415c70a5c8ddad1d5d4c85a4e576c45d3e3f537acd4a30fcfadc
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-07-15
+    upstreamable: true
+    comments: |
+      Forward-declare struct zvfs_pollfd in tracing_ctf.h to break fdtable→kernel→tracing include cycle.
