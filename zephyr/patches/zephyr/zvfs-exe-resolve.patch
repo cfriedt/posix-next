@@ -1,0 +1,202 @@
+diff --git a/include/zephyr/sys/zvfs_fs.h b/include/zephyr/sys/zvfs_fs.h
+--- a/include/zephyr/sys/zvfs_fs.h
++++ b/include/zephyr/sys/zvfs_fs.h
+@@ -269,6 +269,32 @@ __syscall int zvfs_rmdir(const char *path);
+  */
+ __syscall int zvfs_truncate(const char *path, off_t length);
+ 
++/**
++ * @brief Find an executable along a directory list
++ *
++ * Search the colon-separated directory list @p paths for a regular file named
++ * @p exe (which must not contain a path separator) with an execute permission
++ * bit. An empty entry in the list is the working directory, and a match there
++ * is reported by its bare name. Each candidate's path is written to @p buf and
++ * opened by it; the first match is left open and its descriptor returned. The
++ * list is read, never written: a caller passing an environment variable
++ * synchronizes its own modifications of the environment.
++ *
++ * @param paths    Colon-separated directory list.
++ * @param exe      Name to find, without a path separator.
++ * @param buf      Where to write the resolved path.
++ * @param buf_size Size of @p buf.
++ *
++ * @retval fd       The open descriptor of the executable (non-negative).
++ * @retval -ENOENT  No entry of that name along the list.
++ * @retval -EPERM   Only entries that are not executable regular files were found.
++ * @retval -ERANGE  A candidate path does not fit in @p buf.
++ * @retval -EINVAL  A NULL list, name or buffer, an empty name or buffer, or a
++ *                  separator in the name.
++ * @retval -errno   Another failure opening or inspecting a candidate.
++ */
++int zvfs_exe_resolve(const char *paths, const char *exe, char *buf, size_t buf_size);
++
+ /**
+  * @brief Check accessibility of a file or directory.
+  *
+diff --git a/lib/os/zvfs/CMakeLists.txt b/lib/os/zvfs/CMakeLists.txt
+--- a/lib/os/zvfs/CMakeLists.txt
++++ b/lib/os/zvfs/CMakeLists.txt
+@@ -17,6 +17,7 @@ zephyr_library_sources_ifdef(CONFIG_ZVFS_DEFAULT_FILE_VMETHODS zvfs_file_vmethod
+ zephyr_library_sources_ifdef(CONFIG_ZVFS_FS
+   zvfs_cwd.c
+   zvfs_dirent.c
++  zvfs_exe.c
+   zvfs_fs.c
+   zvfs_futime.c
+   zvfs_path.c
+diff --git a/lib/os/zvfs/zvfs_exe.c b/lib/os/zvfs/zvfs_exe.c
+new file mode 100644
+--- /dev/null
++++ b/lib/os/zvfs/zvfs_exe.c
+@@ -0,0 +1,97 @@
++/*
++ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <errno.h>
++#include <stdbool.h>
++#include <stdio.h>
++#include <string.h>
++
++#include <zephyr/sys/fdtable.h>
++#include <zephyr/sys/zvfs.h>
++#include <zephyr/sys/zvfs_fs.h>
++
++/* the opened candidate stays open only when it is an executable regular file */
++static int exe_candidate(int fd, bool *found)
++{
++	struct zvfs_stat st;
++
++	if (zvfs_fstat(fd, &st) < 0) {
++		int err = errno;
++
++		(void)zvfs_close(fd);
++		return -err;
++	}
++	if (((st.mode & ZVFS_MODE_IFMT) == ZVFS_MODE_IFREG) &&
++	    ((st.mode & (ZVFS_S_IXUSR | ZVFS_S_IXGRP | ZVFS_S_IXOTH)) != 0)) {
++		return fd;
++	}
++	(void)zvfs_close(fd);
++	*found = true;
++
++	return -ENOENT;
++}
++
++int zvfs_exe_resolve(const char *paths, const char *exe, char *buf, size_t buf_size)
++{
++	bool found = false;
++	const char *seg = paths;
++	struct zvfs_stat st;
++
++	if ((paths == NULL) || (exe == NULL) || (exe[0] == '\0') || (strchr(exe, '/') != NULL) ||
++	    (buf == NULL) || (buf_size == 0)) {
++		return -EINVAL;
++	}
++
++	while (true) {
++		const char *end = strchr(seg, ':');
++		size_t len;
++		int fd;
++		int n;
++
++		if (end == NULL) {
++			end = seg + strlen(seg);
++		}
++		len = (size_t)(end - seg);
++
++		/* an empty prefix is the working directory: the bare name, relative to it */
++		n = (len == 0) ? snprintf(buf, buf_size, "%s", exe)
++			       : snprintf(buf, buf_size, "%.*s/%s", (int)len, seg, exe);
++		if ((n < 0) || ((size_t)n >= buf_size)) {
++			return -ERANGE;
++		}
++		fd = zvfs_open(buf, ZVFS_O_RDONLY, 0);
++
++		if (fd >= 0) {
++			fd = exe_candidate(fd, &found);
++			if (fd != -ENOENT) {
++				return fd;
++			}
++		} else {
++			switch (errno) {
++			case ENOENT:
++			case ENOTDIR:
++				/* a directory of that name does not open as a file; it still counts */
++				if (zvfs_stat(buf, &st) == 0) {
++					found = true;
++				}
++				break;
++			case EACCES:
++			case EISDIR:
++				found = true;
++				break;
++			default:
++				return -errno;
++			}
++		}
++
++		if (*end == '\0') {
++			break;
++		}
++		seg = end + 1;
++	}
++
++	return found ? -EPERM : -ENOENT;
++}
+diff --git a/tests/lib/zvfs_fs/src/main.c b/tests/lib/zvfs_fs/src/main.c
+--- a/tests/lib/zvfs_fs/src/main.c
++++ b/tests/lib/zvfs_fs/src/main.c
+@@ -212,6 +212,48 @@ ZTEST_USER(zvfs_fs, test_zvfs_fstat)
+ 	zassert_equal(errno, EBADF);
+ }
+ 
++ZTEST_USER(zvfs_fs, test_zvfs_exe_resolve)
++{
++	char path[CONFIG_ZVFS_PATH_MAX];
++	char small[sizeof("tdir/sub")];
++	struct zvfs_stat st;
++	int fd;
++
++	/* the list is colon-separated, so a FAT mount name is reached through the working directory */
++	zassert_ok(zvfs_chdir(MNT));
++
++	/* the second directory holds the file: its path comes back with the descriptor */
++	fd = zvfs_exe_resolve("nope.txt:tdir", "sub.txt", path, sizeof(path));
++	zassert_true(fd >= 0, "resolve failed: %d", fd);
++	zassert_str_equal(path, "tdir/sub.txt");
++	zassert_ok(zvfs_fstat(fd, &st));
++	zassert_equal(st.mode & ZVFS_MODE_IFMT, ZVFS_MODE_IFREG);
++	zassert_ok(zvfs_close(fd));
++
++	/* an empty entry is the working directory */
++	fd = zvfs_exe_resolve("nope.txt:", "tfile.txt", path, sizeof(path));
++	zassert_true(fd >= 0, "resolve in the working directory failed: %d", fd);
++	zassert_str_equal(path, "tfile.txt");
++	zassert_ok(zvfs_close(fd));
++
++	/* nothing of that name anywhere */
++	zassert_equal(zvfs_exe_resolve("tdir:.", "nope.txt", path, sizeof(path)), -ENOENT);
++	/* a directory of that name is not an executable file */
++	zassert_equal(zvfs_exe_resolve(".", "tdir", path, sizeof(path)), -EPERM);
++	/* the path does not fit the buffer */
++	zassert_equal(zvfs_exe_resolve("tdir", "sub.txt", small, sizeof(small)), -ERANGE);
++	/* bad arguments */
++	zassert_equal(zvfs_exe_resolve(NULL, "sub.txt", path, sizeof(path)), -EINVAL);
++	zassert_equal(zvfs_exe_resolve("tdir", NULL, path, sizeof(path)), -EINVAL);
++	zassert_equal(zvfs_exe_resolve("tdir", "", path, sizeof(path)), -EINVAL);
++	zassert_equal(zvfs_exe_resolve("tdir", "a/b", path, sizeof(path)), -EINVAL);
++	zassert_equal(zvfs_exe_resolve("tdir", "sub.txt", NULL, sizeof(path)), -EINVAL);
++	zassert_equal(zvfs_exe_resolve("tdir", "sub.txt", NULL, 0), -EINVAL);
++	zassert_equal(zvfs_exe_resolve("tdir", "sub.txt", path, 0), -EINVAL);
++
++	zassert_ok(zvfs_chdir("/"));
++}
++
+ ZTEST_USER(zvfs_fs, test_zvfs_fstatvfs)
+ {
+ 	int fd;
+ 
