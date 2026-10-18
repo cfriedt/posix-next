@@ -2626,6 +2626,25 @@ patches:
       zvfs_futime() over it, and the stat requests of those objects filling the
       timestamps as zvfs_stat() does. The zvfs_fs test sets times through a
       descriptor and reads them back through fstat() and stat().
+  - path: zephyr/zvfs-exe-resolve.patch
+    sha256sum: 989654840a64d88563ac5d735e80ad08afa688907beb24f46d05886903422e0f
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-10-17
+    upstreamable: true
+    comments: |
+      Add zvfs_exe_resolve(): find an executable regular file named exe along
+      a colon-separated directory list, the search behind execvp() and
+      posix_spawnp(). Each candidate is opened by its path, written into the caller's
+      buffer, and kept open
+      only when fstat() shows a regular file with an execute bit, so the
+      first match comes back as an open descriptor with its path. Nothing
+      found is -ENOENT, only non-executables found is -EPERM, a path that does
+      not fit is -ERANGE, bad arguments (a separator in the name, a buffer and
+      size that disagree) are -EINVAL. An empty list entry is the working
+      directory. The list is never written, so a caller handing over an
+      environment variable synchronizes its own environment modifications.
   - path: zephyr/libc-common-tmpfile.patch
     sha256sum: 625da03c90a12e2f7351b4797c25d1b91642bda5eaee8089fb66bc1e1ea28e91
     module: zephyr
