@@ -160,3 +160,7 @@ zephyr_library_property(ALLOW_EMPTY TRUE)
 
 zephyr_library_compile_options(-U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
 zephyr_library_compile_options_ifdef(CONFIG_XSI -U_XOPEN_SOURCE -D_XOPEN_SOURCE=700)
+
+if(CONFIG_POSIX_LLEXT_SYMBOLS)
+  zephyr_library_sources(llext.c)
+endif()
