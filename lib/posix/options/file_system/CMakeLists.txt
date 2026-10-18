@@ -24,6 +24,7 @@ if(NOT CONFIG_TC_PROVIDES_POSIX_FILE_SYSTEM)
     getcwd.c
     fstat.c
     fstatvfs.c
+    futimens.c
     mkdir.c
     opendir.c
     pathconf.c
