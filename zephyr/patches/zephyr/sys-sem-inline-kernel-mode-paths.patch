@@ -1,0 +1,107 @@
+diff --git a/include/zephyr/sys/sem.h b/include/zephyr/sys/sem.h
+index fc45817e1da..4923e3fe432 100644
+--- a/include/zephyr/sys/sem.h
++++ b/include/zephyr/sys/sem.h
+@@ -126,7 +126,16 @@ int sys_sem_give(struct sys_sem *sem);
+  * @retval -ETIMEDOUT Waiting period timed out.
+  * @retval -EACCES Caller does not have enough access.
+  */
++#if defined(CONFIG_USERSPACE) || defined(__DOXYGEN__)
+ int sys_sem_take(struct sys_sem *sem, k_timeout_t timeout);
++#else
++static ALWAYS_INLINE int sys_sem_take(struct sys_sem *sem, k_timeout_t timeout)
++{
++	int ret = k_sem_take(&sem->kernel_sem, timeout);
++
++	return ((ret == -EAGAIN) || (ret == -EBUSY)) ? -ETIMEDOUT : ret;
++}
++#endif
+ 
+ /**
+  * @brief Get sys_sem's value
+@@ -137,7 +146,14 @@ int sys_sem_take(struct sys_sem *sem, k_timeout_t timeout);
+  *
+  * @return Current value of sys_sem.
+  */
++#if defined(CONFIG_USERSPACE) || defined(__DOXYGEN__)
+ unsigned int sys_sem_count_get(struct sys_sem *sem);
++#else
++static inline unsigned int sys_sem_count_get(struct sys_sem *sem)
++{
++	return k_sem_count_get(&sem->kernel_sem);
++}
++#endif
+ 
+ /**
+  * @brief Check whether any thread is blocked taking @a sem.
+diff --git a/kernel/sem.c b/kernel/sem.c
+index 485fd4d5ede..c9138e59e74 100644
+--- a/kernel/sem.c
++++ b/kernel/sem.c
+@@ -22,6 +22,7 @@
+ #include <zephyr/toolchain.h>
+ #include <wait_q.h>
+ #include <ksem.h>
++#include <zephyr/sys/sem.h>
+ #include <zephyr/sys/dlist.h>
+ #include <ksched.h>
+ #include <scheduler.h>
+@@ -157,6 +158,13 @@ int z_sem_give_checked(struct k_sem *sem)
+ 	return sem_give(sem, true);
+ }
+ 
++#ifndef CONFIG_USERSPACE
++int sys_sem_give(struct sys_sem *sem)
++{
++	return (sem_give(&sem->kernel_sem, true) < 0) ? -EAGAIN : 0;
++}
++#endif /* !CONFIG_USERSPACE */
++
+ #ifdef CONFIG_USERSPACE
+ static inline void z_vrfy_k_sem_give(struct k_sem *sem)
+ {
+diff --git a/kernel/sys/sem.c b/kernel/sys/sem.c
+index e9da5968600..65e4720a4f6 100644
+--- a/kernel/sys/sem.c
++++ b/kernel/sys/sem.c
+@@ -6,7 +6,6 @@
+ #include <zephyr/kernel.h>
+ #include <zephyr/sys/sem.h>
+ #include <wait_q.h>
+-#include <ksem.h>
+ 
+ int sys_sem_init(struct sys_sem *sem, unsigned int initial_count,
+ 		 unsigned int limit)
+@@ -16,32 +15,6 @@ int sys_sem_init(struct sys_sem *sem, unsigned int initial_count,
+ 	return 0;
+ }
+ 
+-int sys_sem_give(struct sys_sem *sem)
+-{
+-	if (z_sem_give_checked(&sem->kernel_sem) < 0) {
+-		return -EAGAIN;
+-	}
+-
+-	return 0;
+-}
+-
+-int sys_sem_take(struct sys_sem *sem, k_timeout_t timeout)
+-{
+-	int ret_value = 0;
+-
+-	ret_value = k_sem_take(&sem->kernel_sem, timeout);
+-	if ((ret_value == -EAGAIN) || (ret_value == -EBUSY)) {
+-		ret_value = -ETIMEDOUT;
+-	}
+-
+-	return ret_value;
+-}
+-
+-unsigned int sys_sem_count_get(struct sys_sem *sem)
+-{
+-	return k_sem_count_get(&sem->kernel_sem);
+-}
+-
+ bool sys_sem_has_waiters(struct sys_sem *sem)
+ {
+ 	return z_waitq_head(&sem->kernel_sem.wait_q) != NULL;
