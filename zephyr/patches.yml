@@ -746,6 +746,50 @@ patches:
       z_sem_give_checked() so both implementations report a full semaphore,
       and the check and the increment stay one atomic step. Cover the limit
       in the sys_sem test from kernel and user mode.
+  - path: zephyr/kernel-sem-inline-give-body.patch
+    sha256sum: e03a1690d63a7cd23a6dcaa2b74e7e624538c418ce81c3819d039db77327bc1e
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-10-19
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/k-sem-give-checked.patch
+    comments: |
+      kernel: sem: inline the shared give body
+
+      Splitting k_sem_give() into a shared sem_give() body left two
+      six-byte trampolines (z_impl_k_sem_give() and z_sem_give_checked())
+      tail-calling it, one extra branch on every give. Force-inline the
+      body into both: k_sem_give()+k_sem_take() on qemu_cortex_m3 drops
+      from 53.6 to 48.8 cycles, back to the v4.4.1 figure, for 88 bytes
+      of ROM.
+  - path: zephyr/sys-sem-inline-kernel-mode-paths.patch
+    sha256sum: 6f437c45962ce728910f8cd543e6a0531d0585e0a129f0cfaf59b7cc7887933e
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-10-19
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/k-sem-give-checked.patch
+          - zephyr/sys-sem-give-reports-full.patch
+    comments: |
+      sys: sem: inline the kernel-mode fast paths
+
+      Without CONFIG_USERSPACE a sys_sem is a k_sem, but sys_sem_take()
+      and sys_sem_count_get() were out-of-line wrappers over the public
+      k_sem calls, and sys_sem_give() reached the give body through two
+      calls. Make take and count_get static inline in the header, and
+      define the kernel-mode sys_sem_give() beside the give body in
+      kernel/sem.c so the checked give is one call. The ETIMEDOUT and
+      EAGAIN mappings are unchanged. POSIX sem_post()+sem_wait() on
+      qemu_cortex_m3: 97.4 to 73.4 cycles (with the inlined give body),
+      ROM -24 bytes.
   - path: zephyr/futex-wait-at-any-user-accessible-address.patch
     sha256sum: 9950d1bd5efed9776fc2101e9b8f861a85d130bc07d8735f2cd8777cd1664fa1
     module: zephyr

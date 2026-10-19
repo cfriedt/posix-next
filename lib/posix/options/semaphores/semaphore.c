@@ -23,11 +23,16 @@ struct nsem_obj {
 
 static sys_slist_t nsem_list;
 
-/* sem_wait() is a cancellation point; test only when about to block, like the futex path */
+/*
+ * sem_wait() is a cancellation point. The kernel-mode sys_sem is a k_sem and
+ * k_sem_take() tests at entry; the futex take only reaches a cancellation point
+ * when it blocks, so test before blocking, and read the count only once a
+ * cancel may actually be pending.
+ */
 static inline void sem_wait_testcancel(sem_t *semaphore)
 {
-#ifdef CONFIG_THREAD_CANCEL
-	if ((sys_sem_count_get(semaphore) == 0) && k_thread_cancel_may_be_pending()) {
+#if defined(CONFIG_THREAD_CANCEL) && defined(CONFIG_USERSPACE)
+	if (k_thread_cancel_may_be_pending() && (sys_sem_count_get(semaphore) == 0)) {
 		k_thread_testcancel();
 	}
 #else
