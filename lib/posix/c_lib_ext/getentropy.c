@@ -8,6 +8,7 @@
 
 #include <zephyr/drivers/entropy.h>
 #include <zephyr/kernel.h>
+#include <zephyr/random/random.h>
 
 #define ENTROPY_NODE DEVICE_DT_GET_OR_NULL(DT_CHOSEN(zephyr_entropy))
 
@@ -26,6 +27,12 @@ int getentropy(void *buffer, size_t length)
 	}
 
 	if (entropy == NULL || !device_is_ready(entropy)) {
+#if defined(CONFIG_CSPRNG_ENABLED) || defined(CONFIG_TEST_CSPRNG_GENERATOR)
+		/* no entropy device: the kernel's (cryptographically secure) generator */
+		if (sys_csrand_get(buffer, length) == 0) {
+			return 0;
+		}
+#endif
 		errno = EIO;
 		return -1;
 	}
