@@ -978,6 +978,73 @@ patches:
     comments: |
       libc: use k_thread_cleanup_push/pop and CONFIG_IDLE_STACK_SIZE in
       newlib/picolibc/arcmwdt pthread.h overlays (post deprecate/move).
+  - path: zephyr/kernel-thread-cancel-without-signals.patch
+    sha256sum: b47667ea15ec0db11a227790c9344e628ac3773c14dff883c09f5285a24f2ed7
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-10-19
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/k-thread-cancel.patch
+          - zephyr/k-signal.patch
+          - zephyr/k-tss.patch
+          - zephyr/sys-thread.patch
+    comments: |
+      kernel: cancel a thread without a signal
+
+      k_thread_cancel() queued K_SIG_CANCEL and the thread was cancelled by
+      the signal's default action, so THREAD_CANCEL depended on SIGNAL and
+      every pooled-thread user carried the signal subsystem. Now a request
+      sets the target's pending flag; a deferred request actuates at the
+      target's next cancellation point and an asynchronous one arms the
+      target to actuate on its next return from a system call. A user
+      thread is redirected through the same trampoline signals use, which
+      becomes its own mechanism: SYSCALL_RETURN_HOOK, selected by
+      THREAD_CANCEL and SIGNAL, in kernel/return_hook.c with the pending-work
+      counter, z_sig_handle(), k_sig_current() and k_sig_return(). The
+      teardown a cancelled thread runs is shared with k_thread_exit() in
+      kernel/thread_exit.c, under THREAD_RESULT, so C11 threads build without
+      cancellation. The cancellation state leaves the signal mask for a
+      thread option, K_CANCEL_DISABLED; K_SIG_CANCEL stays reserved and its
+      default action, reachable only by a runtime that installs its own
+      handler, still cancels. THREAD_CANCEL no longer depends on SIGNAL and
+      SYS_THREAD no longer selects it. tests/kernel/threads/thread_apis gains
+      a CONFIG_SIGNAL=n scenario.
+
+      The system call wrappers run the signal and cancellation return hook after the body for
+      kernel callers too, so any kernel-internal call of a wrapper is a delivery point. Under a
+      spinlock that is fatal: k_sleep() -> z_add_timeout() -> sys_clock_set_timeout() ->
+      timer_core_arm() reads sys_clock_hw_cycles_per_sec() through its wrapper while the
+      scheduler lock is held and the current thread is already off the run queue; a pending
+      SIGSTOP ran z_process_stop_self() there. The hook now declines to deliver while interrupts
+      are locked; the signal stays pending for the wrapper that called with interrupts enabled.
+  - path: zephyr/arch-syscall-return-hook.patch
+    sha256sum: 5242893da0a19124d762dc07008bb64a4ffc8bf4ac5c12c226bc53398e7e79c1
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-10-19
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/kernel-thread-cancel-without-signals.patch
+          - zephyr/user-signals-riscv.patch
+          - zephyr/user-signals-arm.patch
+          - zephyr/user-signals-x86.patch
+    comments: |
+      arch: gate the user-return hook on SYSCALL_RETURN_HOOK
+
+      The system-call return path, the per-thread saved context, its offsets
+      and the arch_sig_pre()/arch_sig_post() sources were gated on SIGNAL;
+      thread cancellation now uses the same path, so they are gated on the
+      mechanism's own symbol. The x86-64 system-call save frame is pushed by
+      every system call and read back by a fork, so its offsets are generated
+      for every userspace build; only the hook's per-thread save area stays
+      behind the symbol. No other code change on any architecture.
   - path: zephyr/libc-signal-h-pthread-kill.patch
     sha256sum: 9db8dc468a348bb0603646373dbe308174a5711ddbcfd454197b47f18992eb48
     module: zephyr

@@ -244,8 +244,8 @@ static void *thread_top_term(void *p1)
 #endif
 
 	if (!k_is_user_context()) {
-		/* kernel threads must explicitly unmask cancel (not a POSIX sigaddset signo) */
-		zassert_ok(k_sig_delset(&k_current_get()->base.sig.mask, K_SIG_CANCEL));
+		/* kernel threads start with cancellation disabled and must enable it explicitly */
+		k_thread_cancel_setstate(true);
 	}
 
 	if (id % 2) {
@@ -590,8 +590,8 @@ static bool testcancel_failed;
 static void *test_pthread_cancel_fn(void *arg)
 {
 	if (!k_is_user_context()) {
-		/* kernel threads must explicitly unmask cancel (not a POSIX sigaddset signo) */
-		zassert_ok(k_sig_delset(&k_current_get()->base.sig.mask, K_SIG_CANCEL));
+		/* kernel threads start with cancellation disabled and must enable it explicitly */
+		k_thread_cancel_setstate(true);
 	}
 
 	zassert_ok(pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL));
