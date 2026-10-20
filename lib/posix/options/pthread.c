@@ -714,6 +714,7 @@ int pthread_atfork(void (*prepare)(void), void (*parent)(void), void (*child)(vo
 
 int pthread_sigmask(int how, const sigset_t *ZRESTRICT set, sigset_t *ZRESTRICT oset)
 {
+#ifdef CONFIG_SIGNAL
 	int k_how;
 
 	switch(how) {
@@ -748,11 +749,25 @@ int pthread_sigmask(int how, const sigset_t *ZRESTRICT set, sigset_t *ZRESTRICT 
 	}
 
 	return 0;
+#else
+	ARG_UNUSED(how);
+	ARG_UNUSED(set);
+	ARG_UNUSED(oset);
+
+	return ENOTSUP;
+#endif /* CONFIG_SIGNAL */
 }
 
 int pthread_kill(pthread_t thread, int sig)
 {
+#ifdef CONFIG_SIGNAL
 	return -k_sig_queue(to_k_thread(&thread), sig, (union k_sig_val){0});
+#else
+	ARG_UNUSED(thread);
+	ARG_UNUSED(sig);
+
+	return ENOTSUP;
+#endif /* CONFIG_SIGNAL */
 }
 
 int sched_yield(void)
