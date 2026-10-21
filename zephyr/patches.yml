@@ -441,6 +441,28 @@ patches:
     comments: |
       Accept POSIX fcntl constants in zsock_fcntl() while translating them to ZVFS constants used by
       socket backends.
+  - path: zephyr/kernel-userspace-dynamic-thread-index-leak.patch
+    sha256sum: ba3e39c6d4b4dc9869397901ffa23970bf402d8116ec5814c0f86e2a039270d4
+    module: zephyr
+    author: Lauren Murphy
+    email: lauren.murphy@intel.com
+    date: 2026-08-31
+    merge-pr: https://github.com/zephyrproject-rtos/zephyr/pull/118248
+    comments: |
+      Backport kernel: userspace: partial fix of dynamic thread index leak
+      (zephyr#118248, open upstream: resync if it changes before it merges).
+      A thread object disposed by its last permission drop never returned
+      its index to _thread_idx_map (zephyr#17023), so repeated allocation
+      and refcount disposal exhausted the map. thread_idx_map_set() is
+      factored out of thread_idx_free() and unref_check() gains a
+      K_OBJ_THREAD case that sets the bit (no permission sweep there: the
+      caller holds lists_lock and the sweep would re-enter; thread_idx_alloc()
+      clears the permissions of the index it hands out). With the PR's
+      tests: dynamic_thread gains test_thread_index_recycled_on_unref, and
+      mem_protect's test_thread_alloc_out_of_idx probes the pool before
+      asserting the map is full. Adapted to kernel/userspace.c; the
+      new case sits before default: (no K_OBJ_TIMER case: zephyr#109977 is
+      not backported, it needs z_try_abort_timeout()).
   - path: zephyr/x86-z-mapped-size-after-iterable-sections.patch
     sha256sum: d695b1c01da6803476ca1ad4a0c1453863df3038907d913163594c956f24ca04
     module: zephyr
