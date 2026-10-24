@@ -4,10 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include <errno.h>
-
-#include <zephyr/kernel.h>
+#include <time.h>
 #include <unistd.h>
+
+#include <zephyr/sys/clock.h>
 
 /**
  * @brief Sleep for a specified number of seconds.
@@ -16,10 +16,13 @@
  */
 unsigned sleep(unsigned int seconds)
 {
-	int rem;
+	struct timespec req = {.tv_sec = seconds};
+	struct timespec rem = {0};
 
-	rem = k_sleep(K_SECONDS(seconds));
-	__ASSERT_NO_MSG(rem >= 0);
+	if (sys_clock_nanosleep(SYS_CLOCK_REALTIME, 0, &req, &rem) == 0) {
+		return 0;
+	}
 
-	return rem / MSEC_PER_SEC;
+	/* interrupted: the seconds left, a part of one counting whole */
+	return (unsigned int)rem.tv_sec + (rem.tv_nsec > 0);
 }
