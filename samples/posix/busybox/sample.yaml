@@ -31,3 +31,53 @@ tests:
       - qemu_riscv64
     integration_platforms:
       - qemu_riscv64
+  sample.posix.busybox.gateway:
+    # qemu user-mode networking: e1000 to the SLIRP virtual gateway, no
+    # host-side TAP or privileges needed
+    platform_allow:
+      - qemu_cortex_a53
+    extra_configs:
+      - CONFIG_NET_TEST=n
+      - CONFIG_NET_SLIP_TAP=n
+      - CONFIG_NET_QEMU_USER=y
+      - CONFIG_NET_L2_ETHERNET=y
+      - CONFIG_ETH_DRIVER=y
+      - CONFIG_NET_DEFAULT_IF_ETHERNET=y
+      - CONFIG_NET_CONFIG_SETTINGS=y
+      - CONFIG_NET_CONFIG_NEED_IPV4=y
+      - CONFIG_NET_CONFIG_MY_IPV4_ADDR="10.0.2.15"
+      - CONFIG_NET_CONFIG_MY_IPV4_NETMASK="255.255.255.0"
+      - CONFIG_NET_CONFIG_MY_IPV4_GW="10.0.2.2"
+      # the PCIe ECAM window alone is 256 MB of kernel VM
+      - CONFIG_KERNEL_VM_SIZE=0x30000000
+      - CONFIG_MAX_XLAT_TABLES=128
+      # name resolution: Zephyr's resolver with Google's public servers (SLIRP
+      # NATs the queries). The resolver's socket service handles replies on its
+      # own thread, whose default 1200-byte stack overflows on 64-bit targets,
+      # one network context is taken per server, and the service polls them.
+      - CONFIG_NET_IPV6=y
+      - CONFIG_NET_CONFIG_NEED_IPV6=y
+      - CONFIG_NET_CONFIG_MY_IPV6_ADDR="fec0::15"
+      - CONFIG_DNS_RESOLVER=y
+      - CONFIG_DNS_SERVER_IP_ADDRESSES=y
+      - CONFIG_DNS_RESOLVER_MAX_SERVERS=4
+      - CONFIG_DNS_SERVER1="8.8.8.8"
+      - CONFIG_DNS_SERVER2="8.8.4.4"
+      - CONFIG_DNS_SERVER3="2001:4860:4860::8888"
+      - CONFIG_DNS_SERVER4="2001:4860:4860::8844"
+      - CONFIG_NET_SOCKETS_SERVICE_STACK_SIZE=4096
+      - CONFIG_NET_MAX_CONTEXTS=16
+      - CONFIG_ZVFS_POLL_MAX=16
+    harness_config:
+      type: multi_line
+      ordered: true
+      regex:
+        - "hello world"
+        - "Hello from busybox on Zephyr!"
+        - "motd"
+        - "bytes from 127[.]0[.]0[.]1"
+        - "bytes from ::1"
+        - "bytes from 10[.]0[.]2[.]2"
+        - "bytes from fec0::2"
+        - "dns[.]google"
+        - "busybox sample complete"
