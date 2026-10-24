@@ -3889,6 +3889,49 @@ patches:
       is seeded from the default domain rather than the C library
       partitions alone, minus the boot malloc partition when the process
       owns an arena.
+  - path: zephyr/k-process-signal-wake.patch
+    sha256sum: 76f886296c3f0ca56ad0add76a590510ac2827587f3c30a36f40ffff418400aa
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-10-24
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/k-signal-interruptible-wait.patch
+          - zephyr/k-signal-process-conformance.patch
+    comments: |
+      The signal wake-up meets processes. Nothing takes the scheduler lock
+      under process_lock: the halt path owns that order, and queueing a
+      signal did, through k_poll_signal_raise() and z_sched_sig_interrupt().
+      z_sig_queue_common() separates the queueing from the wake-up; callers
+      that hold process_lock - k_kill(), k_kill_pgrp(), k_kill_all() and the
+      deferred K_SIG_CHLD - receive it in a struct k_sig_wake and perform it
+      with z_sig_wake() once the lock is dropped, the group kills in batches
+      of eight with each process marked by the kill's generation. A
+      process-directed signal wakes the member it would reach
+      (z_process_sig_target()). k_kill_pgrp() with signal 0 only checks the
+      group, as k_kill_all() does.
+
+      k_waitpid() is interruptible: a waiter whose pend a signal cut short
+      scans its children once more and returns the state change it finds
+      before it reports -EINTR, as Linux does. A parent's notifications
+      follow POSIX rather than its wait: a handled K_SIG_CHLD survives the
+      reap (the notification is dropped only when no handler is installed
+      for it), k_waitpid() emits a deferred notification itself before it
+      reaps, and the child's numeric ID travels with the notification
+      (k_sig_info.child_id), since the handle no longer resolves once the
+      child is reaped. Kernel code reaches the current thread through
+      _current rather than k_current_get(), whose syscall-wrapper tail
+      claims a signal. k_process_cpu_stats() takes a process handle - NULL
+      for the caller, or a child of the caller - so the CPU time of a
+      zombie can be read right after k_waitpid() hands it over with
+      K_PROCESS_WNOWAIT.
+
+      tests/kernel/process covers the SIGCHLD handler running after
+      k_waitpid() with the reaped child's number, the CPU stats of a child
+      before and after it is reaped, and k_kill_pgrp() with signal 0.
   - path: zephyr/libc-sys-stat-utime-markers.patch
     sha256sum: 8edfcf83058522bb80d601e92c4a9e6be14baec04cf8253ffbd344fbadf05b78
     module: zephyr

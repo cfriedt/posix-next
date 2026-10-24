@@ -1,0 +1,1149 @@
+diff --git a/include/zephyr/kernel/process.h b/include/zephyr/kernel/process.h
+index b751ec261f6..e6e8991c5d2 100644
+--- a/include/zephyr/kernel/process.h
++++ b/include/zephyr/kernel/process.h
+@@ -267,6 +267,8 @@ struct k_process {
+ #ifdef CONFIG_SIGNAL
+ 	/** Count of process-scoped pending signals (any member may claim) */
+ 	atomic_t sig_pending;
++	/** The group kill that last queued to this process */
++	uint32_t kill_gen;
+ 	/** Disposition of every member thread for signal n at index n - 1; all-zero is the default */
+ 	struct k_sig_action sig_actions[MAX(SIGNAL_SET_SIZE, 1)];
+ #endif /* CONFIG_SIGNAL */
+diff --git a/include/zephyr/kernel/signal.h b/include/zephyr/kernel/signal.h
+index 722723d26c6..baa94882d10 100644
+--- a/include/zephyr/kernel/signal.h
++++ b/include/zephyr/kernel/signal.h
+@@ -117,6 +117,12 @@ struct k_sig_info {
+ 	 * An identity value (@ref k_pid_t): the child may already be reaped.
+ 	 */
+ 	struct k_thread *pid;
++	/**
++	 * Numeric ID of that child as the system layer numbers processes, captured
++	 * when the notification is generated: the handle alone does not resolve
++	 * once the child is reaped (0 without CONFIG_SYS_PROCESS)
++	 */
++	int child_id;
+ 	/** Wait status of the child, in the K_WSTATUS_* encoding (@ref K_SIG_CHLD) */
+ 	int status;
+ #endif /* CONFIG_PROCESS */
+diff --git a/kernel/include/kernel_internal.h b/kernel/include/kernel_internal.h
+index 4f7a95cfb78..e38d938923e 100644
+--- a/kernel/include/kernel_internal.h
++++ b/kernel/include/kernel_internal.h
+@@ -189,6 +189,7 @@ bool z_process_self_is_reserved(void);
+  */
+ #ifdef CONFIG_SYS_PROCESS
+ int z_process_record_free(struct k_process *proc);
++int z_process_id_number(struct k_process *proc);
+ /* thread-granular numbering (one space with pids; a leader's tid is its pid) */
+ void z_thread_id_assign(struct k_thread *thread);
+ void z_thread_id_retire(struct k_thread *thread);
+@@ -717,6 +718,10 @@ FUNC_NORETURN void z_sig_fault_entry(void);
+ #endif /* CONFIG_SIGNAL_FAULT */
+ /* a signal may be deliverable to tid (its own or its process's) */
+ bool z_sig_pending_any(struct k_thread *tid);
++#ifdef CONFIG_PROCESS
++/* the member of @a proc a process-directed @a signo would reach, NULL if all mask it */
++k_tid_t z_process_sig_target(struct k_process *proc, int signo);
++#endif /* CONFIG_PROCESS */
+ #endif /* CONFIG_SIGNAL */
+ 
+ #ifdef CONFIG_PROCESS
+@@ -753,10 +758,32 @@ int z_sig_queue_msgq(k_pid_t pid, int signo, union k_sig_val value);
+ int z_sig_queue_aio(k_pid_t pid, int signo, union k_sig_val value);
+ #endif /* CONFIG_SYS_AIO && CONFIG_SIGNAL */
+ 
++#ifdef CONFIG_SIGNAL
++/*
++ * The wake-up a queued signal owes its target. Queueing under process_lock
++ * records it here instead of performing it: waking takes the scheduler lock,
++ * which the halt path holds while it takes process_lock. The caller performs
++ * it with z_sig_wake() once process_lock is dropped; signo stays 0 when nothing
++ * was queued.
++ */
++struct k_sig_wake {
++	k_tid_t tid;
++	struct k_process *proc;
++	struct k_poll_signal *wait_sig;
++	int signo;
++};
++
++void z_sig_wake(struct k_sig_wake *wake);
++#endif /* CONFIG_SIGNAL */
++
+ #if defined(CONFIG_PROCESS) && defined(CONFIG_SIGNAL)
+ /* generation-side plumbing between kernel/process.c and kernel/signal.c (internal) */
++int z_sig_queue_thread_deferred(k_tid_t tid, int signo, union k_sig_val value,
++				struct k_sig_wake *wake);
++int z_sig_queue_process_deferred(struct k_process *proc, int signo, union k_sig_val value,
++				 struct k_sig_wake *wake);
+ int z_sig_queue_chld(k_tid_t tid, struct k_process *proc, k_pid_t child_pid, int child_status,
+-		     bool exited);
++		     int code, int child_id, struct k_sig_wake *wake);
+ int z_sig_queue_thread(k_tid_t tid, int signo, union k_sig_val value);
+ int z_sig_queue_process(struct k_process *proc, int signo, union k_sig_val value);
+ int z_sig_actions_clone(struct k_process *parent, struct k_process *child, bool all);
+diff --git a/kernel/process.c b/kernel/process.c
+index ed049110d17..5378c1894de 100644
+--- a/kernel/process.c
++++ b/kernel/process.c
+@@ -185,6 +185,21 @@ static struct k_spinlock process_lock;
+  * generation counter closing the dropped-lock window.
+  */
+ static atomic_t process_wait_gen;
++#ifdef CONFIG_SIGNAL
++/* wake-ups a group kill performs between two walks of the members */
++#define KILL_WAKE_BATCH 8
++static uint32_t process_kill_gen;
++
++/* the caller holds process_lock; never 0, the mark of a process no kill has reached */
++static uint32_t kill_gen_next_locked(void)
++{
++	process_kill_gen++;
++	if (process_kill_gen == 0) {
++		process_kill_gen = 1;
++	}
++	return process_kill_gen;
++}
++#endif /* CONFIG_SIGNAL */
+ 
+ static struct k_process *process_self(void)
+ {
+@@ -851,6 +866,19 @@ int k_session_init(struct k_session *session, struct k_process_group *grp)
+  * currently blocks it. The caller must hold process_lock (the member list is
+  * walked here).
+  */
++static k_tid_t process_sig_target(struct k_process *proc, int signo);
++
++k_tid_t z_process_sig_target(struct k_process *proc, int signo)
++{
++	k_tid_t tid = NULL;
++
++	K_SPINLOCK(&process_lock) {
++		tid = process_sig_target(proc, signo);
++	}
++
++	return tid;
++}
++
+ static k_tid_t process_sig_target(struct k_process *proc, int signo)
+ {
+ 	struct k_thread *t;
+@@ -878,6 +906,11 @@ static int process_sig_queue_pgrp(k_pid_t pgid, int signo, union k_sig_val value
+ 	int found = 0;
+ 	struct k_process_group *pgrp;
+ 	struct k_process *proc;
++#ifdef CONFIG_SIGNAL
++	struct k_sig_wake wakes[KILL_WAKE_BATCH];
++	uint32_t gen;
++	bool more;
++#endif /* CONFIG_SIGNAL */
+ 	k_spinlock_key_t key = k_spin_lock(&process_lock);
+ 
+ 	pgrp = (pgid == NULL) ? process_self()->pgrp : pgrp_resolve_locked(pgid);
+@@ -890,37 +923,75 @@ static int process_sig_queue_pgrp(k_pid_t pgid, int signo, union k_sig_val value
+ 	 * Resolve each member's deliverable thread and queue to it under the
+ 	 * lock: a member thread is live only while the lock is held, and reap
+ 	 * cannot race the queue. k_sig_queue() allocates without waiting and
+-	 * takes only its own locks, which nest below process_lock.
++	 * takes only its own locks, which nest below process_lock; the wake-ups
++	 * wait for the lock and go out a batch at a time, each member marked
++	 * with this kill's generation so a resumed walk does not queue it twice.
+ 	 */
+-	SYS_DLIST_FOR_EACH_CONTAINER(&pgrp->members, proc, pgrp_node) {
+-		int err;
+-		k_tid_t tgt;
++#ifdef CONFIG_SIGNAL
++	gen = kill_gen_next_locked();
++	do {
++		int n = 0;
+ 
+-		if ((proc->state == K_PROCESS_UNUSED) ||
+-		    sys_dlist_is_empty(&proc->threads)) {
+-			continue;
++		more = false;
++#endif /* CONFIG_SIGNAL */
++		SYS_DLIST_FOR_EACH_CONTAINER(&pgrp->members, proc, pgrp_node) {
++			int err;
++			k_tid_t tgt;
++
++			if ((proc->state == K_PROCESS_UNUSED) ||
++			    sys_dlist_is_empty(&proc->threads)) {
++				continue;
++			}
++			if (signo == 0) {
++				/* existence check only: no wake-up is filled in for it */
++				ret = 0;
++				continue;
++			}
++#ifdef CONFIG_SIGNAL
++			if (proc->kill_gen == gen) {
++				continue;
++			}
++			if (n == KILL_WAKE_BATCH) {
++				more = true;
++				break;
++			}
++			proc->kill_gen = gen;
++#endif /* CONFIG_SIGNAL */
++			found++;
++#ifdef CONFIG_SIGNAL
++			tgt = process_sig_target(proc, signo);
++			/* NULL target: every member masked, pend at process scope */
++			err = (tgt == NULL) ? z_sig_queue_process_deferred(proc, signo,
++									 value,
++									 &wakes[n])
++					    : z_sig_queue_thread_deferred(tgt, signo,
++									value,
++									&wakes[n]);
++			if (err == -EINVAL) {
++				ret = -EINVAL;
++				more = false;
++				break;
++			}
++			if (err == 0) {
++				ret = 0;
++				n++;
++			}
++#else
++			ARG_UNUSED(err);
++			ARG_UNUSED(tgt);
++#endif /* CONFIG_SIGNAL */
+ 		}
+-		found++;
+ #ifdef CONFIG_SIGNAL
+-		tgt = process_sig_target(proc, signo);
+-		/* NULL target: every member masked, pend at process scope */
+-		err = (tgt == NULL) ? z_sig_queue_process(proc, signo, value)
+-				    : z_sig_queue_thread(tgt, signo, value);
+-		if (err == -EINVAL) {
+-			k_spin_unlock(&process_lock, key);
+-			return -EINVAL;
++		k_spin_unlock(&process_lock, key);
++		for (int i = 0; i < n; i++) {
++			z_sig_wake(&wakes[i]);
+ 		}
+-		if (err == 0) {
+-			ret = 0;
++		if (more) {
++			key = k_spin_lock(&process_lock);
+ 		}
++	} while (more);
+ #else
+-		ARG_UNUSED(err);
+-		ARG_UNUSED(tgt);
+-#endif /* CONFIG_SIGNAL */
+-	}
+ 	k_spin_unlock(&process_lock, key);
+-
+-#ifndef CONFIG_SIGNAL
+ 	ARG_UNUSED(signo);
+ 	ARG_UNUSED(value);
+ 	ret = (found > 0) ? -ENOTSUP : -ESRCH;
+@@ -937,6 +1008,7 @@ static int process_sig_queue_process(k_pid_t pid, int signo, union k_sig_val val
+ 	int ret = 0;
+ #ifdef CONFIG_SIGNAL
+ 	k_tid_t tid = NULL;
++	struct k_sig_wake wake = {0};
+ #endif /* CONFIG_SIGNAL */
+ 	struct k_process *proc;
+ 
+@@ -951,15 +1023,20 @@ static int process_sig_queue_process(k_pid_t pid, int signo, union k_sig_val val
+ 		if ((signo != 0) && live) {
+ 			tid = process_sig_target(proc, signo);
+ 			/* under the lock: the target cannot exit and reap cannot race
+-			 * the queue. NULL target: every member masked, pend at
+-			 * process scope.
++			 * the queue; the wake-up waits for the lock. NULL target:
++			 * every member masked, pend at process scope.
+ 			 */
+-			ret = (tid == NULL) ? z_sig_queue_process(proc, signo, value)
+-					    : z_sig_queue_thread(tid, signo, value);
++			ret = (tid == NULL) ? z_sig_queue_process_deferred(proc, signo, value, &wake)
++					    : z_sig_queue_thread_deferred(tid, signo, value, &wake);
+ 		}
+ #endif /* CONFIG_SIGNAL */
+ 	}
+ 
++#ifdef CONFIG_SIGNAL
++	if (wake.signo != 0) {
++		z_sig_wake(&wake);
++	}
++#endif /* CONFIG_SIGNAL */
+ 	if (!found) {
+ 		return -ESRCH;
+ 	}
+@@ -1053,6 +1130,11 @@ static int process_sig_queue_all(int signo, union k_sig_val value)
+ 	int ret = -ESRCH;
+ 	struct k_process *proc;
+ 	struct k_process *self;
++#ifdef CONFIG_SIGNAL
++	struct k_sig_wake wakes[KILL_WAKE_BATCH];
++	uint32_t gen;
++	bool more;
++#endif /* CONFIG_SIGNAL */
+ 	k_spinlock_key_t key = k_spin_lock(&process_lock);
+ 
+ 	self = process_self();
+@@ -1062,40 +1144,72 @@ static int process_sig_queue_all(int signo, union k_sig_val value)
+ 	 * records and the caller's own process, resolved and queued under the
+ 	 * lock exactly as k_kill_pgrp() treats group members.
+ 	 */
+-	SYS_DLIST_FOR_EACH_CONTAINER(&process_active, proc, active_node) {
+-		int err;
+-		k_tid_t tgt;
++#ifdef CONFIG_SIGNAL
++	gen = kill_gen_next_locked();
++	do {
++		int n = 0;
+ 
+-		if (process_is_reserved(proc) || (proc == self) ||
+-		    (proc->state == K_PROCESS_UNUSED) ||
+-		    sys_dlist_is_empty(&proc->threads)) {
+-			continue;
+-		}
+-		if (signo == 0) {
+-			/* existence check only */
+-			ret = 0;
+-			continue;
++		more = false;
++#endif /* CONFIG_SIGNAL */
++		SYS_DLIST_FOR_EACH_CONTAINER(&process_active, proc, active_node) {
++			int err;
++			k_tid_t tgt;
++
++			if (process_is_reserved(proc) || (proc == self) ||
++			    (proc->state == K_PROCESS_UNUSED) ||
++			    sys_dlist_is_empty(&proc->threads)) {
++				continue;
++			}
++			if (signo == 0) {
++				/* existence check only */
++				ret = 0;
++				continue;
++			}
++#ifdef CONFIG_SIGNAL
++			if (proc->kill_gen == gen) {
++				continue;
++			}
++			if (n == KILL_WAKE_BATCH) {
++				more = true;
++				break;
++			}
++			proc->kill_gen = gen;
++			tgt = process_sig_target(proc, signo);
++			/* NULL target: every member masked, pend at process scope */
++			err = (tgt == NULL) ? z_sig_queue_process_deferred(proc, signo,
++									 value,
++									 &wakes[n])
++					    : z_sig_queue_thread_deferred(tgt, signo,
++									value,
++									&wakes[n]);
++			if (err == -EINVAL) {
++				ret = -EINVAL;
++				more = false;
++				break;
++			}
++			if (err == 0) {
++				ret = 0;
++				n++;
++			}
++#else
++			ARG_UNUSED(err);
++			ARG_UNUSED(tgt);
++			ARG_UNUSED(value);
++			ret = -ENOTSUP;
++#endif /* CONFIG_SIGNAL */
+ 		}
+ #ifdef CONFIG_SIGNAL
+-		tgt = process_sig_target(proc, signo);
+-		/* NULL target: every member masked, pend at process scope */
+-		err = (tgt == NULL) ? z_sig_queue_process(proc, signo, value)
+-				    : z_sig_queue_thread(tgt, signo, value);
+-		if (err == -EINVAL) {
+-			k_spin_unlock(&process_lock, key);
+-			return -EINVAL;
++		k_spin_unlock(&process_lock, key);
++		for (int i = 0; i < n; i++) {
++			z_sig_wake(&wakes[i]);
+ 		}
+-		if (err == 0) {
+-			ret = 0;
++		if (more) {
++			key = k_spin_lock(&process_lock);
+ 		}
++	} while (more);
+ #else
+-		ARG_UNUSED(err);
+-		ARG_UNUSED(tgt);
+-		ARG_UNUSED(value);
+-		ret = -ENOTSUP;
+-#endif /* CONFIG_SIGNAL */
+-	}
+ 	k_spin_unlock(&process_lock, key);
++#endif /* CONFIG_SIGNAL */
+ 
+ 	return ret;
+ }
+@@ -1143,6 +1257,33 @@ static inline void z_vrfy_k_exit(int code)
+ #include <zephyr/syscalls/k_exit_mrsh.c>
+ #endif /* CONFIG_USERSPACE */
+ 
++#ifdef CONFIG_SIGNAL
++/* the caller holds process_lock: the deferred K_SIG_CHLD about a child that changed state */
++static void sigchld_emit_locked(struct k_process *child, struct k_sig_wake *wake)
++{
++	k_tid_t target;
++	struct k_process *parent = child->parent;
++	int status = child->wstatus;
++	int child_id = 0;
++
++	child->flags &= (uint8_t)~K_PROCESS_FLAG_SIGCHLD;
++	if (parent == NULL) {
++		return;
++	}
++#ifdef CONFIG_SYS_PROCESS
++	child_id = z_process_id_number(child);
++#endif /* CONFIG_SYS_PROCESS */
++	target = process_sig_target(parent, K_SIG_CHLD);
++	/* under the lock: the target cannot exit and reap cannot race the queue;
++	 * a NULL target pends at the parent's process scope. Best effort: the
++	 * queue may be full.
++	 */
++	(void)z_sig_queue_chld(target, (target == NULL) ? parent : NULL, child->leader, status,
++			       K_WIFEXITED(status) ? K_SI_CLD_EXITED : K_SI_CLD_KILLED, child_id,
++			       wake);
++}
++#endif /* CONFIG_SIGNAL */
++
+ static bool waitpid_selects(struct k_process *child, k_pid_t pid, struct k_process_group *pgrp, bool by_pgrp)
+ {
+ 	if (by_pgrp) {
+@@ -1158,6 +1299,10 @@ static int waitpid_common(k_pid_t pid, struct k_process_group *pgrp, bool by_pgr
+ 	struct k_process *child;
+ 	struct k_process *self = process_self();
+ 	k_timepoint_t end = sys_timepoint_calc(timeout);
++	bool interrupted = false;
++#ifdef CONFIG_SIGNAL
++	struct k_sig_wake chld = {0};
++#endif /* CONFIG_SIGNAL */
+ 
+ 	if ((options & (K_PROCESS_WUNTRACED | K_PROCESS_WCONTINUED)) != 0) {
+ 		return -ENOTSUP;
+@@ -1189,6 +1334,12 @@ static int waitpid_common(k_pid_t pid, struct k_process_group *pgrp, bool by_pgr
+ 				*wstatus = zombie->wstatus;
+ 			}
+ 			if ((options & K_PROCESS_WNOWAIT) == 0) {
++#ifdef CONFIG_SIGNAL
++				if ((zombie->flags & K_PROCESS_FLAG_SIGCHLD) != 0) {
++					/* the notifier has not run yet: the reaper emits it */
++					sigchld_emit_locked(zombie, &chld);
++				}
++#endif /* CONFIG_SIGNAL */
+ 				process_reap_locked(zombie, false);
+ 				reaped_one = true;
+ 			}
+@@ -1203,6 +1354,12 @@ static int waitpid_common(k_pid_t pid, struct k_process_group *pgrp, bool by_pgr
+ 
+ 		k_spin_unlock(&process_lock, key);
+ 
++#ifdef CONFIG_SIGNAL
++		if (chld.signo != 0) {
++			z_sig_wake(&chld);
++			chld.signo = 0;
++		}
++#endif /* CONFIG_SIGNAL */
+ 		if (reaped_one) {
+ 			/* the reaped leader's objects go back to their pools now */
+ 			z_thread_graveyard_flush();
+@@ -1210,10 +1367,24 @@ static int waitpid_common(k_pid_t pid, struct k_process_group *pgrp, bool by_pgr
+ 		if (ret <= 0) {
+ 			return ret;
+ 		}
++		if (interrupted) {
++			return -EINTR;
++		}
+ 
+ 		/* pend without process_lock (see the lock-order comment above) */
+-		ret = z_sched_waitq_pend_if(&self->waitq, sys_timepoint_timeout(end),
+-					    &process_wait_gen, gen);
++		{
++			unsigned long token;
++
++			if (!z_sig_pend_begin(&token)) {
++				return -EINTR;
++			}
++			ret = z_sched_waitq_pend_if(&self->waitq, sys_timepoint_timeout(end),
++						    &process_wait_gen, gen);
++			if (z_sig_pend_end(token) && (ret == -EINTR)) {
++				/* the signal may announce a state change: one more look first */
++				interrupted = true;
++			}
++		}
+ 		if (ret == -EAGAIN) {
+ 			return ret;
+ 		}
+@@ -1582,12 +1753,7 @@ static void sigchld_notifier(void *p1, void *p2, void *p3)
+ 	ARG_UNUSED(p3);
+ 
+ 	while (true) {
+-		k_pid_t pid;
+-		int status;
+-		bool exited;
+-		k_tid_t target;
+ 		struct k_process *child;
+-		struct k_process *parent;
+ 		atomic_val_t gen = atomic_get(&process_wait_gen);
+ 
+ 		k_spinlock_key_t key = k_spin_lock(&process_lock);
+@@ -1601,21 +1767,13 @@ static void sigchld_notifier(void *p1, void *p2, void *p3)
+ 			continue;
+ 		}
+ 
+-		child->flags &= (uint8_t)~K_PROCESS_FLAG_SIGCHLD;
+-		pid = child->leader;
+-		status = child->wstatus;
+-		exited = K_WIFEXITED(status);
+-		parent = child->parent;
+-		target = (parent == NULL) ? NULL : process_sig_target(parent, K_SIG_CHLD);
+-		if (parent != NULL) {
+-			/* under the lock: the target cannot exit and reap cannot race
+-			 * the queue; a NULL target pends at the parent's process
+-			 * scope. Best effort: the queue may be full.
+-			 */
+-			(void)z_sig_queue_chld(target, (target == NULL) ? parent : NULL, pid,
+-					       status, exited);
+-		}
++		struct k_sig_wake chld = {0};
++
++		sigchld_emit_locked(child, &chld);
+ 		k_spin_unlock(&process_lock, key);
++		if (chld.signo != 0) {
++			z_sig_wake(&chld);
++		}
+ 	}
+ }
+ 
+diff --git a/kernel/sched.c b/kernel/sched.c
+index 6d584d64c03..2677fada39c 100644
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -624,7 +624,7 @@ int z_sched_waitq_pend_if(_wait_q_t *wait_q, k_timeout_t timeout, atomic_t *gen,
+ 		return 1;
+ 	}
+ 	pend_locked(_current, wait_q, timeout);
+-	return z_swap(&_sched_spinlock, key);
++	return z_pend_result(z_swap(&_sched_spinlock, key));
+ }
+ 
+ struct k_thread *z_unpend1_no_timeout(_wait_q_t *wait_q)
+diff --git a/kernel/signal.c b/kernel/signal.c
+index c01915db4c0..5a973b2e9f5 100644
+--- a/kernel/signal.c
++++ b/kernel/signal.c
+@@ -43,8 +43,6 @@ BUILD_ASSERT(SIGNAL_SET_SIZE >= 0);
+ 
+ RING_BUF_DECLARE_STATIC(k_sig_fifo, SIGNAL_QUEUE_SIZE);
+ static struct k_poll_signal k_sig_fifo_ready = K_POLL_SIGNAL_INITIALIZER(k_sig_fifo_ready);
+-/* the target of a queued signal, if it is in a wait that signal interrupts */
+-static void z_sig_interrupt_target(k_tid_t tid, int signo);
+ K_MEM_SLAB_DEFINE_STATIC(k_sig_slab, sizeof(struct k_sig_fifo_element), SIGNAL_QUEUE_SIZE,
+ 			 alignof(struct k_sig_fifo_element));
+ #ifndef CONFIG_PROCESS
+@@ -304,10 +302,134 @@ static bool sig_ignored_unblocked(k_tid_t tid, int signo)
+ 	return action.handler == K_SIG_IGN;
+ }
+ 
++/* a deliverable signal is pending for the current thread: unblocked, not ignored */
++bool z_sig_interrupts(void)
++{
++	struct k_sig_set pend;
++	struct k_sig_action action;
++
++	K_SPINLOCK(k_sig_lock) {
++		z_sig_pending_unlocked(&pend, _current);
++	}
++	z_sig_unset(&pend, &_current->base.sig.mask);
++
++	for (int signo = 1; signo <= SIGNAL_SET_SIZE; signo++) {
++		if (k_sig_ismember(&pend, signo) != 1) {
++			continue;
++		}
++		if (z_sig_action(signo, NULL, &action, _current) < 0) {
++			return true;
++		}
++		if (action.handler == K_SIG_DFL) {
++			action.handler = z_sig_resolve(signo);
++		}
++		if (action.handler != K_SIG_IGN) {
++			return true;
++		}
++	}
++
++	return false;
++}
++
++static void z_sig_wait_set(struct k_poll_signal *sig)
++{
++	K_SPINLOCK(k_sig_lock) {
++		_current->base.sig.wait_sig = sig;
++	}
++}
++
++bool z_sig_wait_begin(struct k_poll_signal *sig, unsigned long *token)
++{
++	z_sig_wait_set(sig);
++	*token = (unsigned long)atomic_get(&_current->base.sig.delivered);
++	if (z_sig_interrupts()) {
++		z_sig_wait_set(NULL);
++		return false;
++	}
++
++	return true;
++}
++
++bool z_sig_wait_end(unsigned long token)
++{
++	z_sig_wait_set(NULL);
++
++	/* claimed for delivery on the way back to user mode, or still to be claimed */
++	return ((unsigned long)atomic_get(&_current->base.sig.delivered) != token) ||
++	       z_sig_interrupts();
++}
++
++bool z_sig_pend_begin(unsigned long *token)
++{
++	struct k_sig_ctx *const ctx = &_current->base.sig;
++
++	ctx->pend_interrupted = false;
++	ctx->pend_interruptible = true;
++	*token = (unsigned long)atomic_get(&ctx->delivered);
++	if (z_sig_interrupts()) {
++		ctx->pend_interruptible = false;
++		return false;
++	}
++
++	return true;
++}
++
++bool z_sig_pend_end(unsigned long token)
++{
++	struct k_sig_ctx *const ctx = &_current->base.sig;
++
++	ctx->pend_interruptible = false;
++	ctx->pend_interrupted = false;
++
++	return ((unsigned long)atomic_get(&ctx->delivered) != token) || z_sig_interrupts();
++}
++
++/* the thread a queued signal reaches, if it is in a wait that signal interrupts */
++static void z_sig_interrupt_target(k_tid_t pid, struct k_process *proc, int signo)
++{
++	k_tid_t tid = pid;
++
++#ifdef CONFIG_PROCESS
++	if ((tid == NULL) && (proc != NULL)) {
++		tid = z_process_sig_target(proc, signo);
++	}
++#else
++	ARG_UNUSED(proc);
++#endif /* CONFIG_PROCESS */
++	if ((tid != NULL) && (k_sig_ismember(&tid->base.sig.mask, signo) == 0)) {
++		z_sched_sig_interrupt(tid);
++	}
++}
++
++void z_sig_wake(struct k_sig_wake *wake)
++{
++	if (wake->wait_sig != NULL) {
++		/* the target blocks in a wait signals interrupt: it returns to claim */
++		k_poll_signal_raise(wake->wait_sig, 0);
++	}
++	k_poll_signal_raise(&k_sig_fifo_ready, (int)(intptr_t)wake->tid);
++	z_sig_interrupt_target(wake->tid, wake->proc, wake->signo);
++}
++
++static int z_sig_queue_wake(k_pid_t pid, int signo, union k_sig_val value, int code,
++			    struct k_timer *timer, k_pid_t child_pid, int child_status,
++			    int child_id, struct k_process *proc, bool resolved,
++			    struct k_sig_wake *wake);
++
+ static int z_sig_queue_common(k_pid_t pid, int signo, union k_sig_val value, int code,
+ 			      struct k_timer *timer, k_pid_t child_pid, int child_status,
+-			      struct k_process *proc, bool resolved)
++			      int child_id, struct k_process *proc, bool resolved)
++{
++	return z_sig_queue_wake(pid, signo, value, code, timer, child_pid, child_status, child_id,
++				proc, resolved, NULL);
++}
++
++static int z_sig_queue_wake(k_pid_t pid, int signo, union k_sig_val value, int code,
++			    struct k_timer *timer, k_pid_t child_pid, int child_status,
++			    int child_id, struct k_process *proc, bool resolved,
++			    struct k_sig_wake *wake)
+ {
++	struct k_sig_wake w = {.tid = pid, .proc = proc, .signo = signo};
+ #ifdef CONFIG_PROCESS
+ 	const bool system = false;
+ #else
+@@ -394,6 +516,7 @@ static int z_sig_queue_common(k_pid_t pid, int signo, union k_sig_val value, int
+ 				.value = value,
+ #ifdef CONFIG_PROCESS
+ 				.pid = child_pid,
++				.child_id = child_id,
+ 				.status = child_status,
+ #endif /* CONFIG_PROCESS */
+ #ifdef CONFIG_TIMER_SIGNAL
+@@ -419,6 +542,10 @@ static int z_sig_queue_common(k_pid_t pid, int signo, union k_sig_val value, int
+ 	}
+ 	atomic_inc(&z_syscall_work_pending);
+ 
++	if (pid != NULL) {
++		w.wait_sig = pid->base.sig.wait_sig;
++	}
++
+ 	if (IS_ENABLED(CONFIG_SIGNAL_LOG_LEVEL_DBG)) {
+ 		struct k_sig_set pend;
+ 
+@@ -428,20 +555,12 @@ static int z_sig_queue_common(k_pid_t pid, int signo, union k_sig_val value, int
+ 		z_sig_fifo_dump();
+ 	}
+ 
+-	k_poll_signal_raise(&k_sig_fifo_ready, (int)(intptr_t)pid);
+-
+ 	k_spin_unlock(k_sig_lock, key);
+ 
+-	/*
+-	 * The target blocks in a wait signals interrupt: it returns to claim. A
+-	 * waiter registers its poll signal before it looks for pending signals, so
+-	 * one registered after this read finds the signal queued above.
+-	 */
+-	if (pid != NULL) {
+-		if (pid->base.sig.wait_sig != NULL) {
+-			k_poll_signal_raise(pid->base.sig.wait_sig, 0);
+-		}
+-		z_sig_interrupt_target(pid, signo);
++	if (wake != NULL) {
++		*wake = w;
++	} else {
++		z_sig_wake(&w);
+ 	}
+ 
+ 	return 0;
+@@ -450,12 +569,24 @@ static int z_sig_queue_common(k_pid_t pid, int signo, union k_sig_val value, int
+ #ifdef CONFIG_PROCESS
+ int z_sig_queue_thread(k_tid_t tid, int signo, union k_sig_val value)
+ {
+-	return z_sig_queue_common(tid, signo, value, K_SI_QUEUE, NULL, NULL, 0, NULL, true);
++	return z_sig_queue_common(tid, signo, value, K_SI_QUEUE, NULL, NULL, 0, 0, NULL, true);
+ }
+ 
+ int z_sig_queue_process(struct k_process *proc, int signo, union k_sig_val value)
+ {
+-	return z_sig_queue_common(NULL, signo, value, K_SI_QUEUE, NULL, NULL, 0, proc, true);
++	return z_sig_queue_common(NULL, signo, value, K_SI_QUEUE, NULL, NULL, 0, 0, proc, true);
++}
++
++int z_sig_queue_thread_deferred(k_tid_t tid, int signo, union k_sig_val value,
++				struct k_sig_wake *wake)
++{
++	return z_sig_queue_wake(tid, signo, value, K_SI_QUEUE, NULL, NULL, 0, 0, NULL, true, wake);
++}
++
++int z_sig_queue_process_deferred(struct k_process *proc, int signo, union k_sig_val value,
++				 struct k_sig_wake *wake)
++{
++	return z_sig_queue_wake(NULL, signo, value, K_SI_QUEUE, NULL, NULL, 0, 0, proc, true, wake);
+ }
+ 
+ /*
+@@ -484,10 +615,32 @@ int z_sig_actions_clone(struct k_process *parent, struct k_process *child, bool
+ 	return 0;
+ }
+ 
++/* a notification about the reaped child that nothing observes: no handler is installed for it */
++static bool sig_chld_unhandled_unlocked(const struct k_sig_fifo_element *entry,
++					const struct k_process *reaped)
++{
++	const struct k_process *recipient;
++	k_sig_handler_t handler;
++
++	if ((entry->info.signo != K_SIG_CHLD) || (entry->info.pid != reaped->leader)) {
++		return false;
++	}
++	recipient = (entry->proc != NULL) ? entry->proc : entry->tid->process;
++	if (recipient == NULL) {
++		return true;
++	}
++	handler = recipient->sig_actions[K_SIG_CHLD - 1].handler;
++
++	return (handler == K_SIG_DFL) || (handler == K_SIG_IGN);
++}
++
+ /*
+  * Drop pending signals at reap: those scoped to the retiring record, and
+- * K_SIG_CHLD entries about the reaped child (its status has been collected,
+- * so an unclaimed notification would otherwise occupy a queue slot forever).
++ * K_SIG_CHLD entries about the reaped child that no handler would observe
++ * (its status has been collected, so an unclaimed notification would otherwise
++ * occupy a queue slot forever). A handled notification outlives the reap. The
++ * record's dispositions need no purge: the next record drawn from the pool is
++ * zeroed.
+  */
+ void z_sig_process_drop(struct k_process *proc)
+ {
+@@ -498,9 +651,7 @@ void z_sig_process_drop(struct k_process *proc)
+ 
+ 			ring_buf_get(&k_sig_fifo, &pos, 1);
+ 			entry = &k_sig_array[pos];
+-			if ((entry->proc == proc) ||
+-			    ((entry->info.signo == K_SIG_CHLD) &&
+-			     (entry->info.pid == proc->leader))) {
++			if ((entry->proc == proc) || sig_chld_unhandled_unlocked(entry, proc)) {
+ 				if (entry->proc != NULL) {
+ 					atomic_dec(&entry->proc->sig_pending);
+ 				} else {
+@@ -516,95 +667,6 @@ void z_sig_process_drop(struct k_process *proc)
+ }
+ #endif /* CONFIG_PROCESS */
+ 
+-/* a deliverable signal is pending for the current thread: unblocked, not ignored */
+-bool z_sig_interrupts(void)
+-{
+-	struct k_sig_set pend;
+-	struct k_sig_action action;
+-
+-	K_SPINLOCK(k_sig_lock) {
+-		z_sig_pending_unlocked(&pend, _current);
+-	}
+-	z_sig_unset(&pend, &_current->base.sig.mask);
+-
+-	for (int signo = 1; signo <= SIGNAL_SET_SIZE; signo++) {
+-		if (k_sig_ismember(&pend, signo) != 1) {
+-			continue;
+-		}
+-		if (z_sig_action(signo, NULL, &action, _current) < 0) {
+-			return true;
+-		}
+-		if (action.handler == K_SIG_DFL) {
+-			action.handler = z_sig_resolve(signo);
+-		}
+-		if (action.handler != K_SIG_IGN) {
+-			return true;
+-		}
+-	}
+-
+-	return false;
+-}
+-
+-static void z_sig_wait_set(struct k_poll_signal *sig)
+-{
+-	K_SPINLOCK(k_sig_lock) {
+-		_current->base.sig.wait_sig = sig;
+-	}
+-}
+-
+-bool z_sig_wait_begin(struct k_poll_signal *sig, unsigned long *token)
+-{
+-	z_sig_wait_set(sig);
+-	*token = (unsigned long)atomic_get(&_current->base.sig.delivered);
+-	if (z_sig_interrupts()) {
+-		z_sig_wait_set(NULL);
+-		return false;
+-	}
+-
+-	return true;
+-}
+-
+-bool z_sig_wait_end(unsigned long token)
+-{
+-	z_sig_wait_set(NULL);
+-
+-	/* claimed for delivery on the way back to user mode, or still to be claimed */
+-	return ((unsigned long)atomic_get(&_current->base.sig.delivered) != token) ||
+-	       z_sig_interrupts();
+-}
+-
+-bool z_sig_pend_begin(unsigned long *token)
+-{
+-	struct k_sig_ctx *const ctx = &_current->base.sig;
+-
+-	ctx->pend_interrupted = false;
+-	ctx->pend_interruptible = true;
+-	*token = (unsigned long)atomic_get(&ctx->delivered);
+-	if (z_sig_interrupts()) {
+-		ctx->pend_interruptible = false;
+-		return false;
+-	}
+-
+-	return true;
+-}
+-
+-bool z_sig_pend_end(unsigned long token)
+-{
+-	struct k_sig_ctx *const ctx = &_current->base.sig;
+-
+-	ctx->pend_interruptible = false;
+-	ctx->pend_interrupted = false;
+-
+-	return ((unsigned long)atomic_get(&ctx->delivered) != token) || z_sig_interrupts();
+-}
+-
+-static void z_sig_interrupt_target(k_tid_t tid, int signo)
+-{
+-	if (k_sig_ismember(&tid->base.sig.mask, signo) == 0) {
+-		z_sched_sig_interrupt(tid);
+-	}
+-}
+-
+ #ifndef CONFIG_PROCESS
+ /*
+  * Without process objects the system is the single (figurative) process:
+@@ -623,10 +685,10 @@ static int sig_kill_system(k_pid_t pid, int signo, union k_sig_val value)
+ 	}
+ 	if (!k_is_in_isr() &&
+ 	    (k_sig_ismember(&_current->base.sig.mask, signo) == 0)) {
+-		return z_sig_queue_common(_current, signo, value, K_SI_QUEUE, NULL, NULL, 0, NULL,
++		return z_sig_queue_common(_current, signo, value, K_SI_QUEUE, NULL, NULL, 0, 0, NULL,
+ 					  true);
+ 	}
+-	return z_sig_queue_common(NULL, signo, value, K_SI_QUEUE, NULL, NULL, 0, NULL, true);
++	return z_sig_queue_common(NULL, signo, value, K_SI_QUEUE, NULL, NULL, 0, 0, NULL, true);
+ }
+ #endif /* !CONFIG_PROCESS */
+ 
+@@ -650,7 +712,7 @@ int z_impl_k_sig_queue(k_pid_t pid, int signo, union k_sig_val value, enum k_sig
+ 			return z_impl_k_thread_cancel(pid);
+ 		}
+ #endif /* CONFIG_THREAD_CANCEL */
+-		return z_sig_queue_common(pid, signo, value, K_SI_QUEUE, NULL, NULL, 0, NULL,
++		return z_sig_queue_common(pid, signo, value, K_SI_QUEUE, NULL, NULL, 0, 0, NULL,
+ 					  false);
+ 	case K_SIG_SCOPE_PROCESS:
+ 	case K_SIG_SCOPE_PGRP:
+@@ -671,32 +733,32 @@ int z_impl_k_sig_queue(k_pid_t pid, int signo, union k_sig_val value, enum k_sig
+ 
+ #ifdef CONFIG_PROCESS
+ int z_sig_queue_chld(k_tid_t tid, struct k_process *proc, k_pid_t child_pid, int child_status,
+-		     bool exited)
++		     int code, int child_id, struct k_sig_wake *wake)
+ {
+-	return z_sig_queue_common(tid, K_SIG_CHLD, (union k_sig_val){0},
+-				  exited ? K_SI_CLD_EXITED : K_SI_CLD_KILLED, NULL, child_pid,
+-				  child_status, proc, proc != NULL);
++	return z_sig_queue_wake(tid, K_SIG_CHLD, (union k_sig_val){0}, code, NULL, child_pid,
++				child_status, child_id, proc, proc != NULL, wake);
+ }
++
+ #endif /* CONFIG_PROCESS */
+ 
+ #ifdef CONFIG_MSGQ_NOTIFY
+ int z_sig_queue_msgq(k_pid_t pid, int signo, union k_sig_val value)
+ {
+-	return z_sig_queue_common(pid, signo, value, K_SI_MSGQ, NULL, NULL, 0, NULL, false);
++	return z_sig_queue_common(pid, signo, value, K_SI_MSGQ, NULL, NULL, 0, 0, NULL, false);
+ }
+ #endif /* CONFIG_MSGQ_NOTIFY */
+ 
+ #ifdef CONFIG_SYS_AIO
+ int z_sig_queue_aio(k_pid_t pid, int signo, union k_sig_val value)
+ {
+-	return z_sig_queue_common(pid, signo, value, K_SI_ASYNCIO, NULL, NULL, 0, NULL, false);
++	return z_sig_queue_common(pid, signo, value, K_SI_ASYNCIO, NULL, NULL, 0, 0, NULL, false);
+ }
+ #endif /* CONFIG_SYS_AIO */
+ 
+ #ifdef CONFIG_TIMER_SIGNAL
+ int z_sig_queue_timer(struct k_timer *timer, k_pid_t pid, int signo, union k_sig_val value)
+ {
+-	return z_sig_queue_common(pid, signo, value, K_SI_TIMER, timer, NULL, 0, NULL, false);
++	return z_sig_queue_common(pid, signo, value, K_SI_TIMER, timer, NULL, 0, 0, NULL, false);
+ }
+ 
+ void z_sig_purge_timer(struct k_timer *timer)
+@@ -1411,7 +1473,7 @@ int z_sig_claim(struct k_thread *tid)
+ 		 * An ignored signal that was blocked, or whose action changed since it was
+ 		 * generated, is discarded here; an unblocked one never reached the queue.
+ 		 *
+-		 * See also k_sig_queue().
++		 * See also z_sig_queue_wake().
+ 		 */
+ #ifdef CONFIG_TIMER_SIGNAL
+ 		if (entry.info.timer != NULL) {
+diff --git a/lib/os/process.c b/lib/os/process.c
+index da74c37a800..cd7ae2bff93 100644
+--- a/lib/os/process.c
++++ b/lib/os/process.c
+@@ -71,6 +71,7 @@ struct sys_thread_id_entry {
+ };
+ 
+ static struct k_spinlock id_lock;
++static int process_number(struct k_process *proc);
+ static struct sys_process_id_entry process_ids[CONFIG_SYS_PROCESS_IDS];
+ static struct sys_pgrp_id_entry pgrp_ids[CONFIG_SYS_PROCESS_IDS];
+ static struct sys_session_id_entry session_ids[CONFIG_SYS_PROCESS_IDS];
+@@ -205,6 +206,11 @@ static void process_id_retire(struct k_process *proc)
+ 	}
+ }
+ 
++int z_process_id_number(struct k_process *proc)
++{
++	return process_number(proc);
++}
++
+ static int process_number(struct k_process *proc)
+ {
+ 	int ret = 0;
+diff --git a/tests/kernel/process/src/main.c b/tests/kernel/process/src/main.c
+index 8669a118ecc..72233fcd90d 100644
+--- a/tests/kernel/process/src/main.c
++++ b/tests/kernel/process/src/main.c
+@@ -161,8 +161,51 @@ static void waitpid_orphan_reaped(void);
+ 
+ #ifdef CONFIG_SIGNAL
+ static void waitpid_chld_drop(void);
++static void waitpid_chld_handled(void);
+ #endif /* CONFIG_SIGNAL */
+ 
++static void busy_child_entry(void *p1, void *p2, void *p3)
++{
++	ARG_UNUSED(p1);
++	ARG_UNUSED(p2);
++	ARG_UNUSED(p3);
++	k_busy_wait(2000);
++	k_exit(4);
++}
++
++/* the cycles of a child are its parent's to read while it is a zombie */
++static void waitpid_cpu_stats(void)
++{
++	int ws = 0;
++	uint64_t s = 1;
++	uint64_t c = 1;
++	k_pid_t reaped = NULL;
++	k_pid_t child = &child_a;
++	struct sys_clone_args args = {
++		.entry = busy_child_entry,
++		.thread = &child_a,
++		.stack = child_stack_a,
++		.stack_size = STATIC_PROC_STACK_SIZE,
++		.prio = K_LOWEST_APPLICATION_THREAD_PRIO,
++	};
++
++	zassert_ok(sys_clone(&args, NULL));
++	zassert_ok(k_waitpid(child, &reaped, &ws, K_PROCESS_WNOWAIT, K_SECONDS(5)));
++	zassert_equal(reaped, child);
++	zassert_ok(k_process_cpu_stats(child, &s, &c));
++	if (IS_ENABLED(CONFIG_SCHED_THREAD_USAGE)) {
++		zassert_true(s > 0, "the zombie's cycles");
++	} else {
++		zassert_equal(s, 0);
++	}
++	zassert_equal(c, 0);
++	zassert_ok(k_process_cpu_stats(NULL, &s, &c));
++	zassert_equal(k_process_cpu_stats((k_pid_t)(uintptr_t)0x4, &s, &c), -ESRCH);
++	zassert_ok(k_waitpid(child, NULL, &ws, 0, K_SECONDS(5)));
++	zassert_true(K_WIFEXITED(ws) && (K_WEXITSTATUS(ws) == 4), "0x%x", ws);
++	zassert_equal(k_process_cpu_stats(child, &s, &c), -ESRCH, "reaped");
++}
++
+ ZTEST(kernel_process, test_waitpid)
+ {
+ 	int ws;
+@@ -176,7 +219,9 @@ ZTEST(kernel_process, test_waitpid)
+ 		      -ENOTSUP);
+ #ifdef CONFIG_SIGNAL
+ 	waitpid_chld_drop();
++	waitpid_chld_handled();
+ #endif /* CONFIG_SIGNAL */
++	waitpid_cpu_stats();
+ 	/* positive reap paths are covered once sys_clone() creates children */
+ 	waitpid_orphan_reaped();
+ }
+@@ -747,6 +792,9 @@ ZTEST(kernel_process, test_kill_pgrp)
+ 	zassert_equal(k_getpgid(b), grp);
+ 	zassert_equal(sys_pgrp_id(grp), sys_process_id(a));
+ 
++	/* signal 0 checks the group exists and wakes no member */
++	zassert_ok(k_kill_pgrp(grp, 0));
++
+ 	/* fan-out delivers to one eligible thread of every group member */
+ 	zassert_ok(k_kill_pgrp(grp, K_SIG_CHLD));
+ 
+@@ -1094,6 +1142,60 @@ static void waitpid_chld_drop(void)
+ 	zassert_ok(k_waitpid(&child_a, NULL, &ws, 0, K_FOREVER));
+ 	zassert_true(K_WIFEXITED(ws));
+ }
++
++static volatile k_pid_t chld_seen_pid;
++static volatile int chld_seen_id;
++static volatile int chld_seen_status;
++
++static void chld_handler(int sig, struct k_sig_info *info, void *ucontext)
++{
++	ARG_UNUSED(sig);
++	ARG_UNUSED(ucontext);
++
++	chld_seen_pid = info->pid;
++	chld_seen_id = info->child_id;
++	chld_seen_status = info->status;
++}
++
++/* a handled notification outlives the reap: the handler runs after k_waitpid() */
++static void waitpid_chld_handled(void)
++{
++	int id;
++	int ws = 0;
++	struct k_sig_set set;
++	struct k_sig_action action = {.handler = chld_handler};
++	struct sys_clone_args args = {
++		.entry = spawn_entry_exit,
++		.p1 = (void *)(intptr_t)7,
++		.thread = &child_a,
++		.stack = child_stack_a,
++		.stack_size = STATIC_PROC_STACK_SIZE,
++		.prio = K_LOWEST_APPLICATION_THREAD_PRIO,
++	};
++
++	k_sig_emptyset(&set);
++	k_sig_addset(&set, K_SIG_CHLD);
++	zassert_ok(k_sig_action(K_SIG_CHLD, &action, NULL));
++	zassert_ok(k_sig_mask(K_SIG_UNBLOCK, &set, NULL));
++	chld_seen_pid = NULL;
++
++	zassert_ok(sys_clone(&args, NULL));
++	id = sys_process_id(&child_a);
++	zassert_true(id > 0);
++	zassert_ok(k_waitpid(&child_a, NULL, &ws, 0, K_FOREVER));
++	zassert_true(K_WIFEXITED(ws) && (K_WEXITSTATUS(ws) == 7), "0x%x", ws);
++	/* a delivery point for a kernel thread */
++	k_msleep(1);
++	zassert_equal(chld_seen_pid, &child_a, "the reap discarded the pending K_SIG_CHLD");
++	/* the number was captured at generation: the handle is retired by now */
++	zassert_equal(chld_seen_id, id, "%d != %d", chld_seen_id, id);
++	zassert_true(K_WIFEXITED(chld_seen_status) && (K_WEXITSTATUS(chld_seen_status) == 7),
++		     "0x%x", chld_seen_status);
++
++	action.handler = K_SIG_DFL;
++	zassert_ok(k_sig_action(K_SIG_CHLD, &action, NULL));
++	zassert_ok(k_sig_mask(K_SIG_BLOCK, &set, NULL));
++}
+ #endif /* CONFIG_SIGNAL */
+ 
+ #ifdef CONFIG_PROCESS_INIT
+diff --git a/tests/kernel/process/testcase.yaml b/tests/kernel/process/testcase.yaml
+index c916ad9f236..1f380e50e26 100644
+--- a/tests/kernel/process/testcase.yaml
++++ b/tests/kernel/process/testcase.yaml
+@@ -20,6 +20,9 @@ tests:
+       # (kernel) test process, which keeps it masked; size the queue with
+       # headroom for both.
+       - CONFIG_SIGNAL_QUEUE_SIZE=8
++      # k_process_cpu_stats() of a zombie child
++      - CONFIG_THREAD_RUNTIME_STATS=y
++      - CONFIG_SCHED_THREAD_USAGE=y
+   kernel.process.init:
+     filter: not CONFIG_USERSPACE
+     integration_platforms:
