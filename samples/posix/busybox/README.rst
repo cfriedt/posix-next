@@ -18,6 +18,11 @@ The demo also exercises symbolic links on ext2: it creates one with ``ln -s``, r
 (``ln -s busybox /bin/ls``) and execs ``/bin/ls`` — exec follows the symbolic link and busybox
 dispatches on ``argv[0]``.
 
+Networking is loopback-only by default. The ``gateway`` scenario (``qemu_cortex_a53``) puts the
+image on qemu's user-mode network instead: it pings the virtual gateway over IPv4 and IPv6 and
+resolves a name through Zephyr's DNS resolver, configured with Google's public servers, so
+``ping`` and ``wget`` work by name from the shell when the host has internet access.
+
 Requirements
 ************
 
