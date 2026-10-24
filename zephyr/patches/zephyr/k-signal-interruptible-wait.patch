@@ -1,0 +1,820 @@
+diff --git a/include/zephyr/kernel/signal.h b/include/zephyr/kernel/signal.h
+index fb39292e31e..fd120b27d12 100644
+--- a/include/zephyr/kernel/signal.h
++++ b/include/zephyr/kernel/signal.h
+@@ -129,10 +129,18 @@ struct k_sig_action {
+ 	void *user_data;
+ };
+ 
++struct k_poll_signal;
++
+ /** @brief Per-thread signal context */
+ struct k_sig_ctx {
+ #ifdef CONFIG_SIGNAL
+ 	struct k_sig_set mask; /**< Masked signals */
++	/** The poll signal a blocking wait of this thread polls, raised when a signal is queued to it */
++	struct k_poll_signal *wait_sig;
++	/** The thread pends in a wait signals interrupt (z_sig_pend_begin()) */
++	bool pend_interruptible;
++	/** A deliverable signal interrupted that wait: the pend returns -EINTR */
++	bool pend_interrupted;
+ 	struct k_sig_set restore; /**< Signal mask to restore after handling signal */
+ #endif
+ 	struct k_sig_info info; /**< Information about a signal being handled */
+diff --git a/kernel/include/kernel_internal.h b/kernel/include/kernel_internal.h
+index 1ff1ebbecf9..de391efe55d 100644
+--- a/kernel/include/kernel_internal.h
++++ b/kernel/include/kernel_internal.h
+@@ -193,6 +193,59 @@ struct gdb_ctx;
+ extern int z_gdb_main_loop(struct gdb_ctx *ctx);
+ #endif /* CONFIG_GDBSTUB */
+ 
++#ifdef CONFIG_SIGNAL
++struct k_poll_signal;
++/*
++ * A blocking wait signals interrupt: it polls @a sig, which a signal queued to
++ * the thread raises. begin() is false when a signal is already due (do not
++ * wait); end() is true when one was claimed during the wait or is due now. The
++ * wait returns -EINTR in either case.
++ */
++bool z_sig_wait_begin(struct k_poll_signal *sig, unsigned long *token);
++bool z_sig_wait_end(unsigned long token);
++/* a deliverable signal is pending for the current thread: unblocked, not ignored */
++bool z_sig_interrupts(void);
++/*
++ * The current thread's next pend is one signals interrupt: a deliverable
++ * signal queued meanwhile returns it -EINTR. begin() is false when one is
++ * already due (do not wait); end() is true when the wait is to return -EINTR.
++ */
++bool z_sig_pend_begin(unsigned long *token);
++bool z_sig_pend_end(unsigned long token);
++/* a signal for @a thread: its interruptible pend returns -EINTR, its sleep ends */
++void z_sched_sig_interrupt(struct k_thread *thread);
++#else
++static inline bool z_sig_wait_begin(struct k_poll_signal *sig, unsigned long *token)
++{
++	ARG_UNUSED(sig);
++	*token = 0;
++	return true;
++}
++
++static inline bool z_sig_wait_end(unsigned long token)
++{
++	ARG_UNUSED(token);
++	return false;
++}
++
++static inline bool z_sig_interrupts(void)
++{
++	return false;
++}
++
++static inline bool z_sig_pend_begin(unsigned long *token)
++{
++	*token = 0;
++	return true;
++}
++
++static inline bool z_sig_pend_end(unsigned long token)
++{
++	ARG_UNUSED(token);
++	return false;
++}
++#endif /* CONFIG_SIGNAL */
++
+ #ifdef CONFIG_INSTRUMENT_THREAD_SWITCHING
+ void z_thread_mark_switched_in(void);
+ void z_thread_mark_switched_out(void);
+diff --git a/kernel/sched.c b/kernel/sched.c
+index e5a45550956..be57a15112d 100644
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -459,6 +459,12 @@ static void pend_locked(struct k_thread *thread, _wait_q_t *wait_q,
+ #ifdef CONFIG_KERNEL_COHERENCE
+ 	__ASSERT_NO_MSG(wait_q == NULL || sys_cache_is_mem_coherent(wait_q));
+ #endif /* CONFIG_KERNEL_COHERENCE */
++#ifdef CONFIG_SIGNAL
++	if (thread->base.sig.pend_interruptible && thread->base.sig.pend_interrupted) {
++		/* a signal arrived first: the pend returns -EINTR without waiting */
++		return;
++	}
++#endif /* CONFIG_SIGNAL */
+ 	add_to_waitq_locked(thread, wait_q);
+ 	z_add_thread_timeout(thread, timeout);
+ }
+@@ -481,6 +487,58 @@ void z_unpend_thread_no_timeout(struct k_thread *thread)
+ 	}
+ }
+ 
++/* the result of the current thread's pend, -EINTR when a signal cut it short */
++static inline int z_pend_result(int swap_rc)
++{
++#ifdef CONFIG_SIGNAL
++	if (_current->base.sig.pend_interrupted) {
++		return -EINTR;
++	}
++#endif /* CONFIG_SIGNAL */
++	return swap_rc;
++}
++
++#ifdef CONFIG_SIGNAL
++void z_sched_sig_interrupt(struct k_thread *thread)
++{
++	k_spinlock_key_t key = z_sched_spinlock_lock();
++	bool wake = false;
++
++	if ((thread->base.thread_state & (_THREAD_DEAD | _THREAD_ABORTING)) == 0U) {
++		if (thread->base.sig.pend_interruptible) {
++			thread->base.sig.pend_interrupted = true;
++		}
++		if (thread->base.pended_on != NULL) {
++			if (thread->base.sig.pend_interruptible) {
++				(void)z_try_abort_thread_timeout(thread);
++				unpend_thread_no_timeout(thread);
++				arch_thread_return_value_set(thread, -EINTR);
++				wake = true;
++			}
++		} else if (z_is_thread_sleeping(thread)) {
++			/* k_sleep() returns the time left; the sleeper looks for the signal */
++			(void)z_try_abort_thread_timeout(thread);
++			z_mark_thread_as_not_sleeping(thread);
++			wake = true;
++		}
++	}
++	if (wake) {
++		ready_thread(thread);
++	}
++	/* a runnable target runs before a sender of its priority resumes, as under Linux */
++	if ((thread != _current) && (wake || z_is_thread_queued(thread)) && !arch_is_in_isr() &&
++	    thread_is_preemptible(_current) && (z_sched_prio_cmp(_current, thread) == 0)) {
++		move_current_to_end_of_prio_q();
++		wake = true;
++	}
++	if (wake) {
++		z_reschedule_locked(key);
++	} else {
++		z_sched_spinlock_unlock(key);
++	}
++}
++#endif /* CONFIG_SIGNAL */
++
+ void z_sched_wake_thread_locked(struct k_thread *thread)
+ {
+ 	/* No K_SPINLOCK: caller must hold the scheduler's spinlock when calling */
+@@ -549,7 +607,7 @@ int z_pend_curr(struct k_spinlock *lock, k_spinlock_key_t key,
+ 	(void) z_sched_spinlock_lock();
+ 	pend_locked(_current, wait_q, timeout);
+ 	k_spin_release(lock);
+-	return z_swap_locked(key);
++	return z_pend_result(z_swap_locked(key));
+ }
+ 
+ struct k_thread *z_unpend1_no_timeout(_wait_q_t *wait_q)
+diff --git a/kernel/signal.c b/kernel/signal.c
+index aeafabcddc4..5d940f4fe79 100644
+--- a/kernel/signal.c
++++ b/kernel/signal.c
+@@ -10,6 +10,7 @@
+ 
+ #include <zephyr/internal/syscall_handler.h>
+ #include <zephyr/kernel.h>
++#include <kernel_internal.h>
+ #include <zephyr/logging/log.h>
+ #include <zephyr/sys/math_extras.h>
+ #include <zephyr/sys/ring_buffer.h>
+@@ -40,6 +41,8 @@ BUILD_ASSERT(SIGNAL_SET_SIZE >= 0);
+ 
+ RING_BUF_DECLARE_STATIC(k_sig_fifo, SIGNAL_QUEUE_SIZE);
+ static struct k_poll_signal k_sig_fifo_ready = K_POLL_SIGNAL_INITIALIZER(k_sig_fifo_ready);
++/* the target of a queued signal, if it is in a wait that signal interrupts */
++static void z_sig_interrupt_target(k_tid_t tid, int signo);
+ K_MEM_SLAB_DEFINE_STATIC(k_sig_slab, sizeof(struct k_sig_fifo_element), SIGNAL_QUEUE_SIZE,
+ 			 alignof(struct k_sig_fifo_element));
+ struct k_sig_fifo_element signal_actions[SIGNAL_ACTION_DB_SIZE];
+@@ -261,6 +264,95 @@ static bool sig_ignored_unblocked(k_tid_t tid, int signo)
+ 	return action.handler == K_SIG_IGN;
+ }
+ 
++/* a deliverable signal is pending for the current thread: unblocked, not ignored */
++bool z_sig_interrupts(void)
++{
++	struct k_sig_set pend;
++	struct k_sig_action action;
++
++	K_SPINLOCK(k_sig_lock) {
++		z_sig_pending_unlocked(&pend, _current);
++	}
++	z_sig_unset(&pend, &_current->base.sig.mask);
++
++	for (int signo = 1; signo <= SIGNAL_SET_SIZE; signo++) {
++		if (k_sig_ismember(&pend, signo) != 1) {
++			continue;
++		}
++		if (z_sig_action(signo, NULL, &action, _current) < 0) {
++			return true;
++		}
++		if (action.handler == K_SIG_DFL) {
++			action.handler = z_sig_resolve(signo);
++		}
++		if (action.handler != K_SIG_IGN) {
++			return true;
++		}
++	}
++
++	return false;
++}
++
++static void z_sig_wait_set(struct k_poll_signal *sig)
++{
++	K_SPINLOCK(k_sig_lock) {
++		_current->base.sig.wait_sig = sig;
++	}
++}
++
++bool z_sig_wait_begin(struct k_poll_signal *sig, unsigned long *token)
++{
++	z_sig_wait_set(sig);
++	*token = (unsigned long)atomic_get(&_current->base.sig.delivered);
++	if (z_sig_interrupts()) {
++		z_sig_wait_set(NULL);
++		return false;
++	}
++
++	return true;
++}
++
++bool z_sig_wait_end(unsigned long token)
++{
++	z_sig_wait_set(NULL);
++
++	/* claimed for delivery on the way back to user mode, or still to be claimed */
++	return ((unsigned long)atomic_get(&_current->base.sig.delivered) != token) ||
++	       z_sig_interrupts();
++}
++
++bool z_sig_pend_begin(unsigned long *token)
++{
++	struct k_sig_ctx *const ctx = &_current->base.sig;
++
++	ctx->pend_interrupted = false;
++	ctx->pend_interruptible = true;
++	*token = (unsigned long)atomic_get(&ctx->delivered);
++	if (z_sig_interrupts()) {
++		ctx->pend_interruptible = false;
++		return false;
++	}
++
++	return true;
++}
++
++bool z_sig_pend_end(unsigned long token)
++{
++	struct k_sig_ctx *const ctx = &_current->base.sig;
++
++	ctx->pend_interruptible = false;
++	ctx->pend_interrupted = false;
++
++	return ((unsigned long)atomic_get(&ctx->delivered) != token) || z_sig_interrupts();
++}
++
++static void z_sig_interrupt_target(k_tid_t tid, int signo)
++{
++	if (k_sig_ismember(&tid->base.sig.mask, signo) == 0) {
++		z_sched_sig_interrupt(tid);
++	}
++}
++
+ int z_impl_k_sig_queue(k_pid_t pid, int signo, union k_sig_val value)
+ {
+ 	if ((signo < 0) || (signo > SIGNAL_SET_SIZE)) {
+@@ -349,6 +441,16 @@ int z_impl_k_sig_queue(k_pid_t pid, int signo, union k_sig_val value)
+ 
+ 	k_spin_unlock(k_sig_lock, key);
+ 
++	/*
++	 * The target blocks in a wait signals interrupt: it returns to claim. A
++	 * waiter registers its poll signal before it looks for pending signals, so
++	 * one registered after this read finds the signal queued above.
++	 */
++	if (pid->base.sig.wait_sig != NULL) {
++		k_poll_signal_raise(pid->base.sig.wait_sig, 0);
++	}
++	z_sig_interrupt_target(pid, signo);
++
+ 	return 0;
+ }
+ 
+@@ -379,6 +481,7 @@ int z_impl_k_sig_timedwait(const struct k_sig_set *ZRESTRICT set, struct k_sig_i
+ 	__ASSERT_NO_MSG(!k_is_in_isr());
+ 
+ 	int ret = -EAGAIN;
++	const unsigned long token = (unsigned long)atomic_get(&_current->base.sig.delivered);
+ 	uint8_t pos = UINT8_MAX;
+ 	k_tid_t const tid = _current;
+ 	int self = (int)(intptr_t)tid;
+@@ -421,11 +524,50 @@ int z_impl_k_sig_timedwait(const struct k_sig_set *ZRESTRICT set, struct k_sig_i
+ 					break;
+ 				}
+ 
++				/*
++				 * A stale or already-consumed raise: no matching signal is
++				 * queued (yet). Keep waiting until the deadline rather than
++				 * returning a spurious -EAGAIN.
++				 */
+ 				LOG_DBG("signaled, but failed to match! signalled: %d "
+ 					"result: %x ",
+ 					signalled, result);
+-				ret = -EAGAIN;
+-				break;
++				if (z_sig_interrupts() ||
++				    ((unsigned long)atomic_get(&_current->base.sig.delivered) != token)) {
++					/* a signal outside the set is due, or was delivered meanwhile */
++					ret = -EINTR;
++					break;
++				}
++				ret = 0;
++			} else {
++				/*
++				 * The raise belongs to another thread. A raise notifies only
++				 * the first registered poller, and that may have been us: hand
++				 * the wake-up onward by re-raising, which notifies the next
++				 * waiter in line (the owner, if it is blocked here too).
++				 * Without this, a perpetual waiter (e.g. the system timer
++				 * dispatcher) starves every lower-priority signal waiter.
++				 *
++				 * Do not reset the signal (that would lose the owner's
++				 * wake-up), and do not re-poll immediately - that would
++				 * busy-spin on the still-raised signal, fatally so on
++				 * native_sim, where a never-blocking thread stops simulated
++				 * time (and with it every timeout) entirely. Yield for a tick
++				 * so the owner can consume its raise.
++				 */
++				if (sys_timepoint_expired(end)) {
++					ret = -EAGAIN;
++					break;
++				}
++				(void)k_poll_signal_raise(&k_sig_fifo_ready, result);
++				if (z_sig_interrupts() ||
++				    ((unsigned long)atomic_get(&_current->base.sig.delivered) != token)) {
++					/* a signal of our own is due: it does not wait out the tick */
++					ret = -EINTR;
++					break;
++				}
++				k_sleep(K_TICKS(1));
++				ret = 0;
+ 			}
+ 		}
+ 
+@@ -435,6 +577,15 @@ int z_impl_k_sig_timedwait(const struct k_sig_set *ZRESTRICT set, struct k_sig_i
+ 		return ret;
+ 	}
+ 
++	if (ret == 0) {
++		/*
++		 * The fifo-ready poll signal was raised for another thread (or a stale
++		 * raise was observed) and the deadline passed without a matching signal
++		 * for this thread: a timeout, not a delivery.
++		 */
++		return -EAGAIN;
++	}
++
+ 	__ASSERT_NO_MSG(ret != 0);
+ 	__ASSERT_NO_MSG(pos < SIGNAL_QUEUE_SIZE);
+ 
+diff --git a/kernel/thread.c b/kernel/thread.c
+index f759235b24d..2b47f9bb4ad 100644
+--- a/kernel/thread.c
++++ b/kernel/thread.c
+@@ -958,6 +958,9 @@ char *z_setup_new_thread(struct k_thread *new_thread,
+ #ifdef CONFIG_SIGNAL
+ 	/* a reused thread object: signals its previous occupant never claimed are not this thread's */
+ 	z_sig_thread_drop(new_thread);
++	new_thread->base.sig.wait_sig = NULL;
++	new_thread->base.sig.pend_interruptible = false;
++	new_thread->base.sig.pend_interrupted = false;
+ #ifdef CONFIG_USERSPACE
+ 	if ((options & K_USER) == 0U) {
+ 		/*
+diff --git a/lib/os/clock.c b/lib/os/clock.c
+index e4d98de11a9..8184a2ff896 100644
+--- a/lib/os/clock.c
++++ b/lib/os/clock.c
+@@ -17,6 +17,8 @@
+ #include <zephyr/sys/timeutil.h>
+ #include <zephyr/toolchain.h>
+ 
++#include <kernel_internal.h>
++
+ /*
+  * `k_uptime_get` returns a timestamp offset on an always increasing
+  * value from the system start.  To support the `SYS_CLOCK_REALTIME`
+@@ -179,7 +181,22 @@ int z_impl_sys_clock_nanosleep(int clock_id, int flags, const struct timespec *r
+ 	timeout = timespec_to_timeout(&duration, NULL);
+ 	end = sys_timepoint_calc(timeout);
+ 	do {
+-		(void)k_sleep(timeout);
++		unsigned long token;
++		bool interrupted;
++
++		if (!z_sig_pend_begin(&token)) {
++			interrupted = true;
++		} else {
++			int32_t left = k_sleep(timeout);
++
++			interrupted = z_sig_pend_end(token) && (left != 0);
++		}
++		if (interrupted) {
++			if (update_rmtp) {
++				timespec_from_timeout(sys_timepoint_timeout(end), rmtp);
++			}
++			return -EINTR;
++		}
+ 		timeout = sys_timepoint_timeout(end);
+ 	} while (!K_TIMEOUT_EQ(timeout, K_NO_WAIT));
+ 
+diff --git a/lib/os/zvfs/CMakeLists.txt b/lib/os/zvfs/CMakeLists.txt
+index e8a9b51795c..485733133e7 100644
+--- a/lib/os/zvfs/CMakeLists.txt
++++ b/lib/os/zvfs/CMakeLists.txt
+@@ -6,3 +6,8 @@ zephyr_library_sources_ifdef(CONFIG_ZVFS_DEFAULT_FILE_VMETHODS zvfs_file_vmethod
+ zephyr_library_sources_ifdef(CONFIG_ZVFS_EVENTFD zvfs_eventfd.c)
+ zephyr_library_sources_ifdef(CONFIG_ZVFS_POLL zvfs_poll.c)
+ zephyr_library_sources_ifdef(CONFIG_ZVFS_SELECT zvfs_select.c)
++# poll and eventfd take part in the kernel's signal-interruptible waits
++zephyr_library_include_directories(
++  ${ZEPHYR_BASE}/kernel/include
++  ${ARCH_DIR}/${ARCH}/include
++)
+diff --git a/lib/os/zvfs/zvfs_eventfd.c b/lib/os/zvfs/zvfs_eventfd.c
+index d086a4b3246..5e33d581565 100644
+--- a/lib/os/zvfs/zvfs_eventfd.c
++++ b/lib/os/zvfs/zvfs_eventfd.c
+@@ -13,6 +13,8 @@
+ #include <zephyr/sys/fdtable.h>
+ #include <zephyr/sys/math_extras.h>
+ 
++#include <kernel_internal.h>
++
+ #define ZVFS_EFD_IN_USE    0x1
+ #define ZVFS_EFD_FLAGS_SET (ZVFS_EFD_SEMAPHORE | ZVFS_EFD_NONBLOCK)
+ 
+@@ -299,6 +301,7 @@ static ssize_t zvfs_eventfd_rw_op(void *obj, void *buf, size_t sz,
+ 	struct zvfs_eventfd *efd = obj;
+ 	struct k_mutex *lock = NULL;
+ 	struct k_condvar *cond = NULL;
++	unsigned long token;
+ 
+ 	if (sz < sizeof(zvfs_eventfd_t)) {
+ 		errno = EINVAL;
+@@ -370,8 +373,16 @@ static ssize_t zvfs_eventfd_rw_op(void *obj, void *buf, size_t sz,
+ 		/* do not hold a spinlock when taking a mutex */
+ 		k_spin_unlock(&efd->lock, key);
+ 
+-		/* wait for a write or close */
++		/* wait for a write or close; a signal ends the wait */
++		if (!z_sig_pend_begin(&token)) {
++			errno = EINTR;
++			return -1;
++		}
+ 		err = k_condvar_wait(cond, lock, K_FOREVER);
++		if (z_sig_pend_end(token)) {
++			errno = EINTR;
++			return -1;
++		}
+ 		__ASSERT(err == 0, "k_condvar_wait() failed: %d", err);
+ 	}
+ 
+diff --git a/lib/os/zvfs/zvfs_poll.c b/lib/os/zvfs/zvfs_poll.c
+index f91f9dd2bfe..75e7cc4dfe2 100644
+--- a/lib/os/zvfs/zvfs_poll.c
++++ b/lib/os/zvfs/zvfs_poll.c
+@@ -8,6 +8,7 @@
+  */
+ 
+ #include <zephyr/kernel.h>
++#include <kernel_internal.h>
+ #include <zephyr/internal/syscall_handler.h>
+ #include <zephyr/sys/fdtable.h>
+ 
+@@ -106,7 +107,17 @@ int zvfs_poll_internal(struct zvfs_pollfd *fds, int nfds, k_timeout_t timeout)
+ 	timeout = sys_timepoint_timeout(end);
+ 
+ 	do {
++		unsigned long token;
++
++		if (!z_sig_pend_begin(&token)) {
++			errno = EINTR;
++			return -1;
++		}
+ 		ret = k_poll(poll_events, pev - poll_events, timeout);
++		if (z_sig_pend_end(token)) {
++			errno = EINTR;
++			return -1;
++		}
+ 		/* EAGAIN when timeout expired, EINTR when cancelled (i.e. EOF) */
+ 		if (ret != 0 && ret != -EAGAIN && ret != -EINTR) {
+ 			errno = -ret;
+diff --git a/subsys/net/ip/tcp.c b/subsys/net/ip/tcp.c
+index 84d9881326a..aa036d2fbd9 100644
+--- a/subsys/net/ip/tcp.c
++++ b/subsys/net/ip/tcp.c
+@@ -29,6 +29,8 @@ LOG_MODULE_REGISTER(net_tcp, CONFIG_NET_TCP_LOG_LEVEL);
+ #include "tcp_internal.h"
+ #include "pmtu.h"
+ 
++#include <kernel_internal.h>
++
+ #define ACK_TIMEOUT_MS tcp_max_timeout_ms
+ #define ACK_TIMEOUT K_MSEC(ACK_TIMEOUT_MS)
+ #define LAST_ACK_TIMEOUT_MS tcp_max_timeout_ms
+@@ -4393,7 +4395,20 @@ int net_tcp_connect(struct net_context *context,
+ 		goto out;
+ 	}
+ 
+-	(void)k_sem_take(&conn->connect_sem, timeout);
++	{
++		unsigned long token;
++
++		if (!z_sig_pend_begin(&token)) {
++			ret = -EINTR;
++			goto out;
++		}
++		(void)k_sem_take(&conn->connect_sem, timeout);
++		if (z_sig_pend_end(token) && (conn->state != TCP_ESTABLISHED)) {
++			/* the handshake goes on: a later connect() reports its outcome */
++			ret = -EINTR;
++			goto out;
++		}
++	}
+ 
+ 	if (conn->state != TCP_ESTABLISHED) {
+ 		if (conn->in_connect) {
+diff --git a/subsys/net/lib/sockets/CMakeLists.txt b/subsys/net/lib/sockets/CMakeLists.txt
+index 4479c676423..4d419224f5b 100644
+--- a/subsys/net/lib/sockets/CMakeLists.txt
++++ b/subsys/net/lib/sockets/CMakeLists.txt
+@@ -4,7 +4,7 @@ zephyr_syscall_header(
+   ${ZEPHYR_BASE}/include/zephyr/net/socket.h
+ )
+ 
+-zephyr_library_include_directories(.)
++zephyr_library_include_directories(. ${ZEPHYR_BASE}/kernel/include ${ARCH_DIR}/${ARCH}/include)
+ 
+ zephyr_library_sources(
+   getaddrinfo.c
+diff --git a/subsys/net/lib/sockets/sockets_inet.c b/subsys/net/lib/sockets/sockets_inet.c
+index 875dd606c42..3f418ccc35b 100644
+--- a/subsys/net/lib/sockets/sockets_inet.c
++++ b/subsys/net/lib/sockets/sockets_inet.c
+@@ -36,6 +36,8 @@ LOG_MODULE_DECLARE(net_sock, CONFIG_NET_SOCKETS_LOG_LEVEL);
+ #include "sockets_internal.h"
+ #include "../../ip/tcp_internal.h"
+ #include "../../ip/net_private.h"
++
++#include <kernel_internal.h>
+ #if defined(CONFIG_NET_UDP_OPTIONS)
+ #include "../../ip/udp_internal.h"
+ #endif
+@@ -1011,9 +1013,20 @@ int zsock_wait_data(struct net_context *ctx, k_timeout_t *timeout)
+ 	}
+ 
+ 	if (k_fifo_is_empty(&ctx->recv_q)) {
++		unsigned long token;
++
+ 		/* Wait for the data to arrive but without holding a lock */
+-		ret = k_condvar_wait(&ctx->cond.recv, ctx->cond.lock,
+-				     *timeout);
++		do {
++			if (!z_sig_pend_begin(&token)) {
++				return -EINTR;
++			}
++			ret = k_condvar_wait(&ctx->cond.recv, ctx->cond.lock,
++					     *timeout);
++			if (z_sig_pend_end(token)) {
++				return -EINTR;
++			}
++			/* a signal that is not to be delivered: wait on */
++		} while (ret == -EINTR);
+ 		if (ret < 0) {
+ 			return ret;
+ 		}
+diff --git a/tests/kernel/signal/CMakeLists.txt b/tests/kernel/signal/CMakeLists.txt
+index 6b458d8aa0b..2fa9b64da7e 100644
+--- a/tests/kernel/signal/CMakeLists.txt
++++ b/tests/kernel/signal/CMakeLists.txt
+@@ -6,3 +6,4 @@ project(signal)
+ 
+ FILE(GLOB app_sources src/*.c)
+ target_sources(app PRIVATE ${app_sources})
++target_include_directories(app PRIVATE ${ZEPHYR_BASE}/kernel/include ${ZEPHYR_BASE}/arch/${ARCH}/include)
+diff --git a/tests/kernel/signal/src/main.c b/tests/kernel/signal/src/main.c
+index 106ef515c5c..d057fc2b650 100644
+--- a/tests/kernel/signal/src/main.c
++++ b/tests/kernel/signal/src/main.c
+@@ -7,10 +7,14 @@
+ #include <errno.h>
+ #include <setjmp.h>
+ #include <string.h>
++#include <time.h>
+ 
+ #include <zephyr/kernel.h>
++#include <zephyr/sys/clock.h>
+ #include <zephyr/ztest.h>
+ 
++#include <kernel_internal.h>
++
+ BUILD_ASSERT(K_SIG_NUM_RT >= 0);
+ 
+ static void block_rt_signals(void);
+@@ -505,6 +509,85 @@ ZTEST(signal, test_k_sig_alarm)
+ 	k_sig_alarm_owner_exit();
+ }
+ 
++static K_SEM_DEFINE(interrupt_sem, 0, 1);
++ZTEST_BMEM static volatile int interrupt_sleep_ret;
++ZTEST_BMEM static volatile int interrupt_take_ret;
++ZTEST_BMEM static volatile int interrupt_wait_ret;
++ZTEST_BMEM static struct timespec interrupt_rem;
++
++static void interrupt_handler(int sig, struct k_sig_info *info, void *ucontext)
++{
++	ARG_UNUSED(sig);
++	ARG_UNUSED(info);
++	ARG_UNUSED(ucontext);
++}
++
++static void interrupt_wait_entry(void *arg1, void *arg2, void *arg3)
++{
++	struct k_sig_set mask;
++	struct k_sig_action action = {
++		.handler = interrupt_handler,
++	};
++	const struct timespec ten_s = {.tv_sec = 10};
++	unsigned long token;
++
++	ARG_UNUSED(arg1);
++	ARG_UNUSED(arg2);
++	ARG_UNUSED(arg3);
++
++	zassert_ok(k_sig_emptyset(&mask));
++	zassert_ok(k_sig_addset(&mask, K_SIG_USR1));
++	zassert_ok(k_sig_mask(K_SIG_UNBLOCK, &mask, NULL));
++	zassert_ok(k_sig_action(K_SIG_USR1, &action, NULL));
++
++	/* a signal ends a sleep early, with the time left */
++	interrupt_sleep_ret = sys_clock_nanosleep(SYS_CLOCK_MONOTONIC, 0, &ten_s, &interrupt_rem);
++	/* a kernel thread may still hold the signal pending: it is not the next wait's */
++	(void)k_sig_timedwait(&mask, NULL, K_NO_WAIT);
++
++	/* and returns a pend marked interruptible -EINTR */
++	if (z_sig_pend_begin(&token)) {
++		interrupt_take_ret = k_sem_take(&interrupt_sem, K_SECONDS(10));
++		(void)z_sig_pend_end(token);
++	}
++	(void)k_sig_timedwait(&mask, NULL, K_NO_WAIT);
++
++	/* and ends a wait for other signals with -EINTR */
++	zassert_ok(k_sig_emptyset(&mask));
++	zassert_ok(k_sig_addset(&mask, K_SIG_USR2));
++	interrupt_wait_ret = k_sig_timedwait(&mask, NULL, K_SECONDS(10));
++
++	action.handler = K_SIG_DFL;
++	zassert_ok(k_sig_action(K_SIG_USR1, &action, NULL));
++}
++
++ZTEST(signal, test_k_sig_interrupts_wait)
++{
++	const uint32_t start = k_uptime_get_32();
++
++	interrupt_sleep_ret = 0;
++	interrupt_take_ret = 0;
++	interrupt_wait_ret = 0;
++	k_thread_create(&noop_test_thread, noop_test_stack, K_THREAD_STACK_SIZEOF(noop_test_stack),
++			interrupt_wait_entry, NULL, NULL, NULL, K_LOWEST_APPLICATION_THREAD_PRIO, 0,
++			K_NO_WAIT);
++	for (int i = 0; i < 3; i++) {
++		int rc;
++
++		k_msleep(100);
++		rc = k_sig_queue((k_pid_t)&noop_test_thread, K_SIG_USR1, (union k_sig_val){0});
++		zassert_equal(rc, 0, "k_sig_queue() %d: %d", i, rc);
++	}
++	zassert_ok(k_thread_join(&noop_test_thread, K_FOREVER));
++
++	zassert_true((k_uptime_get_32() - start) < 5000U, "the waits were not interrupted");
++	zassert_equal(interrupt_sleep_ret, -EINTR);
++	zassert_true(interrupt_rem.tv_sec >= 9, "time left %lld", (long long)interrupt_rem.tv_sec);
++	zassert_equal(interrupt_take_ret, -EINTR);
++	zassert_equal(interrupt_wait_ret, -EINTR);
++}
++
++
+ static void *setup(void)
+ {
+ 	k_sig_emptyset(&rt_sigset);
+diff --git a/tests/lib/zvfs_eventfd/src/read.c b/tests/lib/zvfs_eventfd/src/read.c
+new file mode 100644
+index 00000000000..2f47df8e8b9
+--- /dev/null
++++ b/tests/lib/zvfs_eventfd/src/read.c
+@@ -0,0 +1,82 @@
++/*
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <errno.h>
++
++#include <zephyr/kernel.h>
++#include <zephyr/sys/fdtable.h>
++#include <zephyr/zvfs/eventfd.h>
++#include <zephyr/ztest.h>
++
++#ifdef CONFIG_SIGNAL
++static K_THREAD_STACK_DEFINE(reader_stack, 1024 + CONFIG_TEST_EXTRA_STACK_SIZE);
++static struct k_thread reader;
++static int reader_fd;
++static volatile int reader_ret;
++static volatile int reader_errno;
++static volatile bool reader_handled;
++
++static void reader_handler(int sig, struct k_sig_info *info, void *ucontext)
++{
++	ARG_UNUSED(sig);
++	ARG_UNUSED(info);
++	ARG_UNUSED(ucontext);
++
++	reader_handled = true;
++}
++
++static void reader_entry(void *p1, void *p2, void *p3)
++{
++	struct k_sig_action act = {.handler = reader_handler};
++	struct k_sig_set set;
++	zvfs_eventfd_t value;
++
++	ARG_UNUSED(p1);
++	ARG_UNUSED(p2);
++	ARG_UNUSED(p3);
++
++	/* kernel threads start with every signal blocked */
++	zassert_ok(k_sig_emptyset(&set));
++	zassert_ok(k_sig_addset(&set, K_SIG_USR1));
++	zassert_ok(k_sig_mask(K_SIG_UNBLOCK, &set, NULL));
++	zassert_ok(k_sig_action(K_SIG_USR1, &act, NULL));
++
++	reader_ret = zvfs_eventfd_read(reader_fd, &value);
++	reader_errno = errno;
++
++	act.handler = K_SIG_DFL;
++	zassert_ok(k_sig_action(K_SIG_USR1, &act, NULL));
++}
++
++/* a signal for a reader blocked on an empty eventfd ends the read with EINTR */
++static void eventfd_read_interrupted(void)
++{
++	reader_fd = zvfs_eventfd(0, 0);
++	zassert_true(reader_fd >= 0, "zvfs_eventfd() failed: %d", errno);
++	reader_handled = false;
++
++	k_thread_create(&reader, reader_stack, K_THREAD_STACK_SIZEOF(reader_stack), reader_entry,
++			NULL, NULL, NULL, K_PRIO_PREEMPT(0), 0, K_NO_WAIT);
++	k_msleep(50);
++	zassert_ok(k_sig_queue((k_pid_t)&reader, K_SIG_USR1, (union k_sig_val){0}));
++	zassert_ok(k_thread_join(&reader, K_SECONDS(5)), "the blocked read was not interrupted");
++
++	zassert_equal(reader_ret, -1, "read returned %d", reader_ret);
++	zassert_equal(reader_errno, EINTR, "errno %d", reader_errno);
++	zassert_true(reader_handled, "the handler did not run");
++	zassert_ok(zvfs_close(reader_fd));
++}
++#endif /* CONFIG_SIGNAL */
++
++ZTEST(zvfs_eventfd, test_zvfs_eventfd_read)
++{
++#ifdef CONFIG_SIGNAL
++	eventfd_read_interrupted();
++#else
++	ztest_test_skip();
++#endif /* CONFIG_SIGNAL */
++}
++
++ZTEST_SUITE(zvfs_eventfd, NULL, NULL, NULL, NULL, NULL);
+diff --git a/tests/lib/zvfs_eventfd/tests.yaml b/tests/lib/zvfs_eventfd/tests.yaml
+index 9e21787769d..a1931bc23bb 100644
+--- a/tests/lib/zvfs_eventfd/tests.yaml
++++ b/tests/lib/zvfs_eventfd/tests.yaml
+@@ -14,3 +14,13 @@ tests:
+       - CONFIG_ZVFS_EVENTFD_MAX=2
+     integration_platforms:
+       - qemu_x86
++  libraries.zvfs_eventfd.signal:
++    tags:
++      - zvfs
++      - eventfd
++    extra_configs:
++      - CONFIG_SIGNAL=y
++      - CONFIG_SIGNAL_SET_SIZE=32
++      - CONFIG_SIGNAL_ACTION_DB_SIZE=1
++    integration_platforms:
++      - qemu_x86
