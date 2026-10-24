@@ -385,3 +385,49 @@ patches:
       queue is unchanged. tests/kernel/signal test_k_kill floods an ignored
       unblocked signal past the queue size and checks that a blocked one
       still pends and is claimed.
+  - path: zephyr/k-signal-interruptible-wait.patch
+    sha256sum: 8786df15605cd825ae3b80e5feca46017695d53640db3ec9efd6d501c836339c
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-10-24
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/k-signal.patch
+    comments: |
+      Signals interrupt a thread's blocking waits. Queueing a signal never
+      woke its target: a thread blocked in a sleep, a pend or a poll ran its
+      handler only when that wait ended on its own, so an alarm never ended
+      a sleep and a handled signal never interrupted the call. A blocking
+      wait that signals may interrupt opts in at its wait site, so the
+      kernel's own waits are never cut short: the waiter marks its thread
+      (z_sig_pend_begin()), checks once more that no deliverable signal
+      (unblocked, not ignored) is pending, and pends as before. A signal
+      queued to a marked thread unpends it with -EINTR, wakes it from
+      k_sleep(), or flags a pend not yet made so that it returns at once;
+      the window between the waiter's check and its pend is closed inside
+      the scheduler (z_sched_sig_interrupt(), pend_locked(), z_pend_curr()).
+      z_sig_pend_end() reports a signal pending, or one claimed during the
+      wait - the arch return path claims it for delivery before the waiter
+      looks. Waits built on poll signals register the signal they poll in
+      the thread's signal context (k_sig_ctx.wait_sig, z_sig_wait_begin()
+      and z_sig_wait_end()) and queueing raises it.
+
+      Opted in here: sys_clock_nanosleep() (sleep, nanosleep,
+      clock_nanosleep), the socket accept, connect and receive waits,
+      poll and select, and the eventfd read and write, which end with
+      EINTR as on Linux instead of staying blocked until the counter moves.
+      A signal wait (k_sig_timedwait) ends with -EINTR when a deliverable
+      signal outside its set arrives, so a thread blocked in sigwaitinfo()
+      can be terminated or run a handler. Blocked and ignored signals do
+      not interrupt; a call is never restarted. The sender of a signal
+      yields to its target: when z_sched_sig_interrupt() readies the target
+      and the sender is a preemptible thread of the same priority, the
+      sender moves to the end of its run queue, as a time slice expiry
+      would, so that programs which rely on the woken thread running first
+      see every report.
+
+      tests/kernel/signal covers a sleep, a semaphore pend and a signal
+      wait; tests/lib/zvfs_eventfd covers the interrupted read.
