@@ -1,0 +1,15 @@
+diff --git a/arch/x86/core/ia32/swap.S b/arch/x86/core/ia32/swap.S
+--- a/arch/x86/core/ia32/swap.S
++++ b/arch/x86/core/ia32/swap.S
+@@ -125,7 +125,11 @@ SECTION_FUNC(TEXT, arch_swap)
+ 	/* Page tables updated. All memory access after this point needs to be
+ 	 * to memory that has the same mappings and access attributes wrt
+ 	 * supervisor mode!
++	 *
++	 * The call clobbers %edx (caller-saved): reload the outgoing thread
++	 * for the floating point state save below.
+ 	 */
++	movl	_kernel_offset_to_current(%edi), %edx
+ #endif
+ 
+ #ifdef CONFIG_EAGER_FPU_SHARING
