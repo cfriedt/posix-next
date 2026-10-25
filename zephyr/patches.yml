@@ -4347,3 +4347,31 @@ patches:
       stress-ng's cache stressors call directly, reads CTR_EL0 for the cache
       line sizes and then cleans by DC CVAU / IC IVAU; from a user thread
       each of these trapped to EL1 and killed the thread.
+  - path: zephyr/k-signal-interruptible-wait.patch
+    sha256sum: 677b187bd077e16939dd5feb910f02348e17afd490a30b11e060a09830c5672a
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-10-24
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/k-signal.patch
+          - zephyr/zvfs-pipe.patch
+    comments: |
+      Signals interrupt blocking pipe waits. Queueing a signal never woke
+      its target: a thread blocked in a pipe read or write returned only
+      when the pipe moved, so a process stuck in a read could not be killed
+      (its SIGKILL waited for a syscall return that never came, and its
+      parent waited for it) and a handled signal never interrupted the
+      call. A blocking wait now registers the poll signal it is about to
+      wait on in its thread's signal context (k_sig_ctx.wait_sig);
+      z_sig_queue_common() raises that signal when it queues to the
+      thread, and the persistent poll-signal state closes the window
+      between the waiter's check and its sleep. z_sig_wait_begin() refuses
+      to wait when a deliverable signal (unblocked, not ignored) is already
+      pending; z_sig_wait_end() reports one claimed during the wait (the
+      arch return path claims it for delivery before the waiter looks) or
+      due now. The pipe wait returns -EINTR in both cases and read()/write()
+      return EINTR, or the count already transferred, per POSIX.
