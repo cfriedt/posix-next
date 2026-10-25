@@ -14,6 +14,11 @@
 
 #include <zephyr/ztest.h>
 
+#ifndef CONFIG_NATIVE_LIBC
+/* Zephyr SDK 1.0.1 does not include prototypes for pthread_kill() */
+int pthread_kill(pthread_t thread, int sig);
+#endif
+
 static ZTEST_BMEM uint8_t scratch[PIPE_BUF + 1];
 static ZTEST_BMEM int shared_fd[2];
 static ZTEST_BMEM volatile sig_atomic_t sigpipe_count;
@@ -122,6 +127,61 @@ static void pipe_sigpipe_handler(int signo)
 	ARG_UNUSED(signo);
 
 	++sigpipe_count;
+}
+
+static ZTEST_BMEM volatile sig_atomic_t sigusr1_count;
+
+static void pipe_sigusr1_handler(int signo)
+{
+	ARG_UNUSED(signo);
+
+	++sigusr1_count;
+}
+
+static void *pipe_deferred_signaller(void *reader)
+{
+	/* directed at the blocked reader, so that no other thread can take it */
+	k_msleep(100);
+	zassert_ok(pthread_kill((pthread_t)(uintptr_t)reader, SIGUSR1));
+
+	return NULL;
+}
+
+/* a handled signal interrupts a blocked read: EINTR, nothing consumed */
+static void pipe_eintr(void)
+{
+	int fd[2];
+	char c;
+	sigset_t set;
+	pthread_t th;
+	struct sigaction oact;
+	struct sigaction act = {
+		.sa_handler = pipe_sigusr1_handler,
+	};
+
+	zassert_ok(sigemptyset(&act.sa_mask));
+	zassert_ok(sigaction(SIGUSR1, &act, &oact));
+	zassert_ok(sigemptyset(&set));
+	zassert_ok(sigaddset(&set, SIGUSR1));
+	zassert_ok(pthread_sigmask(SIG_UNBLOCK, &set, NULL));
+	zassert_ok(pipe(fd));
+
+	sigusr1_count = 0;
+	zassert_ok(pthread_create(&th, NULL, pipe_deferred_signaller,
+				  (void *)(uintptr_t)pthread_self()));
+	zassert_equal(read(fd[0], &c, 1), -1);
+	zassert_equal(errno, EINTR);
+	zassert_equal(sigusr1_count, 1);
+	zassert_ok(pthread_join(th, NULL));
+
+	zassert_equal(write(fd[1], "y", 1), 1);
+	zassert_equal(read(fd[0], &c, 1), 1);
+	zassert_equal(c, 'y');
+
+	zassert_ok(close(fd[0]));
+	zassert_ok(close(fd[1]));
+	zassert_ok(pthread_sigmask(SIG_BLOCK, &set, NULL));
+	zassert_ok(sigaction(SIGUSR1, &oact, NULL));
 }
 
 static void pipe_epipe(void)
@@ -254,6 +314,7 @@ ZTEST_USER(posix_pipe, test_pipe)
 	pipe_eof();
 	pipe_nonblock();
 	pipe_epipe();
+	pipe_eintr();
 	pipe_poll();
 	pipe_blocking();
 }
