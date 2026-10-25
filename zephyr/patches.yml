@@ -4767,3 +4767,72 @@ patches:
       and 1.9 ms on qemu_x86_64 (from 9.5). tests/lib/c_lib/common gains a
       malloc_grow scenario that allocates and reallocates past a 4 KiB arena
       from user mode.
+  - path: zephyr/k-signal-interruptible-wait.patch
+    sha256sum: b24f3dc64374b26b661c802eedf57ddde2c85e9ddf518447e082a6d924e88331
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-10-24
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/k-signal.patch
+          - zephyr/zvfs-pipe.patch
+    comments: |
+      Signals interrupt blocking pipe waits. Queueing a signal never woke
+      its target: a thread blocked in a pipe read or write returned only
+      when the pipe moved, so a process stuck in a read could not be killed
+      (its SIGKILL waited for a syscall return that never came, and its
+      parent waited for it) and a handled signal never interrupted the
+      call. A blocking wait now registers the poll signal it is about to
+      wait on in its thread's signal context (k_sig_ctx.wait_sig);
+      z_sig_queue_common() raises that signal when it queues to the
+      thread, and the persistent poll-signal state closes the window
+      between the waiter's check and its sleep. z_sig_wait_begin() refuses
+      to wait when a deliverable signal (unblocked, not ignored) is already
+      pending; z_sig_wait_end() reports one claimed during the wait (the
+      arch return path claims it for delivery before the waiter looks) or
+      due now. The pipe wait returns -EINTR in both cases and read()/write()
+      return EINTR, or the count already transferred, per POSIX.
+
+      The same contract covers the other blocking system calls POSIX lists
+      as interruptible, through the scheduler rather than a poll signal: a
+      waiter marks its thread (z_sig_pend_begin()) and pends as before; a
+      signal queued to a marked thread unpends it with -EINTR, wakes it if
+      it sleeps, or flags a pend that has not happened yet so it returns at
+      once (z_sched_sig_interrupt(), pend_locked(), z_pend_curr()).
+      Opted in: sys_clock_nanosleep() (sleep, nanosleep, clock_nanosleep),
+      socket accept/connect/receive waits, poll/select, sys_msgq send and
+      receive, the fcntl record-lock wait and waitpid. A signal wait
+      (k_sig_timedwait) ends with -EINTR when a deliverable signal outside
+      its set arrives, so a thread blocked in sigwaitinfo() can be
+      terminated or run a handler, as on Linux. tests/kernel/signal covers
+      a sleep, a semaphore pend and a signal wait.
+      A handled K_SIG_CHLD outlives the reap. k_waitpid() emits the deferred
+      notification itself when the notifier thread has not run yet, and the
+      reap drops a notification about the reaped child only when no handler
+      is installed for it (an unclaimed slot would otherwise never be freed).
+      The child's numeric ID travels with the notification
+      (k_sig_info.child_id, captured at generation through the system layer),
+      since the handle no longer resolves once the child is reaped; the POSIX
+      layer reports it as si_pid. tests/kernel/process and
+      tests/posix/multi_process cover a handler running after waitpid().
+
+      A stop or a continue notifies the parent too (K_SI_CLD_STOPPED,
+      K_SI_CLD_CONTINUED, with the stop signal or K_WSTATUS_CONTINUED as
+      the status), from the stopping thread and the continuing k_kill()
+      under process_lock, unless the parent's K_SIG_CHLD action carries
+      K_SIG_SA_NOCLDSTOP. z_sig_queue_chld() takes the si_code instead of
+      an exited flag. tests/kernel/process covers both notifications and
+      the flag.
+
+      A blocking eventfd read or write waits as an interruptible pend: a
+      signal for the waiting thread ends the wait with EINTR, as on Linux,
+      instead of leaving it blocked until the counter changes. A killed
+      process blocked in an eventfd read can then terminate.
+      tests/lib/zvfs_eventfd libraries.zvfs_eventfd.signal.
+
+      k_kill_pgrp() with signal 0 counted a member whose wake-up the queue call never filled
+      in, and z_sig_wake() ran on uninitialized stack. Signal 0 now only checks the group,
+      as k_kill_all() does.
