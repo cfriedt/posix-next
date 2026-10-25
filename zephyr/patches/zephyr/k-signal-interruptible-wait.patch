@@ -1,0 +1,221 @@
+diff --git a/include/zephyr/kernel/signal.h b/include/zephyr/kernel/signal.h
+index cc90e6893f2..626971108b2 100644
+--- a/include/zephyr/kernel/signal.h
++++ b/include/zephyr/kernel/signal.h
+@@ -172,10 +172,14 @@ struct k_sig_action {
+ 	void *user_data;
+ };
+ 
++struct k_poll_signal;
++
+ /** @brief Per-thread signal context */
+ struct k_sig_ctx {
+ #ifdef CONFIG_SIGNAL
+ 	struct k_sig_set mask; /**< Masked signals */
++	/** The poll signal a blocking wait of this thread polls, raised when a signal is queued to it */
++	struct k_poll_signal *wait_sig;
+ 	struct k_sig_set restore; /**< Signal mask to restore after handling signal */
+ #endif
+ 	struct k_sig_info info; /**< Information about a signal being handled */
+diff --git a/kernel/include/kernel_internal.h b/kernel/include/kernel_internal.h
+index 1b6b3e537c0..21cbbd515af 100644
+--- a/kernel/include/kernel_internal.h
++++ b/kernel/include/kernel_internal.h
+@@ -639,6 +639,27 @@ void z_sig_trampoline(void);
+ int z_sig_claim(struct k_thread *tid);
+ /* a signal may be deliverable to tid (its own or its process's) */
+ bool z_sig_pending_any(struct k_thread *tid);
++/*
++ * A blocking wait signals interrupt: it polls @a sig, which a signal queued to
++ * the thread raises. begin() is false when a signal is already due (do not
++ * wait); end() is true when one was claimed during the wait or is due now. The
++ * wait returns -EINTR in either case.
++ */
++bool z_sig_wait_begin(struct k_poll_signal *sig, unsigned long *token);
++bool z_sig_wait_end(unsigned long token);
++#else
++static inline bool z_sig_wait_begin(struct k_poll_signal *sig, unsigned long *token)
++{
++	ARG_UNUSED(sig);
++	*token = 0;
++	return true;
++}
++
++static inline bool z_sig_wait_end(unsigned long token)
++{
++	ARG_UNUSED(token);
++	return false;
++}
+ #endif /* CONFIG_SIGNAL */
+ 
+ #ifdef CONFIG_TIMER_REALTIME
+diff --git a/kernel/signal.c b/kernel/signal.c
+index d791ac33efd..a414df2ce5f 100644
+--- a/kernel/signal.c
++++ b/kernel/signal.c
+@@ -291,6 +291,64 @@ void z_sig_thread_drop(struct k_thread *tid)
+ 	}
+ }
+ 
++/* a deliverable signal is pending for the current thread: unblocked, not ignored */
++static bool z_sig_interrupts(void)
++{
++	struct k_sig_set pend;
++	struct k_sig_action action;
++
++	K_SPINLOCK(k_sig_lock) {
++		z_sig_pending_unlocked(&pend, _current);
++	}
++	z_sig_unset(&pend, &_current->base.sig.mask);
++
++	for (int signo = 1; signo <= SIGNAL_SET_SIZE; signo++) {
++		if (k_sig_ismember(&pend, signo) != 1) {
++			continue;
++		}
++		if (z_sig_action(signo, NULL, &action, _current) < 0) {
++			return true;
++		}
++		if (action.handler == K_SIG_DFL) {
++			action.handler = z_sig_resolve(signo);
++		}
++		if (action.handler != K_SIG_IGN) {
++			return true;
++		}
++	}
++
++	return false;
++}
++
++static void z_sig_wait_set(struct k_poll_signal *sig)
++{
++	K_SPINLOCK(k_sig_lock) {
++		_current->base.sig.wait_sig = sig;
++	}
++}
++
++bool z_sig_wait_begin(struct k_poll_signal *sig, unsigned long *token)
++{
++	z_sig_wait_set(sig);
++	*token = (unsigned long)atomic_get(&_current->base.sig.delivered);
++	if (z_sig_interrupts()) {
++		z_sig_wait_set(NULL);
++		return false;
++	}
++
++	return true;
++}
++
++bool z_sig_wait_end(unsigned long token)
++{
++	z_sig_wait_set(NULL);
++
++	/* claimed for delivery on the way back to user mode, or still to be claimed */
++	return ((unsigned long)atomic_get(&_current->base.sig.delivered) != token) ||
++	       z_sig_interrupts();
++}
++
++
+ static int z_sig_queue_common(k_pid_t pid, int signo, union k_sig_val value, int code,
+ 			      struct k_timer *timer, k_pid_t child_pid, int child_status,
+ 			      struct k_process *proc, bool resolved)
+@@ -407,6 +465,11 @@ static int z_sig_queue_common(k_pid_t pid, int signo, union k_sig_val value, int
+ 	}
+ 	atomic_inc(&z_syscall_work_pending);
+ 
++	if ((pid != NULL) && (pid->base.sig.wait_sig != NULL)) {
++		/* the target blocks in a wait signals interrupt: it returns to claim */
++		k_poll_signal_raise(pid->base.sig.wait_sig, 0);
++	}
++
+ 	if (IS_ENABLED(CONFIG_SIGNAL_LOG_LEVEL_DBG)) {
+ 		struct k_sig_set pend;
+ 
+diff --git a/kernel/thread.c b/kernel/thread.c
+index 044ff71b2ef..736d91d0a46 100644
+--- a/kernel/thread.c
++++ b/kernel/thread.c
+@@ -978,6 +978,7 @@ char *z_setup_new_thread(struct k_thread *new_thread,
+ #ifdef CONFIG_SIGNAL
+ 	/* a reused thread object: signals its previous occupant never claimed are not this thread's */
+ 	z_sig_thread_drop(new_thread);
++	new_thread->base.sig.wait_sig = NULL;
+ #ifdef CONFIG_USERSPACE
+ 	if ((options & K_USER) == 0U) {
+ 		/*
+diff --git a/lib/os/zvfs/CMakeLists.txt b/lib/os/zvfs/CMakeLists.txt
+index ef8b9bcea4e..286a7bdedb7 100644
+--- a/lib/os/zvfs/CMakeLists.txt
++++ b/lib/os/zvfs/CMakeLists.txt
+@@ -31,5 +31,9 @@ zephyr_library_include_directories_ifdef(CONFIG_ZVFS_MMAP
+   ${ZEPHYR_BASE}/kernel/include
+   ${ARCH_DIR}/${ARCH}/include
+ )
++zephyr_library_include_directories_ifdef(CONFIG_ZVFS_PIPE
++  ${ZEPHYR_BASE}/kernel/include
++  ${ARCH_DIR}/${ARCH}/include
++)
+ zephyr_library_sources_ifdef(CONFIG_ZVFS_POLL zvfs_poll.c)
+ zephyr_library_sources_ifdef(CONFIG_ZVFS_SELECT zvfs_select.c)
+diff --git a/lib/os/zvfs/zvfs_pipe.c b/lib/os/zvfs/zvfs_pipe.c
+index a055f62e534..160c77e3316 100644
+--- a/lib/os/zvfs/zvfs_pipe.c
++++ b/lib/os/zvfs/zvfs_pipe.c
+@@ -19,6 +19,8 @@
+ #endif
+ #include <zephyr/internal/syscall_handler.h>
+ 
++#include <kernel_internal.h>
++
+ #define ZVFS_PIPE_END_OPEN     BIT(0)
+ #define ZVFS_PIPE_END_NONBLOCK BIT(1)
+ 
+@@ -88,34 +90,38 @@ static void zvfs_pipe_wake_side(struct zvfs_pipe *p, uint8_t side)
+ }
+ 
+ /*
+- * Block until the side's poll signal is raised. The signal is raised and reset
+- * under the pipe lock along with the ring, and its state persists, so a raise
+- * between the caller's ring check and the wait is not lost - a condition
+- * variable broadcast from the other side's description would be, as nothing
+- * orders it against this side's description lock. That lock is released for
+- * the wait, as a condition variable would, so a close of the description can
+- * proceed (it raises the signals).
++ * Block until the side's poll signal is raised, or a signal arrives for the
++ * caller (-EINTR). The side's signal is raised and reset under the pipe lock
++ * along with the ring, and its state persists, so a raise between the caller's
++ * ring check and the wait is not lost - a condition variable broadcast from the
++ * other side's description would be, as nothing orders it against this side's
++ * description lock. That lock is released for the wait, as a condition variable
++ * would, so a close of the description can proceed (it raises the signals).
+  */
+ static int zvfs_pipe_wait(struct zvfs_pipe_end *end)
+ {
+ 	int err;
++	unsigned long token;
+ 	struct k_mutex *lock = NULL;
+ 	struct k_condvar *cond = NULL;
+ 	struct zvfs_pipe *p = end->pipe;
+-	struct k_poll_event ev = K_POLL_EVENT_INITIALIZER(
+-		K_POLL_TYPE_SIGNAL, K_POLL_MODE_NOTIFY_ONLY,
+-		(end->side == 0) ? &p->read_sig : &p->write_sig);
++	struct k_poll_signal *sig = (end->side == 0) ? &p->read_sig : &p->write_sig;
++	struct k_poll_event ev =
++		K_POLL_EVENT_INITIALIZER(K_POLL_TYPE_SIGNAL, K_POLL_MODE_NOTIFY_ONLY, sig);
+ 
+ 	if (!zvfs_get_obj_lock_and_cond(end, &zvfs_pipe_fd_vtable, &lock, &cond)) {
+ 		return -EBADF;
+ 	}
+ 
++	if (!z_sig_wait_begin(sig, &token)) {
++		return -EINTR;
++	}
+ 	k_mutex_unlock(lock);
+ 	err = k_poll(&ev, 1, K_FOREVER);
+ 	k_mutex_lock(lock, K_FOREVER);
+ 	__ASSERT(err == 0, "k_poll() failed: %d", err);
+ 
+-	return err;
++	return z_sig_wait_end(token) ? -EINTR : err;
+ }
+ 
+ static ssize_t zvfs_pipe_read_op(void *obj, void *buf, size_t sz)
