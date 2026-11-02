@@ -1,0 +1,250 @@
+diff --git a/subsys/net/lib/sockets/socketpair.c b/subsys/net/lib/sockets/socketpair.c
+--- a/subsys/net/lib/sockets/socketpair.c
++++ b/subsys/net/lib/sockets/socketpair.c
+@@ -45,7 +45,7 @@
+  * - each endpoint may be blocking or non-blocking
+  */
+ __net_socket struct spair {
+-	int remote; /**< the remote endpoint file descriptor */
++	struct spair *remote; /**< the remote endpoint, NULL once it is closed */
+ 	uint32_t flags; /**< status and option bits */
+ 	struct k_sem sem; /**< semaphore for exclusive structure access */
+ 	struct ring_buf recv_q;
+@@ -74,8 +74,7 @@
+ /** Determine if a @ref spair is connected */
+ static inline bool sock_is_connected(const struct spair *spair)
+ {
+-	const struct spair *remote = zvfs_get_fd_obj(spair->remote,
+-		(const struct fd_op_vtable *)&spair_fd_op_vtable, 0);
++	const struct spair *remote = spair->remote;
+ 
+ 	if (remote == NULL) {
+ 		return false;
+@@ -88,8 +87,7 @@
+ /** Determine if a @ref spair has encountered end-of-file */
+ static inline bool sock_is_eof(const struct spair *spair)
+ {
+-	const struct spair *remote = zvfs_get_fd_obj(spair->remote,
+-		(const struct fd_op_vtable *)&spair_fd_op_vtable, 0);
++	const struct spair *remote = spair->remote;
+ 
+ 	/* the peer is gone, this side stopped reading, or the peer stopped writing */
+ 	return (remote == NULL) || ((spair->flags & SPAIR_FLAG_SHUT_RD) != 0) ||
+@@ -104,8 +102,7 @@
+  */
+ static inline size_t spair_write_avail(struct spair *spair)
+ {
+-	struct spair *const remote = zvfs_get_fd_obj(spair->remote,
+-		(const struct fd_op_vtable *)&spair_fd_op_vtable, 0);
++	struct spair *const remote = spair->remote;
+ 
+ 	if (remote == NULL) {
+ 		return 0;
+@@ -125,16 +122,6 @@
+ 	return ring_buf_size_get(&spair->recv_q);
+ }
+ 
+-/** Swap two 32-bit integers */
+-static inline void swap32(uint32_t *a, uint32_t *b)
+-{
+-	uint32_t c;
+-
+-	c = *b;
+-	*b = *a;
+-	*a = c;
+-}
+-
+ /**
+  * Delete @param spair
+  *
+@@ -157,7 +144,7 @@
+  *
+  * If the remote endpoint is already closed, the former operation does not
+  * take place. Otherwise, the @ref spair.remote of the local endpoint is
+- * set to -1.
++ * set to NULL.
+  *
+  * If no threads are blocking on A, then the signals have no effect.
+  *
+@@ -173,25 +160,18 @@
+ 		return;
+ 	}
+ 
+-	if (spair->remote != -1) {
+-		remote = zvfs_get_fd_obj(spair->remote,
+-			(const struct fd_op_vtable *)&spair_fd_op_vtable, 0);
+-
+-		if (remote != NULL) {
+-			res = k_sem_take(&remote->sem, K_FOREVER);
+-			if (res == 0) {
+-				have_remote_sem = true;
+-				remote->remote = -1;
+-				res = k_poll_signal_raise(&remote->readable,
+-					SPAIR_SIG_CANCEL);
+-				__ASSERT(res == 0,
+-					"k_poll_signal_raise() failed: %d",
+-					res);
+-			}
++	remote = spair->remote;
++	if (remote != NULL) {
++		res = k_sem_take(&remote->sem, K_FOREVER);
++		if (res == 0) {
++			have_remote_sem = true;
++			remote->remote = NULL;
++			res = k_poll_signal_raise(&remote->readable, SPAIR_SIG_CANCEL);
++			__ASSERT(res == 0, "k_poll_signal_raise() failed: %d", res);
+ 		}
+ 	}
+ 
+-	spair->remote = -1;
++	spair->remote = NULL;
+ 
+ 	res = k_poll_signal_raise(&spair->writeable, SPAIR_SIG_CANCEL);
+ 	__ASSERT(res == 0, "k_poll_signal_raise() failed: %d", res);
+@@ -220,7 +200,7 @@
+  * If both allocations are successful, then swap the @ref spair.remote
+  * fields in the two @ref spair instances.
+  */
+-static struct spair *spair_new(void)
++static struct spair *spair_new(int *fd)
+ {
+ 	struct spair *spair;
+ 	int res;
+@@ -251,7 +231,7 @@
+ 	memset(spair, 0, sizeof(*spair));
+ 
+ 	/* initialize any non-zero default values */
+-	spair->remote = -1;
++	spair->remote = NULL;
+ 	spair->flags = SPAIR_FLAGS_DEFAULT;
+ 
+ 	k_sem_init(&spair->sem, 1, 1);
+@@ -263,13 +243,13 @@
+ 	res = k_poll_signal_raise(&spair->writeable, SPAIR_SIG_DATA);
+ 	__ASSERT(res == 0, "k_poll_signal_raise() failed: %d", res);
+ 
+-	spair->remote = zvfs_reserve_fd();
+-	if (spair->remote == -1) {
++	*fd = zvfs_reserve_fd();
++	if (*fd == -1) {
+ 		errno = ENFILE;
+ 		goto cleanup;
+ 	}
+ 
+-	zvfs_finalize_typed_fd(spair->remote, spair,
++	zvfs_finalize_typed_fd(*fd, spair,
+ 			       (const struct fd_op_vtable *)&spair_fd_op_vtable, ZVFS_MODE_IFSOCK);
+ 
+ 	goto out;
+@@ -286,6 +266,7 @@
+ {
+ 	int res;
+ 	size_t i;
++	int fd[2];
+ 	struct spair *obj[2] = {};
+ 
+ 	SYS_PORT_TRACING_FUNC_ENTER(socket, socketpair, family, type, proto, sv);
+@@ -316,7 +297,7 @@
+ 	}
+ 
+ 	for (i = 0; i < 2; ++i) {
+-		obj[i] = spair_new();
++		obj[i] = spair_new(&fd[i]);
+ 		if (!obj[i]) {
+ 			res = -1;
+ 			goto cleanup;
+@@ -324,10 +305,11 @@
+ 	}
+ 
+ 	/* connect the two endpoints */
+-	swap32(&obj[0]->remote, &obj[1]->remote);
++	obj[0]->remote = obj[1];
++	obj[1]->remote = obj[0];
+ 
+ 	for (i = 0; i < 2; ++i) {
+-		sv[i] = obj[i]->remote;
++		sv[i] = fd[i];
+ 		k_sem_give(&obj[0]->sem);
+ 	}
+ 
+@@ -442,8 +424,7 @@
+ 
+ 	have_local_sem = true;
+ 
+-	remote = zvfs_get_fd_obj(spair->remote,
+-		(const struct fd_op_vtable *)&spair_fd_op_vtable, 0);
++	remote = spair->remote;
+ 
+ 	if ((remote == NULL) || ((spair->flags & SPAIR_FLAG_SHUT_WR) != 0) ||
+ 	    ((remote->flags & SPAIR_FLAG_SHUT_RD) != 0)) {
+@@ -507,9 +488,7 @@
+ 				goto out;
+ 			}
+ 
+-			remote = zvfs_get_fd_obj(spair->remote,
+-				(const struct fd_op_vtable *)
+-				&spair_fd_op_vtable, 0);
++			remote = spair->remote;
+ 
+ 			if (remote == NULL) {
+ 				errno = EPIPE;
+@@ -788,9 +767,7 @@
+ 			goto out;
+ 		}
+ 
+-		remote = zvfs_get_fd_obj(obj->remote,
+-			(const struct fd_op_vtable *)
+-			&spair_fd_op_vtable, 0);
++		remote = obj->remote;
+ 
+ 		__ASSERT(remote != NULL, "remote is NULL");
+ 
+@@ -838,8 +815,7 @@
+ 			goto pollout_done;
+ 		}
+ 
+-		remote = zvfs_get_fd_obj(obj->remote,
+-			(const struct fd_op_vtable *) &spair_fd_op_vtable, 0);
++		remote = obj->remote;
+ 
+ 		__ASSERT(remote != NULL, "remote is NULL");
+ 
+@@ -1210,8 +1186,7 @@
+ 		return -1;
+ 	}
+ 
+-	remote = zvfs_get_fd_obj(spair->remote, (const struct fd_op_vtable *)&spair_fd_op_vtable,
+-				 0);
++	remote = spair->remote;
+ 
+ 	if (how != ZSOCK_SHUT_WR) {
+ 		spair->flags |= SPAIR_FLAG_SHUT_RD;
+diff --git a/tests/net/socket/socketpair/src/dup.c b/tests/net/socket/socketpair/src/dup.c
+new file mode 100644
+--- /dev/null
++++ b/tests/net/socket/socketpair/src/dup.c
+@@ -0,0 +1,24 @@
++/*
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <zephyr/sys/zvfs.h>
++
++#include "_main.h"
++
++/* an end outlives the close of one of its descriptors: the pair is not torn down */
++ZTEST_USER_F(net_socketpair, test_dup_close)
++{
++	char buf[8];
++	int d = zvfs_dup(fixture->sv[0], 0);
++
++	zassert_true(d >= 0, "dup() failed: %d", errno);
++	zassert_ok(zsock_close(fixture->sv[0]), "close() failed: %d", errno);
++	fixture->sv[0] = d;
++
++	zassert_equal(zsock_send(fixture->sv[1], "xx", 2, 0), 2, "send() failed: %d", errno);
++	zassert_equal(zsock_recv(d, buf, sizeof(buf), 0), 2, "recv() failed: %d", errno);
++	zassert_equal(zsock_send(d, "y", 1, 0), 1, "send() failed: %d", errno);
++	zassert_equal(zsock_recv(fixture->sv[1], buf, sizeof(buf), 0), 1, "recv() failed: %d", errno);
++}

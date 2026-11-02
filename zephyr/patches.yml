@@ -1999,6 +1999,21 @@ patches:
       with EPIPE and lets the peer read end-of-file once it has drained what
       was sent. Blocked readers and writers on either end wake to find that
       out. tests/net/socket/socketpair covers both directions.
+  - path: zephyr/net-socketpair-peer-object.patch
+    sha256sum: cd689287292b0fe2cffc761fcd8cfe32e3d35251ca9c345377f2c09cbbfe1d79
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-02
+    upstreamable: true
+    comments: |
+      A socketpair end named its peer by descriptor number and looked it up
+      on every operation. Descriptors are per process and may be duplicated:
+      closing one of two descriptors of an end, or the parent's copy after a
+      fork, made the peer lookup fail and the other end's writes report EPIPE
+      while the end was still open elsewhere. The peer is now the endpoint
+      object itself, cleared when that endpoint is destroyed on its last
+      close. tests/net/socket/socketpair covers a duplicated descriptor.
   - path: zephyr/libc-signal-h-pthread-kill.patch
     sha256sum: 9db8dc468a348bb0603646373dbe308174a5711ddbcfd454197b47f18992eb48
     module: zephyr
