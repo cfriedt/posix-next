@@ -1,0 +1,13 @@
+diff --git a/subsys/net/lib/sockets/sockets_inet.c b/subsys/net/lib/sockets/sockets_inet.c
+--- a/subsys/net/lib/sockets/sockets_inet.c
++++ b/subsys/net/lib/sockets/sockets_inet.c
+@@ -145,7 +145,8 @@ static int zsock_socket_internal(int family, int type, int proto)
+ 	res = net_context_get(family, type, proto, &ctx);
+ 	if (res < 0) {
+ 		zvfs_free_fd(fd);
+-		errno = -res;
++		/* no free context: the resource error socket() has for it, as on Linux */
++		errno = (res == -ENOENT) ? ENOBUFS : -res;
+ 		return -1;
+ 	}
+ 
