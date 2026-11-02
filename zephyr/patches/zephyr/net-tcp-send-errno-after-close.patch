@@ -1,0 +1,106 @@
+diff --git a/subsys/net/ip/tcp.c b/subsys/net/ip/tcp.c
+--- a/subsys/net/ip/tcp.c
++++ b/subsys/net/ip/tcp.c
+@@ -938,6 +938,11 @@ static void tcp_conn_release(struct k_work *work)
+ 				  NULL);
+ 	}
+
++	/* the socket outlives its connection: a later write reports how it ended */
++	conn->context->flags |= NET_CONTEXT_TCP_CLOSED;
++	if (conn->rst_received && !conn->in_connect) {
++		conn->context->flags |= NET_CONTEXT_TCP_RESET;
++	}
+ 	conn->context->tcp = NULL;
+ 	conn->state = TCP_UNUSED;
+
+@@ -4123,7 +4128,28 @@ int net_tcp_queue(struct net_context *context, const void *data, size_t len,
+ 	size_t queued_len = 0;
+ 	int ret = 0;
+
+-	if (!conn || conn->state != TCP_ESTABLISHED) {
++	if (!conn) {
++		if ((context->flags & NET_CONTEXT_TCP_RESET) != 0) {
++			return -ECONNRESET;
++		}
++		return ((context->flags & NET_CONTEXT_TCP_CLOSED) != 0) ? -EPIPE : -ENOTCONN;
++	}
++
++	switch (conn->state) {
++	case TCP_ESTABLISHED:
++		break;
++	case TCP_CLOSE_WAIT:
++	case TCP_FIN_WAIT_1:
++	case TCP_FIN_WAIT_2:
++	case TCP_CLOSING:
++	case TCP_LAST_ACK:
++	case TCP_TIME_WAIT:
++		/* the connection is closing: a write can no longer reach the peer */
++		return -EPIPE;
++	case TCP_CLOSED:
++		/* it ended, by a reset or otherwise; the socket was connected */
++		return conn->rst_received ? -ECONNRESET : -EPIPE;
++	default:
+ 		return -ENOTCONN;
+ 	}
+
+diff --git a/tests/net/socket/tcp/src/main.c b/tests/net/socket/tcp/src/main.c
+--- a/tests/net/socket/tcp/src/main.c
++++ b/tests/net/socket/tcp/src/main.c
+@@ -503,7 +503,11 @@ static void test_recv_before_rst_common(int family)
+ 	char rx_buf2[30] = {0};
+ 	ssize_t recved_data;
+ 	ssize_t recved_eof;
++	ssize_t sent;
+ 	int recv_errno;
++	int send_errno;
++	ssize_t sent_late;
++	int late_errno;
+ 	int ret;
+
+ 	if (family == NET_AF_INET) {
+@@ -547,6 +551,15 @@ static void test_recv_before_rst_common(int family)
+ 	recved_eof = zsock_recv(c_sock, rx_buf2, sizeof(rx_buf2), 0);
+ 	recv_errno = errno;
+
++	/* A send on the reset connection reports the same. */
++	sent = zsock_send(c_sock, TEST_STR_SMALL, strlen(TEST_STR_SMALL), 0);
++	send_errno = errno;
++
++	/* ...and so does one after the connection itself is torn down. */
++	k_msleep(THREAD_SLEEP);
++	sent_late = zsock_send(c_sock, TEST_STR_SMALL, strlen(TEST_STR_SMALL), 0);
++	late_errno = errno;
++
+ 	/* Clean up before evaluating the result, so that a failed assertion
+ 	 * does not leak the bound port and poison subsequent test cases.
+ 	 */
+@@ -563,6 +576,13 @@ static void test_recv_before_rst_common(int family)
+ 	zassert_equal(recved_eof, -1, "expected error, got %zd", recved_eof);
+ 	zassert_equal(recv_errno, ECONNRESET, "unexpected errno value: %d",
+ 		      recv_errno);
++
++	zassert_equal(sent, -1, "expected error, got %zd", sent);
++	zassert_equal(send_errno, ECONNRESET, "unexpected errno value: %d",
++		      send_errno);
++	zassert_equal(sent_late, -1, "expected error, got %zd", sent_late);
++	zassert_equal(late_errno, ECONNRESET, "unexpected errno value: %d",
++		      late_errno);
+ }
+
+ ZTEST_USER(net_socket_tcp, test_v4_recv_before_rst)
+diff --git a/include/zephyr/net/net_context.h b/include/zephyr/net/net_context.h
+--- a/include/zephyr/net/net_context.h
++++ b/include/zephyr/net/net_context.h
+@@ -74,6 +74,12 @@ enum net_context_state {
+ /** A local address has been bound to this context */
+ #define NET_CONTEXT_LOCAL_ADDR_SET BIT(10)
+
++/** The TCP connection ended; the socket outlives it */
++#define NET_CONTEXT_TCP_CLOSED BIT(11)
++
++/** The TCP connection ended with a reset from the peer */
++#define NET_CONTEXT_TCP_RESET BIT(12)
++
+ struct net_context;
+
+ /**
