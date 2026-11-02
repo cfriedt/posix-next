@@ -440,10 +440,43 @@ ZTEST(posix_realtime_signals, test_sigtimedwait)
 	test_sigtimedwait();
 }
 
+/* re-armed: the first alarm may land before the wait it is meant to interrupt */
+static void sigwaitinfo_signal_handler(int sig)
+{
+	ARG_UNUSED(sig);
+	(void)alarm(1);
+}
+
+/* a caught signal outside the set ends the wait with EINTR */
+static void test_sigwaitinfo_interrupted(void)
+{
+	struct sigaction act = {.sa_handler = sigwaitinfo_signal_handler};
+	sigset_t set = rt_sigset;
+	sigset_t alrm;
+	siginfo_t info;
+
+	block_rt_signals();
+	zassert_ok(sigemptyset(&alrm));
+	zassert_ok(sigaddset(&alrm, SIGALRM));
+	zassert_ok(sigprocmask(SIG_UNBLOCK, &alrm, NULL));
+	zassert_ok(sigaction(SIGALRM, &act, NULL));
+	zassert_equal(alarm(1), 0);
+	zassert_equal(sigwaitinfo(&set, &info), -1);
+	zassert_equal(errno, EINTR);
+	zassert_true(alarm(0) <= 1);
+	act.sa_handler = SIG_DFL;
+	zassert_ok(sigaction(SIGALRM, &act, NULL));
+	zassert_ok(sigprocmask(SIG_BLOCK, &alrm, NULL));
+}
+
 ZTEST(posix_realtime_signals, test_sigwaitinfo)
 {
 	skip_if_rt_sigset_too_small();
 	test_sigwaitinfo();
+	/* the host libc delivers a process-directed signal to any of the simulator's host threads */
+	if (!IS_ENABLED(CONFIG_NATIVE_LIBC)) {
+		test_sigwaitinfo_interrupted();
+	}
 }
 
 ZTEST(posix_realtime_signals, test_rt_delivery_deferred)
