@@ -162,6 +162,15 @@ ZTEST_USER(posix_networking, test_recvfrom)
 	zassert_true(recvd < sizeof(buf));
 	buf[recvd] = '\0';
 	zassert_str_equal(buf, TEST_MSG);
+
+	/* the unspecified address names the local host */
+	addr.sin_addr.s_addr = htonl(INADDR_ANY);
+	zassert_equal(sendto(tx_sock, TEST_MSG, strlen(TEST_MSG), 0, (struct sockaddr *)&addr,
+			     sizeof(addr)),
+		      strlen(TEST_MSG), "errno %d", errno);
+	fromlen = sizeof(from);
+	recvd = recvfrom(rx_sock, buf, sizeof(buf), 0, (struct sockaddr *)&from, &fromlen);
+	zassert_equal(recvd, strlen(TEST_MSG));
 	close(tx_sock);
 	close(rx_sock);
 
