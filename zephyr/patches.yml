@@ -1954,6 +1954,25 @@ patches:
       frame of context_sendto() grows by one struct net_sockaddr_in6 less
       a struct net_sockaddr_in rather than by both resolved copies.
 
+  - path: zephyr/net-tcp-send-errno-after-close.patch
+    sha256sum: 6ccbf27bc8e8b1b086e58e49dbe45cc1734cfaffbd1b03c2e20a62dd833fc200
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-02
+    upstreamable: true
+    comments: |
+      A send on a TCP connection that is no longer established reported
+      ENOTCONN whatever the reason. As on Linux, a connection the peer has
+      reset reports ECONNRESET and a connection that is closing reports
+      EPIPE; ENOTCONN is kept for a socket that was never connected. The
+      reset case is covered in tests/net/socket/tcp. (A write in
+      CLOSE_WAIT would succeed on Linux; Zephyr's TCP does not support the
+      half-closed state, so it reports EPIPE there.)
+      Once the connection itself is torn down the socket remembers how it
+      ended (NET_CONTEXT_TCP_CLOSED / NET_CONTEXT_TCP_RESET on the context):
+      a later send reports ECONNRESET or EPIPE instead of ENOTCONN, and a
+      connection in TCP_CLOSED does the same.
   - path: zephyr/libc-signal-h-pthread-kill.patch
     sha256sum: 9db8dc468a348bb0603646373dbe308174a5711ddbcfd454197b47f18992eb48
     module: zephyr
