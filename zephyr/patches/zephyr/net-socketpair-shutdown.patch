@@ -1,0 +1,179 @@
+diff --git a/subsys/net/lib/sockets/socketpair.c b/subsys/net/lib/sockets/socketpair.c
+--- a/subsys/net/lib/sockets/socketpair.c
++++ b/subsys/net/lib/sockets/socketpair.c
+@@ -19,6 +19,8 @@ enum {
+ 
+ enum {
+ 	SPAIR_FLAG_NONBLOCK = (1 << 0), /**< socket is non-blocking */
++	SPAIR_FLAG_SHUT_RD = (1 << 1), /**< shut down for reading: reads end */
++	SPAIR_FLAG_SHUT_WR = (1 << 2), /**< shut down for writing: writes fail */
+ };
+ 
+ #define SPAIR_FLAGS_DEFAULT 0
+@@ -86,7 +88,12 @@ static inline bool sock_is_connected(const struct spair *spair)
+ /** Determine if a @ref spair has encountered end-of-file */
+ static inline bool sock_is_eof(const struct spair *spair)
+ {
+-	return !sock_is_connected(spair);
++	const struct spair *remote = zvfs_get_fd_obj(spair->remote,
++		(const struct fd_op_vtable *)&spair_fd_op_vtable, 0);
++
++	/* the peer is gone, this side stopped reading, or the peer stopped writing */
++	return (remote == NULL) || ((spair->flags & SPAIR_FLAG_SHUT_RD) != 0) ||
++	       ((remote->flags & SPAIR_FLAG_SHUT_WR) != 0);
+ }
+ 
+ /**
+@@ -438,7 +445,8 @@ static ssize_t spair_write(void *obj, const void *buffer, size_t count)
+ 	remote = zvfs_get_fd_obj(spair->remote,
+ 		(const struct fd_op_vtable *)&spair_fd_op_vtable, 0);
+ 
+-	if (remote == NULL) {
++	if ((remote == NULL) || ((spair->flags & SPAIR_FLAG_SHUT_WR) != 0) ||
++	    ((remote->flags & SPAIR_FLAG_SHUT_RD) != 0)) {
+ 		errno = EPIPE;
+ 		res = -1;
+ 		goto out;
+@@ -645,7 +653,7 @@ static ssize_t spair_read(void *obj, void *buffer, size_t count)
+ 	avail = spair_read_avail(spair);
+ 
+ 	if (avail == 0) {
+-		if (!is_connected) {
++		if (sock_is_eof(spair)) {
+ 			/* signal EOF */
+ 			res = 0;
+ 			goto out;
+@@ -1177,6 +1185,55 @@ static int spair_close(void *obj, int fd)
+ 	return 0;
+ }
+ 
++/**
++ * Shut down one or both directions of a socketpair end.
++ *
++ * Reading shut down: pending data is dropped, further reads report end-of-file
++ * and the peer's writes fail with @ref EPIPE. Writing shut down: further writes
++ * fail with @ref EPIPE and the peer reads end-of-file once it has drained what
++ * was sent. Blocked readers and writers on either end wake to find that out.
++ */
++static int spair_shutdown(void *obj, int how)
++{
++	int res;
++	struct spair *const spair = (struct spair *)obj;
++	struct spair *remote;
++
++	if ((how != ZSOCK_SHUT_RD) && (how != ZSOCK_SHUT_WR) && (how != ZSOCK_SHUT_RDWR)) {
++		errno = EINVAL;
++		return -1;
++	}
++
++	res = k_sem_take(&spair->sem, K_FOREVER);
++	if (res < 0) {
++		errno = -res;
++		return -1;
++	}
++
++	remote = zvfs_get_fd_obj(spair->remote, (const struct fd_op_vtable *)&spair_fd_op_vtable,
++				 0);
++
++	if (how != ZSOCK_SHUT_WR) {
++		spair->flags |= SPAIR_FLAG_SHUT_RD;
++		ring_buf_reset(&spair->recv_q);
++		(void)k_poll_signal_raise(&spair->readable, SPAIR_SIG_DATA);
++		if (remote != NULL) {
++			(void)k_poll_signal_raise(&remote->writeable, SPAIR_SIG_CANCEL);
++		}
++	}
++
++	if (how != ZSOCK_SHUT_RD) {
++		spair->flags |= SPAIR_FLAG_SHUT_WR;
++		if (remote != NULL) {
++			(void)k_poll_signal_raise(&remote->readable, SPAIR_SIG_DATA);
++		}
++	}
++
++	k_sem_give(&spair->sem);
++
++	return 0;
++}
++
+ static const struct socket_op_vtable spair_fd_op_vtable = {
+ 	.fd_vtable = {
+ 		.read = spair_read,
+@@ -1184,6 +1241,7 @@ static const struct socket_op_vtable spair_fd_op_vtable = {
+ 		.close2 = spair_close,
+ 		.ioctl = spair_ioctl,
+ 	},
++	.shutdown = spair_shutdown,
+ 	.bind = spair_bind,
+ 	.connect = spair_connect,
+ 	.listen = spair_listen,
+diff --git a/tests/net/socket/socketpair/src/shutdown.c b/tests/net/socket/socketpair/src/shutdown.c
+new file mode 100644
+--- /dev/null
++++ b/tests/net/socket/socketpair/src/shutdown.c
+@@ -0,0 +1,65 @@
++/*
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include "_main.h"
++
++ZTEST_USER_F(net_socketpair, test_shutdown_write)
++{
++	char buf[8];
++
++	for (size_t i = 0; i < 2; ++i) {
++		int w = fixture->sv[i];
++		int r = fixture->sv[(!i) & 1];
++
++		zassert_equal(zsock_send(w, "xx", 2, 0), 2, "send() failed: %d", errno);
++		zassert_ok(zsock_shutdown(w, ZSOCK_SHUT_WR), "shutdown() failed: %d", errno);
++
++		/* writes on the shut down side fail */
++		zassert_equal(zsock_send(w, "x", 1, 0), -1, "expected send() to fail");
++		zassert_equal(errno, EPIPE, "errno: expected EPIPE, actual %d", errno);
++
++		/* the other side drains what was sent, then reads end-of-file */
++		zassert_equal(zsock_recv(r, buf, sizeof(buf), 0), 2, "recv() failed: %d", errno);
++		zassert_equal(zsock_recv(r, buf, sizeof(buf), 0), 0, "expected end-of-file");
++
++		/* and may still write the other way */
++		zassert_equal(zsock_send(r, "y", 1, 0), 1, "send() failed: %d", errno);
++		zassert_equal(zsock_recv(w, buf, sizeof(buf), 0), 1, "recv() failed: %d", errno);
++
++		/* a fresh pair for the other direction */
++		zassert_ok(zsock_close(fixture->sv[0]));
++		zassert_ok(zsock_close(fixture->sv[1]));
++		zassert_ok(zsock_socketpair(NET_AF_UNIX, NET_SOCK_STREAM, 0, fixture->sv),
++			   "socketpair() failed: %d", errno);
++	}
++}
++
++ZTEST_USER_F(net_socketpair, test_shutdown_read)
++{
++	char buf[8];
++
++	for (size_t i = 0; i < 2; ++i) {
++		int r = fixture->sv[i];
++		int w = fixture->sv[(!i) & 1];
++
++		zassert_equal(zsock_send(w, "xx", 2, 0), 2, "send() failed: %d", errno);
++		zassert_ok(zsock_shutdown(r, ZSOCK_SHUT_RD), "shutdown() failed: %d", errno);
++
++		/* pending data is dropped and reads report end-of-file */
++		zassert_equal(zsock_recv(r, buf, sizeof(buf), 0), 0, "expected end-of-file");
++
++		/* the other side can no longer write to it */
++		zassert_equal(zsock_send(w, "x", 1, 0), -1, "expected send() to fail");
++		zassert_equal(errno, EPIPE, "errno: expected EPIPE, actual %d", errno);
++
++		zassert_ok(zsock_close(fixture->sv[0]));
++		zassert_ok(zsock_close(fixture->sv[1]));
++		zassert_ok(zsock_socketpair(NET_AF_UNIX, NET_SOCK_STREAM, 0, fixture->sv),
++			   "socketpair() failed: %d", errno);
++	}
++
++	zassert_equal(zsock_shutdown(fixture->sv[0], 42), -1, "expected shutdown() to fail");
++	zassert_equal(errno, EINVAL, "errno: expected EINVAL, actual %d", errno);
++}
