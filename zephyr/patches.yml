@@ -1932,6 +1932,28 @@ patches:
       allocation failure for the kernel copy of the option is ENOMEM rather
       than an oops, and a getsockopt() buffer the caller may not write is
       EFAULT (it was a negative errno value).
+  - path: zephyr/net-connect-unspecified-is-local.patch
+    sha256sum: b86ec476d3d338c5626d49b7b22b58bc97b979a90b063e43094bd0505dbe93a7
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-02
+    upstreamable: true
+    comments: |
+      A TCP connect or a UDP send to the unspecified address (0.0.0.0 or
+      ::) names the local host, as on Linux and BSD, instead of being
+      routed to the default interface and timing out (TCP) or failing with
+      EDESTADDRREQ (UDP). The connect resolves it to the loopback address
+      in the context's remote address, and the TCP layer is handed that
+      resolved address rather than the caller's; a datagram send resolves
+      it in a local copy of the destination. Tested on both families in
+      tests/net/socket/tcp and tests/net/socket/udp; the two TCP tests add
+      twelve seconds to a suite that ran within ten of its budget, so its
+      timeout grows to 240 s.
+      The v4-mapped unwrap and both resolutions share one buffer, so the
+      frame of context_sendto() grows by one struct net_sockaddr_in6 less
+      a struct net_sockaddr_in rather than by both resolved copies.
+
   - path: zephyr/libc-signal-h-pthread-kill.patch
     sha256sum: 9db8dc468a348bb0603646373dbe308174a5711ddbcfd454197b47f18992eb48
     module: zephyr

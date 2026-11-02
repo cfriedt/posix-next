@@ -53,8 +53,20 @@ ZTEST_USER(posix_networking, test_connect)
 	uint16_t port;
 	int lsock = tcp_listen_socket(&port);
 	int csock = tcp_connect_socket(port);
+	struct sockaddr_in any;
+	int asock;
 
 	close(csock);
+	close(lsock);
+
+	/* the unspecified address names the local host */
+	lsock = tcp_listen_socket(&port);
+	prepare_sockaddr_in(&any, port);
+	any.sin_addr.s_addr = htonl(INADDR_ANY);
+	asock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	zassert_true(asock >= 0);
+	zassert_ok(connect(asock, (struct sockaddr *)&any, sizeof(any)), "errno %d", errno);
+	close(asock);
 	close(lsock);
 }
 
@@ -136,6 +148,25 @@ ZTEST_USER(posix_networking, test_shutdown)
 	close(lsock);
 }
 
+static void getsockname_truncates(void)
+{
+	uint16_t port;
+	int lsock = tcp_listen_socket(&port);
+	struct sockaddr_in addr;
+	socklen_t len = sizeof(sa_family_t);
+
+	/* a shorter buffer takes that much of the address and learns the full length */
+	memset(&addr, 0xff, sizeof(addr));
+	zassert_ok(getsockname(lsock, (struct sockaddr *)&addr, &len));
+	zassert_equal(len, sizeof(addr));
+	zassert_equal(addr.sin_family, AF_INET);
+	zassert_equal(addr.sin_port, 0xffff);
+	len = 0;
+	zassert_ok(getsockname(lsock, (struct sockaddr *)&addr, &len));
+	zassert_equal(len, sizeof(addr));
+	close(lsock);
+}
+
 ZTEST_USER(posix_networking, test_getsockname)
 {
 	uint16_t port;
@@ -147,6 +178,8 @@ ZTEST_USER(posix_networking, test_getsockname)
 	zassert_equal(addr.sin_family, AF_INET);
 	zassert_equal(ntohs(addr.sin_port), port);
 	close(lsock);
+
+	getsockname_truncates();
 }
 
 ZTEST_USER(posix_networking, test_getpeername)

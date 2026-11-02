@@ -1,0 +1,183 @@
+diff --git a/subsys/net/ip/net_context.c b/subsys/net/ip/net_context.c
+--- a/subsys/net/ip/net_context.c
++++ b/subsys/net/ip/net_context.c
+@@ -1500,6 +1500,12 @@ int net_context_connect(struct net_context *context,
+ 		memcpy(&addr6->sin6_addr, &net_sin6(addr)->sin6_addr,
+ 		       sizeof(struct net_in6_addr));
+ 
++		if (net_context_get_proto(context) == NET_IPPROTO_TCP &&
++		    net_ipv6_is_addr_unspecified(&addr6->sin6_addr)) {
++			/* the unspecified address names the local host, as on Linux */
++			net_ipaddr_copy(&addr6->sin6_addr, &net_in6addr_loopback);
++		}
++
+ 		addr6->sin6_port = net_sin6(addr)->sin6_port;
+ 		addr6->sin6_family = NET_AF_INET6;
+ 
+@@ -1554,6 +1560,12 @@ int net_context_connect(struct net_context *context,
+ 		memcpy(&addr4->sin_addr, &net_sin(addr)->sin_addr,
+ 		       sizeof(struct net_in_addr));
+ 
++		if (net_context_get_proto(context) == NET_IPPROTO_TCP &&
++		    net_ipv4_is_addr_unspecified(&addr4->sin_addr)) {
++			/* the unspecified address names the local host, as on Linux */
++			addr4->sin_addr = (struct net_in_addr)NET_INADDR_LOOPBACK_INIT;
++		}
++
+ 		addr4->sin_port = net_sin(addr)->sin_port;
+ 		addr4->sin_family = NET_AF_INET;
+ 
+@@ -1610,7 +1622,8 @@ int net_context_connect(struct net_context *context,
+ 		   net_context_get_type(context) == NET_SOCK_STREAM) {
+ 		NET_ASSERT(laddr != NULL);
+ 
+-		ret = net_tcp_connect(context, addr, laddr, rport, lport,
++		/* the remote address as resolved above, not as given */
++		ret = net_tcp_connect(context, &context->remote, laddr, rport, lport,
+ 				      timeout, cb, user_data);
+ 	} else {
+ 		ret = -ENOTSUP;
+@@ -2978,7 +2991,13 @@ static int context_sendto(struct net_context *context,
+ 	const struct net_msghdr *msghdr = NULL;
+ 	struct net_if *iface = NULL;
+ 	struct net_pkt *pkt = NULL;
+-	struct net_sockaddr_in mapped;
++	/* a v4-mapped v6 destination unwrapped, or the unspecified address resolved to
++	 * the local host, used after the block that fills it
++	 */
++	union {
++		struct net_sockaddr_in in;
++		struct net_sockaddr_in6 in6;
++	} local;
+ 	bool dont_fragment = COND_CASE_1(CONFIG_NET_IPV4, (context->options.dont_fragment),
+ 					 CONFIG_NET_IPV6, (context->options.dont_fragment),
+ 					 (false));
+@@ -3054,7 +3073,11 @@ static int context_sendto(struct net_context *context,
+ 		}
+ 
+ 		if (net_ipv6_is_addr_unspecified(&addr6->sin6_addr)) {
+-			return -EDESTADDRREQ;
++			/* the unspecified address names the local host, as on Linux */
++			local.in6 = *addr6;
++			net_ipaddr_copy(&local.in6.sin6_addr, &net_in6addr_loopback);
++			addr6 = &local.in6;
++			dst_addr = (const struct net_sockaddr *)&local.in6;
+ 		}
+ 
+ 		if (IS_ENABLED(CONFIG_NET_UDP) &&
+@@ -3118,11 +3141,11 @@ static int context_sendto(struct net_context *context,
+ 		    net_ipv6_addr_is_v4_mapped(&net_sin6(dst_addr)->sin6_addr)) {
+ 			struct net_sockaddr_in6 *addr6 = (struct net_sockaddr_in6 *)dst_addr;
+ 
+-			mapped.sin_port = addr6->sin6_port;
+-			mapped.sin_family = NET_AF_INET;
+-			net_ipaddr_copy(&mapped.sin_addr,
++			local.in.sin_port = addr6->sin6_port;
++			local.in.sin_family = NET_AF_INET;
++			net_ipaddr_copy(&local.in.sin_addr,
+ 					(struct net_in_addr *)(&addr6->sin6_addr.s6_addr32[3]));
+-			addr4 = &mapped;
++			addr4 = &local.in;
+ 
+ 			/* For sendmsg(), the dst_addr is NULL so set it here.
+ 			 */
+@@ -3134,7 +3157,13 @@ static int context_sendto(struct net_context *context,
+ 		}
+ 
+ 		if (!addr4->sin_addr.s_addr) {
+-			return -EDESTADDRREQ;
++			/* the unspecified address names the local host, as on Linux */
++			if (addr4 != &local.in) {
++				local.in = *addr4;
++			}
++			local.in.sin_addr = (struct net_in_addr)NET_INADDR_LOOPBACK_INIT;
++			addr4 = &local.in;
++			dst_addr = (const struct net_sockaddr *)&local.in;
+ 		}
+ 
+ 		if (IS_ENABLED(CONFIG_NET_UDP) &&
+diff --git a/tests/net/socket/tcp/src/main.c b/tests/net/socket/tcp/src/main.c
+--- a/tests/net/socket/tcp/src/main.c
++++ b/tests/net/socket/tcp/src/main.c
+@@ -341,6 +341,69 @@ ZTEST_USER(net_socket_tcp, test_v6_send_recv)
+ 	k_sleep(TCP_TEARDOWN_TIMEOUT);
+ }
+ 
++static void test_connect_unspecified_common(int family)
++{
++	/* The unspecified address names the local host, as on Linux. */
++	int c_sock;
++	int s_sock;
++	int new_sock;
++	struct net_sockaddr_in c_saddr;
++	struct net_sockaddr_in s_saddr;
++	struct net_sockaddr_in6 c_saddr6;
++	struct net_sockaddr_in6 s_saddr6;
++	struct net_sockaddr_storage any_saddr;
++	struct net_sockaddr *s_addr;
++	net_socklen_t s_addrlen;
++	struct net_sockaddr addr;
++	net_socklen_t addrlen = sizeof(addr);
++
++	if (family == NET_AF_INET) {
++		prepare_sock_tcp_v4(MY_IPV4_ADDR, ANY_PORT, &c_sock, &c_saddr);
++		prepare_sock_tcp_v4(MY_IPV4_ADDR, SERVER_PORT, &s_sock, &s_saddr);
++		s_addr = (struct net_sockaddr *)&s_saddr;
++		s_addrlen = sizeof(s_saddr);
++	} else {
++		prepare_sock_tcp_v6(MY_IPV6_ADDR, ANY_PORT, &c_sock, &c_saddr6);
++		prepare_sock_tcp_v6(MY_IPV6_ADDR, SERVER_PORT, &s_sock, &s_saddr6);
++		s_addr = (struct net_sockaddr *)&s_saddr6;
++		s_addrlen = sizeof(s_saddr6);
++	}
++
++	/* the server's address with the host part left unspecified */
++	memset(&any_saddr, 0, sizeof(any_saddr));
++	memcpy(&any_saddr, s_addr, s_addrlen);
++	if (family == NET_AF_INET) {
++		net_sin((struct net_sockaddr *)&any_saddr)->sin_addr.s_addr = 0;
++	} else {
++		net_ipaddr_copy(&net_sin6((struct net_sockaddr *)&any_saddr)->sin6_addr,
++				&net_in6addr_any);
++	}
++
++	test_bind(s_sock, s_addr, s_addrlen);
++	test_listen(s_sock);
++
++	test_connect(c_sock, (struct net_sockaddr *)&any_saddr, s_addrlen);
++	test_accept(s_sock, &new_sock, &addr, &addrlen);
++
++	test_close(c_sock);
++	test_eof(new_sock);
++
++	test_close(new_sock);
++	test_close(s_sock);
++
++	k_sleep(TCP_TEARDOWN_TIMEOUT);
++}
++
++ZTEST_USER(net_socket_tcp, test_v4_connect_unspecified)
++{
++	test_connect_unspecified_common(NET_AF_INET);
++}
++
++ZTEST_USER(net_socket_tcp, test_v6_connect_unspecified)
++{
++	test_connect_unspecified_common(NET_AF_INET6);
++}
++
+ static void test_recv_before_eof_common(int family)
+ {
+ 	/* Data received before the peer gracefully closes the connection should
+diff --git a/tests/net/socket/tcp/tests.yaml b/tests/net/socket/tcp/tests.yaml
+--- a/tests/net/socket/tcp/tests.yaml
++++ b/tests/net/socket/tcp/tests.yaml
+@@ -7,7 +7,7 @@
+     - socket
+     - userspace
+   filter: CONFIG_FULL_LIBC_SUPPORTED
+-  timeout: 180
++  timeout: 240
+ tests:
+   net.socket.tcp:
+     extra_configs:
