@@ -11,6 +11,24 @@
 
 #include "test_net.h"
 
+static void socket_exhausted(void)
+{
+	int socks[CONFIG_NET_MAX_CONTEXTS + 1];
+	int n;
+
+	for (n = 0; n < ARRAY_SIZE(socks); n++) {
+		socks[n] = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+		if (socks[n] < 0) {
+			break;
+		}
+	}
+	zassert_true(n < ARRAY_SIZE(socks), "every socket was created");
+	zassert_equal(errno, ENOBUFS);
+	while (n-- > 0) {
+		close(socks[n]);
+	}
+}
+
 ZTEST_USER(posix_networking, test_socket)
 {
 	int sock;
@@ -22,6 +40,12 @@ ZTEST_USER(posix_networking, test_socket)
 	errno = 0;
 	zassert_equal(socket(99, SOCK_STREAM, IPPROTO_TCP), -1);
 	zassert_equal(errno, EAFNOSUPPORT);
+
+	/* out of contexts is the resource error, as on Linux */
+	/* CONFIG_NET_MAX_CONTEXTS bounds Zephyr's sockets; the host has no such limit */
+	if (!IS_ENABLED(CONFIG_NATIVE_LIBC)) {
+		socket_exhausted();
+	}
 }
 
 ZTEST_USER(posix_networking, test_bind)
