@@ -1917,6 +1917,21 @@ patches:
       + sendto() of a bare ICMP echo works as on other systems. The
       af_inet_raw test sets the option where it supplies headers and gains
       stack-built-header and option round-trip cases.
+  - path: zephyr/zsock-sockopt-length-checks.patch
+    sha256sum: 15e7b9d5d5f9a2a0f2dc651a270c78bf8d958c34ac0d3744fe3356dfdc067b29
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-02
+    upstreamable: true
+    comments: |
+      The socket option syscall verifiers reject a negative option length
+      with EINVAL before looking at the memory it describes, as Linux does.
+      setsockopt(..., (socklen_t)-1) from user mode tripped the verifier's
+      memory check and oopsed the caller instead of failing the call. An
+      allocation failure for the kernel copy of the option is ENOMEM rather
+      than an oops, and a getsockopt() buffer the caller may not write is
+      EFAULT (it was a negative errno value).
   - path: zephyr/libc-signal-h-pthread-kill.patch
     sha256sum: 9db8dc468a348bb0603646373dbe308174a5711ddbcfd454197b47f18992eb48
     module: zephyr
