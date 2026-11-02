@@ -1985,6 +1985,20 @@ patches:
       the code net_context_get() uses for "none found". POSIX and Linux
       report a resource error there, ENOBUFS. The POSIX networking tests
       cover it by opening sockets until one fails.
+  - path: zephyr/net-socketpair-shutdown.patch
+    sha256sum: aa2392cfcf1887e16c40d3f8c0d0a54a92a6b04a4b3545e77afbe148e6dbcf69
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-02
+    upstreamable: true
+    comments: |
+      socketpair ends support shutdown(). Shutting down for reading drops
+      pending data, makes further reads report end-of-file and the peer's
+      writes fail with EPIPE; shutting down for writing fails further writes
+      with EPIPE and lets the peer read end-of-file once it has drained what
+      was sent. Blocked readers and writers on either end wake to find that
+      out. tests/net/socket/socketpair covers both directions.
   - path: zephyr/libc-signal-h-pthread-kill.patch
     sha256sum: 9db8dc468a348bb0603646373dbe308174a5711ddbcfd454197b47f18992eb48
     module: zephyr
