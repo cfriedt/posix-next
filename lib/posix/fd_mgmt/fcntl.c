@@ -10,6 +10,7 @@
 #include <stdint.h>
 
 #include <zephyr/sys/check.h>
+#include <zephyr/sys/copy_checked.h>
 #include <zephyr/sys/fdtable.h>
 #include <zephyr/sys/zvfs.h>
 
@@ -237,17 +238,22 @@ int fcntl(int fd, int cmd, ...)
 	case ZVFS_F_GETLK:
 	case ZVFS_F_SETLK:
 	case ZVFS_F_SETLKW: {
-		struct flock *posix_lock = va_arg(args, struct flock *);
+		struct flock *user_lock = va_arg(args, struct flock *);
+		struct flock posix_lock;
 		struct zvfs_flock zvfs_lock;
 
 		va_end(args);
 
-		if (posix_lock == NULL) {
+		if (user_lock == NULL) {
 			errno = EINVAL;
 			return -1;
 		}
 
-		ret = fcntl_posix_to_zvfs_flock(posix_lock, &zvfs_lock);
+		/* a lock description the caller may not access is EFAULT, as from a kernel copy */
+		ret = sys_copy_checked(&posix_lock, user_lock, sizeof(posix_lock));
+		if (ret == 0) {
+			ret = fcntl_posix_to_zvfs_flock(&posix_lock, &zvfs_lock);
+		}
 		if (ret < 0) {
 			errno = -ret;
 			return -1;
@@ -257,7 +263,10 @@ int fcntl(int fd, int cmd, ...)
 			return -1;
 		}
 		if (zvfs_cmd == ZVFS_F_GETLK) {
-			ret = fcntl_zvfs_to_posix_flock(&zvfs_lock, posix_lock);
+			ret = fcntl_zvfs_to_posix_flock(&zvfs_lock, &posix_lock);
+			if (ret == 0) {
+				ret = sys_copy_checked(user_lock, &posix_lock, sizeof(posix_lock));
+			}
 			if (ret < 0) {
 				errno = -ret;
 				return -1;

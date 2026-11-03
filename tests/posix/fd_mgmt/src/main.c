@@ -115,6 +115,27 @@ ZTEST_USER(posix_fd_mgmt, test_dup2)
 	zassert_ok(close(efd));
 }
 
+#if !defined(CONFIG_NATIVE_LIBC) && defined(F_SETLK)
+/* outside every user partition: a user-mode caller may not access it */
+static struct flock kernel_only_lock;
+
+/* a lock description the caller may not access fails with EFAULT, not a fault */
+static void fcntl_lock_efault(int fd)
+{
+	if (!k_is_user_context()) {
+		return;
+	}
+
+	errno = 0;
+	zassert_equal(fcntl(fd, F_SETLK, &kernel_only_lock), -1);
+	zassert_equal(errno, EFAULT, "errno %d", errno);
+
+	errno = 0;
+	zassert_equal(fcntl(fd, F_GETLK, &kernel_only_lock), -1);
+	zassert_equal(errno, EFAULT, "errno %d", errno);
+}
+#endif /* !CONFIG_NATIVE_LIBC && F_SETLK */
+
 ZTEST_USER(posix_fd_mgmt, test_fcntl)
 {
 	eventfd_t val = 42;
@@ -221,6 +242,7 @@ ZTEST_USER(posix_fd_mgmt, test_fcntl)
 		zassert_equal(fl.l_type, F_UNLCK);
 
 		zassert_ok(close(dupfd));
+		fcntl_lock_efault(file_fd);
 	}
 #endif /* !CONFIG_NATIVE_LIBC && F_SETLK */
 
