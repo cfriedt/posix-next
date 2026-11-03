@@ -179,12 +179,65 @@ static void ksigset_to_posix(sigset_t *dst, const struct k_sig_set *ksrc)
 	}
 }
 
+#if defined(CONFIG_SIGNAL_FAULT) && defined(SEGV_MAPERR)
+/* a K_SEGV_* .. K_TRAP_* code of a fault-generated signal as its POSIX counterpart */
+static int fault_code_to_posix(int ksigno, int code)
+{
+	static const int ill[] = {ILL_ILLOPC, ILL_ILLOPN, ILL_ILLADR, ILL_ILLTRP,
+				  ILL_PRVOPC, ILL_PRVREG, ILL_COPROC, ILL_BADSTK};
+	static const int fpe[] = {FPE_INTDIV, FPE_INTOVF, FPE_FLTDIV, FPE_FLTOVF,
+				  FPE_FLTUND, FPE_FLTRES, FPE_FLTINV, FPE_FLTSUB};
+	static const int segv[] = {SEGV_MAPERR, SEGV_ACCERR};
+	static const int bus[] = {BUS_ADRALN, BUS_ADRERR, BUS_OBJERR};
+#ifdef TRAP_BRKPT
+	static const int trap[] = {TRAP_BRKPT, TRAP_TRACE};
+#endif
+	const int *map = NULL;
+	size_t n = 0;
+
+	switch (ksigno) {
+	case K_SIG_ILL:
+		map = ill;
+		n = ARRAY_SIZE(ill);
+		break;
+	case K_SIG_FPE:
+		map = fpe;
+		n = ARRAY_SIZE(fpe);
+		break;
+	case K_SIG_SEGV:
+		map = segv;
+		n = ARRAY_SIZE(segv);
+		break;
+	case K_SIG_BUS:
+		map = bus;
+		n = ARRAY_SIZE(bus);
+		break;
+#ifdef TRAP_BRKPT
+	case K_SIG_TRAP:
+		map = trap;
+		n = ARRAY_SIZE(trap);
+		break;
+#endif
+	default:
+		break;
+	}
+
+	return ((code > 0) && ((size_t)code <= n)) ? map[code - 1] : z_si_code_to_posix(code);
+}
+#endif /* CONFIG_SIGNAL_FAULT && SEGV_MAPERR */
+
 static void kinfo_to_siginfo(siginfo_t *dst, const struct k_sig_info *src, int signo)
 {
 	*dst = (siginfo_t){0};
 	dst->si_signo = signo;
 	dst->si_code = z_si_code_to_posix(src->code);
 	dst->si_value.sival_ptr = src->value.sival_ptr;
+#ifdef CONFIG_SIGNAL_FAULT
+	dst->si_addr = src->addr;
+#ifdef SEGV_MAPERR
+	dst->si_code = fault_code_to_posix(src->signo, src->code);
+#endif
+#endif /* CONFIG_SIGNAL_FAULT */
 #ifdef CONFIG_PROCESS
 	/* identity handle -> numeric id; 0 if the child was already reaped */
 	dst->si_pid = (pid_t)MAX(sys_process_id(src->pid), 0);
