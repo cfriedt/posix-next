@@ -3669,6 +3669,24 @@ patches:
       in force for the claiming thread, decrements the counter matching
       the entry's scope, and z_sig_handle() includes process and system
       scope in its entry gate.
+  - path: zephyr/k-signal-fault.patch
+    sha256sum: 8264466eeca1d3d247c73b2a9ebcac9b366c635b1cb87f62740acce4c2f51b86
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-03
+    upstreamable: true
+    comments: |
+      A fault a user thread takes generates a signal for it (SIGSEGV, SIGBUS,
+      SIGILL, SIGFPE, SIGTRAP with the Linux si_code and si_addr) instead of
+      a fatal error. The arch records the fault and resumes the thread in a
+      stack-free user-mode stub whose k_sig_fault() system call either runs
+      the handler on the return path or, for a blocked, ignored or default
+      disposition or a fault inside a handler, ends the process with the
+      signal in thread context. A returning handler ends the process (POSIX
+      leaves it undefined). Kernel-reserved processes without a handler keep
+      the fatal-error path. arm64 first. The picolibc signal.h shim numbers
+      si_code as Linux does. tests/kernel/signal test_k_sig_fault.
   - path: zephyr/libc-sys-stat-utime-markers.patch
     sha256sum: 8edfcf83058522bb80d601e92c4a9e6be14baec04cf8253ffbd344fbadf05b78
     module: zephyr

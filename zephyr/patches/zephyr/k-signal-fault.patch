@@ -1,0 +1,599 @@
+diff --git a/arch/Kconfig b/arch/Kconfig
+--- a/arch/Kconfig
++++ b/arch/Kconfig
+@@ -55,6 +55,7 @@ config ARM
+ config ARM64
+ 	bool
+ 	select ARCH_IS_SET
++	select ARCH_HAS_SIGNAL_FAULT if USERSPACE
+ 	select ARCH_HAS_STACK_JUMP
+ 	select 64BIT
+ 	select ARCH_HAS_FWARGS_HANDLER_HOOK
+@@ -1103,6 +1104,12 @@ config ARCH_SUPPORTS_USERSPACE_SIGNALS
+ 	help
+ 	  Enabled when the architecture supports userspace signal handling.
+ 
++config ARCH_HAS_SIGNAL_FAULT
++	bool
++	help
++	  The architecture classifies a fault taken in user mode as a signal and
++	  resumes the thread in z_sig_fault_entry() (see @kconfig{CONFIG_SIGNAL_FAULT}).
++
+ #
+ # Other architecture related options
+ #
+diff --git a/arch/arm64/core/fatal.c b/arch/arm64/core/fatal.c
+--- a/arch/arm64/core/fatal.c
++++ b/arch/arm64/core/fatal.c
+@@ -602,6 +602,83 @@ static void dump_ptable_walk(uintptr_t addr)
+ }
+ #endif
+ 
++#ifdef CONFIG_SIGNAL_FAULT
++/* PSTATE.BTYPE: the resume in z_sig_fault_entry() is not a branch */
++#define SPSR_BTYPE_MASK (3ULL << 10)
++
++/* a fault taken at EL0 generates the signal Linux generates for it */
++static bool user_fault_signal(struct arch_esf *esf, uint64_t esr, uint64_t far)
++{
++	int signo = K_SIG_SEGV;
++	int code;
++	void *addr = (void *)far;
++	uint64_t fsc = esr & 0x3fULL;
++
++	switch (GET_ESR_EC(esr)) {
++	case 0x20: /* instruction abort */
++	case 0x24: /* data abort */
++		if (fsc == 0x21U) {
++			signo = K_SIG_BUS;
++			code = K_BUS_ADRALN;
++		} else if (fsc == 0x10U) {
++			signo = K_SIG_BUS;
++			code = K_BUS_OBJERR;
++		} else {
++			/* address size and translation faults: nothing mapped there */
++			code = (fsc < 0x08U) ? K_SEGV_MAPERR : K_SEGV_ACCERR;
++		}
++		break;
++	case 0x22: /* PC alignment */
++		signo = K_SIG_BUS;
++		code = K_BUS_ADRALN;
++		break;
++	case 0x26: /* SP alignment */
++		signo = K_SIG_BUS;
++		code = K_BUS_ADRALN;
++		addr = (void *)read_sp_el0();
++		break;
++	case 0x00: /* unknown reason: an undefined instruction */
++	case 0x0d: /* branch target identification */
++	case 0x18: /* trapped system register access */
++		signo = K_SIG_ILL;
++		code = K_ILL_ILLOPC;
++		addr = (void *)esf->elr;
++		break;
++	case 0x0e: /* illegal execution state */
++		signo = K_SIG_ILL;
++		code = K_ILL_ILLOPN;
++		addr = (void *)esf->elr;
++		break;
++	case 0x15: /* an SVC that is not a system call */
++		signo = K_SIG_ILL;
++		code = K_ILL_ILLTRP;
++		addr = (void *)esf->elr;
++		break;
++	case 0x2c: /* trapped floating-point exception */
++		signo = K_SIG_FPE;
++		code = K_FPE_FLTINV;
++		addr = (void *)esf->elr;
++		break;
++	case 0x3c: /* BRK */
++		signo = K_SIG_TRAP;
++		code = K_TRAP_BRKPT;
++		addr = (void *)esf->elr;
++		break;
++	default:
++		return false;
++	}
++
++	if (!z_sig_fault(signo, code, addr)) {
++		return false;
++	}
++
++	esf->elr = (uint64_t)(uintptr_t)z_sig_fault_entry;
++	esf->spsr &= ~SPSR_BTYPE_MASK;
++
++	return true;
++}
++#endif /* CONFIG_SIGNAL_FAULT */
++
+ void z_arm64_fatal_error(unsigned int reason, struct arch_esf *esf)
+ {
+ 	uint64_t esr = 0;
+@@ -651,6 +728,14 @@ void z_arm64_fatal_error(unsigned int reason, struct arch_esf *esf)
+ 			return;
+ 		}
+ 
++#ifdef CONFIG_SIGNAL_FAULT
++		if (((reason == K_ERR_CPU_EXCEPTION) || (reason == K_ERR_STACK_CHK_FAIL)) &&
++		    (esf != NULL) && ((esf->spsr & SPSR_MODE_MASK) == 0U) &&
++		    user_fault_signal(esf, esr, far)) {
++			return;
++		}
++#endif /* CONFIG_SIGNAL_FAULT */
++
+ 		if (GET_EL(el) != MODE_EL0) {
+ #ifdef CONFIG_EXCEPTION_DEBUG
+ 			bool dump_far = false;
+diff --git a/arch/arm64/core/userspace.S b/arch/arm64/core/userspace.S
+--- a/arch/arm64/core/userspace.S
++++ b/arch/arm64/core/userspace.S
+@@ -217,3 +217,15 @@ skip_k_sig_handle:
+ 	/* Return from exception */
+ 	.cfi_endproc
+ 	b	z_arm64_exit_exc
++
++#ifdef CONFIG_SIGNAL_FAULT
++/*
++ * A thread that faulted in user mode resumes here, in user mode. Nothing touches the stack: the
++ * fault may have been on it.
++ */
++GTEXT(z_sig_fault_entry)
++SECTION_FUNC(TEXT, z_sig_fault_entry)
++	mov	x8, #K_SYSCALL_K_SIG_FAULT
++	svc	#_SVC_CALL_SYSTEM_CALL
++	b	z_sig_fault_entry
++#endif /* CONFIG_SIGNAL_FAULT */
+diff --git a/include/zephyr/kernel.h b/include/zephyr/kernel.h
+--- a/include/zephyr/kernel.h
++++ b/include/zephyr/kernel.h
+@@ -8299,6 +8299,14 @@ __syscall void k_sig_current(struct k_sig_info *info, struct k_sig_action *actio
+  * application code.
+  */
+ __syscall void k_sig_return(void);
++
++#ifdef CONFIG_SIGNAL_FAULT
++/*
++ * Used exclusively by z_sig_fault_entry(), where a fault taken in user mode resumes the
++ * thread: delivers the signal the fault generated, or ends the process with it.
++ */
++__syscall void k_sig_fault(void);
++#endif /* CONFIG_SIGNAL_FAULT */
+ /** @endcond */
+ #endif
+ #if defined(CONFIG_THREAD_CANCEL) || defined(__DOXYGEN__)
+diff --git a/include/zephyr/kernel/signal.h b/include/zephyr/kernel/signal.h
+--- a/include/zephyr/kernel/signal.h
++++ b/include/zephyr/kernel/signal.h
+@@ -120,6 +120,10 @@ struct k_sig_info {
+ 	/** Wait status of the child, in the K_WSTATUS_* encoding (@ref K_SIG_CHLD) */
+ 	int status;
+ #endif /* CONFIG_PROCESS */
++#ifdef CONFIG_SIGNAL_FAULT
++	/** Faulting data address of a memory fault, else the faulting instruction */
++	void *addr;
++#endif /* CONFIG_SIGNAL_FAULT */
+ #ifdef CONFIG_TIMER_SIGNAL
+ 	/**
+ 	 * Timer that generated this signal (@ref K_SI_TIMER), as an opaque identifier
+@@ -182,6 +186,12 @@ struct k_sig_ctx {
+ 	struct k_sig_action action; /**< Action for a signal being handled */
+ 	/** A handler is in progress: further deliveries wait for @ref k_sig_return */
+ 	bool handling;
++#ifdef CONFIG_SIGNAL_FAULT
++	/** K_SIG_FAULT_* progress of a fault this thread took in user mode */
++	uint8_t fault;
++	/** The signal that fault generated */
++	uint8_t fault_signo;
++#endif /* CONFIG_SIGNAL_FAULT */
+ #if defined(CONFIG_SYSCALL_RETURN_HOOK) && defined(CONFIG_USERSPACE)
+ 	struct arch_sig_ctx user; /**< Arch-specific userspace context for signal being handled */
+ #endif
+@@ -244,6 +254,31 @@ struct k_sig_ctx {
+ #define K_SI_CLD_TRAPPED 4 /**< Traced child has trapped */
+ #define K_SI_CLD_STOPPED 5 /**< Child has stopped */
+ #define K_SI_CLD_CONTINUED 6 /**< Stopped child has continued */
++
++/* Codes of the signals a fault generates (see @kconfig{CONFIG_SIGNAL_FAULT}), per signal */
++#define K_SEGV_MAPERR 1 /**< Address not mapped */
++#define K_SEGV_ACCERR 2 /**< Invalid permissions for a mapped address */
++#define K_BUS_ADRALN 1 /**< Invalid address alignment */
++#define K_BUS_ADRERR 2 /**< Nonexistent physical address */
++#define K_BUS_OBJERR 3 /**< Object-specific hardware error */
++#define K_ILL_ILLOPC 1 /**< Illegal opcode */
++#define K_ILL_ILLOPN 2 /**< Illegal operand */
++#define K_ILL_ILLADR 3 /**< Illegal addressing mode */
++#define K_ILL_ILLTRP 4 /**< Illegal trap */
++#define K_ILL_PRVOPC 5 /**< Privileged opcode */
++#define K_ILL_PRVREG 6 /**< Privileged register */
++#define K_ILL_COPROC 7 /**< Coprocessor error */
++#define K_ILL_BADSTK 8 /**< Internal stack error */
++#define K_FPE_INTDIV 1 /**< Integer divide by zero */
++#define K_FPE_INTOVF 2 /**< Integer overflow */
++#define K_FPE_FLTDIV 3 /**< Floating-point divide by zero */
++#define K_FPE_FLTOVF 4 /**< Floating-point overflow */
++#define K_FPE_FLTUND 5 /**< Floating-point underflow */
++#define K_FPE_FLTRES 6 /**< Floating-point inexact result */
++#define K_FPE_FLTINV 7 /**< Invalid floating-point operation */
++#define K_FPE_FLTSUB 8 /**< Subscript out of range */
++#define K_TRAP_BRKPT 1 /**< Breakpoint */
++#define K_TRAP_TRACE 2 /**< Trace trap */
+ /**
+  * @}
+  */
+diff --git a/kernel/Kconfig b/kernel/Kconfig
+--- a/kernel/Kconfig
++++ b/kernel/Kconfig
+@@ -852,6 +852,17 @@ config SIGNAL_ACTION_DB_SIZE
+ 	  greater than the SIGNAL_ACTION_DB_SIZE option, then the signal action database size will be
+ 	  assigned the new value.
+ 
++config SIGNAL_FAULT
++	bool "Faults of user threads generate signals"
++	depends on USERSPACE && ARCH_HAS_SIGNAL_FAULT
++	default y
++	help
++	  A memory, instruction or arithmetic fault taken by a user-mode thread generates
++	  K_SIG_SEGV, K_SIG_BUS, K_SIG_ILL, K_SIG_FPE or K_SIG_TRAP for that thread instead of
++	  a fatal error. A handler the thread can take runs on it; otherwise the default action
++	  terminates the thread's process, which its parent sees as killed by that signal. A
++	  thread of a kernel-reserved process without a handler keeps the fatal-error path.
++
+ config SIGNAL_QUEUE_SIZE
+ 	int "Signal queue size"
+ 	range 1 256
+diff --git a/kernel/include/kernel_internal.h b/kernel/include/kernel_internal.h
+--- a/kernel/include/kernel_internal.h
++++ b/kernel/include/kernel_internal.h
+@@ -177,6 +177,9 @@ void z_process_exit_thread(struct k_thread *thread);
+ /* Terminate the calling thread's process with a "killed by signal" wait status */
+ FUNC_NORETURN void z_process_exit_signaled(int sig);
+ 
++/* the calling thread belongs to one of the kernel-reserved processes */
++bool z_process_self_is_reserved(void);
++
+ /*
+  * Release-side providers and the number query, implemented by lib/os. The
+  * kernel never calls an allocator: it hands memory back to the provider that
+@@ -298,6 +301,11 @@ static inline FUNC_NORETURN void z_process_exit_signaled(int sig)
+ 	k_thread_abort(_current);
+ 	CODE_UNREACHABLE;
+ }
++
++static inline bool z_process_self_is_reserved(void)
++{
++	return true;
++}
+ #endif /* CONFIG_PROCESS */
+ 
+ #ifdef CONFIG_PROCESS
+@@ -599,6 +607,22 @@ void z_sig_trampoline(void);
+ #ifdef CONFIG_SIGNAL
+ /* claim the next deliverable signal for the current thread into its context; 1 when claimed */
+ int z_sig_claim(struct k_thread *tid);
++#ifdef CONFIG_SIGNAL_FAULT
++/* fault progress of the current thread (struct k_sig_ctx fault) */
++#define K_SIG_FAULT_NONE      0
++#define K_SIG_FAULT_PENDING   1 /* a handler is to run */
++#define K_SIG_FAULT_DELIVERED 2 /* the handler runs; its return ends the process */
++#define K_SIG_FAULT_FORCED    3 /* the default action ends the process */
++/*
++ * From the arch fault handler, interrupts locked: turn a user-mode fault of the current thread
++ * into a signal. True when the arch is to resume the thread in z_sig_fault_entry().
++ */
++bool z_sig_fault(int signo, int code, void *addr);
++/* a pending fault signal becomes the action being handled; 1 when claimed */
++int z_sig_fault_claim(struct k_thread *tid);
++/* user-mode code a faulting thread resumes in: k_sig_fault(), forever */
++FUNC_NORETURN void z_sig_fault_entry(void);
++#endif /* CONFIG_SIGNAL_FAULT */
+ /* a signal may be deliverable to tid (its own or its process's) */
+ bool z_sig_pending_any(struct k_thread *tid);
+ #endif /* CONFIG_SIGNAL */
+diff --git a/kernel/process.c b/kernel/process.c
+--- a/kernel/process.c
++++ b/kernel/process.c
+@@ -1155,6 +1155,11 @@ void z_impl_k_exit(int code)
+ 	process_exit(K_WSTATUS_EXITED(code));
+ }
+ 
++bool z_process_self_is_reserved(void)
++{
++	return process_is_reserved(process_self());
++}
++
+ void z_process_exit_signaled(int sig)
+ {
+ 	if (process_is_reserved(process_self())) {
+diff --git a/kernel/return_hook.c b/kernel/return_hook.c
+--- a/kernel/return_hook.c
++++ b/kernel/return_hook.c
+@@ -178,6 +178,11 @@ int z_sig_handle(void *user)
+ #ifdef CONFIG_THREAD_CANCEL
+ 	redirect = cancel_redirect(tid, ctx);
+ #endif
++#ifdef CONFIG_SIGNAL_FAULT
++	if (!redirect) {
++		redirect = z_sig_fault_claim(tid) != 0;
++	}
++#endif
+ #ifdef CONFIG_SIGNAL
+ 	if (!redirect) {
+ 		redirect = z_sig_claim(tid) != 0;
+diff --git a/kernel/signal.c b/kernel/signal.c
+--- a/kernel/signal.c
++++ b/kernel/signal.c
+@@ -887,6 +887,9 @@ int z_impl_k_sig_abandon(const struct k_sig_set *mask)
+ 	k_tid_t tid = _current;
+ 
+ 	tid->base.sig.handling = false;
++#ifdef CONFIG_SIGNAL_FAULT
++	tid->base.sig.fault = K_SIG_FAULT_NONE;
++#endif /* CONFIG_SIGNAL_FAULT */
+ 
+ 	if (mask != NULL) {
+ 		tid->base.sig.mask = *mask;
+@@ -1168,6 +1171,80 @@ bool z_sig_pending_any(struct k_thread *tid)
+ 	return anything;
+ }
+ 
++#ifdef CONFIG_SIGNAL_FAULT
++bool z_sig_fault(int signo, int code, void *addr)
++{
++	k_tid_t const tid = _current;
++	struct k_sig_ctx *const ctx = &tid->base.sig;
++	struct k_sig_action act;
++
++	if (k_is_pre_kernel() || ((tid->base.user_options & K_USER) == 0U) ||
++	    (ctx->fault != K_SIG_FAULT_NONE)) {
++		/* a fault on the way to the signal: nothing more can run in user mode */
++		return false;
++	}
++
++	(void)z_sig_action(signo, NULL, &act, tid);
++	if (!ctx->handling && (act.handler != K_SIG_DFL) && (act.handler != K_SIG_IGN) &&
++	    (k_sig_ismember(&ctx->mask, signo) == 0)) {
++		ctx->info = (struct k_sig_info){.signo = signo, .code = code, .addr = addr};
++		ctx->fault = K_SIG_FAULT_PENDING;
++	} else if (!z_process_self_is_reserved()) {
++		/* blocked, ignored or inside a handler: the default action, as on Linux */
++		ctx->fault = K_SIG_FAULT_FORCED;
++	} else {
++		return false;
++	}
++	ctx->fault_signo = (uint8_t)signo;
++
++	return true;
++}
++
++int z_sig_fault_claim(struct k_thread *tid)
++{
++	struct k_sig_ctx *const ctx = &tid->base.sig;
++
++	if (ctx->fault != K_SIG_FAULT_PENDING) {
++		return 0;
++	}
++	ctx->fault = K_SIG_FAULT_DELIVERED;
++
++	(void)z_sig_action(ctx->info.signo, NULL, &ctx->action, tid);
++	if ((ctx->action.handler == K_SIG_DFL) || (ctx->action.handler == K_SIG_IGN)) {
++		/* another member reset the disposition since the fault */
++		z_process_exit_signaled(ctx->info.signo);
++	}
++
++	ctx->restore = ctx->mask;
++	if ((ctx->action.flags & K_SIG_SA_NODEFER) == 0) {
++		k_sig_addset(&ctx->mask, ctx->info.signo);
++	}
++	z_sig_orset(&ctx->mask, &ctx->action.mask);
++
++	return 1;
++}
++
++void z_impl_k_sig_fault(void)
++{
++	struct k_sig_ctx *const ctx = &_current->base.sig;
++
++	if (ctx->fault == K_SIG_FAULT_PENDING) {
++		/* the return from this call runs the handler */
++		return;
++	}
++
++	/* the default action, or the handler returned (undefined for a fault: POSIX) */
++	ctx->fault = K_SIG_FAULT_NONE;
++	z_process_exit_signaled((ctx->fault_signo != 0U) ? ctx->fault_signo : K_SIG_SEGV);
++}
++
++static inline void z_vrfy_k_sig_fault(void)
++{
++	z_impl_k_sig_fault();
++}
++#include <zephyr/syscalls/k_sig_fault_mrsh.c>
++#endif /* CONFIG_SIGNAL_FAULT */
++
+ int z_sig_claim(struct k_thread *tid)
+ {
+ 	struct k_sig_ctx *const ctx = &tid->base.sig;
+diff --git a/kernel/thread.c b/kernel/thread.c
+--- a/kernel/thread.c
++++ b/kernel/thread.c
+@@ -1202,6 +1202,9 @@ void z_init_thread_base(struct _thread_base *thread_base, int priority,
+ #ifdef CONFIG_SYSCALL_RETURN_HOOK
+ 	thread_base->sig.handling = false;
+ #endif
++#ifdef CONFIG_SIGNAL_FAULT
++	thread_base->sig.fault = K_SIG_FAULT_NONE;
++#endif
+ 
+ #ifdef CONFIG_SMP
+ 	thread_base->is_idle = 0;
+diff --git a/lib/libc/picolibc/include/signal.h b/lib/libc/picolibc/include/signal.h
+--- a/lib/libc/picolibc/include/signal.h
++++ b/lib/libc/picolibc/include/signal.h
+@@ -40,6 +40,48 @@ typedef __pid_t pid_t;
+ #define _PID_T_DECLARED
+ #endif
+ 
++/*
++ * si_code values as Linux numbers them, which the kernel's K_SI_* and per-signal fault codes
++ * follow: SI_* zero or negative, the codes of each signal from 1. Picolibc's SI_* are positive
++ * and it defines no fault codes.
++ */
++#undef SI_USER
++#undef SI_QUEUE
++#undef SI_TIMER
++#undef SI_MESGQ
++#undef SI_ASYNCIO
++#define SI_USER    0
++#define SI_QUEUE   (-1)
++#define SI_TIMER   (-2)
++#define SI_MESGQ   (-3)
++#define SI_ASYNCIO (-4)
++
++#define ILL_ILLOPC 1
++#define ILL_ILLOPN 2
++#define ILL_ILLADR 3
++#define ILL_ILLTRP 4
++#define ILL_PRVOPC 5
++#define ILL_PRVREG 6
++#define ILL_COPROC 7
++#define ILL_BADSTK 8
++#define FPE_INTDIV 1
++#define FPE_INTOVF 2
++#define FPE_FLTDIV 3
++#define FPE_FLTOVF 4
++#define FPE_FLTUND 5
++#define FPE_FLTRES 6
++#define FPE_FLTINV 7
++#define FPE_FLTSUB 8
++#define SEGV_MAPERR 1
++#define SEGV_ACCERR 2
++#define BUS_ADRALN 1
++#define BUS_ADRERR 2
++#define BUS_OBJERR 3
++#if defined(_XOPEN_SOURCE) || defined(__DOXYGEN__)
++#define TRAP_BRKPT 1
++#define TRAP_TRACE 2
++#endif
++
+ #if defined(_POSIX_THREADS) || defined(__DOXYGEN__)
+ 
+ /* POSIX requires <signal.h> to declare pthread_t when _POSIX_THREADS is defined */
+diff --git a/tests/kernel/signal/src/main.c b/tests/kernel/signal/src/main.c
+--- a/tests/kernel/signal/src/main.c
++++ b/tests/kernel/signal/src/main.c
+@@ -739,6 +739,115 @@ ZTEST(signal, test_k_sig_alarm)
+ 	k_sig_alarm_owner_exit();
+ }
+ 
++#ifdef CONFIG_SIGNAL_FAULT
++/*
++ * A fault a user thread takes generates a signal for that thread: a handler it can take runs on
++ * it with the fault's code and address and may leave by a non-local jump; a handler that returns
++ * ends the thread's process (here, with a kernel-reserved process, the thread).
++ */
++ZTEST_BMEM static jmp_buf fault_env;
++ZTEST_BMEM static volatile int fault_signo;
++ZTEST_BMEM static volatile int fault_code;
++ZTEST_BMEM static void *volatile fault_addr;
++ZTEST_BMEM static volatile bool fault_jump;
++ZTEST_BMEM static volatile bool fault_resumed;
++
++static void fault_handler(int sig, struct k_sig_info *info, void *ucontext)
++{
++	ARG_UNUSED(ucontext);
++
++	fault_signo = sig;
++	fault_code = info->code;
++	fault_addr = info->addr;
++	if (fault_jump) {
++		zassert_ok(k_sig_abandon(NULL));
++		longjmp(fault_env, 1);
++	}
++}
++
++static void fault_store(void *addr)
++{
++	*(volatile int *)addr = 1;
++}
++
++#ifdef CONFIG_ARM64
++static void fault_undefined(void *addr)
++{
++	ARG_UNUSED(addr);
++
++	__asm__ volatile(".inst 0x00000000" ::: "memory");
++}
++#endif /* CONFIG_ARM64 */
++
++static void fault_entry(void *arg1, void *arg2, void *arg3)
++{
++	void (*raise)(void *) = arg1;
++	struct k_sig_action action = {.handler = fault_handler};
++
++	zassert_ok(k_sig_action((int)(intptr_t)arg2, &action, NULL));
++	if (setjmp(fault_env) == 0) {
++		raise(arg3);
++		fault_resumed = true;
++	}
++}
++
++static void k_sig_fault_run(void (*raise)(void *), int signo, void *addr, bool jump)
++{
++	fault_signo = 0;
++	fault_code = 0;
++	fault_addr = NULL;
++	fault_jump = jump;
++	fault_resumed = false;
++
++	k_thread_create(&noop_test_thread, noop_test_stack, K_THREAD_STACK_SIZEOF(noop_test_stack),
++			fault_entry, raise, (void *)(intptr_t)signo, addr,
++			K_LOWEST_APPLICATION_THREAD_PRIO, K_USER | K_INHERIT_PERMS, K_NO_WAIT);
++	zassert_ok(k_thread_join(&noop_test_thread, K_FOREVER));
++	zassert_ok(k_sig_action(signo, &(struct k_sig_action){.handler = K_SIG_DFL}, NULL));
++
++	zassert_equal(fault_signo, signo, "signal %d, not %d", fault_signo, signo);
++	zassert_false(fault_resumed, "the faulting code resumed");
++}
++
++static void k_sig_fault_unmapped(void)
++{
++	k_sig_fault_run(fault_store, K_SIG_SEGV, (void *)16, true);
++	zassert_equal(fault_code, K_SEGV_MAPERR, "code %d", fault_code);
++	zassert_equal(fault_addr, (void *)16);
++}
++
++static void k_sig_fault_kernel_memory(void)
++{
++	k_sig_fault_run(fault_store, K_SIG_SEGV, &noop_test_thread, true);
++	zassert_equal(fault_code, K_SEGV_ACCERR, "code %d", fault_code);
++	zassert_equal(fault_addr, (void *)&noop_test_thread);
++}
++
++static void k_sig_fault_handler_returns(void)
++{
++	k_sig_fault_run(fault_store, K_SIG_SEGV, (void *)16, false);
++}
++
++#ifdef CONFIG_ARM64
++static void k_sig_fault_undefined_instruction(void)
++{
++	k_sig_fault_run(fault_undefined, K_SIG_ILL, NULL, true);
++	zassert_equal(fault_code, K_ILL_ILLOPC, "code %d", fault_code);
++	zassert_not_null(fault_addr);
++}
++#endif /* CONFIG_ARM64 */
++
++ZTEST(signal, test_k_sig_fault)
++{
++	k_sig_fault_unmapped();
++	k_sig_fault_kernel_memory();
++	k_sig_fault_handler_returns();
++#ifdef CONFIG_ARM64
++	k_sig_fault_undefined_instruction();
++#endif /* CONFIG_ARM64 */
++}
++#endif /* CONFIG_SIGNAL_FAULT */
++
+ static void *setup(void)
+ {
+ 	k_sig_emptyset(&rt_sigset);
