@@ -1,0 +1,141 @@
+diff --git a/include/zephyr/sys/copy_checked.h b/include/zephyr/sys/copy_checked.h
+new file mode 100644
+--- /dev/null
++++ b/include/zephyr/sys/copy_checked.h
+@@ -0,0 +1,38 @@
++/*
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_INCLUDE_SYS_COPY_CHECKED_H_
++#define ZEPHYR_INCLUDE_SYS_COPY_CHECKED_H_
++
++#include <stddef.h>
++
++#include <zephyr/toolchain.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/**
++ * @brief Copy between two buffers of the caller, failing instead of faulting
++ *
++ * For a user-mode caller, both buffers are checked against the caller's memory domain first.
++ * A kernel-mode caller gets a plain copy.
++ *
++ * @param dst destination, written by the caller
++ * @param src source, read by the caller
++ * @param size number of bytes
++ *
++ * @retval 0 on success
++ * @retval -EFAULT if a user-mode caller may not read @a src or write @a dst
++ */
++__syscall int sys_copy_checked(void *dst, const void *src, size_t size);
++
++#ifdef __cplusplus
++}
++#endif
++
++#include <zephyr/syscalls/copy_checked.h>
++
++#endif /* ZEPHYR_INCLUDE_SYS_COPY_CHECKED_H_ */
+diff --git a/lib/os/CMakeLists.txt b/lib/os/CMakeLists.txt
+--- a/lib/os/CMakeLists.txt
++++ b/lib/os/CMakeLists.txt
+@@ -2,6 +2,7 @@
+ 
+ zephyr_syscall_header(
+   ${ZEPHYR_BASE}/include/zephyr/sys/clock.h
++  ${ZEPHYR_BASE}/include/zephyr/sys/copy_checked.h
+   ${ZEPHYR_BASE}/include/zephyr/sys/mutex.h
+ )
+ 
+@@ -9,6 +10,7 @@ zephyr_sources(
+   boot_banner.c
+   cbprintf_packaged.c
+   clock.c
++  copy_checked.c
+   printk.c
+   )
+ 
+diff --git a/lib/os/copy_checked.c b/lib/os/copy_checked.c
+new file mode 100644
+--- /dev/null
++++ b/lib/os/copy_checked.c
+@@ -0,0 +1,36 @@
++/*
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <errno.h>
++#include <string.h>
++
++#include <zephyr/internal/syscall_handler.h>
++#include <zephyr/sys/copy_checked.h>
++
++int z_impl_sys_copy_checked(void *dst, const void *src, size_t size)
++{
++	memcpy(dst, src, size);
++
++	return 0;
++}
++
++#ifdef CONFIG_USERSPACE
++/* K_SYSCALL_MEMORY() without its error log: a failed check is an answer here, not a fault */
++static bool user_may(const void *ptr, size_t size, int write)
++{
++	return K_SYSCALL_MEMORY_SIZE_CHECK(ptr, size) && !Z_DETECT_POINTER_OVERFLOW(ptr, size) &&
++	       (arch_buffer_validate((void *)ptr, size, write) == 0);
++}
++
++static inline int z_vrfy_sys_copy_checked(void *dst, const void *src, size_t size)
++{
++	if (!user_may(src, size, 0) || !user_may(dst, size, 1)) {
++		return -EFAULT;
++	}
++
++	return z_impl_sys_copy_checked(dst, src, size);
++}
++#include <zephyr/syscalls/sys_copy_checked_mrsh.c>
++#endif /* CONFIG_USERSPACE */
+diff --git a/tests/kernel/mem_protect/userspace/src/main.c b/tests/kernel/mem_protect/userspace/src/main.c
+--- a/tests/kernel/mem_protect/userspace/src/main.c
++++ b/tests/kernel/mem_protect/userspace/src/main.c
+@@ -16,6 +16,7 @@
+ #include <zephyr/sys/barrier.h>
+ #include <zephyr/debug/stack.h>
+ #include <zephyr/internal/syscall_handler.h>
++#include <zephyr/sys/copy_checked.h>
+ #include "test_syscall.h"
+ #include <zephyr/sys/libc-hooks.h> /* for z_libc_partition */
+ 
+@@ -1758,6 +1759,26 @@ void *userspace_setup(void)
+ 	return NULL;
+ }
+ 
++/* outside every partition: a user thread may neither read nor write it */
++static uint32_t copy_kernel_only = 0x5a5a5a5a;
++
++/* a copy the caller may make succeeds; one it may not fails with -EFAULT, touching nothing */
++ZTEST_USER(userspace, test_sys_copy_checked)
++{
++	uint32_t src = 0x12345678;
++	uint32_t dst = 0;
++
++	zassert_ok(sys_copy_checked(&dst, &src, sizeof(dst)));
++	zassert_equal(dst, src);
++
++	dst = 0;
++	zassert_equal(sys_copy_checked(&dst, &copy_kernel_only, sizeof(dst)), -EFAULT);
++	zassert_equal(dst, 0, "the destination was written");
++
++	zassert_equal(sys_copy_checked(&copy_kernel_only, &src, sizeof(src)), -EFAULT);
++	zassert_equal(sys_copy_checked(&dst, (void *)UINTPTR_MAX, sizeof(dst)), -EFAULT);
++}
++
+ ZTEST_SUITE(userspace, NULL, userspace_setup, NULL, NULL, NULL);
+ 
+ ZTEST_SUITE(userspace_domain, NULL, NULL, NULL, NULL, NULL);
