@@ -25,7 +25,7 @@ int waitid(idtype_t idtype, id_t id, siginfo_t *infop, int options)
 
 	switch (idtype) {
 	case P_ALL:
-		ret = posix_wait_common(NULL, NULL, false, &num, &kws, options);
+		ret = posix_wait_common(NULL, NULL, false, &num, &kws, options, NULL);
 		break;
 	case P_PID: {
 		k_pid_t child = sys_process_find((int)id);
@@ -34,7 +34,7 @@ int waitid(idtype_t idtype, id_t id, siginfo_t *infop, int options)
 			errno = ECHILD;
 			return -1;
 		}
-		ret = posix_wait_common(child, NULL, false, &num, &kws, options);
+		ret = posix_wait_common(child, NULL, false, &num, &kws, options, NULL);
 		break;
 	}
 	case P_PGID: {
@@ -47,7 +47,7 @@ int waitid(idtype_t idtype, id_t id, siginfo_t *infop, int options)
 				return -1;
 			}
 		}
-		ret = posix_wait_common(NULL, grp, true, &num, &kws, options);
+		ret = posix_wait_common(NULL, grp, true, &num, &kws, options, NULL);
 		break;
 	}
 	default:

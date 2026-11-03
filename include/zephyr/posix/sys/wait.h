@@ -119,6 +119,29 @@ pid_t waitpid(pid_t pid, int *stat_loc, int options);
 
 #endif /* defined(_POSIX_C_SOURCE) || defined(__DOXYGEN__) */
 
+#if defined(_GNU_SOURCE) || defined(_BSD_SOURCE) || defined(__DOXYGEN__)
+#include <sys/resource.h>
+
+/**
+ * @brief Wait for a child and report its resource usage (BSD, not POSIX)
+ *
+ * waitpid() with the child's accumulated CPU time in @p rusage: all of it as user time,
+ * as the kernel keeps one CPU time per thread.
+ *
+ * @ingroup posix_option_group_non_portable
+ * @see https://man7.org/linux/man-pages/man2/wait4.2.html
+ */
+pid_t wait4(pid_t pid, int *stat_loc, int options, struct rusage *rusage);
+
+/**
+ * @brief Wait for any child and report its resource usage (BSD, not POSIX)
+ *
+ * @ingroup posix_option_group_non_portable
+ * @see https://man7.org/linux/man-pages/man2/wait4.2.html
+ */
+pid_t wait3(int *stat_loc, int options, struct rusage *rusage);
+#endif /* defined(_GNU_SOURCE) || defined(_BSD_SOURCE) || defined(__DOXYGEN__) */
+
 #ifdef __cplusplus
 }
 #endif
