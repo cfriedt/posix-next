@@ -1,0 +1,418 @@
+diff --git a/include/zephyr/sys/internal/fdtable_priv.h b/include/zephyr/sys/internal/fdtable_priv.h
+--- a/include/zephyr/sys/internal/fdtable_priv.h
++++ b/include/zephyr/sys/internal/fdtable_priv.h
+@@ -114,6 +114,16 @@ int zvfs_poll_update_fd(struct zvfs_pollfd *pfd, struct k_poll_event **pev);
+ int zvfs_fd_obj_refcount(void *obj);
+ /* number of memory mappings referencing an I/O object (CONFIG_ZVFS_MMAP) */
+ int z_zvfs_mmap_obj_refs(const void *obj);
++#ifdef CONFIG_MEM_BUS_FAULT_HOOK
++/* the file behind @a obj is now @a size bytes long: its mappings follow */
++void z_zvfs_mmap_resize(const void *obj, size_t size);
++#else
++static inline void z_zvfs_mmap_resize(const void *obj, size_t size)
++{
++	ARG_UNUSED(obj);
++	ARG_UNUSED(size);
++}
++#endif /* CONFIG_MEM_BUS_FAULT_HOOK */
+ 
+ void zvfs_fd_offset_set(struct fd_entry *entry, size_t offset);
+ 
+diff --git a/kernel/Kconfig.vm b/kernel/Kconfig.vm
+--- a/kernel/Kconfig.vm
++++ b/kernel/Kconfig.vm
+@@ -116,6 +116,15 @@ config MMU_PAGE_SIZE
+ 	  Size of memory pages. Varies per MMU but 4K is common. For MMUs that
+ 	  support multiple page sizes, put the smallest one here.
+ 
++config MEM_BUS_FAULT_HOOK
++	bool
++	depends on SIGNAL_FAULT
++	help
++	  Ask z_mem_bus_fault() whether a user-mode fault on a mapped address
++	  is a bus error (K_SIG_BUS, K_BUS_ADRERR) rather than a segmentation
++	  fault: the address lies in a mapping but has nothing behind it.
++	  Selected by the subsystem that provides the hook.
++
+ config MEM_WRITE_FAULT_HOOK
+ 	bool
+ 	depends on ARCH_HAS_MEM_WRITE_FAULT
+diff --git a/kernel/include/kernel_internal.h b/kernel/include/kernel_internal.h
+--- a/kernel/include/kernel_internal.h
++++ b/kernel/include/kernel_internal.h
+@@ -477,6 +477,11 @@ void z_zvfs_mmap_thread_exit(struct k_thread *thread);
+  * Runs in exception context: it must not block.
+  */
+ bool z_mem_write_fault(void *addr);
++
++#ifdef CONFIG_MEM_BUS_FAULT_HOOK
++/* a user fault at @a addr, in a mapping with nothing behind it there, is a bus error */
++bool z_mem_bus_fault(void *addr);
++#endif /* CONFIG_MEM_BUS_FAULT_HOOK */
+ #endif /* CONFIG_MEM_WRITE_FAULT_HOOK */
+ 
+ #ifdef CONFIG_USERSPACE
+diff --git a/kernel/signal.c b/kernel/signal.c
+--- a/kernel/signal.c
++++ b/kernel/signal.c
+@@ -1443,6 +1443,13 @@ bool z_sig_fault(int signo, int code, void *addr)
+ 		return false;
+ 	}
+ 
++#ifdef CONFIG_MEM_BUS_FAULT_HOOK
++	if ((signo == K_SIG_SEGV) && z_mem_bus_fault(addr)) {
++		signo = K_SIG_BUS;
++		code = K_BUS_ADRERR;
++	}
++#endif /* CONFIG_MEM_BUS_FAULT_HOOK */
++
+ 	(void)z_sig_action(signo, NULL, &act, tid);
+ 	if (!ctx->handling && (act.handler != K_SIG_DFL) && (act.handler != K_SIG_IGN) &&
+ 	    (k_sig_ismember(&ctx->mask, signo) == 0)) {
+diff --git a/lib/os/zvfs/Kconfig b/lib/os/zvfs/Kconfig
+--- a/lib/os/zvfs/Kconfig
++++ b/lib/os/zvfs/Kconfig
+@@ -198,6 +198,7 @@ config ZVFS_MMAP_DIRTY_TRACK
+ 	default y
+ 	depends on MMU && ARCH_HAS_MEM_WRITE_FAULT
+ 	select MEM_WRITE_FAULT_HOOK
++	select MEM_BUS_FAULT_HOOK if SIGNAL_FAULT
+ 	help
+ 	  Write-protect the pages of a shared, writable file mapping and let the
+ 	  first write to each page fault: the page is recorded as modified and
+diff --git a/lib/os/zvfs/zvfs_ftruncate.c b/lib/os/zvfs/zvfs_ftruncate.c
+--- a/lib/os/zvfs/zvfs_ftruncate.c
++++ b/lib/os/zvfs/zvfs_ftruncate.c
+@@ -31,7 +31,14 @@ int z_impl_zvfs_ftruncate(int fd, off_t length)
+ 		return -1;
+ 	}
+ 
+-	return zvfs_ftruncate_wrap(entry, ZFD_IOCTL_TRUNCATE, length);
++	if (zvfs_ftruncate_wrap(entry, ZFD_IOCTL_TRUNCATE, length) < 0) {
++		return -1;
++	}
++	if (length >= 0) {
++		z_zvfs_mmap_resize(entry->obj, (size_t)length);
++	}
++
++	return 0;
+ }
+ 
+ #ifdef CONFIG_USERSPACE
+diff --git a/lib/os/zvfs/zvfs_mmap.c b/lib/os/zvfs/zvfs_mmap.c
+--- a/lib/os/zvfs/zvfs_mmap.c
++++ b/lib/os/zvfs/zvfs_mmap.c
+@@ -32,6 +32,12 @@
+  * z_mem_write_fault(), which records the page as modified and makes it
+  * writable; zvfs_msync() writes back the modified pages only and protects
+  * them again.
++ *
++ * With CONFIG_MEM_BUS_FAULT_HOOK the pages of a file mapping that lie wholly
++ * past the end of the file are inaccessible to user threads, from the
++ * mapping's creation and after a truncation; touching one is a bus error,
++ * reported through z_mem_bus_fault(). A truncation zeroes the bytes of the
++ * mapping that cross the old or the new end of the file.
+  */
+ 
+ #include <errno.h>
+@@ -98,6 +104,10 @@ struct zvfs_mapping {
+ #endif
+ 	/* the file was opened for writing */
+ 	bool writable;
++#ifdef CONFIG_MEM_BUS_FAULT_HOOK
++	/* the file's size as last seen; SIZE_MAX when unknown */
++	size_t eof;
++#endif
+ 	uint8_t prot;
+ 	uint8_t flags;
+ };
+@@ -140,6 +150,20 @@ static inline struct zvfs_mapping *mapping_root(struct zvfs_mapping *m)
+ 	return (m->origin != NULL) ? m->origin : m;
+ }
+ 
++#ifdef CONFIG_MEM_BUS_FAULT_HOOK
++/* the page lies wholly past the end of the mapped file */
++static bool page_past_eof(struct zvfs_mapping *m, size_t idx)
++{
++	const struct zvfs_mapping *r = mapping_root(m);
++
++	if ((r->obj == NULL) || (r->mem == NULL) || (r->eof > SIZE_MAX - MMAP_PAGE)) {
++		return false;
++	}
++
++	return m->off + idx * MMAP_PAGE >= ROUND_UP(r->eof, MMAP_PAGE);
++}
++#endif /* CONFIG_MEM_BUS_FAULT_HOOK */
++
+ static inline bool page_aligned(uintptr_t v)
+ {
+ 	return (v & (MMAP_PAGE - 1)) == 0;
+@@ -284,6 +308,14 @@ static int mapping_user_grant(struct zvfs_mapping *m, int prot)
+ 		return ret;
+ 	}
+ 	m->granted = true;
++#ifdef CONFIG_MEM_BUS_FAULT_HOOK
++	for (size_t idx = 0; idx < m->len / MMAP_PAGE; idx++) {
++		if (page_past_eof(m, idx)) {
++			(void)arch_mem_domain_page_attr_set(m->domain, m->addr + idx * MMAP_PAGE,
++							    MMAP_PAGE, K_MEM_PARTITION_P_RW_U_NA);
++		}
++	}
++#endif /* CONFIG_MEM_BUS_FAULT_HOOK */
+ 	domain_apply_current(m->domain);
+ 
+ 	return 0;
+@@ -374,6 +406,23 @@ static inline void page_dirty_set(struct zvfs_mapping *m, size_t idx, bool dirty
+ 	}
+ }
+ 
++#ifdef CONFIG_USERSPACE
++/* the user view of a page: none at all past the end of the file */
++static k_mem_partition_attr_t page_attr(struct zvfs_mapping *m, size_t idx, int prot)
++{
++#ifdef CONFIG_MEM_BUS_FAULT_HOOK
++	if (page_past_eof(m, idx)) {
++		return K_MEM_PARTITION_P_RW_U_NA;
++	}
++#else
++	ARG_UNUSED(m);
++	ARG_UNUSED(idx);
++#endif /* CONFIG_MEM_BUS_FAULT_HOOK */
++
++	return prot_to_attr(prot);
++}
++#endif /* CONFIG_USERSPACE */
++
+ /* change one page's protection in the kernel view and in the granted domain */
+ static void page_set_prot(struct zvfs_mapping *m, size_t idx, int prot)
+ {
+@@ -385,7 +434,7 @@ static void page_set_prot(struct zvfs_mapping *m, size_t idx, int prot)
+ 	(void)k_mem_update_flags(page, MMAP_PAGE, prot_to_kernel_flags(prot));
+ #ifdef CONFIG_USERSPACE
+ 	if (m->granted) {
+-		(void)arch_mem_domain_page_attr_set(m->domain, page, MMAP_PAGE, prot_to_attr(prot));
++		(void)arch_mem_domain_page_attr_set(m->domain, page, MMAP_PAGE, page_attr(m, idx, prot));
+ 	}
+ #endif
+ #ifdef CONFIG_PROCESS_VM
+@@ -393,7 +442,7 @@ static void page_set_prot(struct zvfs_mapping *m, size_t idx, int prot)
+ 	SYS_DLIST_FOR_EACH_CONTAINER(&mappings, c, node) {
+ 		if ((c->origin == m) && c->granted) {
+ 			(void)arch_mem_domain_page_attr_set(c->domain, page, MMAP_PAGE,
+-							    prot_to_attr(prot));
++							    page_attr(m, idx, prot));
+ 		}
+ 	}
+ #endif
+@@ -418,6 +467,11 @@ bool z_mem_write_fault(void *addr)
+ 
+ 			size_t idx = (a - (uintptr_t)m->addr) / MMAP_PAGE;
+ 
++#ifdef CONFIG_MEM_BUS_FAULT_HOOK
++			if (page_past_eof(m, idx)) {
++				break;
++			}
++#endif /* CONFIG_MEM_BUS_FAULT_HOOK */
+ 			page_dirty_set(m, idx, true);
+ 			page_set_prot(m, idx, m->prot);
+ 			handled = true;
+@@ -427,6 +481,65 @@ bool z_mem_write_fault(void *addr)
+ 
+ 	return handled;
+ }
++
++#ifdef CONFIG_MEM_BUS_FAULT_HOOK
++bool z_mem_bus_fault(void *addr)
++{
++	uintptr_t a = (uintptr_t)addr;
++	struct zvfs_mapping *m;
++	bool bus = false;
++
++	K_SPINLOCK(&list_lock) {
++		SYS_DLIST_FOR_EACH_CONTAINER(&mappings, m, node) {
++			if ((a >= (uintptr_t)m->addr) && (a < (uintptr_t)m->addr + m->len) &&
++			    page_past_eof(m, (a - (uintptr_t)m->addr) / MMAP_PAGE)) {
++				bus = true;
++				break;
++			}
++		}
++	}
++
++	return bus;
++}
++
++/* zero the mapping's bytes in [from, to) of the file */
++static void mapping_zero(struct zvfs_mapping *m, size_t from, size_t to)
++{
++	size_t lo = MAX(from, m->off);
++	size_t hi = MIN(to, m->off + m->len);
++
++	if (lo < hi) {
++		memset(m->addr + (lo - m->off), 0, hi - lo);
++	}
++}
++
++void z_zvfs_mmap_resize(const void *obj, size_t size)
++{
++	struct zvfs_mapping *m;
++
++	(void)k_mutex_lock(&mmap_lock, K_FOREVER);
++	K_SPINLOCK(&list_lock) {
++		SYS_DLIST_FOR_EACH_CONTAINER(&mappings, m, node) {
++			size_t old = m->eof;
++
++			if ((m->obj != obj) || (m->mem == NULL) || (old == size)) {
++				continue;
++			}
++			m->eof = size;
++			(void)k_mem_update_flags(m->mem, m->mem_size, K_MEM_PERM_RW);
++			if (old != SIZE_MAX) {
++				mapping_zero(m, MIN(old, size), MAX(old, size));
++			}
++			for (size_t idx = 0; idx < m->len / MMAP_PAGE; idx++) {
++				bool clean = mapping_tracked(m) && !page_dirty(m, idx);
++
++				page_set_prot(m, idx, clean ? (m->prot & ~ZVFS_PROT_WRITE) : m->prot);
++			}
++		}
++	}
++	k_mutex_unlock(&mmap_lock);
++}
++#endif /* CONFIG_MEM_BUS_FAULT_HOOK */
+ #else
+ static inline bool mapping_tracked(const struct zvfs_mapping *m)
+ {
+@@ -1183,6 +1296,17 @@ int z_impl_zvfs_mmap(size_t len, int prot, int flags, int fd, size_t off, void *
+ 		mapping_track_init(m);
+ 		mapping_kernel_prot(m, mapping_page_prot(m, prot));
+ 	}
++#ifdef CONFIG_MEM_BUS_FAULT_HOOK
++	m->eof = SIZE_MAX;
++	if (!anon && (m->mem != NULL)) {
++		struct zvfs_stat st;
++
++		if ((zvfs_fdtable_call_ioctl(m->vtable, m->obj, ZFD_IOCTL_STAT, &st) == 0) &&
++		    (st.size >= 0)) {
++			m->eof = (size_t)st.size;
++		}
++	}
++#endif /* CONFIG_MEM_BUS_FAULT_HOOK */
+ 
+ 	ret = mapping_user_grant(m, mapping_page_prot(m, prot));
+ 	if (ret != 0) {
+diff --git a/tests/lib/zvfs_mmap/src/main.c b/tests/lib/zvfs_mmap/src/main.c
+--- a/tests/lib/zvfs_mmap/src/main.c
++++ b/tests/lib/zvfs_mmap/src/main.c
+@@ -4,6 +4,7 @@
+  */
+ 
+ #include <errno.h>
++#include <setjmp.h>
+ #include <string.h>
+ 
+ #include <ff.h>
+@@ -90,6 +91,73 @@ static void expect_mmap_error(size_t len, int prot, int flags, int fd, size_t of
+ 	zassert_equal(errno, err, "errno %d, expected %d", errno, err);
+ }
+ 
++#ifdef CONFIG_MEM_BUS_FAULT_HOOK
++static ZTEST_BMEM jmp_buf bus_env;
++static ZTEST_BMEM struct k_sig_set bus_mask;
++static ZTEST_BMEM volatile int bus_signo;
++static ZTEST_BMEM volatile int bus_code;
++static ZTEST_BMEM void *volatile bus_addr;
++
++static void bus_handler(int sig, struct k_sig_info *info, void *ucontext)
++{
++	ARG_UNUSED(ucontext);
++
++	bus_signo = sig;
++	bus_code = info->code;
++	bus_addr = info->addr;
++	zassert_ok(k_sig_abandon(&bus_mask));
++	longjmp(bus_env, 1);
++}
++
++/* a read of @a p is a bus error at @a p */
++static bool read_faults(volatile uint8_t *p)
++{
++	bus_signo = 0;
++	if (setjmp(bus_env) == 0) {
++		(void)*p;
++		return false;
++	}
++	zassert_equal(bus_signo, K_SIG_BUS, "signal %d", bus_signo);
++	zassert_equal(bus_code, K_BUS_ADRERR, "code %d", bus_code);
++	zassert_equal(bus_addr, (void *)p, "address %p, not %p", bus_addr, p);
++
++	return true;
++}
++
++/* the pages wholly past the end of the file are a bus error to touch, and follow truncation */
++static void mmap_past_eof(int fd)
++{
++	const size_t len = FILE_SPAN + 2 * PAGE;
++	struct k_sig_action act = {.handler = bus_handler};
++	uint8_t *p;
++
++	zassert_ok(k_sig_mask(K_SIG_SETMASK, NULL, &bus_mask));
++	zassert_ok(k_sig_action(K_SIG_BUS, &act, NULL));
++
++	p = map(len, ZVFS_PROT_READ, ZVFS_MAP_SHARED, fd, 0);
++	zassert_false(read_faults(p + FILE_SPAN - 1), "the page holding the end faulted");
++	zassert_equal(p[FILE_SIZE], 0);
++	zassert_true(read_faults(p + FILE_SPAN), "the first page past the end did not fault");
++	zassert_true(read_faults(p + FILE_SPAN + PAGE + 7), "a later page did not fault");
++
++	/* shrunk: the pages past the new end fault, the rest of the page holding it reads zero */
++	zassert_ok(zvfs_ftruncate(fd, PAGE + PAGE / 2));
++	zassert_equal(p[PAGE], file_byte(PAGE));
++	zassert_equal(p[PAGE + PAGE / 2], 0);
++	zassert_true(read_faults(p + 2 * PAGE), "a page past the new end did not fault");
++
++	/* grown again: the pages are back, holding the zeros the file grew by */
++	zassert_ok(zvfs_ftruncate(fd, FILE_SIZE));
++	zassert_false(read_faults(p + 2 * PAGE), "a page within the grown file faulted");
++	zassert_equal(p[2 * PAGE], 0);
++	zassert_true(read_faults(p + FILE_SPAN), "the page past the end did not fault again");
++
++	zassert_ok(zvfs_munmap(p, len));
++	act.handler = K_SIG_DFL;
++	zassert_ok(k_sig_action(K_SIG_BUS, &act, NULL));
++}
++#endif /* CONFIG_MEM_BUS_FAULT_HOOK */
++
+ ZTEST_USER(zvfs_mmap, test_zvfs_mmap)
+ {
+ 	int fd = open_file(ZVFS_O_RDWR);
+@@ -187,6 +255,12 @@ ZTEST_USER(zvfs_mmap, test_zvfs_mmap)
+ 	expect_file_byte(fd, 2, (uint8_t)~file_byte(2));
+ 	write_file_byte(fd, 2, file_byte(2));
+ 
++#ifdef CONFIG_MEM_BUS_FAULT_HOOK
++	if (k_is_user_context()) {
++		mmap_past_eof(fd);
++	}
++#endif /* CONFIG_MEM_BUS_FAULT_HOOK */
++
+ 	zassert_ok(zvfs_close(fd));
+ }
+ 
+diff --git a/tests/lib/zvfs_mmap/testcase.yaml b/tests/lib/zvfs_mmap/testcase.yaml
+--- a/tests/lib/zvfs_mmap/testcase.yaml
++++ b/tests/lib/zvfs_mmap/testcase.yaml
+@@ -20,6 +20,14 @@ tests:
+     extra_configs:
+       - CONFIG_TEST_USERSPACE=y
+       - CONFIG_USERSPACE=y
++  libraries.zvfs_mmap.signal:
++    filter: CONFIG_ARCH_HAS_SIGNAL_FAULT
++    tags: userspace
++    extra_configs:
++      - CONFIG_TEST_USERSPACE=y
++      - CONFIG_USERSPACE=y
++      - CONFIG_SIGNAL=y
++      - CONFIG_SIGNAL_ACTION_DB_SIZE=2
+   libraries.zvfs_mmap.demand_paging:
+     # locking tells resident pages from evictable ones only here
+     platform_allow:

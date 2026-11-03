@@ -3724,6 +3724,22 @@ patches:
       plain copy. User-mode library code converting a caller's structure
       before a system call can then fail the way a kernel copy would.
       tests/kernel/mem_protect/userspace test_sys_copy_checked.
+  - path: zephyr/zvfs-mmap-sigbus-past-eof.patch
+    sha256sum: db2d569403f6bd06d6fd3b3be6b8fbbd8108e9c288178e3f45b8d2aee9c697f7
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-04
+    upstreamable: true
+    comments: |
+      The pages of a file mapping wholly past the end of the file are
+      inaccessible to user threads, from the mapping's creation and after
+      ftruncate(); touching one generates SIGBUS with BUS_ADRERR through
+      the new z_mem_bus_fault() hook (CONFIG_MEM_BUS_FAULT_HOOK, selected
+      with dirty tracking when faults generate signals). A truncation zeroes
+      the bytes of each mapping that cross the old or the new end of the
+      file; growing it back makes the pages accessible again.
+      tests/lib/zvfs_mmap libraries.zvfs_mmap.signal.
   - path: zephyr/libc-sys-stat-utime-markers.patch
     sha256sum: 8edfcf83058522bb80d601e92c4a9e6be14baec04cf8253ffbd344fbadf05b78
     module: zephyr
