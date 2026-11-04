@@ -1,0 +1,54 @@
+diff --git a/arch/riscv/core/isr.S b/arch/riscv/core/isr.S
+--- a/arch/riscv/core/isr.S
++++ b/arch/riscv/core/isr.S
+@@ -452,7 +452,18 @@ no_fp:	/* increment _current->arch.exception_depth */
+ 	 * kernel thread.
+ 	 */
+ 	li t1, EXC_SYSCALL
++#if defined(CONFIG_RISCV_S_MODE) && defined(CONFIG_USERSPACE)
++	bne t0, t1, 2f
++	/* a breakpoint taken in user mode is a fault, not a kernel system call */
++	csrr t1, RV_STATUS
++	li t2, STATUS_PP
++	and t1, t1, t2
++	beqz t1, 2f
++	j is_kernel_syscall
++2:
++#else
+ 	beq t0, t1, is_kernel_syscall
++#endif /* CONFIG_RISCV_S_MODE && CONFIG_USERSPACE */
+
+ #ifdef CONFIG_USERSPACE
+
+diff --git a/tests/kernel/mem_protect/userspace/src/main.c b/tests/kernel/mem_protect/userspace/src/main.c
+--- a/tests/kernel/mem_protect/userspace/src/main.c
++++ b/tests/kernel/mem_protect/userspace/src/main.c
+@@ -369,6 +369,28 @@ ZTEST_USER(userspace, test_userspace_disable_mmu_mpu)
+ 	zassert_unreachable("Disable MMU/MPU did not fault");
+ }
+
++#ifdef CONFIG_RISCV
++/**
++ * @brief Test that a breakpoint in user mode is a fault
++ *
++ * @details A supervisor-mode kernel raises its own exceptions with ebreak;
++ * the same instruction from a user thread must not reach that path with a
++ * reason of the thread's choosing.
++ *
++ * @ingroup kernel_memprotect_tests
++ */
++ZTEST_USER(userspace, test_user_ebreak)
++{
++	register unsigned long t0 __asm__("t0") = RV_ECALL_RUNTIME_EXCEPT;
++	register unsigned long a0 __asm__("a0") = K_ERR_KERNEL_PANIC;
++
++	set_fault(K_ERR_CPU_EXCEPTION);
++
++	__asm__ volatile("ebreak" : : "r"(t0), "r"(a0) : "memory");
++	zassert_unreachable("ebreak did not fault");
++}
++#endif /* CONFIG_RISCV */
++
+ /**
+  * @brief Verify that user mode cannot read kernel RAM.
+  *
