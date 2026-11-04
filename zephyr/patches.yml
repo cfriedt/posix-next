@@ -4969,6 +4969,25 @@ patches:
       the requested mode with one fs_chmod() when, and only when, they
       created the node. ZVFS keeps no identity and enforces nothing. Tests
       in tests/lib/zvfs_fs over a second, tmpfs mount; kernel and user mode.
+  - path: zephyr/k-signal-altstack.patch
+    sha256sum: 4e88e28371d7b3e15720a37c28c08612dc76d745ded3deb36a101627f6ab5b22
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-04
+    upstreamable: true
+    comments: |
+      k_sig_altstack() and K_SIG_SA_ONSTACK (CONFIG_SIGNAL_ALTSTACK, arm64,
+      riscv, x86): arch_sig_pre() starts a user handler's frame where
+      z_sig_stack() says. A handler that cannot run (its frame unwritable,
+      or a fault while a fault's handler is entered or runs) ends the
+      process with SIGSEGV instead of a fatal error.
+
+      arch/*/core/signal.c is built whenever the syscall return hook serves user threads,
+      with or without CONFIG_SIGNAL (thread cancellation uses the same trampoline), but
+      z_sig_frame_fault() and z_sig_stack() were declared inside the CONFIG_SIGNAL block of
+      kernel_internal.h: kernel.threads.apis.nosignal failed to build on every userspace
+      board. The declarations move under the return-hook block they belong to.
   - path: stress-ng/stress-ng-zephyr-module.patch
     sha256sum: 5f8cf161fffc206b7f5929639f9d6979739897f0ae989959997cb7237e9a8db9
     module: modules/lib/stress-ng
