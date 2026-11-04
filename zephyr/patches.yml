@@ -1415,6 +1415,20 @@ patches:
       Found through zephyr#122510, whose dynamic_thread_stack test allocates
       user stacks of twice CONFIG_DYNAMIC_THREAD_STACK_SIZE and faults on
       exactly the two power-of-two MPU platforms in CI.
+  - path: zephyr/sched-halt-spin-irqs-masked.patch
+    sha256sum: 9368a470b4e2c746c658a6829b8c6f3f47798949146cdc4c0b493e39c638869f
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-04
+    upstreamable: true
+    comments: |
+      halt_thread() waits out a timeout handler still in flight on another
+      CPU by dropping and retaking the scheduler lock. Unlocking restored
+      interrupts: a thread halting itself is already dead, so an interrupt
+      in that window switched it out for good, before it woke its joiners,
+      and every joiner hung. The lock is now released without restoring
+      interrupts. Upstream v4.5.0 and main have the same loop.
   - path: zephyr/libc-signal-h-pthread-kill.patch
     sha256sum: 9db8dc468a348bb0603646373dbe308174a5711ddbcfd454197b47f18992eb48
     module: zephyr
