@@ -1454,6 +1454,19 @@ patches:
       stp/ldp offsets from the thread object, limited to 504 bytes; growing
       struct k_thread ahead of callee_saved broke the build. The pairs are
       now addressed from a base register.
+  - path: zephyr/sysworkq-stack-fits-dns-retransmit.patch
+    sha256sum: 110cb414ec2f949e0ff07dd14698de84265beefa54781a7dc9d705fa43953f19
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-04
+    upstreamable: true
+    comments: |
+      The DNS resolver retransmits a query from the system workqueue, through
+      zsock_sendto(), source address selection and the route lookup. On a
+      32-bit target without an MMU that chain fills the 1 KiB default stack
+      exactly, so the default is 2048 when the resolver is enabled, as it
+      already is for the Wi-Fi supplicants.
   - path: zephyr/libc-signal-h-pthread-kill.patch
     sha256sum: 9db8dc468a348bb0603646373dbe308174a5711ddbcfd454197b47f18992eb48
     module: zephyr
