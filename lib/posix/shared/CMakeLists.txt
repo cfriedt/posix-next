@@ -60,7 +60,15 @@ if(NEED_ENV_COMMON)
 endif()
 
 if(CONFIG_SIGNAL AND NOT CONFIG_NATIVE_LIBC)
-  zephyr_library_sources(z_sig_set.c)
+  zephyr_library_sources(z_sig_set.c z_sig_mask.c)
+endif()
+
+set(NEED_SIG_POSIX FALSE)
+if(CONFIG_POSIX_SIGNALS AND NOT CONFIG_TC_PROVIDES_POSIX_SIGNALS)
+  set(NEED_SIG_POSIX TRUE)
+endif()
+if(NEED_SIG_POSIX AND NOT CONFIG_NATIVE_LIBC)
+  zephyr_library_sources(z_sig_posix.c)
 endif()
 
 set(NEED_POSIX_SIGEV FALSE)

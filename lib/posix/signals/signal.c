@@ -7,7 +7,6 @@
 #include "posix_internal.h"
 
 #include <errno.h>
-#include <pthread.h>
 #include <signal.h>
 #include <time.h>
 #include <unistd.h>
@@ -21,56 +20,6 @@
 #define SIGNO_WORD_BIT(_signo) ((_signo - 1) & BIT_MASK(LOG2(BITS_PER_LONG)))
 
 #define SIGSET_NLONGS (sizeof(sigset_t) / sizeof(unsigned long))
-
-#ifdef CONFIG_PROCESS
-/* POSIX kill() pid encodings decode here; the kernel is handle-domain only */
-static int posix_kill_multi(pid_t pid, int ksigno)
-{
-	if (pid > 0) {
-		k_pid_t proc = sys_process_find((int)pid);
-
-		return (proc == NULL) ? -ESRCH : k_kill(proc, ksigno);
-	}
-	if (pid == 0) {
-		/* the caller's own process group */
-		return k_kill_pgrp(NULL, ksigno);
-	}
-	if (pid == -1) {
-		/* every process the caller may signal, except itself */
-		return k_kill_all(ksigno);
-	}
-
-	k_pgrp_t grp = sys_pgrp_find((int)-pid);
-
-	return (grp == NULL) ? -ESRCH : k_kill_pgrp(grp, ksigno);
-}
-#else
-static inline int posix_kill_multi(pid_t pid, int ksigno)
-{
-	ARG_UNUSED(pid);
-	ARG_UNUSED(ksigno);
-	return -ESRCH;
-}
-#endif /* CONFIG_PROCESS */
-
-static inline bool posix_sig_is_reserved(int signo)
-{
-	return signo == CONFIG_THREAD_CANCEL_SIGNAL_NUMBER ||
-	       signo == (CONFIG_THREAD_CANCEL_SIGNAL_NUMBER + 1);
-}
-
-static inline bool signo_valid(int signo)
-{
-	if (signo <= 0 || posix_sig_is_reserved(signo)) {
-		return false;
-	}
-
-	if (signo < SIGRTMIN) {
-		return signo <= 31;
-	}
-
-	return signo <= SIGRTMAX;
-}
 
 static inline bool signo_fits(int signo)
 {
@@ -109,7 +58,7 @@ int sigaddset(sigset_t *set, int signo)
 {
 	unsigned long *_set = (unsigned long *)set;
 
-	if (!signo_valid(signo)) {
+	if (!z_sig_posix_valid(signo)) {
 		errno = EINVAL;
 		return -1;
 	}
@@ -129,7 +78,7 @@ int sigdelset(sigset_t *set, int signo)
 {
 	unsigned long *_set = (unsigned long *)set;
 
-	if (!signo_valid(signo)) {
+	if (!z_sig_posix_valid(signo)) {
 		errno = EINVAL;
 		return -1;
 	}
@@ -149,7 +98,7 @@ int sigismember(const sigset_t *set, int signo)
 {
 	const unsigned long *const _set = (const unsigned long *)set;
 
-	if (!signo_valid(signo)) {
+	if (!z_sig_posix_valid(signo)) {
 		errno = EINVAL;
 		return -1;
 	}
@@ -162,13 +111,6 @@ int sigismember(const sigset_t *set, int signo)
 	return 1 & (_set[SIGNO_WORD_IDX(signo)] >> SIGNO_WORD_BIT(signo));
 }
 
-static int ksigno_to_posix(int ksigno)
-{
-	int posix = z_sig_to_posix(ksigno);
-
-	return (posix > 0) ? posix : ksigno;
-}
-
 static void ksigset_to_posix(sigset_t *dst, const struct k_sig_set *ksrc)
 {
 	sigset_t buf;
@@ -179,144 +121,14 @@ static void ksigset_to_posix(sigset_t *dst, const struct k_sig_set *ksrc)
 	}
 }
 
-#if defined(CONFIG_SIGNAL_FAULT) && defined(SEGV_MAPERR)
-/* a K_SEGV_* .. K_TRAP_* code of a fault-generated signal as its POSIX counterpart */
-static int fault_code_to_posix(int ksigno, int code)
-{
-	static const int ill[] = {ILL_ILLOPC, ILL_ILLOPN, ILL_ILLADR, ILL_ILLTRP,
-				  ILL_PRVOPC, ILL_PRVREG, ILL_COPROC, ILL_BADSTK};
-	static const int fpe[] = {FPE_INTDIV, FPE_INTOVF, FPE_FLTDIV, FPE_FLTOVF,
-				  FPE_FLTUND, FPE_FLTRES, FPE_FLTINV, FPE_FLTSUB};
-	static const int segv[] = {SEGV_MAPERR, SEGV_ACCERR};
-	static const int bus[] = {BUS_ADRALN, BUS_ADRERR, BUS_OBJERR};
-#ifdef TRAP_BRKPT
-	static const int trap[] = {TRAP_BRKPT, TRAP_TRACE};
-#endif
-	const int *map = NULL;
-	size_t n = 0;
-
-	switch (ksigno) {
-	case K_SIG_ILL:
-		map = ill;
-		n = ARRAY_SIZE(ill);
-		break;
-	case K_SIG_FPE:
-		map = fpe;
-		n = ARRAY_SIZE(fpe);
-		break;
-	case K_SIG_SEGV:
-		map = segv;
-		n = ARRAY_SIZE(segv);
-		break;
-	case K_SIG_BUS:
-		map = bus;
-		n = ARRAY_SIZE(bus);
-		break;
-#ifdef TRAP_BRKPT
-	case K_SIG_TRAP:
-		map = trap;
-		n = ARRAY_SIZE(trap);
-		break;
-#endif
-	default:
-		break;
-	}
-
-	return ((code > 0) && ((size_t)code <= n)) ? map[code - 1] : z_si_code_to_posix(code);
-}
-#endif /* CONFIG_SIGNAL_FAULT && SEGV_MAPERR */
-
-static void kinfo_to_siginfo(siginfo_t *dst, const struct k_sig_info *src, int signo)
-{
-	*dst = (siginfo_t){0};
-	dst->si_signo = signo;
-	dst->si_code = z_si_code_to_posix(src->code);
-	dst->si_value.sival_ptr = src->value.sival_ptr;
-#ifdef CONFIG_SIGNAL_FAULT
-	dst->si_addr = src->addr;
-#ifdef SEGV_MAPERR
-	dst->si_code = fault_code_to_posix(src->signo, src->code);
-#endif
-#endif /* CONFIG_SIGNAL_FAULT */
-#ifdef CONFIG_PROCESS
-	/* the child's number as captured at generation: the child may be reaped by now */
-	dst->si_pid = (pid_t)src->child_id;
-	if (src->code == K_SI_CLD_EXITED) {
-		dst->si_status = K_WEXITSTATUS(src->status);
-	} else if (src->code == K_SI_CLD_KILLED) {
-		dst->si_status = z_sig_to_posix(K_WTERMSIG(src->status));
-	} else if (src->code == K_SI_CLD_STOPPED) {
-		dst->si_status = z_sig_to_posix(K_WSTOPSIG(src->status));
-	} else if (src->code == K_SI_CLD_CONTINUED) {
-		dst->si_status = SIGCONT;
-	}
-#endif /* CONFIG_PROCESS */
-}
-
-/* handle a POSIX sigaction from a kernel signal handler */
-void z_sig_shim(int ksigno, struct k_sig_info *kinfo, void *context)
-{
-	void *unused;
-	struct k_sig_info kinfo_unused;
-	struct k_sig_action action;
-	const int signo = ksigno_to_posix(ksigno);
-
-	ARG_UNUSED(kinfo);
-
-	k_sig_current(&kinfo_unused, &action, &unused);
-
-	if (action.user_data == NULL) {
-		return;
-	}
-
-	if ((action.flags & K_SIG_SA_SIGINFO) != 0) {
-		siginfo_t info;
-
-		kinfo_to_siginfo(&info, kinfo, signo);
-		((void (*)(int, siginfo_t *, void *))action.user_data)(signo, &info, context);
-	} else {
-		((void (*)(int))action.user_data)(signo);
-	}
-}
-
-/* reconstruct the POSIX action previously in force from the kernel's record of it */
-static void posix_sig_disposition_get(const struct k_sig_action *koact, struct sigaction *oact)
-{
-	*oact = (struct sigaction){0};
-	ksigset_to_posix(&oact->sa_mask, &koact->mask);
-
-	if (koact->handler == z_sig_shim) {
-		oact->sa_handler = (void (*)(int))koact->user_data;
-	} else if ((koact->handler != K_SIG_DFL) && (koact->handler != K_SIG_IGN)) {
-		/* registered with the kernel unwrapped, e.g. through the k_sig_* API directly */
-		oact->sa_handler = (void (*)(int))koact->handler;
-	} else {
-		oact->sa_handler = (koact->handler == K_SIG_IGN) ? SIG_IGN : SIG_DFL;
-	}
-
-	if ((koact->flags & K_SIG_SA_SIGINFO) != 0) {
-		oact->sa_flags |= SA_SIGINFO;
-	}
-	if ((koact->flags & K_SIG_SA_RESETHAND) != 0) {
-		oact->sa_flags |= SA_RESETHAND;
-	}
-	if ((koact->flags & K_SIG_SA_NODEFER) != 0) {
-		oact->sa_flags |= SA_NODEFER;
-	}
-	if ((koact->flags & K_SIG_SA_NOCLDSTOP) != 0) {
-		oact->sa_flags |= SA_NOCLDSTOP;
-	}
-}
-
 int sigaction(int sig, const struct sigaction *ZRESTRICT act, struct sigaction *ZRESTRICT oact)
 {
 	int ret;
 	int ksigno;
 	struct k_sig_action kact;
 	struct k_sig_action koact;
-	struct k_sig_set kmask_buf;
 
-	if (!signo_valid(sig)) {
+	if (!z_sig_posix_valid(sig)) {
 		errno = EINVAL;
 		return -1;
 	}
@@ -328,28 +140,7 @@ int sigaction(int sig, const struct sigaction *ZRESTRICT act, struct sigaction *
 	}
 
 	if (act != NULL) {
-		kact = (struct k_sig_action){0};
-		if ((act->sa_handler == SIG_DFL) || (act->sa_handler == SIG_IGN)) {
-			kact.handler = (act->sa_handler == SIG_IGN) ? K_SIG_IGN : K_SIG_DFL;
-		} else {
-			kact.handler = z_sig_shim;
-			kact.user_data = (void *)act->sa_handler;
-		}
-
-		if ((act->sa_flags & SA_SIGINFO) != 0) {
-			kact.flags |= K_SIG_SA_SIGINFO;
-		}
-		if ((act->sa_flags & SA_RESETHAND) != 0) {
-			kact.flags |= K_SIG_SA_RESETHAND;
-		}
-		if ((act->sa_flags & SA_NODEFER) != 0) {
-			kact.flags |= K_SIG_SA_NODEFER;
-		}
-		if ((act->sa_flags & SA_NOCLDSTOP) != 0) {
-			kact.flags |= K_SIG_SA_NOCLDSTOP;
-		}
-
-		kact.mask = *z_sig_set_from_posix(&act->sa_mask, &kmask_buf);
+		z_sig_action_from_posix(act, &kact);
 	}
 
 	ret = k_sig_action(ksigno, (act == NULL) ? NULL : &kact, &koact);
@@ -360,7 +151,7 @@ int sigaction(int sig, const struct sigaction *ZRESTRICT act, struct sigaction *
 
 	/* koact still describes the disposition in force before this call */
 	if (oact != NULL) {
-		posix_sig_disposition_get(&koact, oact);
+		z_sig_action_to_posix(&koact, oact);
 	}
 
 	return 0;
@@ -369,7 +160,7 @@ int sigaction(int sig, const struct sigaction *ZRESTRICT act, struct sigaction *
 int sigprocmask(int how, const sigset_t *ZRESTRICT set, sigset_t *ZRESTRICT oset)
 {
 	/* make equivalent until Zephyr has processes */
-	int ret = pthread_sigmask(how, set, oset);
+	int ret = z_sig_posix_mask(how, set, oset);
 
 	if (ret != 0) {
 		errno = ret;
@@ -400,28 +191,9 @@ int sigpending(sigset_t *set)
 	return 0;
 }
 
-/*
- * Block until a signal has been delivered to a handler in the calling thread, detected by
- * sampling the thread's kernel delivery count against 'start'.
- */
-/* block until a signal is delivered: a wait that accepts nothing ends when one is due */
-static void posix_sig_wait_delivered(unsigned long start)
-{
-	struct k_sig_set none;
-
-	k_sig_emptyset(&none);
-	while (k_sig_delivered() == start) {
-		(void)k_sig_timedwait(&none, NULL, K_FOREVER);
-		if (!k_is_user_context() && (k_sig_delivered() == start)) {
-			/* a kernel-mode caller delivers on return from a sleep */
-			k_sleep(K_TICKS(1));
-		}
-	}
-}
-
 int pause(void)
 {
-	posix_sig_wait_delivered(k_sig_delivered());
+	z_sig_wait_delivered(k_sig_delivered());
 
 	errno = EINTR;
 
@@ -452,7 +224,7 @@ int sigsuspend(const sigset_t *sigmask)
 		return -1;
 	}
 
-	posix_sig_wait_delivered(start);
+	z_sig_wait_delivered(start);
 
 	/* the mask in force before the call is always restored */
 	(void)k_sig_mask(K_SIG_SETMASK, &kold, NULL);
@@ -483,7 +255,7 @@ int sigwait(const sigset_t *ZRESTRICT set, int *ZRESTRICT sig)
 		return -ret;
 	}
 
-	*sig = ksigno_to_posix(kinfo.signo);
+	*sig = z_sig_ksigno_to_posix(kinfo.signo);
 
 	return 0;
 }
@@ -496,7 +268,7 @@ int kill(pid_t pid, int sig)
 	if (sig == 0) {
 		ksigno = 0;
 	} else {
-		if (!signo_valid(sig)) {
+		if (!z_sig_posix_valid(sig)) {
 			errno = EINVAL;
 			return -1;
 		}
@@ -508,21 +280,7 @@ int kill(pid_t pid, int sig)
 		}
 	}
 
-	if (IS_ENABLED(CONFIG_PROCESS)) {
-		/* multi-process: decode the pid encodings onto the handle-domain kernel */
-		ret = posix_kill_multi(pid, ksigno);
-	} else if ((pid == POSIX_THIS_PID) || (pid == 0) || (pid == -1)) {
-		/*
-		 * single-process: its pid, 0, and -1 all name the one (figurative)
-		 * process, and the kernel performs process-directed delivery over
-		 * it - the caller takes the signal when it has it unblocked, and
-		 * it otherwise pends at system scope for the first thread that
-		 * unblocks or waits for it.
-		 */
-		ret = k_kill(NULL, ksigno);
-	} else {
-		ret = -ESRCH;
-	}
+	ret = z_sig_posix_kill(pid, ksigno);
 
 	if (ret < 0) {
 		errno = -ret;
