@@ -1,0 +1,616 @@
+diff --git a/arch/Kconfig b/arch/Kconfig
+--- a/arch/Kconfig
++++ b/arch/Kconfig
+@@ -116,6 +116,7 @@ config SPARC
+
+ config X86
+ 	bool
++	select ARCH_HAS_SIGNAL_FAULT if USERSPACE
+ 	select ARCH_IS_SET
+ 	select ARCH_HAS_STACK_JUMP
+ 	select ATOMIC_OPERATIONS_BUILTIN
+@@ -150,6 +151,7 @@ config X86
+
+ config RISCV
+ 	bool
++	select ARCH_HAS_SIGNAL_FAULT if USERSPACE
+ 	select ARCH_IS_SET
+ 	select ARCH_MEM_DOMAIN_APPLY_CURRENT if RISCV_PMP && USERSPACE
+ 	select ARCH_HAS_STACK_JUMP
+diff --git a/arch/riscv/core/fatal.c b/arch/riscv/core/fatal.c
+--- a/arch/riscv/core/fatal.c
++++ b/arch/riscv/core/fatal.c
+@@ -216,6 +216,72 @@ static bool bad_stack_pointer(struct arch_esf *esf)
+ 	return false;
+ }
+
++#ifdef CONFIG_SIGNAL_FAULT
++/* a fault taken in U-mode generates the signal Linux generates for it */
++static bool user_fault_signal(struct arch_esf *esf)
++{
++	unsigned long cause;
++	unsigned long tval;
++	int signo = K_SIG_SEGV;
++	int code = K_SEGV_ACCERR;
++
++#ifdef CONFIG_RISCV_S_MODE
++	cause = csr_read(scause);
++	tval = csr_read(stval);
++#else
++	cause = csr_read(mcause);
++	tval = csr_read(mtval);
++#endif
++	void *addr = (void *)tval;
++
++	switch (cause & CONFIG_RISCV_MCAUSE_EXCEPTION_MASK) {
++	case 0: /* instruction address misaligned */
++	case 4: /* load address misaligned */
++	case 6: /* store address misaligned */
++		signo = K_SIG_BUS;
++		code = K_BUS_ADRALN;
++		break;
++	case 1: /* instruction access fault */
++	case 5: /* load access fault */
++	case 7: /* store access fault */
++		break;
++	case 2: /* illegal instruction */
++		signo = K_SIG_ILL;
++		code = K_ILL_ILLOPC;
++		addr = (void *)esf->mepc;
++		break;
++	case RISCV_EXC_BREAKPOINT:
++		signo = K_SIG_TRAP;
++		code = K_TRAP_BRKPT;
++		addr = (void *)esf->mepc;
++		break;
++#ifdef CONFIG_RISCV_MMU
++	case RISCV_EXC_INST_PAGE_FAULT:
++	case RISCV_EXC_LOAD_PAGE_FAULT:
++	case RISCV_EXC_STORE_PAGE_FAULT: {
++		uintptr_t phys;
++
++		/* mapped for the kernel: a permission the user lacks */
++		code = (arch_page_phys_get(addr, &phys) == 0) ? K_SEGV_ACCERR : K_SEGV_MAPERR;
++		break;
++	}
++#endif /* CONFIG_RISCV_MMU */
++	default:
++		signo = K_SIG_ILL;
++		code = K_ILL_ILLTRP;
++		addr = (void *)esf->mepc;
++		break;
++	}
++
++	if (!z_sig_fault(signo, code, addr)) {
++		return false;
++	}
++	esf->mepc = (unsigned long)z_sig_fault_entry;
++
++	return true;
++}
++#endif /* CONFIG_SIGNAL_FAULT */
++
+ void z_riscv_fault(struct arch_esf *esf)
+ {
+ #ifdef CONFIG_RISCV_MMU
+@@ -262,6 +328,12 @@ void z_riscv_fault(struct arch_esf *esf)
+ 	}
+ #endif /* CONFIG_USERSPACE */
+
++#ifdef CONFIG_SIGNAL_FAULT
++	if (((esf->mstatus & RV_STATUS_PP) == RV_STATUS_PP_U) && user_fault_signal(esf)) {
++		return;
++	}
++#endif /* CONFIG_SIGNAL_FAULT */
++
+ 	unsigned int reason = K_ERR_CPU_EXCEPTION;
+
+ 	if (bad_stack_pointer(esf)) {
+diff --git a/arch/riscv/core/userspace.S b/arch/riscv/core/userspace.S
+--- a/arch/riscv/core/userspace.S
++++ b/arch/riscv/core/userspace.S
+@@ -57,3 +57,15 @@ z_riscv_user_string_nlen_fixup:
+ 	li	a4, -1		# Put error to -1
+ 	sw	a4, 0(a2)
+ 	j	exit
++
++#ifdef CONFIG_SIGNAL_FAULT
++/*
++ * A thread that faulted in user mode resumes here, in user mode. Nothing touches the stack: the
++ * fault may have been on it.
++ */
++GTEXT(z_sig_fault_entry)
++SECTION_FUNC(TEXT, z_sig_fault_entry)
++	li	t0, K_SYSCALL_K_SIG_FAULT
++	ecall
++	j	z_sig_fault_entry
++#endif /* CONFIG_SIGNAL_FAULT */
+diff --git a/arch/x86/core/fatal.c b/arch/x86/core/fatal.c
+--- a/arch/x86/core/fatal.c
++++ b/arch/x86/core/fatal.c
+@@ -426,9 +426,139 @@ FUNC_NORETURN void z_x86_fatal_error(unsigned int reason,
+ 	CODE_UNREACHABLE;
+ }
+
+-FUNC_NORETURN void z_x86_unhandled_cpu_exception(uintptr_t vector,
+-						 const struct arch_esf *esf)
++#ifdef CONFIG_SIGNAL_FAULT
++#define DR6_BS BIT(14)
++
++/* the debug status is sticky: read and reset it */
++static inline uintptr_t dr6_take(void)
++{
++	uintptr_t dr6;
++	uintptr_t reset = 0xffff0ff0U;
++
++	__asm__ volatile("mov %%dr6, %0; mov %1, %%dr6" : "=&r"(dr6) : "r"(reset));
++
++	return dr6;
++}
++
++/* the first unmasked exception raised, cleared so the handler can use the unit */
++static int fp_exception_code(uintptr_t vector)
+ {
++	uint32_t raised;
++
++	if (vector == IV_SIMD_FP) {
++		uint32_t mxcsr;
++
++		__asm__ volatile("stmxcsr %0" : "=m"(mxcsr));
++		raised = mxcsr & ~(mxcsr >> 7) & 0x3fU;
++		mxcsr &= ~0x3fU;
++		__asm__ volatile("ldmxcsr %0" : : "m"(mxcsr));
++	} else {
++		uint16_t cw;
++		uint16_t sw;
++
++		__asm__ volatile("fnstcw %0; fnstsw %1; fnclex" : "=m"(cw), "=m"(sw));
++		raised = sw & ~cw & 0x3fU;
++	}
++
++	if ((raised & BIT(2)) != 0U) {
++		return K_FPE_FLTDIV;
++	} else if ((raised & BIT(3)) != 0U) {
++		return K_FPE_FLTOVF;
++	} else if ((raised & (BIT(1) | BIT(4))) != 0U) {
++		return K_FPE_FLTUND;
++	} else if ((raised & BIT(5)) != 0U) {
++		return K_FPE_FLTRES;
++	}
++
++	return K_FPE_FLTINV;
++}
++
++/* a fault taken in ring 3 generates the signal Linux generates for it */
++static bool user_fault_signal(struct arch_esf *esf, uintptr_t vector)
++{
++#ifdef CONFIG_X86_64
++	uintptr_t *ip = (uintptr_t *)&esf->rip;
++#else
++	uintptr_t *ip = (uintptr_t *)&esf->eip;
++#endif
++	void *addr = (void *)*ip;
++	int signo;
++	int code;
++
++	if ((esf->cs & 0x3U) != 0x3U) {
++		return false;
++	}
++
++	switch (vector) {
++	case IV_DIVIDE_ERROR:
++		signo = K_SIG_FPE;
++		code = K_FPE_INTDIV;
++		break;
++	case IV_DEBUG:
++		signo = K_SIG_TRAP;
++		code = ((dr6_take() & DR6_BS) != 0U) ? K_TRAP_TRACE : K_TRAP_BRKPT;
++		break;
++	case IV_BREAKPOINT:
++		signo = K_SIG_TRAP;
++		code = K_TRAP_BRKPT;
++		break;
++	case IV_X87_FPU_FP_ERROR:
++	case IV_SIMD_FP:
++		signo = K_SIG_FPE;
++		code = fp_exception_code(vector);
++		break;
++	case IV_INVALID_OPCODE:
++		signo = K_SIG_ILL;
++		code = K_ILL_ILLOPN;
++		break;
++	case IV_OVERFLOW:
++	case IV_BOUND_RANGE:
++	case IV_INVALID_TSS:
++	case IV_CTRL_PROTECTION_EXCEPTION:
++		signo = K_SIG_SEGV;
++		code = K_SEGV_ACCERR;
++		addr = NULL;
++		break;
++	case IV_GENERAL_PROTECTION:
++		signo = K_SIG_SEGV;
++		code = K_SEGV_ACCERR;
++		addr = NULL;
++		break;
++	case IV_SEGMENT_NOT_PRESENT:
++	case IV_STACK_FAULT:
++		signo = K_SIG_BUS;
++		code = K_BUS_ADRERR;
++		addr = NULL;
++		break;
++	case IV_ALIGNMENT_CHECK:
++		signo = K_SIG_BUS;
++		code = K_BUS_ADRALN;
++		break;
++	case IV_PAGE_FAULT:
++		signo = K_SIG_SEGV;
++		code = ((esf_get_code(esf) & PF_P) != 0U) ? K_SEGV_ACCERR : K_SEGV_MAPERR;
++		addr = z_x86_cr2_get();
++		break;
++	default:
++		return false;
++	}
++
++	if (!z_sig_fault(signo, code, addr)) {
++		return false;
++	}
++	*ip = (uintptr_t)z_sig_fault_entry;
++
++	return true;
++}
++#endif /* CONFIG_SIGNAL_FAULT */
++
++void z_x86_unhandled_cpu_exception(uintptr_t vector, const struct arch_esf *esf)
++{
++#ifdef CONFIG_SIGNAL_FAULT
++	if (user_fault_signal((struct arch_esf *)esf, vector)) {
++		return;
++	}
++#endif /* CONFIG_SIGNAL_FAULT */
+ #ifdef CONFIG_EXCEPTION_DEBUG
+ 	log_exception(vector, esf_get_code(esf));
+ #else
+@@ -542,6 +672,11 @@ void z_x86_page_fault_handler(struct arch_esf *esf)
+ #endif /* CONFIG_X86_64 */
+ 	}
+ #endif
++#ifdef CONFIG_SIGNAL_FAULT
++	if (user_fault_signal(esf, IV_PAGE_FAULT)) {
++		return;
++	}
++#endif /* CONFIG_SIGNAL_FAULT */
+ #ifdef CONFIG_EXCEPTION_DEBUG
+ 	dump_page_fault(esf);
+ #endif
+diff --git a/arch/x86/core/ia32/crt0.S b/arch/x86/core/ia32/crt0.S
+--- a/arch/x86/core/ia32/crt0.S
++++ b/arch/x86/core/ia32/crt0.S
+@@ -172,13 +172,11 @@ __csSet:
+ 	/*
+ 	 * Permit use of SSE instructions
+ 	 *
+-	 * Note that all SSE exceptions are masked by default,
+-	 * and that _no_ handler for SSE exceptions (#XM) is provided.
++	 * Note that all SSE exceptions are masked by default.
+ 	 */
+
+ 	movl	%cr4, %eax		/* move CR4 to EAX */
+-	orl	$0x200, %eax		/* CR4[OSFXSR] = 1 */
+-	andl	$~0x400, %eax		/* CR4[OSXMMEXCPT] = 0 */
++	orl	$0x600, %eax		/* CR4[OSFXSR+OSXMMEXCPT] = 1 */
+ 	movl	%eax, %cr4		/* move EAX to CR4 */
+
+ 	/* initialize SSE control/status reg */
+diff --git a/arch/x86/core/ia32/fatal.c b/arch/x86/core/ia32/fatal.c
+--- a/arch/x86/core/ia32/fatal.c
++++ b/arch/x86/core/ia32/fatal.c
+@@ -62,7 +62,7 @@ NANO_CPU_INT_REGISTER(_kernel_oops_handler, NANO_SOFT_IRQ,
+ 		      Z_X86_OOPS_VECTOR / 16, Z_X86_OOPS_VECTOR, 3);
+
+ #if CONFIG_EXCEPTION_DEBUG
+-FUNC_NORETURN static void generic_exc_handle(unsigned int vector,
++static void generic_exc_handle(unsigned int vector,
+ 					     const struct arch_esf *pEsf)
+ {
+ #ifdef CONFIG_DEBUG_COREDUMP
+@@ -74,7 +74,7 @@ FUNC_NORETURN static void generic_exc_handle(unsigned int vector,
+
+ #define _EXC_FUNC(vector) \
+ \
+-FUNC_NORETURN __used static void handle_exc_##vector(const struct arch_esf *pEsf) \
++__used static void handle_exc_##vector(const struct arch_esf *pEsf) \
+ { \
+ 	generic_exc_handle(vector, pEsf); \
+ }
+@@ -97,8 +97,12 @@ FUNC_NORETURN __used static void handle_exc_##vector(const struct arch_esf *pEsf
+ 	Z_EXC_FUNC_CODE(vector, dpl)
+
+ EXC_FUNC_NOCODE(IV_DIVIDE_ERROR, 0);
++#ifndef CONFIG_GDBSTUB
++EXC_FUNC_NOCODE(IV_DEBUG, 0);
++EXC_FUNC_NOCODE(IV_BREAKPOINT, 3);
++#endif
+ EXC_FUNC_NOCODE(IV_NON_MASKABLE_INTERRUPT, 0);
+-EXC_FUNC_NOCODE(IV_OVERFLOW, 0);
++EXC_FUNC_NOCODE(IV_OVERFLOW, 3);
+ EXC_FUNC_NOCODE(IV_BOUND_RANGE, 0);
+ EXC_FUNC_NOCODE(IV_INVALID_OPCODE, 0);
+ EXC_FUNC_NOCODE(IV_DEVICE_NOT_AVAILABLE, 0);
+@@ -112,6 +116,7 @@ EXC_FUNC_CODE(IV_GENERAL_PROTECTION, 0);
+ EXC_FUNC_NOCODE(IV_X87_FPU_FP_ERROR, 0);
+ EXC_FUNC_CODE(IV_ALIGNMENT_CHECK, 0);
+ EXC_FUNC_NOCODE(IV_MACHINE_CHECK, 0);
++EXC_FUNC_NOCODE(IV_SIMD_FP, 0);
+ EXC_FUNC_CODE(IV_CTRL_PROTECTION_EXCEPTION, 0);
+ #endif
+
+diff --git a/arch/x86/core/ia32/userspace.S b/arch/x86/core/ia32/userspace.S
+--- a/arch/x86/core/ia32/userspace.S
++++ b/arch/x86/core/ia32/userspace.S
+@@ -470,3 +470,15 @@ SECTION_FUNC(TEXT, z_x86_userspace_enter)
+
+ 	/* We will land in z_thread_entry() in user mode after this */
+ 	KPTI_IRET_USER
++
++#ifdef CONFIG_SIGNAL_FAULT
++/*
++ * A thread that faulted in user mode resumes here, in user mode. Nothing touches the stack: the
++ * fault may have been on it.
++ */
++GTEXT(z_sig_fault_entry)
++SECTION_FUNC(TEXT, z_sig_fault_entry)
++	movl	$K_SYSCALL_K_SIG_FAULT, %esi
++	int	$0x80
++	jmp	z_sig_fault_entry
++#endif /* CONFIG_SIGNAL_FAULT */
+diff --git a/arch/x86/core/intel64/fatal.c b/arch/x86/core/intel64/fatal.c
+--- a/arch/x86/core/intel64/fatal.c
++++ b/arch/x86/core/intel64/fatal.c
+@@ -30,12 +30,12 @@ void z_x86_exception(struct arch_esf *esf)
+ 	case IV_NON_MASKABLE_INTERRUPT:
+ 		if (!z_x86_do_kernel_nmi(esf)) {
+ 			z_x86_unhandled_cpu_exception(esf->vector, esf);
+-			CODE_UNREACHABLE;
+ 		}
+ 		break;
+ 	default:
++		/* returns only for a user-mode fault that now generates a signal */
+ 		z_x86_unhandled_cpu_exception(esf->vector, esf);
+-		CODE_UNREACHABLE;
++		break;
+ 	}
+ }
+
+diff --git a/arch/x86/core/intel64/locore.S b/arch/x86/core/intel64/locore.S
+--- a/arch/x86/core/intel64/locore.S
++++ b/arch/x86/core/intel64/locore.S
+@@ -25,11 +25,11 @@
+ /* Long mode, no-execute, syscall */
+ #define EFER_BITS (X86_EFER_MSR_LME | X86_EFER_MSR_NXE | X86_EFER_MSR_SCE)
+
+-/* Paging, write-protect */
+-#define CR0_BITS (CR0_PG | CR0_WP)
++/* Paging, write-protect, native x87 errors */
++#define CR0_BITS (CR0_PG | CR0_WP | CR0_NE)
+
+ /* PAE, SSE */
+-#define CR4_BITS (CR4_PAE | CR4_OSFXSR)
++#define CR4_BITS (CR4_PAE | CR4_OSFXSR | CR4_OSXMMEXCPT)
+
+ .macro set_efer
+ 	movl $X86_EFER_MSR, %ecx
+@@ -1127,7 +1127,7 @@ IRQ(248); IRQ(249); IRQ(250); IRQ(251); IRQ(252); IRQ(253); IRQ(254); IRQ(255)
+ #define USER_INTR	0xee
+ #ifdef CONFIG_X86_KPTI
+ #define TRAP		INTR
+-#define USER_TRAP	UINTR
++#define USER_TRAP	USER_INTR
+ #else
+ #define TRAP		0x8f
+ #define USER_TRAP	0xef
+@@ -1162,8 +1162,8 @@ IRQ(248); IRQ(249); IRQ(250); IRQ(251); IRQ(252); IRQ(253); IRQ(254); IRQ(255)
+ .align 16
+ idt:
+ 	IDT(  0, TRAP, EXC_STACK); IDT(  1, TRAP, EXC_STACK)
+-	IDT(  2, TRAP, NMI_STACK); IDT(  3, TRAP, EXC_STACK)
+-	IDT(  4, TRAP, EXC_STACK); IDT(  5, TRAP, EXC_STACK)
++	IDT(  2, TRAP, NMI_STACK); IDT(  3, USER_TRAP, EXC_STACK)
++	IDT(  4, USER_TRAP, EXC_STACK); IDT(  5, TRAP, EXC_STACK)
+ 	IDT(  6, TRAP, EXC_STACK); IDT(  7, TRAP, EXC_STACK)
+ 	IDT(  8, TRAP, BAD_STACK); IDT(  9, TRAP, EXC_STACK)
+ 	IDT( 10, TRAP, EXC_STACK); IDT( 11, TRAP, EXC_STACK)
+diff --git a/arch/x86/core/intel64/userspace.S b/arch/x86/core/intel64/userspace.S
+--- a/arch/x86/core/intel64/userspace.S
++++ b/arch/x86/core/intel64/userspace.S
+@@ -445,3 +445,15 @@ z_x86_userspace_enter:
+ #endif
+ 	swapgs
+ 	sysretq
++
++#ifdef CONFIG_SIGNAL_FAULT
++/*
++ * A thread that faulted in user mode resumes here, in user mode. Nothing touches the stack: the
++ * fault may have been on it.
++ */
++GTEXT(z_sig_fault_entry)
++SECTION_FUNC(TEXT, z_sig_fault_entry)
++	movq	$K_SYSCALL_K_SIG_FAULT, %rax
++	syscall
++	jmp	z_sig_fault_entry
++#endif /* CONFIG_SIGNAL_FAULT */
+diff --git a/arch/x86/include/kernel_arch_data.h b/arch/x86/include/kernel_arch_data.h
+--- a/arch/x86/include/kernel_arch_data.h
++++ b/arch/x86/include/kernel_arch_data.h
+@@ -53,10 +53,12 @@
+
+ #define CR0_PG		BIT(31)		/* enable paging */
+ #define CR0_WP		BIT(16)		/* honor W bit even when supervisor */
++#define CR0_NE		BIT(5)		/* report x87 errors as #MF */
+
+ #define CR4_PSE		BIT(4)		/* Page size extension (4MB pages) */
+ #define CR4_PAE		BIT(5)		/* enable PAE */
+ #define CR4_OSFXSR	BIT(9)		/* enable SSE (OS FXSAVE/RSTOR) */
++#define CR4_OSXMMEXCPT	BIT(10)		/* report unmasked SSE exceptions as #XM */
+
+ #ifndef _ASMLANGUAGE
+
+diff --git a/arch/x86/include/kernel_arch_func.h b/arch/x86/include/kernel_arch_func.h
+--- a/arch/x86/include/kernel_arch_func.h
++++ b/arch/x86/include/kernel_arch_func.h
+@@ -48,7 +48,7 @@ void z_x86_early_serial_init(void);
+ /* Called upon CPU exception that is unhandled and hence fatal; dump
+  * interesting info and call z_x86_fatal_error()
+  */
+-FUNC_NORETURN void z_x86_unhandled_cpu_exception(uintptr_t vector,
++void z_x86_unhandled_cpu_exception(uintptr_t vector,
+ 						 const struct arch_esf *esf);
+
+ /* Called upon unrecoverable error; dump registers and transfer control to
+diff --git a/tests/kernel/signal/src/main.c b/tests/kernel/signal/src/main.c
+--- a/tests/kernel/signal/src/main.c
++++ b/tests/kernel/signal/src/main.c
+@@ -834,14 +834,61 @@ static void fault_store(void *addr)
+ 	*(volatile int *)addr = 1;
+ }
+
+-#ifdef CONFIG_ARM64
++#if defined(CONFIG_ARM64) || defined(CONFIG_RISCV) || defined(CONFIG_X86)
++#define FAULT_INSTRUCTIONS 1
++
+ static void fault_undefined(void *addr)
+ {
+ 	ARG_UNUSED(addr);
+
++#if defined(CONFIG_ARM64)
+ 	__asm__ volatile(".inst 0x00000000" ::: "memory");
++#elif defined(CONFIG_RISCV)
++	__asm__ volatile("unimp" ::: "memory");
++#else
++	__asm__ volatile("ud2" ::: "memory");
++#endif
+ }
+-#endif /* CONFIG_ARM64 */
++
++static void fault_breakpoint(void *addr)
++{
++	ARG_UNUSED(addr);
++
++#if defined(CONFIG_ARM64)
++	__asm__ volatile("brk #0" ::: "memory");
++#elif defined(CONFIG_RISCV)
++	__asm__ volatile("ebreak" ::: "memory");
++#else
++	__asm__ volatile("int3" ::: "memory");
++#endif
++}
++#endif
++
++#ifdef CONFIG_X86
++static void fault_divide(void *addr)
++{
++	volatile unsigned int zero = (unsigned int)(uintptr_t)addr;
++	unsigned int quotient;
++
++	__asm__ volatile("divl %2" : "=a"(quotient) : "0"(1U), "r"(zero), "d"(0U));
++}
++#endif /* CONFIG_X86 */
++
++#if defined(CONFIG_X86_64) || (defined(CONFIG_X86) && defined(CONFIG_FPU))
++/* the x87 unit traps an unmasked exception at its next waiting instruction */
++static void fault_x87_divide(void *addr)
++{
++	uint16_t cw;
++	volatile double zero = (double)(uintptr_t)addr;
++	double one = 1.0;
++
++	__asm__ volatile("fnstcw %0" : "=m"(cw));
++	cw &= ~BIT(2);
++	__asm__ volatile("fldcw %0" : : "m"(cw));
++	__asm__ volatile("fldl %1; fdivl %2; fwait; fstpl %0" : "=m"(one) : "m"(one), "m"(zero));
++}
++#define FAULT_X87_DIVIDE 1
++#endif
+
+ static void fault_entry(void *arg1, void *arg2, void *arg3)
+ {
+@@ -876,14 +923,18 @@ static void k_sig_fault_run(void (*raise)(void *), int signo, void *addr, bool j
+ static void k_sig_fault_unmapped(void)
+ {
+ 	k_sig_fault_run(fault_store, K_SIG_SEGV, (void *)16, true);
+-	zassert_equal(fault_code, K_SEGV_MAPERR, "code %d", fault_code);
++	/* a memory protection unit tells no unmapped address from a forbidden one */
++	zassert_equal(fault_code, IS_ENABLED(CONFIG_MMU) ? K_SEGV_MAPERR : K_SEGV_ACCERR, "code %d",
++		      fault_code);
+ 	zassert_equal(fault_addr, (void *)16);
+ }
+
+ static void k_sig_fault_kernel_memory(void)
+ {
+ 	k_sig_fault_run(fault_store, K_SIG_SEGV, &noop_test_thread, true);
+-	zassert_equal(fault_code, K_SEGV_ACCERR, "code %d", fault_code);
++	/* absent from a user page table that leaves the kernel out (x86 KPTI) */
++	zassert_true((fault_code == K_SEGV_ACCERR) || (fault_code == K_SEGV_MAPERR), "code %d",
++		     fault_code);
+ 	zassert_equal(fault_addr, (void *)&noop_test_thread);
+ }
+
+@@ -892,23 +943,54 @@ static void k_sig_fault_handler_returns(void)
+ 	k_sig_fault_run(fault_store, K_SIG_SEGV, (void *)16, false);
+ }
+
+-#ifdef CONFIG_ARM64
++#ifdef FAULT_INSTRUCTIONS
+ static void k_sig_fault_undefined_instruction(void)
+ {
+ 	k_sig_fault_run(fault_undefined, K_SIG_ILL, NULL, true);
+-	zassert_equal(fault_code, K_ILL_ILLOPC, "code %d", fault_code);
++	/* x86 reports an invalid opcode as an illegal operand, as Linux does */
++	zassert_true((fault_code == K_ILL_ILLOPC) || (fault_code == K_ILL_ILLOPN), "code %d",
++		     fault_code);
+ 	zassert_not_null(fault_addr);
+ }
+-#endif /* CONFIG_ARM64 */
++
++static void k_sig_fault_breakpoint(void)
++{
++	k_sig_fault_run(fault_breakpoint, K_SIG_TRAP, NULL, true);
++	zassert_equal(fault_code, K_TRAP_BRKPT, "code %d", fault_code);
++}
++#endif /* FAULT_INSTRUCTIONS */
++
++#ifdef CONFIG_X86
++static void k_sig_fault_divide(void)
++{
++	k_sig_fault_run(fault_divide, K_SIG_FPE, NULL, true);
++	zassert_equal(fault_code, K_FPE_INTDIV, "code %d", fault_code);
++}
++#endif /* CONFIG_X86 */
++
++#ifdef FAULT_X87_DIVIDE
++static void k_sig_fault_x87_divide(void)
++{
++	k_sig_fault_run(fault_x87_divide, K_SIG_FPE, NULL, true);
++	zassert_equal(fault_code, K_FPE_FLTDIV, "code %d", fault_code);
++}
++#endif /* FAULT_X87_DIVIDE */
+
+ ZTEST(signal, test_k_sig_fault)
+ {
+ 	k_sig_fault_unmapped();
+ 	k_sig_fault_kernel_memory();
+ 	k_sig_fault_handler_returns();
+-#ifdef CONFIG_ARM64
++#ifdef FAULT_INSTRUCTIONS
+ 	k_sig_fault_undefined_instruction();
+-#endif /* CONFIG_ARM64 */
++	k_sig_fault_breakpoint();
++#endif /* FAULT_INSTRUCTIONS */
++#ifdef CONFIG_X86
++	k_sig_fault_divide();
++#endif /* CONFIG_X86 */
++#ifdef FAULT_X87_DIVIDE
++	k_sig_fault_x87_divide();
++#endif /* FAULT_X87_DIVIDE */
+ }
+ #endif /* CONFIG_SIGNAL_FAULT */
+
