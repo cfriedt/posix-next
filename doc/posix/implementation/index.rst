@@ -683,9 +683,20 @@ Kernel threads block all signals by default
    ``pthread_sigmask()``, before any signal can be delivered to it. User-mode threads start with
    no signals blocked, in line with the POSIX specification.
 
-Faults are not signals
-   A CPU exception or kernel error is reported through the fatal error path rather than by
-   generating ``SIGILL``, ``SIGFPE``, ``SIGSEGV``, or ``SIGBUS`` for the offending thread.
+A fault taken in user mode is a signal
+   With :kconfig:option:`CONFIG_SIGNAL_FAULT` (arm64, riscv and x86), a memory, instruction or
+   arithmetic fault a user thread takes generates ``SIGSEGV``, ``SIGBUS``, ``SIGILL``, ``SIGFPE``
+   or ``SIGTRAP`` for that thread, with ``si_code`` and ``si_addr`` as Linux reports them. The
+   thread resumes in a stub that touches no stack and enters the kernel, so a stack overflow
+   reaches it too, and a handler the thread can take runs through the normal trampoline. When
+   the signal is blocked, ignored or at its default action, or the fault happened inside a
+   handler, the process ends with the signal and its parent sees it killed (``WIFSIGNALED``).
+   Nothing of the faulting context is saved: a handler that returns ends the process the same
+   way, and one that means to continue leaves by ``siglongjmp()``. A fault taken in kernel mode
+   keeps the fatal error path, as does a fault in one of the kernel's reserved processes when no
+   handler is installed. RISC-V has no arithmetic traps and never generates ``SIGFPE``. A
+   reference to a page of a file mapping that lies wholly past the end of the file is a
+   ``SIGBUS`` with ``BUS_ADRERR``; :c:func:`ftruncate` moves that boundary for every mapping.
 
 Elastipool: Elastic Object Pools
 =================================
@@ -1459,8 +1470,7 @@ Deviations
    mode on a board without an MMU (its protection region covers it whole), keeps its shape and
    fails with ``EINVAL``. :c:func:`mprotect` operates on whole mappings: a range covering part of
    one fails with ``ENOTSUP``. Writable and executable pages are never granted together
-   (``ENOTSUP``). A reference past the end of the file beyond the last mapped page
-   cannot raise ``SIGBUS``; the page is simply not mapped.
+   (``ENOTSUP``).
 
 .. _posix_memory_locking_design:
 
