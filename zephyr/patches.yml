@@ -3687,6 +3687,29 @@ patches:
       leaves it undefined). Kernel-reserved processes without a handler keep
       the fatal-error path. arm64 first. The picolibc signal.h shim numbers
       si_code as Linux does. tests/kernel/signal test_k_sig_fault.
+  - path: zephyr/k-signal-fault-riscv-x86.patch
+    sha256sum: 438f4ec078f1d9aebe56b8afaf7d88c4ba006a9c1e91d31eeae6b506faa045d1
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-04
+    upstreamable: true
+    comments: |
+      riscv and x86 (32- and 64-bit) deliver user-mode faults as signals:
+      each classifies the fault as Linux does (riscv mcause/mtval, x86
+      vector, error code and CR2), records it with z_sig_fault() and resumes
+      riscv and x86 (32- and 64-bit) deliver user-mode faults as signals:
+      each classifies the fault as Linux does (riscv mcause/mtval, x86
+      vector, error code and CR2), records it with z_sig_fault() and resumes
+      the thread in a stack-free z_sig_fault_entry stub (ecall, syscall,
+      int $0x80). x86's generic exception handler may return for that.
+      riscv reports an unknown cause as SIGILL ILL_ILLTRP and has no
+      arithmetic traps. x86 decodes #MF and #XM into the SIGFPE code, maps
+      #DB and #BP to SIGTRAP, lets ring 3 issue int3 and into, sets CR0.NE
+      (x86_64) and CR4.OSXMMEXCPT so x87 and SSE errors raise #MF and #XM,
+      and fixes the KPTI USER_TRAP gate type.
+      tests/kernel/signal test_k_sig_fault covers both, including an
+      undefined instruction.
   - path: zephyr/libc-sys-stat-utime-markers.patch
     sha256sum: 8edfcf83058522bb80d601e92c4a9e6be14baec04cf8253ffbd344fbadf05b78
     module: zephyr
