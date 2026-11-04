@@ -1,0 +1,20 @@
+diff --git a/kernel/sched.c b/kernel/sched.c
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -1002,8 +1002,14 @@ static ALWAYS_INLINE void halt_thread(struct k_thread *thread, uint8_t new_state
+ 			 */
+ 			if (key != NULL) {
+ 				while (z_try_abort_thread_timeout(thread) == -EAGAIN) {
+-					z_sched_spinlock_unlock(*key);
+-					*key = z_sched_spinlock_lock();
++					/* Drop the lock for the handler but keep interrupts
++					 * masked: a halting _current is already dead, and an
++					 * interrupt taken here would switch it out for good
++					 * before its joiners are woken.
++					 */
++					z_sched_spinlock_release();
++					arch_spin_relax();
++					(void)z_sched_spinlock_lock();
+ 				}
+ 			}
+ 			unpend_all(&thread->join_queue);
