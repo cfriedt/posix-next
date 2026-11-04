@@ -1467,6 +1467,21 @@ patches:
       32-bit target without an MMU that chain fills the 1 KiB default stack
       exactly, so the default is 2048 when the resolver is enabled, as it
       already is for the Wi-Fi supplicants.
+  - path: zephyr/privileged-stack-fits-a-zvfs-syscall.patch
+    sha256sum: d03826d235f8f2aaad835a0961c9f56d571f867fb811eecbaf942b7bb8426829
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-04
+    upstreamable: true
+    comments: |
+      A ZVFS system call runs the file or socket path on the caller's privileged stack and
+      overflowed the 1 KiB default twice: recv() -> tcp_out_ext() -> net_pkt allocation ->
+      k_queue_get() on qemu_riscv32 (976 bytes in use at the trap), and a FIFO test's file
+      operations -> heap free on mps2/an385, where the first privileged stack sits right above
+      z_main_stack and the overflow corrupted main's frame (its epilogue popped a heap-code
+      return address as pc after the suite had passed). With ZVFS the privileged stack
+      defaults to 2 KiB, as it already does under EMUL and gcov.
   - path: zephyr/libc-signal-h-pthread-kill.patch
     sha256sum: 9db8dc468a348bb0603646373dbe308174a5711ddbcfd454197b47f18992eb48
     module: zephyr
