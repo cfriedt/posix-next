@@ -103,24 +103,27 @@ POSIX System Interfaces
 POSIX Shell and Utilities
 =========================
 
-Zephyr does not support a POSIX shell or utilities at this time.
+The utilities are not part of Zephyr's POSIX support. A provider module with a complete,
+conforming utility set selects the :ref:`Shell and Utilities option symbols <posix_options_posix2>`
+and the option is then reported; none is claimed today.
 
 .. csv-table:: POSIX Shell and Utilities
    :header: Symbol, Support, Remarks
    :widths: 50, 10, 50
 
-    _POSIX2_C_DEV, -1, :ref:`†<posix_undefined_behaviour>`
-    _POSIX2_CHAR_TERM, -1, :ref:`†<posix_undefined_behaviour>`
-    _POSIX2_FORT_DEV, -1, :ref:`†<posix_undefined_behaviour>`
-    _POSIX2_FORT_RUN, -1, :ref:`†<posix_undefined_behaviour>`
-    _POSIX2_LOCALEDEF, -1, :ref:`†<posix_undefined_behaviour>`
+    _POSIX2_VERSION, -1, :kconfig:option:`CONFIG_POSIX2_SHELL_UTILITIES` :ref:`†<posix_undefined_behaviour>`
+    _POSIX2_C_DEV, -1, :kconfig:option:`CONFIG_POSIX2_C_DEV` :ref:`†<posix_undefined_behaviour>`
+    _POSIX2_CHAR_TERM, -1, :kconfig:option:`CONFIG_POSIX2_CHAR_TERM` :ref:`†<posix_undefined_behaviour>`
+    _POSIX2_FORT_DEV, -1, :kconfig:option:`CONFIG_POSIX2_FORT_DEV` :ref:`†<posix_undefined_behaviour>`
+    _POSIX2_FORT_RUN, -1, :kconfig:option:`CONFIG_POSIX2_FORT_RUN` :ref:`†<posix_undefined_behaviour>`
+    _POSIX2_LOCALEDEF, -1, :kconfig:option:`CONFIG_POSIX2_LOCALEDEF` :ref:`†<posix_undefined_behaviour>`
     _POSIX2_PBS, -1, :ref:`†<posix_undefined_behaviour>`
     _POSIX2_PBS_ACCOUNTING, -1, :ref:`†<posix_undefined_behaviour>`
     _POSIX2_PBS_LOCATE, -1, :ref:`†<posix_undefined_behaviour>`
     _POSIX2_PBS_MESSAGE, -1, :ref:`†<posix_undefined_behaviour>`
     _POSIX2_PBS_TRACK, -1, :ref:`†<posix_undefined_behaviour>`
-    _POSIX2_SW_DEV, -1, :ref:`†<posix_undefined_behaviour>`
-    _POSIX2_UPE, -1, :ref:`†<posix_undefined_behaviour>`
+    _POSIX2_SW_DEV, -1, :kconfig:option:`CONFIG_POSIX2_SW_DEV` :ref:`†<posix_undefined_behaviour>`
+    _POSIX2_UPE, -1, :kconfig:option:`CONFIG_POSIX2_UPE` :ref:`†<posix_undefined_behaviour>`
     _POSIX2_UNIX, -1, :ref:`†<posix_undefined_behaviour>`
     _POSIX2_UUCP, -1, :ref:`†<posix_undefined_behaviour>`
 

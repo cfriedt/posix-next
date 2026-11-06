@@ -277,11 +277,11 @@ defined only while all of them remain enabled.
           :ref:`_POSIX_SAVED_IDS <posix_option_saved_ids>`, -1,
           :ref:`_POSIX_SHELL <posix_option_shell>`, 200809L, :kconfig:option:`CONFIG_POSIX_SHELL_FUNC`
           :ref:`_POSIX_VDISABLE <posix_option_vdisable>`, 0,
-          :ref:`_POSIX2_C_DEV <posix_options_posix2>`, -1,
-          :ref:`_POSIX2_CHAR_TERM <posix_options_posix2>`, -1,
-          :ref:`_POSIX2_FORT_RUN <posix_options_posix2>`, -1,
-          :ref:`_POSIX2_SW_DEV <posix_options_posix2>`, -1,
-          :ref:`_POSIX2_UPE <posix_options_posix2>`, -1,
+          :ref:`_POSIX2_C_DEV <posix_options_posix2>`, -1, :kconfig:option:`CONFIG_POSIX2_C_DEV`
+          :ref:`_POSIX2_CHAR_TERM <posix_options_posix2>`, -1, :kconfig:option:`CONFIG_POSIX2_CHAR_TERM`
+          :ref:`_POSIX2_FORT_RUN <posix_options_posix2>`, -1, :kconfig:option:`CONFIG_POSIX2_FORT_RUN`
+          :ref:`_POSIX2_SW_DEV <posix_options_posix2>`, -1, :kconfig:option:`CONFIG_POSIX2_SW_DEV`
+          :ref:`_POSIX2_UPE <posix_options_posix2>`, -1, :kconfig:option:`CONFIG_POSIX2_UPE`
 
       .. note::
          :kconfig:option:`CONFIG_POSIX_AEP_CHOICE_PSE54` enables every PSE54 constituent that
@@ -297,8 +297,8 @@ defined only while all of them remain enabled.
          :ref:`POSIX_FILE_SYSTEM_GLOB <posix_option_group_file_system_glob>` groups, and its
          ``XSI_DYNAMIC_LINKING`` unit is the modern
          :ref:`POSIX_DYNAMIC_LINKING <posix_option_group_dynamic_linking>` group. PSE54 also
-         requires the Shell and Utilities volume (``_POSIX2_*`` above), which is beyond the
-         scope of this project.
+         requires the Shell and Utilities volume (``_POSIX2_*`` above), whose utilities a
+         separate provider module may :ref:`claim <posix_options_posix2>`.
 
 
 .. note::
