@@ -5053,6 +5053,18 @@ patches:
       bogo op within the small targets' budget (0 in 30 s on qemu_riscv64
       under icount, 80 in 32 s on qemu_cortex_a53). With the 512-byte minimum
       it passes on both.
+  - path: stress-ng/stress-ng-memthrash-sse4-fallback-returns.patch
+    sha256sum: f9867df8ed2c370951d3e1af3f45bba332e4ffbbc53a0d0785fbcc7a27255ac0
+    module: modules/lib/stress-ng
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-05
+    upstreamable: true
+    comments: |
+      The memthrash copy128nt method calls the plain copy128 fallback when the
+      CPU has no SSE4.1 but did not return afterwards, so it went on into its
+      movntdqa loop and took an invalid-opcode fault (qemu_x86_64's CPU model
+      has no SSE4.1). The fallback now returns.
   - path: stress-ng/stress-ng-sigstop-pid-before-sigchld.patch
     sha256sum: 0c934338f9300ea52816d2232cb5b39b693c98e249804b68bf8e84f6fd50f869
     module: modules/lib/stress-ng
