@@ -1500,6 +1500,19 @@ Permission bits are not exposed
    regular file. :c:func:`access` and :c:func:`mkdir` follow suit: ``mkdir()`` accepts its
    ``mode`` argument and ignores it, and :c:func:`access` grants ``X_OK`` on any file.
 
+.. _posix_file_attributes_placeholder:
+
+File attributes are a placeholder
+   The :ref:`POSIX_FILE_ATTRIBUTES <posix_option_group_file_attributes>` and
+   :ref:`POSIX_FILE_ATTRIBUTES_FD <posix_option_group_file_attributes_fd>` option groups and
+   :c:func:`lchown` are built on the same gap. :c:func:`chmod`, :c:func:`fchmod`,
+   :c:func:`fchmodat` check that the file exists and discard the mode; :c:func:`chown`,
+   :c:func:`fchown`, :c:func:`fchownat` and :c:func:`lchown` accept only uid 0, gid 0 or -1 and
+   store nothing, since no owner is recorded; :c:func:`umask` round-trips a per-process mask
+   that is applied to nothing, so a file created with :c:func:`open` or :c:func:`mkdir` ignores
+   both the ``mode`` argument and the mask and reports the synthesised mode above. ``st_uid`` and
+   ``st_gid`` are always 0.
+
 Timestamps
    File timestamps are surfaced only when the backend records them, gated by
    :kconfig:option:`CONFIG_FS_DIRENT_EXT`. Where a backend stores no timestamps, ``fs_utime()``

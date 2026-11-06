@@ -13,7 +13,7 @@ symbolic links, symlink() fails, readlink() reports EINVAL, and lstat() is equiv
    :header: API, Supported
    :widths: 50,10
 
-    :c:func:`lchown`,yes
+    :c:func:`lchown`,yes :ref:`†<posix_undefined_behaviour>`
     :c:func:`lstat`,yes
     :c:func:`readlink`,yes
     :c:func:`symlink`,yes
