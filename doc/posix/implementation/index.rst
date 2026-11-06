@@ -1648,6 +1648,64 @@ Timestamps are whole seconds, and reads leave no trace
    (the ``noatime`` behaviour of Linux), so ``st_atim`` moves only through creation and the
    ``utime()`` family.
 
+.. _posix_xsi_file_system_design:
+
+XSI File System
+===============
+
+The :ref:`XSI_FILE_SYSTEM <posix_option_group_xsi_file_system>` option group
+(:kconfig:option:`CONFIG_XSI_FILE_SYSTEM`) stands on ZVFS alone: none of its functions calls
+another option group, so it builds and runs with :ref:`POSIX_FILE_SYSTEM
+<posix_option_group_file_system>` and :ref:`POSIX_FD_MGMT <posix_option_group_fd_mgmt>` disabled,
+and every function works from user mode.
+
+Pathnames
+   :c:func:`basename` and :c:func:`dirname` edit the string they are given, as the standard allows,
+   and return ``"."`` or ``"/"`` from read-only storage when the answer is not part of the input.
+   :c:func:`realpath` resolves one component at a time against the working directory
+   (``zvfs_getcwd()``), dropping ``.`` and ``..``, and reads each symbolic link it meets with
+   ``zvfs_readlink()`` to splice the target in front of what follows; more than ``SYMLOOP_MAX``
+   links in one lookup is ``ELOOP``. Every component has to exist (``ENOENT``) and every one but
+   the last has to be a directory (``ENOTDIR``). A ``NULL`` result buffer is one of ``PATH_MAX``
+   bytes from :c:func:`malloc`.
+
+Directory positions
+   A directory stream's position is kept by ZVFS as the count of entries read since the stream was
+   opened or last rewound: :c:func:`telldir` reports it (``zvfs_telldir()``) and :c:func:`seekdir`
+   returns to it (``zvfs_seekdir()``), rewinding and reading forward when the position lies behind
+   the current one. A position past the end leaves the stream at the end.
+
+Tree walks
+   :c:func:`nftw` and :c:func:`ftw` share one walker over ``zvfs_opendir()``, ``zvfs_readdir()``
+   and ``zvfs_stat()``/``zvfs_lstat()``. It descends into a directory while holding that
+   directory's stream open; when the descent would exceed the caller's descriptor limit, the
+   stream is closed first and reopened afterwards at the position it had, which is what the
+   directory position above is for. ``FTW_PHYS`` reports links as ``FTW_SL``; without it a
+   link to nothing is ``FTW_SLN``. ``FTW_MOUNT`` compares ``st_dev`` with the starting
+   directory's, ``FTW_DEPTH`` reports a directory as ``FTW_DP`` after its contents, and
+   ``FTW_CHDIR`` changes into the directory holding each reported object before the callback
+   and back to the caller's working directory when the walk ends. A starting path whose status
+   cannot be obtained is an error (``-1``); below it, such an object is reported as ``FTW_NS``.
+
+Locks, nodes, names
+   :c:func:`lockf` is the write-lock subset of the ZVFS record locks (``zvfs_fcntl()`` with
+   ``ZVFS_F_SETLK``, ``ZVFS_F_SETLKW`` and ``ZVFS_F_GETLK``), which are owned by the process:
+   ``F_TEST`` reports only other processes' locks, so a region the caller holds tests as free.
+   A negative size locks the region ending at the current offset, measured with
+   ``zvfs_lseek()``; a region that would start before the file is ``EINVAL``.
+   :c:func:`mknod` is ``zvfs_mknod()``: ``S_IFIFO`` makes a FIFO, ``S_IFREG`` or no type an
+   empty regular file, and any other type is ``EINVAL``, since no device special file exists to
+   make. :c:func:`tempnam` picks the first usable directory of ``TMPDIR``, its argument,
+   ``P_tmpdir`` and ``/tmp``, usable meaning ``zvfs_access()`` grants search and write, and
+   returns the first generated name (five prefix characters at most, six random ones) that
+   ``zvfs_access()`` reports as absent; the name is allocated with :c:func:`malloc`.
+
+Synchronization
+   :c:func:`sync` is ``zvfs_sync()``: ZVFS walks its system-wide table of open file descriptions
+   and flushes each one under the description's lock, the lock a close holds, so a description is
+   either flushed or already closed; descriptions with nothing to flush are passed over. Data
+   held only by a memory mapping is written back by :c:func:`msync`.
+
 .. _posix_mapped_files_design:
 
 Memory-Mapped Files

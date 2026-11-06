@@ -21,6 +21,8 @@
 
 #include <stddef.h> /* NULL, size_t */
 
+#include <zephyr/toolchain.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -77,6 +79,18 @@ char *mkdtemp(char *template);
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/mkstemp.html
  */
 int mkstemp(char *template);
+#endif
+
+#if defined(_XOPEN_SOURCE) || defined(__DOXYGEN__)
+/**
+ * @brief Resolve a pathname to an absolute pathname without dot, dot-dot or symbolic links.
+ * @ingroup posix_option_group_xsi_file_system
+ * @param file_name Pathname to resolve.
+ * @param resolved_name Buffer of at least PATH_MAX bytes, or NULL to have one allocated.
+ * @return @p resolved_name or the allocated buffer, or NULL with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/realpath.html
+ */
+char *realpath(const char *ZRESTRICT file_name, char *ZRESTRICT resolved_name);
 #endif
 
 /**

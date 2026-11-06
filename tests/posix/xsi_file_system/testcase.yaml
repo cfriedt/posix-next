@@ -1,0 +1,34 @@
+common:
+  tags:
+    - xsi_file_system
+  # 1 tier0 platform per supported architecture
+  platform_key:
+    - arch
+    - simulation
+  min_flash: 64
+  min_ram: 64
+tests:
+  portability.posix.xsi_file_system:
+    filter: not CONFIG_NATIVE_LIBC
+  portability.posix.xsi_file_system.userspace:
+    filter: (not CONFIG_NATIVE_LIBC) and CONFIG_ARCH_HAS_USERSPACE
+    tags: userspace
+    extra_configs:
+      - CONFIG_TEST_USERSPACE=y
+      - CONFIG_USERSPACE=y
+      # 8-region MPU: stack guard + thread stack leave only 3 domain slots,
+      # one short for zvfs_dir_partition on top of libc/malloc/ztest
+      - platform:mps2/an385:CONFIG_TEST_USERSPACE_WITHOUT_HW_STACK_PROTECTION=y
+  portability.posix.xsi_file_system.minimal:
+    filter: not CONFIG_NATIVE_LIBC
+    extra_configs:
+      - CONFIG_MINIMAL_LIBC=y
+  portability.posix.xsi_file_system.newlib:
+    filter: (not CONFIG_NATIVE_LIBC) and (TOOLCHAIN_HAS_NEWLIB == 1)
+    extra_configs:
+      - CONFIG_NEWLIB_LIBC=y
+  portability.posix.xsi_file_system.picolibc:
+    tags: picolibc
+    filter: (not CONFIG_NATIVE_LIBC) and CONFIG_PICOLIBC_SUPPORTED
+    extra_configs:
+      - CONFIG_PICOLIBC=y

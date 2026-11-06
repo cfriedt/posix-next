@@ -1,0 +1,14 @@
+/*
+ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#include <unistd.h>
+
+#include <zephyr/sys/zvfs.h>
+
+void sync(void)
+{
+	zvfs_sync();
+}
