@@ -21,6 +21,16 @@
 #endif
 #endif /* CONFIG_TEST_POSIX_PROFILE_SUBTRACT */
 
+#ifdef CONFIG_TEST_POSIX_PROFILE_PSE54
+#if !defined(_POSIX_AEP_REALTIME_MINIMAL) || !defined(_POSIX_AEP_REALTIME_CONTROLLER)
+#error "PSE54 inherits PSE51 and PSE52"
+#endif
+#if !defined(_POSIX_ADVISORY_INFO) || !defined(_POSIX_JOB_CONTROL) || !defined(_POSIX_REGEXP) ||  \
+	!defined(_XOPEN_UNIX)
+#error "PSE54 adds advisory information, job control, regular expressions and XSI"
+#endif
+#endif /* CONFIG_TEST_POSIX_PROFILE_PSE54 */
+
 #ifdef CONFIG_POSIX_SYSCONF_IMPL_FULL
 
 enum sysconf_expect {
