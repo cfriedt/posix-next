@@ -1,0 +1,162 @@
+diff --git a/include/zephyr/sys/zvfs.h b/include/zephyr/sys/zvfs.h
+--- a/include/zephyr/sys/zvfs.h
++++ b/include/zephyr/sys/zvfs.h
+@@ -115,6 +115,13 @@
+ __syscall int zvfs_fsync(int fd);
+ 
+ /**
++ * @brief Write the buffered data of every open regular file to its backing store.
++ *
++ * Descriptions of other kinds have nothing to flush and are not visited. Always completes.
++ */
++__syscall void zvfs_sync(void);
++
++/**
+  * @brief Truncate a file descriptor to a given length.
+  *
+  * @param fd File descriptor.
+diff --git a/include/zephyr/sys/internal/fdtable_priv.h b/include/zephyr/sys/internal/fdtable_priv.h
+--- a/include/zephyr/sys/internal/fdtable_priv.h
++++ b/include/zephyr/sys/internal/fdtable_priv.h
+@@ -36,6 +36,8 @@
+ struct fd_slot *zvfs_fd_slot_get(int fd);
+ struct fd_entry *zvfs_fd_entry_get(int fd);
+ struct fd_entry *zvfs_fd_syscall_verify(int fd);
++/* fn runs under the lock of each open description of type ifmt (a ZVFS_MODE_IF* value) */
++void zvfs_fd_entry_foreach(uint32_t ifmt, void (*fn)(struct fd_entry *entry, void *arg), void *arg);
+ 
+ struct k_process;
+ #if defined(CONFIG_ZVFS_FDTABLE) && defined(CONFIG_ZVFS_FS) && defined(CONFIG_PROCESS)
+diff --git a/lib/os/zvfs/CMakeLists.txt b/lib/os/zvfs/CMakeLists.txt
+--- a/lib/os/zvfs/CMakeLists.txt
++++ b/lib/os/zvfs/CMakeLists.txt
+@@ -9,6 +9,7 @@
+   zvfs_lseek.c
+   zvfs_fstat.c
+   zvfs_fsync.c
++  zvfs_sync.c
+   zvfs_ftruncate.c
+   zvfs_fcntl.c
+   zvfs_ioctl.c
+diff --git a/lib/os/zvfs/zvfs_fdtable.c b/lib/os/zvfs/zvfs_fdtable.c
+--- a/lib/os/zvfs/zvfs_fdtable.c
++++ b/lib/os/zvfs/zvfs_fdtable.c
+@@ -292,6 +292,24 @@
+ 	return count;
+ }
+ 
++void zvfs_fd_entry_foreach(uint32_t ifmt, void (*fn)(struct fd_entry *entry, void *arg), void *arg)
++{
++	for (int i = 0; i < ARRAY_SIZE(fdtable); i++) {
++		struct fd_entry *entry = &fdtable[i];
++
++		if ((atomic_get(&entry->refcount) == 0) || ((entry->mode & ZVFS_MODE_IFMT) != ifmt)) {
++			continue;
++		}
++
++		/* as zvfs_close(): the lock orders fn against the object's close */
++		(void)k_mutex_lock(&entry->lock, K_FOREVER);
++		if ((entry->vtable != NULL) && (entry->obj != NULL)) {
++			fn(entry, arg);
++		}
++		k_mutex_unlock(&entry->lock);
++	}
++}
++
+ void zvfs_fd_offset_set(struct fd_entry *entry, size_t offset)
+ {
+ 	/* descriptors sharing this description share the one offset */
+diff --git a/lib/os/zvfs/zvfs_sync.c b/lib/os/zvfs/zvfs_sync.c
+new file mode 100644
+--- /dev/null
++++ b/lib/os/zvfs/zvfs_sync.c
+@@ -0,0 +1,37 @@
++/*
++ * Copyright (c) 2026, Friedt Professional Engineering Services, Inc.
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <errno.h>
++
++#include <zephyr/sys/fdtable.h>
++#include <zephyr/sys/internal/fdtable_priv.h>
++#include <zephyr/internal/syscall_handler.h>
++
++static void sync_description(struct fd_entry *entry, void *arg)
++{
++	int prev_errno = errno;
++
++	ARG_UNUSED(arg);
++
++	/* a file object without a sync answers EOPNOTSUPP */
++	(void)zvfs_fdtable_call_ioctl(entry->vtable, entry->obj, ZFD_IOCTL_FSYNC);
++	errno = prev_errno;
++}
++
++void z_impl_zvfs_sync(void)
++{
++	/* only a regular file has a backing store; a pipe or socket read holds its lock through the wait */
++	zvfs_fd_entry_foreach(ZVFS_MODE_IFREG, sync_description, NULL);
++}
++
++#ifdef CONFIG_USERSPACE
++static void z_vrfy_zvfs_sync(void)
++{
++	z_impl_zvfs_sync();
++}
++
++#include <zephyr/syscalls/zvfs_sync_mrsh.c>
++#endif /* CONFIG_USERSPACE */
+diff --git a/tests/lib/zvfs_fs/src/main.c b/tests/lib/zvfs_fs/src/main.c
+--- a/tests/lib/zvfs_fs/src/main.c
++++ b/tests/lib/zvfs_fs/src/main.c
+@@ -635,6 +635,28 @@
+ #endif
+ }
+ 
++ZTEST_USER(zvfs_fs, test_zvfs_sync)
++{
++	struct zvfs_stat st;
++	int fd;
++	int dfd;
++
++	/* a buffered write reaches the file; a directory description is not visited */
++	fd = zvfs_open(TNOENT, ZVFS_O_RDWR | ZVFS_O_CREAT | ZVFS_O_EXCL, 0600);
++	zassert_true(fd >= 0);
++	dfd = zvfs_open(TDIR, ZVFS_O_RDONLY | ZVFS_O_DIRECTORY, 0);
++	zassert_true(dfd >= 0);
++	zassert_equal(zvfs_write(fd, TCONTENT, strlen(TCONTENT)), strlen(TCONTENT));
++	errno = 0;
++	zvfs_sync();
++	zassert_equal(errno, 0);
++	zassert_ok(zvfs_stat(TNOENT, &st));
++	zassert_equal(st.size, (off_t)strlen(TCONTENT));
++	zassert_ok(zvfs_close(dfd));
++	zassert_ok(zvfs_close(fd));
++	zassert_ok(zvfs_unlink(TNOENT));
++}
++
+ #if defined(CONFIG_USERSPACE) && defined(CONFIG_ZTEST_FATAL_HOOK)
+ ZTEST_USER(zvfs_fs, test_zvfs_stat_fault)
+ {
+diff --git a/doc/services/zvfs/index.rst b/doc/services/zvfs/index.rst
+--- a/doc/services/zvfs/index.rst
++++ b/doc/services/zvfs/index.rst
+@@ -11,6 +11,16 @@
+ reached through the same calls. The POSIX and C library file interfaces sit on
+ top of these entry points.
+ 
++Files
++*****
++
++``zvfs_sync()`` writes the buffered data of every open regular file to its
++backing store, as ``zvfs_fsync()`` does for one descriptor. Descriptions of
++other kinds have nothing to flush and are not visited: a pipe or socket read
++holds its description for as long as it waits. The call always completes.
++Data held only by a memory mapping is written back by ``zvfs_msync()``,
++described below.
++
+ Memory Mappings
+ ***************
+ 
