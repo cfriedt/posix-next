@@ -5159,6 +5159,24 @@ patches:
       stack on the stack it names, and bad-altstack points the alternate stack at
       memory a handler cannot use and expects its child to die of SIGSEGV. Both
       select XSI_SIGNALS.
+  - path: stress-ng/stress-ng-lockf-mknod-enabled.patch
+    sha256sum: b8b622222fb4e1d6483c7e970f4790762a1218abae36674a1adade6748c318d7
+    module: modules/lib/stress-ng
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-06
+    upstreamable: false
+    comments: |
+      lockf and mknod are enabled: XSI_FILE_SYSTEM provides lockf(), mknod()
+      and sync(), so config.h defines HAVE_LOCKF, HAVE_MKNOD and HAVE_SYNC
+      under CONFIG_XSI_FILE_SYSTEM (lockmix, filerace, fd-abuse and syscall
+      gain those paths where the group is linked), and the two stressors
+      select CONFIG_XSI and CONFIG_XSI_FILE_SYSTEM beside the groups they
+      already needed (lockf forks a contender). stress-mknod.c is built for
+      Linux only upstream; the gate admits __ZEPHYR__, since it uses nothing
+      but POSIX and its /dev scan only skips the device types. Generated glue
+      regenerated: 187 of 390 stressors enabled, 7 left waiting on XSI groups
+      (itimer, sigvtalrm, nice, resched, sigxcpu, sigxfsz, prio-inv).
   - path: stress-ng/stress-ng-sigstop-pid-before-sigchld.patch
     sha256sum: 0c934338f9300ea52816d2232cb5b39b693c98e249804b68bf8e84f6fd50f869
     module: modules/lib/stress-ng
