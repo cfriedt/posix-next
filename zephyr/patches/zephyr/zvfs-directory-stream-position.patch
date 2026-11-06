@@ -1,0 +1,243 @@
+diff --git a/include/zephyr/sys/fdtable.h b/include/zephyr/sys/fdtable.h
+--- a/include/zephyr/sys/fdtable.h
++++ b/include/zephyr/sys/fdtable.h
+@@ -386,6 +386,10 @@ enum {
+ 	ZFD_IOCTL_STATVFS,
+ 	ZFD_IOCTL_READDIR,
+ 	ZFD_IOCTL_REWINDDIR,
++	/** Entries read since the stream was opened or rewound: (long *pos) */
++	ZFD_IOCTL_TELLDIR,
++	/** Return to a position ZFD_IOCTL_TELLDIR reported: (const long *pos) */
++	ZFD_IOCTL_SEEKDIR,
+ 	/* succeeds only on descriptors referring to a terminal */
+ 	ZFD_IOCTL_ISATTY,
+ 	/* console input mode, an unsigned int of ZVFS_CONSOLE_* bits */
+diff --git a/include/zephyr/sys/zvfs_fs.h b/include/zephyr/sys/zvfs_fs.h
+--- a/include/zephyr/sys/zvfs_fs.h
++++ b/include/zephyr/sys/zvfs_fs.h
+@@ -48,6 +48,8 @@ struct zvfs_fs_desc {
+ #endif
+ 	/** Open flags (ZVFS_O_*) reported by F_GETFL */
+ 	int flags;
++	/** Entries read since the directory stream was opened or rewound */
++	long dir_pos;
+ 	bool is_dir: 1;
+ 	bool used: 1;
+ };
+@@ -157,6 +159,28 @@ __syscall int zvfs_readdir(int fd, struct zvfs_dirent *ent);
+  */
+ __syscall int zvfs_rewinddir(int fd);
+ 
++/**
++ * @brief Report the position of a directory stream.
++ *
++ * The position is the count of entries read since the stream was opened or
++ * last rewound.
++ *
++ * @param fd Directory file descriptor.
++ *
++ * @return The position, or -1 with errno set on error.
++ */
++__syscall long zvfs_telldir(int fd);
++
++/**
++ * @brief Return a directory stream to a position zvfs_telldir() reported.
++ *
++ * @param fd Directory file descriptor.
++ * @param pos The position.
++ *
++ * @return 0 on success, -1 with errno set on error.
++ */
++__syscall int zvfs_seekdir(int fd, long pos);
++
+ /**
+  * @brief Open a path on a mounted Zephyr file system and return an fd.
+  *
+diff --git a/lib/os/zvfs/zvfs_dirent.c b/lib/os/zvfs/zvfs_dirent.c
+--- a/lib/os/zvfs/zvfs_dirent.c
++++ b/lib/os/zvfs/zvfs_dirent.c
+@@ -177,3 +177,48 @@ static int z_vrfy_zvfs_rewinddir(int fd)
+ }
+ #include <zephyr/syscalls/zvfs_rewinddir_mrsh.c>
+ #endif /* CONFIG_USERSPACE */
++
++long z_impl_zvfs_telldir(int fd)
++{
++	long pos;
++
++	if (zvfs_dir_fd_ioctl(fd, ZFD_IOCTL_TELLDIR, &pos) < 0) {
++		return -1;
++	}
++
++	return pos;
++}
++
++#ifdef CONFIG_USERSPACE
++static long z_vrfy_zvfs_telldir(int fd)
++{
++	if (zvfs_fd_syscall_verify(fd) == NULL) {
++		return -1;
++	}
++
++	return z_impl_zvfs_telldir(fd);
++}
++#include <zephyr/syscalls/zvfs_telldir_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++int z_impl_zvfs_seekdir(int fd, long pos)
++{
++	if (pos < 0) {
++		errno = EINVAL;
++		return -1;
++	}
++
++	return zvfs_dir_fd_ioctl(fd, ZFD_IOCTL_SEEKDIR, &pos);
++}
++
++#ifdef CONFIG_USERSPACE
++static int z_vrfy_zvfs_seekdir(int fd, long pos)
++{
++	if (zvfs_fd_syscall_verify(fd) == NULL) {
++		return -1;
++	}
++
++	return z_impl_zvfs_seekdir(fd, pos);
++}
++#include <zephyr/syscalls/zvfs_seekdir_mrsh.c>
++#endif /* CONFIG_USERSPACE */
+diff --git a/lib/os/zvfs/zvfs_fs.c b/lib/os/zvfs/zvfs_fs.c
+--- a/lib/os/zvfs/zvfs_fs.c
++++ b/lib/os/zvfs/zvfs_fs.c
+@@ -143,6 +143,7 @@ int z_impl_zvfs_openat(int dirfd, const char *name, int flags, int mode)
+ 
+ 		ptr->stream = NULL;
+ 		ptr->flags = flags & (ZVFS_O_ACCMODE | ZVFS_O_DIRECTORY);
++		ptr->dir_pos = 0;
+ 		strcpy(ptr->path, name);
+ 		zvfs_finalize_typed_fd(fd, ptr, &fs_dir_fd_op_vtable, ZVFS_MODE_IFDIR);
+ 
+@@ -313,10 +314,42 @@ static int fs_dir_ioctl_vmeth(void *obj, unsigned int request, va_list args)
+ 		ent->d_size = entry.size;
+ 		strncpy(ent->d_name, entry.name, ZVFS_NAME_MAX);
+ 		ent->d_name[ZVFS_NAME_MAX] = '\0';
++		ptr->dir_pos++;
+ 		return 0;
+ 	}
+ 	case ZFD_IOCTL_REWINDDIR: {
+ 		rc = fs_rewinddir(&ptr->dir);
++		if (rc == 0) {
++			ptr->dir_pos = 0;
++		}
++		break;
++	}
++	case ZFD_IOCTL_TELLDIR: {
++		long *pos = va_arg(args, long *);
++
++		*pos = ptr->dir_pos;
++		return 0;
++	}
++	case ZFD_IOCTL_SEEKDIR: {
++		long pos = *va_arg(args, const long *);
++		struct fs_dirent entry;
++
++		rc = 0;
++		if (pos < ptr->dir_pos) {
++			rc = fs_rewinddir(&ptr->dir);
++			if (rc < 0) {
++				break;
++			}
++			ptr->dir_pos = 0;
++		}
++		/* a position past the end leaves the stream at the end */
++		while (ptr->dir_pos < pos) {
++			rc = fs_readdir(&ptr->dir, &entry);
++			if ((rc < 0) || (entry.name[0] == '\0')) {
++				break;
++			}
++			ptr->dir_pos++;
++		}
+ 		break;
+ 	}
+ 	case ZFD_IOCTL_UTIME: {
+diff --git a/tests/lib/zvfs_fs/src/main.c b/tests/lib/zvfs_fs/src/main.c
+--- a/tests/lib/zvfs_fs/src/main.c
++++ b/tests/lib/zvfs_fs/src/main.c
+@@ -494,6 +494,63 @@ ZTEST_USER(zvfs_fs, test_zvfs_rewinddir)
+ 	zassert_ok(zvfs_close(d->fd));
+ }
+ 
++ZTEST_USER(zvfs_fs, test_zvfs_telldir)
++{
++	struct zvfs_dirstream *d;
++	int fd;
++
++	/* the position counts the entries read; a rewind resets it */
++	d = zvfs_opendir(MNT);
++	zassert_not_null(d);
++	zassert_equal(zvfs_telldir(d->fd), 0);
++	zassert_equal(zvfs_readdir(d->fd, &d->ent), 0);
++	zassert_equal(zvfs_telldir(d->fd), 1);
++	zassert_ok(zvfs_rewinddir(d->fd));
++	zassert_equal(zvfs_telldir(d->fd), 0);
++	zassert_ok(zvfs_close(d->fd));
++
++	/* not a directory */
++	fd = zvfs_open(TFILE, ZVFS_O_RDONLY, 0);
++	zassert_true(fd >= 0);
++	errno = 0;
++	zassert_equal(zvfs_telldir(fd), -1);
++	zassert_equal(errno, ENOTDIR);
++	zassert_ok(zvfs_close(fd));
++}
++
++ZTEST_USER(zvfs_fs, test_zvfs_seekdir)
++{
++	struct zvfs_dirstream *d;
++	char first[ZVFS_NAME_MAX + 1];
++	char second[ZVFS_NAME_MAX + 1];
++
++	/* the mount root holds the fixture file and directory */
++	d = zvfs_opendir(MNT);
++	zassert_not_null(d);
++	zassert_equal(zvfs_readdir(d->fd, &d->ent), 0);
++	strcpy(first, d->ent.d_name);
++	zassert_equal(zvfs_readdir(d->fd, &d->ent), 0);
++	strcpy(second, d->ent.d_name);
++	zassert_equal(zvfs_readdir(d->fd, &d->ent), 1);
++
++	/* back to a reported position, then forward again; past the end reads nothing */
++	zassert_ok(zvfs_seekdir(d->fd, 0));
++	zassert_equal(zvfs_readdir(d->fd, &d->ent), 0);
++	zassert_str_equal(d->ent.d_name, first);
++	zassert_ok(zvfs_seekdir(d->fd, 1));
++	zassert_equal(zvfs_readdir(d->fd, &d->ent), 0);
++	zassert_str_equal(d->ent.d_name, second);
++	zassert_ok(zvfs_seekdir(d->fd, 0));
++	zassert_ok(zvfs_seekdir(d->fd, 2));
++	zassert_equal(zvfs_readdir(d->fd, &d->ent), 1);
++	zassert_equal(zvfs_telldir(d->fd), 2);
++
++	errno = 0;
++	zassert_equal(zvfs_seekdir(d->fd, -1), -1);
++	zassert_equal(errno, EINVAL);
++	zassert_ok(zvfs_close(d->fd));
++}
++
+ ZTEST_USER(zvfs_fs, test_zvfs_chdir)
+ {
+ 	int fd;
+diff --git a/doc/services/zvfs/index.rst b/doc/services/zvfs/index.rst
+--- a/doc/services/zvfs/index.rst
++++ b/doc/services/zvfs/index.rst
+@@ -21,6 +21,11 @@ holds its description for as long as it waits. The call always completes.
+ Data held only by a memory mapping is written back by ``zvfs_msync()``,
+ described below.
+ 
++A directory stream has a position: the count of entries read since it was
++opened or last rewound. ``zvfs_telldir()`` reports it, and ``zvfs_seekdir()``
++returns the stream to a reported position, rewinding and reading forward when
++the position lies behind the current one.
++
+ Memory Mappings
+ ***************
+ 
