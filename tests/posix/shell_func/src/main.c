@@ -38,6 +38,8 @@ static void install(const char *path, const uint8_t *data, size_t len)
 		zassert_true(fs_write(&f, data + off, MIN(1024, len - off)) > 0);
 	}
 	zassert_ok(fs_close(&f));
+	/* a file created by the file system API has no execute permission */
+	zassert_ok(fs_chmod(path, 0755));
 }
 #endif
 
