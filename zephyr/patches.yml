@@ -1482,6 +1482,19 @@ patches:
       z_main_stack and the overflow corrupted main's frame (its epilogue popped a heap-code
       return address as pc after the suite had passed). With ZVFS the privileged stack
       defaults to 2 KiB, as it already does under EMUL and gcov.
+  - path: zephyr/ztest-failed-expectation-from-user-mode.patch
+    sha256sum: 2f4d06896d1a791447bfbfa1790baf2dc28d435166e18913ff0b3087272d1e6d
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-07
+    upstreamable: true
+    comments: |
+      ztest_test_expect_fail() recorded a failed zexpect by writing a static of the
+      test framework directly; from a user-mode test that write is a page fault, so a
+      failing expectation crashed the test instead of failing it, and twister reported
+      "Fault detected while running test" with no verdict. The flag is set through a
+      system call like the test result and phase already are.
   - path: zephyr/libc-signal-h-pthread-kill.patch
     sha256sum: 9db8dc468a348bb0603646373dbe308174a5711ddbcfd454197b47f18992eb48
     module: zephyr
