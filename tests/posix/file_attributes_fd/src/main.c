@@ -13,7 +13,6 @@
 
 #include <zephyr/kernel.h>
 #ifndef CONFIG_NATIVE_LIBC
-#include <ff.h>
 #include <zephyr/fs/fs.h>
 #endif
 #ifdef CONFIG_USERSPACE
@@ -26,11 +25,9 @@ ZTEST_BMEM int fs_test_fd = -1;
 ZTEST_BMEM int fs_test_rofd = -1;
 
 #ifndef CONFIG_NATIVE_LIBC
-static FATFS fat_fs;
 static struct fs_mount_t fs_mnt = {
-	.type = FS_FATFS,
+	.type = FS_TMPFS,
 	.mnt_point = "/",
-	.fs_data = &fat_fs,
 };
 #endif
 
@@ -46,9 +43,8 @@ static void grant_fd(int fd)
 }
 
 /*
- * Remove a whole subtree. The Zephyr path uses the fs_* API directly: POSIX
- * <dirent.h> and the FATFS ff.h both define a DIR type, so they cannot share
- * a translation unit. Under the host libc, plain POSIX calls are used.
+ * Remove a whole subtree. The Zephyr path uses the fs_* API directly, as
+ * the rest of the fixture does; under the host libc, plain POSIX calls.
  */
 #ifdef CONFIG_NATIVE_LIBC
 #include <dirent.h>
@@ -77,23 +73,27 @@ static void rmtree(const char *path)
 	(void)unlink(path);
 }
 #else
+/* tmpfs skips an entry removed mid-iteration: take the first entry of a fresh stream each pass */
 static void rmtree(const char *path)
 {
 	struct fs_dir_t dir;
 	struct fs_dirent ent;
 	char child[300];
 
-	fs_dir_t_init(&dir);
-
-	if (fs_opendir(&dir, path) == 0) {
-		while (fs_readdir(&dir, &ent) == 0 && ent.name[0] != '\0') {
-			if (snprintf(child, sizeof(child), "%s/%s", path, ent.name) >=
-			    (int)sizeof(child)) {
-				continue;
-			}
-			rmtree(child);
+	for (;;) {
+		fs_dir_t_init(&dir);
+		if (fs_opendir(&dir, path) != 0) {
+			break;
+		}
+		if ((fs_readdir(&dir, &ent) != 0) || (ent.name[0] == '\0')) {
+			fs_closedir(&dir);
+			break;
 		}
 		fs_closedir(&dir);
+		if (snprintf(child, sizeof(child), "%s/%s", path, ent.name) >= (int)sizeof(child)) {
+			break;
+		}
+		rmtree(child);
 	}
 
 	(void)fs_unlink(path);
@@ -160,7 +160,6 @@ static void after(void *arg)
 static void *setup(void)
 {
 #ifndef CONFIG_NATIVE_LIBC
-	memset(&fat_fs, 0, sizeof(fat_fs));
 	zassert_ok(fs_mount(&fs_mnt));
 #endif
 	(void)mkdir(FS_TMPDIR, 0777);

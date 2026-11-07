@@ -7,6 +7,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 ZTEST_USER(posix_file_attributes_fd, test_fchownat)
@@ -28,6 +29,24 @@ ZTEST_USER(posix_file_attributes_fd, test_fchownat)
 	errno = 0;
 	zassert_equal(fchownat(fs_test_fd, "file.txt", (uid_t)-1, (gid_t)-1, 0), -1);
 	zassert_equal(errno, ENOTDIR);
+
+	errno = 0;
+	zassert_equal(fchownat(dirfd, "file.txt", (uid_t)-1, (gid_t)-1, AT_REMOVEDIR), -1);
+	zassert_equal(errno, EINVAL);
+
+	/* the privileged identity may give a file to anyone; -1 keeps the other ID */
+	IF_NOT_NATIVE_LIBC({
+		struct stat st;
+
+		zassert_ok(fchownat(dirfd, "file.txt", 1000, (gid_t)-1, 0));
+		zassert_ok(fstatat(dirfd, "file.txt", &st, 0));
+		zassert_equal(st.st_uid, 1000);
+		zassert_equal(st.st_gid, 0);
+		zassert_ok(fchownat(dirfd, "file.txt", (uid_t)-1, 100, 0));
+		zassert_ok(stat(TEST_FILE, &st));
+		zassert_equal(st.st_uid, 1000);
+		zassert_equal(st.st_gid, 100);
+	});
 
 	zassert_ok(close(dirfd));
 }

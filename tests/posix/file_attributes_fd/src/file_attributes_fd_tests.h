@@ -11,8 +11,8 @@
 #include "../../shared/linux_compat_test.h"
 
 /*
- * The file system is mounted at "/", and /tmp exists in both worlds (the FAT
- * RAM disk under Zephyr, the host filesystem under CONFIG_NATIVE_LIBC), so
+ * The file system is mounted at "/", and /tmp exists in both worlds (the tmpfs
+ * under Zephyr, the host filesystem under CONFIG_NATIVE_LIBC), so
  * every path constant is identical for the linux_compat variant.
  */
 #define FS_TMPDIR   "/tmp"

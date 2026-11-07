@@ -14,19 +14,11 @@
 
 int lchown(const char *path, uid_t owner, gid_t group)
 {
-	struct zvfs_stat zs;
+	/* -1 leaves an ID unchanged, as UINT32_MAX does below */
+	uint32_t uid = (owner == (uid_t)-1) ? UINT32_MAX : (uint32_t)owner;
+	uint32_t gid = (group == (gid_t)-1) ? UINT32_MAX : (uint32_t)group;
 
-	if (zvfs_lstat(path, &zs) < 0) {
-		return -1;
-	}
-
-	/* only the privileged identity exists; -1 leaves an ID unchanged */
-	if (((owner != 0) && (owner != (uid_t)-1)) || ((group != 0) && (group != (gid_t)-1))) {
-		errno = EINVAL;
-		return -1;
-	}
-
-	return 0;
+	return zvfs_chownat(ZVFS_AT_FDCWD, path, uid, gid, ZVFS_AT_SYMLINK_NOFOLLOW);
 }
 
 int lstat(const char *ZRESTRICT path, struct stat *ZRESTRICT buf)

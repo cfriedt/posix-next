@@ -19,6 +19,8 @@ static inline void posix_stat_from_zvfs(struct stat *buf, const struct zvfs_stat
 	buf->st_ino = zs->ino;
 	buf->st_mode = zs->mode;
 	buf->st_nlink = zs->nlink;
+	buf->st_uid = zs->uid;
+	buf->st_gid = zs->gid;
 	buf->st_size = zs->size;
 	buf->st_blksize = zs->blksize;
 	buf->st_blocks = zs->blocks;
