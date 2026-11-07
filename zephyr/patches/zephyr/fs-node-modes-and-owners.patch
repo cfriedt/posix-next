@@ -1,0 +1,773 @@
+diff --git a/include/zephyr/fs/fs.h b/include/zephyr/fs/fs.h
+--- a/include/zephyr/fs/fs.h
++++ b/include/zephyr/fs/fs.h
+@@ -48,6 +48,22 @@
+ 	FS_DIR_ENTRY_FIFO
+ };
+ 
++/**
++ * @name File mode bits
++ *
++ * The mode a file system records for a node, in the encoding shared by their
++ * on-disk formats: a type and the owner, group and other read, write and
++ * execute permissions, plus the set-user-ID, set-group-ID and sticky bits.
++ * @{
++ */
++#define FS_MODE_IFMT  0170000 /**< Mask of the type bits */
++#define FS_MODE_IFIFO 0010000 /**< FIFO special file */
++#define FS_MODE_IFDIR 0040000 /**< Directory */
++#define FS_MODE_IFREG 0100000 /**< Regular file */
++#define FS_MODE_IFLNK 0120000 /**< Symbolic link */
++#define FS_MODE_PERM  0007777 /**< Mask of the permission bits */
++/** @} */
++
+ /** @brief Enumeration to uniquely identify file system types.
+  *
+  * Zephyr supports in-tree file systems and external ones.  Each
+@@ -161,6 +177,25 @@
+ 	 * @kconfig_dep{CONFIG_FS_DIRENT_EXT}
+ 	 */
+ 	struct timespec mtime;
++	/**
++	 * Mode of the node, its type (FS_MODE_IF*) and permission bits, zero
++	 * when the file system records no mode.
++	 *
++	 * @kconfig_dep{CONFIG_FS_DIRENT_EXT}
++	 */
++	uint32_t mode;
++	/**
++	 * Owner of the node, zero when the file system records none.
++	 *
++	 * @kconfig_dep{CONFIG_FS_DIRENT_EXT}
++	 */
++	uint32_t uid;
++	/**
++	 * Group of the node, zero when the file system records none.
++	 *
++	 * @kconfig_dep{CONFIG_FS_DIRENT_EXT}
++	 */
++	uint32_t gid;
+ #endif
+ };
+ 
+@@ -833,6 +868,61 @@
+ int fs_utime(const char *path, const struct timespec times[2]);
+ 
+ /**
++ * @brief Change the permission bits of a file or directory
++ *
++ * Replaces the permission bits (FS_MODE_PERM) of the node named by @p path
++ * with those of @p mode; the type bits of @p mode are ignored.
++ *
++ * @param path Path to the file or directory
++ * @param mode The new permission bits
++ *
++ * @retval 0 on success;
++ * @retval -EINVAL when a bad file name is given;
++ * @retval -ENOENT when no such file or directory is found;
++ * @retval -EROFS when the file system is read-only;
++ * @retval -ENOTSUP when the file system records no mode;
++ * @retval <0 a negative errno code on error.
++ */
++int fs_chmod(const char *path, uint32_t mode);
++
++/**
++ * @brief Change the owner and group of a file or directory
++ *
++ * A symbolic link in @p path is followed, including a final one.
++ *
++ * @param path Path to the file or directory
++ * @param uid The new owner
++ * @param gid The new group
++ *
++ * @retval 0 on success;
++ * @retval -EINVAL when a bad file name is given;
++ * @retval -ENOENT when no such file or directory is found;
++ * @retval -EROFS when the file system is read-only;
++ * @retval -ENOTSUP when the file system records no owner;
++ * @retval <0 a negative errno code on error.
++ */
++int fs_chown(const char *path, uint32_t uid, uint32_t gid);
++
++/**
++ * @brief Change the owner and group of a symbolic link
++ *
++ * As fs_chown(), except that when @p path names a symbolic link the link
++ * itself is changed rather than its target.
++ *
++ * @param path Path to the file, directory or symbolic link
++ * @param uid The new owner
++ * @param gid The new group
++ *
++ * @retval 0 on success;
++ * @retval -EINVAL when a bad file name is given;
++ * @retval -ENOENT when no such file or directory is found;
++ * @retval -EROFS when the file system is read-only;
++ * @retval -ENOTSUP when the file system records no owner;
++ * @retval <0 a negative errno code on error.
++ */
++int fs_lchown(const char *path, uint32_t uid, uint32_t gid);
++
++/**
+  * @brief Create fresh file system
+  *
+  * @param fs_type Type of file system to create.
+diff --git a/include/zephyr/fs/fs_sys.h b/include/zephyr/fs/fs_sys.h
+--- a/include/zephyr/fs/fs_sys.h
++++ b/include/zephyr/fs/fs_sys.h
+@@ -254,6 +254,38 @@
+ 	 */
+ 	int (*utime)(struct fs_mount_t *mountp, const char *name,
+ 					const struct timespec times[2]);
++	/**
++	 * Replaces the permission bits of a file or directory. Optional; when
++	 * NULL, fs_chmod() reports -ENOTSUP.
++	 *
++	 * @param mountp Mount point.
++	 * @param name Path to the file or directory.
++	 * @param mode The new permission bits (FS_MODE_PERM); type bits are ignored.
++	 * @return 0 on success, negative errno code on fail.
++	 */
++	int (*chmod)(struct fs_mount_t *mountp, const char *name, uint32_t mode);
++	/**
++	 * Sets the owner and group of a file or directory, following a final
++	 * symbolic link. Optional; when NULL, fs_chown() reports -ENOTSUP.
++	 *
++	 * @param mountp Mount point.
++	 * @param name Path to the file or directory.
++	 * @param uid The new owner.
++	 * @param gid The new group.
++	 * @return 0 on success, negative errno code on fail.
++	 */
++	int (*chown)(struct fs_mount_t *mountp, const char *name, uint32_t uid, uint32_t gid);
++	/**
++	 * Sets the owner and group of a symbolic link itself. Optional; when
++	 * NULL, fs_lchown() reports -ENOTSUP.
++	 *
++	 * @param mountp Mount point.
++	 * @param name Path to the file, directory or symbolic link.
++	 * @param uid The new owner.
++	 * @param gid The new group.
++	 * @return 0 on success, negative errno code on fail.
++	 */
++	int (*lchown)(struct fs_mount_t *mountp, const char *name, uint32_t uid, uint32_t gid);
+ #if defined(CONFIG_FILE_SYSTEM_GC) || defined(__DOXYGEN__)
+ 	/**
+ 	 * Attempt to proactively clean file system
+diff --git a/subsys/fs/fs.c b/subsys/fs/fs.c
+--- a/subsys/fs/fs.c
++++ b/subsys/fs/fs.c
+@@ -135,6 +135,9 @@
+ #ifdef CONFIG_FS_DIRENT_EXT
+ 	entry->atime = (struct timespec){0};
+ 	entry->mtime = (struct timespec){0};
++	entry->mode = 0;
++	entry->uid = 0;
++	entry->gid = 0;
+ #else
+ 	ARG_UNUSED(entry);
+ #endif
+@@ -1015,6 +1018,101 @@
+ 	}
+ 
+ 	return rc;
++}
++
++/* the mount of a path that names a node below a mount point, writable */
++static int fs_attr_mount(const char *abs_path, struct fs_mount_t **mp)
++{
++	int rc;
++
++	if ((abs_path == NULL) || (abs_path[0] != '/') || (abs_path[1] == '\0')) {
++		LOG_ERR("invalid file or dir name!!");
++		return -EINVAL;
++	}
++
++	rc = fs_get_mnt_point(mp, abs_path, NULL);
++	if (rc < 0) {
++		LOG_ERR("mount point not found!!");
++		return rc;
++	}
++
++	if ((*mp)->flags & FS_MOUNT_FLAG_READ_ONLY) {
++		return -EROFS;
++	}
++
++	return 0;
++}
++
++/* a file system without the operation: a missing node is still missing */
++static int fs_attr_unsupported(struct fs_mount_t *mp, const char *abs_path)
++{
++	struct fs_dirent entry;
++	int rc = mp->fs->stat(mp, abs_path, &entry);
++
++	return (rc < 0) ? rc : -ENOTSUP;
++}
++
++int fs_chmod(const char *abs_path, uint32_t mode)
++{
++	struct fs_mount_t *mp;
++	int rc = fs_attr_mount(abs_path, &mp);
++
++	if (rc < 0) {
++		return rc;
++	}
++
++	CHECKIF(mp->fs->chmod == NULL) {
++		return fs_attr_unsupported(mp, abs_path);
++	}
++
++	rc = mp->fs->chmod(mp, abs_path, mode & FS_MODE_PERM);
++	if (rc < 0) {
++		LOG_ERR("failed to set file or dir mode (%d)", rc);
++	}
++
++	return rc;
++}
++
++int fs_chown(const char *abs_path, uint32_t uid, uint32_t gid)
++{
++	struct fs_mount_t *mp;
++	int rc = fs_attr_mount(abs_path, &mp);
++
++	if (rc < 0) {
++		return rc;
++	}
++
++	CHECKIF(mp->fs->chown == NULL) {
++		return fs_attr_unsupported(mp, abs_path);
++	}
++
++	rc = mp->fs->chown(mp, abs_path, uid, gid);
++	if (rc < 0) {
++		LOG_ERR("failed to set file or dir owner (%d)", rc);
++	}
++
++	return rc;
++}
++
++int fs_lchown(const char *abs_path, uint32_t uid, uint32_t gid)
++{
++	struct fs_mount_t *mp;
++	int rc = fs_attr_mount(abs_path, &mp);
++
++	if (rc < 0) {
++		return rc;
++	}
++
++	CHECKIF(mp->fs->lchown == NULL) {
++		return fs_attr_unsupported(mp, abs_path);
++	}
++
++	rc = mp->fs->lchown(mp, abs_path, uid, gid);
++	if (rc < 0) {
++		LOG_ERR("failed to set link owner (%d)", rc);
++	}
++
++	return rc;
+ }
+ 
+ #if defined(CONFIG_FILE_SYSTEM_GC)
+diff --git a/subsys/fs/tmpfs/tmpfs.c b/subsys/fs/tmpfs/tmpfs.c
+--- a/subsys/fs/tmpfs/tmpfs.c
++++ b/subsys/fs/tmpfs/tmpfs.c
+@@ -41,6 +41,9 @@
+ 	uint8_t unlinked;
+ 	uint16_t opens;
+ 	size_t size;
++	uint32_t mode;
++	uint32_t uid;
++	uint32_t gid;
+ 	struct timespec atime;
+ 	struct timespec mtime;
+ 	void *direct[NDIRECT];
+@@ -351,6 +354,10 @@
+ 	(void)memcpy(node->name, name, len);
+ 	node->name[len] = '\0';
+ 	node->type = type;
++	/* everything for everyone until a creator's mask or a chmod says otherwise */
++	node->mode = ((type == FS_DIR_ENTRY_DIR) || (type == FS_DIR_ENTRY_SYMLINK)) ? 0777 : 0666;
++	node->uid = 0;
++	node->gid = 0;
+ 	now(&node->mtime);
+ 	node->atime = node->mtime;
+ 	node->parent = parent;
+@@ -555,6 +562,21 @@
+ 	return mp->fs_data;
+ }
+ 
++/* the type bits of a node's mode */
++static uint32_t type_mode(uint8_t type)
++{
++	switch (type) {
++	case FS_DIR_ENTRY_DIR:
++		return FS_MODE_IFDIR;
++	case FS_DIR_ENTRY_SYMLINK:
++		return FS_MODE_IFLNK;
++	case FS_DIR_ENTRY_FIFO:
++		return FS_MODE_IFIFO;
++	default:
++		return FS_MODE_IFREG;
++	}
++}
++
+ static void fill_dirent(const struct tmpfs_node *node, struct fs_dirent *entry)
+ {
+ 	entry->type = node->type;
+@@ -564,6 +586,9 @@
+ #ifdef CONFIG_FS_DIRENT_EXT
+ 	entry->atime = node->atime;
+ 	entry->mtime = node->mtime;
++	entry->mode = type_mode(node->type) | node->mode;
++	entry->uid = node->uid;
++	entry->gid = node->gid;
+ #endif
+ }
+ 
+@@ -1180,6 +1205,68 @@
+ 	return rc;
+ }
+ 
++/* the node a path names, for an attribute change */
++static int attr_lookup(struct tmpfs_data *fs, struct fs_mount_t *mountp, const char *name,
++		       bool nofollow, struct tmpfs_node **node)
++{
++	const char *path = fs_impl_strip_prefix(name, mountp);
++	struct tmpfs_lookup l;
++	int rc = lookup(fs, path, nofollow, &l);
++
++	if ((rc == 0) && (l.node == NULL)) {
++		rc = -ENOENT;
++	}
++	if (rc == 0) {
++		*node = l.node;
++	}
++
++	return rc;
++}
++
++static int tmpfs_chmod(struct fs_mount_t *mountp, const char *name, uint32_t mode)
++{
++	struct tmpfs_data *fs = fs_of(mountp);
++	struct tmpfs_node *node;
++	int rc;
++
++	(void)k_mutex_lock(&fs->lock, K_FOREVER);
++	rc = attr_lookup(fs, mountp, name, false, &node);
++	if (rc == 0) {
++		node->mode = mode & FS_MODE_PERM;
++	}
++	k_mutex_unlock(&fs->lock);
++
++	return rc;
++}
++
++static int chown_common(struct fs_mount_t *mountp, const char *name, uint32_t uid, uint32_t gid,
++			bool nofollow)
++{
++	struct tmpfs_data *fs = fs_of(mountp);
++	struct tmpfs_node *node;
++	int rc;
++
++	(void)k_mutex_lock(&fs->lock, K_FOREVER);
++	rc = attr_lookup(fs, mountp, name, nofollow, &node);
++	if (rc == 0) {
++		node->uid = uid;
++		node->gid = gid;
++	}
++	k_mutex_unlock(&fs->lock);
++
++	return rc;
++}
++
++static int tmpfs_chown(struct fs_mount_t *mountp, const char *name, uint32_t uid, uint32_t gid)
++{
++	return chown_common(mountp, name, uid, gid, false);
++}
++
++static int tmpfs_lchown(struct fs_mount_t *mountp, const char *name, uint32_t uid, uint32_t gid)
++{
++	return chown_common(mountp, name, uid, gid, true);
++}
++
+ static const struct fs_file_system_t tmpfs_fs = {
+ 	.open = tmpfs_open,
+ 	.close = tmpfs_close,
+@@ -1205,6 +1292,9 @@
+ 	.mkfifo = tmpfs_mkfifo,
+ 	.statvfs = tmpfs_statvfs,
+ 	.utime = tmpfs_utime,
++	.chmod = tmpfs_chmod,
++	.chown = tmpfs_chown,
++	.lchown = tmpfs_lchown,
+ };
+ 
+ static int tmpfs_init(void)
+diff --git a/subsys/fs/ext2/ext2_struct.h b/subsys/fs/ext2/ext2_struct.h
+--- a/subsys/fs/ext2/ext2_struct.h
++++ b/subsys/fs/ext2/ext2_struct.h
+@@ -173,6 +173,8 @@
+ 	uint32_t i_id;             /* inode number */
+ 	uint16_t i_mode;           /* mode */
+ 	uint16_t i_links_count;    /* link count */
++	uint16_t i_uid;            /* owner */
++	uint16_t i_gid;            /* group */
+ 	uint32_t i_size;           /* size */
+ 	uint32_t i_atime;          /* access time */
+ 	uint32_t i_ctime;          /* status change time */
+diff --git a/subsys/fs/ext2/ext2_diskops.c b/subsys/fs/ext2/ext2_diskops.c
+--- a/subsys/fs/ext2/ext2_diskops.c
++++ b/subsys/fs/ext2/ext2_diskops.c
+@@ -111,6 +111,8 @@
+ 	inode->i_ctime       = sys_le32_to_cpu(dino->i_ctime);
+ 	inode->i_mtime       = sys_le32_to_cpu(dino->i_mtime);
+ 	inode->i_links_count = sys_le16_to_cpu(dino->i_links_count);
++	inode->i_uid         = sys_le16_to_cpu(dino->i_uid);
++	inode->i_gid         = sys_le16_to_cpu(dino->i_gid);
+ 	inode->i_blocks      = sys_le32_to_cpu(dino->i_blocks);
+ 	for (int i = 0; i < EXT2_INODE_BLOCKS; i++) {
+ 		inode->i_block[i] = sys_le32_to_cpu(dino->i_block[i]);
+@@ -125,6 +127,8 @@
+ 	dino->i_ctime       = sys_cpu_to_le32(inode->i_ctime);
+ 	dino->i_mtime       = sys_cpu_to_le32(inode->i_mtime);
+ 	dino->i_links_count = sys_cpu_to_le16(inode->i_links_count);
++	dino->i_uid         = sys_cpu_to_le16(inode->i_uid);
++	dino->i_gid         = sys_cpu_to_le16(inode->i_gid);
+ 	dino->i_blocks      = sys_cpu_to_le32(inode->i_blocks);
+ 	for (int i = 0; i < EXT2_INODE_BLOCKS; i++) {
+ 		dino->i_block[i] = sys_cpu_to_le32(inode->i_block[i]);
+diff --git a/subsys/fs/ext2/ext2_impl.c b/subsys/fs/ext2/ext2_impl.c
+--- a/subsys/fs/ext2/ext2_impl.c
++++ b/subsys/fs/ext2/ext2_impl.c
+@@ -1140,6 +1140,9 @@
+ #ifdef CONFIG_FS_DIRENT_EXT
+ 		ent->atime = (struct timespec){.tv_sec = inode->i_atime};
+ 		ent->mtime = (struct timespec){.tv_sec = inode->i_mtime};
++		ent->mode = inode->i_mode;
++		ent->uid = inode->i_uid;
++		ent->gid = inode->i_gid;
+ #endif
+ 	}
+ 
+@@ -1188,6 +1191,8 @@
+ 		break;
+ 	}
+ 	inode->i_links_count = 0;
++	inode->i_uid = 0;
++	inode->i_gid = 0;
+ 	inode->i_atime = ext2_now();
+ 	inode->i_ctime = inode->i_atime;
+ 	inode->i_mtime = inode->i_atime;
+diff --git a/subsys/fs/ext2/ext2_ops.c b/subsys/fs/ext2/ext2_ops.c
+--- a/subsys/fs/ext2/ext2_ops.c
++++ b/subsys/fs/ext2/ext2_ops.c
+@@ -697,6 +697,72 @@
+ 	return rc;
+ }
+ 
++static int ext2_chmod(struct fs_mount_t *mountp, const char *path, uint32_t mode)
++{
++	int rc;
++	struct ext2_data *fs = mountp->fs_data;
++
++	path = fs_impl_strip_prefix(path, mountp);
++
++	struct ext2_lookup_args args = {
++		.path = path,
++		.inode = NULL,
++		.flags = LOOKUP_ARG_OPEN,
++	};
++
++	rc = ext2_lookup_inode(fs, &args);
++	if (rc < 0) {
++		return rc;
++	}
++
++	args.inode->i_mode = (args.inode->i_mode & EXT2_S_IFMT) | (mode & 07777);
++	args.inode->i_ctime = ext2_now();
++
++	rc = ext2_commit_inode(args.inode);
++
++	ext2_inode_drop(args.inode);
++	return rc;
++}
++
++static int chown_common(struct fs_mount_t *mountp, const char *path, uint32_t uid, uint32_t gid,
++			uint8_t lookup_flags)
++{
++	int rc;
++	struct ext2_data *fs = mountp->fs_data;
++
++	path = fs_impl_strip_prefix(path, mountp);
++
++	struct ext2_lookup_args args = {
++		.path = path,
++		.inode = NULL,
++		.flags = lookup_flags,
++	};
++
++	rc = ext2_lookup_inode(fs, &args);
++	if (rc < 0) {
++		return rc;
++	}
++
++	args.inode->i_uid = (uint16_t)uid;
++	args.inode->i_gid = (uint16_t)gid;
++	args.inode->i_ctime = ext2_now();
++
++	rc = ext2_commit_inode(args.inode);
++
++	ext2_inode_drop(args.inode);
++	return rc;
++}
++
++static int ext2_chown(struct fs_mount_t *mountp, const char *path, uint32_t uid, uint32_t gid)
++{
++	return chown_common(mountp, path, uid, gid, LOOKUP_ARG_OPEN);
++}
++
++static int ext2_lchown(struct fs_mount_t *mountp, const char *path, uint32_t uid, uint32_t gid)
++{
++	return chown_common(mountp, path, uid, gid, LOOKUP_ARG_OPEN | LOOKUP_ARG_NOFOLLOW);
++}
++
+ /* File system interface */
+ 
+ /*
+@@ -918,6 +984,41 @@
+ 	return ret;
+ }
+ 
++static int ext2_locked_chmod(struct fs_mount_t *mountp, const char *path, uint32_t mode)
++{
++	int ret;
++
++	(void)k_mutex_lock(&ext2_op_lock, K_FOREVER);
++	ret = ext2_chmod(mountp, path, mode);
++	k_mutex_unlock(&ext2_op_lock);
++
++	return ret;
++}
++
++static int ext2_locked_chown(struct fs_mount_t *mountp, const char *path, uint32_t uid,
++			     uint32_t gid)
++{
++	int ret;
++
++	(void)k_mutex_lock(&ext2_op_lock, K_FOREVER);
++	ret = ext2_chown(mountp, path, uid, gid);
++	k_mutex_unlock(&ext2_op_lock);
++
++	return ret;
++}
++
++static int ext2_locked_lchown(struct fs_mount_t *mountp, const char *path, uint32_t uid,
++			      uint32_t gid)
++{
++	int ret;
++
++	(void)k_mutex_lock(&ext2_op_lock, K_FOREVER);
++	ret = ext2_lchown(mountp, path, uid, gid);
++	k_mutex_unlock(&ext2_op_lock);
++
++	return ret;
++}
++
+ #if defined(CONFIG_FILE_SYSTEM_MKFS)
+ static int ext2_locked_mkfs(uintptr_t dev_id, void *vcfg, int flags)
+ {
+@@ -1167,6 +1268,9 @@
+ 	.mkfifo = ext2_locked_mkfifo,
+ 	.readlink = ext2_locked_readlink,
+ 	.utime = ext2_locked_utime,
++	.chmod = ext2_locked_chmod,
++	.chown = ext2_locked_chown,
++	.lchown = ext2_locked_lchown,
+ 	.statvfs = ext2_locked_statvfs,
+ #if defined(CONFIG_FILE_SYSTEM_MKFS)
+ 	.mkfs = ext2_locked_mkfs,
+diff --git a/tests/subsys/fs/tmpfs/src/main.c b/tests/subsys/fs/tmpfs/src/main.c
+--- a/tests/subsys/fs/tmpfs/src/main.c
++++ b/tests/subsys/fs/tmpfs/src/main.c
+@@ -96,6 +96,67 @@
+ 	zassert_equal(fs_unmount(&tmpfs_mnt), 0);
+ }
+ 
++ZTEST(tmpfs, test_attributes)
++{
++	struct fs_dirent ent;
++	struct fs_dir_t dir;
++	bool seen = false;
++
++	zassert_equal(fs_mount(&tmpfs_mnt), 0);
++	zassert_equal(fs_mkdir(MNT "/d"), 0);
++	write_all(MNT "/d/f", "x", 1, 0);
++	zassert_equal(fs_symlink("f", MNT "/d/l"), 0);
++	zassert_equal(fs_mkfifo(MNT "/d/p"), 0);
++
++	/* a new node is open to everyone and belongs to 0:0 */
++	zassert_equal(fs_stat(MNT "/d", &ent), 0);
++	zassert_equal(ent.mode, FS_MODE_IFDIR | 0777, "0%o", ent.mode);
++	zassert_equal(fs_stat(MNT "/d/f", &ent), 0);
++	zassert_equal(ent.mode, FS_MODE_IFREG | 0666, "0%o", ent.mode);
++	zassert_equal(ent.uid, 0);
++	zassert_equal(ent.gid, 0);
++	zassert_equal(fs_lstat(MNT "/d/l", &ent), 0);
++	zassert_equal(ent.mode, FS_MODE_IFLNK | 0777, "0%o", ent.mode);
++	zassert_equal(fs_stat(MNT "/d/p", &ent), 0);
++	zassert_equal(ent.mode, FS_MODE_IFIFO | 0666, "0%o", ent.mode);
++
++	/* the permission bits change, the type does not; stat and readdir agree */
++	zassert_equal(fs_chmod(MNT "/d/f", FS_MODE_IFDIR | 04640), 0);
++	zassert_equal(fs_stat(MNT "/d/f", &ent), 0);
++	zassert_equal(ent.mode, FS_MODE_IFREG | 04640, "0%o", ent.mode);
++	zassert_equal(fs_chown(MNT "/d/f", 1000, 100), 0);
++	zassert_equal(fs_stat(MNT "/d/f", &ent), 0);
++	zassert_equal(ent.uid, 1000);
++	zassert_equal(ent.gid, 100);
++	fs_dir_t_init(&dir);
++	zassert_equal(fs_opendir(&dir, MNT "/d"), 0);
++	while ((fs_readdir(&dir, &ent) == 0) && (ent.name[0] != '\0')) {
++		if (strcmp(ent.name, "f") == 0) {
++			zassert_equal(ent.mode, FS_MODE_IFREG | 04640, "0%o", ent.mode);
++			zassert_equal(ent.uid, 1000);
++			seen = true;
++		}
++	}
++	zassert_equal(fs_closedir(&dir), 0);
++	zassert_true(seen, "readdir did not list the file");
++
++	/* through a link the target changes; lchown changes the link itself */
++	zassert_equal(fs_chmod(MNT "/d/l", 0600), 0);
++	zassert_equal(fs_stat(MNT "/d/f", &ent), 0);
++	zassert_equal(ent.mode, FS_MODE_IFREG | 0600, "0%o", ent.mode);
++	zassert_equal(fs_lstat(MNT "/d/l", &ent), 0);
++	zassert_equal(ent.mode, FS_MODE_IFLNK | 0777, "0%o", ent.mode);
++	zassert_equal(fs_lchown(MNT "/d/l", 7, 8), 0);
++	zassert_equal(fs_lstat(MNT "/d/l", &ent), 0);
++	zassert_equal(ent.uid, 7);
++	zassert_equal(fs_stat(MNT "/d/f", &ent), 0);
++	zassert_equal(ent.uid, 1000, "the target kept its owner");
++
++	zassert_equal(fs_chmod(MNT "/d/nope", 0600), -ENOENT);
++	zassert_equal(fs_chown(MNT "/d/nope", 0, 0), -ENOENT);
++	zassert_equal(fs_unmount(&tmpfs_mnt), 0);
++}
++
+ ZTEST(tmpfs, test_fifo)
+ {
+ 	struct fs_dirent ent;
+diff --git a/tests/subsys/fs/ext2/src/testfs_attributes.c b/tests/subsys/fs/ext2/src/testfs_attributes.c
+new file mode 100644
+--- /dev/null
++++ b/tests/subsys/fs/ext2/src/testfs_attributes.c
+@@ -0,0 +1,85 @@
++/*
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <string.h>
++
++#include <zephyr/fs/fs.h>
++#include <zephyr/ztest.h>
++
++#include "utils.h"
++
++#define ATTR_DIR  "/sml/attr.d"
++#define ATTR_FILE ATTR_DIR "/owned"
++#define ATTR_LINK ATTR_DIR "/link"
++
++ZTEST(ext2tests, test_attributes)
++{
++#ifdef CONFIG_FS_DIRENT_EXT
++	struct fs_file_t file;
++	struct fs_dir_t dir;
++	struct fs_dirent ent;
++	bool seen = false;
++
++	zassert_ok(fs_mount(&testfs_mnt));
++	zassert_ok(fs_mkdir(ATTR_DIR));
++	fs_file_t_init(&file);
++	zassert_ok(fs_open(&file, ATTR_FILE, FS_O_CREATE | FS_O_WRITE));
++	zassert_ok(fs_close(&file));
++	zassert_ok(fs_symlink("owned", ATTR_LINK));
++
++	/* the on-disk defaults, owned by 0:0 */
++	zassert_ok(fs_stat(ATTR_DIR, &ent));
++	zassert_equal(ent.mode, FS_MODE_IFDIR | 0755, "0%o", ent.mode);
++	zassert_ok(fs_stat(ATTR_FILE, &ent));
++	zassert_equal(ent.mode, FS_MODE_IFREG | 0644, "0%o", ent.mode);
++	zassert_equal(ent.uid, 0);
++	zassert_equal(ent.gid, 0);
++	zassert_ok(fs_lstat(ATTR_LINK, &ent));
++	zassert_equal(ent.mode, FS_MODE_IFLNK | 0777, "0%o", ent.mode);
++
++	/* permission bits and owners are stored in the inode */
++	zassert_ok(fs_chmod(ATTR_FILE, 02750));
++	zassert_ok(fs_chown(ATTR_FILE, 1000, 100));
++	zassert_ok(fs_stat(ATTR_FILE, &ent));
++	zassert_equal(ent.mode, FS_MODE_IFREG | 02750, "0%o", ent.mode);
++	zassert_equal(ent.uid, 1000);
++	zassert_equal(ent.gid, 100);
++
++	/* a link's target changes through it; the link itself only through lchown */
++	zassert_ok(fs_chmod(ATTR_LINK, 0600));
++	zassert_ok(fs_stat(ATTR_FILE, &ent));
++	zassert_equal(ent.mode, FS_MODE_IFREG | 0600, "0%o", ent.mode);
++	zassert_ok(fs_lchown(ATTR_LINK, 7, 8));
++	zassert_ok(fs_lstat(ATTR_LINK, &ent));
++	zassert_equal(ent.uid, 7);
++	zassert_equal(ent.gid, 8);
++	zassert_ok(fs_stat(ATTR_FILE, &ent));
++	zassert_equal(ent.uid, 1000, "the target kept its owner");
++
++	/* readdir reports what stat reports, and everything survives a remount */
++	zassert_ok(fs_unmount(&testfs_mnt));
++	zassert_ok(fs_mount(&testfs_mnt));
++	fs_dir_t_init(&dir);
++	zassert_ok(fs_opendir(&dir, ATTR_DIR));
++	while ((fs_readdir(&dir, &ent) == 0) && (ent.name[0] != '\0')) {
++		if (strcmp(ent.name, "owned") == 0) {
++			zassert_equal(ent.mode, FS_MODE_IFREG | 0600, "0%o", ent.mode);
++			zassert_equal(ent.uid, 1000);
++			zassert_equal(ent.gid, 100);
++			seen = true;
++		}
++	}
++	zassert_ok(fs_closedir(&dir));
++	zassert_true(seen, "readdir did not list the file");
++
++	zassert_equal(fs_chmod(ATTR_DIR "/nope", 0600), -ENOENT);
++	zassert_ok(fs_unlink(ATTR_LINK));
++	zassert_ok(fs_unlink(ATTR_FILE));
++	zassert_ok(fs_unlink(ATTR_DIR));
++	zassert_ok(fs_unmount(&testfs_mnt));
++#else
++	ztest_test_skip();
++#endif /* CONFIG_FS_DIRENT_EXT */
++}
+diff --git a/doc/services/storage/file_system/index.rst b/doc/services/storage/file_system/index.rst
+--- a/doc/services/storage/file_system/index.rst
++++ b/doc/services/storage/file_system/index.rst
+@@ -44,6 +44,19 @@
+ 
+ 
+ 
++Modes and owners
++****************
++
++A file system may record a mode and an owner for each node. With
++:kconfig:option:`CONFIG_FS_DIRENT_EXT`, :c:struct:`fs_dirent` reports them as
++``mode`` (the node's type and permission bits, ``FS_MODE_*``), ``uid`` and
++``gid``, all zero where the file system records none; :c:func:`fs_chmod`
++replaces the permission bits and :c:func:`fs_chown` and :c:func:`fs_lchown`
++the owner and group, the latter of a symbolic link itself. A new node starts
++with the file system's default mode, owned by ``0:0``. tmpfs and ext2 record
++modes and owners; FAT and LittleFS do not, and report ``-ENOTSUP`` for the
++three calls.
++
+ tmpfs
+ *****
+ 
