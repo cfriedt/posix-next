@@ -1555,26 +1555,14 @@ Symbolic links depend on the backend
    inside the driver, after ZVFS has already collapsed ``..`` lexically (see *Working directory*
    above).
 
-Permission bits are not exposed
-   The subsystem's ``struct fs_dirent`` carries no mode bits, so :c:func:`stat` cannot report a
-   file system's stored permissions even when it has them - ext2 again being the example. It
-   reports a synthesised mode instead: read and search for everyone, plus write unless the mount
-   is read-only, and - since the subsystem has no execute bit to withhold - execute on every
-   regular file. :c:func:`access` and :c:func:`mkdir` follow suit: ``mkdir()`` accepts its
-   ``mode`` argument and ignores it, and :c:func:`access` grants ``X_OK`` on any file.
-
-.. _posix_file_attributes_placeholder:
-
-File attributes are a placeholder
-   The :ref:`POSIX_FILE_ATTRIBUTES <posix_option_group_file_attributes>` and
-   :ref:`POSIX_FILE_ATTRIBUTES_FD <posix_option_group_file_attributes_fd>` option groups and
-   :c:func:`lchown` are built on the same gap. :c:func:`chmod`, :c:func:`fchmod`,
-   :c:func:`fchmodat` check that the file exists and discard the mode; :c:func:`chown`,
-   :c:func:`fchown`, :c:func:`fchownat` and :c:func:`lchown` accept only uid 0, gid 0 or -1 and
-   store nothing, since no owner is recorded; :c:func:`umask` round-trips a per-process mask
-   that is applied to nothing, so a file created with :c:func:`open` or :c:func:`mkdir` ignores
-   both the ``mode`` argument and the mask and reports the synthesised mode above. ``st_uid`` and
-   ``st_gid`` are always 0.
+Permission bits depend on the backend
+   The subsystem's ``struct fs_dirent`` carries the mode, owner and group a file system records
+   (:kconfig:option:`CONFIG_FS_DIRENT_EXT`), and ``fs_chmod()``, ``fs_chown()`` and
+   ``fs_lchown()`` change them; tmpfs and ext2 record them, FAT and LittleFS do not. Where none
+   is recorded, :c:func:`stat` reports a synthesised mode - read and search for everyone, plus
+   write unless the mount is read-only, and execute on every regular file - with ``st_uid`` and
+   ``st_gid`` 0, and :c:func:`chmod` and :c:func:`chown` fail with ``ENOTSUP``. See
+   :ref:`posix_file_attributes_design`.
 
 Timestamps
    File timestamps are surfaced only when the backend records them, gated by
@@ -1646,9 +1634,6 @@ Symbolic links are fast symbolic links only
    ``ENAMETOOLONG``. Resolution follows at most 8 links in one lookup before failing with
    ``ELOOP``.
 
-Permissions may not be reported accurately
-   :c:func:`stat` reports a synthesised mode rather than the file's stored permission bits.
-
 Timestamps are whole seconds, and reads leave no trace
    ext2 stores the inode's access, modification and status-change times with one-second
    resolution: creation stamps all three, a write or truncation stamps the modification and
@@ -1656,6 +1641,52 @@ Timestamps are whole seconds, and reads leave no trace
    :c:func:`futimens` store the given times. Reading a file does not update its access time
    (the ``noatime`` behaviour of Linux), so ``st_atim`` moves only through creation and the
    ``utime()`` family.
+
+.. _posix_file_attributes_design:
+
+File Attributes
+===============
+
+The :ref:`POSIX_FILE_ATTRIBUTES <posix_option_group_file_attributes>` and
+:ref:`POSIX_FILE_ATTRIBUTES_FD <posix_option_group_file_attributes_fd>` option groups, and
+:c:func:`lchown` of :ref:`POSIX_SYMBOLIC_LINKS <posix_option_group_symbolic_links>`, are thin
+layers over four ZVFS system calls - ``zvfs_chmodat()``, ``zvfs_fchmod()``, ``zvfs_chownat()``
+and ``zvfs_fchown()`` - and the per-process creation mask, ``zvfs_umask()``. Every call works
+from user mode.
+
+Storage
+   A mode and an owner belong to the node, so they are the file system's: ``struct fs_dirent``
+   reports them and ``fs_chmod()``, ``fs_chown()`` and ``fs_lchown()`` change them. tmpfs keeps
+   them in its node, ext2 in the inode fields the on-disk format has always had (``i_mode``,
+   ``i_uid``, ``i_gid``), so they survive a remount. A backend that records none leaves the
+   fields zero and ZVFS reports the synthesised mode described under *Zephyr FS subsystem
+   caveats*; :c:func:`chmod` and :c:func:`chown` on such a file fail with ``ENOTSUP`` (a
+   missing file is still ``ENOENT``). The ``-1`` that leaves an ID unchanged is resolved by
+   ZVFS from the node's current owner.
+
+Creation
+   The file mode creation mask lives beside the working directory in the per-process ZVFS
+   state: a child created by :c:func:`fork` or :c:func:`posix_spawn` starts with a copy of its
+   parent's, threads that belong to no process share the boot mask, and the mask is ``022`` at
+   boot. ``zvfs_open()``, ``zvfs_mkdir()`` and ``zvfs_mknod()`` create a node with the backend's
+   default mode and then withhold the mask's bits from the requested mode with one
+   ``fs_chmod()``, only when they created the node: opening an existing file with ``O_CREAT``
+   leaves its mode alone. A backend without modes has nothing to withhold.
+
+Identity and access
+   ZVFS keeps no identity, so it enforces nothing; what a caller may do is decided in the
+   POSIX layer, where the credentials live. There is one identity, the privileged one, so
+   :c:func:`access` and :c:func:`faccessat` grant read and write to everything (a read-only
+   file system still refuses writes with ``EROFS``) and grant execute only when some execute
+   bit is set, as Linux does for root; :c:func:`chown` may give a file to any owner. The
+   class-based check for other identities is in place for when there are any. :c:func:`open`
+   enforces nothing, as the privileged identity may open anything.
+
+Deviations
+   ``AT_SYMLINK_NOFOLLOW`` to :c:func:`fchmodat` on a symbolic link fails with ``EOPNOTSUPP``,
+   which POSIX permits. No status-change time is kept, so a mode or owner change is invisible
+   to ``st_ctim``. The set-user-ID, set-group-ID and sticky bits are stored and reported but
+   have no effect.
 
 .. _posix_xsi_file_system_design:
 
