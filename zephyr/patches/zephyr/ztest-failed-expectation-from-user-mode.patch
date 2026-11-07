@@ -1,0 +1,66 @@
+diff --git a/subsys/testsuite/ztest/include/zephyr/ztest_test.h b/subsys/testsuite/ztest/include/zephyr/ztest_test.h
+--- a/subsys/testsuite/ztest/include/zephyr/ztest_test.h
++++ b/subsys/testsuite/ztest/include/zephyr/ztest_test.h
+@@ -371,9 +371,16 @@ static inline void __ztest_set_test_phase(enum ztest_phase new_phase)
+ {
+ 	z_impl___ztest_set_test_phase(new_phase);
+ }
++
++void z_impl___ztest_set_failed_expectation(void);
++static inline void __ztest_set_failed_expectation(void)
++{
++	z_impl___ztest_set_failed_expectation();
++}
+ #else
+ __syscall void __ztest_set_test_result(enum ztest_result new_result);
+ __syscall void __ztest_set_test_phase(enum ztest_phase new_phase);
++__syscall void __ztest_set_failed_expectation(void);
+ #endif
+ 
+ 
+diff --git a/subsys/testsuite/ztest/src/ztest.c b/subsys/testsuite/ztest/src/ztest.c
+--- a/subsys/testsuite/ztest/src/ztest.c
++++ b/subsys/testsuite/ztest/src/ztest.c
+@@ -491,7 +491,7 @@ EXPORT_SYMBOL(ztest_test_skip);
+ 
+ void ztest_test_expect_fail(void)
+ {
+-	failed_expectation = true;
++	__ztest_set_failed_expectation();
+ 
+ 	switch (cur_phase) {
+ 	case TEST_PHASE_SETUP:
+@@ -663,7 +663,7 @@ EXPORT_SYMBOL(ztest_test_skip);
+ 
+ void ztest_test_expect_fail(void)
+ {
+-	failed_expectation = true;
++	__ztest_set_failed_expectation();
+ }
+ 
+ void ztest_simple_1cpu_before(void *data)
+@@ -1257,6 +1257,11 @@ void z_impl___ztest_set_test_phase(enum ztest_phase new_phase)
+ 	cur_phase = new_phase;
+ }
+ 
++void z_impl___ztest_set_failed_expectation(void)
++{
++	failed_expectation = true;
++}
++
+ const void *ztest_get_current_param(void)
+ {
+ 	return z_ztest_param_state.value;
+@@ -1289,6 +1294,12 @@ void z_vrfy___ztest_set_test_phase(enum ztest_phase new_phase)
+ 	z_impl___ztest_set_test_phase(new_phase);
+ }
+ #include <zephyr/syscalls/__ztest_set_test_phase_mrsh.c>
++
++void z_vrfy___ztest_set_failed_expectation(void)
++{
++	z_impl___ztest_set_failed_expectation();
++}
++#include <zephyr/syscalls/__ztest_set_failed_expectation_mrsh.c>
+ #endif /* CONFIG_USERSPACE */
+ 
+ void ztest_verify_all_test_suites_ran(void)
