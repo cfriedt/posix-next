@@ -1,0 +1,42 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index ab9b68a64c6..40988b9792f 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -268,6 +268,11 @@ Select one of them from the SOC_SERIES_* symbol or, lacking that, from the \
+ SOC_* symbol.")
+ endif()
+ 
++if(CONFIG_LIBC_SPEED_OPTIMIZED)
++  # the driver selects the C library build by the optimization flag of the link
++  set(LINKER_OPTIMIZATION_FLAG ${LINKER_OPTIMIZE_FOR_SPEED_FLAG})
++endif()
++
+ # Apply the final optimization flag(s)
+ zephyr_compile_options($<$<COMPILE_LANGUAGE:ASM>:${ASM_OPTIMIZATION_FLAG}>)
+ zephyr_compile_options($<$<COMPILE_LANGUAGE:C>:${COMPILER_OPTIMIZATION_FLAG}>)
+diff --git a/lib/libc/Kconfig b/lib/libc/Kconfig
+index 601637a70fc..67d3e1ebe5f 100644
+--- a/lib/libc/Kconfig
++++ b/lib/libc/Kconfig
+@@ -172,6 +172,21 @@ endchoice # LIBC_IMPLEMENTATION
+ config HAS_NEWLIB_LIBC_NANO
+ 	bool
+ 
++config LIBC_SPEED_OPTIMIZED
++	bool "Link the speed-optimized C library"
++	depends on (PICOLIBC && !PICOLIBC_USE_MODULE) || NEWLIB_LIBC
++	depends on SIZE_OPTIMIZATIONS
++	depends on !LTO
++	help
++	  The toolchain ships its C library in a size-optimized and a speed-optimized
++	  build, and the linker driver picks between them by the optimization flag of
++	  the link, which follows the compiler's: an image compiled for size links a
++	  memcpy(), memset() and strcmp() that move one byte per iteration. Link with
++	  the speed flag instead, so that the library's optimized string and memory
++	  routines are used while every object of the image is still compiled for
++	  size. Costs a few hundred bytes of text. Without LTO the flag affects only
++	  which library is linked.
++
+ rsource "common/Kconfig"
+ rsource "minimal/Kconfig"
+ rsource "newlib/Kconfig"

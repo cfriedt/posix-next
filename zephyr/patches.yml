@@ -4430,3 +4430,28 @@ patches:
       stress-ng's cache stressors call directly, reads CTR_EL0 for the cache
       line sizes and then cleans by DC CVAU / IC IVAU; from a user thread
       each of these trapped to EL1 and killed the thread.
+  - path: zephyr/libc-speed-optimized.patch
+    sha256sum: 3ef64a510e542c5338508b8a3607be57778151b4f29d40ffaf38bfb63245eb4e
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-08
+    upstreamable: true
+    custom:
+      upstream:
+        issue: https://github.com/zephyrproject-rtos/zephyr/issues/111586
+    comments: |
+      CONFIG_LIBC_SPEED_OPTIMIZED: the toolchain's C library comes in a
+      size-optimized and a speed-optimized build, and the linker driver
+      picks between them by the optimization flag of the link, which follows
+      the compiler's (`gcc -print-multi-lib` lists `space;@Os`). An image
+      compiled for size therefore links a memcpy(), memset() and strcmp()
+      that move one byte per iteration, which under QEMU made the 2 MiB
+      frame copy of a fork, the zeroing of every k_mem_map() page, the
+      RISC-V page-table copies and every user memcpy() cost milliseconds.
+      The option sets only the link-time flag to the speed one, so the
+      library's optimized routines are linked while every object is still
+      compiled for size (a few hundred bytes of text; not with LTO, where
+      the link flag would recompile the image for speed). The word-copy loop
+      the frame copy of a fork carried for this reason goes back to memcpy().
+      To fold: the frame copy into k-process-vm.patch.
