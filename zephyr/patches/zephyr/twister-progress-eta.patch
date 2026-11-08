@@ -1,0 +1,204 @@
+diff --git a/scripts/pylib/twister/twisterlib/consolemonitor.py b/scripts/pylib/twister/twisterlib/consolemonitor.py
+index ac5ae79..eb61ce3 100644
+--- a/scripts/pylib/twister/twisterlib/consolemonitor.py
++++ b/scripts/pylib/twister/twisterlib/consolemonitor.py
+@@ -23,6 +23,8 @@ import os
+ import threading
+ import time
+ 
++from twisterlib.runmonitor import estimate_remaining, format_duration
++
+ # Counter line: (counter name, display label, color class).
+ COUNTER_FIELDS = (
+     ('passed', 'passed', 'passed'),
+@@ -36,20 +38,6 @@ COUNTER_FIELDS = (
+ FILTERS = ('all', 'active', 'failures', 'passed', 'queued', 'filtered')
+ 
+ 
+-def format_duration(seconds) -> str:
+-    """Human-friendly duration: 42s / 3m 10s / 2h 05m."""
+-    if seconds is None:
+-        return ''
+-    seconds = max(0, int(seconds))
+-    if seconds < 60:
+-        return f"{seconds}s"
+-    minutes, secs = divmod(seconds, 60)
+-    if minutes < 60:
+-        return f"{minutes}m {secs:02d}s"
+-    hours, minutes = divmod(minutes, 60)
+-    return f"{hours}h {minutes:02d}m"
+-
+-
+ def progress_bar(counters: dict, width: int) -> str:
+     """Render an ASCII progress bar over the to-do total.
+ 
+@@ -70,9 +58,7 @@ def eta(counters: dict, elapsed: float) -> float | None:
+     """Naive remaining-time estimate from average per-instance rate."""
+     total = max(0, counters.get('total', 0) - counters.get('filtered_static', 0))
+     done = max(0, counters.get('done', 0) - counters.get('filtered_static', 0))
+-    if done <= 5 or done >= total or elapsed <= 0:
+-        return None
+-    return elapsed * (total - done) / done
++    return estimate_remaining(done, total, elapsed)
+ 
+ 
+ def match_filter(row: dict, name: str) -> bool:
+diff --git a/scripts/pylib/twister/twisterlib/runmonitor.py b/scripts/pylib/twister/twisterlib/runmonitor.py
+index 4611091..f840842 100644
+--- a/scripts/pylib/twister/twisterlib/runmonitor.py
++++ b/scripts/pylib/twister/twisterlib/runmonitor.py
+@@ -31,6 +31,27 @@ import time
+ 
+ logger = logging.getLogger('twister')
+ 
++
++def format_duration(seconds) -> str:
++    """Human-friendly duration: 42s / 3m 10s / 2h 05m."""
++    if seconds is None:
++        return ''
++    seconds = max(0, int(seconds))
++    if seconds < 60:
++        return f"{seconds}s"
++    minutes, secs = divmod(seconds, 60)
++    if minutes < 60:
++        return f"{minutes}m {secs:02d}s"
++    hours, minutes = divmod(minutes, 60)
++    return f"{hours}h {minutes:02d}m"
++
++
++def estimate_remaining(done: int, total: int, elapsed: float) -> float | None:
++    """Naive remaining-time estimate from the average per-instance rate."""
++    if done <= 5 or done >= total or elapsed <= 0:
++        return None
++    return elapsed * (total - done) / done
++
+ # Shared flag telling the worker processes whether the --console-monitor UI
+ # currently owns the terminal. Created in the main process before the
+ # workers are forked (so they inherit the shared memory) and cleared the
+diff --git a/scripts/pylib/twister/twisterlib/runner.py b/scripts/pylib/twister/twisterlib/runner.py
+index 224471d..7798859 100644
+--- a/scripts/pylib/twister/twisterlib/runner.py
++++ b/scripts/pylib/twister/twisterlib/runner.py
+@@ -62,7 +62,12 @@ from twisterlib.environment import TwisterEnv
+ from twisterlib.harness import Harness, HarnessImporter
+ from twisterlib.log_helper import log_command
+ from twisterlib.platform import Platform
+-from twisterlib.runmonitor import console_ui_active, make_event
++from twisterlib.runmonitor import (
++    console_ui_active,
++    estimate_remaining,
++    format_duration,
++    make_event,
++)
+ from twisterlib.sidecars import SidecarImporter
+ from twisterlib.testinstance import TestInstance
+ from twisterlib.testplan import change_skip_to_error_if_integration
+@@ -192,6 +197,7 @@ class ExecutionCounter:
+                 setattr(self, descriptor.attr, Value('i', 0))
+         self.total = total
+         self.lock = Lock()
++        self.start_time = time.time()
+ 
+     def __getattr__(self, name):
+         # Synthesise `<counter>_increment(value=1)` for each AtomicCounter.
+@@ -1500,12 +1506,20 @@ class ProjectBuilder(FilterBuilder):
+             )
+             failed_section = self._colored_count(results.failed, TwisterStatus.FAIL)
+             error_section = self._colored_count(results.error, TwisterStatus.ERROR)
++            time_section = ""
++            start_time = getattr(results, 'start_time', None)
++            if isinstance(start_time, (int, float)):
++                elapsed = time.time() - start_time
++                time_section = f", elapsed: {format_duration(elapsed)}"
++                remaining = estimate_remaining(unfiltered, total_to_do, elapsed)
++                if remaining is not None:
++                    time_section += f", eta: {format_duration(remaining)}"
+             sys.stdout.write(
+                 f"INFO    - Total complete: {complete_section}"
+                 f"  built (not run): {notrun_section},"
+                 f" filtered: {filtered_section},"
+                 f" failed: {failed_section},"
+-                f" error: {error_section}\r"
++                f" error: {error_section}{time_section}\r"
+             )
+         sys.stdout.flush()
+ 
+diff --git a/scripts/tests/twister/test_runner.py b/scripts/tests/twister/test_runner.py
+index 7890b2a..c70bc19 100644
+--- a/scripts/tests/twister/test_runner.py
++++ b/scripts/tests/twister/test_runner.py
+@@ -2221,6 +2221,11 @@ TESTDATA_13 = [
+     )
+ ]
+ 
++TESTDATA_13_TIME = [
++    (1000.0, 1100.0, ', elapsed: 1m 40s, eta: 25s\r'),
++    (1000.0, 1000.0, ', elapsed: 0s\r'),
++]
++
+ @pytest.mark.parametrize(
+     'status, verbose, cmake_only, ready_run, expected_logs, expected_out',
+     TESTDATA_13,
+@@ -2334,6 +2339,62 @@ def test_projectbuilder_report_out(
+         assert expected_out in out
+ 
+ 
++@pytest.mark.parametrize(
++    'start_time, now, expected_tail',
++    TESTDATA_13_TIME,
++    ids=['eta', 'no eta yet']
++)
++def test_projectbuilder_report_out_elapsed(
++    capfd,
++    mocked_jobserver,
++    start_time,
++    now,
++    expected_tail
++):
++    instance_mock = mock.Mock()
++    instance_mock.status = TwisterStatus.FAIL
++    instance_mock.reason = 'dummy reason'
++    instance_mock.platform.name = 'dummy platform'
++    instance_mock.testsuite.name = 'dummy.testsuite.name'
++    instance_mock.testsuite.testcases = []
++    instance_mock.testcases = []
++    env_mock = mock.Mock()
++
++    pb = ProjectBuilder(instance_mock, env_mock, mocked_jobserver)
++    pb.options.verbose = False
++    pb.options.cmake_only = False
++    pb.log_info_file = mock.Mock()
++
++    results_mock = mock.Mock(
++        total = 25,
++        done = 19,
++        notrun = 0,
++        failed = 2,
++        filtered_configs = 3,
++        filtered_static = 0,
++        error = 1,
++        start_time = start_time
++    )
++    def results_done_increment(value=1, decrement=False):
++        results_mock.done += value * (-1 if decrement else 1)
++    results_mock.done_increment = results_done_increment
++    def failed_increment(value=1, decrement=False):
++        results_mock.failed += value * (-1 if decrement else 1)
++    results_mock.failed_increment = failed_increment
++
++    with mock.patch('time.time', return_value=now):
++        pb.report_out(results_mock)
++
++    out, err = capfd.readouterr()
++    out = re.sub(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])', '', out)
++
++    assert (
++        'INFO    - Total complete:   20/  25  80%'
++        '  built (not run):    0, filtered:    3, failed:    3, error:    1'
++        + expected_tail
++    ) in out
++
++
+ def test_projectbuilder_cmake_assemble_args():
+     extra_args = ['CONFIG_FOO=y', 'DUMMY_EXTRA="yes"']
+     handler = mock.Mock(ready=True, args=['dummy_handler'])
