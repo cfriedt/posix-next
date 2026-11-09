@@ -630,9 +630,12 @@ its parent's copied stack, and its own thread stack is just the privilege
 stack of its system calls.
 
 The copies are page frames taken from the kernel's free frame list, not kernel
-heap: a process address space is sized by the memory it duplicates (a 2 MiB
-malloc arena per child, typically), and the kernel heap is a small fixed pool
-shared with everything else. The frames carry no kernel mapping. The clone
+heap: a process address space is sized by the memory it duplicates, and the
+kernel heap is a small fixed pool shared with everything else. With
+:kconfig:option:`CONFIG_COMMON_LIBC_MALLOC_GROW` the malloc arena is only the
+first heap of a process: when it is full, :c:func:`malloc` maps a further
+anonymous private region and adds it to the heap, so a fork copies the regions a
+process has actually grown rather than the largest arena any program needs. The frames carry no kernel mapping. The clone
 fills them through a transient kernel window, mapped once per copied range in
 contiguous physical runs, then maps the child's ranges at the frames run by
 run; the frames return to the free list when the child's clone context is
