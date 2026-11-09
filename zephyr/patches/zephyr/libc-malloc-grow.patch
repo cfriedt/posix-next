@@ -1,0 +1,413 @@
+diff --git a/include/zephyr/sys/process_state.h b/include/zephyr/sys/process_state.h
+index d36dd3b6642..7aaf482fd6d 100644
+--- a/include/zephyr/sys/process_state.h
++++ b/include/zephyr/sys/process_state.h
+@@ -20,6 +20,7 @@
+ 
+ #include <zephyr/kernel.h>
+ #include <zephyr/sys/sys_heap.h>
++#include <zephyr/sys/multi_heap.h>
+ 
+ #ifdef __cplusplus
+ extern "C" {
+@@ -53,6 +54,10 @@ struct process_state {
+ 	char **envp;
+ 	/** The process's malloc heap; the arena follows the block */
+ 	struct sys_heap heap;
++#ifdef CONFIG_COMMON_LIBC_MALLOC_GROW
++	/** The heap and the regions grown onto it */
++	struct sys_multi_heap mheap;
++#endif /* CONFIG_COMMON_LIBC_MALLOC_GROW */
+ 	/** @endcond */
+ };
+ 
+diff --git a/lib/libc/common/Kconfig b/lib/libc/common/Kconfig
+index 25a4d34049a..c0fba25a320 100644
+--- a/lib/libc/common/Kconfig
++++ b/lib/libc/common/Kconfig
+@@ -89,6 +89,36 @@ config COMMON_LIBC_MALLOC_ARENA_SIZE
+ 	  16kB and all other systems will default to using all remaining
+ 	  ram for the malloc heap.
+ 
++config COMMON_LIBC_MALLOC_GROW
++	bool "Grow the malloc heap with anonymous mappings"
++	depends on COMMON_LIBC_MALLOC && COMMON_LIBC_MALLOC_ARENA_SIZE > 0
++	depends on ZVFS_MMAP && MMU
++	select MULTI_HEAP
++	help
++	  When no heap has room for an allocation, malloc() maps a new anonymous
++	  private region of at least COMMON_LIBC_MALLOC_GROW_STEP bytes and adds
++	  it to the heap, up to seven regions. The arena is then the first heap
++	  rather than the whole of it: a process pays for the memory it uses,
++	  and a fork copies only the regions that exist.
++
++config COMMON_LIBC_MALLOC_GROW_STEP
++	int "Smallest heap growth, in bytes"
++	depends on COMMON_LIBC_MALLOC_GROW
++	default 65536
++	help
++	  A region the heap grows by is at least this large, rounded up to a
++	  page; an allocation larger than that gets a region of its own size
++	  plus a page.
++
++config COMMON_LIBC_MALLOC_GROW_MAX
++	int "Largest heap, arena and grown regions together, in bytes"
++	depends on COMMON_LIBC_MALLOC_GROW
++	default 0
++	help
++	  The heap does not grow past this total; 0 does not bound it. A bound
++	  keeps a program that allocates whatever it is given within the memory
++	  a fixed arena of that size would have offered.
++
+ config COMMON_LIBC_CALLOC
+ 	bool "Common C library calloc"
+ 	depends on COMMON_LIBC_MALLOC
+diff --git a/lib/libc/common/include/sys_malloc.h b/lib/libc/common/include/sys_malloc.h
+index 57ece222a1d..184aa83d48f 100644
+--- a/lib/libc/common/include/sys_malloc.h
++++ b/lib/libc/common/include/sys_malloc.h
+@@ -29,6 +29,12 @@ extern "C" {
+  */
+ int malloc_runtime_stats_get(struct sys_memory_stats *stats);
+ 
++#ifdef CONFIG_COMMON_LIBC_MALLOC_GROW
++struct sys_multi_heap;
++/* the growable heap of a process over its first, fixed heap */
++void z_malloc_multi_heap_init(struct sys_multi_heap *mheap, struct sys_heap *first, size_t size);
++#endif /* CONFIG_COMMON_LIBC_MALLOC_GROW */
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/lib/libc/common/source/process.c b/lib/libc/common/source/process.c
+index 668b777c001..dc804670949 100644
+--- a/lib/libc/common/source/process.c
++++ b/lib/libc/common/source/process.c
+@@ -8,6 +8,7 @@
+ #include <zephyr/sys/libc-hooks.h>
+ #include <zephyr/sys/process_state.h>
+ #include <zephyr/sys/process.h>
++#include <sys_malloc.h>
+ 
+ #if defined(CONFIG_SYS_PROCESS_EXEC) && defined(CONFIG_USERSPACE) && \
+ 	(CONFIG_SYS_PROCESS_STATE_AREA > 0)
+@@ -30,6 +31,9 @@ static struct process_state *process_state_init(void *area, size_t size)
+ 	}
+ 	if (atomic_cas(&lp->init, 0, 1)) {
+ 		sys_heap_init(&lp->heap, (uint8_t *)area + arena, size - arena);
++#ifdef CONFIG_COMMON_LIBC_MALLOC_GROW
++		z_malloc_multi_heap_init(&lp->mheap, &lp->heap, size - arena);
++#endif /* CONFIG_COMMON_LIBC_MALLOC_GROW */
+ 		atomic_set(&lp->init, 2);
+ 	}
+ 	while (atomic_get(&lp->init) != 2) {
+diff --git a/lib/libc/common/source/stdlib/malloc.c b/lib/libc/common/source/stdlib/malloc.c
+index 1ce98812fb9..f764065c9ab 100644
+--- a/lib/libc/common/source/stdlib/malloc.c
++++ b/lib/libc/common/source/stdlib/malloc.c
+@@ -120,6 +120,123 @@ extern char _heap_sentry[];
+ 
+ Z_LIBC_DATA static struct sys_heap z_malloc_heap;
+ 
++#ifdef CONFIG_COMMON_LIBC_MALLOC_GROW
++#include <zephyr/sys/multi_heap.h>
++#include <zephyr/sys/zvfs.h>
++#include <sys_malloc.h>
++
++Z_LIBC_DATA static struct sys_multi_heap z_malloc_mheap;
++
++/* the first heap with room: the arena, then the regions grown onto it in turn */
++static void *malloc_heap_choice(struct sys_multi_heap *mheap, void *cfg, size_t align,
++				size_t size)
++{
++	ARG_UNUSED(cfg);
++
++	for (unsigned int i = 0; i < mheap->nheaps; i++) {
++		void *ret = sys_heap_aligned_alloc(mheap->heaps[i].heap, align, size);
++
++		if (ret != NULL) {
++			return ret;
++		}
++	}
++
++	return NULL;
++}
++
++/* each heap's record carries its size, so the total is at hand */
++void z_malloc_multi_heap_init(struct sys_multi_heap *mheap, struct sys_heap *first, size_t size)
++{
++	sys_multi_heap_init(mheap, malloc_heap_choice);
++	sys_multi_heap_add_heap(mheap, first, (void *)size);
++}
++
++/* a new anonymous private region of the process, its heap header at its start */
++static bool heap_grow(struct sys_multi_heap *mheap, size_t size)
++{
++	const size_t header = ROUND_UP(sizeof(struct sys_heap), __alignof__(z_max_align_t));
++	struct sys_heap *heap;
++	void *mem;
++	size_t len;
++
++	if ((mheap->nheaps >= MAX_MULTI_HEAPS) ||
++	    size_add_overflow(size, header + CONFIG_MMU_PAGE_SIZE, &len)) {
++		return false;
++	}
++	len = ROUND_UP(MAX(len, (size_t)CONFIG_COMMON_LIBC_MALLOC_GROW_STEP), CONFIG_MMU_PAGE_SIZE);
++	if (CONFIG_COMMON_LIBC_MALLOC_GROW_MAX > 0) {
++		size_t total = len;
++
++		for (unsigned int i = 0; i < mheap->nheaps; i++) {
++			total += (size_t)mheap->heaps[i].user_data;
++		}
++		if (total > (size_t)CONFIG_COMMON_LIBC_MALLOC_GROW_MAX) {
++			return false;
++		}
++	}
++	if (zvfs_mmap(len, ZVFS_PROT_READ | ZVFS_PROT_WRITE, ZVFS_MAP_PRIVATE | ZVFS_MAP_ANONYMOUS,
++		      -1, 0, &mem) != 0) {
++		return false;
++	}
++	heap = mem;
++	sys_heap_init(heap, (uint8_t *)mem + header, len - header);
++	sys_multi_heap_add_heap(mheap, heap, (void *)len);
++
++	return true;
++}
++
++typedef struct sys_multi_heap malloc_heap_t;
++
++static inline bool heap_ready(malloc_heap_t *heap)
++{
++	return heap->nheaps > 0;
++}
++
++static inline void *heap_alloc(malloc_heap_t *heap, size_t align, size_t size)
++{
++	return sys_multi_heap_aligned_alloc(heap, NULL, align, size);
++}
++
++static inline void *heap_realloc(malloc_heap_t *heap, void *ptr, size_t align, size_t size)
++{
++	return sys_multi_heap_aligned_realloc(heap, NULL, ptr, align, size);
++}
++
++static inline void heap_free(malloc_heap_t *heap, void *ptr)
++{
++	sys_multi_heap_free(heap, ptr);
++}
++#else
++typedef struct sys_heap malloc_heap_t;
++
++static inline bool heap_grow(malloc_heap_t *heap, size_t size)
++{
++	ARG_UNUSED(heap);
++	ARG_UNUSED(size);
++	return false;
++}
++
++static inline bool heap_ready(malloc_heap_t *heap)
++{
++	return heap->heap != NULL;
++}
++
++static inline void *heap_alloc(malloc_heap_t *heap, size_t align, size_t size)
++{
++	return sys_heap_aligned_alloc(heap, align, size);
++}
++
++static inline void *heap_realloc(malloc_heap_t *heap, void *ptr, size_t align, size_t size)
++{
++	return sys_heap_aligned_realloc(heap, ptr, align, size);
++}
++
++static inline void heap_free(malloc_heap_t *heap, void *ptr)
++{
++	sys_heap_free(heap, ptr);
++}
++#endif /* CONFIG_COMMON_LIBC_MALLOC_GROW */
++
+ #if defined(CONFIG_SYS_HEAP_KASAN_MALLOC) && defined(HEAP_STATIC)
+ #include <zephyr/sys/heap_kasan.h>
+ SYS_HEAP_KASAN_ENABLE(z_malloc_heap, HEAP_SIZE);
+@@ -140,17 +257,25 @@ static inline struct process_state *malloc_process(void)
+ 	return k_is_user_context() ? process_state_get() : NULL;
+ }
+ 
+-static inline struct sys_heap *malloc_heap(void)
++static inline malloc_heap_t *malloc_heap(void)
+ {
+ 	struct process_state *lp = malloc_process();
+ 
++#ifdef CONFIG_COMMON_LIBC_MALLOC_GROW
++	return (lp != NULL) ? &lp->mheap : &z_malloc_mheap;
++#else
+ 	return (lp != NULL) ? &lp->heap : &z_malloc_heap;
++#endif /* CONFIG_COMMON_LIBC_MALLOC_GROW */
+ }
+ #else
+ #define MALLOC_PROCESS_HEAP 0
+-static inline struct sys_heap *malloc_heap(void)
++static inline malloc_heap_t *malloc_heap(void)
+ {
++#ifdef CONFIG_COMMON_LIBC_MALLOC_GROW
++	return &z_malloc_mheap;
++#else
+ 	return &z_malloc_heap;
++#endif /* CONFIG_COMMON_LIBC_MALLOC_GROW */
+ }
+ #endif /* CONFIG_SYS_PROCESS_EXEC && CONFIG_USERSPACE && CONFIG_SYS_PROCESS_STATE_AREA */
+ 
+@@ -194,11 +319,15 @@ malloc_unlock(void)
+ void *malloc(size_t size)
+ {
+ 	void *ret = NULL;
++	malloc_heap_t *heap = malloc_heap();
+ 
+ 	malloc_lock();
+ 
+-	if (malloc_heap()->heap != NULL) {
+-		ret = sys_heap_aligned_alloc(malloc_heap(), __alignof__(z_max_align_t), size);
++	if (heap_ready(heap)) {
++		ret = heap_alloc(heap, __alignof__(z_max_align_t), size);
++		if ((ret == NULL) && (size != 0) && heap_grow(heap, size)) {
++			ret = heap_alloc(heap, __alignof__(z_max_align_t), size);
++		}
+ 	}
+ 	if (ret == NULL && size != 0) {
+ 		errno = ENOMEM;
+@@ -212,11 +341,15 @@ void *malloc(size_t size)
+ void *aligned_alloc(size_t alignment, size_t size)
+ {
+ 	void *ret = NULL;
++	malloc_heap_t *heap = malloc_heap();
+ 
+ 	malloc_lock();
+ 
+-	if (malloc_heap()->heap != NULL) {
+-		ret = sys_heap_aligned_alloc(malloc_heap(), alignment, size);
++	if (heap_ready(heap)) {
++		ret = heap_alloc(heap, alignment, size);
++		if ((ret == NULL) && (size != 0) && heap_grow(heap, size + alignment)) {
++			ret = heap_alloc(heap, alignment, size);
++		}
+ 	}
+ 	if (ret == NULL && size != 0) {
+ 		errno = ENOMEM;
+@@ -303,6 +436,9 @@ static int malloc_prepare(void)
+ 	}
+ 
+ 	sys_heap_init(&z_malloc_heap, heap_base, heap_size);
++#ifdef CONFIG_COMMON_LIBC_MALLOC_GROW
++	z_malloc_multi_heap_init(&z_malloc_mheap, &z_malloc_heap, heap_size);
++#endif /* CONFIG_COMMON_LIBC_MALLOC_GROW */
+ 
+ 	return 0;
+ }
+@@ -310,12 +446,15 @@ static int malloc_prepare(void)
+ void *realloc(void *ptr, size_t requested_size)
+ {
+ 	void *ret = NULL;
++	malloc_heap_t *heap = malloc_heap();
+ 
+ 	malloc_lock();
+ 
+-	if (malloc_heap()->heap != NULL) {
+-		ret = sys_heap_aligned_realloc(malloc_heap(), ptr, __alignof__(z_max_align_t),
+-					       requested_size);
++	if (heap_ready(heap)) {
++		ret = heap_realloc(heap, ptr, __alignof__(z_max_align_t), requested_size);
++		if ((ret == NULL) && (requested_size != 0) && heap_grow(heap, requested_size)) {
++			ret = heap_realloc(heap, ptr, __alignof__(z_max_align_t), requested_size);
++		}
+ 	}
+ 
+ 	if (ret == NULL && requested_size != 0) {
+@@ -330,7 +469,7 @@ void *realloc(void *ptr, size_t requested_size)
+ void free(void *ptr)
+ {
+ 	malloc_lock();
+-	sys_heap_free(malloc_heap(), ptr);
++	heap_free(malloc_heap(), ptr);
+ 	malloc_unlock();
+ }
+ 
+@@ -342,7 +481,24 @@ int malloc_runtime_stats_get(struct sys_memory_stats *stats)
+ 
+ 	malloc_lock();
+ 
++#ifdef CONFIG_COMMON_LIBC_MALLOC_GROW
++	{
++		malloc_heap_t *heap = malloc_heap();
++
++		*stats = (struct sys_memory_stats){0};
++		ret = heap_ready(heap) ? 0 : -EINVAL;
++		for (unsigned int i = 0; (ret == 0) && (i < heap->nheaps); i++) {
++			struct sys_memory_stats part;
++
++			ret = sys_heap_runtime_stats_get(heap->heaps[i].heap, &part);
++			stats->free_bytes += part.free_bytes;
++			stats->allocated_bytes += part.allocated_bytes;
++			stats->max_allocated_bytes += part.max_allocated_bytes;
++		}
++	}
++#else
+ 	ret = sys_heap_runtime_stats_get(malloc_heap(), stats);
++#endif /* CONFIG_COMMON_LIBC_MALLOC_GROW */
+ 
+ 	malloc_unlock();
+ 
+diff --git a/tests/lib/c_lib/common/src/main.c b/tests/lib/c_lib/common/src/main.c
+index 7af96dcf7d0..a014ea10579 100644
+--- a/tests/lib/c_lib/common/src/main.c
++++ b/tests/lib/c_lib/common/src/main.c
+@@ -1238,6 +1238,25 @@ ZTEST(libc_common, test_malloc)
+ 	}
+ 
+ 	free(buf);
++
++	if (IS_ENABLED(CONFIG_COMMON_LIBC_MALLOC_GROW)) {
++		/* the heap grows past its arena: a block the arena cannot hold, then one more */
++		const size_t big = 2 * CONFIG_COMMON_LIBC_MALLOC_ARENA_SIZE;
++		char *grown = malloc(big);
++		char *again;
++
++		zassert_not_null(grown, "malloc beyond the arena failed");
++		memset(grown, 0x5a, big);
++		zassert_equal(grown[big - 1], 0x5a);
++		again = realloc(grown, 3 * big);
++		zassert_not_null(again, "realloc beyond the arena failed");
++		zassert_equal(again[big - 1], 0x5a, "realloc lost the data");
++		memset(again, 0xa5, 3 * big);
++		free(again);
++		grown = malloc(100);
++		zassert_not_null(grown);
++		free(grown);
++	}
+ #else
+ 	ztest_test_skip();
+ #endif /* CONFIG_COMMON_LIBC_MALLOC && CONFIG_COMMON_LIBC_MALLOC_ARENA_SIZE > 220 */
+diff --git a/tests/lib/c_lib/common/tests.yaml b/tests/lib/c_lib/common/tests.yaml
+index 5e58f9700e6..18864e69497 100644
+--- a/tests/lib/c_lib/common/tests.yaml
++++ b/tests/lib/c_lib/common/tests.yaml
+@@ -6,6 +6,20 @@ common:
+     - mps2/an385
+ tests:
+   libraries.libc.common: {}
++  libraries.libc.common.malloc_grow:
++    filter: CONFIG_MMU and CONFIG_ARCH_HAS_USERSPACE
++    tags: userspace
++    extra_configs:
++      - CONFIG_USERSPACE=y
++      - CONFIG_COMMON_LIBC_MALLOC_ARENA_SIZE=4096
++      - CONFIG_ZVFS=y
++      - CONFIG_ZVFS_OPEN_IGNORE_MIN=y
++      - CONFIG_ZVFS_OPEN_MAX=1
++      - CONFIG_ZVFS_MMAP=y
++      - CONFIG_ZVFS_MMAP_MAX=4
++      - CONFIG_HEAP_MEM_POOL_SIZE=16384
++      - CONFIG_COMMON_LIBC_MALLOC_GROW=y
++      - CONFIG_COMMON_LIBC_MALLOC_GROW_STEP=16384
+   libraries.libc.common.minimal:
+     filter: CONFIG_MINIMAL_LIBC_SUPPORTED
+     tags: minimal_libc

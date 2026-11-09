@@ -4455,3 +4455,29 @@ patches:
       the link flag would recompile the image for speed). The word-copy loop
       the frame copy of a fork carried for this reason goes back to memcpy().
       To fold: the frame copy into k-process-vm.patch.
+  - path: zephyr/libc-malloc-grow.patch
+    sha256sum: 156e37682dc2f000e4794e91a11bc5f7d577afd409c1ed4c306e43378f74d5c7
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-08
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/zvfs-mmap.patch
+    comments: |
+      CONFIG_COMMON_LIBC_MALLOC_GROW: the common malloc is a sys_multi_heap
+      whose first heap is the configured arena; when no heap has room it maps
+      a further anonymous private region with zvfs_mmap() (at least
+      COMMON_LIBC_MALLOC_GROW_STEP, or the request plus a page, bounded by
+      COMMON_LIBC_MALLOC_GROW_MAX) and adds it, up to the multi-heap's eight.
+      The boot heap and the per-process state heap of an image process both
+      grow this way; the heap stats sum the heaps. A process pays for the
+      memory it uses rather than the largest arena any program needs, and a
+      fork copies only the regions that exist: with a 256 KiB growable arena
+      in place of the 2 MiB one the stress-ng scenarios had, a fork takes
+      26 ms on qemu_riscv64 (from 97), 7.7 ms on qemu_cortex_a53 (from 16.5)
+      and 1.9 ms on qemu_x86_64 (from 9.5). tests/lib/c_lib/common gains a
+      malloc_grow scenario that allocates and reallocates past a 4 KiB arena
+      from user mode.
