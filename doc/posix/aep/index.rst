@@ -273,9 +273,11 @@ defined only while all of them remain enabled.
           :ref:`_POSIX_ADVISORY_INFO <posix_option_advisory_info>`, 200809L, :kconfig:option:`CONFIG_POSIX_ADVISORY_INFO`
           :ref:`_POSIX_CHOWN_RESTRICTED <posix_option_chown_restricted>`, 200809L,
           :ref:`_POSIX_JOB_CONTROL <posix_option_job_control>`, 200809L, :kconfig:option:`CONFIG_POSIX_JOB_CONTROL`
+          :ref:`_POSIX_MONOTONIC_CLOCK <posix_option_monotonic_clock>`, 200809L, :kconfig:option:`CONFIG_POSIX_MONOTONIC_CLOCK`
           :ref:`_POSIX_REGEXP <posix_option_group_regexp>`, 200809L, :kconfig:option:`CONFIG_POSIX_REGEXP`
           :ref:`_POSIX_SAVED_IDS <posix_option_saved_ids>`, -1,
           :ref:`_POSIX_SHELL <posix_option_shell>`, 200809L, :kconfig:option:`CONFIG_POSIX_SHELL_FUNC`
+          :ref:`_POSIX_THREAD_PROCESS_SHARED <posix_option_thread_process_shared>`, 200809L, :kconfig:option:`CONFIG_POSIX_THREAD_PROCESS_SHARED`
           :ref:`_POSIX_VDISABLE <posix_option_vdisable>`, 0,
           :ref:`_POSIX2_C_DEV <posix_options_posix2>`, -1, :kconfig:option:`CONFIG_POSIX2_C_DEV`
           :ref:`_POSIX2_CHAR_TERM <posix_options_posix2>`, -1, :kconfig:option:`CONFIG_POSIX2_CHAR_TERM`
@@ -298,7 +300,10 @@ defined only while all of them remain enabled.
          ``XSI_DYNAMIC_LINKING`` unit is the modern
          :ref:`POSIX_DYNAMIC_LINKING <posix_option_group_dynamic_linking>` group. PSE54 also
          requires the Shell and Utilities volume (``_POSIX2_*`` above), whose utilities a
-         separate provider module may :ref:`claim <posix_options_posix2>`.
+         separate provider module may :ref:`claim <posix_options_posix2>`, and the
+         ``_POSIX_TRACE``, ``_POSIX_TRACE_EVENT_FILTER`` and ``_POSIX_TRACE_LOG`` options, which
+         Issue 8 removed from the standard and which are not listed here
+         :ref:`†<posix_undefined_behaviour>`.
 
 
 .. note::

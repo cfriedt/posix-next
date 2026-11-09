@@ -26,8 +26,9 @@
 #error "PSE54 inherits PSE51 and PSE52"
 #endif
 #if !defined(_POSIX_ADVISORY_INFO) || !defined(_POSIX_JOB_CONTROL) || !defined(_POSIX_REGEXP) ||  \
-	!defined(_XOPEN_UNIX)
-#error "PSE54 adds advisory information, job control, regular expressions and XSI"
+	!defined(_POSIX_THREAD_PROCESS_SHARED) || !defined(_XOPEN_UNIX)
+#error "PSE54 adds advisory information, job control, regular expressions, process-shared " \
+	"objects and XSI"
 #endif
 #endif /* CONFIG_TEST_POSIX_PROFILE_PSE54 */
 
