@@ -5038,3 +5038,20 @@ patches:
       mergesort cannot map their buffers, the fork stressor counting the
       child it forked as the run ended so that it is waited for, and the
       daemon stressor's /dev/null stand-in.
+  - path: stress-ng/stress-ng-sigstop-pid-before-sigchld.patch
+    sha256sum: 0c934338f9300ea52816d2232cb5b39b693c98e249804b68bf8e84f6fd50f869
+    module: modules/lib/stress-ng
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-08
+    upstreamable: true
+    comments: |
+      The sigstop stressor's child stops itself as soon as it runs, and the
+      parent's SIGCHLD handler only continues a child whose si_pid equals
+      stress_sigstop_pid; when the first CLD_STOPPED arrives before fork() has
+      returned and stored that pid, the handler ignores it, nothing continues
+      the child, and the parent pauses until the stop alarm: 0 bogo ops. On
+      qemu_cortex_a53 this happened deterministically once the kernel's memcpy()
+      got faster (CONFIG_LIBC_SPEED_OPTIMIZED) and the tick landed in that
+      window after a run of sigabrt or bad-altstack children. SIGCHLD is blocked
+      across the fork until the pid is stored.
