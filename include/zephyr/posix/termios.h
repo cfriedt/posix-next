@@ -273,6 +273,24 @@ int tcsendbreak(int fildes, int duration);
  */
 int tcsetattr(int fildes, int optional_actions, const struct termios *termios_p);
 
+/**
+ * @brief Get the foreground process group of the terminal.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/tcgetpgrp.html
+ */
+pid_t tcgetpgrp(int fildes);
+
+/**
+ * @brief Set the foreground process group of the terminal.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/tcsetpgrp.html
+ */
+int tcsetpgrp(int fildes, pid_t pgid_id);
+
+/**
+ * @brief Get the session leader of the terminal's session.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/tcgetsid.html
+ */
+pid_t tcgetsid(int fildes);
+
 #ifdef __cplusplus
 }
 #endif
