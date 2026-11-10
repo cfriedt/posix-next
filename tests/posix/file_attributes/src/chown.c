@@ -22,6 +22,9 @@ ZTEST_USER(posix_file_attributes, test_chown)
 	zassert_equal(chown(TEST_NOENT, (uid_t)-1, (gid_t)-1), -1);
 	zassert_equal(errno, ENOENT);
 
+	/* giving a file away takes privilege, and the file system says so */
+	zassert_true(pathconf(TEST_FILE, _PC_CHOWN_RESTRICTED) > 0);
+
 	/* the privileged identity may give a file to anyone; -1 keeps the other ID */
 	IF_NOT_NATIVE_LIBC({
 		struct stat st;
