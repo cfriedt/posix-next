@@ -66,6 +66,11 @@
 #endif
 
 /*
+ * _POSIX_AEP_REALTIME_MULTI (PSE54) is not advertised: it also requires POSIX_DYNAMIC_LINKING,
+ * _POSIX_SAVED_IDS and the Shell and Utilities volume (_POSIX2_*), which are not supported.
+ */
+
+/*
  * Subprofiling Considerations
  */
 #define _POSIX_SUBPROFILE 1
