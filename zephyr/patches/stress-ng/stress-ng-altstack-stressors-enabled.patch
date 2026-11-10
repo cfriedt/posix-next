@@ -1,0 +1,152 @@
+diff --git a/zephyr/Kconfig.stressors b/zephyr/Kconfig.stressors
+--- a/zephyr/Kconfig.stressors
++++ b/zephyr/Kconfig.stressors
+@@ -28,6 +28,9 @@ config STRESS_NG_STRESSOR_ALARM
+ config STRESS_NG_STRESSOR_ATOMIC
+ 	bool "atomic"
+
++config STRESS_NG_STRESSOR_BAD_ALTSTACK
++	bool "bad-altstack"
++
+ config STRESS_NG_STRESSOR_BESSELMATH
+ 	bool "besselmath"
+ 	help
+@@ -787,6 +790,11 @@ config STRESS_NG_STRESSOR_SPINMEM
+ 	# two processes spin handing a value back and forth through a shared page: on one CPU every hand-off waits out a time slice
+ 	depends on MP_MAX_NUM_CPUS > 1
+
++config STRESS_NG_STRESSOR_STACK
++	bool "stack"
++	help
++	  Start N workers generating stack overflows.
++
+ config STRESS_NG_STRESSOR_STR
+ 	bool "str"
+ 	help
+@@ -944,7 +952,6 @@ config STRESS_NG_STRESSOR_ZOMBIE
+ #   af-alg: stress-ng builds it as unimplemented on Zephyr: Linux-only interfaces
+ #   aiol: stress-ng builds it as unimplemented on Zephyr: Linux-only interfaces
+ #   apparmor: stress-ng builds it as unimplemented on Zephyr: Linux-only interfaces
+-#   bad-altstack: offered once XSI_SIGNALS provides sigaltstack()
+ #   bad-ioctl: stress-ng builds it as unimplemented on Zephyr: Linux system-call exerciser
+ #   bind-mount: stress-ng builds it as unimplemented on Zephyr: Linux-only interfaces
+ #   binderfs: stress-ng builds it as unimplemented on Zephyr: Linux-only interfaces
+@@ -1105,7 +1112,6 @@ config STRESS_NG_STRESSOR_ZOMBIE
+ #   sockfd: stress-ng builds it as unimplemented on Zephyr: Linux-only interfaces
+ #   spawn: refuses to run as root, and Zephyr processes are uid 0
+ #   splice: stress-ng builds it as unimplemented on Zephyr: Linux-only interfaces
+-#   stack: offered once XSI_SIGNALS provides sigaltstack()
+ #   stackmmap: stress-ng builds it as unimplemented on Zephyr: Linux system-call exerciser
+ #   statmount: stress-ng builds it as unimplemented on Zephyr: Linux-only interfaces
+ #   strnum: verifies long double scanf precision; picolibc's %Lf scanf is not exact
+@@ -1305,12 +1311,12 @@ config STRESS_NG_NEEDS_POSIX_SHARED_MEMORY_OBJECTS
+
+ config STRESS_NG_NEEDS_POSIX_SIGNALS
+ 	bool
+-	default y if STRESS_NG_STRESSOR_AIO || STRESS_NG_STRESSOR_ALARM || STRESS_NG_STRESSOR_BIGHEAP || STRESS_NG_STRESSOR_CYCLIC || STRESS_NG_STRESSOR_DAEMON || STRESS_NG_STRESSOR_DEKKER || STRESS_NG_STRESSOR_EXEC || STRESS_NG_STRESSOR_FAR_BRANCH || STRESS_NG_STRESSOR_FD_ABUSE || STRESS_NG_STRESSOR_FILERACE || STRESS_NG_STRESSOR_GET || STRESS_NG_STRESSOR_HRTIMERS || STRESS_NG_STRESSOR_KILL || STRESS_NG_STRESSOR_LOADAVG || STRESS_NG_STRESSOR_MEMTHRASH || STRESS_NG_STRESSOR_MISALIGNED || STRESS_NG_STRESSOR_MMAPTORTURE || STRESS_NG_STRESSOR_MPROTECT || STRESS_NG_STRESSOR_PETERSON || STRESS_NG_STRESSOR_PSEEK || STRESS_NG_STRESSOR_PTHREAD || STRESS_NG_STRESSOR_RESOURCES || STRESS_NG_STRESSOR_SCHEDMIX || STRESS_NG_STRESSOR_SHM || STRESS_NG_STRESSOR_SIGBUS || STRESS_NG_STRESSOR_SIGCHLD || STRESS_NG_STRESSOR_SIGFPE || STRESS_NG_STRESSOR_SIGHUP || STRESS_NG_STRESSOR_SIGILL || STRESS_NG_STRESSOR_SIGPENDING || STRESS_NG_STRESSOR_SIGQ || STRESS_NG_STRESSOR_SIGRT || STRESS_NG_STRESSOR_SIGSEGV || STRESS_NG_STRESSOR_SIGSTOP || STRESS_NG_STRESSOR_SIGSUSPEND || STRESS_NG_STRESSOR_SIGTRAP || STRESS_NG_STRESSOR_SLEEP || STRESS_NG_STRESSOR_TIMER || STRESS_NG_STRESSOR_TIMERMIX || STRESS_NG_STRESSOR_VARYLOAD || STRESS_NG_STRESSOR_VM_SEGV || STRESS_NG_STRESSOR_WAIT
++	default y if STRESS_NG_STRESSOR_AIO || STRESS_NG_STRESSOR_ALARM || STRESS_NG_STRESSOR_BAD_ALTSTACK || STRESS_NG_STRESSOR_BIGHEAP || STRESS_NG_STRESSOR_CYCLIC || STRESS_NG_STRESSOR_DAEMON || STRESS_NG_STRESSOR_DEKKER || STRESS_NG_STRESSOR_EXEC || STRESS_NG_STRESSOR_FAR_BRANCH || STRESS_NG_STRESSOR_FD_ABUSE || STRESS_NG_STRESSOR_FILERACE || STRESS_NG_STRESSOR_GET || STRESS_NG_STRESSOR_HRTIMERS || STRESS_NG_STRESSOR_KILL || STRESS_NG_STRESSOR_LOADAVG || STRESS_NG_STRESSOR_MEMTHRASH || STRESS_NG_STRESSOR_MISALIGNED || STRESS_NG_STRESSOR_MMAPTORTURE || STRESS_NG_STRESSOR_MPROTECT || STRESS_NG_STRESSOR_PETERSON || STRESS_NG_STRESSOR_PSEEK || STRESS_NG_STRESSOR_PTHREAD || STRESS_NG_STRESSOR_RESOURCES || STRESS_NG_STRESSOR_SCHEDMIX || STRESS_NG_STRESSOR_SHM || STRESS_NG_STRESSOR_SIGBUS || STRESS_NG_STRESSOR_SIGCHLD || STRESS_NG_STRESSOR_SIGFPE || STRESS_NG_STRESSOR_SIGHUP || STRESS_NG_STRESSOR_SIGILL || STRESS_NG_STRESSOR_SIGPENDING || STRESS_NG_STRESSOR_SIGQ || STRESS_NG_STRESSOR_SIGRT || STRESS_NG_STRESSOR_SIGSEGV || STRESS_NG_STRESSOR_SIGSTOP || STRESS_NG_STRESSOR_SIGSUSPEND || STRESS_NG_STRESSOR_SIGTRAP || STRESS_NG_STRESSOR_SLEEP || STRESS_NG_STRESSOR_STACK || STRESS_NG_STRESSOR_TIMER || STRESS_NG_STRESSOR_TIMERMIX || STRESS_NG_STRESSOR_VARYLOAD || STRESS_NG_STRESSOR_VM_SEGV || STRESS_NG_STRESSOR_WAIT
+ 	select POSIX_SIGNALS
+
+ config STRESS_NG_NEEDS_POSIX_SIGNAL_JUMP
+ 	bool
+-	default y if STRESS_NG_STRESSOR_BIGHEAP || STRESS_NG_STRESSOR_BITONICSORT || STRESS_NG_STRESSOR_BUBBLESORT || STRESS_NG_STRESSOR_CACHE || STRESS_NG_STRESSOR_FAR_BRANCH || STRESS_NG_STRESSOR_FAULT || STRESS_NG_STRESSOR_FD_ABUSE || STRESS_NG_STRESSOR_GET || STRESS_NG_STRESSOR_HEAPSORT || STRESS_NG_STRESSOR_INSERTIONSORT || STRESS_NG_STRESSOR_LIST || STRESS_NG_STRESSOR_MALLOC || STRESS_NG_STRESSOR_MERGESORT || STRESS_NG_STRESSOR_MISALIGNED || STRESS_NG_STRESSOR_MMAP || STRESS_NG_STRESSOR_MPROTECT || STRESS_NG_STRESSOR_MSYNC || STRESS_NG_STRESSOR_NOP || STRESS_NG_STRESSOR_PRIV_INSTR || STRESS_NG_STRESSOR_QSORT || STRESS_NG_STRESSOR_RADIXSORT || STRESS_NG_STRESSOR_SHELLSORT || STRESS_NG_STRESSOR_SIGBUS || STRESS_NG_STRESSOR_SIGFPE || STRESS_NG_STRESSOR_SIGILL || STRESS_NG_STRESSOR_SIGSEGV || STRESS_NG_STRESSOR_SIGTRAP || STRESS_NG_STRESSOR_TREE || STRESS_NG_STRESSOR_VM_SEGV
++	default y if STRESS_NG_STRESSOR_BAD_ALTSTACK || STRESS_NG_STRESSOR_BIGHEAP || STRESS_NG_STRESSOR_BITONICSORT || STRESS_NG_STRESSOR_BUBBLESORT || STRESS_NG_STRESSOR_CACHE || STRESS_NG_STRESSOR_FAR_BRANCH || STRESS_NG_STRESSOR_FAULT || STRESS_NG_STRESSOR_FD_ABUSE || STRESS_NG_STRESSOR_GET || STRESS_NG_STRESSOR_HEAPSORT || STRESS_NG_STRESSOR_INSERTIONSORT || STRESS_NG_STRESSOR_LIST || STRESS_NG_STRESSOR_MALLOC || STRESS_NG_STRESSOR_MERGESORT || STRESS_NG_STRESSOR_MISALIGNED || STRESS_NG_STRESSOR_MMAP || STRESS_NG_STRESSOR_MPROTECT || STRESS_NG_STRESSOR_MSYNC || STRESS_NG_STRESSOR_NOP || STRESS_NG_STRESSOR_PRIV_INSTR || STRESS_NG_STRESSOR_QSORT || STRESS_NG_STRESSOR_RADIXSORT || STRESS_NG_STRESSOR_SHELLSORT || STRESS_NG_STRESSOR_SIGBUS || STRESS_NG_STRESSOR_SIGFPE || STRESS_NG_STRESSOR_SIGILL || STRESS_NG_STRESSOR_SIGSEGV || STRESS_NG_STRESSOR_SIGTRAP || STRESS_NG_STRESSOR_STACK || STRESS_NG_STRESSOR_TREE || STRESS_NG_STRESSOR_VM_SEGV
+ 	select POSIX_SIGNAL_JUMP if !NATIVE_BUILD || NATIVE_LIBC
+
+ config STRESS_NG_NEEDS_POSIX_SINGLE_PROCESS
+@@ -1363,6 +1369,11 @@ config STRESS_NG_NEEDS_POSIX_USER_GROUPS
+ 	default y if STRESS_NG_STRESSOR_CHOWN || STRESS_NG_STRESSOR_SET
+ 	select POSIX_USER_GROUPS
+
++config STRESS_NG_NEEDS_XSI_SIGNALS
++	bool
++	default y if STRESS_NG_STRESSOR_BAD_ALTSTACK || STRESS_NG_STRESSOR_STACK
++	select XSI_SIGNALS
++
+ config STRESS_NG_NEEDS_XSI_SINGLE_PROCESS
+ 	bool
+ 	default y if STRESS_NG_STRESSOR_UTIME
+diff --git a/zephyr/config/config.h b/zephyr/config/config.h
+--- a/zephyr/config/config.h
++++ b/zephyr/config/config.h
+@@ -660,6 +660,10 @@
+ #define HAVE_GETLOGIN
+ #endif
+
++#if defined(CONFIG_XSI_SIGNALS) && defined(CONFIG_SIGNAL_ALTSTACK)
++#define HAVE_SIGALTSTACK
++#endif
++
+ #if defined(CONFIG_XSI_SINGLE_PROCESS)
+ #define HAVE_GETHOSTID
+ #endif
+@@ -776,7 +780,7 @@
+  * HAVE_MM512_ADD_EPI8 HAVE_MM512_DPBUSD_EPI32 HAVE_MM512_DPWSSD_EPI32 HAVE_MM512_LOADU_SI512 HAVE_MM512_STOREU_SI512 HAVE_NICE
+  * HAVE_PIPE2 HAVE_PTHREAD_MUTEXATTR_SETROBUST HAVE_READV HAVE_REMOVEXATTR HAVE_SBRK HAVE_SCHED_GETCPU
+  * HAVE_SETGROUPS HAVE_SETPGRP HAVE_SETPWENT HAVE_SETREGID HAVE_SETREUID HAVE_SETTIMEOFDAY
+- * HAVE_SETXATTR HAVE_SIGALTSTACK HAVE_SYNC HAVE_SYS_TREE_H HAVE_UTIMES HAVE_VALLOC
++ * HAVE_SETXATTR HAVE_SYNC HAVE_SYS_TREE_H HAVE_UTIMES HAVE_VALLOC
+  * HAVE_VFORK HAVE_VHANGUP HAVE_WRITEV HAVE_Y0L HAVE_Y1L HAVE_YNL
+  */
+
+diff --git a/zephyr/include/stress_ng_stressors.h b/zephyr/include/stress_ng_stressors.h
+--- a/zephyr/include/stress_ng_stressors.h
++++ b/zephyr/include/stress_ng_stressors.h
+@@ -17,6 +17,9 @@ STRESS_NG_STRESSOR(alarm, "alarm")
+ #ifdef CONFIG_STRESS_NG_STRESSOR_ATOMIC
+ STRESS_NG_STRESSOR(atomic, "atomic")
+ #endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_BAD_ALTSTACK
++STRESS_NG_STRESSOR(bad_altstack, "bad-altstack")
++#endif
+ #ifdef CONFIG_STRESS_NG_STRESSOR_BESSELMATH
+ STRESS_NG_STRESSOR(besselmath, "besselmath")
+ #endif
+@@ -464,6 +467,9 @@ STRESS_NG_STRESSOR(spec_rollback, "spec-rollback")
+ #ifdef CONFIG_STRESS_NG_STRESSOR_SPINMEM
+ STRESS_NG_STRESSOR(spinmem, "spinmem")
+ #endif
++#ifdef CONFIG_STRESS_NG_STRESSOR_STACK
++STRESS_NG_STRESSOR(stack, "stack")
++#endif
+ #ifdef CONFIG_STRESS_NG_STRESSOR_STR
+ STRESS_NG_STRESSOR(str, "str")
+ #endif
+diff --git a/zephyr/scripts/requirements.json b/zephyr/scripts/requirements.json
+--- a/zephyr/scripts/requirements.json
++++ b/zephyr/scripts/requirements.json
+@@ -54,7 +54,6 @@
+   ]
+  },
+  "bad-altstack": {
+-  "exclude": "offered once XSI_SIGNALS provides sigaltstack()",
+   "select": [
+    "POSIX_SIGNALS",
+    "POSIX_SIGNAL_JUMP",
+@@ -1524,7 +1523,6 @@
+   "exclude": "stress-ng builds it as unimplemented on Zephyr: Linux-only interfaces"
+  },
+  "stack": {
+-  "exclude": "offered once XSI_SIGNALS provides sigaltstack()",
+   "select": [
+    "POSIX_SIGNALS",
+    "POSIX_SIGNAL_JUMP",
+diff --git a/zephyr/stressors.cmake b/zephyr/stressors.cmake
+--- a/zephyr/stressors.cmake
++++ b/zephyr/stressors.cmake
+@@ -5,6 +5,7 @@ zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_AFFINITY ${sng_dir}/stres
+ zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_AIO ${sng_dir}/stress-aio.c)
+ zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_ALARM ${sng_dir}/stress-alarm.c)
+ zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_ATOMIC ${sng_dir}/stress-atomic.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_BAD_ALTSTACK ${sng_dir}/stress-bad-altstack.c)
+ zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_BESSELMATH ${sng_dir}/stress-besselmath.c)
+ zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_BIGHEAP ${sng_dir}/stress-bigheap.c)
+ zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_BITONICSORT ${sng_dir}/stress-bitonicsort.c)
+@@ -154,6 +155,7 @@ zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_SOFTLOCKUP ${sng_dir}/str
+ zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_SPARSEMATRIX ${sng_dir}/stress-sparsematrix.c)
+ zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_SPEC_ROLLBACK ${sng_dir}/stress-spec-rollback.c)
+ zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_SPINMEM ${sng_dir}/stress-spinmem.c)
++zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_STACK ${sng_dir}/stress-stack.c)
+ zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_STR ${sng_dir}/stress-str.c)
+ zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_STREAM ${sng_dir}/stress-stream.c)
+ zephyr_library_sources_ifdef(CONFIG_STRESS_NG_STRESSOR_SWITCH ${sng_dir}/stress-switch.c)
