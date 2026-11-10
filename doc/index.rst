@@ -45,6 +45,11 @@ posix-next
        <span class="pn-tile-title">Samples</span>
        <span class="pn-tile-desc">Example POSIX applications for Zephyr</span>
      </a>
+     <a class="pn-tile" href="samples/posix/toybox/README.html#try-it-in-your-browser">
+       <span class="pn-tile-icon">&#9654;</span>
+       <span class="pn-tile-title">Try It</span>
+       <span class="pn-tile-desc">A toybox shell on Zephyr, in your browser</span>
+     </a>
      <a class="pn-tile" href="metrics/index.html">
        <span class="pn-tile-icon">&#128200;</span>
        <span class="pn-tile-title">Metrics</span>
