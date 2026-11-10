@@ -56,7 +56,7 @@ long sysconf(int name)
 	case _SC_REALTIME_SIGNALS:
 		return -1L;
 	case _SC_REGEXP:
-		return -1L;
+		return COND_CODE_1(CONFIG_POSIX_REGEXP, (_POSIX_VERSION), (-1L));
 	case _SC_SAVED_IDS:
 		return -1L;
 	case _SC_SEMAPHORES:
