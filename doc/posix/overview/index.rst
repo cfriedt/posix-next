@@ -140,6 +140,7 @@ Applications should enable one of the Kconfig options below to quickly configure
 * :kconfig:option:`CONFIG_POSIX_AEP_CHOICE_PSE51` (:ref:`PSE51 <posix_aep_pse51>`)
 * :kconfig:option:`CONFIG_POSIX_AEP_CHOICE_PSE52` (:ref:`PSE52 <posix_aep_pse52>`)
 * :kconfig:option:`CONFIG_POSIX_AEP_CHOICE_PSE53` (:ref:`PSE53 <posix_aep_pse53>`)
+* :kconfig:option:`CONFIG_POSIX_AEP_CHOICE_PSE54` (:ref:`PSE54 <posix_aep_pse54>`)
 
 A subprofile enables its Option Groups and Options by default rather than forcing them on:
 each may be disabled individually, and further Option Groups may be enabled on top. A network

@@ -241,7 +241,7 @@ defined only while all of them remain enabled.
          :header: Symbol, Support, Remarks
          :widths: 50, 10, 50
 
-          _POSIX_AEP_REALTIME_MULTI, ,
+          _POSIX_AEP_REALTIME_MULTI, -1, :kconfig:option:`CONFIG_POSIX_AEP_REALTIME_MULTI` :ref:`†<posix_undefined_behaviour>`
 
       .. csv-table:: PSE54 Option Groups
          :header: Symbol, Support, Remarks
@@ -286,7 +286,11 @@ defined only while all of them remain enabled.
           :ref:`_POSIX2_UPE <posix_options_posix2>`, -1,
 
       .. note::
-         PSE54 is not yet supported. The tables above list only what PSE54 adds beyond PSE53
+         :kconfig:option:`CONFIG_POSIX_AEP_CHOICE_PSE54` enables every PSE54 constituent that
+         Zephyr provides, but ``_POSIX_AEP_REALTIME_MULTI`` is not advertised: PSE54 also
+         requires :ref:`POSIX_DYNAMIC_LINKING <posix_option_group_dynamic_linking>`,
+         ``_POSIX_SAVED_IDS`` and the Shell and Utilities volume (``_POSIX2_*`` above), none of
+         which are supported. The tables above list only what PSE54 adds beyond PSE53
          (`IEEE 1003.13-2003`_, Tables 1-18 and 1-19), translated to the Option Groups and
          Options of the current POSIX-1 standard. IEEE 1003.13's ``POSIX_EVENT_MGMT`` and
          ``POSIX_STRING_MATCHING`` units map onto the modern
