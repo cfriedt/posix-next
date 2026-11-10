@@ -5133,3 +5133,22 @@ patches:
       sched_setaffinity() under _GNU_SOURCE with the POSIX layer's
       cpu_set_t. Picolibc declares them only after its own <sys/cpuset.h>,
       which the Zephyr SDK does not ship.
+  - path: zephyr/k-signal-altstack.patch
+    sha256sum: db79fc2835df3b2975b05c020e9a566a208329702c59c41d15e0b3436a069db1
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-04
+    upstreamable: true
+    comments: |
+      k_sig_altstack() and K_SIG_SA_ONSTACK (CONFIG_SIGNAL_ALTSTACK, arm64,
+      riscv, x86): arch_sig_pre() starts a user handler's frame where
+      z_sig_stack() says. A handler that cannot run (its frame unwritable,
+      or a fault while a fault's handler is entered or runs) ends the
+      process with SIGSEGV instead of a fatal error.
+
+      arch/*/core/signal.c is built whenever the syscall return hook serves user threads,
+      with or without CONFIG_SIGNAL (thread cancellation uses the same trampoline), but
+      z_sig_frame_fault() and z_sig_stack() were declared inside the CONFIG_SIGNAL block of
+      kernel_internal.h: kernel.threads.apis.nosignal failed to build on every userspace
+      board. The declarations move under the return-hook block they belong to.
