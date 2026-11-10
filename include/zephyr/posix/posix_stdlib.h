@@ -79,6 +79,16 @@ char *mkdtemp(char *template);
 int mkstemp(char *template);
 #endif
 
+/**
+ * @brief Execute a shell command.
+ * @ingroup posix_option_group_shell_func
+ * @param command The command line for "sh -c", or NULL to ask whether a shell exists.
+ * @return The wait status of the shell, -1 with errno set on failure, or, for a NULL
+ *         command, nonzero when a shell is available.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/system.html
+ */
+int system(const char *command);
+
 #if defined(_POSIX_ADVISORY_INFO) || defined(__DOXYGEN__)
 /**
  * @brief Allocate aligned memory.
