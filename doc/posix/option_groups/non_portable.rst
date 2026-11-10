@@ -19,6 +19,8 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_NON_PORTABLE`.
     :c:func:`pthread_timedjoin_np`,yes
     :c:func:`pthread_tryjoin_np`,yes
     :c:func:`setmntent`,yes
+    :c:func:`wait3`,yes
+    :c:func:`wait4`,yes
 
 See :ref:`posix_non_portable_extensions` for implementation details.
 

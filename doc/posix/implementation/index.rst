@@ -214,6 +214,10 @@ permission on the thread object.
 
 - :c:func:`pthread_setname_np` and :c:func:`pthread_getname_np` read and write the kernel thread
   name (:kconfig:option:`CONFIG_THREAD_NAME`, selected by the option group).
+- :c:func:`wait4` and :c:func:`wait3`, with :kconfig:option:`CONFIG_POSIX_MULTI_PROCESS`, are
+  :c:func:`waitpid` with the child's resource usage. The kernel keeps one CPU time per thread,
+  so ``ru_utime`` carries all of the child's (and its reaped children's) time and ``ru_stime``
+  is zero; the other ``rusage`` fields are zero.
 - :c:func:`pthread_tryjoin_np` and :c:func:`pthread_timedjoin_np` are the conventional
   non-blocking and absolute-deadline (``CLOCK_REALTIME``) forms of :c:func:`pthread_join`; a
   NULL deadline blocks indefinitely.
