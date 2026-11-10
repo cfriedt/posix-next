@@ -193,6 +193,8 @@ tests:
       - CONFIG_NET_CONTEXT_SNDBUF=y
       - CONFIG_NET_CONTEXT_RCVBUF=y
       # descriptors of every kind, then bad addresses and calls on them (faults generate signals)
+      - CONFIG_STRESS_NG_STRESSOR_FD_ABUSE=y
+      - platform:qemu_x86/atom:CONFIG_STRESS_NG_STRESSOR_FD_ABUSE=n
       - CONFIG_STRESS_NG_STRESSOR_LOCKA=y
       - CONFIG_STRESS_NG_STRESSOR_LOCKMIX=y
   portability.posix.stress_ng.fifo.multi_process:
@@ -650,6 +652,23 @@ tests:
     extra_configs:
       - CONFIG_STRESS_NG_STRESSOR_SIGNAL=y
   # a fault in user mode generates a signal (CONFIG_SIGNAL_FAULT)
+  portability.posix.stress_ng.signals.fault:
+    filter: (not CONFIG_NATIVE_LIBC) and CONFIG_ARCH_HAS_USERSPACE and CONFIG_ARCH_HAS_SIGNAL_FAULT
+    platform_allow:
+      - qemu_cortex_a53
+      - qemu_riscv64/qemu_virt_riscv64
+      - qemu_x86_64/atom
+    timeout: 100
+    extra_configs:
+      - CONFIG_STRESS_NG_STRESSOR_GET=y
+      - CONFIG_STRESS_NG_STRESSOR_MISALIGNED=y
+      - CONFIG_STRESS_NG_STRESSOR_MPROTECT=y
+      - CONFIG_STRESS_NG_STRESSOR_PRIV_INSTR=y
+      - CONFIG_STRESS_NG_STRESSOR_SIGBUS=y
+      - CONFIG_STRESS_NG_STRESSOR_SIGFPE=y
+      - CONFIG_STRESS_NG_STRESSOR_SIGILL=y
+      - CONFIG_STRESS_NG_STRESSOR_SIGSEGV=y
+      - CONFIG_STRESS_NG_STRESSOR_SIGTRAP=y
   portability.posix.stress_ng.signals.anon_pages:
     filter: (not CONFIG_NATIVE_LIBC) and (CONFIG_ARCH_HAS_USERSPACE) and (CONFIG_MMU)
     timeout: 80
@@ -687,6 +706,7 @@ tests:
       - CONFIG_STRESS_NG_STRESSOR_SIGABRT=y
       - CONFIG_STRESS_NG_STRESSOR_SIGSTOP=y
       - CONFIG_STRESS_NG_STRESSOR_SIGSUSPEND=y
+      - CONFIG_STRESS_NG_STRESSOR_VM_SEGV=y
   portability.posix.stress_ng.single_process:
     timeout: 100
     extra_configs:
