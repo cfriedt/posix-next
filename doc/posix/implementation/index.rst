@@ -1480,7 +1480,7 @@ option group works from user mode when :kconfig:option:`CONFIG_USERSPACE` is ena
 
 ZVFS is the common waypoint for every file-descriptor consumer. The POSIX file API and the C
 library's ``<stdio.h>`` both bottom out in the same ZVFS entry points - ``fopen()`` and
-``open()`` are two spellings of ``zvfs_open()`` - so an application reaches one file system
+``open()`` are two spellings of ``zvfs_openat()`` - so an application reaches one file system
 implementation whichever interface it uses.
 
 **Timestamps through a descriptor.** :c:func:`futimens` resolves the ``UTIME_NOW`` and

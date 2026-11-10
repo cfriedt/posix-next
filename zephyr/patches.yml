@@ -4691,6 +4691,44 @@ patches:
     comments: |
       The newlib and picolibc <sys/stat.h> of the Zephyr SDK define the utimensat() tv_nsec markers
       UTIME_NOW and UTIME_OMIT only for other targets; provide them from the shims.
+  - path: zephyr/zvfs-directory-descriptors-at-family.patch
+    sha256sum: 479ca0ec5d8f714b42c51d62611c6f1508a0e2fea75ab404145c9ae67d4f9e5b
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-03
+    upstreamable: true
+    comments: |
+      Give zvfs the *at() family that the POSIX_FILE_SYSTEM_FD,
+      POSIX_FILE_ATTRIBUTES_FD and POSIX_SYMBOLIC_LINKS_FD Option Groups need:
+      zvfs_openat(), zvfs_statat(), zvfs_accessat(), zvfs_mkdirat(),
+      zvfs_unlinkat(), zvfs_renameat(), zvfs_symlinkat(), zvfs_readlinkat(),
+      zvfs_utimeat() and zvfs_fdopendir(). A relative path resolves against the
+      directory descriptor inside the call (the *at() functions exist to close
+      the resolve-then-act race, so there is no separate resolve
+      syscall). The syscalls are the *at() calls alone; the plain forms,
+      zvfs_open(), zvfs_stat() and the rest, are static inline wrappers
+      in the header passing ZVFS_AT_FDCWD, the way POSIX defines open()
+      in terms of openat(): zvfs_opendir() is zvfs_openat(O_DIRECTORY)
+      plus zvfs_fdopendir(), zvfs_remove() is zvfs_unlinkat() with a
+      ZVFS_AT_REMOVEDIR retry, and open(), stat() and the other POSIX
+      and ISO C path functions call the wrappers. zvfs_open() keeps the
+      path-open signature zvfs-libc-file-fd-fix.patch gave it in place
+      of upstream's vtable form. Without CONFIG_PROCESS
+      the image has one working directory, starting at the root, which any
+      thread may move; the header says so. open() on a directory
+      without O_DIRECTORY yields a directory descriptor, as on other systems.
+      The ZVFS_AT_* flags the POSIX headers already referenced are defined, and
+      the picolibc/newlib wrappers remap the toolchain's BSD-valued AT_* and
+      O_CLOEXEC/O_NOFOLLOW flags to them, declare renameat(), and provide the
+      UTIME_NOW/UTIME_OMIT markers.
+      zvfs_exe_resolve() gains its directory form: with no buffer each
+      directory of the list is opened and the name is looked up within it.
+      zvfs_utimeat() refuses flag bits other than
+      ZVFS_AT_SYMLINK_NOFOLLOW with EINVAL and, given the flag, a path
+      that names a symbolic link with EOPNOTSUPP, as POSIX permits where
+      a link cannot carry times of its own; without the check the target
+      was stamped through the link.
   - path: zephyr/arm64-userspace-cache-maintenance.patch
     sha256sum: 2e42fc6bdc1fec89817fa1326b6d9ac8fe57cb5096b98a4201c9b175676babf7
     module: zephyr
