@@ -5,6 +5,7 @@ zephyr_library()
 zephyr_library_property(ALLOW_EMPTY TRUE)
 
 zephyr_library_include_directories(
+  ${CMAKE_CURRENT_SOURCE_DIR}/../multi_process
   ${CMAKE_CURRENT_SOURCE_DIR}/../shared
   ${ZEPHYR_BASE}/kernel/include
   ${ARCH_DIR}/${ARCH}/include
@@ -16,4 +17,5 @@ zephyr_library_compile_options_ifdef(CONFIG_XSI -U_XOPEN_SOURCE -D_XOPEN_SOURCE=
 
 if(NOT CONFIG_TC_PROVIDES_POSIX_NON_PORTABLE)
   zephyr_library_sources(pthread_np.c)
+  zephyr_library_sources_ifdef(CONFIG_POSIX_MULTI_PROCESS wait3.c wait4.c)
 endif()
