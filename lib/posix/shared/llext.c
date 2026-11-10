@@ -23,6 +23,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <fnmatch.h>
+#include <ftw.h>
 #include <glob.h>
 #include <grp.h>
 #include <libgen.h>
@@ -663,6 +664,23 @@ EXPORT_SYMBOL(setuid);
 #ifdef CONFIG_POSIX_USER_GROUPS_R
 EXPORT_SYMBOL(getlogin_r);
 #endif /* CONFIG_POSIX_USER_GROUPS_R */
+
+/* XSI_FILE_SYSTEM */
+#ifdef CONFIG_XSI_FILE_SYSTEM
+/* <libgen.h> spells basename() __xpg_basename; the symbol is basename */
+#undef basename
+EXPORT_SYMBOL_NAMED(__xpg_basename, basename);
+EXPORT_SYMBOL(dirname);
+EXPORT_SYMBOL(ftw);
+EXPORT_SYMBOL(lockf);
+EXPORT_SYMBOL(mknod);
+EXPORT_SYMBOL(nftw);
+EXPORT_SYMBOL(realpath);
+EXPORT_SYMBOL(seekdir);
+EXPORT_SYMBOL(sync);
+EXPORT_SYMBOL(telldir);
+EXPORT_SYMBOL(tempnam);
+#endif /* CONFIG_XSI_FILE_SYSTEM */
 
 /* XSI_SINGLE_PROCESS */
 #ifdef CONFIG_XSI_SINGLE_PROCESS
