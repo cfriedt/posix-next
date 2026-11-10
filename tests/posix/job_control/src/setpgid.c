@@ -72,7 +72,7 @@ static void setpgid_child_group(void)
 }
 #endif /* !CONFIG_USERSPACE */
 
-ZTEST_USER(posix_multi_process, test_setpgid)
+ZTEST_USER(posix_job_control, test_setpgid)
 {
 	/* a negative process or group id is invalid */
 	errno = 0;

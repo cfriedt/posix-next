@@ -68,13 +68,20 @@ int waitid(idtype_t idtype, id_t id, siginfo_t *infop, int options)
 	}
 
 	if (infop != NULL) {
-		*infop = (siginfo_t){
-			.si_signo = SIGCHLD,
-			.si_pid = num,
-			.si_status = K_WIFEXITED(kws) ? K_WEXITSTATUS(kws)
-						      : z_sig_to_posix(K_WTERMSIG(kws)),
-			.si_code = K_WIFEXITED(kws) ? CLD_EXITED : CLD_KILLED,
-		};
+		*infop = (siginfo_t){.si_signo = SIGCHLD, .si_pid = num};
+		if (K_WIFEXITED(kws)) {
+			infop->si_code = CLD_EXITED;
+			infop->si_status = K_WEXITSTATUS(kws);
+		} else if (K_WIFSTOPPED(kws)) {
+			infop->si_code = CLD_STOPPED;
+			infop->si_status = z_sig_to_posix(K_WSTOPSIG(kws));
+		} else if (K_WIFCONTINUED(kws)) {
+			infop->si_code = CLD_CONTINUED;
+			infop->si_status = SIGCONT;
+		} else {
+			infop->si_code = CLD_KILLED;
+			infop->si_status = z_sig_to_posix(K_WTERMSIG(kws));
+		}
 	}
 
 	return 0;
