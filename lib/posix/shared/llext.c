@@ -497,6 +497,20 @@ EXPORT_SYMBOL(pthread_rwlock_timedwrlock);
 EXPORT_SYMBOL(sem_timedwait);
 #endif /* CONFIG_POSIX_TIMERS */
 
+/* USER_GROUPS */
+#ifdef CONFIG_POSIX_USER_GROUPS
+EXPORT_SYMBOL(getegid);
+EXPORT_SYMBOL(geteuid);
+EXPORT_SYMBOL(getgid);
+EXPORT_SYMBOL(getgroups);
+EXPORT_SYMBOL(getlogin);
+EXPORT_SYMBOL(getuid);
+EXPORT_SYMBOL(setegid);
+EXPORT_SYMBOL(seteuid);
+EXPORT_SYMBOL(setgid);
+EXPORT_SYMBOL(setuid);
+#endif /* CONFIG_POSIX_USER_GROUPS */
+
 /* XSI_SINGLE_PROCESS */
 #ifdef CONFIG_XSI_SINGLE_PROCESS
 EXPORT_SYMBOL(gethostid);
