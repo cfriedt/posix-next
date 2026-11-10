@@ -160,7 +160,7 @@ int scandir(const char *dir, struct dirent ***namelist, int (*sel)(const struct 
 #if defined(_XOPEN_SOURCE)
 /**
  * @brief Set the position of a directory stream (XSI extension).
- * @ingroup posix_option_group_file_system
+ * @ingroup posix_option_group_xsi_file_system
  * @param dirp Directory stream.
  * @param loc  Position value from telldir().
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/seekdir.html
@@ -169,7 +169,7 @@ void seekdir(DIR *dirp, long loc);
 
 /**
  * @brief Get the current position of a directory stream (XSI extension).
- * @ingroup posix_option_group_file_system
+ * @ingroup posix_option_group_xsi_file_system
  * @param dirp Directory stream.
  * @return Current position value, or -1 on failure.
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/telldir.html
