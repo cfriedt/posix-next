@@ -359,7 +359,7 @@ int renameat(int olddirfd, const char *oldpath, int newdirfd, const char *newpat
 #if (_XOPEN_SOURCE >= 500) || defined(_POSIX_C_SOURCE) || defined(__DOXYGEN__)
 /**
  * @brief Generate a pathname for a temporary file (obsolescent).
- * @ingroup posix_option_group_xsi_single_process
+ * @ingroup posix_option_group_xsi_file_system
  * @param dir Directory prefix, or @c NULL to use @c P_tmpdir.
  * @param pfx Filename prefix, or @c NULL.
  * @return Pointer to a pathname, or @c NULL on failure.
