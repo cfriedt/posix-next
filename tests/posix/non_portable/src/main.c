@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include <errno.h>
+#include <limits.h>
 #include <pthread.h>
 #include <sched.h>
 #include <string.h>
@@ -256,6 +258,126 @@ ZTEST_USER(posix_non_portable, test_pthread_setaffinity_np)
 		pthread_setaffinity_np_other();
 	} else {
 		pthread_setaffinity_np_unsupported();
+	}
+}
+
+static void sched_getaffinity_invalid(void)
+{
+	cpu_set_t set;
+
+	IF_NOT_NATIVE_LIBC({
+		errno = 0;
+		zassert_equal(sched_getaffinity(0, sizeof(set), NULL), -1);
+		zassert_equal(errno, EFAULT);
+	})
+	errno = 0;
+	zassert_equal(sched_getaffinity(0, 0, &set), -1);
+	zassert_equal(errno, EINVAL);
+	errno = 0;
+	zassert_equal(sched_getaffinity(INT_MAX, sizeof(set), &set), -1);
+	zassert_equal(errno, ESRCH);
+}
+
+/* the calling thread's set, as the thread's own pthread view reports it */
+static void sched_getaffinity_self(void)
+{
+	cpu_set_t set;
+	cpu_set_t expected;
+
+	zassert_ok(pthread_getaffinity_np(pthread_self(), sizeof(expected), &expected));
+	zassert_ok(sched_getaffinity(0, sizeof(set), &set));
+	zassert_true(CPU_EQUAL(&set, &expected));
+	zassert_true(CPU_COUNT(&set) >= 1);
+}
+
+ZTEST_USER(posix_non_portable, test_sched_getaffinity)
+{
+	sched_getaffinity_invalid();
+	sched_getaffinity_self();
+}
+
+static void sched_setaffinity_invalid(void)
+{
+	cpu_set_t set;
+
+	CPU_ZERO(&set);
+	CPU_SET(0, &set);
+	IF_NOT_NATIVE_LIBC({
+		errno = 0;
+		zassert_equal(sched_setaffinity(0, sizeof(set), NULL), -1);
+		zassert_equal(errno, EFAULT);
+	})
+	errno = 0;
+	zassert_equal(sched_setaffinity(0, 0, &set), -1);
+	zassert_equal(errno, EINVAL);
+	errno = 0;
+	zassert_equal(sched_setaffinity(INT_MAX, sizeof(set), &set), -1);
+	zassert_equal(errno, ESRCH);
+
+	/* no CPU at all, then only a CPU that does not exist */
+	CPU_ZERO(&set);
+	errno = 0;
+	zassert_equal(sched_setaffinity(0, sizeof(set), &set), -1);
+	zassert_equal(errno, EINVAL);
+	CPU_SET(CPU_SETSIZE - 1, &set);
+	errno = 0;
+	zassert_equal(sched_setaffinity(0, sizeof(set), &set), -1);
+	zassert_equal(errno, EINVAL);
+}
+
+/* the calling thread moves to each of its CPUs in turn, then gets its set back */
+static void sched_setaffinity_self(void)
+{
+	cpu_set_t set;
+	cpu_set_t initial;
+
+	zassert_ok(sched_getaffinity(0, sizeof(initial), &initial));
+
+	for (int cpu = 0; cpu < CPU_SETSIZE; ++cpu) {
+		if (!CPU_ISSET(cpu, &initial)) {
+			continue;
+		}
+
+		CPU_ZERO(&set);
+		CPU_SET(cpu, &set);
+		zassert_ok(sched_setaffinity(0, sizeof(set), &set));
+		zassert_ok(pthread_getaffinity_np(pthread_self(), sizeof(set), &set));
+		zassert_equal(CPU_COUNT(&set), 1);
+		zassert_true(CPU_ISSET(cpu, &set));
+		if (affinity_observable()) {
+			zassert_equal(current_cpu_id(), cpu, "not running on CPU %d", cpu);
+		}
+	}
+
+	zassert_ok(sched_setaffinity(0, sizeof(initial), &initial));
+	zassert_ok(sched_getaffinity(0, sizeof(set), &set));
+	zassert_true(CPU_EQUAL(&set, &initial));
+}
+
+static void sched_setaffinity_unsupported(void)
+{
+	cpu_set_t set;
+	cpu_set_t initial;
+
+	zassert_ok(sched_getaffinity(0, sizeof(initial), &initial));
+	zassert_ok(sched_setaffinity(0, sizeof(initial), &initial));
+
+	if (CPU_COUNT(&initial) > 1) {
+		CPU_ZERO(&set);
+		CPU_SET(0, &set);
+		errno = 0;
+		zassert_equal(sched_setaffinity(0, sizeof(set), &set), -1);
+		zassert_equal(errno, ENOTSUP);
+	}
+}
+
+ZTEST_USER(posix_non_portable, test_sched_setaffinity)
+{
+	sched_setaffinity_invalid();
+	if (IS_ENABLED(CONFIG_NATIVE_LIBC) || IS_ENABLED(CONFIG_SCHED_CPU_MASK)) {
+		sched_setaffinity_self();
+	} else {
+		sched_setaffinity_unsupported();
 	}
 }
 
