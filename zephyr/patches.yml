@@ -4892,3 +4892,35 @@ patches:
       reach every description of a side, so anonymous pipes and FIFOs
       share one object. stat, fstat and readdir report the FIFO type.
       zvfs_mknod() is the plain inline form of zvfs_mknodat().
+  - path: zephyr/fs-node-modes-and-owners.patch
+    sha256sum: 53665bc197204a730a6ddb52f44841f3043812e85aff2ffd294cc11c406f67d4
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-06
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/fs-add-rewinddir-utime-and-dirent-ext.patch
+          - zephyr/fs-ext2-symbolic-links.patch
+          - zephyr/fs-ext2-fifo.patch
+          - zephyr/fs-tmpfs.patch
+    comments: |
+      fs: file systems store a mode and an owner. struct fs_dirent gains mode
+      (the node's type and permission bits, FS_MODE_*), uid and gid under
+      CONFIG_FS_DIRENT_EXT, zero where a file system records none; three
+      optional operations, chmod, chown and lchown, and their public forms
+      fs_chmod(), fs_chown() and fs_lchown() (-ENOTSUP where absent, -ENOENT
+      for a missing node first). tmpfs keeps them in its node (0666 files and
+      FIFOs, 0777 directories and links, 0:0); ext2 reads and writes the
+      i_mode permission bits and the i_uid/i_gid the on-disk inode has
+      always had, so they survive a remount, and readdir reports them from
+      the inode it already fetches. Tested in tests/subsys/fs/tmpfs and
+      tests/subsys/fs/ext2 (test_attributes), documented under Modes and
+      owners.
+      CONFIG_FILE_SYSTEM_ATTRIBUTES (selecting FS_DIRENT_EXT) gates it:
+      the three fields, the three operations and the calls over them,
+      tmpfs's per-node storage and ext2's reporting; without the option
+      the calls are inline stubs reporting -ENOTSUP.
+      POSIX_FILE_ATTRIBUTES implies the option.
