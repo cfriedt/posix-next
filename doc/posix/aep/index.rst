@@ -264,6 +264,7 @@ defined only while all of them remain enabled.
           :ref:`POSIX_USER_GROUPS <posix_option_group_user_groups>`, yes, :kconfig:option:`CONFIG_POSIX_USER_GROUPS`
           :ref:`POSIX_USER_GROUPS_R <posix_option_group_user_groups_r>`, yes, :kconfig:option:`CONFIG_POSIX_USER_GROUPS_R`
           :ref:`POSIX_WIDE_CHAR_DEVICE_IO <posix_option_group_wide_char_device_io>`, yes,
+          :ref:`XSI_SIGNALS <posix_option_group_xsi_signals>`, yes, :kconfig:option:`CONFIG_XSI_SIGNALS`
           :ref:`XSI_SYSTEM_LOGGING <posix_option_group_xsi_system_logging>`, yes, :kconfig:option:`CONFIG_XSI_SYSTEM_LOGGING`
 
       .. csv-table:: PSE54 Option Requirements
@@ -303,7 +304,11 @@ defined only while all of them remain enabled.
          separate provider module may :ref:`claim <posix_options_posix2>`, and the
          ``_POSIX_TRACE``, ``_POSIX_TRACE_EVENT_FILTER`` and ``_POSIX_TRACE_LOG`` options, which
          Issue 8 removed from the standard and which are not listed here
-         :ref:`†<posix_undefined_behaviour>`.
+         :ref:`†<posix_undefined_behaviour>`. :ref:`XSI_SIGNALS <posix_option_group_xsi_signals>`
+         is listed although the IEEE 1003.13 tables predate the group: PSE54 is the one profile
+         that requires the X/Open System Interfaces, and the group holds :c:func:`sigaltstack`,
+         the standard way to run a handler for a stack overflow or a memory fault on a stack of
+         its own. The group stays out of PSE51, PSE52 and PSE53, which do not require XSI.
 
 
 .. note::
