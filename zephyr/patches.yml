@@ -4918,3 +4918,24 @@ patches:
       child blocked on its status pipe would stall the parent's sync()). The
       caller's errno is preserved. tests/lib/zvfs_fs: a buffered write to a
       FAT file is reported by stat only after the sync.
+  - path: zephyr/zvfs-directory-stream-position.patch
+    sha256sum: 5207b1a907c5b372ab932dc1048040e5ffe654432f3c29a8f3b3c681e98db38a
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-06
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/zvfs-dirent-syscalls.patch
+          - zephyr/zvfs-userspace-tests.patch
+    comments: |
+      A directory stream could be read and rewound but not positioned, which
+      telldir()/seekdir() need. The directory descriptor counts the entries
+      read since it was opened or rewound (dir_pos); ZFD_IOCTL_TELLDIR reports
+      the count and ZFD_IOCTL_SEEKDIR returns to one, rewinding and reading
+      forward when it lies behind, and stopping at the end for a count past
+      it. zvfs_telldir()/zvfs_seekdir() expose both as system calls; a
+      negative position is EINVAL. tests/lib/zvfs_fs: test_zvfs_telldir and
+      test_zvfs_seekdir on the fixture root.
