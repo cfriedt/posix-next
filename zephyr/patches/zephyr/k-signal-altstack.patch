@@ -1,0 +1,595 @@
+diff --git a/arch/Kconfig b/arch/Kconfig
+--- a/arch/Kconfig
++++ b/arch/Kconfig
+@@ -56,6 +56,7 @@ config ARM64
+ 	bool
+ 	select ARCH_IS_SET
+ 	select ARCH_HAS_SIGNAL_FAULT if USERSPACE
++	select ARCH_HAS_SIGNAL_ALTSTACK if USERSPACE
+ 	select ARCH_HAS_STACK_JUMP
+ 	select 64BIT
+ 	select ARCH_HAS_FWARGS_HANDLER_HOOK
+@@ -117,6 +118,7 @@ config SPARC
+ config X86
+ 	bool
+ 	select ARCH_HAS_SIGNAL_FAULT if USERSPACE
++	select ARCH_HAS_SIGNAL_ALTSTACK if USERSPACE
+ 	select ARCH_IS_SET
+ 	select ARCH_HAS_STACK_JUMP
+ 	select ATOMIC_OPERATIONS_BUILTIN
+@@ -152,6 +154,7 @@ config X86
+ config RISCV
+ 	bool
+ 	select ARCH_HAS_SIGNAL_FAULT if USERSPACE
++	select ARCH_HAS_SIGNAL_ALTSTACK if USERSPACE
+ 	select ARCH_IS_SET
+ 	select ARCH_MEM_DOMAIN_APPLY_CURRENT if RISCV_PMP && USERSPACE
+ 	select ARCH_HAS_STACK_JUMP
+@@ -1112,6 +1115,12 @@ config ARCH_HAS_SIGNAL_FAULT
+ 	  The architecture classifies a fault taken in user mode as a signal and
+ 	  resumes the thread in z_sig_fault_entry() (see @kconfig{CONFIG_SIGNAL_FAULT}).
+ 
++config ARCH_HAS_SIGNAL_ALTSTACK
++	bool
++	help
++	  The architecture's arch_sig_pre() places a user-mode handler's frame where
++	  z_sig_stack() says (see @kconfig{CONFIG_SIGNAL_ALTSTACK}).
++
+ #
+ # Other architecture related options
+ #
+diff --git a/arch/arm64/core/signal.c b/arch/arm64/core/signal.c
+--- a/arch/arm64/core/signal.c
++++ b/arch/arm64/core/signal.c
+@@ -5,6 +5,7 @@
+  */
+ 
+ #include <zephyr/kernel.h>
++#include <kernel_internal.h>
+ 
+ extern void z_sig_trampoline(void);
+ 
+@@ -19,6 +20,7 @@ void arch_sig_pre(struct k_thread *thread, void *arg)
+ #endif
+ #ifdef CONFIG_ARM64_SAFE_EXCEPTION_STACK
+ 	backup->sp = esf->sp;
++	esf->sp = z_sig_stack(thread, esf->sp);
+ #endif
+ 	backup->lr = esf->lr;
+ 	backup->elr = esf->elr;
+diff --git a/arch/riscv/core/signal.c b/arch/riscv/core/signal.c
+--- a/arch/riscv/core/signal.c
++++ b/arch/riscv/core/signal.c
+@@ -4,6 +4,7 @@
+  * SPDX-License-Identifier: Apache-2.0
+  */
+ #include <zephyr/kernel.h>
++#include <kernel_internal.h>
+ 
+ void arch_sig_pre(struct k_thread *thread, void *arg)
+ {
+@@ -17,6 +18,8 @@ void arch_sig_pre(struct k_thread *thread, void *arg)
+ 	sig->s0 = esf->s0;
+ 	sig->mepc = esf->mepc;
+ 
++	esf->sp = z_sig_stack(thread, esf->sp);
++
+ 	/* Overwrite MEPC to resume execution in arch_sig_trampoline() */
+ 	esf->mepc = (unsigned long)arch_sig_trampoline;
+ }
+diff --git a/arch/x86/core/ia32/signal.c b/arch/x86/core/ia32/signal.c
+--- a/arch/x86/core/ia32/signal.c
++++ b/arch/x86/core/ia32/signal.c
+@@ -6,6 +6,7 @@
+ 
+ #include <zephyr/kernel.h>
+ #include <zephyr/internal/syscall_handler.h>
++#include <kernel_internal.h>
+ 
+ void arch_sig_pre(struct k_thread *thread, void *arg)
+ {
+@@ -21,9 +22,11 @@ void arch_sig_pre(struct k_thread *thread, void *arg)
+ 
+ 	/* Additional stack frame to facilitate return to original syscall epilogue */
+ 	/* entered like a called function: ESP + 4 is 16-byte aligned */
+-	user_sp = ROUND_DOWN((uintptr_t)sf->esp, 16) - sizeof(uintptr_t);
++	user_sp = ROUND_DOWN(z_sig_stack(thread, sf->esp), 16) - sizeof(uintptr_t);
+ 	/* write original EIP at new top of user stack */
+-	K_OOPS(K_SYSCALL_MEMORY_WRITE(user_sp, sizeof(uintptr_t)));
++	if (arch_buffer_validate((void *)user_sp, sizeof(uintptr_t), 1) != 0) {
++		z_sig_frame_fault();
++	}
+ 	*(uintptr_t *)user_sp = (uintptr_t)backup->eip;
+ 	sf->esp = (unsigned long)user_sp;
+ 
+diff --git a/arch/x86/core/intel64/signal.c b/arch/x86/core/intel64/signal.c
+--- a/arch/x86/core/intel64/signal.c
++++ b/arch/x86/core/intel64/signal.c
+@@ -5,6 +5,8 @@
+  */
+ 
+ #include <zephyr/kernel.h>
++#include <zephyr/internal/syscall_handler.h>
++#include <kernel_internal.h>
+ 
+ void arch_sig_pre(struct k_thread *thread, void *arg)
+ {
+@@ -20,8 +22,11 @@ void arch_sig_pre(struct k_thread *thread, void *arg)
+ 
+ 	/* Additional stack frame to facilitate return to original syscall epilogue */
+ 	/* entered like a called function: RSP + 8 is 16-byte aligned */
+-	user_sp = ROUND_DOWN((uintptr_t)sf->rsp, 16) - sizeof(uintptr_t);
++	user_sp = ROUND_DOWN(z_sig_stack(thread, sf->rsp), 16) - sizeof(uintptr_t);
+ 	/* write original RIP at new top of user stack */
++	if (arch_buffer_validate((void *)user_sp, sizeof(uintptr_t), 1) != 0) {
++		z_sig_frame_fault();
++	}
+ 	*(uintptr_t *)user_sp = (uintptr_t)backup->rip;
+ 	sf->rsp = (unsigned long)user_sp;
+ 
+diff --git a/include/zephyr/kernel.h b/include/zephyr/kernel.h
+--- a/include/zephyr/kernel.h
++++ b/include/zephyr/kernel.h
+@@ -8225,6 +8225,28 @@ __syscall int k_sig_mask(int how, const struct k_sig_set *set, struct k_sig_set
+  */
+ __syscall int k_sig_abandon(const struct k_sig_set *mask);
+ 
++/**
++ * @brief Set or get the alternate signal stack of the calling thread
++ *
++ * A handler installed with @ref K_SIG_SA_ONSTACK runs on the alternate signal stack, unless the
++ * thread already runs on it. When @a ss is not NULL, it becomes the alternate signal stack, or,
++ * with @ref K_SIG_SS_DISABLE in its flags, there is none. When @a old_ss is not NULL, it receives
++ * the previous one, with @ref K_SIG_SS_ONSTACK in its flags while a handler runs on it, or
++ * @ref K_SIG_SS_DISABLE when there was none.
++ *
++ * A thread starts without one. Only user threads take signals on an alternate stack.
++ *
++ * @param ss the new alternate signal stack, or NULL
++ * @param[out] old_ss the previous alternate signal stack, or NULL
++ * @retval 0 on success
++ * @retval -EPERM a handler runs on the alternate signal stack
++ * @retval -EINVAL the flags of @a ss are neither 0 nor @ref K_SIG_SS_DISABLE
++ * @retval -ENOMEM the stack is smaller than @ref K_SIG_MINSTKSZ
++ * @retval -ENOTSUP the calling thread is not a user thread, or alternate signal stacks are not
++ * supported (see @kconfig{CONFIG_SIGNAL_ALTSTACK})
++ */
++__syscall int k_sig_altstack(const struct k_sig_stack *ss, struct k_sig_stack *old_ss);
++
+ /**
+  * @brief Get the set of pending signals for the calling thread.
+  *
+diff --git a/include/zephyr/kernel/signal.h b/include/zephyr/kernel/signal.h
+--- a/include/zephyr/kernel/signal.h
++++ b/include/zephyr/kernel/signal.h
+@@ -87,6 +87,22 @@ extern "C" {
+ #define K_SIG_SA_SIGINFO BIT(4)
+ /** @brief Signal action flag to indicate the signal being handled should not be blocked */
+ #define K_SIG_SA_NODEFER BIT(6)
++/** @brief Signal action flag to run the handler on the alternate signal stack (see @ref k_sig_altstack) */
++#define K_SIG_SA_ONSTACK BIT(1)
++
++/** @brief Alternate signal stack flag: the thread runs on it */
++#define K_SIG_SS_ONSTACK BIT(0)
++/** @brief Alternate signal stack flag: there is none */
++#define K_SIG_SS_DISABLE BIT(1)
++/** @brief Smallest alternate signal stack @ref k_sig_altstack accepts */
++#define K_SIG_MINSTKSZ 2048
++
++/** @brief An alternate signal stack (see @ref k_sig_altstack) */
++struct k_sig_stack {
++	void *sp;     /**< Lowest address of the stack */
++	size_t size;  /**< Size of the stack in bytes */
++	int flags;    /**< K_SIG_SS_ONSTACK or K_SIG_SS_DISABLE */
++};
+ 
+ /**
+  * @brief Signal value
+@@ -211,6 +227,11 @@ struct k_sig_ctx {
+ #if defined(CONFIG_SYSCALL_RETURN_HOOK) && defined(CONFIG_USERSPACE)
+ 	struct arch_sig_ctx user; /**< Arch-specific userspace context for signal being handled */
+ #endif
++#ifdef CONFIG_SIGNAL_ALTSTACK
++	struct k_sig_stack altstack; /**< Alternate signal stack, if size is not 0 */
++	/** The handler in progress runs on the alternate signal stack */
++	bool onstack;
++#endif /* CONFIG_SIGNAL_ALTSTACK */
+ #ifdef CONFIG_SIGNAL
+ 	atomic_t pending; /**< Count of signals pending delivery */
+ 	atomic_t delivered; /**< Count of signals delivered to a handler */
+diff --git a/kernel/Kconfig b/kernel/Kconfig
+--- a/kernel/Kconfig
++++ b/kernel/Kconfig
+@@ -863,6 +863,15 @@ config SIGNAL_FAULT
+ 	  terminates the thread's process, which its parent sees as killed by that signal. A
+ 	  thread of a kernel-reserved process without a handler keeps the fatal-error path.
+ 
++config SIGNAL_ALTSTACK
++	bool "Alternate signal stacks"
++	depends on USERSPACE && SYSCALL_RETURN_HOOK && ARCH_HAS_SIGNAL_ALTSTACK
++	default y
++	help
++	  A user thread may name an alternate stack with k_sig_altstack(): a handler installed
++	  with K_SIG_SA_ONSTACK runs on it, so that one can handle the overflow of the
++	  thread's own stack.
++
+ config SIGNAL_QUEUE_SIZE
+ 	int "Signal queue size"
+ 	range 1 256
+diff --git a/kernel/include/kernel_internal.h b/kernel/include/kernel_internal.h
+--- a/kernel/include/kernel_internal.h
++++ b/kernel/include/kernel_internal.h
+@@ -648,6 +648,21 @@ static inline void z_thread_cancel_arm(struct k_thread *thread)
+ #ifdef CONFIG_SYSCALL_RETURN_HOOK
+ /* the trampoline: fetch the pending action with k_sig_current(), run it, k_sig_return() */
+ void z_sig_trampoline(void);
++#ifdef CONFIG_USERSPACE
++/* from arch_sig_pre(): the handler's frame is not the thread's to write */
++FUNC_NORETURN void z_sig_frame_fault(void);
++#ifdef CONFIG_SIGNAL_ALTSTACK
++/* from arch_sig_pre(): the user stack pointer the handler of tid's signal is to start from */
++uintptr_t z_sig_stack(struct k_thread *tid, uintptr_t sp);
++#else
++static inline uintptr_t z_sig_stack(struct k_thread *tid, uintptr_t sp)
++{
++	ARG_UNUSED(tid);
++
++	return sp;
++}
++#endif /* CONFIG_SIGNAL_ALTSTACK */
++#endif /* CONFIG_USERSPACE */
+ #endif /* CONFIG_SYSCALL_RETURN_HOOK */
+ 
+ #ifdef CONFIG_SIGNAL
+diff --git a/kernel/return_hook.c b/kernel/return_hook.c
+--- a/kernel/return_hook.c
++++ b/kernel/return_hook.c
+@@ -155,6 +155,17 @@ void arch_sig_trampoline(void)
+ }
+ #endif
+ 
++#ifdef CONFIG_USERSPACE
++FUNC_NORETURN void z_sig_frame_fault(void)
++{
++	if (!z_process_self_is_reserved()) {
++		/* the handler's frame cannot be written: the process dies of SIGSEGV, as on Linux */
++		z_process_exit_signaled(K_SIG_SEGV);
++	}
++	arch_syscall_oops(_current->syscall_frame);
++}
++#endif /* CONFIG_USERSPACE */
++
+ int z_sig_handle(void *user)
+ {
+ 	if (IS_ENABLED(CONFIG_USERSPACE)) {
+@@ -230,6 +241,9 @@ static inline void z_vrfy_k_sig_current(struct k_sig_info *info, struct k_sig_ac
+ void z_impl_k_sig_return(void)
+ {
+ 	_current->base.sig.handling = false;
++#ifdef CONFIG_SIGNAL_ALTSTACK
++	_current->base.sig.onstack = false;
++#endif /* CONFIG_SIGNAL_ALTSTACK */
+ #ifdef CONFIG_USERSPACE
+ 	if (k_is_in_user_syscall()) {
+ 		arch_sig_post(_current, _current->syscall_frame);
+diff --git a/kernel/signal.c b/kernel/signal.c
+--- a/kernel/signal.c
++++ b/kernel/signal.c
+@@ -334,6 +334,10 @@ void z_sig_thread_drop(struct k_thread *tid)
+ 		atomic_clear(&tid->base.sig.pending);
+ 		atomic_clear(&tid->base.sig.delivered);
+ 	}
++#ifdef CONFIG_SIGNAL_ALTSTACK
++	tid->base.sig.altstack = (struct k_sig_stack){0};
++	tid->base.sig.onstack = false;
++#endif /* CONFIG_SIGNAL_ALTSTACK */
+ }
+ 
+ /* tid has signo unblocked and its action, explicit or default, is to ignore it */
+@@ -1135,6 +1139,9 @@ int z_impl_k_sig_abandon(const struct k_sig_set *mask)
+ #ifdef CONFIG_SIGNAL_FAULT
+ 	tid->base.sig.fault = K_SIG_FAULT_NONE;
+ #endif /* CONFIG_SIGNAL_FAULT */
++#ifdef CONFIG_SIGNAL_ALTSTACK
++	tid->base.sig.onstack = false;
++#endif /* CONFIG_SIGNAL_ALTSTACK */
+ 
+ 	if (mask != NULL) {
+ 		tid->base.sig.mask = *mask;
+@@ -1160,6 +1167,90 @@ int z_vrfy_k_sig_abandon(const struct k_sig_set *mask)
+ #include <zephyr/syscalls/k_sig_abandon_mrsh.c>
+ #endif
+ 
++int z_impl_k_sig_altstack(const struct k_sig_stack *ss, struct k_sig_stack *old_ss)
++{
++#ifdef CONFIG_SIGNAL_ALTSTACK
++	struct k_sig_ctx *const ctx = &_current->base.sig;
++
++	if ((_current->base.user_options & K_USER) == 0U) {
++		return -ENOTSUP;
++	}
++
++	if (ss != NULL) {
++		if (ctx->onstack) {
++			return -EPERM;
++		}
++		if ((ss->flags & ~K_SIG_SS_DISABLE) != 0) {
++			return -EINVAL;
++		}
++		if (((ss->flags & K_SIG_SS_DISABLE) == 0) && (ss->size < K_SIG_MINSTKSZ)) {
++			return -ENOMEM;
++		}
++	}
++
++	if (old_ss != NULL) {
++		*old_ss = ctx->altstack;
++		if (ctx->altstack.size == 0U) {
++			old_ss->flags = K_SIG_SS_DISABLE;
++		} else {
++			old_ss->flags = ctx->onstack ? K_SIG_SS_ONSTACK : 0;
++		}
++	}
++
++	if (ss != NULL) {
++		if ((ss->flags & K_SIG_SS_DISABLE) != 0) {
++			ctx->altstack = (struct k_sig_stack){0};
++		} else {
++			ctx->altstack = *ss;
++		}
++	}
++
++	return 0;
++#else
++	ARG_UNUSED(ss);
++	ARG_UNUSED(old_ss);
++
++	return -ENOTSUP;
++#endif /* CONFIG_SIGNAL_ALTSTACK */
++}
++
++#ifdef CONFIG_USERSPACE
++static inline int z_vrfy_k_sig_altstack(const struct k_sig_stack *ss, struct k_sig_stack *old_ss)
++{
++	struct k_sig_stack copy;
++
++	if (ss != NULL) {
++		K_OOPS(k_usermode_from_copy(&copy, ss, sizeof(copy)));
++		ss = &copy;
++	}
++	if (old_ss != NULL) {
++		K_OOPS(K_SYSCALL_MEMORY_WRITE(old_ss, sizeof(*old_ss)));
++	}
++
++	return z_impl_k_sig_altstack(ss, old_ss);
++}
++#include <zephyr/syscalls/k_sig_altstack_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
++#ifdef CONFIG_SIGNAL_ALTSTACK
++uintptr_t z_sig_stack(struct k_thread *tid, uintptr_t sp)
++{
++	struct k_sig_ctx *const ctx = &tid->base.sig;
++	uintptr_t const base = (uintptr_t)ctx->altstack.sp;
++
++	if (((ctx->action.flags & K_SIG_SA_ONSTACK) == 0) || (ctx->altstack.size == 0U)) {
++		return sp;
++	}
++	if ((sp > base) && (sp <= (base + ctx->altstack.size))) {
++		/* a handler that left by a non-local jump without k_sig_abandon(): still on it */
++		return sp;
++	}
++	ctx->onstack = true;
++
++	return ROUND_DOWN(base + ctx->altstack.size, ARCH_STACK_PTR_ALIGN);
++}
++#endif /* CONFIG_SIGNAL_ALTSTACK */
++
+ int z_impl_k_sig_pending(struct k_sig_set *set)
+ {
+ 	if (k_is_in_isr()) {
+@@ -1423,8 +1514,16 @@ bool z_sig_fault(int signo, int code, void *addr)
+ 	struct k_sig_ctx *const ctx = &tid->base.sig;
+ 	struct k_sig_action act;
+ 
+-	if (k_is_pre_kernel() || ((tid->base.user_options & K_USER) == 0U) ||
+-	    (ctx->fault != K_SIG_FAULT_NONE)) {
++	if (k_is_pre_kernel() || ((tid->base.user_options & K_USER) == 0U)) {
++		return false;
++	}
++	if ((ctx->fault == K_SIG_FAULT_DELIVERED) && !z_process_self_is_reserved()) {
++		/* in the handler of a fault, or on the way to it (its frame faulted): as on Linux */
++		ctx->fault = K_SIG_FAULT_FORCED;
++		ctx->fault_signo = (uint8_t)signo;
++		return true;
++	}
++	if (ctx->fault != K_SIG_FAULT_NONE) {
+ 		/* a fault on the way to the signal: nothing more can run in user mode */
+ 		return false;
+ 	}
+diff --git a/lib/os/process.c b/lib/os/process.c
+--- a/lib/os/process.c
++++ b/lib/os/process.c
+@@ -1212,6 +1212,10 @@ int z_sys_clone_vm_copy(const struct sys_clone_args *args, k_pid_t *child)
+ #ifdef CONFIG_SIGNAL
+ 	/* a copy of the caller, its signal mask included */
+ 	tid->base.sig.mask = _current->base.sig.mask;
++#ifdef CONFIG_SIGNAL_ALTSTACK
++	tid->base.sig.altstack = _current->base.sig.altstack;
++	tid->base.sig.onstack = _current->base.sig.onstack;
++#endif /* CONFIG_SIGNAL_ALTSTACK */
+ #endif /* CONFIG_SIGNAL */
+ 
+ 	(void)k_mem_domain_add_thread(z_process_vm_domain(proc->vm), tid);
+diff --git a/tests/kernel/signal/src/main.c b/tests/kernel/signal/src/main.c
+--- a/tests/kernel/signal/src/main.c
++++ b/tests/kernel/signal/src/main.c
+@@ -1008,6 +1008,169 @@ ZTEST(signal, test_k_sig_interrupts_wait)
+ 	zassert_equal(interrupt_wait_ret, -EINTR);
+ }
+ 
++#ifdef CONFIG_SIGNAL_ALTSTACK
++/*
++ * A user thread names an alternate stack: a handler installed with K_SIG_SA_ONSTACK runs on it,
++ * one without does not, and the stack cannot be changed while a handler runs on it.
++ */
++enum altstack_case {
++	ALTSTACK_ERRORS,
++	ALTSTACK_ONSTACK,
++	ALTSTACK_NOT_ONSTACK,
++	ALTSTACK_BAD_SP,
++};
++
++ZTEST_BMEM static uint8_t __aligned(16) altstack_buf[2 * K_SIG_MINSTKSZ];
++ZTEST_BMEM static volatile int altstack_ret[3];
++ZTEST_BMEM static volatile int altstack_handler_flags;
++ZTEST_BMEM static volatile int altstack_handler_set;
++ZTEST_BMEM static volatile uintptr_t altstack_handler_local;
++ZTEST_BMEM static jmp_buf altstack_env;
++
++static bool on_altstack(uintptr_t addr)
++{
++	return (addr >= (uintptr_t)altstack_buf) && (addr < (uintptr_t)altstack_buf + sizeof(altstack_buf));
++}
++
++static void altstack_handler(int sig, struct k_sig_info *info, void *ucontext)
++{
++	volatile int local;
++	struct k_sig_stack old;
++	const struct k_sig_stack ss = {.sp = altstack_buf, .size = sizeof(altstack_buf)};
++
++	ARG_UNUSED(info);
++	ARG_UNUSED(ucontext);
++
++	altstack_handler_local = (uintptr_t)&local;
++	altstack_handler_flags = (k_sig_altstack(NULL, &old) == 0) ? old.flags : -1;
++	altstack_handler_set = k_sig_altstack(&ss, NULL);
++	if (sig == K_SIG_SEGV) {
++		(void)k_sig_abandon(NULL);
++		longjmp(altstack_env, 1);
++	}
++}
++
++#ifdef CONFIG_SIGNAL_FAULT
++/* a store through a stack pointer that points nowhere: no handler frame fits there */
++static void altstack_bad_sp(void)
++{
++#if defined(CONFIG_ARM64)
++	__asm__ volatile("mov x9, #16; mov sp, x9; str xzr, [sp]" ::: "x9", "memory");
++#elif defined(CONFIG_RISCV)
++	__asm__ volatile("li sp, 16; sw zero, 0(sp)" ::: "memory");
++#elif defined(CONFIG_X86_64)
++	__asm__ volatile("mov $16, %%rsp; movq $0, (%%rsp)" ::: "memory");
++#else
++	__asm__ volatile("mov $16, %%esp; movl $0, (%%esp)" ::: "memory");
++#endif
++}
++#endif /* CONFIG_SIGNAL_FAULT */
++
++static void altstack_entry(void *arg1, void *arg2, void *arg3)
++{
++	enum altstack_case const which = (enum altstack_case)(intptr_t)arg1;
++	struct k_sig_stack ss = {.sp = altstack_buf, .size = sizeof(altstack_buf)};
++	struct k_sig_stack old;
++	struct k_sig_action action = {
++		.handler = altstack_handler,
++		.flags = (which == ALTSTACK_NOT_ONSTACK) ? 0 : K_SIG_SA_ONSTACK,
++	};
++	int const signo = (which == ALTSTACK_BAD_SP) ? K_SIG_SEGV : K_SIG_USR1;
++
++	ARG_UNUSED(arg2);
++	ARG_UNUSED(arg3);
++
++	if (which == ALTSTACK_ERRORS) {
++		altstack_ret[0] = k_sig_altstack(&(struct k_sig_stack){.flags = BIT(5)}, NULL);
++		altstack_ret[1] = k_sig_altstack(
++			&(struct k_sig_stack){.sp = altstack_buf, .size = K_SIG_MINSTKSZ - 1}, NULL);
++		altstack_ret[2] = (k_sig_altstack(NULL, &old) == 0) ? old.flags : -1;
++		return;
++	}
++
++	altstack_ret[0] = k_sig_altstack(&ss, NULL);
++	altstack_ret[1] = k_sig_action(signo, &action, NULL);
++	if (which == ALTSTACK_BAD_SP) {
++#ifdef CONFIG_SIGNAL_FAULT
++		if (setjmp(altstack_env) == 0) {
++			altstack_bad_sp();
++		}
++#endif /* CONFIG_SIGNAL_FAULT */
++	} else {
++		(void)k_sig_queue((k_pid_t)k_current_get(), signo, (union k_sig_val){0});
++	}
++	altstack_ret[2] = (k_sig_altstack(NULL, &old) == 0) ? old.flags : -1;
++	(void)k_sig_action(signo, &(struct k_sig_action){.handler = K_SIG_DFL}, NULL);
++}
++
++static void k_sig_altstack_run(enum altstack_case which)
++{
++	memset((void *)altstack_ret, 0x7f, sizeof(altstack_ret));
++	altstack_handler_flags = -1;
++	altstack_handler_set = 0;
++	altstack_handler_local = 0;
++
++	k_thread_create(&noop_test_thread, noop_test_stack, K_THREAD_STACK_SIZEOF(noop_test_stack),
++			altstack_entry, (void *)(intptr_t)which, NULL, NULL,
++			K_LOWEST_APPLICATION_THREAD_PRIO, K_USER | K_INHERIT_PERMS, K_NO_WAIT);
++	zassert_ok(k_thread_join(&noop_test_thread, K_FOREVER));
++}
++
++static void k_sig_altstack_errors(void)
++{
++	struct k_sig_stack old;
++
++	/* a kernel thread takes its signals where it runs */
++	zassert_equal(k_sig_altstack(NULL, &old), -ENOTSUP);
++
++	k_sig_altstack_run(ALTSTACK_ERRORS);
++	zassert_equal(altstack_ret[0], -EINVAL);
++	zassert_equal(altstack_ret[1], -ENOMEM);
++	zassert_equal(altstack_ret[2], K_SIG_SS_DISABLE);
++}
++
++static void k_sig_altstack_onstack(void)
++{
++	k_sig_altstack_run(ALTSTACK_ONSTACK);
++	zassert_ok(altstack_ret[0]);
++	zassert_ok(altstack_ret[1]);
++	zassert_true(on_altstack(altstack_handler_local), "handler stack %p",
++		     (void *)altstack_handler_local);
++	zassert_equal(altstack_handler_flags, K_SIG_SS_ONSTACK);
++	zassert_equal(altstack_handler_set, -EPERM);
++	zassert_equal(altstack_ret[2], 0, "flags %d after the handler", altstack_ret[2]);
++}
++
++static void k_sig_altstack_not_onstack(void)
++{
++	k_sig_altstack_run(ALTSTACK_NOT_ONSTACK);
++	zassert_not_equal(altstack_handler_local, 0, "the handler did not run");
++	zassert_false(on_altstack(altstack_handler_local));
++	zassert_equal(altstack_handler_flags, 0);
++	zassert_ok(altstack_handler_set);
++}
++
++#ifdef CONFIG_SIGNAL_FAULT
++static void k_sig_altstack_bad_sp(void)
++{
++	k_sig_altstack_run(ALTSTACK_BAD_SP);
++	zassert_true(on_altstack(altstack_handler_local), "handler stack %p",
++		     (void *)altstack_handler_local);
++	zassert_equal(altstack_ret[2], 0, "flags %d after the jump", altstack_ret[2]);
++}
++#endif /* CONFIG_SIGNAL_FAULT */
++
++ZTEST(signal, test_k_sig_altstack)
++{
++	k_sig_altstack_errors();
++	k_sig_altstack_onstack();
++	k_sig_altstack_not_onstack();
++#ifdef CONFIG_SIGNAL_FAULT
++	k_sig_altstack_bad_sp();
++#endif /* CONFIG_SIGNAL_FAULT */
++}
++#endif /* CONFIG_SIGNAL_ALTSTACK */
++
+ static void *setup(void)
+ {
+ 	k_sig_emptyset(&rt_sigset);
