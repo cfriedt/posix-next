@@ -1,0 +1,35 @@
+diff --git a/lib/libc/picolibc/include/sched.h b/lib/libc/picolibc/include/sched.h
+new file mode 100644
+--- /dev/null
++++ b/lib/libc/picolibc/include/sched.h
+@@ -0,0 +1,30 @@
++/*
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SCHED_H_
++#define ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SCHED_H_
++
++#include_next <sched.h>
++
++/*
++ * Picolibc declares the affinity functions only after its own <sys/cpuset.h>, which the Zephyr
++ * SDK does not ship. The POSIX layer's cpu_set_t takes its place.
++ */
++#if defined(_GNU_SOURCE) && __has_include(<zephyr/posix/sys/cpuset.h>)
++#include <zephyr/posix/sys/cpuset.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++int sched_getaffinity(pid_t pid, size_t cpusetsize, cpu_set_t *mask);
++int sched_setaffinity(pid_t pid, size_t cpusetsize, const cpu_set_t *mask);
++
++#ifdef __cplusplus
++}
++#endif
++#endif /* _GNU_SOURCE */
++
++#endif /* ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SCHED_H_ */
