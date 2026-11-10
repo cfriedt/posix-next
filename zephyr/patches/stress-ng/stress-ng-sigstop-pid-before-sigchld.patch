@@ -1,0 +1,29 @@
+diff --git a/stress-sigstop.c b/stress-sigstop.c
+index eea4fb57d..a9c27c6bd 100644
+--- a/stress-sigstop.c
++++ b/stress-sigstop.c
+@@ -88,6 +88,7 @@ static int stress_sigstop(stress_args_t *args)
+ 	int rc = EXIT_SUCCESS;
+ 	int parent_cpu;
+ 	struct sigaction sa;
++	sigset_t set, old_set;
+ 
+ 	stress_sigstop_args = args;
+ 
+@@ -113,7 +114,16 @@ static int stress_sigstop(stress_args_t *args)
+ 	stress_proc_state_set(args->name, STRESS_STATE_RUN);
+ 
+ 	parent_cpu = stress_cpu_get();
++	/*
++	 *  The child stops itself as soon as it runs; hold SIGCHLD back until
++	 *  the pid the handler matches against has been stored, or the first
++	 *  notification is dropped and the child never gets a SIGCONT.
++	 */
++	(void)sigemptyset(&set);
++	(void)sigaddset(&set, SIGCHLD);
++	(void)sigprocmask(SIG_BLOCK, &set, &old_set);
+ 	stress_sigstop_pid = stress_retry_fork(args, 0);
++	(void)sigprocmask(SIG_SETMASK, &old_set, NULL);
+ 	if (stress_sigstop_pid < 0) {
+ 		if (UNLIKELY(!stress_continue(args)))
+ 			goto finish;
