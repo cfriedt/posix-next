@@ -276,7 +276,7 @@ defined only while all of them remain enabled.
           :ref:`_POSIX_MONOTONIC_CLOCK <posix_option_monotonic_clock>`, 200809L, :kconfig:option:`CONFIG_POSIX_MONOTONIC_CLOCK`
           :ref:`_POSIX_REGEXP <posix_option_group_regexp>`, 200809L, :kconfig:option:`CONFIG_POSIX_REGEXP`
           :ref:`_POSIX_SAVED_IDS <posix_option_saved_ids>`, -1,
-          :ref:`_POSIX_SHELL <posix_option_shell>`, -1,
+          :ref:`_POSIX_SHELL <posix_option_shell>`, 200809L, :kconfig:option:`CONFIG_POSIX_SHELL_FUNC`
           :ref:`_POSIX_THREAD_PROCESS_SHARED <posix_option_thread_process_shared>`, 200809L, :kconfig:option:`CONFIG_POSIX_THREAD_PROCESS_SHARED`
           :ref:`_POSIX_VDISABLE <posix_option_vdisable>`, 0,
           :ref:`_POSIX2_C_DEV <posix_options_posix2>`, -1,
