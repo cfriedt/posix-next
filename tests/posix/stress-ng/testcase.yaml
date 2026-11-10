@@ -107,6 +107,35 @@ tests:
     extra_configs:
       - CONFIG_STRESS_NG_STRESSOR_NULL=y
       - CONFIG_STRESS_NG_STRESSOR_ZERO=y
+  portability.posix.stress_ng.device_io.multi_process:
+    platform_exclude:
+      # every forked child needs the stressor-stack partition: no MPU slot left for it
+      - mps2/an385
+    filter: (not CONFIG_NATIVE_LIBC) and (CONFIG_ARCH_HAS_USERSPACE) and (CONFIG_ARCH_HAS_PROCESS_VM)
+    timeout: 68
+    extra_configs:
+      # fork(): a per-process address space and the arch current-thread lookup
+      - CONFIG_PROCESS_VM=y
+      - CONFIG_CURRENT_THREAD_USE_TLS=n
+      - CONFIG_SYS_PROCESS_MAX=32
+      # every live process holds a permission index: a byte covers eight
+      - CONFIG_MAX_PROCESS_BYTES=4
+      # and a thread index: eight static thread objects, then one per live process
+      - CONFIG_MAX_THREAD_BYTES=4
+      # and a number: three reserved processes, the test process, and every live child
+      - CONFIG_SYS_PROCESS_IDS=48
+      # a forked child privatizes a leaf table per copied range and its domain's
+      # partitions: nine live children (sigrt) run past 64 tables
+      - platform:qemu_cortex_a53/qemu_cortex_a53:CONFIG_MAX_XLAT_TABLES=256
+      - platform:qemu_riscv64/qemu_virt_riscv64:CONFIG_MAX_XLAT_TABLES=640
+      # PROCESS_VM needs the kernel on the process's page tables (no KPTI); every
+      # forked child holds a memory domain
+      - platform:qemu_x86/atom:CONFIG_X86_KPTI=n
+      - platform:qemu_x86/atom:CONFIG_X86_MAX_ADDITIONAL_MEM_DOMAINS=16
+      - platform:qemu_x86_64/atom:CONFIG_X86_KPTI=n
+      - platform:qemu_x86_64/atom:CONFIG_X86_MAX_ADDITIONAL_MEM_DOMAINS=16
+      - CONFIG_STRESS_NG_STRESSOR_DEV=y
+      - CONFIG_STRESS_NG_STRESSOR_POLL=y
   portability.posix.stress_ng.fd_mgmt:
     timeout: 100
     extra_configs:
@@ -117,6 +146,79 @@ tests:
     timeout: 80
     extra_configs:
       - CONFIG_STRESS_NG_STRESSOR_DUP=y
+  portability.posix.stress_ng.fd_mgmt.multi_process:
+    platform_exclude:
+      # every forked child needs the stressor-stack partition: no MPU slot left for it
+      - mps2/an385
+    filter: (not CONFIG_NATIVE_LIBC) and (CONFIG_ARCH_HAS_USERSPACE) and (CONFIG_ARCH_HAS_PROCESS_VM)
+    timeout: 80
+    extra_configs:
+      # fork(): a per-process address space and the arch current-thread lookup
+      - CONFIG_PROCESS_VM=y
+      - CONFIG_CURRENT_THREAD_USE_TLS=n
+      - CONFIG_SYS_PROCESS_MAX=32
+      # every live process holds a permission index: a byte covers eight
+      - CONFIG_MAX_PROCESS_BYTES=4
+      # and a thread index: eight static thread objects, then one per live process
+      - CONFIG_MAX_THREAD_BYTES=4
+      # and a number: three reserved processes, the test process, and every live child
+      - CONFIG_SYS_PROCESS_IDS=48
+      # a forked child privatizes a leaf table per copied range and its domain's
+      # partitions: nine live children (sigrt) run past 64 tables
+      - platform:qemu_cortex_a53/qemu_cortex_a53:CONFIG_MAX_XLAT_TABLES=256
+      - platform:qemu_riscv64/qemu_virt_riscv64:CONFIG_MAX_XLAT_TABLES=640
+      # PROCESS_VM needs the kernel on the process's page tables (no KPTI); every
+      # forked child holds a memory domain
+      - platform:qemu_x86/atom:CONFIG_X86_KPTI=n
+      - platform:qemu_x86/atom:CONFIG_X86_MAX_ADDITIONAL_MEM_DOMAINS=16
+      - platform:qemu_x86_64/atom:CONFIG_X86_KPTI=n
+      - platform:qemu_x86_64/atom:CONFIG_X86_MAX_ADDITIONAL_MEM_DOMAINS=16
+      # fd-abuse opens descriptors of every kind, sockets included
+      - CONFIG_NET_SLIP_TAP=n
+      - CONFIG_NETWORKING=y
+      - CONFIG_NET_TEST=y
+      - CONFIG_NET_DRIVERS=y
+      - CONFIG_NET_LOOPBACK=y
+      - CONFIG_NET_IPV4=y
+      - CONFIG_NET_IPV6=y
+      - CONFIG_NET_SOCKETS=y
+      - CONFIG_NET_TCP=y
+      - CONFIG_NET_UDP=y
+      - CONFIG_NET_MAX_CONTEXTS=64
+      - CONFIG_NET_MAX_CONN=64
+      - CONFIG_NET_CONTEXT_SNDBUF=y
+      - CONFIG_NET_CONTEXT_RCVBUF=y
+      # descriptors of every kind, then bad addresses and calls on them (faults generate signals)
+      - CONFIG_STRESS_NG_STRESSOR_LOCKA=y
+      - CONFIG_STRESS_NG_STRESSOR_LOCKMIX=y
+  portability.posix.stress_ng.fifo.multi_process:
+    platform_exclude:
+      # every forked child needs the stressor-stack partition: no MPU slot left for it
+      - mps2/an385
+    filter: (not CONFIG_NATIVE_LIBC) and (CONFIG_ARCH_HAS_USERSPACE) and (CONFIG_ARCH_HAS_PROCESS_VM)
+    timeout: 64
+    extra_configs:
+      # fork(): a per-process address space and the arch current-thread lookup
+      - CONFIG_PROCESS_VM=y
+      - CONFIG_CURRENT_THREAD_USE_TLS=n
+      - CONFIG_SYS_PROCESS_MAX=32
+      # every live process holds a permission index: a byte covers eight
+      - CONFIG_MAX_PROCESS_BYTES=4
+      # and a thread index: eight static thread objects, then one per live process
+      - CONFIG_MAX_THREAD_BYTES=4
+      # and a number: three reserved processes, the test process, and every live child
+      - CONFIG_SYS_PROCESS_IDS=48
+      # a forked child privatizes a leaf table per copied range and its domain's
+      # partitions: nine live children (sigrt) run past 64 tables
+      - platform:qemu_cortex_a53/qemu_cortex_a53:CONFIG_MAX_XLAT_TABLES=256
+      - platform:qemu_riscv64/qemu_virt_riscv64:CONFIG_MAX_XLAT_TABLES=640
+      # PROCESS_VM needs the kernel on the process's page tables (no KPTI); every
+      # forked child holds a memory domain
+      - platform:qemu_x86/atom:CONFIG_X86_KPTI=n
+      - platform:qemu_x86/atom:CONFIG_X86_MAX_ADDITIONAL_MEM_DOMAINS=16
+      - platform:qemu_x86_64/atom:CONFIG_X86_KPTI=n
+      - platform:qemu_x86_64/atom:CONFIG_X86_MAX_ADDITIONAL_MEM_DOMAINS=16
+      - CONFIG_STRESS_NG_STRESSOR_FIFO=y
   portability.posix.stress_ng.file_attributes:
     timeout: 100
     extra_configs:
@@ -142,6 +244,55 @@ tests:
     timeout: 80
     extra_configs:
       - CONFIG_STRESS_NG_STRESSOR_DENTRY=y
+  portability.posix.stress_ng.file_system.multi_process:
+    platform_exclude:
+      # every forked child needs the stressor-stack partition: no MPU slot left for it
+      - mps2/an385
+    filter: (not CONFIG_NATIVE_LIBC) and (CONFIG_ARCH_HAS_USERSPACE) and (CONFIG_ARCH_HAS_PROCESS_VM)
+    timeout: 96
+    extra_configs:
+      # fork(): a per-process address space and the arch current-thread lookup
+      - CONFIG_PROCESS_VM=y
+      - CONFIG_CURRENT_THREAD_USE_TLS=n
+      - CONFIG_SYS_PROCESS_MAX=32
+      # iomix runs one child per I/O mix function at once
+      - CONFIG_SYS_PROCESS_MIN=24
+      # every live process holds a permission index: a byte covers eight
+      - CONFIG_MAX_PROCESS_BYTES=4
+      # and a thread index: eight static thread objects, then one per live process
+      - CONFIG_MAX_THREAD_BYTES=4
+      # and a number: three reserved processes, the test process, and every live child
+      - CONFIG_SYS_PROCESS_IDS=48
+      # and its own open files: the file descriptions are a system-wide pool that
+      # ZVFS_OPEN_MAX sizes (metamix holds up to 32 at once, touch 4 x 4)
+      - CONFIG_ZVFS_OPEN_MAX=128
+      # a forked child privatizes a leaf table per copied range and its domain's
+      # partitions, and every kernel mapping is globalized into each of the 24
+      # process page-table sets
+      - platform:qemu_cortex_a53/qemu_cortex_a53:CONFIG_MAX_XLAT_TABLES=512
+      - platform:qemu_riscv64/qemu_virt_riscv64:CONFIG_MAX_XLAT_TABLES=640
+      # metamix: 16 processes each hold a 1 MiB file in tmpfs, whose pages are
+      # mapped into the kernel's virtual address space
+      - platform:qemu_cortex_a53/qemu_cortex_a53:CONFIG_KERNEL_VM_SIZE=0x4000000
+      - platform:qemu_x86/atom:CONFIG_KERNEL_VM_SIZE=0x4000000
+      - platform:qemu_x86_64/atom:CONFIG_KERNEL_VM_SIZE=0x4000000
+      - platform:qemu_riscv64/qemu_virt_riscv64:CONFIG_KERNEL_VM_SIZE=0x4000000
+      # PROCESS_VM needs the kernel on the process's page tables (no KPTI); every
+      # forked child holds a memory domain, and a slot keeps its tables once used,
+      # so the pool covers every process the scenario may have had
+      - platform:qemu_x86/atom:CONFIG_X86_KPTI=n
+      - platform:qemu_x86/atom:CONFIG_X86_MAX_ADDITIONAL_MEM_DOMAINS=32
+      - platform:qemu_x86_64/atom:CONFIG_X86_KPTI=n
+      - platform:qemu_x86_64/atom:CONFIG_X86_MAX_ADDITIONAL_MEM_DOMAINS=32
+      - CONFIG_STRESS_NG_STRESSOR_DIR=y
+      - CONFIG_STRESS_NG_STRESSOR_FILENAME=y
+      - CONFIG_STRESS_NG_STRESSOR_FILERACE=y
+      - CONFIG_STRESS_NG_STRESSOR_IOMIX=y
+      - CONFIG_STRESS_NG_STRESSOR_METAMIX=y
+      - CONFIG_STRESS_NG_STRESSOR_OPEN=y
+      - CONFIG_STRESS_NG_STRESSOR_PSEEK=y
+      - CONFIG_STRESS_NG_STRESSOR_TOUCH=y
+      - CONFIG_STRESS_NG_STRESSOR_UNLINK=y
   portability.posix.stress_ng.mapped_files.anon_pages:
     filter: (not CONFIG_NATIVE_LIBC) and (CONFIG_ARCH_HAS_USERSPACE) and (CONFIG_MMU)
     timeout: 200
@@ -161,11 +312,89 @@ tests:
       - CONFIG_STRESS_NG_STRESSOR_MMAPTORTURE=y
       - CONFIG_STRESS_NG_STRESSOR_VM=y
       - CONFIG_STRESS_NG_STRESSOR_VM_ADDR=y
+  portability.posix.stress_ng.mapped_files.multi_process:
+    filter: (not CONFIG_NATIVE_LIBC) and (CONFIG_ARCH_HAS_USERSPACE) and (CONFIG_ARCH_HAS_PROCESS_VM)
+    timeout: 64
+    extra_configs:
+      # fork(): a per-process address space and the arch current-thread lookup
+      - CONFIG_PROCESS_VM=y
+      - CONFIG_CURRENT_THREAD_USE_TLS=n
+      - CONFIG_SYS_PROCESS_MAX=32
+      # every live process holds a permission index: a byte covers eight
+      - CONFIG_MAX_PROCESS_BYTES=4
+      # a forked child privatizes a leaf table per copied range and its domain's
+      # partitions: nine live children (sigrt) run past 64 tables
+      - platform:qemu_cortex_a53/qemu_cortex_a53:CONFIG_MAX_XLAT_TABLES=256
+      # PROCESS_VM needs the kernel on the process's page tables (no KPTI); every
+      # forked child holds a memory domain
+      - platform:qemu_x86/atom:CONFIG_X86_KPTI=n
+      - platform:qemu_x86/atom:CONFIG_X86_MAX_ADDITIONAL_MEM_DOMAINS=16
+      - platform:qemu_x86_64/atom:CONFIG_X86_KPTI=n
+      - platform:qemu_x86_64/atom:CONFIG_X86_MAX_ADDITIONAL_MEM_DOMAINS=16
   portability.posix.stress_ng.memlock_range.anon_pages:
     filter: (not CONFIG_NATIVE_LIBC) and (CONFIG_ARCH_HAS_USERSPACE) and (CONFIG_MMU)
     timeout: 80
     extra_configs:
       - CONFIG_STRESS_NG_STRESSOR_MLOCK=y
+  portability.posix.stress_ng.memlock_range.multi_process:
+    platform_exclude:
+      # every forked child needs the stressor-stack partition: no MPU slot left for it
+      - mps2/an385
+    filter: (not CONFIG_NATIVE_LIBC) and (CONFIG_ARCH_HAS_USERSPACE) and (CONFIG_ARCH_HAS_PROCESS_VM)
+    timeout: 64
+    extra_configs:
+      # fork(): a per-process address space and the arch current-thread lookup
+      - CONFIG_PROCESS_VM=y
+      - CONFIG_CURRENT_THREAD_USE_TLS=n
+      - CONFIG_SYS_PROCESS_MAX=32
+      # every live process holds a permission index: a byte covers eight
+      - CONFIG_MAX_PROCESS_BYTES=4
+      # and a thread index: eight static thread objects, then one per live process
+      - CONFIG_MAX_THREAD_BYTES=4
+      # and a number: three reserved processes, the test process, and every live child
+      - CONFIG_SYS_PROCESS_IDS=48
+      # a forked child privatizes a leaf table per copied range and its domain's
+      # partitions: nine live children (sigrt) run past 64 tables
+      - platform:qemu_cortex_a53/qemu_cortex_a53:CONFIG_MAX_XLAT_TABLES=256
+      - platform:qemu_riscv64/qemu_virt_riscv64:CONFIG_MAX_XLAT_TABLES=640
+      # PROCESS_VM needs the kernel on the process's page tables (no KPTI); every
+      # forked child holds a memory domain
+      - platform:qemu_x86/atom:CONFIG_X86_KPTI=n
+      - platform:qemu_x86/atom:CONFIG_X86_MAX_ADDITIONAL_MEM_DOMAINS=16
+      - platform:qemu_x86_64/atom:CONFIG_X86_KPTI=n
+      - platform:qemu_x86_64/atom:CONFIG_X86_MAX_ADDITIONAL_MEM_DOMAINS=16
+      - CONFIG_STRESS_NG_STRESSOR_MLOCKMANY=y
+  portability.posix.stress_ng.message_passing.multi_process:
+    platform_exclude:
+      # every forked child needs the stressor-stack partition: no MPU slot left for it
+      - mps2/an385
+    filter: (not CONFIG_NATIVE_LIBC) and (CONFIG_ARCH_HAS_USERSPACE) and (CONFIG_ARCH_HAS_PROCESS_VM)
+    timeout: 68
+    extra_configs:
+      # fork(): a per-process address space and the arch current-thread lookup
+      - CONFIG_PROCESS_VM=y
+      - CONFIG_CURRENT_THREAD_USE_TLS=n
+      - CONFIG_SYS_PROCESS_MAX=32
+      # every live process holds a permission index: a byte covers eight
+      - CONFIG_MAX_PROCESS_BYTES=4
+      # and a thread index: eight static thread objects, then one per live process
+      - CONFIG_MAX_THREAD_BYTES=4
+      # and a number: three reserved processes, the test process, and every live child
+      - CONFIG_SYS_PROCESS_IDS=48
+      # a forked child privatizes a leaf table per copied range and its domain's
+      # partitions: nine live children (sigrt) run past 64 tables
+      - platform:qemu_cortex_a53/qemu_cortex_a53:CONFIG_MAX_XLAT_TABLES=256
+      - platform:qemu_riscv64/qemu_virt_riscv64:CONFIG_MAX_XLAT_TABLES=640
+      # PROCESS_VM needs the kernel on the process's page tables (no KPTI); every
+      # forked child holds a memory domain
+      - platform:qemu_x86/atom:CONFIG_X86_KPTI=n
+      - platform:qemu_x86/atom:CONFIG_X86_MAX_ADDITIONAL_MEM_DOMAINS=16
+      - platform:qemu_x86_64/atom:CONFIG_X86_KPTI=n
+      - platform:qemu_x86_64/atom:CONFIG_X86_MAX_ADDITIONAL_MEM_DOMAINS=16
+      # the mq stressor sends with priorities up to 127; POSIX only promises 32
+      - CONFIG_POSIX_MQ_PRIO_MAX=128
+      - CONFIG_STRESS_NG_STRESSOR_MQ=y
+      - CONFIG_STRESS_NG_STRESSOR_SWITCH=y
   portability.posix.stress_ng.multi_process:
     filter: (not CONFIG_NATIVE_LIBC) and (CONFIG_ARCH_HAS_USERSPACE) and (CONFIG_ARCH_HAS_PROCESS_VM)
     timeout: 360
@@ -231,17 +460,161 @@ tests:
       - platform:qemu_x86_64/atom:CONFIG_X86_MAX_ADDITIONAL_MEM_DOMAINS=16
       # kill: a flood of an ignored signal fills the shared ring and kill() fails EAGAIN (open)
       - CONFIG_STRESS_NG_STRESSOR_SCHEDMIX=y
+  portability.posix.stress_ng.networking.multi_process:
+    platform_exclude:
+      # every forked child needs the stressor-stack partition: no MPU slot left for it
+      - mps2/an385
+    filter: (not CONFIG_NATIVE_LIBC) and (CONFIG_ARCH_HAS_USERSPACE) and (CONFIG_ARCH_HAS_PROCESS_VM)
+    timeout: 80
+    extra_configs:
+      # fork(): a per-process address space and the arch current-thread lookup
+      - CONFIG_PROCESS_VM=y
+      - CONFIG_CURRENT_THREAD_USE_TLS=n
+      - CONFIG_SYS_PROCESS_MAX=32
+      # every live process holds a permission index: a byte covers eight
+      - CONFIG_MAX_PROCESS_BYTES=4
+      # and a thread index: eight static thread objects, then one per live process
+      - CONFIG_MAX_THREAD_BYTES=4
+      # and a number: three reserved processes, the test process, and every live child
+      - CONFIG_SYS_PROCESS_IDS=48
+      # a forked child privatizes a leaf table per copied range and its domain's
+      # partitions: nine live children (sigrt) run past 64 tables
+      - platform:qemu_cortex_a53/qemu_cortex_a53:CONFIG_MAX_XLAT_TABLES=256
+      - platform:qemu_riscv64/qemu_virt_riscv64:CONFIG_MAX_XLAT_TABLES=640
+      # PROCESS_VM needs the kernel on the process's page tables (no KPTI); every
+      # forked child holds a memory domain
+      - platform:qemu_x86/atom:CONFIG_X86_KPTI=n
+      - platform:qemu_x86/atom:CONFIG_X86_MAX_ADDITIONAL_MEM_DOMAINS=16
+      - platform:qemu_x86_64/atom:CONFIG_X86_KPTI=n
+      - platform:qemu_x86_64/atom:CONFIG_X86_MAX_ADDITIONAL_MEM_DOMAINS=16
+      # user-mode TCP over loopback stalls on qemu_x86_64 under SMP (pre-existing,
+      # not yet root-caused); one CPU, and the board runs under icount then
+      - platform:qemu_x86_64/atom:CONFIG_SMP=n
+      - platform:qemu_x86_64/atom:CONFIG_MP_MAX_NUM_CPUS=1
+      # loopback only: the SLIP TAP driver would make QEMU wait for a host socket
+      - CONFIG_NET_SLIP_TAP=n
+      - CONFIG_NETWORKING=y
+      - CONFIG_NET_TEST=y
+      - CONFIG_NET_DRIVERS=y
+      - CONFIG_NET_LOOPBACK=y
+      - CONFIG_NET_IPV4=y
+      - CONFIG_NET_IPV6=y
+      - CONFIG_NET_SOCKETS=y
+      - CONFIG_NET_TCP=y
+      - CONFIG_NET_UDP=y
+      # the socket stressors open and close sockets faster than TCP tears them down
+      - CONFIG_NET_MAX_CONTEXTS=64
+      - CONFIG_NET_MAX_CONN=64
+      - CONFIG_NET_CONTEXT_SNDBUF=y
+      - CONFIG_NET_CONTEXT_RCVBUF=y
+      - CONFIG_STRESS_NG_STRESSOR_SOCK=y
+      - CONFIG_STRESS_NG_STRESSOR_SOCKABUSE=y
+      - CONFIG_STRESS_NG_STRESSOR_SOCKMANY=y
+      - CONFIG_STRESS_NG_STRESSOR_SOCKPAIR=y
+      - CONFIG_STRESS_NG_STRESSOR_UDP=y
   portability.posix.stress_ng.pipe.anon_pages:
     filter: (not CONFIG_NATIVE_LIBC) and (CONFIG_ARCH_HAS_USERSPACE) and (CONFIG_MMU)
     timeout: 80
     extra_configs:
       - CONFIG_STRESS_NG_STRESSOR_RING_PIPE=y
       - CONFIG_STRESS_NG_STRESSOR_SIGPIPE=y
+  portability.posix.stress_ng.pipe.multi_process:
+    platform_exclude:
+      # every forked child needs the stressor-stack partition: no MPU slot left for it
+      - mps2/an385
+    filter: (not CONFIG_NATIVE_LIBC) and (CONFIG_ARCH_HAS_USERSPACE) and (CONFIG_ARCH_HAS_PROCESS_VM)
+    timeout: 64
+    extra_configs:
+      # fork(): a per-process address space and the arch current-thread lookup
+      - CONFIG_PROCESS_VM=y
+      - CONFIG_CURRENT_THREAD_USE_TLS=n
+      - CONFIG_SYS_PROCESS_MAX=32
+      # every live process holds a permission index: a byte covers eight
+      - CONFIG_MAX_PROCESS_BYTES=4
+      # and a thread index: eight static thread objects, then one per live process
+      - CONFIG_MAX_THREAD_BYTES=4
+      # and a number: three reserved processes, the test process, and every live child
+      - CONFIG_SYS_PROCESS_IDS=48
+      # a forked child privatizes a leaf table per copied range and its domain's
+      # partitions: nine live children (sigrt) run past 64 tables
+      - platform:qemu_cortex_a53/qemu_cortex_a53:CONFIG_MAX_XLAT_TABLES=256
+      - platform:qemu_riscv64/qemu_virt_riscv64:CONFIG_MAX_XLAT_TABLES=640
+      # PROCESS_VM needs the kernel on the process's page tables (no KPTI); every
+      # forked child holds a memory domain
+      - platform:qemu_x86/atom:CONFIG_X86_KPTI=n
+      - platform:qemu_x86/atom:CONFIG_X86_MAX_ADDITIONAL_MEM_DOMAINS=16
+      - platform:qemu_x86_64/atom:CONFIG_X86_KPTI=n
+      - platform:qemu_x86_64/atom:CONFIG_X86_MAX_ADDITIONAL_MEM_DOMAINS=16
+      - CONFIG_STRESS_NG_STRESSOR_PIPE=y
+  portability.posix.stress_ng.realtime_signals.multi_process:
+    platform_exclude:
+      # every forked child needs the stressor-stack partition: no MPU slot left for it
+      - mps2/an385
+    filter: (not CONFIG_NATIVE_LIBC) and (CONFIG_ARCH_HAS_USERSPACE) and (CONFIG_ARCH_HAS_PROCESS_VM)
+    timeout: 68
+    extra_configs:
+      # fork(): a per-process address space and the arch current-thread lookup
+      - CONFIG_PROCESS_VM=y
+      - CONFIG_CURRENT_THREAD_USE_TLS=n
+      - CONFIG_SYS_PROCESS_MAX=32
+      # every live process holds a permission index: a byte covers eight
+      - CONFIG_MAX_PROCESS_BYTES=4
+      # a forked child privatizes a leaf table per copied range and its domain's
+      # partitions: nine live children (sigrt) run past 64 tables
+      - platform:qemu_cortex_a53/qemu_cortex_a53:CONFIG_MAX_XLAT_TABLES=256
+      - platform:qemu_riscv64/qemu_virt_riscv64:CONFIG_MAX_XLAT_TABLES=640
+      # PROCESS_VM needs the kernel on the process's page tables (no KPTI); every
+      # forked child holds a memory domain
+      - platform:qemu_x86/atom:CONFIG_X86_KPTI=n
+      - platform:qemu_x86/atom:CONFIG_X86_MAX_ADDITIONAL_MEM_DOMAINS=16
+      - platform:qemu_x86_64/atom:CONFIG_X86_KPTI=n
+      - platform:qemu_x86_64/atom:CONFIG_X86_MAX_ADDITIONAL_MEM_DOMAINS=16
+      # sigrt keeps a child per real-time signal alive at once; a forked child's
+      # address space comes from the static process pool
+      - CONFIG_SYS_PROCESS_MIN=12
+      # eight static thread objects take indexes 0-7; the stressor process and
+      # its nine children need nine more than the sixteen two bytes hold
+      - CONFIG_MAX_THREAD_BYTES=4
+      # and a number: three reserved processes, the test process, and every live child
+      - CONFIG_SYS_PROCESS_IDS=48
+      # the nine forks alone take ~2.7 s on qemu_riscv64 (0.2-0.4 s each): give the
+      # ping-pong rounds time to run before the stop alarm
+      - CONFIG_TEST_STRESS_NG_TIMEOUT=5
+      - CONFIG_STRESS_NG_STRESSOR_SIGQ=y
+      - CONFIG_STRESS_NG_STRESSOR_SIGRT=y
   portability.posix.stress_ng.semaphores.anon_pages:
     filter: (not CONFIG_NATIVE_LIBC) and (CONFIG_ARCH_HAS_USERSPACE) and (CONFIG_MMU)
     timeout: 80
     extra_configs:
       - CONFIG_STRESS_NG_STRESSOR_SEM=y
+  portability.posix.stress_ng.shared_memory_objects.multi_process:
+    platform_exclude:
+      # every forked child needs the stressor-stack partition: no MPU slot left for it
+      - mps2/an385
+    filter: (not CONFIG_NATIVE_LIBC) and (CONFIG_ARCH_HAS_USERSPACE) and (CONFIG_ARCH_HAS_PROCESS_VM)
+    timeout: 64
+    extra_configs:
+      # fork(): a per-process address space and the arch current-thread lookup
+      - CONFIG_PROCESS_VM=y
+      - CONFIG_CURRENT_THREAD_USE_TLS=n
+      - CONFIG_SYS_PROCESS_MAX=32
+      # every live process holds a permission index: a byte covers eight
+      - CONFIG_MAX_PROCESS_BYTES=4
+      # and a thread index: eight static thread objects, then one per live process
+      - CONFIG_MAX_THREAD_BYTES=4
+      # and a number: three reserved processes, the test process, and every live child
+      - CONFIG_SYS_PROCESS_IDS=48
+      # a forked child privatizes a leaf table per copied range and its domain's
+      # partitions: nine live children (sigrt) run past 64 tables
+      - platform:qemu_cortex_a53/qemu_cortex_a53:CONFIG_MAX_XLAT_TABLES=256
+      - platform:qemu_riscv64/qemu_virt_riscv64:CONFIG_MAX_XLAT_TABLES=640
+      # PROCESS_VM needs the kernel on the process's page tables (no KPTI); every
+      # forked child holds a memory domain
+      - platform:qemu_x86/atom:CONFIG_X86_KPTI=n
+      - platform:qemu_x86/atom:CONFIG_X86_MAX_ADDITIONAL_MEM_DOMAINS=16
+      - platform:qemu_x86_64/atom:CONFIG_X86_KPTI=n
+      - platform:qemu_x86_64/atom:CONFIG_X86_MAX_ADDITIONAL_MEM_DOMAINS=16
+      - CONFIG_STRESS_NG_STRESSOR_SHM=y
   portability.posix.stress_ng.signals:
     timeout: 80
     extra_configs:
@@ -252,6 +625,38 @@ tests:
     timeout: 80
     extra_configs:
       - CONFIG_STRESS_NG_STRESSOR_SIGPENDING=y
+  portability.posix.stress_ng.signals.multi_process:
+    platform_exclude:
+      # every forked child needs the stressor-stack partition: no MPU slot left for it
+      - mps2/an385
+    filter: (not CONFIG_NATIVE_LIBC) and (CONFIG_ARCH_HAS_USERSPACE) and (CONFIG_ARCH_HAS_PROCESS_VM)
+    timeout: 90
+    extra_configs:
+      # fork(): a per-process address space and the arch current-thread lookup
+      - CONFIG_PROCESS_VM=y
+      - CONFIG_CURRENT_THREAD_USE_TLS=n
+      - CONFIG_SYS_PROCESS_MAX=32
+      # every live process holds a permission index: a byte covers eight
+      - CONFIG_MAX_PROCESS_BYTES=4
+      # and a thread index: eight static thread objects, then one per live process
+      - CONFIG_MAX_THREAD_BYTES=4
+      # and a number: three reserved processes, the test process, and every live child
+      - CONFIG_SYS_PROCESS_IDS=48
+      # a forked child privatizes a leaf table per copied range and its domain's
+      # partitions: nine live children (sigrt) run past 64 tables
+      - platform:qemu_cortex_a53/qemu_cortex_a53:CONFIG_MAX_XLAT_TABLES=256
+      - platform:qemu_riscv64/qemu_virt_riscv64:CONFIG_MAX_XLAT_TABLES=640
+      # PROCESS_VM needs the kernel on the process's page tables (no KPTI); every
+      # forked child holds a memory domain
+      - platform:qemu_x86/atom:CONFIG_X86_KPTI=n
+      - platform:qemu_x86/atom:CONFIG_X86_MAX_ADDITIONAL_MEM_DOMAINS=16
+      - platform:qemu_x86_64/atom:CONFIG_X86_KPTI=n
+      - platform:qemu_x86_64/atom:CONFIG_X86_MAX_ADDITIONAL_MEM_DOMAINS=16
+      - CONFIG_STRESS_NG_STRESSOR_ALARM=y
+      - CONFIG_STRESS_NG_STRESSOR_KILL=y
+      - CONFIG_STRESS_NG_STRESSOR_SIGABRT=y
+      - CONFIG_STRESS_NG_STRESSOR_SIGSTOP=y
+      - CONFIG_STRESS_NG_STRESSOR_SIGSUSPEND=y
   portability.posix.stress_ng.single_process:
     timeout: 100
     extra_configs:
@@ -314,3 +719,32 @@ tests:
       - CONFIG_STRESS_NG_STRESSOR_NANOSLEEP=y
       - CONFIG_STRESS_NG_STRESSOR_SLEEP=y
       - CONFIG_STRESS_NG_STRESSOR_TIMER=y
+  portability.posix.stress_ng.timers.multi_process:
+    platform_exclude:
+      # every forked child needs the stressor-stack partition: no MPU slot left for it
+      - mps2/an385
+    filter: (not CONFIG_NATIVE_LIBC) and (CONFIG_ARCH_HAS_USERSPACE) and (CONFIG_ARCH_HAS_PROCESS_VM)
+    timeout: 68
+    extra_configs:
+      # fork(): a per-process address space and the arch current-thread lookup
+      - CONFIG_PROCESS_VM=y
+      - CONFIG_CURRENT_THREAD_USE_TLS=n
+      - CONFIG_SYS_PROCESS_MAX=32
+      # every live process holds a permission index: a byte covers eight
+      - CONFIG_MAX_PROCESS_BYTES=4
+      # and a thread index: eight static thread objects, then one per live process
+      - CONFIG_MAX_THREAD_BYTES=4
+      # and a number: three reserved processes, the test process, and every live child
+      - CONFIG_SYS_PROCESS_IDS=48
+      # a forked child privatizes a leaf table per copied range and its domain's
+      # partitions: nine live children (sigrt) run past 64 tables
+      - platform:qemu_cortex_a53/qemu_cortex_a53:CONFIG_MAX_XLAT_TABLES=256
+      - platform:qemu_riscv64/qemu_virt_riscv64:CONFIG_MAX_XLAT_TABLES=640
+      # PROCESS_VM needs the kernel on the process's page tables (no KPTI); every
+      # forked child holds a memory domain
+      - platform:qemu_x86/atom:CONFIG_X86_KPTI=n
+      - platform:qemu_x86/atom:CONFIG_X86_MAX_ADDITIONAL_MEM_DOMAINS=16
+      - platform:qemu_x86_64/atom:CONFIG_X86_KPTI=n
+      - platform:qemu_x86_64/atom:CONFIG_X86_MAX_ADDITIONAL_MEM_DOMAINS=16
+      - CONFIG_STRESS_NG_STRESSOR_CYCLIC=y
+      - CONFIG_STRESS_NG_STRESSOR_HRTIMERS=y
