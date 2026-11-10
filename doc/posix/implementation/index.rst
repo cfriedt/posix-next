@@ -243,6 +243,11 @@ permission on the thread object.
   file system type by its conventional name (``vfat``, ``littlefs``, ``ext2``, ``tmpfs``) and
   whether it is read-only (``mnt_opts`` of ``ro`` or ``rw``). ``mnt_fsname`` repeats the type,
   as Linux reports for file systems without a backing device.
+- :c:func:`sched_setaffinity` and :c:func:`sched_getaffinity` take the same sets and follow the
+  same rules on the same kernel calls, for a thread named by ID: 0 is the calling thread, and a
+  process ID names the process's initial thread, as a thread ID does on Linux. Without
+  :kconfig:option:`CONFIG_SYS_PROCESS` only 0 names a thread (``ESRCH`` otherwise). Errors are
+  reported through ``errno``.
 
 Event file descriptors
 ----------------------
