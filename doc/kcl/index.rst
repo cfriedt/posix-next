@@ -11,3 +11,4 @@ enabled with :kconfig:option:`CONFIG_KCL` and live under :file:`subsys/kcl/` of 
    :maxdepth: 1
 
    linux.rst
+   ../samples/subsys/kcl/kcl

@@ -66,5 +66,6 @@ posix-next
    posix/symbols
    kcl/index.rst
    samples/posix/posix
+   samples/subsys/kcl/kcl
    metrics/index.rst
    upstreaming.rst

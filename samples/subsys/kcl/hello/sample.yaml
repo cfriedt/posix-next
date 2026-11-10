@@ -1,0 +1,63 @@
+sample:
+  description: spawn a Linux executable, built with the host's compiler, as a process
+  name: kcl linux hello
+common:
+  tags:
+    - posix
+    - kcl
+    - exec
+  harness: console
+  harness_config:
+    type: multi_line
+    ordered: true
+    regex:
+      - "hello, world"
+      - "exited with status 42"
+      - "kcl linux hello sample complete"
+  timeout: 60
+tests:
+  sample.kcl.hello:
+    # the guest is a Linux program for the target: the host's own compiler, or a
+    # Linux cross toolchain with a static-PIE C library (see the README)
+    platform_allow:
+      - qemu_x86_64
+      - qemu_cortex_a53
+      - qemu_riscv64
+    integration_platforms:
+      - qemu_x86_64
+  sample.kcl.hello.trace:
+    platform_allow:
+      - qemu_x86_64
+      - qemu_cortex_a53
+      - qemu_riscv64
+    extra_args: EXTRA_CONF_FILE=trace.conf
+    harness_config:
+      type: multi_line
+      ordered: true
+      regex:
+        - "linux-syscall: pid=[0-9]+ brk"
+        - "hello, world"
+        - "linux-syscall: pid=[0-9]+ exit_group"
+        - "exited with status 42"
+        - "kcl linux hello sample complete"
+  # services the layer only implies switched off, and one call on its own: the
+  # program runs without them (uname() fails, so its report line is gone)
+  sample.kcl.hello.trimmed:
+    platform_allow:
+      - qemu_x86_64
+      - qemu_cortex_a53
+      - qemu_riscv64
+    extra_configs:
+      - CONFIG_ZVFS_PIPE=n
+      - CONFIG_ZVFS_FIFO=n
+      - CONFIG_ZVFS_POLL=n
+      - CONFIG_PROCESS_STOP=n
+      - CONFIG_KCL_LINUX_SYSCALL_UNAME=n
+    harness_config:
+      type: multi_line
+      ordered: true
+      regex:
+        - "hello, world"
+        - "env: LANG=C"
+        - "exited with status 42"
+        - "kcl linux hello sample complete"
