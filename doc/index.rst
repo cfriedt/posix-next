@@ -64,6 +64,7 @@ posix-next
    getting_started/index.rst
    posix/index.rst
    posix/symbols
+   kcl/index.rst
    samples/posix/posix
    metrics/index.rst
    upstreaming.rst

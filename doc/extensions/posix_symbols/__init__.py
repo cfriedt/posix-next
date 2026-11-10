@@ -185,14 +185,16 @@ def _parse_xml_dir(xml_dir: Path) -> list[dict]:
                     # strip leading "More..." / trailing punctuation noise
                     brief = re.sub(r"\s*More\.\.\.\s*$", "", brief).strip()
 
+                    # POSIX headers only: the search links each symbol to its
+                    # Open Group page, which other documented headers lack
                     location = memberdef.find("location")
-                    header_file = ""
-                    if location is not None:
-                        header_file = location.get("file", "")
-                        # strip leading path up to zephyr/posix/
-                        m = re.search(r"(?:include/)?zephyr/posix/(.+)", header_file)
-                        if m:
-                            header_file = m.group(1)
+                    m = re.search(
+                        r"(?:include/)?zephyr/posix/(.+)",
+                        location.get("file", "") if location is not None else "",
+                    )
+                    if not m:
+                        continue
+                    header_file = m.group(1)
 
                     doxy_refid = memberdef.get("id", "")
 
