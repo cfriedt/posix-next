@@ -30,10 +30,15 @@ ZTEST_USER(posix_symbolic_links, test_lchown)
 	zassert_equal(lchown(TEST_NOENT, (uid_t)-1, (gid_t)-1), -1);
 	zassert_equal(errno, ENOENT);
 
-	/* only the privileged identity exists (a host root user may give files to anyone) */
+	/* the privileged identity may give a link away without touching its target */
 	IF_NOT_NATIVE_LIBC({
-		errno = 0;
-		zassert_equal(lchown(TEST_FILE, 1000, (gid_t)-1), -1);
-		zassert_equal(errno, EINVAL);
+		zassert_ok(symlink("file.txt", TEST_DANGLE));
+		zassert_ok(lchown(TEST_DANGLE, 1000, (gid_t)-1));
+		zassert_ok(lstat(TEST_DANGLE, &st));
+		zassert_equal(st.st_uid, 1000);
+		zassert_equal(st.st_gid, 0);
+		zassert_ok(stat(TEST_DANGLE, &st));
+		zassert_equal(st.st_uid, 0, "the target kept its owner");
+		zassert_ok(unlink(TEST_DANGLE));
 	});
 }
