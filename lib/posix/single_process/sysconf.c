@@ -154,11 +154,11 @@ long sysconf(int name)
 	case _SC_BC_STRING_MAX:
 		return -1L;
 	case _SC_2_C_BIND:
-		return -1L;
+		return _POSIX2_C_BIND;
 	case _SC_2_C_DEV:
-		return COND_CODE_1(_POSIX2_C_DEV > 0, (_POSIX2_C_DEV), (-1));
+		return COND_CODE_1(CONFIG_POSIX2_C_DEV, (_POSIX_VERSION), (-1L));
 	case _SC_2_CHAR_TERM:
-		return -1L;
+		return COND_CODE_1(CONFIG_POSIX2_CHAR_TERM, (_POSIX_VERSION), (-1L));
 	case _SC_COLL_WEIGHTS_MAX:
 		return -1L;
 	case _SC_DELAYTIMER_MAX:
@@ -166,13 +166,13 @@ long sysconf(int name)
 	case _SC_EXPR_NEST_MAX:
 		return -1L;
 	case _SC_2_FORT_DEV:
-		return -1L;
+		return COND_CODE_1(CONFIG_POSIX2_FORT_DEV, (_POSIX_VERSION), (-1L));
 	case _SC_2_FORT_RUN:
-		return -1L;
+		return COND_CODE_1(CONFIG_POSIX2_FORT_RUN, (_POSIX_VERSION), (-1L));
 	case _SC_LINE_MAX:
 		return -1L;
 	case _SC_2_LOCALEDEF:
-		return -1L;
+		return COND_CODE_1(CONFIG_POSIX2_LOCALEDEF, (_POSIX_VERSION), (-1L));
 	case _SC_2_PBS:
 		return -1L;
 	case _SC_2_PBS_ACCOUNTING:
@@ -186,11 +186,11 @@ long sysconf(int name)
 	case _SC_2_PBS_TRACK:
 		return -1L;
 	case _SC_2_SW_DEV:
-		return -1L;
+		return COND_CODE_1(CONFIG_POSIX2_SW_DEV, (_POSIX_VERSION), (-1L));
 	case _SC_2_UPE:
-		return -1L;
+		return COND_CODE_1(CONFIG_POSIX2_UPE, (_POSIX_VERSION), (-1L));
 	case _SC_2_VERSION:
-		return COND_CODE_1(_POSIX2_VERSION > 0, (_POSIX2_VERSION), (-1));
+		return COND_CODE_1(CONFIG_POSIX2_SHELL_UTILITIES, (_POSIX_VERSION), (-1L));
 	case _SC_XOPEN_CRYPT:
 		return -1L;
 	case _SC_XOPEN_ENH_I18N:
