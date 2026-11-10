@@ -1,0 +1,78 @@
+diff --git a/doc/services/tracing/index.rst b/doc/services/tracing/index.rst
+--- a/doc/services/tracing/index.rst
++++ b/doc/services/tracing/index.rst
+@@ -506,6 +506,8 @@ queues). The authoritative list, with exact signatures, is the set of
+    void sys_trace_isr_enter_user(void);
+    void sys_trace_isr_exit_user(void);
+    void sys_trace_idle_user(void);
++   void sys_trace_syscall_enter_user(uint32_t syscall_id, const char *syscall_name);
++   void sys_trace_syscall_exit_user(uint32_t syscall_id, const char *syscall_name);
+    void sys_trace_k_sem_give_enter_user(struct k_sem *sem);
+    void sys_trace_k_mutex_lock_enter_user(struct k_mutex *mutex, k_timeout_t timeout);
+ 
+diff --git a/include/zephyr/tracing/tracing_syscall.h b/include/zephyr/tracing/tracing_syscall.h
+--- a/include/zephyr/tracing/tracing_syscall.h
++++ b/include/zephyr/tracing/tracing_syscall.h
+@@ -19,6 +19,8 @@
+ #include "tracing_ctf_syscall.h"
+ #elif defined CONFIG_TRACING_TEST
+ #include "tracing_test_syscall.h"
++#elif defined CONFIG_TRACING_USER
++#include "tracing_user_syscall.h"
+ #else
+ 
+ /**
+diff --git a/subsys/tracing/user/tracing_user.c b/subsys/tracing/user/tracing_user.c
+--- a/subsys/tracing/user/tracing_user.c
++++ b/subsys/tracing/user/tracing_user.c
+@@ -26,6 +26,8 @@ void __weak sys_trace_isr_exit_user(void) {}
+ void __weak sys_trace_idle_user(void) {}
+ void __weak sys_trace_sys_init_enter_user(const struct init_entry *entry, int level) {}
+ void __weak sys_trace_sys_init_exit_user(const struct init_entry *entry, int level, int result) {}
++void __weak sys_trace_syscall_enter_user(uint32_t syscall_id, const char *syscall_name) {}
++void __weak sys_trace_syscall_exit_user(uint32_t syscall_id, const char *syscall_name) {}
+ void __weak sys_trace_k_thread_sleep_ticks_enter_user(k_timeout_t timeout) {}
+ void __weak sys_trace_k_thread_sleep_ticks_exit_user(k_timeout_t timeout, int32_t ret) {}
+ void __weak sys_trace_gpio_pin_interrupt_configure_enter_user(const struct device *port,
+diff --git a/subsys/tracing/user/tracing_user.h b/subsys/tracing/user/tracing_user.h
+--- a/subsys/tracing/user/tracing_user.h
++++ b/subsys/tracing/user/tracing_user.h
+@@ -31,6 +31,8 @@ void sys_trace_isr_exit_user(void);
+ void sys_trace_idle_user(void);
+ void sys_trace_sys_init_enter_user(const struct init_entry *entry, int level);
+ void sys_trace_sys_init_exit_user(const struct init_entry *entry, int level, int result);
++void sys_trace_syscall_enter_user(uint32_t syscall_id, const char *syscall_name);
++void sys_trace_syscall_exit_user(uint32_t syscall_id, const char *syscall_name);
+ void sys_trace_k_thread_sleep_ticks_enter_user(k_timeout_t timeout);
+ void sys_trace_k_thread_sleep_ticks_exit_user(k_timeout_t timeout, int32_t ret);
+ 
+diff --git a/subsys/tracing/user/tracing_user_syscall.h b/subsys/tracing/user/tracing_user_syscall.h
+new file mode 100644
+--- /dev/null
++++ b/subsys/tracing/user/tracing_user_syscall.h
+@@ -0,0 +1,25 @@
++/*
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#ifndef ZEPHYR_SUBSYS_TRACING_USER_TRACING_USER_SYSCALL_H_
++#define ZEPHYR_SUBSYS_TRACING_USER_TRACING_USER_SYSCALL_H_
++
++#include <stdint.h>
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++void sys_trace_syscall_enter_user(uint32_t syscall_id, const char *syscall_name);
++void sys_trace_syscall_exit_user(uint32_t syscall_id, const char *syscall_name);
++
++#define sys_port_trace_syscall_enter(id, name, ...) sys_trace_syscall_enter_user(id, #name)
++#define sys_port_trace_syscall_exit(id, name, ...) sys_trace_syscall_exit_user(id, #name)
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* ZEPHYR_SUBSYS_TRACING_USER_TRACING_USER_SYSCALL_H_ */
