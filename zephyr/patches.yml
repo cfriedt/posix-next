@@ -4635,6 +4635,40 @@ patches:
       poll() support through a signal raised by a work item that watches the
       UART while a poll is outstanding. A full-screen program can then take
       the console raw and wait for keys.
+  - path: zephyr/k-process-stop-continue.patch
+    sha256sum: 68a17ad7295b02962dbe5ee635f828959ebf192f885125bef60e5593ed83b4bb
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-30
+    upstreamable: true
+    comments: |
+      Process stop and continue (CONFIG_PROCESS_STOP): the stop signals
+      gain their POSIX default action, suspending every member thread of
+      the receiving process (the delivery context last); generation of
+      K_SIG_CONT resumes a stopped process regardless of delivery, as
+      does K_SIG_KILL, since a stopped member cannot run its own
+      delivery. k_waitpid() accepts K_PROCESS_WUNTRACED and
+      K_PROCESS_WCONTINUED, reporting K_WSTATUS_STOPPED/CONTINUED
+      transitions without reaping. With stop support enabled the stop
+      and kill signals become unmaskable for kernel-mode callers too
+      (k_sig_mask and clone-time masks), since a process that can mask
+      SIGSTOP defeats job control. Suspension takes a bounded member
+      snapshot outside process_lock: the halt path holds the scheduler
+      lock before process_lock, so scheduler operations under it would
+      invert that order.
+
+      Generation of K_SIG_CONT discards the pending stop signals of the
+      process and a stop signal discards a pending K_SIG_CONT, as POSIX
+      requires (z_sig_process_discard()); a stop does not happen while
+      K_SIG_KILL is pending for the stopping thread. The stopping thread
+      pends on the process's stop queue under process_stop_lock instead of
+      suspending itself; a continue bumps a generation count and wakes that
+      queue under the same lock, so a continue cannot be lost between the
+      decision to stop and the stop (the woken stopper redoes resumes that
+      preceded their suspends). tests/kernel/process covers stop and
+      continue reporting, the discard rule and K_SIG_KILL ending a stopped
+      process.
   - path: zephyr/arm64-userspace-cache-maintenance.patch
     sha256sum: 2e42fc6bdc1fec89817fa1326b6d9ac8fe57cb5096b98a4201c9b175676babf7
     module: zephyr
