@@ -241,13 +241,13 @@ int getchar_unlocked(void);
 #if (_POSIX_C_SOURCE >= 200809L) || (_XOPEN_SOURCE >= 700) || defined(__DOXYGEN__)
 /**
  * @brief Read a delimited record from a stream.
- * @ingroup posix_option_group_c_lib_ext
+ * @ingroup posix_option_group_file_system_ext
  * @param lineptr Pointer to the buffer pointer; updated on return.
  * @param n Pointer to the buffer size; updated on return.
  * @param delimiter Record delimiter byte.
  * @param stream Stream to read from.
- * @return Number of bytes read, excluding the delimiter and NUL terminator,
- *         0 at end-of-file with no data read, or -1 on failure.
+ * @return Number of bytes read, including the delimiter but excluding the
+ *         NUL terminator, or -1 at end-of-file or on failure.
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/getdelim.html
  */
 ssize_t getdelim(char **ZRESTRICT lineptr, size_t *ZRESTRICT n, int delimiter,
@@ -255,12 +255,12 @@ ssize_t getdelim(char **ZRESTRICT lineptr, size_t *ZRESTRICT n, int delimiter,
 
 /**
  * @brief Read a line from a stream.
- * @ingroup posix_option_group_c_lib_ext
+ * @ingroup posix_option_group_file_system_ext
  * @param lineptr Pointer to the buffer pointer; updated on return.
  * @param n Pointer to the buffer size; updated on return.
  * @param stream Stream to read from.
- * @return Number of bytes read, excluding the newline and NUL terminator,
- *         0 at end-of-file with no data read, or -1 on failure.
+ * @return Number of bytes read, including the newline but excluding the
+ *         NUL terminator, or -1 at end-of-file or on failure.
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/getline.html
  */
 ssize_t getline(char **ZRESTRICT lineptr, size_t *ZRESTRICT n, FILE *ZRESTRICT stream);

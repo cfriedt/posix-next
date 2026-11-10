@@ -55,6 +55,18 @@ int getenv_r(const char *name, char *buf, size_t len);
  */
 int getsubopt(char **optionp, char *const *keylistp, char **valuep);
 
+#if (_POSIX_C_SOURCE >= 200809L) || defined(__DOXYGEN__)
+/**
+ * @brief Create a unique directory from a path template.
+ * @ingroup posix_option_group_file_system_ext
+ * @param template Path template whose final six characters are "XXXXXX",
+ *                 replaced in place with the generated name.
+ * @return @p template on success, or NULL with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/mkdtemp.html
+ */
+char *mkdtemp(char *template);
+#endif
+
 #if (_POSIX_C_SOURCE >= 200112L) || defined(__DOXYGEN__)
 /**
  * @brief Create a unique regular file and open it for reading and writing.
