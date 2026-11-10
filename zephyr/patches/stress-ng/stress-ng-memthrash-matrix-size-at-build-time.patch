@@ -1,0 +1,27 @@
+diff --git a/stress-memthrash.c b/stress-memthrash.c
+--- a/stress-memthrash.c
++++ b/stress-memthrash.c
+@@ -49,7 +49,9 @@
+ 
+ #if defined(HAVE_LIB_PTHREAD)
+ 
++#ifndef MATRIX_SIZE_MAX_SHIFT
+ #define MATRIX_SIZE_MAX_SHIFT	(14)	/* No more than 16 */
++#endif
+ #define MATRIX_SIZE_MIN_SHIFT	(10)
+ #define MATRIX_SIZE		(1 << MATRIX_SIZE_MAX_SHIFT)
+ #define MEM_SIZE		(MATRIX_SIZE * MATRIX_SIZE)
+diff --git a/zephyr/CMakeLists.txt b/zephyr/CMakeLists.txt
+--- a/zephyr/CMakeLists.txt
++++ b/zephyr/CMakeLists.txt
+@@ -107,6 +107,10 @@
+   VERSION="${sng_ver}"
+   STRESS_PROCS_MAX=${CONFIG_STRESS_NG_PROCS_MAX}
+ )
++if(CONFIG_STRESS_NG_MINIMIZE)
++  # memthrash's matrix is sized at build time: 4 MiB in place of 256 MiB
++  zephyr_library_compile_definitions(MATRIX_SIZE_MAX_SHIFT=11)
++endif()
+ zephyr_library_compile_options(
+   -std=gnu99
+   -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L
