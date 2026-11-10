@@ -15,6 +15,11 @@ standard POSIX process API: :c:func:`posix_spawn` and :c:func:`waitpid`. Toybox 
 the name it was invoked by, so each command is available under its own name. Every command
 runs as a user-mode process in a memory domain of its own, with C library state of its own.
 
+Networking is loopback-only by default. The ``gateway`` scenario (``qemu_cortex_a53``) puts the
+image on qemu's user-mode network instead: it pings the virtual gateway over IPv4 and IPv6 and
+resolves a name through Zephyr's DNS resolver, configured with Google's public servers, so
+``ping``, ``wget`` and ``nc`` work by name from the shell when the host has internet access.
+
 Building and Running
 ********************
 
