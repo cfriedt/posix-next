@@ -698,6 +698,18 @@ EXPORT_SYMBOL(telldir);
 EXPORT_SYMBOL(tempnam);
 #endif /* CONFIG_XSI_FILE_SYSTEM */
 
+/* XSI_SIGNALS */
+#ifdef CONFIG_XSI_SIGNALS
+EXPORT_SYMBOL(killpg);
+EXPORT_SYMBOL(sigaltstack);
+EXPORT_SYMBOL(sighold);
+EXPORT_SYMBOL(sigignore);
+EXPORT_SYMBOL(siginterrupt);
+EXPORT_SYMBOL(sigpause);
+EXPORT_SYMBOL(sigrelse);
+EXPORT_SYMBOL(sigset);
+#endif /* CONFIG_XSI_SIGNALS */
+
 /* XSI_SINGLE_PROCESS */
 #ifdef CONFIG_XSI_SINGLE_PROCESS
 EXPORT_SYMBOL(gethostid);

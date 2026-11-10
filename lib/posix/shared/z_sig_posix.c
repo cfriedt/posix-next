@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-/* the parts of POSIX signal handling more than one signal option group needs */
+/* the parts of POSIX signal handling the POSIX_SIGNALS and XSI_SIGNALS option groups share */
 
 /* the ucontext_t a three-argument handler receives is XSI */
 #define _XOPEN_SOURCE 700
@@ -157,7 +157,11 @@ static void kucontext_to_ucontext(ucontext_t *uc, const struct k_sig_ucontext *k
 		return;
 	}
 	uc->uc_sigmask = *z_sig_set_to_posix(&kuc->mask, &mask_buf);
-	uc->uc_stack = (stack_t){.ss_flags = SS_DISABLE};
+	uc->uc_stack = (stack_t){
+		.ss_sp = kuc->stack.sp,
+		.ss_size = kuc->stack.size,
+		.ss_flags = ((kuc->stack.flags & K_SIG_SS_ONSTACK) != 0) ? SS_ONSTACK : SS_DISABLE,
+	};
 }
 
 /* handle a POSIX sigaction from a kernel signal handler */
@@ -215,9 +219,16 @@ void z_sig_action_from_posix(const struct sigaction *act, struct k_sig_action *k
 	if ((act->sa_flags & SA_NODEFER) != 0) {
 		kact->flags |= K_SIG_SA_NODEFER;
 	}
+#ifdef SA_NOCLDSTOP
 	if ((act->sa_flags & SA_NOCLDSTOP) != 0) {
 		kact->flags |= K_SIG_SA_NOCLDSTOP;
 	}
+#endif /* SA_NOCLDSTOP */
+#ifdef SA_ONSTACK
+	if ((act->sa_flags & SA_ONSTACK) != 0) {
+		kact->flags |= K_SIG_SA_ONSTACK;
+	}
+#endif /* SA_ONSTACK */
 
 	kact->mask = *z_sig_set_from_posix(&act->sa_mask, &kmask_buf);
 }
@@ -249,9 +260,16 @@ void z_sig_action_to_posix(const struct k_sig_action *koact, struct sigaction *o
 	if ((koact->flags & K_SIG_SA_NODEFER) != 0) {
 		oact->sa_flags |= SA_NODEFER;
 	}
+#ifdef SA_NOCLDSTOP
 	if ((koact->flags & K_SIG_SA_NOCLDSTOP) != 0) {
 		oact->sa_flags |= SA_NOCLDSTOP;
 	}
+#endif /* SA_NOCLDSTOP */
+#ifdef SA_ONSTACK
+	if ((koact->flags & K_SIG_SA_ONSTACK) != 0) {
+		oact->sa_flags |= SA_ONSTACK;
+	}
+#endif /* SA_ONSTACK */
 }
 
 /*
