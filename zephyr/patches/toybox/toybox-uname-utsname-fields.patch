@@ -1,0 +1,29 @@
+diff --git a/toys/posix/uname.c b/toys/posix/uname.c
+index dfa5762f..56a50d74 100644
+--- a/toys/posix/uname.c
++++ b/toys/posix/uname.c
+@@ -39,18 +39,16 @@ config UNAME
+ 
+ void uname_main(void)
+ {
++  struct utsname *u = (void *)toybuf;
++  char *field[] = {u->sysname, u->nodename, u->release, u->version, u->machine,
++    "Toybox"};
+   int i, needspace = 0;
+-  char *c;
+ 
+-  uname((void *)toybuf);
++  uname(u);
+   if (!toys.optflags) toys.optflags = FLAG_s;
+   for (i=0; i<6; i++) if (toys.optflags & ((1<<i)|FLAG_a)) {
+-    if (i==5) c = " Toybox"+!needspace;
+-    else {
+-      c = toybuf+sizeof(((struct utsname *)0)->sysname)*i;
+-      if (needspace++) *(--c)=' '; // Can't decrement first entry
+-    }
+-    xputsn(c);
++    if (needspace++) xputc(' ');
++    xputsn(field[i]);
+   }
+   if (FLAG(p)) xputsn(" unknown"+!needspace);
+   xputc('\n');
