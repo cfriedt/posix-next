@@ -14,6 +14,19 @@ RAM disk as ``/bin/toybox`` with a ``/bin`` symlink for every command, and then 
 standard POSIX process API: :c:func:`posix_spawn` and :c:func:`waitpid`. Toybox dispatches on
 the name it was invoked by, so each command is available under its own name.
 
+The ``fork`` scenario, and a build with ``-DEXTRA_CONF_FILE=userspace.conf``, runs the commands
+as user-mode processes with :c:func:`fork`: toysh's subshells, command substitution and
+``timeout`` work, and a command that misbehaves dies alone. ``/bin/fault``, a small image built
+beside toybox, stores through a null pointer; the shell reports the signal and goes on:
+
+.. code-block:: console
+
+   $ fault; echo $?
+   fault: storing through a null pointer
+   139
+   $ timeout -s SEGV 1 sleep 10; echo $?
+   124
+
 Networking is loopback-only by default. The ``gateway`` scenario (``qemu_cortex_a53``) puts the
 image on qemu's user-mode network instead: it pings the virtual gateway over IPv4 and IPv6 and
 resolves a name through Zephyr's DNS resolver, configured with Google's public servers, so
