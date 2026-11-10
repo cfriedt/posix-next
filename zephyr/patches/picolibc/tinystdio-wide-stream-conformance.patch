@@ -1,0 +1,54 @@
+diff --git a/newlib/libc/tinystdio/fgetwc.c b/newlib/libc/tinystdio/fgetwc.c
+index 238bca092..05317fe14 100644
+--- a/newlib/libc/tinystdio/fgetwc.c
++++ b/newlib/libc/tinystdio/fgetwc.c
+@@ -45,16 +45,21 @@ __STDIO_UNLOCKED(getwc)(FILE *stream)
+         
+         stream->flags |= __SWIDE;
+ 
+-	if ((stream->flags & __SRD) == 0)
++	if ((stream->flags & __SRD) == 0) {
++		stream->flags |= __SERR;
+ 		return WEOF;
++	}
+ 
+ 	if ((unget = __atomic_exchange_ungetc(&stream->unget, 0)) != 0)
+ 		return (wint_t) (unget - 1);
+ 
+         for (i = 0; i < sizeof(wchar_t); i++) {
+                 sc = stream->get(stream);
+-                if (sc < 0)
++                if (sc < 0) {
++                        /* if != _FDEV_ERR, assume it's _FDEV_EOF */
++                        stream->flags |= (sc == _FDEV_ERR)? __SERR: __SEOF;
+                         return WEOF;
++                }
+                 u.c[i] = (char) sc;
+         }
+ 
+diff --git a/newlib/libc/tinystdio/vswprintf.c b/newlib/libc/tinystdio/vswprintf.c
+index e1367aaa6..dc0b15f78 100644
+--- a/newlib/libc/tinystdio/vswprintf.c
++++ b/newlib/libc/tinystdio/vswprintf.c
+@@ -33,6 +33,7 @@
+  * OF THE POSSIBILITY OF SUCH DAMAGE.
+  */
+ 
++#include <errno.h>
+ #include "stdio_private.h"
+ 
+ int
+@@ -44,6 +45,13 @@ vswprintf(wchar_t *s, size_t len, const wchar_t *fmt, va_list ap)
+ 
+         f.file.flags |= __SWIDE;
+ 	i = vfwprintf(&f.file, fmt, ap);
++	if (i >= 0 && (size_t) i >= len) {
++		/* ISO C: a result that does not fit is an error, not a count */
++		if (len)
++			s[len - 1] = 0;
++		errno = EOVERFLOW;
++		return -1;
++	}
+ 	if (i >= 0)
+ 		s[i] = 0;
+ 
