@@ -96,8 +96,9 @@ functionality provided elsewhere.
    vdisable
 
 :ref:`_POSIX_CHOWN_RESTRICTED <posix_option_chown_restricted>`
-   Use of :c:func:`chown` is restricted to a process with appropriate privileges.
-   Unsupported: Zephyr does not implement file ownership.
+   Use of :c:func:`chown` is restricted to a process with appropriate privileges. Zephyr's only
+   identity is the privileged user, so every call has them; see
+   :ref:`POSIX_FILE_ATTRIBUTES <posix_option_group_file_attributes>`.
 
 :ref:`_POSIX_IPV6 <posix_option_ipv6>`
    Internet Protocol Version 6 is supported by the
