@@ -13,5 +13,5 @@ BUILD_ASSERT(F_OK == ZVFS_F_OK && R_OK == ZVFS_R_OK && W_OK == ZVFS_W_OK && X_OK
 
 int access(const char *path, int amode)
 {
-	return zvfs_access(path, amode);
+	return zvfs_accessat(ZVFS_AT_FDCWD, path, amode, 0);
 }

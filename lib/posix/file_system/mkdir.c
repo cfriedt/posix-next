@@ -10,5 +10,5 @@
 
 int mkdir(const char *path, mode_t mode)
 {
-	return zvfs_mkdir(path, mode);
+	return zvfs_mkdirat(ZVFS_AT_FDCWD, path, mode);
 }

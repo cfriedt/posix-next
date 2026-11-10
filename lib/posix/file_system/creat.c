@@ -10,5 +10,5 @@
 
 int creat(const char *path, mode_t mode)
 {
-	return zvfs_open(path, ZVFS_O_WRONLY | ZVFS_O_CREAT | ZVFS_O_TRUNC, mode);
+	return zvfs_openat(ZVFS_AT_FDCWD, path, ZVFS_O_WRONLY | ZVFS_O_CREAT | ZVFS_O_TRUNC, mode);
 }

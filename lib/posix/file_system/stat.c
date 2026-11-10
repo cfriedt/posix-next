@@ -13,7 +13,7 @@ int stat(const char *ZRESTRICT path, struct stat *ZRESTRICT buf)
 {
 	struct zvfs_stat zs;
 
-	if (zvfs_stat(path, &zs) < 0) {
+	if (zvfs_statat(ZVFS_AT_FDCWD, path, &zs, 0) < 0) {
 		return -1;
 	}
 

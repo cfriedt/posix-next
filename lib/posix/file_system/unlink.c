@@ -10,5 +10,5 @@
 
 int unlink(const char *path)
 {
-	return zvfs_unlink(path);
+	return zvfs_unlinkat(ZVFS_AT_FDCWD, path, 0);
 }

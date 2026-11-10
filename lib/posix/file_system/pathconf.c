@@ -16,7 +16,7 @@ long pathconf(const char *path, int name)
 	struct zvfs_statvfs zv;
 	const struct zvfs_statvfs *zvp = NULL;
 
-	if (zvfs_stat(path, &st) < 0) {
+	if (zvfs_statat(ZVFS_AT_FDCWD, path, &st, 0) < 0) {
 		return -1;
 	}
 

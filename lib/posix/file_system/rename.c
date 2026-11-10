@@ -10,5 +10,5 @@
 
 int rename(const char *old, const char *new)
 {
-	return zvfs_rename(old, new);
+	return zvfs_renameat(ZVFS_AT_FDCWD, old, ZVFS_AT_FDCWD, new);
 }

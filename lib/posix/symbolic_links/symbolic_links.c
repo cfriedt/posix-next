@@ -14,7 +14,7 @@ int lchown(const char *path, uid_t owner, gid_t group)
 {
 	struct zvfs_stat zs;
 
-	if (zvfs_lstat(path, &zs) < 0) {
+	if (zvfs_statat(ZVFS_AT_FDCWD, path, &zs, ZVFS_AT_SYMLINK_NOFOLLOW) < 0) {
 		return -1;
 	}
 
@@ -31,7 +31,7 @@ int lstat(const char *ZRESTRICT path, struct stat *ZRESTRICT buf)
 {
 	struct zvfs_stat zs;
 
-	if (zvfs_lstat(path, &zs) < 0) {
+	if (zvfs_statat(ZVFS_AT_FDCWD, path, &zs, ZVFS_AT_SYMLINK_NOFOLLOW) < 0) {
 		return -1;
 	}
 
@@ -54,10 +54,10 @@ int lstat(const char *ZRESTRICT path, struct stat *ZRESTRICT buf)
 
 ssize_t readlink(const char *ZRESTRICT path, char *ZRESTRICT buf, size_t bufsize)
 {
-	return zvfs_readlink(path, buf, bufsize);
+	return zvfs_readlinkat(ZVFS_AT_FDCWD, path, buf, bufsize);
 }
 
 int symlink(const char *path1, const char *path2)
 {
-	return zvfs_symlink(path1, path2);
+	return zvfs_symlinkat(path1, ZVFS_AT_FDCWD, path2);
 }
