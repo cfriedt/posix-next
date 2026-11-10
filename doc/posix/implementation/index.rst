@@ -798,14 +798,19 @@ Signal Implementation Details
 =============================
 
 The :ref:`POSIX_SIGNALS <posix_option_group_signals>` option group is implemented on top of the
-kernel signal API (``k_sig_*``). Zephyr does not yet conventionally support interrupted or
-restarted system calls. As a result, signals are delivered to a thread on its return from a
-system call, so a thread that never enters the kernel does not run a signal handler
-:ref:`†<posix_undefined_behaviour>`.
-
-.. note::
-    Efforts to support the standard behaviour (interrupting blocking system calls, with
-    ``EINTR`` and optional restart semantics) are underway.
+kernel signal API (``k_sig_*``). Signals are delivered to a thread on its return from a system
+call, so a thread that never enters the kernel does not run a signal handler
+:ref:`†<posix_undefined_behaviour>`. A thread blocked in one of the calls POSIX lists as
+interruptible is woken by a signal queued to it, and the call fails with ``EINTR`` (or returns
+the count already transferred) when a signal that will be delivered - unblocked and not ignored -
+is pending, including a signal the kernel claimed for delivery while the thread was asleep. The
+interruptible calls are :c:func:`sleep`, :c:func:`nanosleep` and :c:func:`clock_nanosleep`;
+reads and writes on pipes and FIFOs; :c:func:`accept`, :c:func:`connect` and the socket
+receive calls; :c:func:`poll`, :c:func:`select` and :c:func:`pselect`; :c:func:`mq_send` and
+:c:func:`mq_receive` with their timed forms; :c:func:`fcntl` with ``F_SETLKW``; and
+:c:func:`wait` and :c:func:`waitpid`. ``SA_RESTART`` is accepted but a call is never restarted
+:ref:`†<posix_undefined_behaviour>`; the mechanism is described under
+:ref:`posix_signal_interruptible_wait` below.
 
 ``abort()``, ``raise()``, and ``signal()`` are the three functions of the option group that ISO C
 also requires, so they must work in a freestanding-plus-ISO-C environment where
@@ -858,6 +863,16 @@ The interrupted context lives in the kernel, not on the user stack
    allocates for it. The context is read through system calls rather than a ``ucontext_t``, and
    a handler cannot modify the interrupted program counter.
 
+Handlers run in series, never nested
+   Because that context is kept once per thread, a signal that becomes deliverable while a
+   handler is in progress - including at the return of a system call the handler itself makes -
+   stays pending until the handler returns through ``k_sig_return()``, and is delivered at the
+   thread's next return from a system call. POSIX lets a second, unblocked signal interrupt a
+   running handler; here it waits for it :ref:`†<posix_undefined_behaviour>`. A handler that
+   leaves by ``siglongjmp()`` ends its delivery the same way a return would (``k_sig_abandon()``
+   releases the kept context and installs the saved mask), so the jump does not hold up later
+   signals.
+
 Handlers must not use the shared floating-point or vector registers
    Nothing saves or restores floating-point or vector state around a signal handler, so a
    handler that uses those registers corrupts the floating-point state of the code it
@@ -885,6 +900,45 @@ A fault taken in user mode is a signal
    handler is installed. RISC-V has no arithmetic traps and never generates ``SIGFPE``. A
    reference to a page of a file mapping that lies wholly past the end of the file is a
    ``SIGBUS`` with ``BUS_ADRERR``; :c:func:`ftruncate` moves that boundary for every mapping.
+
+A signal queued to a thread dies with that thread
+   A thread-directed signal that its target never claims - it was blocked, or the thread exited
+   first - is dropped when the thread object is next set up, so a pooled thread object handed to a
+   new thread (a forked child's leader, a pool thread) never starts with its predecessor's
+   signals. Process-directed signals pending at process scope go with the process record at
+   reap.
+
+.. _posix_signal_interruptible_wait:
+
+Interruptible waits
+-------------------
+
+A blocking wait that signals may interrupt opts in at its wait site, so that the kernel's own
+waits - a driver taking a semaphore inside a system call, say - are never cut short. The waiter
+marks its thread (``z_sig_pend_begin()``), checks once more that no deliverable signal is
+pending, and pends as it always did: on a condition variable, a semaphore, a message queue, a
+poll or a sleep. When ``z_sig_queue_common()`` queues a signal that the target thread does not
+block, it looks at that thread under the scheduler lock: a marked thread pended on a wait queue
+is unpended with a return value of ``-EINTR``, a sleeping thread is woken as :c:func:`k_wakeup`
+would, and a marked thread that has not pended yet is flagged so that its pend returns
+``-EINTR`` at once instead of sleeping - the window between the waiter's check and its pend is
+closed inside the scheduler rather than with a persistent poll signal. Waking, the waiter clears
+the mark (``z_sig_pend_end()``) and reports an interruption when a deliverable signal is pending
+or when the count of claimed signals moved while it slept - on several architectures the return
+path claims a pending signal for delivery before the waiter gets to look. The caller turns that
+report into ``EINTR``; a wake by a signal that is blocked or ignored is treated as spurious and
+the wait resumes.
+
+Pipes keep the earlier form of the same idea, a poll signal registered in the thread's signal
+context that ``z_sig_queue_common()`` raises, because their data flow is built on poll signals.
+
+Pipes use the same poll signals for their data flow. A side's signal is raised and reset under
+the pipe lock together with the ring buffer, so a blocked reader or writer waits on a state that
+cannot go stale: the earlier condition-variable wait could lose a wake-up, because the other
+side's broadcast was not ordered against the waiter's descriptor lock, and a reader on a second
+CPU could sleep forever with data in the pipe. The combination is what lets a process blocked in
+a pipe read be killed: its ``SIGKILL`` wakes the wait, the read returns to the system call exit
+where the kill is delivered, and the parent's :c:func:`waitpid` completes.
 
 Elastipool: Elastic Object Pools
 =================================
