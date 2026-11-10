@@ -317,21 +317,52 @@
 /*
  * POSIX2 Options
  */
+#undef _POSIX2_VERSION
+#ifdef CONFIG_POSIX2_SHELL_UTILITIES
+#define _POSIX2_VERSION _POSIX_VERSION
+#endif
+
 #undef _POSIX2_C_BIND
 #define _POSIX2_C_BIND _POSIX_VERSION
-/* #define _POSIX2_C_DEV (-1) */
-/* #define _POSIX2_CHAR_TERM (-1L) */
-/* #define _POSIX2_FORT_DEV (-1L) */
-/* #define _POSIX2_FORT_RUN (-1L) */
-/* #define _POSIX2_LOCALEDEF (-1L) */
-/* #define _POSIX2_PBS (-1L) */
-/* #define _POSIX2_PBS_ACCOUNTING (-1L) */
-/* #define _POSIX2_PBS_CHECKPOINT (-1L) */
-/* #define _POSIX2_PBS_LOCATE (-1L) */
-/* #define _POSIX2_PBS_MESSAGE (-1L) */
-/* #define _POSIX2_PBS_TRACK (-1L) */
-/* #define _POSIX2_SW_DEV (-1L) */
-/* #define _POSIX2_UPE (-1L) */
+
+#undef _POSIX2_C_DEV
+#ifdef CONFIG_POSIX2_C_DEV
+#define _POSIX2_C_DEV _POSIX_VERSION
+#endif
+
+#undef _POSIX2_CHAR_TERM
+#ifdef CONFIG_POSIX2_CHAR_TERM
+#define _POSIX2_CHAR_TERM _POSIX_VERSION
+#endif
+
+#undef _POSIX2_FORT_DEV
+#ifdef CONFIG_POSIX2_FORT_DEV
+#define _POSIX2_FORT_DEV _POSIX_VERSION
+#endif
+
+#undef _POSIX2_FORT_RUN
+#ifdef CONFIG_POSIX2_FORT_RUN
+#define _POSIX2_FORT_RUN _POSIX_VERSION
+#endif
+
+#undef _POSIX2_LOCALEDEF
+#ifdef CONFIG_POSIX2_LOCALEDEF
+#define _POSIX2_LOCALEDEF _POSIX_VERSION
+#endif
+
+/* _POSIX2_PBS, _POSIX2_PBS_ACCOUNTING, _POSIX2_PBS_CHECKPOINT, _POSIX2_PBS_LOCATE,
+ * _POSIX2_PBS_MESSAGE, _POSIX2_PBS_TRACK: not supported
+ */
+
+#undef _POSIX2_SW_DEV
+#ifdef CONFIG_POSIX2_SW_DEV
+#define _POSIX2_SW_DEV _POSIX_VERSION
+#endif
+
+#undef _POSIX2_UPE
+#ifdef CONFIG_POSIX2_UPE
+#define _POSIX2_UPE _POSIX_VERSION
+#endif
 
 /*
  * X/Open System Interfaces
