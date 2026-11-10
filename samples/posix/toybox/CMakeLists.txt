@@ -25,3 +25,12 @@ add_custom_command(
   VERBATIM
 )
 set_property(SOURCE src/main.c APPEND PROPERTY OBJECT_DEPENDS ${commands_inc})
+
+# a command of our own beside toybox: an image that faults
+add_llext_target(fault_ext
+  OUTPUT  ${PROJECT_BINARY_DIR}/llext/fault.llext
+  SOURCES ${PROJECT_SOURCE_DIR}/src/fault_ext.c
+)
+generate_inc_file_for_target(app ${PROJECT_BINARY_DIR}/llext/fault.llext
+  ${ZEPHYR_BINARY_DIR}/include/generated/fault_ext.inc
+)
