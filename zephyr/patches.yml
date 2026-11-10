@@ -4625,3 +4625,21 @@ patches:
       CONFIG_FILE_SYSTEM_SYMLINKS and CONFIG_FILE_SYSTEM_FIFOS; the
       filesystem.tmpfs.plain scenario builds without either and expects
       -ENOTSUP from the calls.
+  - path: zephyr/zvfs-fifo.patch
+    sha256sum: 9ff4c9a8ec0eb7c9a67a3051a1210ae0f680dffee137cb96566ae37885081551
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-20
+    upstreamable: true
+    comments: |
+      zvfs: named pipes. zvfs_mknodat() creates a node of the type its mode
+      names, a FIFO or an empty regular file;
+      open() on a FIFO node connects to the pipe the path names, kept for
+      as long as any description of it is open, and waits for the other
+      side unless O_NONBLOCK, where a reader proceeds and a writer fails
+      with ENXIO; an opener that came and went while the waiter was
+      queued still counts. Pipe ends become open file descriptions with a
+      side, the pipe counts open descriptions per side, and wake-ups
+      reach every description of a side, so anonymous pipes and FIFOs
+      share one object. stat, fstat and readdir report the FIFO type.
