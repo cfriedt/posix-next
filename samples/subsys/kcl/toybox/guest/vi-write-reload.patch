@@ -1,0 +1,21 @@
+vi: reload the buffer after a successful write
+
+write_file() unloads the line list before writing and only reloads it
+when the rename fails, so a successful :w leaves an empty buffer behind:
+the text disappears from the screen, a second :w says "Not modified" and
+:q dereferences NULL.
+
+--- a/toys/pending/vi.c
++++ b/toys/pending/vi.c
+@@ -641,9 +641,9 @@ static int write_file(char *filename)
+   linelist_unload();
+ 
+   xclose(fd);
+-  if (!rename(toybuf, filename)) return 1;
++  if (rename(toybuf, filename)) return 0;
+   linelist_load(filename, 0);
+-  return 0;
++  return 1;
+ }
+ 
+ // jump into valid offset index
