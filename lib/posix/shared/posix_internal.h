@@ -374,7 +374,7 @@ static inline int z_sig_ksigno_to_posix(int ksigno)
 }
 
 /*
- * Shared by the signal option groups (z_sig_posix.c)
+ * Shared by the POSIX_SIGNALS and XSI_SIGNALS option groups (z_sig_posix.c)
  */
 
 /* deliver a kernel signal number to a POSIX kill() pid: a process, 0, -1 or -group; -errno */
