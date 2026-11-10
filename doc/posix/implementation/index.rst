@@ -864,13 +864,13 @@ Dispositions are per-process with process support
    not in force for another and dies with its installer.
 
 The interrupted context lives in the kernel, not on the user stack
-   A handler runs on the interrupted thread's own stack, but the state needed to resume that
-   thread is kept once per thread in the kernel: the return address, stack pointer and return
-   value of the interrupted system call and the callee-saved registers, which a trampoline
-   captures at redirection and ``k_sig_return()`` restores. Nothing is pushed onto the user
-   stack beyond a return address, so a delivery costs no thread stack and the kernel never
-   allocates for it. The context is read through system calls rather than a ``ucontext_t``, and
-   a handler cannot modify the interrupted program counter.
+   A handler runs on the interrupted thread's own stack, or on its alternate signal stack, but
+   the state needed to resume that thread is kept once per thread in the kernel: the return
+   address, stack pointer and return value of the interrupted system call and the callee-saved
+   registers, which a trampoline captures at redirection and ``k_sig_return()`` restores.
+   Nothing is pushed onto the user stack beyond a return address, so a delivery costs no thread
+   stack and the kernel never allocates for it. The context is read through system calls rather
+   than a ``ucontext_t``, and a handler cannot modify the interrupted program counter.
 
 Handlers run in series, never nested
    Because that context is kept once per thread, a signal that becomes deliverable while a
@@ -894,6 +894,16 @@ Kernel threads block all signals by default
    A kernel thread must opt in to signal delivery, with :c:func:`sigprocmask` or
    ``pthread_sigmask()``, before any signal can be delivered to it. User-mode threads start with
    no signals blocked, in line with the POSIX specification.
+
+Alternate signal stacks belong to user threads
+   :c:func:`sigaltstack` names the stack on which a user thread runs the handlers it installed
+   with ``SA_ONSTACK`` (:kconfig:option:`CONFIG_SIGNAL_ALTSTACK`, on arm64, riscv and x86); with
+   fault delivery it is what lets a thread handle the overflow of its own stack. The stack cannot
+   change while a handler runs on it (``EPERM``), must hold ``MINSIGSTKSZ`` bytes (``ENOMEM``),
+   is copied by :c:func:`fork` and is dropped with the thread. A kernel thread takes its signals
+   where it runs, so the call fails for it with ``ENOTSUP``. A handler whose frame cannot be
+   written on the stack it is to run on, or a fault taken while a fault's handler is entered or
+   runs, ends the process with ``SIGSEGV``, as on Linux.
 
 A fault taken in user mode is a signal
    With :kconfig:option:`CONFIG_SIGNAL_FAULT` (arm64, riscv and x86), a memory, instruction or
