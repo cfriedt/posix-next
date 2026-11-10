@@ -346,6 +346,49 @@ static inline int z_si_code_to_posix(int code)
 	}
 }
 
+static inline bool z_sig_posix_reserved(int signo)
+{
+	return signo == CONFIG_THREAD_CANCEL_SIGNAL_NUMBER ||
+	       signo == (CONFIG_THREAD_CANCEL_SIGNAL_NUMBER + 1);
+}
+
+/* a POSIX signal number an application may name */
+static inline bool z_sig_posix_valid(int signo)
+{
+	if (signo <= 0 || z_sig_posix_reserved(signo)) {
+		return false;
+	}
+
+	if (signo < SIGRTMIN) {
+		return signo <= 31;
+	}
+
+	return signo <= SIGRTMAX;
+}
+
+static inline int z_sig_ksigno_to_posix(int ksigno)
+{
+	int posix = z_sig_to_posix(ksigno);
+
+	return (posix > 0) ? posix : ksigno;
+}
+
+/*
+ * Shared by the signal option groups (z_sig_posix.c)
+ */
+
+/* deliver a kernel signal number to a POSIX kill() pid: a process, 0, -1 or -group; -errno */
+int z_sig_posix_kill(pid_t pid, int ksigno);
+/* the kernel handler of every POSIX handler: calls it with the POSIX number and siginfo_t */
+void z_sig_shim(int ksigno, struct k_sig_info *kinfo, void *context);
+/* a POSIX action as the kernel's, and back */
+void z_sig_action_from_posix(const struct sigaction *act, struct k_sig_action *kact);
+void z_sig_action_to_posix(const struct k_sig_action *kact, struct sigaction *act);
+/* block until the calling thread's delivery count moves past start */
+void z_sig_wait_delivered(unsigned long start);
+/* pthread_sigmask() for the calling thread: 0 or a positive errno (z_sig_mask.c) */
+int z_sig_posix_mask(int how, const sigset_t *ZRESTRICT set, sigset_t *ZRESTRICT oset);
+
 static inline struct k_sig_set *z_sig_set_from_posix(const sigset_t *set, struct k_sig_set *buf)
 {
 	ARG_UNUSED(buf);
