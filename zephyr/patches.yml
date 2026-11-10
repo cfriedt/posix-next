@@ -4592,3 +4592,24 @@ patches:
       is an inline stub reporting -ENOTSUP, the mkfifo operation leaves
       struct fs_file_system_t and ext2's FIFO creation is not built.
       POSIX_FIFO implies the option.
+  - path: zephyr/fs-tmpfs.patch
+    sha256sum: 09c7cb700fd7dae3cd419455dfdd62fd92fdfcdf972efe7722e1ba18a1591d3d
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-30
+    upstreamable: true
+    comments: |
+      fs: add tmpfs, a file system in anonymously mapped pages. Its nodes,
+      the contents of its files and its own record are pages from
+      k_mem_map() on MMU targets and heap blocks elsewhere, so a mount
+      starts empty and unmounting releases everything. Files (direct,
+      indirect and double-indirect page tables, holes read as zeros),
+      directories, symbolic links followed on lookup, FIFO nodes, rename
+      with POSIX replacement rules, unlink of open files, utime and
+      statvfs against an optional page bound. tests/subsys/fs/tmpfs runs
+      the tree's common directory and open-flag tests plus its own.
+      Symbolic links and FIFO nodes are built with
+      CONFIG_FILE_SYSTEM_SYMLINKS and CONFIG_FILE_SYSTEM_FIFOS; the
+      filesystem.tmpfs.plain scenario builds without either and expects
+      -ENOTSUP from the calls.
