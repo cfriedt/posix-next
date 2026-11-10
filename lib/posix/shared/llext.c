@@ -69,6 +69,7 @@
 #include <zephyr/getopt.h>
 #include <zephyr/llext/symbol.h>
 #include <zephyr/posix/posix_setjmp.h>
+#include <zephyr/sys/util.h>
 
 /* errno may be thread-local; extensions resolve it per call through this */
 int *__errno_location(void)
@@ -77,6 +78,15 @@ int *__errno_location(void)
 }
 EXPORT_SYMBOL(__errno_location);
 
+/* picolibc keeps no list of open streams: flushing every stream is flushing the standard ones */
+static int posix_llext_fflush(FILE *stream)
+{
+	if ((stream == NULL) && IS_ENABLED(CONFIG_PICOLIBC)) {
+		return ((fflush(stdout) != 0) || (fflush(stderr) != 0)) ? EOF : 0;
+	}
+
+	return fflush(stream);
+}
 
 /* ADVISORY_INFO */
 #ifdef CONFIG_POSIX_ADVISORY_INFO
@@ -140,7 +150,7 @@ EXPORT_SYMBOL(fclose);
 EXPORT_SYMBOL(fdopen);
 EXPORT_SYMBOL(feof);
 EXPORT_SYMBOL(ferror);
-EXPORT_SYMBOL(fflush);
+EXPORT_SYMBOL_NAMED(posix_llext_fflush, fflush);
 EXPORT_SYMBOL(fgetc);
 EXPORT_SYMBOL(fgets);
 EXPORT_SYMBOL(fileno);
@@ -983,4 +993,3 @@ EXPORT_SYMBOL(optopt);
 EXPORT_SYMBOL(zephyr_getopt);
 #endif /* CONFIG_ZEPHYR_GETOPT */
 #endif /* CONFIG_POSIX_C_LIB_EXT */
-
