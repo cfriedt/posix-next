@@ -419,6 +419,22 @@ tests:
       - CONFIG_STRESS_NG_STRESSOR_SOFTLOCKUP=y
       - CONFIG_STRESS_NG_STRESSOR_ZOMBIE=y
   # a second CPU: spinmem's two processes spin on a shared page at the same time
+  portability.posix.stress_ng.multi_process.smp:
+    filter: (not CONFIG_NATIVE_LIBC) and (CONFIG_ARCH_HAS_USERSPACE) and (CONFIG_ARCH_HAS_PROCESS_VM)
+    platform_allow:
+      - qemu_cortex_a53/qemu_cortex_a53/smp
+      - qemu_x86_64/atom
+    timeout: 360
+    extra_configs:
+      - CONFIG_NET_SLIP_TAP=n
+      - CONFIG_PROCESS_VM=y
+      - CONFIG_CURRENT_THREAD_USE_TLS=n
+      - CONFIG_SYS_PROCESS_MAX=32
+      - CONFIG_MAX_PROCESS_BYTES=4
+      - platform:qemu_cortex_a53/qemu_cortex_a53/smp:CONFIG_MAX_XLAT_TABLES=256
+      - platform:qemu_x86_64/atom:CONFIG_X86_KPTI=n
+      - platform:qemu_x86_64/atom:CONFIG_X86_MAX_ADDITIONAL_MEM_DOMAINS=16
+      - CONFIG_STRESS_NG_STRESSOR_SPINMEM=y
   portability.posix.stress_ng.multi_process.anon_pages:
     filter: (not CONFIG_NATIVE_LIBC) and (CONFIG_ARCH_HAS_USERSPACE) and (CONFIG_MMU) and (CONFIG_ARCH_HAS_PROCESS_VM)
     timeout: 100
