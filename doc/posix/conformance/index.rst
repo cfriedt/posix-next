@@ -56,7 +56,7 @@ POSIX System Interfaces
 
     _POSIX_JOB_CONTROL, -1, :ref:`†<posix_undefined_behaviour>`
     _POSIX_SAVED_IDS, -1, :ref:`†<posix_undefined_behaviour>`
-    _POSIX_SHELL, -1, :ref:`†<posix_undefined_behaviour>`
+    :ref:`_POSIX_SHELL<posix_option_shell>`, 200809L, :kconfig:option:`CONFIG_POSIX_SHELL_FUNC`
 
 .. csv-table:: POSIX System Interfaces (Optional)
    :header: Symbol, Support, Remarks

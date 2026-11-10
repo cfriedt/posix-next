@@ -131,8 +131,9 @@ functionality provided elsewhere.
    no user or group identities.
 
 :ref:`_POSIX_SHELL <posix_option_shell>`
-   :c:func:`system` executes commands with a conformant shell. Unsupported: Zephyr's shell
-   is not a POSIX shell.
+   :c:func:`system` executes commands with a conformant shell: with
+   :ref:`POSIX_SHELL_FUNC <posix_option_group_shell_func>` the interpreter is the shell the
+   application installs at ``/bin/sh``.
 
 :ref:`_POSIX_SPORADIC_SERVER <posix_option_sporadic_server>`
    The ``SCHED_SPORADIC`` scheduling policy is accepted by the
