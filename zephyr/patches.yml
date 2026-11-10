@@ -4924,3 +4924,40 @@ patches:
       tmpfs's per-node storage and ext2's reporting; without the option
       the calls are inline stubs reporting -ENOTSUP.
       POSIX_FILE_ATTRIBUTES implies the option.
+  - path: zephyr/zvfs-modes-owners-umask.patch
+    sha256sum: c031a94b1745a2a4ca861a48c065ab64da88e903a7a4bbdc67f216680c4d4c7b
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-06
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/fs-node-modes-and-owners.patch
+          - zephyr/zvfs-directory-descriptors-at-family.patch
+          - zephyr/zvfs-per-process-cwd.patch
+          - zephyr/zvfs-fifo.patch
+          - zephyr/zvfs-stat-identity.patch
+          - zephyr/zvfs-futime.patch
+    comments: |
+      zvfs: modes, owners and the file mode creation mask. struct zvfs_stat
+      gains uid and gid; stat and fstat report the file system's recorded
+      mode and fall back to the synthesised one only where there is none.
+      New syscalls zvfs_chmodat(), zvfs_fchmod(), zvfs_chownat() and
+      zvfs_fchown() (UINT32_MAX keeps an ID, resolved from the node's
+      owner; ZVFS_AT_SYMLINK_NOFOLLOW changes a link's owner and refuses a
+      link's mode with EOPNOTSUPP) over fs_chmod()/fs_chown()/fs_lchown()
+      and two ioctls on the file and directory objects. zvfs_umask() keeps
+      a per-process creation mask beside the working directory (022 at
+      boot, copied at clone, the boot mask for threads of no process);
+      zvfs_openat(O_CREAT), zvfs_mkdirat() and zvfs_mknodat() withhold it from
+      the requested mode with one fs_chmod() when, and only when, they
+      created the node. ZVFS keeps no identity and enforces nothing. Tests
+      in tests/lib/zvfs_fs over a second, tmpfs mount; kernel and user mode.
+      The recorded mode and owner reach struct zvfs_stat only with
+      CONFIG_FILE_SYSTEM_ATTRIBUTES; the test enables it, and
+      CONFIG_FILE_SYSTEM_SYMLINKS for the links whose owner it changes,
+      on its tmpfs mount.
+      zvfs_chmod(), zvfs_chown() and zvfs_lchown() are the plain inline
+      forms of zvfs_chmodat() and zvfs_chownat().
