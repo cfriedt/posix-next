@@ -4710,3 +4710,22 @@ patches:
       CONFIG_FILE_SYSTEM_ATTRIBUTES; the test enables it, and
       CONFIG_FILE_SYSTEM_SYMLINKS for the links whose owner it changes,
       on its tmpfs mount.
+  - path: zephyr/libc-termios-glob-interpose.patch
+    sha256sum: 534563955540a75a9ab384bce0fa6fd40a562b738084bda8b07047dd227ea518
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-30
+    upstreamable: true
+    comments: |
+      Interpose <termios.h>, <glob.h>, and <sys/time.h> for Picolibc and
+      Newlib onto the POSIX module's headers, following the existing
+      per-libc wrapper-header pattern; the toolchain copies otherwise
+      resolve first, the toolchain termios.h depends on a <sys/termios.h>
+      nobody provides, and the toolchain sys/time.h includes the internal
+      <sys/_select.h>, whose fd_set conflicts with the interposed
+      <sys/select.h>. The existing sys/select.h wrappers also gain
+      <sys/_types.h> before the internal type headers, which some
+      toolchain builds (aarch64) require. <stdio.h> gains a chaining
+      wrapper declaring ctermid(), which neither toolchain libc
+      provides; posix_stdio.h remains its documented owner.
