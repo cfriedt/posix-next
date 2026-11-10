@@ -16,6 +16,7 @@
 #include <zephyr/kernel.h>
 
 #define TOYBOX_PATH "/bin/toybox"
+#define FAULT_PATH "/bin/fault"
 
 static struct fs_mount_t root_mnt = {
 	.type = FS_EXT2,
@@ -25,6 +26,11 @@ static struct fs_mount_t root_mnt = {
 
 static const uint8_t toybox_image[] __aligned(8) = {
 #include "toybox.inc"
+};
+
+/* a command of our own: a process that takes a CPU fault */
+static const uint8_t fault_image[] __aligned(8) = {
+#include "fault_ext.inc"
 };
 
 /* the commands the image provides: each is a /bin symlink to the binary */
@@ -135,12 +141,13 @@ int main(void)
 	if (write_file("/etc/passwd", passwd, strlen(passwd)) < 0 ||
 	    write_file("/etc/group", group, strlen(group)) < 0 ||
 	    write_file("/etc/motd", motd, strlen(motd)) < 0 ||
-	    write_file(TOYBOX_PATH, toybox_image, sizeof(toybox_image)) < 0) {
+	    write_file(TOYBOX_PATH, toybox_image, sizeof(toybox_image)) < 0 ||
+	    write_file(FAULT_PATH, fault_image, sizeof(fault_image)) < 0) {
 		return -1;
 	}
 	/* a file created by the file system API has no execute permission */
-	if (chmod(TOYBOX_PATH, 0755) != 0) {
-		printf("chmod %s failed: %d\n", TOYBOX_PATH, errno);
+	if (chmod(TOYBOX_PATH, 0755) != 0 || chmod(FAULT_PATH, 0755) != 0) {
+		printf("chmod failed: %d\n", errno);
 		return -1;
 	}
 
@@ -202,6 +209,14 @@ int main(void)
 #ifdef CONFIG_PROCESS_VM
 	/* subshells and command substitution fork() the shell */
 	RUN("sh", "-c", "(echo subshell works); echo cmdsub is $(echo works)");
+#endif
+#ifdef CONFIG_USERSPACE
+	/* a user-mode process that faults is killed by the signal; the shell
+	 * that ran it reports the death and goes on. In kernel mode the fault
+	 * is the kernel's.
+	 */
+	run(FAULT_PATH, (char *const[]){"fault", NULL});
+	RUN("sh", "-c", "fault; echo fault exited with $?");
 #endif
 #ifdef CONFIG_NET_CONFIG_SETTINGS
 	/* a real interface is configured: reach past the loopback */
