@@ -154,8 +154,8 @@ functionality provided elsewhere.
    :kconfig:option:`CONFIG_POSIX_THREAD_SPORADIC_SERVER`.
 
 :ref:`_POSIX_VDISABLE <posix_option_vdisable>`
-   Terminal special characters can be disabled via :c:func:`tcsetattr`. Unsupported: the
-   general terminal interface is unimplemented.
+   Terminal special characters can be disabled via :c:func:`tcsetattr` by setting them to
+   ``'\0'``; see :ref:`POSIX_DEVICE_SPECIFIC <posix_option_group_device_specific>`.
 
 :ref:`_POSIX2 Shell and Utilities Options <posix_options_posix2>`
    The ``_POSIX2_*`` constants describe the Shell and Utilities volume, which is beyond the
