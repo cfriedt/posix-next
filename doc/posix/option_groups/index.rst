@@ -61,6 +61,7 @@ For individual POSIX options, see :ref:`posix_options`.
    xsi_advanced_realtime
    xsi_file_system
    xsi_realtime
+   xsi_signals
    xsi_single_process
    xsi_system_logging
    xsi_threads_ext
