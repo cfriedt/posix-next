@@ -256,7 +256,7 @@ defined only while all of them remain enabled.
           :ref:`POSIX_FILE_SYSTEM_EXT <posix_option_group_file_system_ext>`,,
           :ref:`POSIX_FILE_SYSTEM_GLOB <posix_option_group_file_system_glob>`, yes, :kconfig:option:`CONFIG_POSIX_FILE_SYSTEM_GLOB`
           :ref:`POSIX_JOB_CONTROL <posix_option_group_job_control>`, yes, :kconfig:option:`CONFIG_POSIX_JOB_CONTROL`
-          :ref:`POSIX_REGEXP <posix_option_group_regexp>`,,
+          :ref:`POSIX_REGEXP <posix_option_group_regexp>`, yes, :kconfig:option:`CONFIG_POSIX_REGEXP`
           :ref:`POSIX_SHELL_FUNC <posix_option_group_shell_func>`,,
           :ref:`POSIX_SYMBOLIC_LINKS <posix_option_group_symbolic_links>`, yes, :kconfig:option:`CONFIG_POSIX_SYMBOLIC_LINKS`
           :ref:`POSIX_SYSTEM_DATABASE <posix_option_group_system_database>`, yes, :kconfig:option:`CONFIG_POSIX_SYSTEM_DATABASE`
@@ -274,7 +274,7 @@ defined only while all of them remain enabled.
           :ref:`_POSIX_CHOWN_RESTRICTED <posix_option_chown_restricted>`, -1,
           :ref:`_POSIX_JOB_CONTROL <posix_option_job_control>`, 200809L, :kconfig:option:`CONFIG_POSIX_JOB_CONTROL`
           :ref:`_POSIX_MONOTONIC_CLOCK <posix_option_monotonic_clock>`, 200809L, :kconfig:option:`CONFIG_POSIX_MONOTONIC_CLOCK`
-          :ref:`_POSIX_REGEXP <posix_option_group_regexp>`, -1,
+          :ref:`_POSIX_REGEXP <posix_option_group_regexp>`, 200809L, :kconfig:option:`CONFIG_POSIX_REGEXP`
           :ref:`_POSIX_SAVED_IDS <posix_option_saved_ids>`, -1,
           :ref:`_POSIX_SHELL <posix_option_shell>`, -1,
           :ref:`_POSIX_THREAD_PROCESS_SHARED <posix_option_thread_process_shared>`, 200809L, :kconfig:option:`CONFIG_POSIX_THREAD_PROCESS_SHARED`
