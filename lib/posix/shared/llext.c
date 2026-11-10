@@ -193,6 +193,12 @@ EXPORT_SYMBOL(rewind);
 EXPORT_SYMBOL(mkfifo);
 #endif /* CONFIG_POSIX_FIFO */
 
+/* FIFO_FD */
+#ifdef CONFIG_POSIX_FIFO_FD
+EXPORT_SYMBOL(mkfifoat);
+EXPORT_SYMBOL(mknodat);
+#endif /* CONFIG_POSIX_FIFO_FD */
+
 /* FILE_LOCKING */
 #ifdef CONFIG_POSIX_FILE_LOCKING
 EXPORT_SYMBOL(flockfile);
