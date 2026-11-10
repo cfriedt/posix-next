@@ -1,0 +1,17 @@
+diff --git a/stress-metamix.c b/stress-metamix.c
+--- a/stress-metamix.c
++++ b/stress-metamix.c
+@@ -350,7 +350,12 @@
+ 		goto tidy_s_pids;
+ 	}
+ 
+-	(void)stress_setting_get("metamix-bytes", &metamix_bytes_total);
++	if (!stress_setting_get("metamix-bytes", &metamix_bytes_total)) {
++		if (g_opt_flags & OPT_FLAGS_MAXIMIZE)
++			metamix_bytes_total = MAX_METAMIX_BYTES;
++		if (g_opt_flags & OPT_FLAGS_MINIMIZE)
++			metamix_bytes_total = MIN_METAMIX_BYTES;
++	}
+ 	metamix_bytes = metamix_bytes_total / args->instances;
+ 	if (metamix_bytes < MIN_METAMIX_BYTES) {
+ 		metamix_bytes = MIN_METAMIX_BYTES;

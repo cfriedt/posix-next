@@ -5026,6 +5026,21 @@ patches:
       mergesort cannot map their buffers, the fork stressor counting the
       child it forked as the run ended so that it is waited for, and the
       daemon stressor's /dev/null stand-in.
+  - path: stress-ng/stress-ng-metamix-honours-minimize.patch
+    sha256sum: 5730ebf2afdeda88b4159b65609d80745e0b786cc5b313f7380355960e36e0b9
+    module: modules/lib/stress-ng
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-05
+    upstreamable: true
+    comments: |
+      The metamix stressor honours --minimize and --maximize for its file
+      size, as bigheap, shm and the other sized stressors do: without an
+      explicit --metamix-bytes it wrote the 1 MiB default in each of its
+      sixteen processes, with fdatasync() after every chunk, and finished no
+      bogo op within the small targets' budget (0 in 30 s on qemu_riscv64
+      under icount, 80 in 32 s on qemu_cortex_a53). With the 512-byte minimum
+      it passes on both.
   - path: stress-ng/stress-ng-sigstop-pid-before-sigchld.patch
     sha256sum: 0c934338f9300ea52816d2232cb5b39b693c98e249804b68bf8e84f6fd50f869
     module: modules/lib/stress-ng
