@@ -5053,6 +5053,19 @@ patches:
       CPU has no SSE4.1 but did not return afterwards, so it went on into its
       movntdqa loop and took an invalid-opcode fault (qemu_x86_64's CPU model
       has no SSE4.1). The fallback now returns.
+  - path: stress-ng/stress-ng-memthrash-matrix-size-at-build-time.patch
+    sha256sum: 07c4b7a8103fb5bb0411511b8aaf8c5e4b3959ccdb2d0127da7ea07b490e4d8d
+    module: modules/lib/stress-ng
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-05
+    upstreamable: true
+    comments: |
+      memthrash's matrix is a compile-time size: 16K x 16K bytes, 256 MiB, which
+      no Zephyr target with a 24 MiB kernel address space (qemu_x86_64) can map;
+      the stressor retried the mmap until its time ran out and "did no work".
+      MATRIX_SIZE_MAX_SHIFT can now be set at build time; the Zephyr glue
+      builds a 4 MiB matrix under STRESS_NG_MINIMIZE (sizes 1 MiB and 4 MiB).
   - path: stress-ng/stress-ng-sigstop-pid-before-sigchld.patch
     sha256sum: 0c934338f9300ea52816d2232cb5b39b693c98e249804b68bf8e84f6fd50f869
     module: modules/lib/stress-ng
