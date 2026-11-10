@@ -4544,6 +4544,37 @@ patches:
       the inode it already fetches. Tested in tests/subsys/fs/tmpfs and
       tests/subsys/fs/ext2 (test_attributes), documented under Modes and
       owners.
+  - path: zephyr/zvfs-modes-owners-umask.patch
+    sha256sum: ee7ceb75f58f043c9b7946e49543e6ef5c674abd09f06a084bb43f3aa34fdd9f
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-06
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/fs-node-modes-and-owners.patch
+          - zephyr/zvfs-directory-descriptors-at-family.patch
+          - zephyr/zvfs-per-process-cwd.patch
+          - zephyr/zvfs-fifo.patch
+          - zephyr/zvfs-stat-identity.patch
+          - zephyr/zvfs-futime.patch
+    comments: |
+      zvfs: modes, owners and the file mode creation mask. struct zvfs_stat
+      gains uid and gid; stat and fstat report the file system's recorded
+      mode and fall back to the synthesised one only where there is none.
+      New syscalls zvfs_chmodat(), zvfs_fchmod(), zvfs_chownat() and
+      zvfs_fchown() (UINT32_MAX keeps an ID, resolved from the node's
+      owner; ZVFS_AT_SYMLINK_NOFOLLOW changes a link's owner and refuses a
+      link's mode with EOPNOTSUPP) over fs_chmod()/fs_chown()/fs_lchown()
+      and two ioctls on the file and directory objects. zvfs_umask() keeps
+      a per-process creation mask beside the working directory (022 at
+      boot, copied at clone, the boot mask for threads of no process);
+      zvfs_open(O_CREAT), zvfs_mkdir() and zvfs_mknod() withhold it from
+      the requested mode with one fs_chmod() when, and only when, they
+      created the node. ZVFS keeps no identity and enforces nothing. Tests
+      in tests/lib/zvfs_fs over a second, tmpfs mount; kernel and user mode.
   - path: zephyr/arm64-userspace-cache-maintenance.patch
     sha256sum: 2e42fc6bdc1fec89817fa1326b6d9ac8fe57cb5096b98a4201c9b175676babf7
     module: zephyr
