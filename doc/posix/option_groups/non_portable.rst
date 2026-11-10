@@ -15,6 +15,8 @@ Enable this option group with :kconfig:option:`CONFIG_POSIX_NON_PORTABLE`.
     :c:func:`pthread_setname_np`,yes
     :c:func:`pthread_timedjoin_np`,yes
     :c:func:`pthread_tryjoin_np`,yes
+    :c:func:`sched_getaffinity`,yes
+    :c:func:`sched_setaffinity`,yes
     :c:func:`wait3`,yes
     :c:func:`wait4`,yes
 

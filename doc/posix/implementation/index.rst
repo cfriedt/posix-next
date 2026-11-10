@@ -235,6 +235,11 @@ permission on the thread object.
   the full set and the setter accepts only that set, returning ``ENOTSUP`` for anything
   narrower; with :kconfig:option:`CONFIG_SCHED_CPU_MASK_PIN_ONLY` a set may name only one CPU
   and a runnable thread cannot be moved, matching the kernel's rules for that variant.
+- :c:func:`sched_setaffinity` and :c:func:`sched_getaffinity` take the same sets and follow the
+  same rules on the same kernel calls, for a thread named by ID: 0 is the calling thread, and a
+  process ID names the process's initial thread, as a thread ID does on Linux. Without
+  :kconfig:option:`CONFIG_SYS_PROCESS` only 0 names a thread (``ESRCH`` otherwise). Errors are
+  reported through ``errno``.
 
 Event file descriptors
 ----------------------
