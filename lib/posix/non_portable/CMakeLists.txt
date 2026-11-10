@@ -16,6 +16,6 @@ zephyr_library_compile_options(-D_GNU_SOURCE)
 zephyr_library_compile_options_ifdef(CONFIG_XSI -U_XOPEN_SOURCE -D_XOPEN_SOURCE=700)
 
 if(NOT CONFIG_TC_PROVIDES_POSIX_NON_PORTABLE)
-  zephyr_library_sources(pthread_np.c)
+  zephyr_library_sources(pthread_np.c sched_affinity.c)
   zephyr_library_sources_ifdef(CONFIG_POSIX_MULTI_PROCESS wait3.c wait4.c)
 endif()
