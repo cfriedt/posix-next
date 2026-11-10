@@ -1,0 +1,31 @@
+diff --git a/lib/libc/picolibc/include/signal.h b/lib/libc/picolibc/include/signal.h
+--- a/lib/libc/picolibc/include/signal.h
++++ b/lib/libc/picolibc/include/signal.h
+@@ -35,6 +35,9 @@
+ #define SIGRTMAX SIGRTMIN
+ #endif
+
++/* Picolibc numbers a SIGEMT that neither POSIX nor Linux defines and the kernel has no signal for */
++#undef SIGEMT
++
+ #ifndef _PID_T_DECLARED
+ typedef __pid_t pid_t;
+ #define _PID_T_DECLARED
+@@ -80,6 +83,17 @@ typedef __pid_t pid_t;
+ #if defined(_XOPEN_SOURCE) || defined(__DOXYGEN__)
+ #define TRAP_BRKPT 1
+ #define TRAP_TRACE 2
++
++/* the XSI signal interfaces picolibc does not declare */
++#ifndef SIG_HOLD
++#define SIG_HOLD ((void (*)(int))2)
++#endif
++int sighold(int sig);
++int sigignore(int sig);
++int siginterrupt(int sig, int flag);
++int sigpause(int sig);
++int sigrelse(int sig);
++void (*sigset(int sig, void (*disp)(int)))(int);
+ #endif
+
+ #if defined(_POSIX_THREADS) || defined(__DOXYGEN__)
