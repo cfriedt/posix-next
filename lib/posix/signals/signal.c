@@ -239,12 +239,16 @@ static void kinfo_to_siginfo(siginfo_t *dst, const struct k_sig_info *src, int s
 #endif
 #endif /* CONFIG_SIGNAL_FAULT */
 #ifdef CONFIG_PROCESS
-	/* identity handle -> numeric id; 0 if the child was already reaped */
-	dst->si_pid = (pid_t)MAX(sys_process_id(src->pid), 0);
+	/* the child's number as captured at generation: the child may be reaped by now */
+	dst->si_pid = (pid_t)src->child_id;
 	if (src->code == K_SI_CLD_EXITED) {
 		dst->si_status = K_WEXITSTATUS(src->status);
 	} else if (src->code == K_SI_CLD_KILLED) {
 		dst->si_status = z_sig_to_posix(K_WTERMSIG(src->status));
+	} else if (src->code == K_SI_CLD_STOPPED) {
+		dst->si_status = z_sig_to_posix(K_WSTOPSIG(src->status));
+	} else if (src->code == K_SI_CLD_CONTINUED) {
+		dst->si_status = SIGCONT;
 	}
 #endif /* CONFIG_PROCESS */
 }
@@ -299,6 +303,9 @@ static void posix_sig_disposition_get(const struct k_sig_action *koact, struct s
 	if ((koact->flags & K_SIG_SA_NODEFER) != 0) {
 		oact->sa_flags |= SA_NODEFER;
 	}
+	if ((koact->flags & K_SIG_SA_NOCLDSTOP) != 0) {
+		oact->sa_flags |= SA_NOCLDSTOP;
+	}
 }
 
 int sigaction(int sig, const struct sigaction *ZRESTRICT act, struct sigaction *ZRESTRICT oact)
@@ -337,6 +344,9 @@ int sigaction(int sig, const struct sigaction *ZRESTRICT act, struct sigaction *
 		}
 		if ((act->sa_flags & SA_NODEFER) != 0) {
 			kact.flags |= K_SIG_SA_NODEFER;
+		}
+		if ((act->sa_flags & SA_NOCLDSTOP) != 0) {
+			kact.flags |= K_SIG_SA_NOCLDSTOP;
 		}
 
 		kact.mask = *z_sig_set_from_posix(&act->sa_mask, &kmask_buf);
@@ -394,10 +404,18 @@ int sigpending(sigset_t *set)
  * Block until a signal has been delivered to a handler in the calling thread, detected by
  * sampling the thread's kernel delivery count against 'start'.
  */
+/* block until a signal is delivered: a wait that accepts nothing ends when one is due */
 static void posix_sig_wait_delivered(unsigned long start)
 {
+	struct k_sig_set none;
+
+	k_sig_emptyset(&none);
 	while (k_sig_delivered() == start) {
-		k_sleep(K_TICKS(1));
+		(void)k_sig_timedwait(&none, NULL, K_FOREVER);
+		if (!k_is_user_context() && (k_sig_delivered() == start)) {
+			/* a kernel-mode caller delivers on return from a sleep */
+			k_sleep(K_TICKS(1));
+		}
 	}
 }
 
