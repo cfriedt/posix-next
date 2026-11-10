@@ -248,7 +248,7 @@ defined only while all of them remain enabled.
          :widths: 50, 10, 50
 
           :ref:`POSIX_C_LANG_WIDE_CHAR <posix_option_group_c_lang_wide_char>`,,
-          :ref:`POSIX_DEVICE_SPECIFIC <posix_option_group_device_specific>`,,
+          :ref:`POSIX_DEVICE_SPECIFIC <posix_option_group_device_specific>`, yes, :kconfig:option:`CONFIG_POSIX_DEVICE_SPECIFIC`
           :ref:`POSIX_DEVICE_SPECIFIC_R <posix_option_group_device_specific_r>`,,
           :ref:`POSIX_DYNAMIC_LINKING <posix_option_group_dynamic_linking>`,,
           :ref:`POSIX_FIFO <posix_option_group_fifo>`, yes, :kconfig:option:`CONFIG_POSIX_FIFO`
