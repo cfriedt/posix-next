@@ -97,6 +97,10 @@ tests:
       - CONFIG_STRESS_NG_STRESSOR_STREAM=y
       - CONFIG_STRESS_NG_STRESSOR_TREE=y
       - CONFIG_STRESS_NG_STRESSOR_TSC=y
+  portability.posix.stress_ng.c_lang_wide_char:
+    timeout: 60
+    extra_configs:
+      - CONFIG_STRESS_NG_STRESSOR_WCS=y
   portability.posix.stress_ng.device_io:
     timeout: 80
     extra_configs:
@@ -510,6 +514,33 @@ tests:
       - CONFIG_STRESS_NG_STRESSOR_SOCKMANY=y
       - CONFIG_STRESS_NG_STRESSOR_SOCKPAIR=y
       - CONFIG_STRESS_NG_STRESSOR_UDP=y
+  portability.posix.stress_ng.non_portable.multi_process:
+    platform_exclude:
+      # every forked child needs the stressor-stack partition: no MPU slot left for it
+      - mps2/an385
+    filter: (not CONFIG_NATIVE_LIBC) and (CONFIG_ARCH_HAS_USERSPACE) and (CONFIG_ARCH_HAS_PROCESS_VM)
+    timeout: 80
+    extra_configs:
+      # fork(): a per-process address space and the arch current-thread lookup
+      - CONFIG_PROCESS_VM=y
+      - CONFIG_CURRENT_THREAD_USE_TLS=n
+      - CONFIG_SYS_PROCESS_MAX=32
+      # every live process holds a permission index: a byte covers eight
+      - CONFIG_MAX_PROCESS_BYTES=4
+      # and a thread index: eight static thread objects, then one per live process
+      - CONFIG_MAX_THREAD_BYTES=4
+      # and a number: three reserved processes, the test process, and every live child
+      - CONFIG_SYS_PROCESS_IDS=48
+      - platform:qemu_cortex_a53/qemu_cortex_a53:CONFIG_MAX_XLAT_TABLES=256
+      - platform:qemu_riscv64/qemu_virt_riscv64:CONFIG_MAX_XLAT_TABLES=640
+      # PROCESS_VM needs the kernel on the process's page tables (no KPTI); every
+      # forked child holds a memory domain
+      - platform:qemu_x86/atom:CONFIG_X86_KPTI=n
+      - platform:qemu_x86/atom:CONFIG_X86_MAX_ADDITIONAL_MEM_DOMAINS=16
+      - platform:qemu_x86_64/atom:CONFIG_X86_KPTI=n
+      - platform:qemu_x86_64/atom:CONFIG_X86_MAX_ADDITIONAL_MEM_DOMAINS=16
+      - CONFIG_STRESS_NG_STRESSOR_EVENTFD=y
+      - CONFIG_STRESS_NG_STRESSOR_YIELD=y
   portability.posix.stress_ng.pipe.anon_pages:
     filter: (not CONFIG_NATIVE_LIBC) and (CONFIG_ARCH_HAS_USERSPACE) and (CONFIG_MMU)
     timeout: 80
