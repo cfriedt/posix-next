@@ -5,6 +5,7 @@
 
 #include <errno.h>
 #include <netinet/in.h>
+#include <signal.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -94,6 +95,49 @@ ZTEST_USER(posix_networking, test_connect)
 	close(lsock);
 }
 
+static void socket_signal_handler(int sig)
+{
+	ARG_UNUSED(sig);
+}
+
+/* a caught SIGALRM in about a second */
+static void socket_alarm_arm(void)
+{
+	struct sigaction act = {.sa_handler = socket_signal_handler};
+	sigset_t set;
+
+	zassert_ok(sigemptyset(&set));
+	zassert_ok(sigaddset(&set, SIGALRM));
+	zassert_ok(sigprocmask(SIG_UNBLOCK, &set, NULL));
+	zassert_ok(sigaction(SIGALRM, &act, NULL));
+	zassert_equal(alarm(1), 0);
+}
+
+static void socket_alarm_disarm(void)
+{
+	struct sigaction act = {.sa_handler = SIG_DFL};
+	sigset_t set;
+
+	zassert_equal(alarm(0), 0);
+	zassert_ok(sigaction(SIGALRM, &act, NULL));
+	zassert_ok(sigemptyset(&set));
+	zassert_ok(sigaddset(&set, SIGALRM));
+	zassert_ok(sigprocmask(SIG_BLOCK, &set, NULL));
+}
+
+static void accept_interrupted(void)
+{
+	uint16_t port;
+	int lsock = tcp_listen_socket(&port);
+
+	/* no client comes: the caught signal ends the wait */
+	socket_alarm_arm();
+	zassert_equal(accept(lsock, NULL, NULL), -1);
+	zassert_equal(errno, EINTR);
+	socket_alarm_disarm();
+	close(lsock);
+}
+
 ZTEST_USER(posix_networking, test_accept)
 {
 	uint16_t port;
@@ -108,6 +152,11 @@ ZTEST_USER(posix_networking, test_accept)
 	close(asock);
 	close(csock);
 	close(lsock);
+
+	/* the host libc delivers a process-directed signal to any of the simulator's host threads */
+	if (!IS_ENABLED(CONFIG_NATIVE_LIBC)) {
+		accept_interrupted();
+	}
 }
 
 ZTEST_USER(posix_networking, test_send)
@@ -123,6 +172,25 @@ ZTEST_USER(posix_networking, test_send)
 	asock = accept(lsock, (struct sockaddr *)&peer, &peerlen);
 	sent = send(csock, TEST_MSG, strlen(TEST_MSG), 0);
 	zassert_equal(sent, strlen(TEST_MSG));
+	close(asock);
+	close(csock);
+	close(lsock);
+}
+
+static void recv_interrupted(void)
+{
+	uint16_t port;
+	int lsock = tcp_listen_socket(&port);
+	int csock = tcp_connect_socket(port);
+	int asock = accept(lsock, NULL, NULL);
+	char buf[16];
+
+	zassert_true(asock >= 0);
+	/* no data comes: the caught signal ends the wait */
+	socket_alarm_arm();
+	zassert_equal(recv(asock, buf, sizeof(buf), 0), -1);
+	zassert_equal(errno, EINTR);
+	socket_alarm_disarm();
 	close(asock);
 	close(csock);
 	close(lsock);
@@ -149,6 +217,11 @@ ZTEST_USER(posix_networking, test_recv)
 	close(asock);
 	close(csock);
 	close(lsock);
+
+	/* the host libc delivers a process-directed signal to any of the simulator's host threads */
+	if (!IS_ENABLED(CONFIG_NATIVE_LIBC)) {
+		recv_interrupted();
+	}
 }
 
 ZTEST_USER(posix_networking, test_shutdown)

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include <signal.h>
 #include <stdint.h>
 
 #include "message_passing_tests.h"
@@ -69,6 +70,39 @@ static void mq_receive_errors(void)
 	zassert_ok(mq_unlink(MQ_NAME));
 }
 
+/* re-armed: the first alarm may land before the wait it is meant to interrupt */
+static void mq_receive_signal_handler(int sig)
+{
+	ARG_UNUSED(sig);
+	(void)alarm(1);
+}
+
+static void mq_receive_interrupted(void)
+{
+	struct sigaction act = {.sa_handler = mq_receive_signal_handler};
+	char buf[MQ_MSG_SIZE];
+	sigset_t set;
+	mqd_t mqd = mq_test_open(0);
+
+	zassert_not_equal(mqd, (mqd_t)-1);
+
+	/* nothing is sent: the caught signal ends the wait */
+	zassert_ok(sigemptyset(&set));
+	zassert_ok(sigaddset(&set, SIGALRM));
+	zassert_ok(sigprocmask(SIG_UNBLOCK, &set, NULL));
+	zassert_ok(sigaction(SIGALRM, &act, NULL));
+	zassert_equal(alarm(1), 0);
+	zassert_equal(mq_receive(mqd, buf, sizeof(buf), NULL), -1);
+	zassert_equal(errno, EINTR);
+	zassert_true(alarm(0) <= 1);
+	act.sa_handler = SIG_DFL;
+	zassert_ok(sigaction(SIGALRM, &act, NULL));
+	zassert_ok(sigprocmask(SIG_BLOCK, &set, NULL));
+
+	zassert_ok(mq_close(mqd));
+	zassert_ok(mq_unlink(MQ_NAME));
+}
+
 ZTEST_USER(posix_message_passing, test_mq_receive)
 {
 	mq_receive_reports_length_and_priority();
@@ -77,4 +111,9 @@ ZTEST_USER(posix_message_passing, test_mq_receive)
 	mq_test_section_reset();
 	mq_receive_errors();
 	mq_test_section_reset();
+	/* the host libc delivers a process-directed signal to any of the simulator's host threads */
+	if (!IS_ENABLED(CONFIG_NATIVE_LIBC)) {
+		mq_receive_interrupted();
+		mq_test_section_reset();
+	}
 }
