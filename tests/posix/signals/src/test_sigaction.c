@@ -124,6 +124,13 @@ ZTEST_USER(posix_signals, test_sigaction)
 	zassert_equal(SIG_DFL, oact.sa_handler);
 	test_signals_reset(SIGVTALRM);
 
+	/* a signal nothing on this system generates still takes a handler: editors install one */
+	act.sa_handler = test_signals_handler;
+	zassert_ok(sigaction(SIGWINCH, &act, NULL));
+	zassert_ok(sigaction(SIGWINCH, NULL, &oact));
+	zassert_equal(test_signals_handler, oact.sa_handler);
+	test_signals_reset(SIGWINCH);
+
 	act.sa_handler = test_signals_handler;
 	zassert_ok(sigaction(SIGUSR1, &act, NULL));
 
