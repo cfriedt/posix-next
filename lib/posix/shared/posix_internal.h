@@ -313,7 +313,6 @@ struct posix_atfork {
  * process with C library state of its own carries a block in a slot there.
  */
 struct posix_process_attr {
-	mode_t cmask;
 	atomic_t atfork_count;
 	struct posix_atfork atfork[MAX(POSIX_THREAD_ATFORK_MAX, 1)];
 };

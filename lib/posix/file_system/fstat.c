@@ -32,6 +32,8 @@ int fstat(int fildes, struct stat *buf)
 	buf->st_ino = zs.ino;
 	buf->st_mode = zs.mode;
 	buf->st_nlink = zs.nlink;
+	buf->st_uid = zs.uid;
+	buf->st_gid = zs.gid;
 #if defined(_XOPEN_SOURCE)
 	buf->st_blksize = zs.blksize;
 	buf->st_blocks = zs.blocks;
