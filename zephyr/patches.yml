@@ -4894,3 +4894,27 @@ patches:
       k_kill_pgrp() with signal 0 counted a member whose wake-up the queue call never filled
       in, and z_sig_wake() ran on uninitialized stack. Signal 0 now only checks the group,
       as k_kill_all() does.
+  - path: zephyr/zvfs-sync-flushes-every-open-file.patch
+    sha256sum: fc195f5f609a303f4585faf818d929644a2449716f438ca55bcf84baa678e8d7
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-06
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/zvfs-fdtable-use-k-obj-file.patch
+          - zephyr/zvfs-userspace-tests.patch
+    comments: |
+      The file system layer synchronizes one open file at a time (fs_sync()),
+      exposed as zvfs_fsync(fd); nothing flushed the system as a whole, which
+      sync() needs. zvfs_sync() walks the system-wide table of open file
+      descriptions and issues ZFD_IOCTL_FSYNC to each under the description's
+      lock - the lock zvfs_close() holds while it closes the object - so a
+      file is either flushed or already closed. Only regular files are
+      visited: a description of another kind has nothing to flush, and a
+      pipe or socket read holds its lock for as long as it waits (a forked
+      child blocked on its status pipe would stall the parent's sync()). The
+      caller's errno is preserved. tests/lib/zvfs_fs: a buffered write to a
+      FAT file is reported by stat only after the sync.
