@@ -1,0 +1,114 @@
+diff --git a/include/zephyr/kernel/process.h b/include/zephyr/kernel/process.h
+--- a/include/zephyr/kernel/process.h
++++ b/include/zephyr/kernel/process.h
+@@ -303,6 +303,10 @@ struct k_process {
+ 	/** Argument block staged for the leader (system layer), until consumed */
+ 	void *args;
+ #endif /* CONFIG_SYS_PROCESS */
++#ifdef CONFIG_KCL
++	/** Compatibility-layer state of the process (system layer), or NULL */
++	void *compat;
++#endif /* CONFIG_KCL */
+ #ifdef CONFIG_SYS_PROCESS_EXEC
+ 	/** Loaded extension backing the process image (system layer), or NULL */
+ 	void *image;
+diff --git a/kernel/include/kernel_internal.h b/kernel/include/kernel_internal.h
+--- a/kernel/include/kernel_internal.h
++++ b/kernel/include/kernel_internal.h
+@@ -284,6 +284,30 @@ static inline void z_process_image_drop(struct k_process *proc)
+ 	ARG_UNUSED(proc);
+ }
+ #endif /* CONFIG_SYS_PROCESS_EXEC */
++
++struct sys_process_start;
++
++#ifdef CONFIG_KCL
++/* load a foreign-format image into a paused, argument-staged child (compatibility layer) */
++int z_kcl_exec_load(struct k_process *proc, k_tid_t leader, const char *path,
++		    struct sys_process_start *start);
++/* release the compatibility-layer state of a process being reaped */
++void z_kcl_process_drop(struct k_process *proc);
++#else
++static inline int z_kcl_exec_load(struct k_process *proc, k_tid_t leader, const char *path,
++				  struct sys_process_start *start)
++{
++	ARG_UNUSED(proc);
++	ARG_UNUSED(leader);
++	ARG_UNUSED(path);
++	ARG_UNUSED(start);
++	return -ENOEXEC;
++}
++static inline void z_kcl_process_drop(struct k_process *proc)
++{
++	ARG_UNUSED(proc);
++}
++#endif /* CONFIG_KCL */
+ #endif /* CONFIG_PROCESS */
+ 
+ #ifdef CONFIG_USERSPACE
+diff --git a/kernel/process.c b/kernel/process.c
+--- a/kernel/process.c
++++ b/kernel/process.c
+@@ -371,6 +371,7 @@ static void process_free_locked(struct k_process *proc, bool sched_locked)
+ #endif /* CONFIG_USERSPACE */
+ 	z_process_args_drop(proc);
+ 	z_process_image_drop(proc);
++	z_kcl_process_drop(proc);
+ 	z_process_domain_drop(proc);
+ 	z_process_fds_drop(proc);
+ 	proc->state = K_PROCESS_UNUSED;
+diff --git a/lib/os/process.c b/lib/os/process.c
+--- a/lib/os/process.c
++++ b/lib/os/process.c
+@@ -1768,6 +1768,33 @@ static struct k_mem_domain *process_next_domain(struct k_process *proc)
+ }
+ #endif /* CONFIG_USERSPACE */
+ 
++#ifdef CONFIG_KCL
++/* the ELF type of an image file, or a negative error */
++static int exec_image_type(const char *path)
++{
++	struct fs_file_t f;
++	elf_ehdr_t ehdr;
++	ssize_t n;
++	int ret;
++
++	fs_file_t_init(&f);
++	ret = fs_open(&f, path, FS_O_READ);
++	if (ret < 0) {
++		return ret;
++	}
++	n = fs_read(&f, &ehdr, sizeof(ehdr));
++	(void)fs_close(&f);
++	if (n != (ssize_t)sizeof(ehdr)) {
++		return -ENOEXEC;
++	}
++	if (memcmp(ehdr.e_ident, "\177ELF", 4) != 0) {
++		return -ENOEXEC;
++	}
++
++	return ehdr.e_type;
++}
++#endif /* CONFIG_KCL */
++
+ int z_impl_sys_exec_load(k_pid_t child, const char *path)
+ {
+ 	static atomic_t exec_instance;
+@@ -1816,6 +1843,17 @@ int z_impl_sys_exec_load(k_pid_t child, const char *path)
+ 	/* images of already-reaped processes give their memory back first */
+ 	image_graveyard_drain();
+ 
++#ifdef CONFIG_KCL
++	ret = exec_image_type(path);
++	if (ret < 0) {
++		return (ret == -ENOEXEC) ? -ENOEXEC : -ENOENT;
++	}
++	if (ret != ET_REL) {
++		/* an executable of another kernel's format: only into a fresh child for now */
++		return (blk == NULL) ? -ENOEXEC : z_kcl_exec_load(proc, child, path, &blk->start);
++	}
++#endif /* CONFIG_KCL */
++
+ #if defined(CONFIG_USERSPACE) && (CONFIG_SYS_PROCESS_STATE_AREA > 0)
+ 	if ((child->base.user_options & K_USER) != 0U) {
+ 		/* a user-mode image process owns its C library state */
