@@ -46,8 +46,12 @@ static inline int wstatus_to_posix(int kws)
  * handle may already name a running process, returning -EAGAIN from the
  * targeted no-wait reap); loop when that happens.
  */
+/*
+ * One wait: peek with WNOWAIT, read the child's cycles if asked (its own and its reaped
+ * children's, as a zombie keeps them until the reap), then consume the report.
+ */
 static inline int posix_wait_common(k_pid_t child, k_pgrp_t grp, bool by_grp, pid_t *num_out,
-				    int *kws_out, int options)
+				    int *kws_out, int options, uint64_t *cycles)
 {
 	int ret;
 	int kws;
@@ -69,6 +73,13 @@ static inline int posix_wait_common(k_pid_t child, k_pgrp_t grp, bool by_grp, pi
 
 		*num_out = (pid_t)sys_process_id(reaped);
 		*kws_out = kws;
+		if (cycles != NULL) {
+			uint64_t s = 0;
+			uint64_t c = 0;
+
+			(void)k_process_cpu_stats(reaped, &s, &c);
+			*cycles = s + c;
+		}
 
 		if ((options & K_PROCESS_WNOWAIT) != 0) {
 			return 0;
@@ -93,6 +104,34 @@ static inline int posix_wait_common(k_pid_t child, k_pgrp_t grp, bool by_grp, pi
 			return 0;
 		}
 		/* stolen by a concurrent waiter: go around again */
+	}
+}
+
+/* waitpid()'s selector: a child, any child (-1), the caller's group (0), a group (< -1) */
+static inline int posix_wait_dispatch(pid_t pid, pid_t *num_out, int *kws_out, int options,
+				      uint64_t *cycles)
+{
+	if (pid == -1) {
+		return posix_wait_common(NULL, NULL, false, num_out, kws_out, options, cycles);
+	}
+	if (pid == 0) {
+		return posix_wait_common(NULL, NULL, true, num_out, kws_out, options, cycles);
+	}
+	if (pid < -1) {
+		k_pgrp_t grp = sys_pgrp_find((int)-pid);
+
+		if (grp == NULL) {
+			return -ECHILD;
+		}
+		return posix_wait_common(NULL, grp, true, num_out, kws_out, options, cycles);
+	}
+	{
+		k_pid_t child = sys_process_find((int)pid);
+
+		if (child == NULL) {
+			return -ECHILD;
+		}
+		return posix_wait_common(child, NULL, false, num_out, kws_out, options, cycles);
 	}
 }
 
