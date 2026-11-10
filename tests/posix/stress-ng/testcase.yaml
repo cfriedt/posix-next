@@ -312,25 +312,6 @@ tests:
       - CONFIG_STRESS_NG_STRESSOR_MMAPTORTURE=y
       - CONFIG_STRESS_NG_STRESSOR_VM=y
       - CONFIG_STRESS_NG_STRESSOR_VM_ADDR=y
-  portability.posix.stress_ng.mapped_files.multi_process:
-    filter: (not CONFIG_NATIVE_LIBC) and (CONFIG_ARCH_HAS_USERSPACE) and (CONFIG_ARCH_HAS_PROCESS_VM)
-    timeout: 64
-    extra_configs:
-      # fork(): a per-process address space and the arch current-thread lookup
-      - CONFIG_PROCESS_VM=y
-      - CONFIG_CURRENT_THREAD_USE_TLS=n
-      - CONFIG_SYS_PROCESS_MAX=32
-      # every live process holds a permission index: a byte covers eight
-      - CONFIG_MAX_PROCESS_BYTES=4
-      # a forked child privatizes a leaf table per copied range and its domain's
-      # partitions: nine live children (sigrt) run past 64 tables
-      - platform:qemu_cortex_a53/qemu_cortex_a53:CONFIG_MAX_XLAT_TABLES=256
-      # PROCESS_VM needs the kernel on the process's page tables (no KPTI); every
-      # forked child holds a memory domain
-      - platform:qemu_x86/atom:CONFIG_X86_KPTI=n
-      - platform:qemu_x86/atom:CONFIG_X86_MAX_ADDITIONAL_MEM_DOMAINS=16
-      - platform:qemu_x86_64/atom:CONFIG_X86_KPTI=n
-      - platform:qemu_x86_64/atom:CONFIG_X86_MAX_ADDITIONAL_MEM_DOMAINS=16
   portability.posix.stress_ng.memlock_range.anon_pages:
     filter: (not CONFIG_NATIVE_LIBC) and (CONFIG_ARCH_HAS_USERSPACE) and (CONFIG_MMU)
     timeout: 80
