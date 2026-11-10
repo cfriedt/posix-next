@@ -443,6 +443,8 @@ EXPORT_SYMBOL(pthread_setaffinity_np);
 EXPORT_SYMBOL(pthread_setname_np);
 EXPORT_SYMBOL(pthread_timedjoin_np);
 EXPORT_SYMBOL(pthread_tryjoin_np);
+EXPORT_SYMBOL(sched_getaffinity);
+EXPORT_SYMBOL(sched_setaffinity);
 #ifdef CONFIG_POSIX_MULTI_PROCESS
 EXPORT_SYMBOL(wait3);
 EXPORT_SYMBOL(wait4);

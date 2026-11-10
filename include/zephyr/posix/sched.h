@@ -149,6 +149,39 @@ int sched_setscheduler(pid_t pid, int policy, const struct sched_param *param);
  */
 int sched_rr_get_interval(pid_t pid, struct timespec *interval);
 
+#if defined(_GNU_SOURCE) || defined(__DOXYGEN__)
+/**
+ * @brief Get the set of CPUs a thread may run on (GNU extension).
+ * @ingroup posix_option_group_non_portable
+ * @param pid        Thread ID (0 = calling thread); a process ID names the process's leader.
+ * @param cpusetsize Size of @p mask in bytes, at least @c sizeof(cpu_set_t).
+ * @param mask       Output: the CPUs the thread may run on.
+ * @retval 0 on success.
+ * @retval -1 with errno EFAULT (@p mask is NULL), EINVAL (@p cpusetsize is too small) or
+ *         ESRCH (no such thread).
+ * @see https://man7.org/linux/man-pages/man2/sched_getaffinity.2.html
+ */
+int sched_getaffinity(pid_t pid, size_t cpusetsize, cpu_set_t *mask);
+
+/**
+ * @brief Set the CPUs a thread may run on (GNU extension).
+ * @ingroup posix_option_group_non_portable
+ *
+ * CPUs in @p mask that do not exist are ignored; at least one existing CPU must remain. Without
+ * CONFIG_SCHED_CPU_MASK only a set naming every CPU can be honored.
+ *
+ * @param pid        Thread ID (0 = calling thread); a process ID names the process's leader.
+ * @param cpusetsize Size of @p mask in bytes, at least @c sizeof(cpu_set_t).
+ * @param mask       The CPUs the thread may run on.
+ * @retval 0 on success.
+ * @retval -1 with errno EFAULT (@p mask is NULL), EINVAL (@p cpusetsize is too small or @p mask
+ *         names no existing CPU), ESRCH (no such thread) or ENOTSUP (the set cannot be honored in
+ *         this configuration).
+ * @see https://man7.org/linux/man-pages/man2/sched_setaffinity.2.html
+ */
+int sched_setaffinity(pid_t pid, size_t cpusetsize, const cpu_set_t *mask);
+#endif /* _GNU_SOURCE || __DOXYGEN__ */
+
 #ifdef __cplusplus
 }
 #endif
