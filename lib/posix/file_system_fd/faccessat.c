@@ -3,11 +3,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include <fcntl.h>
 #include <unistd.h>
 
-#include <zephyr/sys/zvfs_fs.h>
+#include "posix_access.h"
 
 int faccessat(int fd, const char *path, int amode, int flag)
 {
-	return zvfs_accessat(fd, path, amode, flag);
+	/* the real and effective identities are the same: AT_EACCESS changes nothing */
+	return posix_access_check(fd, path, amode, flag);
 }

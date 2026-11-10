@@ -22,6 +22,8 @@ int fstatat(int fd, const char *ZRESTRICT path, struct stat *ZRESTRICT buf, int 
 	buf->st_mode = zs.mode;
 	buf->st_size = zs.size;
 	buf->st_nlink = zs.nlink;
+	buf->st_uid = zs.uid;
+	buf->st_gid = zs.gid;
 #if defined(_XOPEN_SOURCE)
 	buf->st_blksize = zs.blksize;
 	buf->st_blocks = zs.blocks;
