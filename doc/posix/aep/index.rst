@@ -217,15 +217,100 @@ defined only while all of them remain enabled.
          verification, but is otherwise unimplemented. See :ref:`posix_sporadic_server` for
          additional information.
 
+   .. tab:: PSE54
+
+      .. raw:: html
+
+         <div class="figure align-center aep-diagram" data-aep-svg="aep-pse54.svg"
+              aria-label="Multi-Purpose Realtime System Profile (PSE54)">
+           <p class="caption"><span class="caption-text">Multi-Purpose Realtime System Profile (PSE54)</span></p>
+         </div>
+
+      .. _posix_aep_pse54:
+      .. _multi_purpose_realtime_system_profile_pse54:
+
+      The *Multi-Purpose Realtime System Profile* (PSE54) includes all features from PSE53, PSE52,
+      PSE51, and the :ref:`System Interfaces<posix_system_interfaces_required>`, and adds the
+      interactive, multi-user, and full file system features of the base standard: wide
+      characters, terminals, file attributes and symbolic links, regular expressions, and the
+      shell interfaces.
+
+      .. Conforming implementations shall define _POSIX_AEP_REALTIME_MULTI to the value 200312L
+
+      .. csv-table:: PSE54 System Interfaces
+         :header: Symbol, Support, Remarks
+         :widths: 50, 10, 50
+
+          _POSIX_AEP_REALTIME_MULTI, -1, :kconfig:option:`CONFIG_POSIX_AEP_REALTIME_MULTI` :ref:`†<posix_undefined_behaviour>`
+
+      .. csv-table:: PSE54 Option Groups
+         :header: Symbol, Support, Remarks
+         :widths: 50, 10, 50
+
+          :ref:`POSIX_C_LANG_WIDE_CHAR <posix_option_group_c_lang_wide_char>`, yes, :kconfig:option:`CONFIG_POSIX_C_LANG_WIDE_CHAR`
+          :ref:`POSIX_DEVICE_SPECIFIC <posix_option_group_device_specific>`, yes, :kconfig:option:`CONFIG_POSIX_DEVICE_SPECIFIC`
+          :ref:`POSIX_DEVICE_SPECIFIC_R <posix_option_group_device_specific_r>`, yes, :kconfig:option:`CONFIG_POSIX_DEVICE_SPECIFIC_R`
+          :ref:`POSIX_DYNAMIC_LINKING <posix_option_group_dynamic_linking>`,,
+          :ref:`POSIX_FIFO <posix_option_group_fifo>`, yes, :kconfig:option:`CONFIG_POSIX_FIFO`
+          :ref:`POSIX_FILE_ATTRIBUTES <posix_option_group_file_attributes>`, yes, :kconfig:option:`CONFIG_POSIX_FILE_ATTRIBUTES`
+          :ref:`POSIX_FILE_SYSTEM_EXT <posix_option_group_file_system_ext>`, yes, :kconfig:option:`CONFIG_POSIX_FILE_SYSTEM_EXT`
+          :ref:`POSIX_FILE_SYSTEM_GLOB <posix_option_group_file_system_glob>`, yes, :kconfig:option:`CONFIG_POSIX_FILE_SYSTEM_GLOB`
+          :ref:`POSIX_JOB_CONTROL <posix_option_group_job_control>`, yes, :kconfig:option:`CONFIG_POSIX_JOB_CONTROL`
+          :ref:`POSIX_REGEXP <posix_option_group_regexp>`, yes, :kconfig:option:`CONFIG_POSIX_REGEXP`
+          :ref:`POSIX_SHELL_FUNC <posix_option_group_shell_func>`, yes, :kconfig:option:`CONFIG_POSIX_SHELL_FUNC`
+          :ref:`POSIX_SYMBOLIC_LINKS <posix_option_group_symbolic_links>`, yes, :kconfig:option:`CONFIG_POSIX_SYMBOLIC_LINKS`
+          :ref:`POSIX_SYSTEM_DATABASE <posix_option_group_system_database>`, yes, :kconfig:option:`CONFIG_POSIX_SYSTEM_DATABASE`
+          :ref:`POSIX_SYSTEM_DATABASE_R <posix_option_group_system_database_r>`, yes, :kconfig:option:`CONFIG_POSIX_SYSTEM_DATABASE_R`
+          :ref:`POSIX_USER_GROUPS <posix_option_group_user_groups>`, yes, :kconfig:option:`CONFIG_POSIX_USER_GROUPS`
+          :ref:`POSIX_USER_GROUPS_R <posix_option_group_user_groups_r>`, yes, :kconfig:option:`CONFIG_POSIX_USER_GROUPS_R`
+          :ref:`POSIX_WIDE_CHAR_DEVICE_IO <posix_option_group_wide_char_device_io>`, yes,
+          :ref:`XSI_SYSTEM_LOGGING <posix_option_group_xsi_system_logging>`, yes, :kconfig:option:`CONFIG_XSI_SYSTEM_LOGGING`
+
+      .. csv-table:: PSE54 Option Requirements
+         :header: Symbol, Support, Remarks
+         :widths: 50, 10, 50
+
+          :ref:`_POSIX_ADVISORY_INFO <posix_option_advisory_info>`, 200809L, :kconfig:option:`CONFIG_POSIX_ADVISORY_INFO`
+          :ref:`_POSIX_CHOWN_RESTRICTED <posix_option_chown_restricted>`, 200809L,
+          :ref:`_POSIX_JOB_CONTROL <posix_option_job_control>`, 200809L, :kconfig:option:`CONFIG_POSIX_JOB_CONTROL`
+          :ref:`_POSIX_MONOTONIC_CLOCK <posix_option_monotonic_clock>`, 200809L, :kconfig:option:`CONFIG_POSIX_MONOTONIC_CLOCK`
+          :ref:`_POSIX_REGEXP <posix_option_group_regexp>`, 200809L, :kconfig:option:`CONFIG_POSIX_REGEXP`
+          :ref:`_POSIX_SAVED_IDS <posix_option_saved_ids>`, -1,
+          :ref:`_POSIX_SHELL <posix_option_shell>`, 200809L, :kconfig:option:`CONFIG_POSIX_SHELL_FUNC`
+          :ref:`_POSIX_THREAD_PROCESS_SHARED <posix_option_thread_process_shared>`, 200809L, :kconfig:option:`CONFIG_POSIX_THREAD_PROCESS_SHARED`
+          :ref:`_POSIX_VDISABLE <posix_option_vdisable>`, 0,
+          :ref:`_POSIX2_C_DEV <posix_options_posix2>`, -1, :kconfig:option:`CONFIG_POSIX2_C_DEV`
+          :ref:`_POSIX2_CHAR_TERM <posix_options_posix2>`, -1, :kconfig:option:`CONFIG_POSIX2_CHAR_TERM`
+          :ref:`_POSIX2_FORT_RUN <posix_options_posix2>`, -1, :kconfig:option:`CONFIG_POSIX2_FORT_RUN`
+          :ref:`_POSIX2_SW_DEV <posix_options_posix2>`, -1, :kconfig:option:`CONFIG_POSIX2_SW_DEV`
+          :ref:`_POSIX2_UPE <posix_options_posix2>`, -1, :kconfig:option:`CONFIG_POSIX2_UPE`
+
+      .. note::
+         :kconfig:option:`CONFIG_POSIX_AEP_CHOICE_PSE54` enables every PSE54 constituent that
+         Zephyr provides, but ``_POSIX_AEP_REALTIME_MULTI`` is not advertised: PSE54 also
+         requires :ref:`POSIX_DYNAMIC_LINKING <posix_option_group_dynamic_linking>`,
+         ``_POSIX_SAVED_IDS`` and the Shell and Utilities volume (``_POSIX2_*`` above), none of
+         which are supported. The tables above list only what PSE54 adds beyond PSE53
+         (`IEEE 1003.13-2003`_, Tables 1-18 and 1-19), translated to the Option Groups and
+         Options of the current POSIX-1 standard. IEEE 1003.13's ``POSIX_EVENT_MGMT`` and
+         ``POSIX_STRING_MATCHING`` units map onto the modern
+         :ref:`POSIX_DEVICE_IO <posix_option_group_device_io>` and
+         :ref:`POSIX_C_LIB_EXT <posix_option_group_c_lib_ext>` /
+         :ref:`POSIX_FILE_SYSTEM_GLOB <posix_option_group_file_system_glob>` groups, and its
+         ``XSI_DYNAMIC_LINKING`` unit is the modern
+         :ref:`POSIX_DYNAMIC_LINKING <posix_option_group_dynamic_linking>` group. PSE54 also
+         requires the Shell and Utilities volume (``_POSIX2_*`` above), whose utilities a
+         separate provider module may :ref:`claim <posix_options_posix2>`, and the
+         ``_POSIX_TRACE``, ``_POSIX_TRACE_EVENT_FILTER`` and ``_POSIX_TRACE_LOG`` options, which
+         Issue 8 removed from the standard and which are not listed here
+         :ref:`†<posix_undefined_behaviour>`.
+
 
 .. note::
    In the *Option Groups* tables above, a blank Support cell with a Kconfig remark means the
    profile enables that :ref:`option group <posix_option_groups>` but it is not fully
    implemented. ``yes`` means the group is considered fully supported. See each group page
    for per-API detail.
-
-.. note::
-   PSE54 is not considered at this time.
 
 .. _IEEE 1003.1-2017: https://standards.ieee.org/ieee/1003.1/7101/
 .. _IEEE 1003.13-2003: https://standards.ieee.org/ieee/1003.13/3322/

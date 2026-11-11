@@ -51,7 +51,7 @@ module that serves as a staging tree for upstream POSIX API features. It tracks 
 Key goals:
 
 - **Portability** — run POSIX applications on Zephyr with minimal changes.
-- **Conformance** — track the full POSIX option groups and work toward PSE51/52/53 profiles.
+- **Conformance** — track the full POSIX option groups and work toward the PSE51/52/53/54 profiles.
 - **Linux parity** — validate behavior against Linux using `native_sim` and real hardware.
 
 ## Documentation

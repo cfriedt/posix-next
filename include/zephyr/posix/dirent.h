@@ -65,7 +65,7 @@ struct dirent {
 #if (_POSIX_C_SOURCE >= 200809L) || (_XOPEN_SOURCE >= 700)
 /**
  * @brief Compare two directory entries alphabetically (for use with scandir()).
- * @ingroup posix_option_group_file_system
+ * @ingroup posix_option_group_file_system_ext
  * @param d1 First directory entry.
  * @param d2 Second directory entry.
  * @return Negative, zero, or positive per strcmp() semantics.
@@ -86,7 +86,7 @@ int closedir(DIR *dirp);
 #if (_POSIX_C_SOURCE >= 200809L) || (_XOPEN_SOURCE >= 700)
 /**
  * @brief Get the file descriptor for an open directory stream.
- * @ingroup posix_option_group_file_system
+ * @ingroup posix_option_group_file_system_ext
  * @param dirp Directory stream.
  * @return File descriptor on success, or -1 with errno set on failure.
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/dirfd.html
@@ -145,7 +145,7 @@ void rewinddir(DIR *dirp);
 #if (_POSIX_C_SOURCE >= 200809L) || (_XOPEN_SOURCE >= 700)
 /**
  * @brief Scan a directory, optionally filtering and sorting the entries.
- * @ingroup posix_option_group_file_system
+ * @ingroup posix_option_group_file_system_ext
  * @param dir      Path to the directory.
  * @param namelist Output: allocated array of directory entry pointers.
  * @param sel      Filter function, or NULL to include all entries.
@@ -160,7 +160,7 @@ int scandir(const char *dir, struct dirent ***namelist, int (*sel)(const struct 
 #if defined(_XOPEN_SOURCE)
 /**
  * @brief Set the position of a directory stream (XSI extension).
- * @ingroup posix_option_group_file_system
+ * @ingroup posix_option_group_xsi_file_system
  * @param dirp Directory stream.
  * @param loc  Position value from telldir().
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/seekdir.html
@@ -169,7 +169,7 @@ void seekdir(DIR *dirp, long loc);
 
 /**
  * @brief Get the current position of a directory stream (XSI extension).
- * @ingroup posix_option_group_file_system
+ * @ingroup posix_option_group_xsi_file_system
  * @param dirp Directory stream.
  * @return Current position value, or -1 on failure.
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/telldir.html

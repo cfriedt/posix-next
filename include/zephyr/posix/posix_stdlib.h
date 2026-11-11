@@ -21,6 +21,8 @@
 
 #include <stddef.h> /* NULL, size_t */
 
+#include <zephyr/toolchain.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -55,6 +57,18 @@ int getenv_r(const char *name, char *buf, size_t len);
  */
 int getsubopt(char **optionp, char *const *keylistp, char **valuep);
 
+#if (_POSIX_C_SOURCE >= 200809L) || defined(__DOXYGEN__)
+/**
+ * @brief Create a unique directory from a path template.
+ * @ingroup posix_option_group_file_system_ext
+ * @param template Path template whose final six characters are "XXXXXX",
+ *                 replaced in place with the generated name.
+ * @return @p template on success, or NULL with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/mkdtemp.html
+ */
+char *mkdtemp(char *template);
+#endif
+
 #if (_POSIX_C_SOURCE >= 200112L) || defined(__DOXYGEN__)
 /**
  * @brief Create a unique regular file and open it for reading and writing.
@@ -65,6 +79,41 @@ int getsubopt(char **optionp, char *const *keylistp, char **valuep);
  * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/mkstemp.html
  */
 int mkstemp(char *template);
+#endif
+
+#if defined(_XOPEN_SOURCE) || defined(__DOXYGEN__)
+/**
+ * @brief Resolve a pathname to an absolute pathname without dot, dot-dot or symbolic links.
+ * @ingroup posix_option_group_xsi_file_system
+ * @param file_name Pathname to resolve.
+ * @param resolved_name Buffer of at least PATH_MAX bytes, or NULL to have one allocated.
+ * @return @p resolved_name or the allocated buffer, or NULL with errno set on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/realpath.html
+ */
+char *realpath(const char *ZRESTRICT file_name, char *ZRESTRICT resolved_name);
+#endif
+
+/**
+ * @brief Execute a shell command.
+ * @ingroup posix_option_group_shell_func
+ * @param command The command line for "sh -c", or NULL to ask whether a shell exists.
+ * @return The wait status of the shell, -1 with errno set on failure, or, for a NULL
+ *         command, nonzero when a shell is available.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/system.html
+ */
+int system(const char *command);
+
+#if defined(_POSIX_ADVISORY_INFO) || defined(__DOXYGEN__)
+/**
+ * @brief Allocate aligned memory.
+ * @ingroup posix_option_advisory_info
+ * @param memptr    Receives the allocated pointer.
+ * @param alignment Power of two that is a multiple of sizeof(void *).
+ * @param size      Bytes to allocate.
+ * @return 0 on success, or a positive error number on failure.
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/posix_memalign.html
+ */
+int posix_memalign(void **memptr, size_t alignment, size_t size);
 #endif
 #endif
 

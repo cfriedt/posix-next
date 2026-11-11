@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include <signal.h>
 #include <unistd.h>
 
 #include <zephyr/ztest.h>
@@ -27,9 +28,15 @@ static void waker_func(struct k_work *work)
 	struct k_work_delayable *dwork = k_work_delayable_from_work(work);
 
 	ww = CONTAINER_OF(dwork, struct waker_work, dwork);
-	k_wakeup(ww->tid);
+	/* a signal ends the sleep; a bare k_wakeup() does not */
+	(void)k_sig_queue((k_pid_t)ww->tid, K_SIG_USR1, (union k_sig_val){0});
 }
 K_WORK_DELAYABLE_DEFINE(waker, waker_func);
+
+static void sleep_signal_handler(int sig)
+{
+	ARG_UNUSED(sig);
+}
 
 ZTEST(posix_multi_process, test_sleep)
 {
@@ -56,12 +63,20 @@ ZTEST(posix_multi_process, test_sleep)
 	zassert_true((now - then) >= 2 * MSEC_PER_SEC);
 
 	if (!IS_ENABLED(CONFIG_NATIVE_LIBC)) {
-		/* test that sleep reports the remainder; k_wakeup() only interrupts a Zephyr
-		 * thread blocked in the Zephyr sleep() implementation
-		 */
+		struct sigaction act = {.sa_handler = sleep_signal_handler};
+		sigset_t set;
+
+		/* a caught signal ends the sleep early, which reports the seconds left */
+		zassert_ok(sigemptyset(&set));
+		zassert_ok(sigaddset(&set, SIGUSR1));
+		zassert_ok(sigprocmask(SIG_UNBLOCK, &set, NULL));
+		zassert_ok(sigaction(SIGUSR1, &act, NULL));
 		wake_work.tid = k_current_get();
 		k_work_init_delayable(&wake_work.dwork, waker_func);
 		zassert_equal(1, k_work_schedule(&wake_work.dwork, K_SECONDS(sleep_min_s)));
 		zassert_true(sleep(sleep_max_s) >= sleep_rem_s);
+		act.sa_handler = SIG_DFL;
+		zassert_ok(sigaction(SIGUSR1, &act, NULL));
+		zassert_ok(sigprocmask(SIG_BLOCK, &set, NULL));
 	}
 }

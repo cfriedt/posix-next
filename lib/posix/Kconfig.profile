@@ -15,8 +15,8 @@ config POSIX_API
 	select DEPRECATED
 	help
 	  This option is deprecated. Applications should select CONFIG_POSIX_AEP_CHOICE_BASE,
-	  CONFIG_POSIX_AEP_CHOICE_PSE51, CONFIG_POSIX_AEP_CHOICE_PSE52, or
-	  CONFIG_POSIX_AEP_CHOICE_PSE53. Libraries should depend on
+	  CONFIG_POSIX_AEP_CHOICE_PSE51, CONFIG_POSIX_AEP_CHOICE_PSE52, CONFIG_POSIX_AEP_CHOICE_PSE53,
+	  or CONFIG_POSIX_AEP_CHOICE_PSE54. Libraries should depend on
 	  CONFIG_POSIX_SYSTEM_INTERFACES and other POSIX Option Groups.
 
 choice POSIX_AEP_CHOICE
@@ -116,7 +116,26 @@ config POSIX_AEP_CHOICE_NETAPP
 	  networked applications that do not need process management. The networking interfaces
 	  are only enabled when CONFIG_NETWORKING is enabled.
 
-# TODO: PSE54: Multi-purpose Realtime System Profile
+config POSIX_AEP_CHOICE_PSE54
+	bool "Multi-Purpose Realtime System Profile (PSE54)"
+	imply POSIX_SYSTEM_INTERFACES
+	imply POSIX_AEP_REALTIME_MINIMAL
+	imply POSIX_AEP_REALTIME_CONTROLLER
+	imply POSIX_AEP_REALTIME_DEDICATED
+	imply POSIX_AEP_REALTIME_MULTI
+	help
+	  PSE54 includes POSIX Base Definitions, PSE51, PSE52, and PSE53, plus PSE54 delta:
+	  option groups POSIX_C_LANG_WIDE_CHAR, POSIX_DEVICE_SPECIFIC, POSIX_DEVICE_SPECIFIC_R,
+	  POSIX_FIFO, POSIX_FILE_ATTRIBUTES, POSIX_FILE_SYSTEM_EXT, POSIX_FILE_SYSTEM_GLOB,
+	  POSIX_JOB_CONTROL, POSIX_REGEXP, POSIX_SHELL_FUNC (where the configured file system
+	  and llext support allow it), POSIX_SYMBOLIC_LINKS, POSIX_SYSTEM_DATABASE,
+	  POSIX_SYSTEM_DATABASE_R, POSIX_USER_GROUPS, POSIX_USER_GROUPS_R,
+	  XSI_SYSTEM_LOGGING (and therefore XSI); and options
+	  _POSIX_ADVISORY_INFO and _POSIX_THREAD_PROCESS_SHARED.
+
+	  PSE54 also requires POSIX_DYNAMIC_LINKING, _POSIX_SAVED_IDS and the Shell and
+	  Utilities volume (_POSIX2_*), none of which Zephyr provides, so the profile enables
+	  every constituent it can but _POSIX_AEP_REALTIME_MULTI is not advertised.
 
 endchoice # POSIX_AEP_CHOICE
 
@@ -229,5 +248,38 @@ config POSIX_AEP_REALTIME_DEDICATED
 	  (where the configured C library supports it), _POSIX_CPUTIME,
 	  _POSIX_PRIORITY_SCHEDULING, _POSIX_RAW_SOCKETS, _POSIX_SPAWN, and
 	  _POSIX_SPORADIC_SERVER.
+
+# This profile builds on top of POSIX_AEP_REALTIME_DEDICATED
+config POSIX_AEP_REALTIME_MULTI
+	bool
+	# Option Groups
+	imply POSIX_C_LANG_WIDE_CHAR
+	imply POSIX_DEVICE_SPECIFIC
+	imply POSIX_DEVICE_SPECIFIC_R
+	# POSIX_DYNAMIC_LINKING is not supported
+	imply POSIX_FIFO
+	imply POSIX_FILE_ATTRIBUTES
+	imply POSIX_FILE_SYSTEM_EXT
+	imply POSIX_FILE_SYSTEM_GLOB
+	imply POSIX_JOB_CONTROL
+	imply POSIX_REGEXP
+	imply POSIX_SHELL_FUNC
+	imply POSIX_SYMBOLIC_LINKS
+	imply POSIX_SYSTEM_DATABASE
+	imply POSIX_SYSTEM_DATABASE_R
+	imply POSIX_USER_GROUPS
+	imply POSIX_USER_GROUPS_R
+	# POSIX_WIDE_CHAR_DEVICE_IO is provided by the configured C library
+	imply XSI
+	imply XSI_SYSTEM_LOGGING
+	# Options
+	imply POSIX_ADVISORY_INFO
+	# _POSIX_CHOWN_RESTRICTED and _POSIX_VDISABLE are always defined
+	# _POSIX_JOB_CONTROL and _POSIX_SHELL follow from the option groups above
+	# _POSIX_SAVED_IDS and the Shell and Utilities volume are not supported
+	help
+	  Internal PSE54 profile (POSIX_AEP_CHOICE_PSE54). Inherits PSE53 and adds the
+	  interactive, multi-user and full file system option groups listed in the choice
+	  help for POSIX_AEP_CHOICE_PSE54.
 
 endif # POSIX_SYSTEM_INTERFACES

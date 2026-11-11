@@ -38,6 +38,7 @@ POSIX System Interfaces
     :ref:`_POSIX_MEMORY_PROTECTION<posix_option_memory_protection>`, 200809L, :kconfig:option:`CONFIG_POSIX_MEMORY_PROTECTION`
     :ref:`_POSIX_READER_WRITER_LOCKS<posix_option_reader_writer_locks>`, 200809L, :kconfig:option:`CONFIG_POSIX_RW_LOCKS`
     :ref:`_POSIX_REALTIME_SIGNALS<posix_option_realtime_signals>`, 200809L, :kconfig:option:`CONFIG_POSIX_REALTIME_SIGNALS`
+    :ref:`_POSIX_REGEXP<posix_option_group_regexp>`, 200809L, :kconfig:option:`CONFIG_POSIX_REGEXP`
     :ref:`_POSIX_SEMAPHORES<posix_option_semaphores>`, 200809L, :kconfig:option:`CONFIG_POSIX_SEMAPHORES`
     :ref:`_POSIX_SPIN_LOCKS<posix_option_spin_locks>`, 200809L, :kconfig:option:`CONFIG_POSIX_SPIN_LOCKS`
     :ref:`_POSIX_THREAD_SAFE_FUNCTIONS<posix_option_thread_safe_functions>`, 200809L, :kconfig:option:`CONFIG_POSIX_C_LANG_SUPPORT_R` or :kconfig:option:`CONFIG_POSIX_FILE_SYSTEM_R` or :kconfig:option:`CONFIG_POSIX_FILE_LOCKING` or :kconfig:option:`CONFIG_POSIX_SYSTEM_DATABASE_R`
@@ -54,15 +55,14 @@ POSIX System Interfaces
    :widths: 50, 10, 50
 
     _POSIX_JOB_CONTROL, -1, :ref:`†<posix_undefined_behaviour>`
-    _POSIX_REGEXP, -1, :ref:`†<posix_undefined_behaviour>`
     _POSIX_SAVED_IDS, -1, :ref:`†<posix_undefined_behaviour>`
-    _POSIX_SHELL, -1, :ref:`†<posix_undefined_behaviour>`
+    :ref:`_POSIX_SHELL<posix_option_shell>`, 200809L, :kconfig:option:`CONFIG_POSIX_SHELL_FUNC`
 
 .. csv-table:: POSIX System Interfaces (Optional)
    :header: Symbol, Support, Remarks
    :widths: 50, 10, 50
 
-    _POSIX_ADVISORY_INFO, -1,
+    :ref:`_POSIX_ADVISORY_INFO<posix_option_advisory_info>`, 200809L, :kconfig:option:`CONFIG_POSIX_ADVISORY_INFO`
     :ref:`_POSIX_CPUTIME<posix_option_cputime>`, 200809L, :kconfig:option:`CONFIG_POSIX_CPUTIME`
     _POSIX_DEVICE_CONTROL, -1,
     :ref:`_POSIX_FSYNC<posix_option_fsync>`, 200809L, :kconfig:option:`CONFIG_POSIX_FSYNC`
@@ -103,24 +103,27 @@ POSIX System Interfaces
 POSIX Shell and Utilities
 =========================
 
-Zephyr does not support a POSIX shell or utilities at this time.
+The utilities are not part of Zephyr's POSIX support. A provider module with a complete,
+conforming utility set selects the :ref:`Shell and Utilities option symbols <posix_options_posix2>`
+and the option is then reported; none is claimed today.
 
 .. csv-table:: POSIX Shell and Utilities
    :header: Symbol, Support, Remarks
    :widths: 50, 10, 50
 
-    _POSIX2_C_DEV, -1, :ref:`†<posix_undefined_behaviour>`
-    _POSIX2_CHAR_TERM, -1, :ref:`†<posix_undefined_behaviour>`
-    _POSIX2_FORT_DEV, -1, :ref:`†<posix_undefined_behaviour>`
-    _POSIX2_FORT_RUN, -1, :ref:`†<posix_undefined_behaviour>`
-    _POSIX2_LOCALEDEF, -1, :ref:`†<posix_undefined_behaviour>`
+    _POSIX2_VERSION, -1, :kconfig:option:`CONFIG_POSIX2_SHELL_UTILITIES` :ref:`†<posix_undefined_behaviour>`
+    _POSIX2_C_DEV, -1, :kconfig:option:`CONFIG_POSIX2_C_DEV` :ref:`†<posix_undefined_behaviour>`
+    _POSIX2_CHAR_TERM, -1, :kconfig:option:`CONFIG_POSIX2_CHAR_TERM` :ref:`†<posix_undefined_behaviour>`
+    _POSIX2_FORT_DEV, -1, :kconfig:option:`CONFIG_POSIX2_FORT_DEV` :ref:`†<posix_undefined_behaviour>`
+    _POSIX2_FORT_RUN, -1, :kconfig:option:`CONFIG_POSIX2_FORT_RUN` :ref:`†<posix_undefined_behaviour>`
+    _POSIX2_LOCALEDEF, -1, :kconfig:option:`CONFIG_POSIX2_LOCALEDEF` :ref:`†<posix_undefined_behaviour>`
     _POSIX2_PBS, -1, :ref:`†<posix_undefined_behaviour>`
     _POSIX2_PBS_ACCOUNTING, -1, :ref:`†<posix_undefined_behaviour>`
     _POSIX2_PBS_LOCATE, -1, :ref:`†<posix_undefined_behaviour>`
     _POSIX2_PBS_MESSAGE, -1, :ref:`†<posix_undefined_behaviour>`
     _POSIX2_PBS_TRACK, -1, :ref:`†<posix_undefined_behaviour>`
-    _POSIX2_SW_DEV, -1, :ref:`†<posix_undefined_behaviour>`
-    _POSIX2_UPE, -1, :ref:`†<posix_undefined_behaviour>`
+    _POSIX2_SW_DEV, -1, :kconfig:option:`CONFIG_POSIX2_SW_DEV` :ref:`†<posix_undefined_behaviour>`
+    _POSIX2_UPE, -1, :kconfig:option:`CONFIG_POSIX2_UPE` :ref:`†<posix_undefined_behaviour>`
     _POSIX2_UNIX, -1, :ref:`†<posix_undefined_behaviour>`
     _POSIX2_UUCP, -1, :ref:`†<posix_undefined_behaviour>`
 

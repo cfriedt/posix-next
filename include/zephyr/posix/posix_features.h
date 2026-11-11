@@ -66,6 +66,11 @@
 #endif
 
 /*
+ * _POSIX_AEP_REALTIME_MULTI (PSE54) is not advertised: it also requires POSIX_DYNAMIC_LINKING,
+ * _POSIX_SAVED_IDS and the Shell and Utilities volume (_POSIX2_*), which are not supported.
+ */
+
+/*
  * Subprofiling Considerations
  */
 #define _POSIX_SUBPROFILE 1
@@ -77,11 +82,16 @@
 #define _POSIX_VERSION 200809L
 
 #undef _POSIX_CHOWN_RESTRICTED
-#define _POSIX_CHOWN_RESTRICTED (0)
+#define _POSIX_CHOWN_RESTRICTED _POSIX_VERSION
 #undef _POSIX_NO_TRUNC
 #define _POSIX_NO_TRUNC (0)
+#undef _POSIX_VDISABLE
+#define _POSIX_VDISABLE ('\0')
 
-/* _POSIX_ADVISORY_INFO: not supported */
+#undef _POSIX_ADVISORY_INFO
+#ifdef CONFIG_POSIX_ADVISORY_INFO
+#define _POSIX_ADVISORY_INFO _POSIX_VERSION
+#endif
 
 #undef _POSIX_ASYNCHRONOUS_IO
 #ifdef CONFIG_POSIX_ASYNCHRONOUS_IO
@@ -113,7 +123,10 @@
 #define _POSIX_IPV6 _POSIX_VERSION
 #endif
 
-/* _POSIX_JOB_CONTROL: not supported */
+#undef _POSIX_JOB_CONTROL
+#ifdef CONFIG_POSIX_JOB_CONTROL
+#define _POSIX_JOB_CONTROL _POSIX_VERSION
+#endif
 
 #undef _POSIX_MAPPED_FILES
 #ifdef CONFIG_POSIX_MAPPED_FILES
@@ -174,7 +187,11 @@
 #define _POSIX_REALTIME_SIGNALS _POSIX_VERSION
 #endif
 
-/* _POSIX_REGEXP: not supported */
+#undef _POSIX_REGEXP
+#ifdef CONFIG_POSIX_REGEXP
+#define _POSIX_REGEXP _POSIX_VERSION
+#endif
+
 /* _POSIX_SAVED_IDS: not supported */
 
 #undef _POSIX_SEMAPHORES
@@ -187,7 +204,10 @@
 #define _POSIX_SHARED_MEMORY_OBJECTS _POSIX_VERSION
 #endif
 
-/* _POSIX_SHELL: not supported */
+#undef _POSIX_SHELL
+#ifdef CONFIG_POSIX_SHELL_FUNC
+#define _POSIX_SHELL _POSIX_VERSION
+#endif
 /* _POSIX_SPAWN: not supported */
 
 #undef _POSIX_SPIN_LOCKS
@@ -297,21 +317,52 @@
 /*
  * POSIX2 Options
  */
+#undef _POSIX2_VERSION
+#ifdef CONFIG_POSIX2_SHELL_UTILITIES
+#define _POSIX2_VERSION _POSIX_VERSION
+#endif
+
 #undef _POSIX2_C_BIND
 #define _POSIX2_C_BIND _POSIX_VERSION
-/* #define _POSIX2_C_DEV (-1) */
-/* #define _POSIX2_CHAR_TERM (-1L) */
-/* #define _POSIX2_FORT_DEV (-1L) */
-/* #define _POSIX2_FORT_RUN (-1L) */
-/* #define _POSIX2_LOCALEDEF (-1L) */
-/* #define _POSIX2_PBS (-1L) */
-/* #define _POSIX2_PBS_ACCOUNTING (-1L) */
-/* #define _POSIX2_PBS_CHECKPOINT (-1L) */
-/* #define _POSIX2_PBS_LOCATE (-1L) */
-/* #define _POSIX2_PBS_MESSAGE (-1L) */
-/* #define _POSIX2_PBS_TRACK (-1L) */
-/* #define _POSIX2_SW_DEV (-1L) */
-/* #define _POSIX2_UPE (-1L) */
+
+#undef _POSIX2_C_DEV
+#ifdef CONFIG_POSIX2_C_DEV
+#define _POSIX2_C_DEV _POSIX_VERSION
+#endif
+
+#undef _POSIX2_CHAR_TERM
+#ifdef CONFIG_POSIX2_CHAR_TERM
+#define _POSIX2_CHAR_TERM _POSIX_VERSION
+#endif
+
+#undef _POSIX2_FORT_DEV
+#ifdef CONFIG_POSIX2_FORT_DEV
+#define _POSIX2_FORT_DEV _POSIX_VERSION
+#endif
+
+#undef _POSIX2_FORT_RUN
+#ifdef CONFIG_POSIX2_FORT_RUN
+#define _POSIX2_FORT_RUN _POSIX_VERSION
+#endif
+
+#undef _POSIX2_LOCALEDEF
+#ifdef CONFIG_POSIX2_LOCALEDEF
+#define _POSIX2_LOCALEDEF _POSIX_VERSION
+#endif
+
+/* _POSIX2_PBS, _POSIX2_PBS_ACCOUNTING, _POSIX2_PBS_CHECKPOINT, _POSIX2_PBS_LOCATE,
+ * _POSIX2_PBS_MESSAGE, _POSIX2_PBS_TRACK: not supported
+ */
+
+#undef _POSIX2_SW_DEV
+#ifdef CONFIG_POSIX2_SW_DEV
+#define _POSIX2_SW_DEV _POSIX_VERSION
+#endif
+
+#undef _POSIX2_UPE
+#ifdef CONFIG_POSIX2_UPE
+#define _POSIX2_UPE _POSIX_VERSION
+#endif
 
 /*
  * X/Open System Interfaces

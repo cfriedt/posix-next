@@ -22,7 +22,9 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <fnmatch.h>
+#include <glob.h>
 #include <grp.h>
+#include <ifaddrs.h>
 #include <libgen.h>
 #include <limits.h>
 #include <locale.h>
@@ -34,6 +36,7 @@
 #include <poll.h>
 #include <pthread.h>
 #include <pwd.h>
+#include <regex.h>
 #include <sched.h>
 #include <semaphore.h>
 #include <setjmp.h>
@@ -55,10 +58,12 @@
 #include <sys/utsname.h>
 #include <sys/wait.h>
 #include <syslog.h>
+#include <termios.h>
 #include <time.h>
 #include <unistd.h>
 #include <utime.h>
 #include <wchar.h>
+#include <wordexp.h>
 #include <wctype.h>
 
 #include <zephyr/getopt.h>
@@ -72,6 +77,14 @@ int *__errno_location(void)
 }
 EXPORT_SYMBOL(__errno_location);
 
+
+/* ADVISORY_INFO */
+#ifdef CONFIG_POSIX_ADVISORY_INFO
+EXPORT_SYMBOL(posix_fadvise);
+EXPORT_SYMBOL(posix_fallocate);
+EXPORT_SYMBOL(posix_madvise);
+EXPORT_SYMBOL(posix_memalign);
+#endif /* CONFIG_POSIX_ADVISORY_INFO */
 
 /* BARRIERS */
 #ifdef CONFIG_POSIX_BARRIERS
@@ -164,6 +177,28 @@ EXPORT_SYMBOL(vscanf);
 EXPORT_SYMBOL(write);
 #endif /* CONFIG_POSIX_DEVICE_IO */
 
+/* DEVICE_SPECIFIC */
+#ifdef CONFIG_POSIX_DEVICE_SPECIFIC
+EXPORT_SYMBOL(cfgetispeed);
+EXPORT_SYMBOL(cfgetospeed);
+EXPORT_SYMBOL(cfsetispeed);
+EXPORT_SYMBOL(cfsetospeed);
+EXPORT_SYMBOL(ctermid);
+EXPORT_SYMBOL(isatty);
+EXPORT_SYMBOL(tcdrain);
+EXPORT_SYMBOL(tcflow);
+EXPORT_SYMBOL(tcflush);
+EXPORT_SYMBOL(tcgetattr);
+EXPORT_SYMBOL(tcsendbreak);
+EXPORT_SYMBOL(tcsetattr);
+EXPORT_SYMBOL(ttyname);
+#endif /* CONFIG_POSIX_DEVICE_SPECIFIC */
+
+/* DEVICE_SPECIFIC_R */
+#ifdef CONFIG_POSIX_DEVICE_SPECIFIC_R
+EXPORT_SYMBOL(ttyname_r);
+#endif /* CONFIG_POSIX_DEVICE_SPECIFIC_R */
+
 /* FD_MGMT */
 #ifdef CONFIG_POSIX_FD_MGMT
 EXPORT_SYMBOL(dup);
@@ -179,6 +214,32 @@ EXPORT_SYMBOL(ftruncate);
 EXPORT_SYMBOL(lseek);
 EXPORT_SYMBOL(rewind);
 #endif /* CONFIG_POSIX_FD_MGMT */
+
+/* FIFO */
+#ifdef CONFIG_POSIX_FIFO
+EXPORT_SYMBOL(mkfifo);
+#endif /* CONFIG_POSIX_FIFO */
+
+/* FIFO_FD */
+#ifdef CONFIG_POSIX_FIFO_FD
+EXPORT_SYMBOL(mkfifoat);
+EXPORT_SYMBOL(mknodat);
+#endif /* CONFIG_POSIX_FIFO_FD */
+
+/* FILE_ATTRIBUTES */
+#ifdef CONFIG_POSIX_FILE_ATTRIBUTES
+EXPORT_SYMBOL(chmod);
+EXPORT_SYMBOL(chown);
+EXPORT_SYMBOL(fchmod);
+EXPORT_SYMBOL(fchown);
+EXPORT_SYMBOL(umask);
+#endif /* CONFIG_POSIX_FILE_ATTRIBUTES */
+
+/* FILE_ATTRIBUTES_FD */
+#ifdef CONFIG_POSIX_FILE_ATTRIBUTES_FD
+EXPORT_SYMBOL(fchmodat);
+EXPORT_SYMBOL(fchownat);
+#endif /* CONFIG_POSIX_FILE_ATTRIBUTES_FD */
 
 /* FILE_LOCKING */
 #ifdef CONFIG_POSIX_FILE_LOCKING
@@ -222,10 +283,47 @@ EXPORT_SYMBOL(unlink);
 EXPORT_SYMBOL(utime);
 #endif /* CONFIG_POSIX_FILE_SYSTEM */
 
+/* FILE_SYSTEM_EXT */
+#ifdef CONFIG_POSIX_FILE_SYSTEM_EXT
+EXPORT_SYMBOL(alphasort);
+EXPORT_SYMBOL(dirfd);
+EXPORT_SYMBOL(getdelim);
+EXPORT_SYMBOL(getline);
+EXPORT_SYMBOL(mkdtemp);
+EXPORT_SYMBOL(scandir);
+#endif /* CONFIG_POSIX_FILE_SYSTEM_EXT */
+
+/* FILE_SYSTEM_FD */
+#ifdef CONFIG_POSIX_FILE_SYSTEM_FD
+EXPORT_SYMBOL(faccessat);
+EXPORT_SYMBOL(fdopendir);
+EXPORT_SYMBOL(fstatat);
+EXPORT_SYMBOL(linkat);
+EXPORT_SYMBOL(mkdirat);
+EXPORT_SYMBOL(openat);
+EXPORT_SYMBOL(renameat);
+EXPORT_SYMBOL(unlinkat);
+EXPORT_SYMBOL(utimensat);
+#endif /* CONFIG_POSIX_FILE_SYSTEM_FD */
+
+/* FILE_SYSTEM_GLOB */
+#ifdef CONFIG_POSIX_FILE_SYSTEM_GLOB
+EXPORT_SYMBOL(glob);
+EXPORT_SYMBOL(globfree);
+#endif /* CONFIG_POSIX_FILE_SYSTEM_GLOB */
+
 /* FILE_SYSTEM_R */
 #ifdef CONFIG_POSIX_FILE_SYSTEM_R
 EXPORT_SYMBOL(readdir_r);
 #endif /* CONFIG_POSIX_FILE_SYSTEM_R */
+
+/* JOB_CONTROL */
+#ifdef CONFIG_POSIX_JOB_CONTROL
+EXPORT_SYMBOL(setpgid);
+EXPORT_SYMBOL(tcgetpgrp);
+EXPORT_SYMBOL(tcgetsid);
+EXPORT_SYMBOL(tcsetpgrp);
+#endif /* CONFIG_POSIX_JOB_CONTROL */
 
 /* MAPPED_FILES */
 #ifdef CONFIG_POSIX_MAPPED_FILES
@@ -272,8 +370,10 @@ EXPORT_SYMBOL(endnetent);
 EXPORT_SYMBOL(endprotoent);
 EXPORT_SYMBOL(endservent);
 EXPORT_SYMBOL(freeaddrinfo);
+EXPORT_SYMBOL(freeifaddrs);
 EXPORT_SYMBOL(gai_strerror);
 EXPORT_SYMBOL(getaddrinfo);
+EXPORT_SYMBOL(getifaddrs); /* BSD extension, with freeifaddrs() above */
 EXPORT_SYMBOL(gethostent);
 EXPORT_SYMBOL(gethostname);
 EXPORT_SYMBOL(getnameinfo);
@@ -343,6 +443,14 @@ EXPORT_SYMBOL(sigtimedwait);
 EXPORT_SYMBOL(sigwaitinfo);
 #endif /* CONFIG_POSIX_REALTIME_SIGNALS */
 
+/* REGEXP */
+#ifdef CONFIG_POSIX_REGEXP
+EXPORT_SYMBOL(regcomp);
+EXPORT_SYMBOL(regerror);
+EXPORT_SYMBOL(regexec);
+EXPORT_SYMBOL(regfree);
+#endif /* CONFIG_POSIX_REGEXP */
+
 /* RW_LOCKS */
 #ifdef CONFIG_POSIX_RW_LOCKS
 EXPORT_SYMBOL(pthread_rwlock_destroy);
@@ -368,6 +476,15 @@ EXPORT_SYMBOL(sem_trywait);
 EXPORT_SYMBOL(sem_unlink);
 EXPORT_SYMBOL(sem_wait);
 #endif /* CONFIG_POSIX_SEMAPHORES */
+
+/* SHELL_FUNC */
+#ifdef CONFIG_POSIX_SHELL_FUNC
+EXPORT_SYMBOL(pclose);
+EXPORT_SYMBOL(popen);
+EXPORT_SYMBOL(system);
+EXPORT_SYMBOL(wordexp);
+EXPORT_SYMBOL(wordfree);
+#endif /* CONFIG_POSIX_SHELL_FUNC */
 
 /* SIGNAL_JUMP */
 #ifdef CONFIG_POSIX_SIGNAL_JUMP
@@ -419,6 +536,20 @@ EXPORT_SYMBOL(pthread_spin_lock);
 EXPORT_SYMBOL(pthread_spin_trylock);
 EXPORT_SYMBOL(pthread_spin_unlock);
 #endif /* CONFIG_POSIX_SPIN_LOCKS */
+
+/* SYMBOLIC_LINKS */
+#ifdef CONFIG_POSIX_SYMBOLIC_LINKS
+EXPORT_SYMBOL(lchown);
+EXPORT_SYMBOL(lstat);
+EXPORT_SYMBOL(readlink);
+EXPORT_SYMBOL(symlink);
+#endif /* CONFIG_POSIX_SYMBOLIC_LINKS */
+
+/* SYMBOLIC_LINKS_FD */
+#ifdef CONFIG_POSIX_SYMBOLIC_LINKS_FD
+EXPORT_SYMBOL(readlinkat);
+EXPORT_SYMBOL(symlinkat);
+#endif /* CONFIG_POSIX_SYMBOLIC_LINKS_FD */
 
 /* SYSTEM_DATABASE */
 #ifdef CONFIG_POSIX_SYSTEM_DATABASE
@@ -496,6 +627,25 @@ EXPORT_SYMBOL(pthread_rwlock_timedrdlock);
 EXPORT_SYMBOL(pthread_rwlock_timedwrlock);
 EXPORT_SYMBOL(sem_timedwait);
 #endif /* CONFIG_POSIX_TIMERS */
+
+/* USER_GROUPS */
+#ifdef CONFIG_POSIX_USER_GROUPS
+EXPORT_SYMBOL(getegid);
+EXPORT_SYMBOL(geteuid);
+EXPORT_SYMBOL(getgid);
+EXPORT_SYMBOL(getgroups);
+EXPORT_SYMBOL(getlogin);
+EXPORT_SYMBOL(getuid);
+EXPORT_SYMBOL(setegid);
+EXPORT_SYMBOL(seteuid);
+EXPORT_SYMBOL(setgid);
+EXPORT_SYMBOL(setuid);
+#endif /* CONFIG_POSIX_USER_GROUPS */
+
+/* USER_GROUPS_R */
+#ifdef CONFIG_POSIX_USER_GROUPS_R
+EXPORT_SYMBOL(getlogin_r);
+#endif /* CONFIG_POSIX_USER_GROUPS_R */
 
 /* XSI_SINGLE_PROCESS */
 #ifdef CONFIG_XSI_SINGLE_PROCESS
