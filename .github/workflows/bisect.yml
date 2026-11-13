@@ -1,0 +1,181 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright (c) The Zephyr Project Contributors
+
+# Nightly bisectability check: build and run, at a sample of the recent commits
+# of main, a pseudo-random subset of the test scenarios each commit's own diff
+# touches (scripts/ci/bisectability.sh, profile bisectability_nightly). Every
+# run draws a fresh seed, so an unchanged main still gains coverage night over
+# night and the scheduled run is never skipped. The seed is printed by every
+# shard and recorded in the summary artifact so a failing night can be repeated
+# locally with --seed.
+
+name: Bisect
+
+on:
+  schedule:
+    - cron: '0 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  packages: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Inside container jobs the workspace mounts at a different path than on the
+# host and ${{ github.workspace }} always expands to the HOST path; steps use
+# $GITHUB_WORKSPACE and workspace-relative paths (see twister.yml).
+
+jobs:
+  # Only ci-image.yml and the twister workflow build a missing image on
+  # demand; this consumer resolves the published tag and otherwise runs on
+  # plain runners where setup-workspace builds the environment inline.
+  ci-image-check:
+    runs-on: ubuntu-24.04
+    outputs:
+      image: ${{ steps.ensure.outputs.image }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Resolve CI image
+        id: ensure
+        uses: ./.github/actions/ensure-ci-image
+        with:
+          can-push: "false"
+
+  bisect-prep:
+    runs-on: ubuntu-24.04
+    outputs:
+      shard_total: ${{ steps.plan.outputs.shard_total }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+      seed: ${{ steps.plan.outputs.seed }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          sparse-checkout: .github
+
+      - name: Plan shards and draw the seed
+        id: plan
+        shell: bash
+        run: |
+          set -euo pipefail
+          total=$(jq -r '.bisectability_nightly.shards // 1' .github/ci-config.json)
+          # one seed for every shard: the shards are interleaved slices of a
+          # single stop list, which the seed determines
+          seed=$(shuf -i 0-2147483647 -n 1)
+          echo "shard_total=$total" >> "$GITHUB_OUTPUT"
+          echo "matrix=$(jq -nc --argjson n "$total" '{shard: [range(1; $n+1)]}')" >> "$GITHUB_OUTPUT"
+          echo "seed=$seed" >> "$GITHUB_OUTPUT"
+          echo "shards: $total, seed: $seed"
+
+  bisect:
+    needs: [bisect-prep, ci-image-check]
+    runs-on: ubuntu-24.04
+    container: ${{ needs.ci-image-check.outputs.image }}
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.bisect-prep.outputs.matrix) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          # the whole history: stops are materialized from past commits
+          fetch-depth: 0
+
+      - name: Set up workspace
+        id: workspace
+        uses: ./.github/actions/setup-workspace
+        with:
+          toolchains: aarch64-zephyr-elf:arm-zephyr-eabi:riscv64-zephyr-elf:x86_64-zephyr-elf
+          # Objects differ little between neighbouring commits, so one cache
+          # per shard pays off night over night even though the stops change.
+          ccache-key-prefix: bisect-shard-${{ matrix.shard }}
+
+      - name: Bisect (shard ${{ matrix.shard }}/${{ needs.bisect-prep.outputs.shard_total }})
+        shell: bash
+        run: |
+          set -euo pipefail
+          ccache --zero-stats
+          CI_CONFIG_PROFILE=bisectability_nightly \
+            "${GITHUB_WORKSPACE}/${MANIFEST_PATH}/scripts/ci/bisectability.sh" \
+            --shard "${{ matrix.shard }}/${{ needs.bisect-prep.outputs.shard_total }}" \
+            --seed "${{ needs.bisect-prep.outputs.seed }}"
+          ccache --show-stats
+
+      - name: Upload shard results
+        if: always() && !cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bisect-shard-${{ matrix.shard }}
+          path: |
+            ${{ env.MANIFEST_PATH }}/build/bisect/results.tsv
+            ${{ env.MANIFEST_PATH }}/build/bisect/summary.json
+            ${{ env.MANIFEST_PATH }}/build/bisect/stops.jsonl
+            ${{ env.MANIFEST_PATH }}/build/bisect/stops/*/*.log
+            ${{ env.MANIFEST_PATH }}/build/bisect/stops/*/twister-out/**/*.log
+          if-no-files-found: ignore
+
+      - name: Save workspace ccache
+        if: always() && !cancelled()
+        uses: ./.github/actions/save-workspace-ccache
+        with:
+          cache-primary-key: ${{ steps.workspace.outputs.ccache-primary-key }}
+          save: true
+
+  bisect-summary:
+    if: always() && !cancelled()
+    needs: [bisect-prep, bisect]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download shard results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: bisect-shard-*
+          path: ${{ runner.temp }}/shards
+
+      - name: Summarize
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="${RUNNER_TEMP}/summary"
+          mkdir -p "$out"
+          mapfile -t results < <(find "${RUNNER_TEMP}/shards" -name results.tsv | sort)
+          expected="${{ needs.bisect-prep.outputs.shard_total }}"
+          if [ "${#results[@]}" -ne "$expected" ]; then
+            echo "::error::$expected shards expected, ${#results[@]} reported results"
+            status=1
+          else
+            status=0
+          fi
+          cat "${results[@]}" 2>/dev/null | sort -n -k1,1 > "$out/results.tsv" || true
+          find "${RUNNER_TEMP}/shards" -name summary.json -exec cat {} + \
+            | jq -s '{seed: (.[0].seed), range: (.[0].range), stride: (.[0].stride),
+                      shards: length, stops: (map(.stops) | add), results: (map(.results) | add),
+                      failed: (map(.failed) | add)}' > "$out/summary.json" || echo '{}' > "$out/summary.json"
+          cat "$out/summary.json"
+          echo "$(wc -l < "$out/results.tsv") scenario results"
+          bad=$(awk -F'\t' '$5 == "failed" || $5 == "error"' "$out/results.tsv")
+          if [ -n "$bad" ]; then
+            echo "::error::bisectability failures (repeat with --seed $(jq -r .seed "$out/summary.json")):"
+            printf '%s\n' "$bad" | awk -F'\t' '{ printf "  %s %s %s: %s %s (%s) %s\n", $1, $2, $7, $3, $4, $5, $6 }'
+            status=1
+          else
+            echo "no failures"
+          fi
+          echo "status=$status" >> "$GITHUB_ENV"
+
+      - name: Upload summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: bisect-summary
+          path: ${{ runner.temp }}/summary
+          if-no-files-found: error
+
+      - name: Report
+        run: exit "$status"
