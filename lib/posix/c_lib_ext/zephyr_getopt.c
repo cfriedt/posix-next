@@ -262,7 +262,7 @@ int zephyr_getopt(int argc, char *const argv[], const char *optstring,
 		  const struct option *longopts, int *longindex, bool longonly, char **optarg,
 		  int *opterr, int *optind, int *optopt)
 {
-	int ret;
+	int ret = -1;
 	uint64_t optmask;
 	uint64_t argmask;
 	bool colon_at_start;
