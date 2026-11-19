@@ -4378,6 +4378,21 @@ patches:
       partitions; the image's regions join it, its main() is recorded in the
       staged block and entered as exit(main(argc, argv, envp)), and the
       extension is unloaded when the process is reaped.
+  - path: zephyr/sys-clone-vm-copy-failure-release.patch
+    sha256sum: 4003c0a9e822b0dd526379afad5eef7f48d49f875316a749e8488e56c2515380
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-19
+    upstreamable: true
+    comments: |
+      A fork that failed after process_vm_clone() - no pooled leader thread,
+      no descriptor table, no mapping or signal state to copy, no process
+      slot - freed its record but kept the copied address space: the clone
+      context, its page frames and its memory domain slot were never
+      returned, and a shell whose forks kept failing lost a slot on every
+      attempt. fork_discard() hands the copy back before the record goes;
+      every failure path after process_vm_clone() takes it.
   - path: zephyr/arch-user-mode-restart.patch
     sha256sum: 96e65f2f9cca0f3bde81002bd858d0239e89428f3ba59d795c0a3ab9cd8bbecd
     module: zephyr
