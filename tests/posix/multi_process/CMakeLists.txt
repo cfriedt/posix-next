@@ -12,4 +12,4 @@ target_include_directories(app PRIVATE
 )
 zephyr_linker_sources(ROM_SECTIONS ${CMAKE_CURRENT_SOURCE_DIR}/../spawn/iterables.ld)
 
-target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L)
+target_compile_options(app PRIVATE -U_POSIX_C_SOURCE -D_POSIX_C_SOURCE=200809L -U_XOPEN_SOURCE -D_XOPEN_SOURCE=700)

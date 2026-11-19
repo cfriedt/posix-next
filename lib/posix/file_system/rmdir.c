@@ -10,5 +10,5 @@
 
 int rmdir(const char *path)
 {
-	return zvfs_rmdir(path);
+	return zvfs_unlinkat(ZVFS_AT_FDCWD, path, ZVFS_AT_REMOVEDIR);
 }

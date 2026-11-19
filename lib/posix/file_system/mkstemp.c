@@ -52,7 +52,8 @@ int mkstemp(char *template)
 			suffix[i] = tmpl_chars[mkstemp_rand(&state) % (sizeof(tmpl_chars) - 1)];
 		}
 
-		fd = zvfs_open(template, ZVFS_O_RDWR | ZVFS_O_CREAT | ZVFS_O_EXCL, 0600);
+		fd = zvfs_openat(ZVFS_AT_FDCWD, template, ZVFS_O_RDWR | ZVFS_O_CREAT | ZVFS_O_EXCL,
+				 0600);
 		if (fd >= 0) {
 			return fd;
 		}

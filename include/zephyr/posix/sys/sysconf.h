@@ -167,7 +167,8 @@ enum {
 
 /* clang-format off */
 
-#define __z_posix_sysconf_SC_ADVISORY_INFO (-1L)
+#define __z_posix_sysconf_SC_ADVISORY_INFO                                                         \
+	COND_CODE_1(CONFIG_POSIX_ADVISORY_INFO, (_POSIX_ADVISORY_INFO), (-1L))
 #define __z_posix_sysconf_SC_ASYNCHRONOUS_IO                                                       \
 	COND_CODE_1(CONFIG_POSIX_ASYNCHRONOUS_IO, (_POSIX_ASYNCHRONOUS_IO), (-1L))
 #define __z_posix_sysconf_SC_BARRIERS COND_CODE_1(CONFIG_POSIX_BARRIERS, (_POSIX_BARRIERS), (-1L))
@@ -201,13 +202,15 @@ enum {
 #define __z_posix_sysconf_SC_READER_WRITER_LOCKS                                                   \
 	COND_CODE_1(CONFIG_POSIX_RW_LOCKS, (_POSIX_READER_WRITER_LOCKS), (-1L))
 #define __z_posix_sysconf_SC_REALTIME_SIGNALS      (-1L)
-#define __z_posix_sysconf_SC_REGEXP                (-1L)
+#define __z_posix_sysconf_SC_REGEXP                                                                \
+	COND_CODE_1(CONFIG_POSIX_REGEXP, (_POSIX_REGEXP), (-1L))
 #define __z_posix_sysconf_SC_SAVED_IDS             (-1L)
 #define __z_posix_sysconf_SC_SEMAPHORES                                                            \
 	COND_CODE_1(CONFIG_POSIX_SEMAPHORES, (_POSIX_SEMAPHORES), (-1L))
 #define __z_posix_sysconf_SC_SHARED_MEMORY_OBJECTS                                                 \
 	COND_CODE_1(CONFIG_POSIX_SHARED_MEMORY_OBJECTS, (_POSIX_SHARED_MEMORY_OBJECTS), (-1L))
-#define __z_posix_sysconf_SC_SHELL                 (-1L)
+#define __z_posix_sysconf_SC_SHELL                                                                 \
+	COND_CODE_1(CONFIG_POSIX_SHELL_FUNC, (_POSIX_SHELL), (-1L))
 #define __z_posix_sysconf_SC_SPAWN                                                                 \
 	COND_CODE_1(CONFIG_POSIX_SPAWN, (_POSIX_SPAWN), (-1L))
 #define __z_posix_sysconf_SC_SPIN_LOCKS                                                            \

@@ -17,4 +17,8 @@ ZTEST_USER(posix_file_system, test_access)
 	errno = 0;
 	zassert_equal(access(TEST_NOENT, F_OK), -1);
 	zassert_equal(errno, ENOENT);
+
+	errno = 0;
+	zassert_equal(access(TEST_FILE, 0x1000), -1);
+	zassert_equal(errno, EINVAL);
 }

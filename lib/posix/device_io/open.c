@@ -21,7 +21,7 @@ int open(const char *name, int flags, ...)
 		va_end(args);
 	}
 
-	return zvfs_open(name, flags, mode);
+	return zvfs_openat(ZVFS_AT_FDCWD, name, flags, mode);
 }
 #ifdef CONFIG_POSIX_DEVICE_IO_ALIAS_OPEN
 FUNC_ALIAS(open, _open, int);

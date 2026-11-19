@@ -48,7 +48,60 @@ static pid_t waitid_spawn(bool linger)
 	return (pid_t)sys_process_id(child);
 }
 
+#ifdef CONFIG_POSIX_JOB_CONTROL
+/* a kernel thread that accepts the job-control signals, stops itself, then exits */
+static void waitid_stop_child_entry(void *p1, void *p2, void *p3)
+{
+	sigset_t set;
+
+	ARG_UNUSED(p1);
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	(void)sigemptyset(&set);
+	(void)sigaddset(&set, SIGSTOP);
+	(void)sigaddset(&set, SIGCONT);
+	(void)sigprocmask(SIG_UNBLOCK, &set, NULL);
+	(void)kill(getpid(), SIGSTOP);
+	/* delivery points: the stop lands here, the continue lets the sleep finish */
+	k_sleep(K_MSEC(10));
+	k_sleep(K_MSEC(200));
+	_exit(7);
+}
+
 /* P_PID: WNOWAIT observes without reaping, and the reap fills siginfo */
+/* a stop and a continue are reported with the signal as si_status */
+static void waitid_stopped_continued(void)
+{
+	siginfo_t info;
+	k_pid_t child = NULL;
+	pid_t pid;
+	struct sys_clone_args args = {
+		.entry = waitid_stop_child_entry,
+		.thread = &waitid_child_thread,
+		.stack = waitid_child_stack,
+		.stack_size = WAITID_CHILD_STACK_SIZE,
+		.prio = k_thread_priority_get(k_current_get()),
+	};
+
+	zassert_ok(sys_clone(&args, &child));
+	pid = (pid_t)sys_process_id(child);
+	zassert_true(pid > 0);
+
+	zassert_ok(waitid(P_PID, pid, &info, WSTOPPED));
+	zassert_equal(info.si_pid, pid);
+	zassert_equal(info.si_code, CLD_STOPPED);
+	zassert_equal(info.si_status, SIGSTOP, "si_status %d", info.si_status);
+	zassert_ok(kill(pid, SIGCONT));
+	zassert_ok(waitid(P_PID, pid, &info, WCONTINUED));
+	zassert_equal(info.si_code, CLD_CONTINUED);
+	zassert_equal(info.si_status, SIGCONT, "si_status %d", info.si_status);
+	zassert_ok(waitid(P_PID, pid, &info, WEXITED));
+	zassert_equal(info.si_code, CLD_EXITED);
+	zassert_equal(info.si_status, 7);
+}
+#endif /* CONFIG_POSIX_JOB_CONTROL */
+
 static void waitid_pid_nowait_reap(void)
 {
 	siginfo_t info;
@@ -141,6 +194,9 @@ ZTEST_USER(posix_multi_process, test_waitid)
 		waitid_pid_nowait_reap();
 		waitid_all_nohang();
 		waitid_pgid();
+#ifdef CONFIG_POSIX_JOB_CONTROL
+		waitid_stopped_continued();
+#endif /* CONFIG_POSIX_JOB_CONTROL */
 	}
 #endif /* !CONFIG_USERSPACE */
 }

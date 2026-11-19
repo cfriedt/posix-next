@@ -245,6 +245,10 @@ static void kinfo_to_siginfo(siginfo_t *dst, const struct k_sig_info *src, int s
 		dst->si_status = K_WEXITSTATUS(src->status);
 	} else if (src->code == K_SI_CLD_KILLED) {
 		dst->si_status = z_sig_to_posix(K_WTERMSIG(src->status));
+	} else if (src->code == K_SI_CLD_STOPPED) {
+		dst->si_status = z_sig_to_posix(K_WSTOPSIG(src->status));
+	} else if (src->code == K_SI_CLD_CONTINUED) {
+		dst->si_status = SIGCONT;
 	}
 #endif /* CONFIG_PROCESS */
 }
@@ -299,6 +303,9 @@ static void posix_sig_disposition_get(const struct k_sig_action *koact, struct s
 	if ((koact->flags & K_SIG_SA_NODEFER) != 0) {
 		oact->sa_flags |= SA_NODEFER;
 	}
+	if ((koact->flags & K_SIG_SA_NOCLDSTOP) != 0) {
+		oact->sa_flags |= SA_NOCLDSTOP;
+	}
 }
 
 int sigaction(int sig, const struct sigaction *ZRESTRICT act, struct sigaction *ZRESTRICT oact)
@@ -337,6 +344,9 @@ int sigaction(int sig, const struct sigaction *ZRESTRICT act, struct sigaction *
 		}
 		if ((act->sa_flags & SA_NODEFER) != 0) {
 			kact.flags |= K_SIG_SA_NODEFER;
+		}
+		if ((act->sa_flags & SA_NOCLDSTOP) != 0) {
+			kact.flags |= K_SIG_SA_NOCLDSTOP;
 		}
 
 		kact.mask = *z_sig_set_from_posix(&act->sa_mask, &kmask_buf);

@@ -4450,6 +4450,26 @@ patches:
       The thread_apis cpu-mask test keeps the -EINVAL expectations for
       PIN_ONLY and otherwise exercises the running caller; the smp affinity
       test moves a running thread between CPUs and checks that it follows.
+  - path: zephyr/fs-ext2-symbolic-links.patch
+    sha256sum: f92899cdc4c9daf2a35ed9f853575bf57f928d6b49c6bd2ee20c6d6488351c06
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-30
+    upstreamable: true
+    comments: |
+      Symbolic link support: fs_symlink()/fs_readlink()/fs_lstat() in the
+      file system API (with lstat falling back to stat for drivers without
+      symlinks), FS_DIR_ENTRY_SYMLINK, an ext2 implementation using fast
+      symlinks (target stored in i_block, at most 60 bytes) with path
+      resolution following links (ELOOP after 8), and
+      zvfs_symlink()/zvfs_readlink()/zvfs_lstat() syscalls for the
+      POSIX_SYMBOLIC_LINKS Option Group.
+      CONFIG_FILE_SYSTEM_SYMLINKS gates it: without the option
+      fs_symlink() and fs_readlink() are inline stubs reporting
+      -ENOTSUP, fs_lstat() is fs_stat(), the lstat, symlink and readlink
+      operations leave struct fs_file_system_t, and ext2 neither creates
+      nor follows links. POSIX_SYMBOLIC_LINKS implies the option.
   - path: zephyr/libc-sys-stat-utime-markers.patch
     sha256sum: 8edfcf83058522bb80d601e92c4a9e6be14baec04cf8253ffbd344fbadf05b78
     module: zephyr
@@ -4460,6 +4480,47 @@ patches:
     comments: |
       The newlib and picolibc <sys/stat.h> of the Zephyr SDK define the utimensat() tv_nsec markers
       UTIME_NOW and UTIME_OMIT only for other targets; provide them from the shims.
+  - path: zephyr/zvfs-directory-descriptors-at-family.patch
+    sha256sum: 5b3384523e9d1e894c3a657973104db05d47a61e09e728be1285c865c10265f3
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-03
+    upstreamable: true
+    comments: |
+      Give zvfs the *at() family that the POSIX_FILE_SYSTEM_FD,
+      POSIX_FILE_ATTRIBUTES_FD and POSIX_SYMBOLIC_LINKS_FD Option Groups need:
+      zvfs_openat(), zvfs_statat(), zvfs_accessat(), zvfs_mkdirat(),
+      zvfs_unlinkat(), zvfs_renameat(), zvfs_symlinkat(), zvfs_readlinkat(),
+      zvfs_utimeat() and zvfs_fdopendir(). A relative path resolves against the
+      directory descriptor inside the call (the *at() functions exist to close
+      the resolve-then-act race, so there is no separate resolve syscall). The
+      plain forms go: the ZVFS layer has only the *at() calls, and open(),
+      stat() and the other POSIX and ISO C path functions are the *at() calls
+      with ZVFS_AT_FDCWD, as POSIX defines them; opendir() is
+      zvfs_openat(O_DIRECTORY) plus zvfs_fdopendir(), remove() is
+      zvfs_unlinkat() with a ZVFS_AT_REMOVEDIR retry. Without CONFIG_PROCESS
+      the image has one working directory, starting at the root, which any
+      thread may move; the header says so. open() on a directory
+      without O_DIRECTORY yields a directory descriptor, as on other systems.
+      The ZVFS_AT_* flags the POSIX headers already referenced are defined, and
+      the picolibc/newlib wrappers remap the toolchain's BSD-valued AT_* and
+      O_CLOEXEC/O_NOFOLLOW flags to them, declare renameat(), and provide the
+      UTIME_NOW/UTIME_OMIT markers.
+      zvfs_exe_resolve() gains its directory form: with no buffer each
+      directory of the list is opened and the name is looked up within it.
+  - path: zephyr/libc-fcntl-advisory-info.patch
+    sha256sum: 63009d84e2d7c96d5d7a03703777b12e204e5852e8cc6b32773476a40364ea03
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-19
+    upstreamable: true
+    comments: |
+      The Picolibc and Newlib <fcntl.h> wrappers declare posix_fadvise()
+      and posix_fallocate() and define the POSIX_FADV_* advice values when
+      _POSIX_ADVISORY_INFO is in effect; the toolchain headers have
+      neither, so the module's implementations were unreachable there.
   - path: zephyr/arm64-userspace-cache-maintenance.patch
     sha256sum: 2e42fc6bdc1fec89817fa1326b6d9ac8fe57cb5096b98a4201c9b175676babf7
     module: zephyr
@@ -4525,3 +4586,351 @@ patches:
       and 1.9 ms on qemu_x86_64 (from 9.5). tests/lib/c_lib/common gains a
       malloc_grow scenario that allocates and reallocates past a 4 KiB arena
       from user mode.
+  - path: zephyr/fs-ext2-fifo.patch
+    sha256sum: 806d73e6a20f199db515b255d5421683251eee65d383cb807d0e20c7371f1889
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-20
+    upstreamable: true
+    comments: |
+      fs: support FIFO special files in the file system API and ext2. A
+      new entry type, FS_DIR_ENTRY_FIFO, an optional mkfifo operation
+      with fs_mkfifo() over it, and ext2 inodes of that type: created
+      with no data, reported by stat and readdir, and removed by unlink
+      like a file. The file system stores only the node; the layer above
+      opens it as a pipe.
+      CONFIG_FILE_SYSTEM_FIFOS gates it: without the option fs_mkfifo()
+      is an inline stub reporting -ENOTSUP, the mkfifo operation leaves
+      struct fs_file_system_t and ext2's FIFO creation is not built.
+      POSIX_FIFO implies the option.
+  - path: zephyr/fs-tmpfs.patch
+    sha256sum: 09c7cb700fd7dae3cd419455dfdd62fd92fdfcdf972efe7722e1ba18a1591d3d
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-30
+    upstreamable: true
+    comments: |
+      fs: add tmpfs, a file system in anonymously mapped pages. Its nodes,
+      the contents of its files and its own record are pages from
+      k_mem_map() on MMU targets and heap blocks elsewhere, so a mount
+      starts empty and unmounting releases everything. Files (direct,
+      indirect and double-indirect page tables, holes read as zeros),
+      directories, symbolic links followed on lookup, FIFO nodes, rename
+      with POSIX replacement rules, unlink of open files, utime and
+      statvfs against an optional page bound. tests/subsys/fs/tmpfs runs
+      the tree's common directory and open-flag tests plus its own.
+      Symbolic links and FIFO nodes are built with
+      CONFIG_FILE_SYSTEM_SYMLINKS and CONFIG_FILE_SYSTEM_FIFOS; the
+      filesystem.tmpfs.plain scenario builds without either and expects
+      -ENOTSUP from the calls.
+  - path: zephyr/zvfs-fifo.patch
+    sha256sum: 9ff4c9a8ec0eb7c9a67a3051a1210ae0f680dffee137cb96566ae37885081551
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-20
+    upstreamable: true
+    comments: |
+      zvfs: named pipes. zvfs_mknodat() creates a node of the type its mode
+      names, a FIFO or an empty regular file;
+      open() on a FIFO node connects to the pipe the path names, kept for
+      as long as any description of it is open, and waits for the other
+      side unless O_NONBLOCK, where a reader proceeds and a writer fails
+      with ENXIO; an opener that came and went while the waiter was
+      queued still counts. Pipe ends become open file descriptions with a
+      side, the pipe counts open descriptions per side, and wake-ups
+      reach every description of a side, so anonymous pipes and FIFOs
+      share one object. stat, fstat and readdir report the FIFO type.
+  - path: zephyr/fs-node-modes-and-owners.patch
+    sha256sum: 53665bc197204a730a6ddb52f44841f3043812e85aff2ffd294cc11c406f67d4
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-06
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/fs-add-rewinddir-utime-and-dirent-ext.patch
+          - zephyr/fs-ext2-symbolic-links.patch
+          - zephyr/fs-ext2-fifo.patch
+          - zephyr/fs-tmpfs.patch
+    comments: |
+      fs: file systems store a mode and an owner. struct fs_dirent gains mode
+      (the node's type and permission bits, FS_MODE_*), uid and gid under
+      CONFIG_FS_DIRENT_EXT, zero where a file system records none; three
+      optional operations, chmod, chown and lchown, and their public forms
+      fs_chmod(), fs_chown() and fs_lchown() (-ENOTSUP where absent, -ENOENT
+      for a missing node first). tmpfs keeps them in its node (0666 files and
+      FIFOs, 0777 directories and links, 0:0); ext2 reads and writes the
+      i_mode permission bits and the i_uid/i_gid the on-disk inode has
+      always had, so they survive a remount, and readdir reports them from
+      the inode it already fetches. Tested in tests/subsys/fs/tmpfs and
+      tests/subsys/fs/ext2 (test_attributes), documented under Modes and
+      owners.
+      CONFIG_FILE_SYSTEM_ATTRIBUTES (selecting FS_DIRENT_EXT) gates it:
+      the three fields, the three operations and the calls over them,
+      tmpfs's per-node storage and ext2's reporting; without the option
+      the calls are inline stubs reporting -ENOTSUP.
+      POSIX_FILE_ATTRIBUTES implies the option.
+  - path: zephyr/zvfs-modes-owners-umask.patch
+    sha256sum: 88e2b60e7677450bb8486d3483ddad56234824292a89a4160565c05369feaf46
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-06
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/fs-node-modes-and-owners.patch
+          - zephyr/zvfs-directory-descriptors-at-family.patch
+          - zephyr/zvfs-per-process-cwd.patch
+          - zephyr/zvfs-fifo.patch
+          - zephyr/zvfs-stat-identity.patch
+          - zephyr/zvfs-futime.patch
+    comments: |
+      zvfs: modes, owners and the file mode creation mask. struct zvfs_stat
+      gains uid and gid; stat and fstat report the file system's recorded
+      mode and fall back to the synthesised one only where there is none.
+      New syscalls zvfs_chmodat(), zvfs_fchmod(), zvfs_chownat() and
+      zvfs_fchown() (UINT32_MAX keeps an ID, resolved from the node's
+      owner; ZVFS_AT_SYMLINK_NOFOLLOW changes a link's owner and refuses a
+      link's mode with EOPNOTSUPP) over fs_chmod()/fs_chown()/fs_lchown()
+      and two ioctls on the file and directory objects. zvfs_umask() keeps
+      a per-process creation mask beside the working directory (022 at
+      boot, copied at clone, the boot mask for threads of no process);
+      zvfs_openat(O_CREAT), zvfs_mkdirat() and zvfs_mknodat() withhold it from
+      the requested mode with one fs_chmod() when, and only when, they
+      created the node. ZVFS keeps no identity and enforces nothing. Tests
+      in tests/lib/zvfs_fs over a second, tmpfs mount; kernel and user mode.
+      The recorded mode and owner reach struct zvfs_stat only with
+      CONFIG_FILE_SYSTEM_ATTRIBUTES; the test enables it, and
+      CONFIG_FILE_SYSTEM_SYMLINKS for the links whose owner it changes,
+      on its tmpfs mount.
+  - path: zephyr/libc-termios-glob-interpose.patch
+    sha256sum: 534563955540a75a9ab384bce0fa6fd40a562b738084bda8b07047dd227ea518
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-30
+    upstreamable: true
+    comments: |
+      Interpose <termios.h>, <glob.h>, and <sys/time.h> for Picolibc and
+      Newlib onto the POSIX module's headers, following the existing
+      per-libc wrapper-header pattern; the toolchain copies otherwise
+      resolve first, the toolchain termios.h depends on a <sys/termios.h>
+      nobody provides, and the toolchain sys/time.h includes the internal
+      <sys/_select.h>, whose fd_set conflicts with the interposed
+      <sys/select.h>. The existing sys/select.h wrappers also gain
+      <sys/_types.h> before the internal type headers, which some
+      toolchain builds (aarch64) require. <stdio.h> gains a chaining
+      wrapper declaring ctermid(), which neither toolchain libc
+      provides; posix_stdio.h remains its documented owner.
+  - path: zephyr/zvfs-stdio-isatty.patch
+    sha256sum: 822cdf4dab83315314fa5c31cc648d32db59585fc5894095ca157254c9dd7114
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-30
+    upstreamable: true
+    comments: |
+      ZFD_IOCTL_ISATTY: succeeds only on descriptors referring to a
+      terminal; the reserved stdio descriptors answer for the console,
+      giving isatty() and the termios functions their fd identity check.
+      The ioctl verifier admits the request, which carries no argument,
+      so user mode can ask too.
+  - path: zephyr/zvfs-stdin-console.patch
+    sha256sum: 1772733361dbe6f7c11cbfa2a114af1d2853ec1e7ea6952ed4418380e84d6cc6
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-30
+    upstreamable: true
+    comments: |
+      CONFIG_ZVFS_STDIN_CONSOLE: read() on the reserved stdin descriptor
+      polls the console UART through a minimal line discipline - echo,
+      backspace editing, CR-to-NL translation, Ctrl-D at the start of a
+      line as end-of-file. Interrupt characters are not yet routed to
+      the foreground process group. Without the option such reads keep
+      returning 0.
+  - path: zephyr/zvfs-console-input-modes.patch
+    sha256sum: 80851f7b4f8759b93b6757224e748b5a49e5bb3d11fd9d13bef8855225819389
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-25
+    upstreamable: true
+    comments: |
+      Give the console's stdin the input modes a terminal has: canonical
+      line assembly, echo and CR-to-NL translation, each switchable with the
+      ZFD_IOCTL_CONSOLE_SET_MODE ioctl so that tcsetattr() reaches it, and
+      poll() support through a signal raised by a work item that watches the
+      UART while a poll is outstanding. A full-screen program can then take
+      the console raw and wait for keys.
+  - path: zephyr/k-process-stop-continue.patch
+    sha256sum: e4e9c70f83c73557dda44403cfea7758319505d0f72cc67213857d08d737381a
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-30
+    upstreamable: true
+    comments: |
+      Process stop and continue (CONFIG_PROCESS_STOP): the stop signals
+      gain their POSIX default action, suspending every member thread of
+      the receiving process (the delivery context last); generation of
+      K_SIG_CONT resumes a stopped process regardless of delivery, as
+      does K_SIG_KILL, since a stopped member cannot run its own
+      delivery. k_waitpid() accepts K_PROCESS_WUNTRACED and
+      K_PROCESS_WCONTINUED, reporting K_WSTATUS_STOPPED/CONTINUED
+      transitions without reaping. With stop support enabled the stop
+      and kill signals become unmaskable for kernel-mode callers too
+      (k_sig_mask and clone-time masks), since a process that can mask
+      SIGSTOP defeats job control. Suspension takes a bounded member
+      snapshot outside process_lock: the halt path holds the scheduler
+      lock before process_lock, so scheduler operations under it would
+      invert that order.
+
+      Generation of K_SIG_CONT discards the pending stop signals of the
+      process and a stop signal discards a pending K_SIG_CONT, as POSIX
+      requires (z_sig_process_discard()); a stop does not happen while
+      K_SIG_KILL is pending for the stopping thread. The stopping thread
+      pends on the process's stop queue under process_stop_lock instead of
+      suspending itself; a continue bumps a generation count and wakes that
+      queue under the same lock, so a continue cannot be lost between the
+      decision to stop and the stop (the woken stopper redoes resumes that
+      preceded their suspends). tests/kernel/process covers stop and
+      continue reporting, the discard rule and K_SIG_KILL ending a stopped
+      process.
+  - path: zephyr/libc-picolibc-regex-h-shim.patch
+    sha256sum: 87fd32d6cced0608889dcd8e99c5f6ae535a368d547d0cb36f099be9f5e50a8d
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-02
+    upstreamable: true
+    comments: |
+      Redirect Picolibc's <regex.h> to the posix-next <zephyr/posix/regex.h>
+      owning header. Picolibc's own <regex.h> is unusable as shipped: the
+      toolchain copy is not self-contained (uses size_t without requesting it
+      from <stddef.h>) and its regcomp() has a use-after-free, and the
+      toolchain build (the Zephyr SDK default) cannot be patched. So the
+      module supplies the regex engine and this header for POSIX_REGEXP. The
+      minimal libc needs no shim (the module's include/zephyr/posix is on its
+      search path) and Newlib uses its own working regex via
+      TC_PROVIDES_POSIX_REGEXP.
+  - path: picolibc/regex-h-self-contained-size-t.patch
+    sha256sum: 535bef113a04ab0c46b0aea678f681c71587af899fbdbfa8ca9c41f575838a2f
+    module: picolibc
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-02
+    upstreamable: true
+    comments: |
+      Picolibc <regex.h> uses size_t but requests only ptrdiff_t from
+      <stddef.h>; add __need_size_t so the header is self-contained when
+      included first.
+  - path: picolibc/regcomp-no-free-of-live-sets-on-error.patch
+    sha256sum: 1832dff0a895d96a8b60d62ac4ec51276b127868b3d31f0a1fa06afdd94c71c3
+    module: picolibc
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-02
+    upstreamable: true
+    comments: |
+      Fix a use-after-free in Picolibc regcomp(): seterr() freed the
+      parser's cset arrays on any error while the parse continues to use
+      pointers into them; regcomp() already releases them via regfree() on
+      its error path. Reproduces on any invalid bracket expression, e.g.
+      regcomp(preg, "[abc", REG_EXTENDED).
+  - path: picolibc/tinystdio-wide-stream-conformance.patch
+    sha256sum: 42dd7dd3fa77d3ab04f3eed65bdb53cea4cb7dd9c3900dede7742734ecb7140e
+    module: picolibc
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-18
+    upstreamable: true
+    comments: |
+      Two ISO C conformance fixes in tinystdio's wide-character streams.
+      vswprintf() returned the length a truncated result needed and wrote the
+      terminator at that index, past the end of the array; a result that does
+      not fit now terminates what fits and returns -1 with EOVERFLOW. getwc()
+      returned WEOF without setting the stream's end-of-file or error
+      indicator, so feof() and ferror() stayed clear; it now records them as
+      getc() does.
+  - path: zephyr/libc-stdio-popen.patch
+    sha256sum: 2762b867fb51a099df66e47407624e89ce40bd81e0b2231b7e7362722d171c23
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-20
+    upstreamable: true
+    comments: |
+      The Picolibc and Newlib <stdio.h> wrappers declare popen() and
+      pclose() beside ctermid(): the toolchain headers have neither, so
+      the module's implementations were unreachable there.
+  - path: zephyr/zvfs-sync-flushes-every-open-file.patch
+    sha256sum: b98fb0287d3fedbe7c65c2ee70a1344d3852b559dd2c155a0abbb7c0ca131df3
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-06
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/zvfs-fdtable-use-k-obj-file.patch
+          - zephyr/zvfs-userspace-tests.patch
+    comments: |
+      The file system layer synchronizes one open file at a time (fs_sync()),
+      exposed as zvfs_fsync(fd); nothing flushed the system as a whole, which
+      sync() needs. zvfs_sync() walks the system-wide table of open file
+      descriptions and issues ZFD_IOCTL_FSYNC to each under the description's
+      lock - the lock zvfs_close() holds while it closes the object - so a
+      file is either flushed or already closed. Only regular files are
+      visited: a description of another kind has nothing to flush, and a
+      pipe or socket read holds its lock for as long as it waits (a forked
+      child blocked on its status pipe would stall the parent's sync()). The
+      caller's errno is preserved. tests/lib/zvfs_fs: a buffered write to a
+      FAT file is reported by stat only after the sync.
+  - path: zephyr/zvfs-directory-stream-position.patch
+    sha256sum: 2f784efc10aef23550241f2f421e61e16c22ada25f99017a0443532cba1f7f1a
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-06
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/zvfs-dirent-syscalls.patch
+          - zephyr/zvfs-userspace-tests.patch
+    comments: |
+      A directory stream could be read and rewound but not positioned, which
+      telldir()/seekdir() need. The directory descriptor counts the entries
+      read since it was opened or rewound (dir_pos); ZFD_IOCTL_TELLDIR reports
+      the count and ZFD_IOCTL_SEEKDIR returns to one, rewinding and reading
+      forward when it lies behind, and stopping at the end for a count past
+      it. zvfs_telldir()/zvfs_seekdir() expose both as system calls; a
+      negative position is EINVAL. tests/lib/zvfs_fs: test_zvfs_telldir and
+      test_zvfs_seekdir on the fixture root.
+  - path: zephyr/libc-libgen-ftw-header-shims.patch
+    sha256sum: ba51c624dfb2ff38e9b22598e1665a0b4575b6cb1980bce8409505eb7488d613
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-06
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/libc-stdio-popen.patch
+    comments: |
+      <libgen.h> and <ftw.h> shims for newlib and picolibc, forwarding to the
+      posix-next <zephyr/posix/libgen.h> and <zephyr/posix/ftw.h>. Neither
+      toolchain ships an <ftw.h>; both ship a <libgen.h>, picolibc's renaming
+      basename() to __xpg_basename(), which the module does not provide. The
+      picolibc <stdio.h> shim also declares tempnam(), which picolibc's own
+      header leaves out, under _XOPEN_SOURCE.

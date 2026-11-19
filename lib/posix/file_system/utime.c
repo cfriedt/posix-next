@@ -21,5 +21,5 @@ int utime(const char *path, const struct utimbuf *times)
 		tp = ts;
 	}
 
-	return zvfs_utime(path, tp);
+	return zvfs_utimeat(ZVFS_AT_FDCWD, path, tp, 0);
 }

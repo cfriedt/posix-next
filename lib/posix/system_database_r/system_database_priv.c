@@ -70,7 +70,7 @@ int z_getgr_r(const char *name, gid_t gid, struct group *grp, char *buffer, size
 		return ERANGE;
 	}
 
-	fd = zvfs_open("/etc/group", ZVFS_O_RDONLY, 0);
+	fd = zvfs_openat(ZVFS_AT_FDCWD, "/etc/group", ZVFS_O_RDONLY, 0);
 	if (fd < 0) {
 		return EIO;
 	}
@@ -189,7 +189,7 @@ int z_getpw_r(const char *name, uid_t uid, struct passwd *pwd, char *buffer, siz
 		return ERANGE;
 	}
 
-	fd = zvfs_open("/etc/passwd", ZVFS_O_RDONLY, 0);
+	fd = zvfs_openat(ZVFS_AT_FDCWD, "/etc/passwd", ZVFS_O_RDONLY, 0);
 	if (fd < 0) {
 		return EIO;
 	}
