@@ -185,3 +185,16 @@ patches:
       copy on the caller's stack and sends its address; the marshaller
       validates that object for reading, va_copy()s it into a local list
       for the verifier and va_end()s it afterwards.
+  - path: zephyr/fs-ext2-serialize-operations.patch
+    sha256sum: 2db31d79153050925c287da5fdb7b1e7101de3a85a2a80904b24d53a723d524f
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-30
+    upstreamable: true
+    comments: |
+      Serialize every ext2 operation behind one lock: the driver was
+      written assuming external serialization (static lookup buffers,
+      shared block-fetch state) which concurrently running processes do
+      not provide; racing lookups returned phantom ENOENTs. ext2 supports
+      a single mounted instance, so a single lock suffices.
