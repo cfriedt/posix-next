@@ -282,3 +282,17 @@ patches:
       stp/ldp offsets from the thread object, limited to 504 bytes; growing
       struct k_thread ahead of callee_saved broke the build. The pairs are
       now addressed from a base register.
+  - path: zephyr/sched-halt-spin-irqs-masked.patch
+    sha256sum: 56e824f2878376875d810d90e93f0da2d53efb93f3510ee5442077512c6f7758
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-04
+    upstreamable: true
+    comments: |
+      halt_thread() waits out a timeout handler still in flight on another
+      CPU by dropping and retaking the scheduler lock. Unlocking restored
+      interrupts: a thread halting itself is already dead, so an interrupt
+      in that window switched it out for good, before it woke its joiners,
+      and every joiner hung. The lock is now released without restoring
+      interrupts. Upstream v4.5.0 and main have the same loop.
