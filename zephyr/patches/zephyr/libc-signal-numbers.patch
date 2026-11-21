@@ -1,0 +1,275 @@
+diff --git a/lib/libc/common/source/signal/raise.c b/lib/libc/common/source/signal/raise.c
+index bed2a3ac615..8c5bcc0f1e4 100644
+--- a/lib/libc/common/source/signal/raise.c
++++ b/lib/libc/common/source/signal/raise.c
+@@ -14,10 +14,8 @@
+ int raise(int sig)
+ {
+ 	int ret;
+-	int ksig;
+ 
+-	ksig = (z_sig_from_posix != NULL) ? z_sig_from_posix(sig) : z_isoc_sig_to_k(sig);
+-	if (ksig <= 0) {
++	if (!z_isoc_sig_valid(sig)) {
+ 		errno = EINVAL;
+ 		return -1;
+ 	}
+@@ -26,7 +24,7 @@ int raise(int sig)
+ 	 * ISO C requires the handler to have finished before raise() returns; the generated
+ 	 * k_sig_queue() wrapper drains pending signals before returning here.
+ 	 */
+-	ret = k_sig_queue(k_current_get(), ksig, (union k_sig_val){0});
++	ret = k_sig_queue(k_current_get(), sig, (union k_sig_val){0});
+ 	if (ret < 0) {
+ 		errno = -ret;
+ 		return -1;
+diff --git a/lib/libc/common/source/signal/sig_isoc.h b/lib/libc/common/source/signal/sig_isoc.h
+index 9bf24b8ed8d..20855dde7ee 100644
+--- a/lib/libc/common/source/signal/sig_isoc.h
++++ b/lib/libc/common/source/signal/sig_isoc.h
+@@ -7,6 +7,7 @@
+ #define ZEPHYR_LIB_LIBC_COMMON_SOURCE_SIGNAL_SIG_ISOC_H_
+ 
+ #include <signal.h>
++#include <stdbool.h>
+ 
+ #include <zephyr/kernel.h>
+ #include <zephyr/kernel/signal.h>
+@@ -20,47 +21,21 @@ BUILD_ASSERT((void *)SIG_DFL == K_SIG_DFL, "SIG_DFL does not match K_SIG_DFL");
+ BUILD_ASSERT((void *)SIG_IGN == K_SIG_IGN, "SIG_IGN does not match K_SIG_IGN");
+ BUILD_ASSERT((void *)SIG_ERR == K_SIG_ERR, "SIG_ERR does not match K_SIG_ERR");
+ 
+-/**
+- * @brief Convert a C library signal number to a kernel signal number
+- *
+- * Only the six signals required by ISO C are translated. A C library is free to number signals
+- * however it likes, and the ones Zephyr ships with disagree: picolibc and newlib inherit Cygwin's
+- * numbering, where SIGUSR1 is 30, while the kernel and the POSIX option group follow Linux, where
+- * it is 10. Translating the rest needs the full table that the POSIX signals option group owns,
+- * so signal() defers to it by being weak, and raise() picks the full table up through a weak
+- * reference to z_sig_from_posix() when the POSIX layer is linked.
+- *
+- * @param sig C library signal number
+- * @return the corresponding kernel signal number, or -1 if @p sig is not an ISO C signal number
++/*
++ * Every C library on Zephyr numbers signals as the kernel does, so signal() and raise() hand the
++ * number straight to the kernel. The two numbers reserved for thread cancellation are not an
++ * application's to act on.
+  */
+-static inline int z_isoc_sig_to_k(int sig)
++static inline bool z_isoc_sig_valid(int sig)
+ {
+-	switch (sig) {
+-	case SIGABRT:
+-		return K_SIG_ABRT;
+-	case SIGFPE:
+-		return K_SIG_FPE;
+-	case SIGILL:
+-		return K_SIG_ILL;
+-	case SIGINT:
+-		return K_SIG_INT;
+-	case SIGSEGV:
+-		return K_SIG_SEGV;
+-	case SIGTERM:
+-		return K_SIG_TERM;
+-	default:
+-		return -1;
+-	}
++	return (sig > 0) && (sig != K_SIG_CANCEL) && (sig != K_SIG_RESERVED);
+ }
+ 
+ /*
+- * Provided by the POSIX signals option group when it is linked; resolve to NULL otherwise.
+- * z_sig_from_posix() maps a C library signal number to a kernel signal number using the full
+- * table the POSIX layer owns. z_sig_shim() is the handler the POSIX layer registers with the
+- * kernel: it recovers the application handler from the action's user_data and invokes it with
+- * the C library's signal number.
++ * Provided by the POSIX signals option group when it is linked; resolves to NULL otherwise. It is
++ * the handler the POSIX layer registers with the kernel: it recovers the application handler from
++ * the action's user_data and invokes it with the signal number.
+  */
+-int z_sig_from_posix(int sig) __attribute__((__weak__));
+ void z_sig_shim(int sig, struct k_sig_info *info, void *context) __attribute__((__weak__));
+ 
+ #endif /* ZEPHYR_LIB_LIBC_COMMON_SOURCE_SIGNAL_SIG_ISOC_H_ */
+diff --git a/lib/libc/common/source/signal/signal.c b/lib/libc/common/source/signal/signal.c
+index 2e1584f33ab..928d23d7d73 100644
+--- a/lib/libc/common/source/signal/signal.c
++++ b/lib/libc/common/source/signal/signal.c
+@@ -14,12 +14,10 @@
+ void (*signal(int sig, void (*func)(int)))(int)
+ {
+ 	int ret;
+-	int ksig;
+ 	struct k_sig_action oact;
+ 	struct k_sig_action act = {0};
+ 
+-	ksig = (z_sig_from_posix != NULL) ? z_sig_from_posix(sig) : z_isoc_sig_to_k(sig);
+-	if (ksig <= 0) {
++	if (!z_isoc_sig_valid(sig)) {
+ 		errno = EINVAL;
+ 		return SIG_ERR;
+ 	}
+@@ -35,9 +33,8 @@ void (*signal(int sig, void (*func)(int)))(int)
+ 		act.user_data = (void *)func;
+ 	} else {
+ 		/*
+-		 * Without the POSIX layer only the six ISO C signal numbers are reachable, and
+-		 * those coincide with the kernel's, so the handler can take delivery directly; it
+-		 * ignores the trailing arguments the kernel passes.
++		 * Without the POSIX layer the handler takes delivery directly; it ignores the
++		 * trailing arguments the kernel passes.
+ 		 */
+ 		act.handler = (k_sig_handler_t)func;
+ 	}
+@@ -45,7 +42,7 @@ void (*signal(int sig, void (*func)(int)))(int)
+ 	/* ISO C dispositions carry no mask */
+ 	k_sig_emptyset(&act.mask);
+ 
+-	ret = k_sig_action(ksig, &act, &oact);
++	ret = k_sig_action(sig, &act, &oact);
+ 	if (ret < 0) {
+ 		errno = -ret;
+ 		return SIG_ERR;
+diff --git a/lib/libc/newlib/include/signal.h b/lib/libc/newlib/include/signal.h
+index 88982365687..1892a3656fa 100644
+--- a/lib/libc/newlib/include/signal.h
++++ b/lib/libc/newlib/include/signal.h
+@@ -9,6 +9,66 @@
+ 
+ #include_next <signal.h>
+ 
++/*
++ * Newlib numbers the signals beyond ISO C's six as Cygwin does (SIGUSR1 is 25). On Zephyr a
++ * signal number means the same thing to the C library, to the POSIX layer and to the kernel, whose
++ * numbering every <signal.h> follows; SIGEMT and SIGLOST, which newlib names and the kernel
++ * does not, are no signals here.
++ */
++#include <zephyr/kernel/signal.h>
++#undef SIGHUP
++#define SIGHUP K_SIG_HUP
++#undef SIGQUIT
++#define SIGQUIT K_SIG_QUIT
++#undef SIGTRAP
++#define SIGTRAP K_SIG_TRAP
++#undef SIGBUS
++#define SIGBUS K_SIG_BUS
++#undef SIGKILL
++#define SIGKILL K_SIG_KILL
++#undef SIGUSR1
++#define SIGUSR1 K_SIG_USR1
++#undef SIGUSR2
++#define SIGUSR2 K_SIG_USR2
++#undef SIGPIPE
++#define SIGPIPE K_SIG_PIPE
++#undef SIGALRM
++#define SIGALRM K_SIG_ALRM
++#undef SIGCHLD
++#define SIGCHLD K_SIG_CHLD
++#undef SIGCONT
++#define SIGCONT K_SIG_CONT
++#undef SIGSTOP
++#define SIGSTOP K_SIG_STOP
++#undef SIGTSTP
++#define SIGTSTP K_SIG_TSTP
++#undef SIGTTIN
++#define SIGTTIN K_SIG_TTIN
++#undef SIGTTOU
++#define SIGTTOU K_SIG_TTOU
++#undef SIGURG
++#define SIGURG K_SIG_URG
++#undef SIGXCPU
++#define SIGXCPU K_SIG_XCPU
++#undef SIGXFSZ
++#define SIGXFSZ K_SIG_XFSZ
++#undef SIGVTALRM
++#define SIGVTALRM K_SIG_VTALRM
++#undef SIGPROF
++#define SIGPROF K_SIG_PROF
++#undef SIGPOLL
++#define SIGPOLL K_SIG_POLL
++#undef SIGSYS
++#define SIGSYS K_SIG_SYS
++#undef SIGIOT
++#define SIGIOT SIGABRT
++#undef SIGCLD
++#define SIGCLD SIGCHLD
++#undef SIGIO
++#define SIGIO SIGPOLL
++#undef SIGEMT
++#undef SIGLOST
++
+ #if defined(_POSIX_C_SOURCE) || defined(__DOXYGEN__)
+ 
+ /*
+diff --git a/lib/libc/picolibc/include/signal.h b/lib/libc/picolibc/include/signal.h
+index 7b27f858e4d..635ef40d65a 100644
+--- a/lib/libc/picolibc/include/signal.h
++++ b/lib/libc/picolibc/include/signal.h
+@@ -9,6 +9,66 @@
+ 
+ #include_next <signal.h>
+ 
++/*
++ * Picolibc numbers the signals beyond ISO C's six as Cygwin does (SIGUSR1 is 30). On Zephyr a
++ * signal number means the same thing to the C library, to the POSIX layer and to the kernel, whose
++ * numbering every <signal.h> follows; SIGEMT and SIGLOST, which picolibc names and the kernel
++ * does not, are no signals here.
++ */
++#include <zephyr/kernel/signal.h>
++#undef SIGHUP
++#define SIGHUP K_SIG_HUP
++#undef SIGQUIT
++#define SIGQUIT K_SIG_QUIT
++#undef SIGTRAP
++#define SIGTRAP K_SIG_TRAP
++#undef SIGBUS
++#define SIGBUS K_SIG_BUS
++#undef SIGKILL
++#define SIGKILL K_SIG_KILL
++#undef SIGUSR1
++#define SIGUSR1 K_SIG_USR1
++#undef SIGUSR2
++#define SIGUSR2 K_SIG_USR2
++#undef SIGPIPE
++#define SIGPIPE K_SIG_PIPE
++#undef SIGALRM
++#define SIGALRM K_SIG_ALRM
++#undef SIGCHLD
++#define SIGCHLD K_SIG_CHLD
++#undef SIGCONT
++#define SIGCONT K_SIG_CONT
++#undef SIGSTOP
++#define SIGSTOP K_SIG_STOP
++#undef SIGTSTP
++#define SIGTSTP K_SIG_TSTP
++#undef SIGTTIN
++#define SIGTTIN K_SIG_TTIN
++#undef SIGTTOU
++#define SIGTTOU K_SIG_TTOU
++#undef SIGURG
++#define SIGURG K_SIG_URG
++#undef SIGXCPU
++#define SIGXCPU K_SIG_XCPU
++#undef SIGXFSZ
++#define SIGXFSZ K_SIG_XFSZ
++#undef SIGVTALRM
++#define SIGVTALRM K_SIG_VTALRM
++#undef SIGPROF
++#define SIGPROF K_SIG_PROF
++#undef SIGPOLL
++#define SIGPOLL K_SIG_POLL
++#undef SIGSYS
++#define SIGSYS K_SIG_SYS
++#undef SIGIOT
++#define SIGIOT SIGABRT
++#undef SIGCLD
++#define SIGCLD SIGCHLD
++#undef SIGIO
++#define SIGIO SIGPOLL
++#undef SIGEMT
++#undef SIGLOST
++
+ #include <zephyr/toolchain.h>
+ 
+ #if defined(_POSIX_C_SOURCE) || defined(__DOXYGEN__)

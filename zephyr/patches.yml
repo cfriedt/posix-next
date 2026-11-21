@@ -2092,6 +2092,27 @@ patches:
 
       Also reduces the minimal libc <signal.h> to what ISO C requires; the POSIX
       additions already come from <zephyr/posix/posix_signal.h>, which it includes.
+  - path: zephyr/libc-signal-numbers.patch
+    sha256sum: c2d8454112282719ff9076103accbe47a1df054fbf121cef4296a8e0cccadf4e
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-20
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/k-signal.patch
+          - zephyr/libc-isoc-signal-handling.patch
+    comments: |
+      Picolibc and newlib number the signals beyond ISO C's six as Cygwin does;
+      the kernel numbers them as Linux does. The <signal.h> Zephyr puts in front
+      of each library renumbers every signal to the kernel's, so a signal number
+      means the same thing to the C library, the POSIX layer and the kernel, and
+      nothing translates between them: the ISO C signal() and raise() hand the
+      number straight to the kernel instead of consulting a table the POSIX
+      layer had to provide. SIGEMT and SIGLOST, which the libraries name and
+      the kernel does not, are no signals here.
   - path: zephyr/libc-picolibc-limits-h.patch
     sha256sum: c215c69901f9cd028c994f9ef07ad551165f672410334468b332b5253244b4eb
     module: zephyr
