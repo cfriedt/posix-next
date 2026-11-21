@@ -1,0 +1,170 @@
+diff --git a/arch/Kconfig b/arch/Kconfig
+index 84cc7d14039..bca3fc34c54 100644
+--- a/arch/Kconfig
++++ b/arch/Kconfig
+@@ -54,6 +54,7 @@ config ARM
+ config ARM64
+ 	bool
+ 	select ARCH_IS_SET
++	select ARCH_HAS_SIGNAL_FAULT if USERSPACE
+ 	select 64BIT
+ 	select ARCH_HAS_FWARGS_HANDLER_HOOK
+ 	select ARCH_SUPPORTS_COREDUMP
+diff --git a/arch/arm64/core/fatal.c b/arch/arm64/core/fatal.c
+index 4eb2a1671d5..af62ac12ad8 100644
+--- a/arch/arm64/core/fatal.c
++++ b/arch/arm64/core/fatal.c
+@@ -584,6 +584,83 @@ static void dump_ptable_walk(uintptr_t addr)
+ }
+ #endif
+ 
++#ifdef CONFIG_SIGNAL_FAULT
++/* PSTATE.BTYPE: the resume in z_sig_fault_entry() is not a branch */
++#define SPSR_BTYPE_MASK (3ULL << 10)
++
++/* a fault taken at EL0 generates the signal Linux generates for it */
++static bool user_fault_signal(struct arch_esf *esf, uint64_t esr, uint64_t far)
++{
++	int signo = K_SIG_SEGV;
++	int code;
++	void *addr = (void *)far;
++	uint64_t fsc = esr & 0x3fULL;
++
++	switch (GET_ESR_EC(esr)) {
++	case 0x20: /* instruction abort */
++	case 0x24: /* data abort */
++		if (fsc == 0x21U) {
++			signo = K_SIG_BUS;
++			code = K_BUS_ADRALN;
++		} else if (fsc == 0x10U) {
++			signo = K_SIG_BUS;
++			code = K_BUS_OBJERR;
++		} else {
++			/* address size and translation faults: nothing mapped there */
++			code = (fsc < 0x08U) ? K_SEGV_MAPERR : K_SEGV_ACCERR;
++		}
++		break;
++	case 0x22: /* PC alignment */
++		signo = K_SIG_BUS;
++		code = K_BUS_ADRALN;
++		break;
++	case 0x26: /* SP alignment */
++		signo = K_SIG_BUS;
++		code = K_BUS_ADRALN;
++		addr = (void *)read_sp_el0();
++		break;
++	case 0x00: /* unknown reason: an undefined instruction */
++	case 0x0d: /* branch target identification */
++	case 0x18: /* trapped system register access */
++		signo = K_SIG_ILL;
++		code = K_ILL_ILLOPC;
++		addr = (void *)esf->elr;
++		break;
++	case 0x0e: /* illegal execution state */
++		signo = K_SIG_ILL;
++		code = K_ILL_ILLOPN;
++		addr = (void *)esf->elr;
++		break;
++	case 0x15: /* an SVC that is not a system call */
++		signo = K_SIG_ILL;
++		code = K_ILL_ILLTRP;
++		addr = (void *)esf->elr;
++		break;
++	case 0x2c: /* trapped floating-point exception */
++		signo = K_SIG_FPE;
++		code = K_FPE_FLTINV;
++		addr = (void *)esf->elr;
++		break;
++	case 0x3c: /* BRK */
++		signo = K_SIG_TRAP;
++		code = K_TRAP_BRKPT;
++		addr = (void *)esf->elr;
++		break;
++	default:
++		return false;
++	}
++
++	if (!z_sig_fault(signo, code, addr)) {
++		return false;
++	}
++
++	esf->elr = (uint64_t)(uintptr_t)z_sig_fault_entry;
++	esf->spsr &= ~SPSR_BTYPE_MASK;
++
++	return true;
++}
++#endif /* CONFIG_SIGNAL_FAULT */
++
+ void z_arm64_fatal_error(unsigned int reason, struct arch_esf *esf)
+ {
+ 	uint64_t esr = 0;
+@@ -626,6 +703,14 @@ void z_arm64_fatal_error(unsigned int reason, struct arch_esf *esf)
+ 			return;
+ 		}
+ 
++#ifdef CONFIG_SIGNAL_FAULT
++		if (((reason == K_ERR_CPU_EXCEPTION) || (reason == K_ERR_STACK_CHK_FAIL)) &&
++		    (esf != NULL) && ((esf->spsr & SPSR_MODE_MASK) == 0U) &&
++		    user_fault_signal(esf, esr, far)) {
++			return;
++		}
++#endif /* CONFIG_SIGNAL_FAULT */
++
+ 		if (GET_EL(el) != MODE_EL0) {
+ #ifdef CONFIG_EXCEPTION_DEBUG
+ 			bool dump_far = false;
+diff --git a/arch/arm64/core/userspace.S b/arch/arm64/core/userspace.S
+index 8933d4b9e89..e4aa07c8447 100644
+--- a/arch/arm64/core/userspace.S
++++ b/arch/arm64/core/userspace.S
+@@ -200,3 +200,15 @@ skip_k_sig_handle:
+ 	/* Return from exception */
+ 	.cfi_endproc
+ 	b	z_arm64_exit_exc
++
++#ifdef CONFIG_SIGNAL_FAULT
++/*
++ * A thread that faulted in user mode resumes here, in user mode. Nothing touches the stack: the
++ * fault may have been on it.
++ */
++GTEXT(z_sig_fault_entry)
++SECTION_FUNC(TEXT, z_sig_fault_entry)
++	mov	x8, #K_SYSCALL_K_SIG_FAULT
++	svc	#_SVC_CALL_SYSTEM_CALL
++	b	z_sig_fault_entry
++#endif /* CONFIG_SIGNAL_FAULT */
+diff --git a/tests/kernel/signal/src/main.c b/tests/kernel/signal/src/main.c
+index a62498dc6bd..71a73288997 100644
+--- a/tests/kernel/signal/src/main.c
++++ b/tests/kernel/signal/src/main.c
+@@ -688,21 +688,29 @@ static void fault_store(void *addr)
+ 	*(volatile int *)addr = 1;
+ }
+ 
+-#if defined(CONFIG_RISCV)
++#if defined(CONFIG_ARM64) || defined(CONFIG_RISCV)
+ #define FAULT_INSTRUCTIONS 1
+ 
+ static void fault_undefined(void *addr)
+ {
+ 	ARG_UNUSED(addr);
+ 
++#if defined(CONFIG_ARM64)
++	__asm__ volatile(".inst 0x00000000" ::: "memory");
++#elif defined(CONFIG_RISCV)
+ 	__asm__ volatile("unimp" ::: "memory");
++#endif
+ }
+ 
+ static void fault_breakpoint(void *addr)
+ {
+ 	ARG_UNUSED(addr);
+ 
++#if defined(CONFIG_ARM64)
++	__asm__ volatile("brk #0" ::: "memory");
++#elif defined(CONFIG_RISCV)
+ 	__asm__ volatile("ebreak" ::: "memory");
++#endif
+ }
+ #endif
+ 
