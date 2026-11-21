@@ -1,0 +1,33 @@
+diff --git a/newlib/libc/tinystdio/fflush.c b/newlib/libc/tinystdio/fflush.c
+index b72db58c2..42523ab44 100644
+--- a/newlib/libc/tinystdio/fflush.c
++++ b/newlib/libc/tinystdio/fflush.c
+@@ -35,10 +35,28 @@
+ 
+ #include "stdio_private.h"
+ 
++/*
++ * Weak references: a program that never names the standard streams does not
++ * pull their definitions in through fflush(NULL).
++ */
++extern FILE *const stdout __weak;
++extern FILE *const stderr __weak;
++
+ int
+ fflush(FILE *stream)
+ {
+         int ret = 0;
++        if (stream == NULL) {
++                /*
++                 * There is no list of open streams to walk; the standard
++                 * output streams are the ones that can be reached.
++                 */
++                if (&stdout != NULL && fflush(stdout) != 0)
++                        ret = EOF;
++                if (&stderr != NULL && fflush(stderr) != 0)
++                        ret = EOF;
++                return ret;
++        }
+         __flockfile(stream);
+ 	if (stream->flush)
+ 		ret = (stream->flush)(stream);
