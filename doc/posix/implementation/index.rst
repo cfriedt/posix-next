@@ -1192,4 +1192,10 @@ Deviations
    mode on a board without an MMU (its protection region covers it whole), keeps its shape and
    fails with ``EINVAL``. :c:func:`mprotect` operates on whole mappings: a range covering part of
    one fails with ``ENOTSUP``. Writable and executable pages are never granted together
-   (``ENOTSUP``).
+   (``ENOTSUP``). With :kconfig:option:`CONFIG_PROCESS`
+   a mapping still belongs to the thread that created it rather than to its process: it is
+   released when that thread exits although the process lives on, it stays behind when the
+   process ends through another thread until the next mapping operation, and a process cloned
+   with a copy of its address space (:kconfig:option:`CONFIG_PROCESS_VM`) gets copies of the
+   mapped pages but no mappings of its own, so shared mappings are not shared with it and it
+   can neither :c:func:`msync` nor :c:func:`munmap` them.
