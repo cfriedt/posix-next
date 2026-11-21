@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "spawn_internal.h"
+#include "posix_image.h"
 
 #include <stddef.h>
 
