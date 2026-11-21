@@ -387,6 +387,56 @@ void setprotoent(int stayopen);
  */
 void setservent(int stayopen);
 
+/*
+ * The host lookup of POSIX.1-2001 (Issue 6), where it was already LEGACY; POSIX.1-2008 (Issue 7)
+ * removed it. Declared for a program that targets Issue 6 or earlier, or asks for the extensions
+ * (_DEFAULT_SOURCE, _BSD_SOURCE or _GNU_SOURCE), as the C libraries that still carry it do.
+ */
+#if defined(__DOXYGEN__) || defined(_DEFAULT_SOURCE) || defined(_BSD_SOURCE) ||                   \
+	defined(_GNU_SOURCE) ||                                                                     \
+	(!(defined(_POSIX_C_SOURCE) && (_POSIX_C_SOURCE >= 200809L)) &&                             \
+	 !(defined(_XOPEN_SOURCE) && (_XOPEN_SOURCE >= 700)))
+
+/** @brief The host was not found. */
+#define HOST_NOT_FOUND 1
+/** @brief The lookup failed for now: try again later. */
+#define TRY_AGAIN      2
+/** @brief The lookup failed for good. */
+#define NO_RECOVERY    3
+/** @brief The host has no address of the requested type. */
+#define NO_DATA        4
+
+/** @brief The reason the last host name lookup failed, one of the codes above. */
+extern int h_errno;
+
+/**
+ * @brief Look a host up by name, returning its first address.
+ * @param name Host name or numeric address string.
+ * @return Pointer to a static hostent, or @c NULL with @ref h_errno set.
+ * @ingroup posix_option_group_networking
+ */
+struct hostent *gethostbyname(const char *name);
+
+/**
+ * @brief Look a host up by address, in the hosts database.
+ * @param addr The address, @p len bytes long.
+ * @param len Size of a @c struct in_addr or of a @c struct in6_addr.
+ * @param type @ref AF_INET or @ref AF_INET6.
+ * @return Pointer to a static hostent, or @c NULL with @ref h_errno set.
+ * @ingroup posix_option_group_networking
+ */
+struct hostent *gethostbyaddr(const void *addr, socklen_t len, int type);
+
+/**
+ * @brief Describe a host name lookup error.
+ * @param err One of the @ref h_errno codes.
+ * @return A constant string.
+ * @ingroup posix_option_group_networking
+ */
+const char *hstrerror(int err);
+
+#endif /* the host lookup of POSIX.1-2001 */
+
 #ifdef __cplusplus
 }
 #endif

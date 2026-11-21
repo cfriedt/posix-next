@@ -250,6 +250,10 @@ EXPORT_SYMBOL(endservent);
 EXPORT_SYMBOL(freeaddrinfo);
 EXPORT_SYMBOL(gai_strerror);
 EXPORT_SYMBOL(getaddrinfo);
+EXPORT_SYMBOL(gethostbyaddr); /* POSIX.1-2001 host lookup, with h_errno and hstrerror() */
+EXPORT_SYMBOL(gethostbyname);
+EXPORT_SYMBOL(h_errno);
+EXPORT_SYMBOL(hstrerror);
 EXPORT_SYMBOL(gethostent);
 EXPORT_SYMBOL(gethostname);
 EXPORT_SYMBOL(getnameinfo);
