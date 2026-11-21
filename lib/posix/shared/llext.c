@@ -67,6 +67,14 @@
 #include <zephyr/llext/symbol.h>
 #include <zephyr/posix/posix_setjmp.h>
 
+/* ADVISORY_INFO */
+#ifdef CONFIG_POSIX_ADVISORY_INFO
+EXPORT_SYMBOL(posix_fadvise);
+EXPORT_SYMBOL(posix_fallocate);
+EXPORT_SYMBOL(posix_madvise);
+EXPORT_SYMBOL(posix_memalign);
+#endif /* CONFIG_POSIX_ADVISORY_INFO */
+
 /* BARRIERS */
 #ifdef CONFIG_POSIX_BARRIERS
 EXPORT_SYMBOL(pthread_barrier_destroy);
