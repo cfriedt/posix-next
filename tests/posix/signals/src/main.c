@@ -72,6 +72,21 @@ void test_signals_sigaction_handler(int signo, siginfo_t *info, void *context)
 	test_signals_state.si_code = (info == NULL) ? -1 : info->si_code;
 }
 
+/* resumes with SIGUSR2 blocked: the mask left in the context is the one installed at return */
+void test_signals_ucontext_handler(int signo, siginfo_t *info, void *context)
+{
+	ucontext_t *const uc = context;
+
+	ARG_UNUSED(info);
+
+	test_signals_handler(signo);
+	test_signals_state.uc_usr2_clear = (uc != NULL) && (sigismember(&uc->uc_sigmask, SIGUSR2) == 0);
+	if (uc != NULL) {
+		(void)sigaddset(&uc->uc_sigmask, SIGUSR2);
+		(void)sigaddset(&uc->uc_sigmask, SIGKILL);
+	}
+}
+
 bool test_signals_blocked(int signo)
 {
 	sigset_t mask;

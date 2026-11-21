@@ -180,6 +180,30 @@ ZTEST_USER(posix_signals, test_sigaction)
 		      SIGUSR1);
 
 	/*
+	 * The third argument is a ucontext_t whose uc_sigmask is the mask in force when the signal
+	 * was delivered; the handler's changes to it are the mask the interrupted context resumes
+	 * with, except that SIGKILL and SIGSTOP stay unblocked.
+	 */
+	act.sa_sigaction = test_signals_ucontext_handler;
+	act.sa_flags = SA_SIGINFO;
+	zassert_ok(sigemptyset(&act.sa_mask));
+	zassert_ok(sigaction(SIGUSR1, &act, NULL));
+	zassert_false(test_signals_blocked(SIGUSR2));
+
+	test_signals_record_reset();
+	zassert_ok(raise(SIGUSR1));
+	zassert_equal(1, test_signals_state.calls);
+	zassert_true(test_signals_state.uc_usr2_clear, "uc_sigmask did not carry the interrupted mask");
+	zassert_true(test_signals_blocked(SIGUSR2), "the mask the handler left was not installed");
+	if (k_is_user_context()) {
+		zassert_false(test_signals_blocked(SIGKILL), "SIGKILL blocked through uc_sigmask");
+	}
+	zassert_ok(sigemptyset(&unmaskable));
+	zassert_ok(sigaddset(&unmaskable, SIGUSR2));
+	zassert_ok(sigaddset(&unmaskable, SIGKILL));
+	zassert_ok(sigprocmask(SIG_UNBLOCK, &unmaskable, NULL));
+
+	/*
 	 * SIGKILL and SIGSTOP cannot be added to the mask through sa_mask, and the restriction is
 	 * enforced without indicating an error.
 	 */

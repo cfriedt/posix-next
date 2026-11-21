@@ -36,6 +36,7 @@ struct test_signals_record {
 	int si_code;       /* siginfo_t::si_code, for SA_SIGINFO handlers */
 	sigset_t mask;     /* signal mask in effect inside the handler */
 	bool mask_valid;   /* whether mask could be read */
+	bool uc_usr2_clear; /* ucontext_t::uc_sigmask had SIGUSR2 clear on entry */
 };
 
 extern struct test_signals_record test_signals_state;
@@ -45,6 +46,7 @@ void test_signals_handler(int signo);
 
 /* A three-argument (SA_SIGINFO) handler that records its arguments */
 void test_signals_sigaction_handler(int signo, siginfo_t *info, void *context);
+void test_signals_ucontext_handler(int signo, siginfo_t *info, void *context);
 
 /* Forget everything test_signals_handler() has recorded so far */
 void test_signals_record_reset(void);
