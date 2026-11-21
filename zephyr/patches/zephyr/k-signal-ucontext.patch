@@ -1,0 +1,291 @@
+diff --git a/include/zephyr/kernel.h b/include/zephyr/kernel.h
+index 9957abc980a..a25d0966aa2 100644
+--- a/include/zephyr/kernel.h
++++ b/include/zephyr/kernel.h
+@@ -7535,18 +7535,17 @@ __syscall int k_sig_timedwait(const struct k_sig_set *set, struct k_sig_info *in
+ #if defined(CONFIG_SYSCALL_RETURN_HOOK) && defined(CONFIG_USERSPACE)
+ /** @cond INTERNAL_HIDDEN */
+ /*
+- * This system call is used exclusively for returning from the signal handler trampoline,
+- * z_sig_trampoline(), when userspace is enabled and should never be called from regular
+- * application code.
++ * The signal handler trampoline's own, z_sig_trampoline(): the signal being handled, its action
++ * and the context the handler is entered with. Not for application code.
+  */
+-__syscall void k_sig_current(struct k_sig_info *info, struct k_sig_action *action, void **context);
++__syscall void k_sig_current(struct k_sig_info *info, struct k_sig_action *action,
++			     struct k_sig_ucontext *uc);
+ 
+ /*
+- * This system call is used exclusively for returning from the signal handler trampoline,
+- * z_sig_trampoline(), when userspace is enabled and should never be called from regular
+- * application code.
++ * The signal handler trampoline's own: the handler returned, and the mask of the context it was
++ * entered with, as the handler left it, is the thread's again. Not for application code.
+  */
+-__syscall void k_sig_return(void);
++__syscall void k_sig_return(const struct k_sig_ucontext *uc);
+ /** @endcond */
+ #endif
+ 
+diff --git a/include/zephyr/kernel/signal.h b/include/zephyr/kernel/signal.h
+index fb39292e31e..338c6a6c777 100644
+--- a/include/zephyr/kernel/signal.h
++++ b/include/zephyr/kernel/signal.h
+@@ -129,6 +129,18 @@ struct k_sig_action {
+ 	void *user_data;
+ };
+ 
++/**
++ * @brief The context a signal handler is entered with
++ *
++ * The signal trampoline builds one on the handler's stack and passes its address as the
++ * handler's third argument. @ref k_sig_return installs @a mask as the thread's signal mask, so a
++ * handler that changes it chooses the mask the interrupted context resumes with; the signals that
++ * cannot be blocked stay unblocked.
++ */
++struct k_sig_ucontext {
++	struct k_sig_set mask; /**< The signal mask in force before delivery */
++};
++
+ /** @brief Per-thread signal context */
+ struct k_sig_ctx {
+ #ifdef CONFIG_SIGNAL
+diff --git a/kernel/return_hook.c b/kernel/return_hook.c
+index c61bbcb35c6..1d3e718e067 100644
+--- a/kernel/return_hook.c
++++ b/kernel/return_hook.c
+@@ -34,11 +34,11 @@ static bool z_syscall_hook_deliverable(void)
+ 
+ void z_sig_trampoline(void)
+ {
+-	void *context;
+ 	struct k_sig_info info;
+ 	struct k_sig_action action;
++	struct k_sig_ucontext uc;
+ 
+-	k_sig_current(&info, &action, &context);
++	k_sig_current(&info, &action, &uc);
+ 
+ #ifdef CONFIG_SIGNAL
+ 	if ((action.flags & K_SIG_SA_RESETHAND) != 0) {
+@@ -51,8 +51,8 @@ void z_sig_trampoline(void)
+ 	}
+ #endif /* CONFIG_SIGNAL */
+ 
+-	action.handler(info.signo, &info, &context);
+-	k_sig_return();
++	action.handler(info.signo, &info, &uc);
++	k_sig_return(&uc);
+ }
+ 
+ #ifndef CONFIG_ARCH_HAS_SIGNAL_TRAMPOLINE
+@@ -99,7 +99,8 @@ int z_sig_handle(void *user)
+ 	return 1;
+ }
+ 
+-void z_impl_k_sig_current(struct k_sig_info *info, struct k_sig_action *action, void **context)
++void z_impl_k_sig_current(struct k_sig_info *info, struct k_sig_action *action,
++			  struct k_sig_ucontext *uc)
+ {
+ 	__ASSERT_NO_MSG(!k_is_pre_kernel());
+ 	__ASSERT_NO_MSG(!k_is_in_isr());
+@@ -108,23 +109,26 @@ void z_impl_k_sig_current(struct k_sig_info *info, struct k_sig_action *action,
+ 
+ 	*info = ctx->info;
+ 	*action = ctx->action;
+-	*context = NULL;
++	*uc = (struct k_sig_ucontext){0};
++#ifdef CONFIG_SIGNAL
++	uc->mask = ctx->restore;
++#endif
+ }
+ 
+ #ifdef CONFIG_USERSPACE
+ static inline void z_vrfy_k_sig_current(struct k_sig_info *info, struct k_sig_action *action,
+-					void **context)
++					struct k_sig_ucontext *uc)
+ {
+ 	K_OOPS(K_SYSCALL_MEMORY_WRITE(info, sizeof(*info)));
+ 	K_OOPS(K_SYSCALL_MEMORY_WRITE(action, sizeof(*action)));
+-	K_OOPS(K_SYSCALL_MEMORY_WRITE(context, sizeof(*context)));
++	K_OOPS(K_SYSCALL_MEMORY_WRITE(uc, sizeof(*uc)));
+ 
+-	z_impl_k_sig_current(info, action, context);
++	z_impl_k_sig_current(info, action, uc);
+ }
+ #include <zephyr/syscalls/k_sig_current_mrsh.c>
+ #endif
+ 
+-void z_impl_k_sig_return(void)
++void z_impl_k_sig_return(const struct k_sig_ucontext *uc)
+ {
+ 	_current->base.sig.handling = false;
+ #ifdef CONFIG_USERSPACE
+@@ -134,14 +138,31 @@ void z_impl_k_sig_return(void)
+ #endif
+ 
+ #ifdef CONFIG_SIGNAL
+-	_current->base.sig.mask = _current->base.sig.restore;
+-#endif
++	if (uc != NULL) {
++		/* the handler may have changed the mask the interrupted context resumes with */
++		_current->base.sig.mask = uc->mask;
++#ifdef CONFIG_USERSPACE
++		if (k_is_in_user_syscall()) {
++			(void)k_sig_delset(&_current->base.sig.mask, K_SIG_KILL);
++			(void)k_sig_delset(&_current->base.sig.mask, K_SIG_STOP);
++		}
++#endif /* CONFIG_USERSPACE */
++	} else {
++		_current->base.sig.mask = _current->base.sig.restore;
++	}
++#endif /* CONFIG_SIGNAL */
+ }
+ 
+ #ifdef CONFIG_USERSPACE
+-static inline void z_vrfy_k_sig_return(void)
++static inline void z_vrfy_k_sig_return(const struct k_sig_ucontext *uc)
+ {
+-	z_impl_k_sig_return();
++	struct k_sig_ucontext kuc;
++
++	if (uc != NULL) {
++		K_OOPS(k_usermode_from_copy(&kuc, uc, sizeof(kuc)));
++		uc = &kuc;
++	}
++	z_impl_k_sig_return(uc);
+ }
+ #include <zephyr/syscalls/k_sig_return_mrsh.c>
+ #endif
+diff --git a/lib/libc/newlib/include/signal.h b/lib/libc/newlib/include/signal.h
+index e558154c003..3c4a49ca981 100644
+--- a/lib/libc/newlib/include/signal.h
++++ b/lib/libc/newlib/include/signal.h
+@@ -48,4 +48,21 @@
+ 
+ #endif /* defined(_POSIX_C_SOURCE) || defined(__DOXYGEN__) */
+ 
++#if defined(_XOPEN_SOURCE) || defined(__DOXYGEN__)
++/*
++ * The context a three-argument handler receives. The interrupted thread's registers are kept
++ * by the kernel, so the machine context is opaque.
++ */
++typedef struct {
++	const void *__context;
++} mcontext_t;
++
++typedef struct ucontext {
++	struct ucontext *uc_link;
++	sigset_t uc_sigmask;
++	stack_t uc_stack;
++	mcontext_t uc_mcontext;
++} ucontext_t;
++#endif /* defined(_XOPEN_SOURCE) || defined(__DOXYGEN__) */
++
+ #endif /* ZEPHYR_LIB_LIBC_NEWLIB_INCLUDE_SIGNAL_H_ */
+diff --git a/lib/libc/picolibc/include/signal.h b/lib/libc/picolibc/include/signal.h
+index bd8d550114b..e0297ed1bb2 100644
+--- a/lib/libc/picolibc/include/signal.h
++++ b/lib/libc/picolibc/include/signal.h
+@@ -61,4 +61,21 @@ int pthread_sigmask(int how, const sigset_t *ZRESTRICT set, sigset_t *ZRESTRICT
+ 
+ #endif /* defined(_POSIX_C_SOURCE) || defined(__DOXYGEN__) */
+ 
++#if defined(_XOPEN_SOURCE) || defined(__DOXYGEN__)
++/*
++ * The context a three-argument handler receives. The interrupted thread's registers are kept
++ * by the kernel, so the machine context is opaque.
++ */
++typedef struct {
++	const void *__context;
++} mcontext_t;
++
++typedef struct ucontext {
++	struct ucontext *uc_link;
++	sigset_t uc_sigmask;
++	stack_t uc_stack;
++	mcontext_t uc_mcontext;
++} ucontext_t;
++#endif /* defined(_XOPEN_SOURCE) || defined(__DOXYGEN__) */
++
+ #endif /* ZEPHYR_LIB_LIBC_PICOLIBC_INCLUDE_SIGNAL_H_ */
+diff --git a/tests/kernel/signal/src/main.c b/tests/kernel/signal/src/main.c
+index 106ef515c5c..e1e8aaea4ec 100644
+--- a/tests/kernel/signal/src/main.c
++++ b/tests/kernel/signal/src/main.c
+@@ -526,3 +526,74 @@ static void before(void *arg)
+ }
+ 
+ ZTEST_SUITE(signal, NULL, setup, before, NULL, NULL);
++
++/*
++ * The handler's third argument is the context it was entered with: the mask k_sig_return()
++ * installs, which the handler may change, and the stack it runs on.
++ */
++ZTEST_BMEM static struct k_sig_set ucontext_before;
++ZTEST_BMEM static volatile bool ucontext_mask_matched;
++
++static void ucontext_handler(int sig, struct k_sig_info *info, void *ucontext)
++{
++	struct k_sig_ucontext *const uc = ucontext;
++
++	ARG_UNUSED(sig);
++	ARG_UNUSED(info);
++
++	ucontext_mask_matched = memcmp(&uc->mask, &ucontext_before, sizeof(uc->mask)) == 0;
++	/* resume with K_SIG_USR2 blocked; K_SIG_KILL cannot be blocked this way either */
++	zassert_ok(k_sig_addset(&uc->mask, K_SIG_USR2));
++	zassert_ok(k_sig_addset(&uc->mask, K_SIG_KILL));
++}
++
++static void test_k_sig_ucontext_entry(void *arg1, void *arg2, void *arg3)
++{
++	struct k_sig_set set, after;
++	struct k_sig_action act = {.handler = ucontext_handler};
++
++	ARG_UNUSED(arg1);
++	ARG_UNUSED(arg2);
++	ARG_UNUSED(arg3);
++
++	zassert_ok(k_sig_emptyset(&set));
++	zassert_ok(k_sig_addset(&set, K_SIG_USR1));
++	zassert_ok(k_sig_addset(&set, K_SIG_USR2));
++	zassert_ok(k_sig_mask(K_SIG_UNBLOCK, &set, NULL));
++	zassert_ok(k_sig_mask(K_SIG_SETMASK, NULL, &ucontext_before));
++	zassert_ok(k_sig_action(K_SIG_USR1, &act, NULL));
++
++	ucontext_mask_matched = false;
++	zassert_ok(k_sig_queue((k_pid_t)k_current_get(), K_SIG_USR1, (union k_sig_val){0}));
++	k_msleep(0);
++	k_msleep(0);
++
++	zassert_true(ucontext_mask_matched, "the context did not carry the interrupted mask");
++	zassert_ok(k_sig_mask(K_SIG_SETMASK, NULL, &after));
++	zassert_equal(k_sig_ismember(&after, K_SIG_USR2), 1, "the mask the handler set was not installed");
++	if (k_is_user_context()) {
++		zassert_equal(k_sig_ismember(&after, K_SIG_KILL), 0, "K_SIG_KILL blocked through the context");
++	}
++
++	act.handler = K_SIG_DFL;
++	zassert_ok(k_sig_action(K_SIG_USR1, &act, NULL));
++	zassert_ok(k_sig_mask(K_SIG_SETMASK, &ucontext_before, NULL));
++}
++
++static void k_sig_ucontext_run(uint32_t options)
++{
++	k_thread_create(&noop_test_thread, noop_test_stack, K_THREAD_STACK_SIZEOF(noop_test_stack),
++			test_k_sig_ucontext_entry, NULL, NULL, NULL, K_LOWEST_APPLICATION_THREAD_PRIO,
++			options, K_NO_WAIT);
++	zassert_ok(k_thread_join(&noop_test_thread, K_FOREVER));
++}
++
++ZTEST(signal, test_k_sig_ucontext)
++{
++	k_sig_ucontext_run(0);
++#ifdef CONFIG_USERSPACE
++	if (!IS_ENABLED(CONFIG_COVERAGE)) {
++		k_sig_ucontext_run(K_USER | K_INHERIT_PERMS);
++	}
++#endif
++}

@@ -606,3 +606,21 @@ patches:
       queue is unchanged. tests/kernel/signal test_k_kill floods an ignored
       unblocked signal past the queue size and checks that a blocked one
       still pends and is claimed.
+  - path: zephyr/k-signal-ucontext.patch
+    sha256sum: dad3d7456b2804a997377b8277e13b6498b989147a43992412fcf5a2746f6621
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-20
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/k-signal.patch
+    comments: |
+      The signal trampoline builds the context a handler is entered with on
+      the handler's stack and passes its address as the third argument: the
+      mask the interrupted context resumes with, which the handler may change.
+      k_sig_return() installs that mask, with K_SIG_KILL and K_SIG_STOP kept
+      unblocked for a user caller, in place of the one it kept; k_sig_current()
+      fills the context in.
