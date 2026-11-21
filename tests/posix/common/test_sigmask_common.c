@@ -109,8 +109,6 @@ void test_pthread_sigmask_init_expectation_mask(void)
 	}
 
 #ifdef CONFIG_SIGNAL
-	extern sigset_t *z_sig_set_to_posix_slow(const struct k_sig_set *kset, sigset_t *buf);
-
 	struct k_sig_set buf;
 	struct k_sig_set *const kmask = &buf;
 	sigset_t *const pmask = &sigfillset_mask_bits;
@@ -118,7 +116,9 @@ void test_pthread_sigmask_init_expectation_mask(void)
 	(void)k_sig_fillset(kmask);
 	(void)k_sig_mask(K_SIG_SETMASK, kmask, NULL);
 	(void)k_sig_mask(K_SIG_SETMASK, NULL, kmask);
-	zassert_not_null(z_sig_set_to_posix_slow(kmask, pmask));
+	/* the C library numbers signals as the kernel does: its set is the kernel's, as far as it reaches */
+	memset(pmask, 0, sizeof(*pmask));
+	memcpy(pmask, kmask, MIN(sizeof(*pmask), sizeof(*kmask)));
 	pr_sigset("sigfillset_mask_bits", pmask);
 #endif /* CONFIG_SIGNAL */
 }

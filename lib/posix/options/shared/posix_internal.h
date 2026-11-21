@@ -16,6 +16,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <signal.h>
+#include <string.h>
 
 #include <zephyr/kernel.h>
 #include <zephyr/sys/util.h>
@@ -213,50 +214,73 @@ static inline pthread_t to_pthread_thread(const struct k_thread *kth)
 	return (pthread_t)posix_from_kernel_object((void *)kth, sizeof(pthread_t));
 }
 
-#define z_sig_set_equal()                                                                      \
-	((K_SIG_HUP == SIGHUP) && (K_SIG_INT == SIGINT) && (K_SIG_QUIT == SIGQUIT) &&          \
-	 (K_SIG_ILL == SIGILL) && (K_SIG_TRAP == SIGTRAP) && (K_SIG_ABRT == SIGABRT) &&        \
-	 (K_SIG_BUS == SIGBUS) && (K_SIG_FPE == SIGFPE) && (K_SIG_KILL == SIGKILL) &&          \
-	 (K_SIG_USR1 == SIGUSR1) && (K_SIG_SEGV == SIGSEGV) && (K_SIG_USR2 == SIGUSR2) &&      \
-	 (K_SIG_PIPE == SIGPIPE) && (K_SIG_ALRM == SIGALRM) && (K_SIG_TERM == SIGTERM) &&      \
-	 /* 16: SIGSTKFLT — no K_SIG_* */                                                        \
-	 (K_SIG_CHLD == SIGCHLD) && (K_SIG_CONT == SIGCONT) && (K_SIG_STOP == SIGSTOP) &&      \
-	 (K_SIG_TSTP == SIGTSTP) && (K_SIG_TTIN == SIGTTIN) && (K_SIG_TTOU == SIGTTOU) &&      \
-	 (K_SIG_URG == SIGURG) && (K_SIG_XCPU == SIGXCPU) && (K_SIG_XFSZ == SIGXFSZ) &&        \
-	 (K_SIG_VTALRM == SIGVTALRM) && (K_SIG_PROF == SIGPROF) &&                             \
-	 /* 28: SIGWINCH — no K_SIG_* */                                                         \
-	 (K_SIG_POLL == SIGPOLL) &&                                                            \
-	 /* 30: SIGPWR — no K_SIG_* */                                                           \
-	 (K_SIG_SYS == SIGSYS) && (K_SIG_CANCEL == CONFIG_THREAD_CANCEL_SIGNAL_NUMBER) &&      \
-	 (K_SIG_RTMIN == SIGRTMIN) && (K_SIG_CANCEL < K_SIG_RTMIN) &&                          \
-	 (DIV_ROUND_UP(SIGRTMAX, BITS_PER_LONG) ==                                              \
-	  DIV_ROUND_UP(MAX(SIGNAL_SET_SIZE, 1), BITS_PER_LONG)))
+/*
+ * Every C library on Zephyr numbers signals as the kernel does, so a POSIX signal number is the
+ * kernel's. The set types can differ in size: a C library's sigset_t may hold fewer words than the
+ * kernel's set, and a signal that does not fit is dropped.
+ */
+BUILD_ASSERT(SIGHUP == K_SIG_HUP);
+BUILD_ASSERT(SIGINT == K_SIG_INT);
+BUILD_ASSERT(SIGQUIT == K_SIG_QUIT);
+BUILD_ASSERT(SIGILL == K_SIG_ILL);
+BUILD_ASSERT(SIGTRAP == K_SIG_TRAP);
+BUILD_ASSERT(SIGABRT == K_SIG_ABRT);
+BUILD_ASSERT(SIGBUS == K_SIG_BUS);
+BUILD_ASSERT(SIGFPE == K_SIG_FPE);
+BUILD_ASSERT(SIGKILL == K_SIG_KILL);
+BUILD_ASSERT(SIGUSR1 == K_SIG_USR1);
+BUILD_ASSERT(SIGSEGV == K_SIG_SEGV);
+BUILD_ASSERT(SIGUSR2 == K_SIG_USR2);
+BUILD_ASSERT(SIGPIPE == K_SIG_PIPE);
+BUILD_ASSERT(SIGALRM == K_SIG_ALRM);
+BUILD_ASSERT(SIGTERM == K_SIG_TERM);
+BUILD_ASSERT(SIGCHLD == K_SIG_CHLD);
+BUILD_ASSERT(SIGCONT == K_SIG_CONT);
+BUILD_ASSERT(SIGSTOP == K_SIG_STOP);
+BUILD_ASSERT(SIGTSTP == K_SIG_TSTP);
+BUILD_ASSERT(SIGTTIN == K_SIG_TTIN);
+BUILD_ASSERT(SIGTTOU == K_SIG_TTOU);
+BUILD_ASSERT(SIGURG == K_SIG_URG);
+BUILD_ASSERT(SIGXCPU == K_SIG_XCPU);
+BUILD_ASSERT(SIGXFSZ == K_SIG_XFSZ);
+BUILD_ASSERT(SIGVTALRM == K_SIG_VTALRM);
+BUILD_ASSERT(SIGPROF == K_SIG_PROF);
+BUILD_ASSERT(SIGPOLL == K_SIG_POLL);
+BUILD_ASSERT(SIGSYS == K_SIG_SYS);
+BUILD_ASSERT(SIGRTMIN == K_SIG_RTMIN);
+BUILD_ASSERT(K_SIG_CANCEL < K_SIG_RTMIN);
 
-struct k_sig_set *z_sig_set_from_posix_slow(const sigset_t *set, struct k_sig_set *buf);
-sigset_t *z_sig_set_to_posix_slow(const struct k_sig_set *kset, sigset_t *buf);
-int z_sig_from_posix(int sig);
-int z_sig_to_posix(int sig);
+static inline int z_sig_from_posix(int sig)
+{
+	/* a signal number an application may name: a standard one, or a real-time one */
+	return ((sig > 0) && ((sig < SIGRTMIN) ? (sig <= 31) : (sig <= SIGRTMAX))) ? sig : -1;
+}
+
+static inline int z_sig_to_posix(int sig)
+{
+	return sig;
+}
 
 static inline struct k_sig_set *z_sig_set_from_posix(const sigset_t *set, struct k_sig_set *buf)
 {
-	ARG_UNUSED(buf);
-
-	if (z_sig_set_equal() && (sizeof(struct k_sig_set) == sizeof(sigset_t))) {
+	if (sizeof(struct k_sig_set) == sizeof(sigset_t)) {
 		return (struct k_sig_set *)(const void *)set;
 	}
+	memset(buf, 0, sizeof(*buf));
+	memcpy(buf, set, MIN(sizeof(*buf), sizeof(*set)));
 
-	return z_sig_set_from_posix_slow(set, buf);
+	return buf;
 }
 
 static inline sigset_t *z_sig_set_to_posix(const struct k_sig_set *kset, sigset_t *buf)
 {
-	ARG_UNUSED(buf);
-
-	if (z_sig_set_equal() && (sizeof(struct k_sig_set) == sizeof(sigset_t))) {
+	if (sizeof(struct k_sig_set) == sizeof(sigset_t)) {
 		return (sigset_t *)(const void *)kset;
 	}
+	memset(buf, 0, sizeof(*buf));
+	memcpy(buf, kset, MIN(sizeof(*buf), sizeof(*kset)));
 
-	return z_sig_set_to_posix_slow(kset, buf);
+	return buf;
 }
 
 /* forward declaration to avoid pulling in conflicting <sys/time.h> and <time.h> */
