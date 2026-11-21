@@ -1,0 +1,193 @@
+diff --git a/arch/Kconfig b/arch/Kconfig
+index 4313e496b84..84cc7d14039 100644
+--- a/arch/Kconfig
++++ b/arch/Kconfig
+@@ -146,6 +146,7 @@ config X86
+ 
+ config RISCV
+ 	bool
++	select ARCH_HAS_SIGNAL_FAULT if USERSPACE
+ 	select ARCH_IS_SET
+ 	select ATOMIC_OPERATIONS_C if (!RISCV_ISA_EXT_A && !ATOMIC_OPERATIONS_ARCH)
+ 	select ATOMIC_OPERATIONS_BUILTIN if RISCV_ISA_EXT_A
+diff --git a/arch/riscv/core/fatal.c b/arch/riscv/core/fatal.c
+index 1e64cc2eae3..a6d2f6d5b6b 100644
+--- a/arch/riscv/core/fatal.c
++++ b/arch/riscv/core/fatal.c
+@@ -216,6 +216,72 @@ static bool bad_stack_pointer(struct arch_esf *esf)
+ 	return false;
+ }
+ 
++#ifdef CONFIG_SIGNAL_FAULT
++/* a fault taken in U-mode generates the signal Linux generates for it */
++static bool user_fault_signal(struct arch_esf *esf)
++{
++	unsigned long cause;
++	unsigned long tval;
++	int signo = K_SIG_SEGV;
++	int code = K_SEGV_ACCERR;
++
++#ifdef CONFIG_RISCV_S_MODE
++	cause = csr_read(scause);
++	tval = csr_read(stval);
++#else
++	cause = csr_read(mcause);
++	tval = csr_read(mtval);
++#endif
++	void *addr = (void *)tval;
++
++	switch (cause & CONFIG_RISCV_MCAUSE_EXCEPTION_MASK) {
++	case 0: /* instruction address misaligned */
++	case 4: /* load address misaligned */
++	case 6: /* store address misaligned */
++		signo = K_SIG_BUS;
++		code = K_BUS_ADRALN;
++		break;
++	case 1: /* instruction access fault */
++	case 5: /* load access fault */
++	case 7: /* store access fault */
++		break;
++	case 2: /* illegal instruction */
++		signo = K_SIG_ILL;
++		code = K_ILL_ILLOPC;
++		addr = (void *)esf->mepc;
++		break;
++	case RISCV_EXC_BREAKPOINT:
++		signo = K_SIG_TRAP;
++		code = K_TRAP_BRKPT;
++		addr = (void *)esf->mepc;
++		break;
++#ifdef CONFIG_RISCV_MMU
++	case RISCV_EXC_INST_PAGE_FAULT:
++	case RISCV_EXC_LOAD_PAGE_FAULT:
++	case RISCV_EXC_STORE_PAGE_FAULT: {
++		uintptr_t phys;
++
++		/* mapped for the kernel: a permission the user lacks */
++		code = (arch_page_phys_get(addr, &phys) == 0) ? K_SEGV_ACCERR : K_SEGV_MAPERR;
++		break;
++	}
++#endif /* CONFIG_RISCV_MMU */
++	default:
++		signo = K_SIG_ILL;
++		code = K_ILL_ILLTRP;
++		addr = (void *)esf->mepc;
++		break;
++	}
++
++	if (!z_sig_fault(signo, code, addr)) {
++		return false;
++	}
++	esf->mepc = (unsigned long)z_sig_fault_entry;
++
++	return true;
++}
++#endif /* CONFIG_SIGNAL_FAULT */
++
+ void z_riscv_fault(struct arch_esf *esf)
+ {
+ #ifdef CONFIG_RISCV_MMU
+@@ -254,6 +320,12 @@ void z_riscv_fault(struct arch_esf *esf)
+ 	}
+ #endif /* CONFIG_USERSPACE */
+ 
++#ifdef CONFIG_SIGNAL_FAULT
++	if (((esf->mstatus & RV_STATUS_PP) == RV_STATUS_PP_U) && user_fault_signal(esf)) {
++		return;
++	}
++#endif /* CONFIG_SIGNAL_FAULT */
++
+ 	unsigned int reason = K_ERR_CPU_EXCEPTION;
+ 
+ 	if (bad_stack_pointer(esf)) {
+diff --git a/arch/riscv/core/userspace.S b/arch/riscv/core/userspace.S
+index 487310c6bff..9aa7217b636 100644
+--- a/arch/riscv/core/userspace.S
++++ b/arch/riscv/core/userspace.S
+@@ -57,3 +57,15 @@ z_riscv_user_string_nlen_fixup:
+ 	li	a4, -1		# Put error to -1
+ 	sw	a4, 0(a2)
+ 	j	exit
++
++#ifdef CONFIG_SIGNAL_FAULT
++/*
++ * A thread that faulted in user mode resumes here, in user mode. Nothing touches the stack: the
++ * fault may have been on it.
++ */
++GTEXT(z_sig_fault_entry)
++SECTION_FUNC(TEXT, z_sig_fault_entry)
++	li	t0, K_SYSCALL_K_SIG_FAULT
++	ecall
++	j	z_sig_fault_entry
++#endif /* CONFIG_SIGNAL_FAULT */
+diff --git a/tests/kernel/signal/src/main.c b/tests/kernel/signal/src/main.c
+index 60362390ae8..e244ac5ec00 100644
+--- a/tests/kernel/signal/src/main.c
++++ b/tests/kernel/signal/src/main.c
+@@ -540,6 +540,24 @@ static void fault_store(void *addr)
+ 	*(volatile int *)addr = 1;
+ }
+ 
++#if defined(CONFIG_RISCV)
++#define FAULT_INSTRUCTIONS 1
++
++static void fault_undefined(void *addr)
++{
++	ARG_UNUSED(addr);
++
++	__asm__ volatile("unimp" ::: "memory");
++}
++
++static void fault_breakpoint(void *addr)
++{
++	ARG_UNUSED(addr);
++
++	__asm__ volatile("ebreak" ::: "memory");
++}
++#endif
++
+ static void fault_entry(void *arg1, void *arg2, void *arg3)
+ {
+ 	void (*raise)(void *) = arg1;
+@@ -573,7 +591,9 @@ static void k_sig_fault_run(void (*raise)(void *), int signo, void *addr, bool j
+ static void k_sig_fault_unmapped(void)
+ {
+ 	k_sig_fault_run(fault_store, K_SIG_SEGV, (void *)16, true);
+-	zassert_equal(fault_code, K_SEGV_MAPERR, "code %d", fault_code);
++	/* a memory protection unit tells no unmapped address from a forbidden one */
++	zassert_equal(fault_code, IS_ENABLED(CONFIG_MMU) ? K_SEGV_MAPERR : K_SEGV_ACCERR, "code %d",
++		      fault_code);
+ 	zassert_equal(fault_addr, (void *)16);
+ }
+ 
+@@ -589,11 +609,30 @@ static void k_sig_fault_handler_returns(void)
+ 	k_sig_fault_run(fault_store, K_SIG_SEGV, (void *)16, false);
+ }
+ 
++#ifdef FAULT_INSTRUCTIONS
++static void k_sig_fault_undefined_instruction(void)
++{
++	k_sig_fault_run(fault_undefined, K_SIG_ILL, NULL, true);
++	zassert_equal(fault_code, K_ILL_ILLOPC, "code %d", fault_code);
++	zassert_not_null(fault_addr);
++}
++
++static void k_sig_fault_breakpoint(void)
++{
++	k_sig_fault_run(fault_breakpoint, K_SIG_TRAP, NULL, true);
++	zassert_equal(fault_code, K_TRAP_BRKPT, "code %d", fault_code);
++}
++#endif /* FAULT_INSTRUCTIONS */
++
+ ZTEST(signal, test_k_sig_fault)
+ {
+ 	k_sig_fault_unmapped();
+ 	k_sig_fault_kernel_memory();
+ 	k_sig_fault_handler_returns();
++#ifdef FAULT_INSTRUCTIONS
++	k_sig_fault_undefined_instruction();
++	k_sig_fault_breakpoint();
++#endif /* FAULT_INSTRUCTIONS */
+ }
+ #endif /* CONFIG_SIGNAL_FAULT */
+ 

@@ -882,3 +882,24 @@ patches:
     comments: |
       RISC-V arch-level support for userspace signals in syscall handling: the
       user-mode return path is gated on SYSCALL_RETURN_HOOK.
+  - path: zephyr/k-signal-fault-riscv.patch
+    sha256sum: a19451f486a4e5357aeddce095a9bddc1c0424f0e4dc6de78af95b87415f7a48
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-04
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/k-signal-fault.patch
+          - zephyr/user-signals-riscv.patch
+          - zephyr/riscv-mmu-support.patch
+    comments: |
+      riscv delivers user-mode faults as signals: it classifies mcause and
+      mtval (stval in S-mode) as Linux does, records the fault with
+      z_sig_fault() and resumes the thread in a stack-free z_sig_fault_entry
+      stub (li t0 / ecall). An unknown cause is SIGILL ILL_ILLTRP; riscv has
+      no arithmetic traps and never generates SIGFPE. test_k_sig_fault gains
+      the undefined-instruction (unimp) and breakpoint (ebreak) sections, and
+      accepts SEGV_ACCERR for the unmapped address under a protection unit.
