@@ -4,6 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+/* the ucontext_t a three-argument handler receives is XSI */
+#define _XOPEN_SOURCE 700
+
 #include "posix_internal.h"
 
 #include <errno.h>
@@ -155,9 +158,21 @@ static void kinfo_to_siginfo(siginfo_t *dst, const struct k_sig_info *src, int s
 	dst->si_value.sival_ptr = src->value.sival_ptr;
 }
 
+/* the context a handler is entered with, from the kernel's */
+static void kucontext_to_ucontext(ucontext_t *uc, const struct k_sig_ucontext *kuc)
+{
+	*uc = (ucontext_t){.uc_mcontext.__context = kuc};
+	if (kuc == NULL) {
+		return;
+	}
+	ksigset_to_posix(&uc->uc_sigmask, &kuc->mask);
+	uc->uc_stack = (stack_t){.ss_flags = SS_DISABLE};
+}
+
 /* handle a POSIX sigaction from a kernel signal handler */
 void z_sig_shim(int ksigno, struct k_sig_info *kinfo, void *context)
 {
+	struct k_sig_ucontext *const kuc = context;
 	struct k_sig_ucontext kuc_unused;
 	struct k_sig_info kinfo_unused;
 	struct k_sig_action action;
@@ -173,9 +188,16 @@ void z_sig_shim(int ksigno, struct k_sig_info *kinfo, void *context)
 
 	if ((action.flags & K_SIG_SA_SIGINFO) != 0) {
 		siginfo_t info;
+		ucontext_t uc;
+		struct k_sig_set kmask_buf;
 
 		kinfo_to_siginfo(&info, kinfo, signo);
-		((void (*)(int, siginfo_t *, void *))action.user_data)(signo, &info, context);
+		kucontext_to_ucontext(&uc, kuc);
+		((void (*)(int, siginfo_t *, void *))action.user_data)(signo, &info, &uc);
+		if (kuc != NULL) {
+			/* the mask the handler leaves in the context is the one the return installs */
+			kuc->mask = *z_sig_set_from_posix(&uc.uc_sigmask, &kmask_buf);
+		}
 	} else {
 		((void (*)(int))action.user_data)(signo);
 	}

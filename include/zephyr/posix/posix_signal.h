@@ -243,11 +243,13 @@ struct sigaction {
 #define SIGSTKSZ    4096
 
 #if !defined(_MCONTEXT_T_DECLARED) && !defined(__mcontext_t_defined)
-/** @brief Machine-specific context saved when a signal is delivered. */
+/**
+ * @brief Machine-specific context saved when a signal is delivered.
+ *
+ * The interrupted thread's registers are kept by the kernel: the member is opaque.
+ */
 typedef struct {
-	/* FIXME: there should be a much better Zephyr-specific structure that can be used here */
-	unsigned long gregs[32]; /**< General-purpose registers. */
-	unsigned long flags;     /**< Architecture-specific flags. */
+	const void *__context; /**< Reserved. */
 } mcontext_t;
 #define _MCONTEXT_T_DECLARED
 #define __mcontext_defined
@@ -266,12 +268,19 @@ typedef struct {
 #endif
 
 #if !defined(_UCONTEXT_T_DECLARED) && !defined(__ucontext_t_defined)
-/** @brief User-space context saved and restored by getcontext()/setcontext(). */
-typedef struct {
-	struct ucontext *uc_link;  /**< Context to resume when this one returns. */
-	sigset_t uc_sigmask;       /**< Signals blocked in this context. */
-	stack_t uc_stack;          /**< Stack used by this context. */
-	mcontext_t uc_mcontext;    /**< Machine-specific saved state. */
+/**
+ * @brief The context a three-argument signal handler receives.
+ *
+ * The third argument of a handler installed with @c SA_SIGINFO points to one: the signal mask the
+ * interrupted context resumes with, which the handler may change, the stack the handler runs on,
+ * and an opaque machine context, since the interrupted registers stay in the kernel. Nothing saves
+ * or restores one otherwise: there is no getcontext() or setcontext().
+ */
+typedef struct ucontext {
+	struct ucontext *uc_link;  /**< Unused: a handler returns to the interrupted context. */
+	sigset_t uc_sigmask;       /**< The mask the interrupted context resumes with. */
+	stack_t uc_stack;          /**< The stack the handler runs on. */
+	mcontext_t uc_mcontext;    /**< Opaque: the registers live in the kernel. */
 } ucontext_t;
 #define _UCONTEXT_T_DECLARED
 #define __ucontext_defined
