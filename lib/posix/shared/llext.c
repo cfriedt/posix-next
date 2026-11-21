@@ -59,6 +59,7 @@
 #include <sys/times.h>
 #include <sys/utsname.h>
 #include <sys/wait.h>
+#include <mntent.h>
 #include <syslog.h>
 #include <termios.h>
 #include <time.h>
@@ -439,6 +440,12 @@ EXPORT_SYMBOL(pthread_setaffinity_np);
 EXPORT_SYMBOL(pthread_setname_np);
 EXPORT_SYMBOL(pthread_timedjoin_np);
 EXPORT_SYMBOL(pthread_tryjoin_np);
+#ifdef CONFIG_POSIX_FILE_SYSTEM
+EXPORT_SYMBOL(endmntent);
+EXPORT_SYMBOL(getmntent);
+EXPORT_SYMBOL(hasmntopt);
+EXPORT_SYMBOL(setmntent);
+#endif /* CONFIG_POSIX_FILE_SYSTEM */
 #endif /* CONFIG_POSIX_NON_PORTABLE */
 
 /* PIPE */
