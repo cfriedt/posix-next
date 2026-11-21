@@ -231,6 +231,14 @@ permission on the thread object.
   the full set and the setter accepts only that set, returning ``ENOTSUP`` for anything
   narrower; with :kconfig:option:`CONFIG_SCHED_CPU_MASK_PIN_ONLY` a set may name only one CPU
   and a runnable thread cannot be moved, matching the kernel's rules for that variant.
+- :c:func:`setmntent`, :c:func:`getmntent`, :c:func:`endmntent` and :c:func:`hasmntopt`
+  (``<mntent.h>``, with :kconfig:option:`CONFIG_POSIX_FILE_SYSTEM`) enumerate the mounted file
+  systems. There is no mount table file to parse: the path given to :c:func:`setmntent` is
+  ignored and the stream it returns is a cursor on the kernel's list of mounts, read one entry
+  per call through the ``zvfs_readmount()`` system call, which reports each mount point, the
+  file system type by its conventional name (``vfat``, ``littlefs``, ``ext2``, ``tmpfs``) and
+  whether it is read-only (``mnt_opts`` of ``ro`` or ``rw``). ``mnt_fsname`` repeats the type,
+  as Linux reports for file systems without a backing device.
 
 Event file descriptors
 ----------------------
