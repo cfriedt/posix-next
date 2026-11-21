@@ -623,7 +623,7 @@ int sigwaitinfo(const sigset_t *ZRESTRICT set, siginfo_t *ZRESTRICT info);
 #define SIGPROF   27 /**< Profiling timer expired */
 /* 28 not used */
 #define SIGPOLL   29 /**< Pollable event occurred */
-/* 30 not used */
+#define SIGPWR    30 /**< Power failure */
 #define SIGSYS    31 /**< Bad system call */
 
 #if defined(_POSIX_REALTIME_SIGNALS) || defined(__DOXYGEN__)
