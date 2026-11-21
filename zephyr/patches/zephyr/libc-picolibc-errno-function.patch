@@ -1,0 +1,73 @@
+diff --git a/lib/libc/common/Kconfig b/lib/libc/common/Kconfig
+index 18035898586..9f4c181576b 100644
+--- a/lib/libc/common/Kconfig
++++ b/lib/libc/common/Kconfig
+@@ -139,7 +139,10 @@ config ERRNO
+ config ERRNO_IN_TLS
+ 	bool "Store errno in thread local storage (TLS)"
+ 	depends on ERRNO && THREAD_LOCAL_STORAGE && !LIBC_ERRNO
++	default n if LLEXT
+ 	default y
+ 	help
+ 	  Use thread local storage to store errno instead of storing it in
+ 	  the kernel thread struct. This avoids a syscall if userspace is enabled.
++	  Loadable extensions carry no thread-local relocations, so with LLEXT the
++	  default keeps errno where the z_errno() system call finds it.
+diff --git a/lib/libc/picolibc/CMakeLists.txt b/lib/libc/picolibc/CMakeLists.txt
+index 2351df64114..0042563c674 100644
+--- a/lib/libc/picolibc/CMakeLists.txt
++++ b/lib/libc/picolibc/CMakeLists.txt
+@@ -18,6 +18,8 @@ endif()
+ 
+ zephyr_library_compile_options($<TARGET_PROPERTY:compiler,prohibit_lto>)
+ 
++zephyr_compile_definitions_ifdef(CONFIG_PICOLIBC_ERRNO_FUNCTION __PICOLIBC_ERRNO_FUNCTION=z_errno_wrap)
++
+ # define __LINUX_ERRNO_EXTENSIONS__ so we get errno defines like -ESHUTDOWN
+ # used by the network stack
+ zephyr_compile_definitions(__LINUX_ERRNO_EXTENSIONS__)
+diff --git a/lib/libc/picolibc/Kconfig b/lib/libc/picolibc/Kconfig
+index 3e0004bbd87..d91e828fd7d 100644
+--- a/lib/libc/picolibc/Kconfig
++++ b/lib/libc/picolibc/Kconfig
+@@ -29,6 +29,16 @@ config PICOLIBC_USE_TOOLCHAIN
+ 
+ endchoice # PICOLIBC_SOURCE
+ 
++config PICOLIBC_ERRNO_FUNCTION
++	bool "Reach errno through a function"
++	depends on LIBC_ERRNO
++	default y if LLEXT
++	help
++	  Every errno access calls z_errno_wrap() instead of naming the C
++	  library's thread-local variable. Code that cannot carry thread-local
++	  relocations, such as a loadable extension, then shares the errno of
++	  the thread running it.
++
+ choice PICOLIBC_IO_LEVEL
+ 	prompt "Picolibc printf/scanf level"
+ 	default PICOLIBC_IO_MINIMAL if CBPRINTF_NANO
+diff --git a/lib/libc/picolibc/errno_wrap.c b/lib/libc/picolibc/errno_wrap.c
+index 4e9b81cec54..48f518959e7 100644
+--- a/lib/libc/picolibc/errno_wrap.c
++++ b/lib/libc/picolibc/errno_wrap.c
+@@ -18,4 +18,19 @@ int *z_errno_wrap(void)
+ 	return z_errno();
+ }
+ 
++#elif defined(CONFIG_PICOLIBC_ERRNO_FUNCTION)
++
++#include <errno.h>
++#include <zephyr/llext/symbol.h>
++
++/* the C library's own thread-local variable, which the headers reach through this */
++#undef errno
++extern __THREAD_LOCAL_ERRNO int errno;
++
++int *z_errno_wrap(void)
++{
++	return &errno;
++}
++EXPORT_SYMBOL(z_errno_wrap);
++
+ #endif

@@ -373,3 +373,18 @@ patches:
       Found through zephyr#122510, whose dynamic_thread_stack test allocates
       user stacks of twice CONFIG_DYNAMIC_THREAD_STACK_SIZE and faults on
       exactly the two power-of-two MPU platforms in CI.
+  - path: zephyr/libc-picolibc-errno-function.patch
+    sha256sum: 20511f749f65f6d6fe8b9ddbdb4accaa21a23aa1977f0b2b9cd926c2090be6d2
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-20
+    upstreamable: true
+    comments: |
+      Picolibc keeps errno in a thread-local variable, which a loadable
+      extension cannot name: extensions carry no thread-local relocations.
+      CONFIG_PICOLIBC_ERRNO_FUNCTION, on by default with LLEXT, has the
+      library's <errno.h> route every access through z_errno_wrap(), a
+      function the base image defines over the variable and exports, so an
+      extension shares the errno of the thread running it. ERRNO_IN_TLS
+      defaults off with LLEXT for the same reason.
