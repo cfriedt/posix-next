@@ -5167,6 +5167,25 @@ patches:
       it. zvfs_telldir()/zvfs_seekdir() expose both as system calls; a
       negative position is EINVAL. tests/lib/zvfs_fs: test_zvfs_telldir and
       test_zvfs_seekdir on the fixture root.
+  - path: zephyr/zvfs-statvfs-root-mount.patch
+    sha256sum: aa0eb191129e89f9f27a0331c494fddd00f053cf22b59bd0b74dd115863a7e6b
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-20
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/zvfs-fs-path-syscalls.patch
+          - zephyr/zvfs-cwd.patch
+    comments: |
+      statvfs() of the root answered with the synthetic directory of mount
+      points even when a file system was mounted at the root, so df and
+      anything else sizing the root saw no blocks: fs_statvfs() refused the
+      path "/" before looking for a mount there. It now looks, and ZVFS reports
+      the file system mounted at the root; the synthetic root remains the
+      answer when nothing is.
   - path: zephyr/libc-libgen-ftw-header-shims.patch
     sha256sum: ba51c624dfb2ff38e9b22598e1665a0b4575b6cb1980bce8409505eb7488d613
     module: zephyr
