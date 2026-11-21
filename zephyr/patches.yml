@@ -624,3 +624,27 @@ patches:
       k_sig_return() installs that mask, with K_SIG_KILL and K_SIG_STOP kept
       unblocked for a user caller, in place of the one it kept; k_sig_current()
       fills the context in.
+  - path: zephyr/k-signal-fault.patch
+    sha256sum: 239fae688f75845d89a0c94decbc0ff1f2420c7092dec7059ac319afdcb61e65
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-03
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/k-signal.patch
+    comments: |
+      A fault a user thread takes generates a signal for it (SIGSEGV, SIGBUS,
+      SIGILL, SIGFPE, SIGTRAP with the Linux si_code and si_addr) instead of
+      a fatal error. The arch records the fault and resumes the thread in a
+      stack-free user-mode stub whose k_sig_fault() system call either runs
+      the handler on the return path or, for a blocked, ignored or default
+      disposition or a fault inside a handler, ends the thread with the
+      signal in thread context (its process, once there are processes). A
+      returning handler ends it the same way (POSIX leaves it undefined).
+      Each architecture's fault classifier follows in a patch of its own. The
+      picolibc signal.h shim numbers si_code as Linux does.
+      tests/kernel/signal test_k_sig_fault, with the sections every
+      architecture shares.
