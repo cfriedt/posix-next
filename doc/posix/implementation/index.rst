@@ -237,16 +237,16 @@ also requires, so they must work in a freestanding-plus-ISO-C environment where
 :kconfig:option:`CONFIG_POSIX_SIGNALS` is not selected. They are implemented once, in the common
 C library behind :kconfig:option:`CONFIG_COMMON_LIBC_SIGNAL`, and behave identically whichever
 standard they are reached through: the calling thread is the same thread in ISO C, POSIX, and the
-kernel. When the option group is linked, weak references pick up its signal number table and its
-delivery shim, so ``signal()`` makes the same kernel registration :c:func:`sigaction` makes and a
-disposition installed through either is visible to the other. Without it, only the six signal
-numbers ISO C defines (``SIGABRT``, ``SIGFPE``, ``SIGILL``, ``SIGINT``, ``SIGSEGV``, and
-``SIGTERM``) are reachable, and those coincide with the kernel's numbering, so handlers take
-delivery directly.
+kernel. When the option group is linked, a weak reference picks up its delivery shim, so
+``signal()`` makes the same kernel registration :c:func:`sigaction` makes and a disposition
+installed through either is visible to the other. Without it, handlers take delivery directly.
 
-Note that only the six ISO C signal numbers can be assumed: a C library is free to number every
-other signal however it likes, and the numbering shipped with a given toolchain need not match
-the Linux-aligned numbering used by the kernel and the POSIX option group.
+Every C library numbers signals as the kernel does. Picolibc and Newlib ship Cygwin's layout, in
+which ``SIGUSR1`` is 30 or 25; the ``<signal.h>`` Zephyr puts in front of theirs renumbers every
+signal beyond the six of ISO C to the kernel's, so a signal number means the same thing to the C
+library, the POSIX layer and the kernel, and no table translates between them. ``SIGEMT`` and
+``SIGLOST``, which those libraries name and the kernel does not, are not signals on Zephyr; the
+kernel leaves 16 unassigned and reserves 32 and 33 for thread cancellation.
 
 Zephyr does not support processes, which shapes the implementation in several ways:
 
