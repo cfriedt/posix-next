@@ -5186,6 +5186,39 @@ patches:
       path "/" before looking for a mount there. It now looks, and ZVFS reports
       the file system mounted at the root; the synthetic root remains the
       answer when nothing is.
+  - path: zephyr/zvfs-readmount.patch
+    sha256sum: f8bfc9f275e10cf4692a3c2dc9cb3bf9010b5fce6ffc001f5126d93f86e2459a
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-20
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/zvfs-fs-path-syscalls.patch
+          - zephyr/fs-node-modes-and-owners.patch
+    comments: |
+      Read the mount table through ZVFS: zvfs_readmount() walks the kernel's
+      list of mounted file systems one entry per call, reporting the mount
+      point, the file system type by its conventional name (vfat, littlefs,
+      ext2, tmpfs, ...) and whether the mount is read-only, over fs_readmount()
+      and a new fs_mount_type() beside fs_mount_flags(). The ZVFS and file
+      system test suites cover both.
+  - path: zephyr/libc-mntent-shim.patch
+    sha256sum: 9d0611a8a6ed633a7674ecb4802b1207025bf3372c97a07aa712f29dd41403b2
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-20
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/libc-ifaddrs-shim.patch
+    comments: |
+      Route <mntent.h> to the module for Picolibc and Newlib, which have no such
+      header, as the other headers the module owns are routed.
   - path: zephyr/libc-libgen-ftw-header-shims.patch
     sha256sum: ba51c624dfb2ff38e9b22598e1665a0b4575b6cb1980bce8409505eb7488d613
     module: zephyr
