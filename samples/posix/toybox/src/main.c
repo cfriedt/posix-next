@@ -137,8 +137,9 @@ static void tour(void)
 	RUN("sh", "-c", "ls /bin | wc -l");
 
 	/* toysh: builtins, variables, globbing and control flow run in the
-	 * shell process itself; external commands are spawned. Subshells and
-	 * command substitution need fork() and are not yet part of the demo.
+	 * shell process itself; external commands are forked where the platform
+	 * has fork() and spawned elsewhere. Subshells and command substitution
+	 * need fork().
 	 */
 	static const char init_sh[] = "echo toysh: hello from $0\n"
 				      "uname -m\n"
@@ -152,6 +153,15 @@ static void tour(void)
 		RUN("sh", "-c", "echo hello from toysh | cat");
 		RUN("sh", "/etc/init.sh");
 	}
+
+	/* commands that run another: forked where the platform has fork(), spawned elsewhere */
+	RUN("time", "-p", "echo", "timed");
+	RUN("find", "/etc", "-name", "init.sh", "-exec", "echo", "found", "{}", ";");
+	/* the mounted file systems, read from the mount table through <mntent.h> */
+	RUN("df");
+	/* tail -f follows a file by polling it: a line appended after it started comes out */
+	RUN("sh", "-c", "echo follow me > /tmp/scratch/log; tail -f /tmp/scratch/log & sleep 1; "
+	    "echo followed line >> /tmp/scratch/log; sleep 1; kill $!; echo tail -f stopped");
 
 	RUN("ping", "-c", "1", "127.0.0.1");
 	RUN("ping6", "-c", "1", "::1");
