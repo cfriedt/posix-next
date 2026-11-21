@@ -930,3 +930,17 @@ patches:
       as Linux does, z_sig_fault() records it and the thread resumes in a
       stack-free z_sig_fault_entry stub (svc). test_k_sig_fault gains the
       undefined-instruction (.inst 0) and breakpoint (brk) sections.
+  - path: zephyr/user-signals-x86.patch
+    sha256sum: 073c05e9983442db4804a420965bb48f0b7aab7e1d20cae7953f7dad56f61487
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-02-15
+    upstreamable: true
+    comments: |
+      x86 arch-level support for userspace signals in syscall handling: the
+      user-mode return paths are gated on SYSCALL_RETURN_HOOK, and the system
+      call save frame offsets are generated for every userspace build.
+      The syscall id is read back from the thread's own syscall frame: the
+      per-CPU TSS stash it replaced went stale when the thread was preempted
+      inside the call by another thread's syscall, or migrated.
