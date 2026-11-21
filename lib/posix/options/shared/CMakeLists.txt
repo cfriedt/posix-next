@@ -45,10 +45,6 @@ if(NEED_ENV_COMMON)
   zephyr_library_sources(env_common.c)
 endif()
 
-if(NOT CONFIG_TC_PROVIDES_POSIX_TIMERS)
-  zephyr_library_sources_ifdef(CONFIG_POSIX_TIMERS timespec_to_timeout.c)
-endif()
-
 if((CONFIG_POSIX_THREADS AND NOT CONFIG_TC_PROVIDES_POSIX_THREADS) OR
    (CONFIG_POSIX_THREAD_PRIORITY_SCHEDULING AND NOT CONFIG_TC_PROVIDES_POSIX_THREAD_PRIORITY_SCHEDULING))
   zephyr_library_sources(pthread_priority.c)

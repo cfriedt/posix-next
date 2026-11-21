@@ -6,7 +6,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "posix_clock.h"
 #include "posix_internal.h"
 
 #include <pthread.h>
@@ -14,19 +13,22 @@
 
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/sys/timeutil.h>
 
 LOG_MODULE_REGISTER(posix_non_portable, CONFIG_POSIX_NON_PORTABLE_LOG_LEVEL);
 
 int pthread_timedjoin_np(pthread_t pthread, void **status, const struct timespec *abstime)
 {
-	if (!timespec_is_valid(abstime)) {
+	/* as on Linux, a NULL abstime blocks indefinitely (and must not be dereferenced) */
+	if ((abstime != NULL) && !timespec_is_valid(abstime)) {
 		return EINVAL;
 	}
 
+	/* TODO(clock-settime-reactive-waits): the CLOCK_REALTIME offset is baked in here */
 	int ret = -k_thread_rejoin(
 		to_k_thread(&pthread), status,
 		(abstime == NULL) ? K_FOREVER
-				  : sys_timepoint_timeout(timespec_abs_rt_to_timepoint(abstime)));
+				  : timespec_abs_to_timeout(SYS_CLOCK_REALTIME, abstime));
 
 	if ((ret == EAGAIN) || (ret == EBUSY)) {
 		ret = ETIMEDOUT;

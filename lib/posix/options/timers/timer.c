@@ -8,8 +8,6 @@
 #undef _POSIX_C_SOURCE
 #define _POSIX_C_SOURCE 200809L
 
-#include "posix_clock.h"
-
 #include <errno.h>
 #include <signal.h>
 #include <time.h>
@@ -17,6 +15,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/clock.h>
+#include <zephyr/sys/timeutil.h>
 #include <pthread.h>
 
 #include "posix_internal.h"
@@ -285,7 +284,7 @@ int timer_settime(timer_t timerid, int flags, const struct itimerspec *value,
 	}
 
 	/* Calculate timer period */
-	timer->reload = ts_to_ms(&value->it_interval);
+	timer->reload = k_ticks_to_ms_ceil32(timespec_to_timeout(&value->it_interval, NULL).ticks);
 	timer->interval.tv_sec = value->it_interval.tv_sec;
 	timer->interval.tv_nsec = value->it_interval.tv_nsec;
 
@@ -300,7 +299,7 @@ int timer_settime(timer_t timerid, int flags, const struct itimerspec *value,
 		now_ms = (int64_t)now.tv_sec * MSEC_PER_SEC + now.tv_nsec / NSEC_PER_MSEC;
 		duration = (deadline_ms > now_ms) ? (deadline_ms - now_ms) : 0;
 	} else {
-		duration = ts_to_ms(&(value->it_value));
+		duration = k_ticks_to_ms_ceil32(timespec_to_timeout(&value->it_value, NULL).ticks);
 	}
 
 	if (timer->status == ACTIVE) {
