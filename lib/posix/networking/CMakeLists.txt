@@ -23,6 +23,7 @@ if(NOT CONFIG_TC_PROVIDES_POSIX_NETWORKING)
     gai_strerror.c
     getaddrinfo.c
     gethostbyname.c
+    getifaddrs.c
     getnameinfo.c
     getpeername.c
     gethostname.c
