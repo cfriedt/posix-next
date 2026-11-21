@@ -22,6 +22,7 @@
 
 /* resolve the image's _exit() and execve() references at llext link time */
 EXPORT_SYMBOL(_exit);
+EXPORT_SYMBOL(close);
 EXPORT_SYMBOL(execve);
 
 #define EXEC_IMAGE "/RAM:/hello.llext"

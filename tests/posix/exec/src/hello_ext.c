@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include <errno.h>
 #include <unistd.h>
 
 #include <zephyr/llext/symbol.h>
@@ -17,6 +18,11 @@ int main(int argc, char **argv, char **envp)
 	(void)envp;
 
 	if ((argc == 2) && (argv[1][0] == 'x')) {
+		/* errno is the running thread's: the image reaches it through the base image */
+		errno = 0;
+		if ((close(-1) != -1) || (errno != EBADF)) {
+			return 45;
+		}
 		return 42;
 	}
 	if ((argc == 2) && (argv[1][0] == 'e')) {
