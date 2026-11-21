@@ -741,6 +741,38 @@ patches:
       falls back to a spawn with its exported variables for external commands,
       runs toybox commands through the toybox binary, reports that subshells
       need fork().
+      Port toybox's portability layer to Zephyr: route errno through the
+      exported accessor (extensions carry no TLS relocations), fall back to
+      stat() where struct dirent has no d_type, map vfork() to fork(), provide
+      Zephyr branches for the mount table, inotify and extended attribute
+      helpers (none exist; the prototypes the Linux and macOS branches share
+      come along, for cp and tar), use the Linux device number encoding, and
+      flush stdout/stderr individually on exit because fflush(NULL) walks the
+      base image's stream list, which is not per-process. The shell (toysh)
+      runs external commands through posix_spawn() with the caller's
+      redirections inherited, runs toybox commands through the toybox binary,
+      reports that subshells need fork(), keeps a per-image environ set from
+      envp, and leaves the shared stdout buffering alone. Four commands get
+      small fixes: cp dates a copy by name where futimens() is missing, time
+      spawns its command through posix_spawnp() where fork() is missing and
+      reports no rusage, getconf guards the Linux-only _SC_UIO_MAXIOV, and
+      hostname looks a name up through getaddrinfo(), as the rest of toybox
+      does, instead of gethostbyname().
+  - path: toybox/toybox-sh-expand-one-arg-ownership.patch
+    sha256sum: b654fb77df8f5c95b5609468b88fc417bcdfc96983340343941e9af5a090ecec
+    module: modules/lib/toybox
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-04
+    upstreamable: true
+    comments: |
+      toysh: expand_one_arg() hands its callers a string they free whenever
+      it differs from the input, but for a bare $var the expansion borrows
+      the variable's own string, so `case $x in` queued a pointer into the
+      variable for deletion and the frame pop freed it a second time (an
+      interior free on Zephyr's heap, a heap-buffer-overflow under ASAN on
+      the host). The expansion now copies a borrowed result, which is what
+      every caller already assumes it owns.
   - path: zephyr/k-signal-fault.patch
     sha256sum: 239fae688f75845d89a0c94decbc0ff1f2420c7092dec7059ac319afdcb61e65
     module: zephyr
