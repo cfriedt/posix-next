@@ -944,3 +944,27 @@ patches:
       The syscall id is read back from the thread's own syscall frame: the
       per-CPU TSS stash it replaced went stale when the thread was preempted
       inside the call by another thread's syscall, or migrated.
+  - path: zephyr/k-signal-fault-x86.patch
+    sha256sum: fcc6b4985f15607766749a9c4e6e1a30f60c8af1a3ef32e1b9d8bb745df19c70
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-04
+    upstreamable: true
+    custom:
+      upstream:
+        depends-on:
+          - zephyr/k-signal-fault.patch
+          - zephyr/user-signals-x86.patch
+    comments: |
+      x86 (32- and 64-bit) delivers user-mode faults as signals: the vector,
+      error code and CR2 classify the fault as Linux does, z_sig_fault()
+      records it and the thread resumes in a stack-free z_sig_fault_entry
+      stub (syscall, int $0x80); the generic exception handler may return
+      for that. x86 decodes #MF and #XM into the SIGFPE code, maps #DB and
+      #BP to SIGTRAP, lets ring 3 issue int3 and into, sets CR0.NE (x86_64)
+      and CR4.OSXMMEXCPT so x87 and SSE errors raise #MF and #XM, and fixes
+      the KPTI USER_TRAP gate type. test_k_sig_fault gains the
+      undefined-instruction (ud2), breakpoint (int3), integer divide and x87
+      divide sections, accepts either SEGV code for kernel memory (KPTI keeps
+      it out of the user page tables) and ILL_ILLOPN for an invalid opcode.
