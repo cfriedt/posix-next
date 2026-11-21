@@ -3164,6 +3164,25 @@ patches:
       z_process_self_is_reserved() joins z_process_exit_signaled(): a fault's default
       action ends the faulting thread's process, except in a kernel-reserved one,
       where the fatal-error path stays (see k-signal-fault.patch).
+  - path: zephyr/k-process-sigchld.patch
+    sha256sum: 7518020bdb24596f01880668d28fffd91e7ec4a96823c0e116f8e6ea4a105c07
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-08-11
+    upstreamable: true
+    comments: |
+      Extend struct k_sig_info with pid/status fields and add the
+      K_SI_CLD_EXITED / K_SI_CLD_KILLED codes (gated on CONFIG_PROCESS);
+      widen the internal z_sig_queue_common() to carry them and add
+      z_sig_queue_chld() (declared in the lifecycle patch). kernel/process.c
+      emits K_SIG_CHLD to a zombie's parent from a notifier thread, since
+      signal generation cannot run in the scheduler's thread-halt path.
+
+      The notifier reports the exit on the parent's behalf and holds no permission on
+      the parent's threads, so the K_SI_CLD_* codes are exempt from the access check
+      for user-mode targets, as the timer and I/O completion codes are: a parent
+      accepting K_SIG_CHLD on a thread no longer loses it.
   - path: zephyr/libc-sys-stat-utime-markers.patch
     sha256sum: 8edfcf83058522bb80d601e92c4a9e6be14baec04cf8253ffbd344fbadf05b78
     module: zephyr
