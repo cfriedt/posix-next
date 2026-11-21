@@ -60,6 +60,7 @@ For individual POSIX options, see :ref:`posix_options`.
    timers
    xsi_advanced_realtime
    xsi_file_system
+   xsi_multi_process
    xsi_realtime
    xsi_signals
    xsi_single_process

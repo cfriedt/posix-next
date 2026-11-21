@@ -1764,6 +1764,39 @@ Deviations
    to ``st_ctim``. The set-user-ID, set-group-ID and sticky bits are stored and reported but
    have no effect.
 
+.. _posix_xsi_multi_process_design:
+
+XSI Multi Process
+=================
+
+The :ref:`XSI_MULTI_PROCESS <posix_option_group_xsi_multi_process>` option group
+(:kconfig:option:`CONFIG_XSI_MULTI_PROCESS`) provides the resource usage and resource limit
+functions of ``<sys/resource.h>`` over :ref:`POSIX_MULTI_PROCESS
+<posix_option_group_multi_process>`. The scheduling priority functions (:c:func:`getpriority`,
+:c:func:`setpriority`, :c:func:`nice`) and :c:func:`ulimit` are not provided.
+
+Resource usage
+   :c:func:`getrusage` reads the cycle counters :c:func:`times` reads, through
+   ``k_process_cpu_stats()``: ``RUSAGE_SELF`` is the calling process's accumulated CPU time, that
+   of its live threads and of the threads that have exited, and ``RUSAGE_CHILDREN`` the time of
+   the children it has reaped, and of theirs. The kernel keeps one CPU time per thread, not split
+   by mode, so all of it is reported as ``ru_utime`` and ``ru_stime`` is zero. ``struct rusage``
+   carries the members every system has beyond the two POSIX names (``ru_maxrss``, the fault,
+   block and message counts, the context switch counts), so a program written for another system
+   compiles; nothing in the kernel counts them, and they are zero.
+
+Resource limits
+   The limits are the build's, and the same for every process: ``RLIMIT_NOFILE`` is the size of
+   the descriptor table (:kconfig:option:`CONFIG_ZVFS_OPEN_MAX` plus the descriptors the enabled
+   libraries add), ``RLIMIT_NPROC`` the number of process records, the statically defined ones and
+   :kconfig:option:`CONFIG_SYS_PROCESS_MAX` heap-provided ones, ``RLIMIT_STACK`` is the stack a new thread or process
+   is given (:kconfig:option:`CONFIG_DYNAMIC_THREAD_STACK_SIZE`, ``RLIM_INFINITY`` without dynamic
+   stacks), ``RLIMIT_CORE`` is 0 since no core file is ever written, and the rest are
+   ``RLIM_INFINITY``; the hard limit always equals the soft limit. :c:func:`getrlimit` reports
+   them. :c:func:`setrlimit` checks its arguments (``EINVAL`` for an unknown resource or a soft
+   limit above the hard limit) and accepts the limits in force, but no process can change a limit,
+   so any other value fails with ``EPERM`` :ref:`†<posix_undefined_behaviour>`.
+
 .. _posix_xsi_file_system_design:
 
 XSI File System
