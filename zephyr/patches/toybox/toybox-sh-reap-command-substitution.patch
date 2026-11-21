@@ -1,0 +1,58 @@
+diff --git a/toys/pending/sh.c b/toys/pending/sh.c
+--- a/toys/pending/sh.c
++++ b/toys/pending/sh.c
+@@ -1531,9 +1531,11 @@
+ }
+ 
+ // Call subshell with either stdin/stdout redirected, return other end of pipe
+-static int pipe_subshell(char *s, int len, int out)
++// and, when the caller wants it, the subshell's pid to wait for
++static int pipe_subshell(char *s, int len, int out, pid_t *pid)
+ {
+   int pipes[2], *uu = 0, in = !out;
++  pid_t pp;
+ 
+   // Grab subshell data
+   if (pipe(pipes)) {
+@@ -1546,7 +1548,8 @@
+   save_redirect(&uu, pipes[in], in);
+   close(pipes[in]);
+   fcntl(pipes[!in], F_SETFD, FD_CLOEXEC);
+-  run_subshell(s, len);
++  pp = run_subshell(s, len);
++  if (pid) *pid = pp;
+   fcntl(pipes[!in], F_SETFD, 0);
+   unredirect(&uu);
+ 
+@@ -1923,6 +1926,7 @@
+ {
+   char cc, qq = flags&NO_QUOTE, sep[6], *new = str, *s, *ss = ss, *ifs, *slice;
+   int ii = 0, oo = 0, xx, yy, dd, jj, kk, ll, mm;
++  pid_t spid;
+   struct sh_arg deck = {0};
+ 
+   // TODO: ! history expansion
+@@ -2035,10 +2039,13 @@
+ 
+ // TODO what does \ in `` mean? What is echo `printf %s \$x` supposed to do?
+         // This has to be async so pipe buffer doesn't fill up
+-        if (!ss) jj = pipe_subshell(s, kk, 0); // TODO $(true &&) syntax_err()
++        spid = 0;
++        if (!ss) jj = pipe_subshell(s, kk, 0, &spid); // TODO $(true &&) syntax_err()
+         if ((ifs = readfd(jj, 0, &pp)))
+           for (kk = strlen(ifs); kk && ifs[kk-1]=='\n'; ifs[--kk] = 0);
+         close(jj);
++        // the subshell has written all it will: collect it, no zombie left behind
++        if (spid>0) while (-1==waitpid(spid, 0, 0) && errno==EINTR);
+       }
+     } else if (!str[ii]) new[oo++] = cc;
+     else if (cc=='\\') {
+@@ -2649,7 +2656,7 @@
+ 
+     // Handle <() >() redirectionss
+     if ((*s == '<' || *s == '>') && s[1] == '(') {
+-      int new = pipe_subshell(s+2, strlen(s+2)-1, *s == '>');
++      int new = pipe_subshell(s+2, strlen(s+2)-1, *s == '>', 0);
+ 
+       // Grab subshell data
+       if (new == -1) goto qfail;

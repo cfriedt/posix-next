@@ -773,6 +773,20 @@ patches:
       interior free on Zephyr's heap, a heap-buffer-overflow under ASAN on
       the host). The expansion now copies a borrowed result, which is what
       every caller already assumes it owns.
+  - path: toybox/toybox-sh-reap-command-substitution.patch
+    sha256sum: 16b7640f12fca8a015413d9f9a57f0e43719acd7906ca87a713e1ec7af18ea65
+    module: modules/lib/toybox
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-19
+    upstreamable: true
+    comments: |
+      toysh: pipe_subshell() dropped the pid of the subshell it forks for a
+      $(...) command substitution, so the child was never waited for and
+      every substitution left a zombie behind until the shell exited. The
+      pid now reaches the substitution reader, which waits for the subshell
+      once its pipe has drained. Process substitution (<(...), >(...)) runs
+      concurrently with its command and is unchanged.
   - path: zephyr/k-signal-fault.patch
     sha256sum: 239fae688f75845d89a0c94decbc0ff1f2420c7092dec7059ac319afdcb61e65
     module: zephyr
