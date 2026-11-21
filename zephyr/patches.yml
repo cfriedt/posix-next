@@ -787,6 +787,20 @@ patches:
       pid now reaches the substitution reader, which waits for the subshell
       once its pipe has drained. Process substitution (<(...), >(...)) runs
       concurrently with its command and is unchanged.
+  - path: toybox/toybox-builtin-stdout-buffer.patch
+    sha256sum: 33d3f5e8819c6b84f85ec3f95b8ef76e0ce3f5dc1ba4894f02ae74ecb3a7388c
+    module: modules/lib/toybox
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-21
+    upstreamable: true
+    comments: |
+      toy_singleinit() hands every command a freshly allocated 4 KiB stdout
+      buffer through setvbuf(), skipping only the multiplexer and NOFORK
+      commands. toysh runs MAYFORK commands such as [, test, true and echo in
+      its own process, so each one leaked a buffer: sixty [ tests exhausted a
+      256 KiB process heap. A reentrant call, which toysh marks with
+      toys.rebound, keeps the shell's buffering.
   - path: zephyr/k-signal-fault.patch
     sha256sum: 239fae688f75845d89a0c94decbc0ff1f2420c7092dec7059ac319afdcb61e65
     module: zephyr

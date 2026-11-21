@@ -1,0 +1,17 @@
+diff --git a/main.c b/main.c
+index aa6a52cb..b41eb46b 100644
+--- a/main.c
++++ b/main.c
+@@ -207,8 +207,10 @@ void toy_singleinit(struct toy_list *which, char *argv[])
+     for (toys.optc = 0; toys.optargs[toys.optc]; toys.optc++);
+   }
+ 
+-  // Setup we only want to do once: skip for multiplexer or NOFORK reentry
+-  if (!(CFG_TOYBOX && which == toy_list) && !(which->flags & TOYFLAG_NOFORK)) {
++  // Setup we only want to do once: skip for multiplexer, NOFORK, and reentry
++  // from a shell running the command in its own process (toys.rebound set)
++  if (!(CFG_TOYBOX && which == toy_list) && !(which->flags & TOYFLAG_NOFORK)
++      && !toys.rebound) {
+     char *buf = 0;
+     int btype = _IOFBF;
+ 
