@@ -534,6 +534,17 @@ loadable extension (llext), and its exported ``main()`` runs as the new
 process image - the image ABI is ``int main(int argc, char **argv, char
 **envp)``, and the return value becomes the process's exit status.
 
+An image process has C library state of its own in the process state area
+(:kconfig:option:`CONFIG_SYS_PROCESS_STATE_AREA`): its heap, its environment
+store, and the buffering of its standard streams. The ``FILE`` objects behind
+``stdin``, ``stdout`` and ``stderr`` are the image's, shared by every process,
+and operate unbuffered on the process's own descriptors 0 to 2; a process
+that calls :c:func:`setvbuf` on one gets a buffered stream of its own over
+the descriptor, which the shared stream forwards to, so a command's full or
+line buffering is its own, :c:func:`fflush` of ``NULL`` and :c:func:`exit`
+flush it, and ``_exit()`` discards it. The error and end-of-file indicators
+and the :c:func:`ungetc` slot of the shared objects remain image-wide.
+
 Either way :c:func:`execve` replaces the image in place: it aborts every
 other member thread with ``k_process_prune()`` and continues on the calling
 thread, preserving the process's identity, parent, and group membership;
