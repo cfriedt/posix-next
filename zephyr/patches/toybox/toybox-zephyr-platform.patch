@@ -1,0 +1,333 @@
+diff --git a/lib/portability.c b/lib/portability.c
+index 19e4c7e8..4f67e7a2 100644
+--- a/lib/portability.c
++++ b/lib/portability.c
+@@ -355,6 +355,57 @@ ssize_t xattr_fset(int fd, const char* name,
+   return fsetxattr(fd, name, value, size, 0, flags);
+ }
+ 
++#elif defined(__ZEPHYR__)
++
++// no extended attributes
++ssize_t xattr_get(const char *path, const char *name, void *value, size_t size)
++{
++  return errno = ENOTSUP, -1;
++}
++
++ssize_t xattr_lget(const char *path, const char *name, void *value, size_t size)
++{
++  return errno = ENOTSUP, -1;
++}
++
++ssize_t xattr_fget(int fd, const char *name, void *value, size_t size)
++{
++  return errno = ENOTSUP, -1;
++}
++
++ssize_t xattr_list(const char *path, char *list, size_t size)
++{
++  return errno = ENOTSUP, -1;
++}
++
++ssize_t xattr_llist(const char *path, char *list, size_t size)
++{
++  return errno = ENOTSUP, -1;
++}
++
++ssize_t xattr_flist(int fd, char *list, size_t size)
++{
++  return errno = ENOTSUP, -1;
++}
++
++ssize_t xattr_set(const char* path, const char* name,
++                  const void* value, size_t size, int flags)
++{
++  return errno = ENOTSUP, -1;
++}
++
++ssize_t xattr_lset(const char* path, const char* name,
++                   const void* value, size_t size, int flags)
++{
++  return errno = ENOTSUP, -1;
++}
++
++ssize_t xattr_fset(int fd, const char* name,
++                   const void* value, size_t size, int flags)
++{
++  return errno = ENOTSUP, -1;
++}
++
+ #elif !defined(__FreeBSD__) && !defined(__OpenBSD__)
+ 
+ ssize_t xattr_get(const char *path, const char *name, void *value, size_t size)
+@@ -553,7 +604,7 @@ char *num_to_sig(int sig)
+ 
+ int dev_minor(int dev)
+ {
+-#if defined(__linux__)
++#if defined(__linux__) || defined(__ZEPHYR__)
+   return ((dev&0xfff00000)>>12)|(dev&0xff);
+ #elif defined(__APPLE__)
+   return dev&0xffffff;
+@@ -566,7 +617,7 @@ int dev_minor(int dev)
+ 
+ int dev_major(int dev)
+ {
+-#if defined(__linux__)
++#if defined(__linux__) || defined(__ZEPHYR__)
+   return (dev&0xfff00)>>8;
+ #elif defined(__APPLE__)
+   return (dev>>24)&0xff;
+@@ -579,7 +630,7 @@ int dev_major(int dev)
+ 
+ int dev_makedev(int major, int minor)
+ {
+-#if defined(__linux__)
++#if defined(__linux__) || defined(__ZEPHYR__)
+   return (minor&0xff)|((major&0xfff)<<8)|((minor&0xfff00)<<12);
+ #elif defined(__APPLE__)
+   return (minor&0xffffff)|((major&0xff)<<24);
+diff --git a/lib/portability.h b/lib/portability.h
+index e87b919f..904de712 100644
+--- a/lib/portability.h
++++ b/lib/portability.h
+@@ -54,6 +54,14 @@
+ // will transitively include it, and ones that don't (macOS) won't break.
+ #include <sys/types.h>
+ 
++#ifdef __ZEPHYR__
++// no vfork(): fork() where the platform has it, else the failure is reported
++// at the call site; xpopen_setup() spawns the command instead
++#include <spawn.h>
++#include <unistd.h>
++#define vfork fork
++#endif
++
+ // Various constants old build environments (or glibc, hiding behind
+ // _GNU_SOURCE) might not have even if kernel does.
+ 
+@@ -193,10 +201,12 @@ void *memmem(const void *haystack, size_t haystack_length,
+ int personality(int);
+ #endif
+ 
+-#if defined(__APPLE__) || defined(__linux__)
++#if defined(__APPLE__) || defined(__linux__) || defined(__ZEPHYR__)
+ // Linux and macOS has both have getxattr and friends in <sys/xattr.h>, but
+ // they aren't compatible.
++#ifndef __ZEPHYR__
+ #include <sys/xattr.h>
++#endif
+ ssize_t xattr_get(const char *, const char *, void *, size_t);
+ ssize_t xattr_lget(const char *, const char *, void *, size_t);
+ ssize_t xattr_fget(int fd, const char *, void *, size_t);
+diff --git a/lib/xwrap.c b/lib/xwrap.c
+index fb608d57..22e60348 100644
+--- a/lib/xwrap.c
++++ b/lib/xwrap.c
+@@ -239,6 +239,41 @@ void xexec(char **argv)
+   xexit();
+ }
+ 
++#ifdef __ZEPHYR__
++// Without fork(): spawn argv with the pipe ends xpopen_setup() made, or the
++// caller's descriptors, as its stdin/stdout. The child gets none of the four
++// pipe ends themselves. Returns the pid, or -1 with errno set.
++static pid_t xspawn_pipes(char **argv, int *pipes, int *pp)
++{
++  posix_spawn_file_actions_t fa;
++  pid_t pid;
++  int in = 0, out = 1, swap = -1, err;
++
++  posix_spawn_file_actions_init(&fa);
++  if (pipes) {
++    in = pp[1] ? pp[0] : pipes[0];
++    out = pp[2] ? pp[3] : pipes[1];
++    // If swapping stdin/stdout, dup a filehandle that gets closed before use
++    if (!out) out = swap = dup(0);
++    if (in) posix_spawn_file_actions_adddup2(&fa, in, 0);
++    if (out != 1) posix_spawn_file_actions_adddup2(&fa, out, 1);
++    if (in) posix_spawn_file_actions_addclose(&fa, in);
++    if (out != 1) posix_spawn_file_actions_addclose(&fa, out);
++    if (pp[1]) posix_spawn_file_actions_addclose(&fa, pp[1]);
++    if (pp[2]) posix_spawn_file_actions_addclose(&fa, pp[2]);
++  }
++  err = posix_spawnp(&pid, *argv, &fa, 0, argv, environ);
++  posix_spawn_file_actions_destroy(&fa);
++  if (swap != -1) close(swap);
++  if (err) {
++    errno = err;
++    pid = -1;
++  }
++
++  return pid;
++}
++#endif
++
+ // Spawn child process, capturing stdin/stdout.
+ // argv[]: command to exec. If null, child re-runs original program with
+ //         toys.stacktop zeroed.
+@@ -255,7 +290,19 @@ pid_t xpopen_setup(char **argv, int *pipes, void (*callback)(char **argv))
+   if (pipes) for (pid = 0; pid < 2; pid++)
+     if (pipes[pid]==-1 && pipe(cestnepasun+(2*pid))) perror_exit("pipe");
+ 
++#ifdef __ZEPHYR__
++  // fork() where the platform has it. Where it does not, spawn the command:
++  // a callback cannot run in a child that does not exist, so a caller with
++  // one, or with no command, gets -1 and ENOTSUP.
++  if ((pid = fork()) == -1) {
++    if (errno != ENOTSUP) perror_exit("fork");
++    if (callback || !argv) return -1;
++    pid = xspawn_pipes(argv, pipes, cestnepasun);
++  }
++  if (!pid) {
++#else
+   if (!(pid = CFG_TOYBOX_FORK ? xfork() : XVFORK())) {
++#endif
+     // Child process: Dance of the stdin/stdout redirection.
+     // cestnepasun[1]->cestnepasun[0] and cestnepasun[3]->cestnepasun[2]
+     if (pipes) {
+diff --git a/toys/net/ping.c b/toys/net/ping.c
+index 672099fa..a985e115 100644
+--- a/toys/net/ping.c
++++ b/toys/net/ping.c
+@@ -169,8 +169,14 @@ void ping_main(void)
+ 
+   // Open DGRAM socket
+   sa->sa_family = ai->ai_family;
++#ifdef __ZEPHYR__
++  // no unprivileged ICMP sockets: raw carries Linux v4 raw semantics
++  TT.sock = socket(ai->ai_family, SOCK_RAW,
++    len = (ai->ai_family == AF_INET) ? IPPROTO_ICMP : IPPROTO_ICMPV6);
++#else
+   TT.sock = socket(ai->ai_family, SOCK_DGRAM,
+     len = (ai->ai_family == AF_INET) ? IPPROTO_ICMP : IPPROTO_ICMPV6);
++#endif
+   if (TT.sock == -1) {
+     perror_msg("socket SOCK_DGRAM %x", len);
+     if (errno == EACCES) {
+@@ -276,6 +282,22 @@ void ping_main(void)
+     if (!(len = xrecvmsgwait(TT.sock, &msg, 0, &srcaddr2, waitms)))
+       continue;
+ 
++#ifdef __ZEPHYR__
++    // raw v4 delivery includes the IP header and every ICMP message the
++    // stack receives: strip the header, take the ttl from it, and keep
++    // only echo replies that answer this process
++    if (ai->ai_family == AF_INET) {
++      unsigned hl = (toybuf[0]&0xf)*4;
++
++      if (len < (int)(hl+sizeof(*ih))) continue;
++      ttl = (unsigned char)toybuf[8];
++      len -= hl;
++      memmove(toybuf, toybuf+hl, len);
++    }
++    if (ih->type != ((ai->ai_family == AF_INET) ? 0 : 129)
++        || ih->un.echo.id != (unsigned short)getpid()) continue;
++#endif
++
+     TT.recv++;
+     TT.fugit += (pkttime = millitime()-*(unsigned *)(ih+1));
+     if (pkttime < TT.min) TT.min = pkttime;
+diff --git a/toys/pending/sh.c b/toys/pending/sh.c
+index 51a9db84..a44602b9 100644
+--- a/toys/pending/sh.c
++++ b/toys/pending/sh.c
+@@ -2931,6 +2931,66 @@ static void sh_exec(char **argv)
+   llist_traverse(sl, free);
+ }
+ 
++#ifdef __ZEPHYR__
++// Without fork(): run an external command as a spawned process, with the
++// exported variables sh_exec() would have given it. The caller has already
++// applied the command's redirections to this process's descriptors, which
++// the child inherits, so the spawn needs no file actions. A toybox command
++// runs this binary, which dispatches on argv[0]. Returns the pid, or -1 after
++// reporting the failure.
++static pid_t zephyr_spawn_command(char **argv)
++{
++  char *pp = getvar("PATH") ? : _PATH_DEFPATH, *ss = *argv, **sss = 0;
++  struct string_list *sl = 0;
++  struct sh_vars **vv;
++  struct sh_arg aa;
++  unsigned uu;
++  pid_t pid = -1;
++  int err;
++
++  errno = ENOENT;
++  if (strchr(ss, '/')) {
++    if (access(ss, X_OK)) ss = 0;
++  } else for (sl = find_in_path(pp, toy_find(ss) ? "toybox" : ss);
++              sl || (ss = 0); free(llist_pop(&sl)))
++    if (!access(ss = sl->str, X_OK)) break;
++  if (!ss) {
++    perror_msg("%s", *argv);
++
++    return -1;
++  }
++
++  // the exported variables plus _=path, as sh_exec() builds them
++  vv = visible_vars();
++  aa.v = (void *)vv;
++  for (aa.c = uu = 0; vv[uu]; uu++) {
++    if ((vv[uu]->flags&(VAR_WHITEOUT|VAR_EXPORT))==VAR_EXPORT) {
++      if (*(pp = vv[uu]->str)=='_' && pp[1]=='=') sss = aa.v+aa.c;
++      aa.v[aa.c++] = pp;
++    }
++  }
++  aa.v[aa.c] = 0;
++  if (!sss) {
++    if (aa.c<uu) aa.v[++aa.c] = 0;
++    else arg_add(&aa, 0);
++    sss = aa.v+aa.c-1;
++  }
++  *sss = xmprintf("_=%s", ss);
++
++  err = posix_spawn(&pid, ss, 0, 0, argv, aa.v);
++  if (err) {
++    errno = err;
++    perror_msg("%s", *argv);
++    pid = -1;
++  }
++  free(*sss);
++  free(aa.v);
++  llist_traverse(sl, free);
++
++  return pid;
++}
++#endif
++
+ // Execute a single command at TT.ff->pl returning new sh_process instance.
+ static struct sh_process *run_command(int local)
+ {
+@@ -3062,8 +3122,13 @@ if (DEBUG) { dprintf(2, "%d builtin", getpid()); for (int xx = 0; xx<=pp->arg.c;
+       if (toys.old_umask) umask(toys.old_umask);
+       memcpy(&toys, &temp, jj);
+     // Run command in new child process
+-    } else if (-1==(pp->pid = xpopen_setup(pp->arg.v, 0, sh_exec)))
++    } else if (-1==(pp->pid = xpopen_setup(pp->arg.v, 0, sh_exec))) {
++#ifdef __ZEPHYR__
++      if (errno == ENOTSUP) pp->pid = zephyr_spawn_command(pp->arg.v);
++      else
++#endif
+         perror_msg("%s: vfork", *pp->arg.v);
++    }
+   }
+ 
+ done:
+diff --git a/toys/posix/time.c b/toys/posix/time.c
+index 078aca58..f1d1854e 100644
+--- a/toys/posix/time.c
++++ b/toys/posix/time.c
+@@ -36,7 +36,12 @@ void time_main(void)
+ 
+   if (FLAG(v)) label = vlabels;
+   clock_gettime(CLOCK_MONOTONIC, &ts);
++#ifdef __ZEPHYR__
++  // fork() where the platform has it, a spawn where it does not
++  if ((pid = xpopen_setup(toys.optargs, 0, 0)) == -1) perror_exit("%s", *toys.optargs);
++#else
+   if (!(pid = XVFORK())) xexec(toys.optargs);
++#endif
+   wait4(pid, &stat, 0, &ru);
+   clock_gettime(CLOCK_MONOTONIC, &ts2);
+   sec[0] = nanodiff(&ts, &ts2);

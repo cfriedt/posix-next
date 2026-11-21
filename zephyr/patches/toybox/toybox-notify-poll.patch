@@ -1,0 +1,62 @@
+diff --git a/lib/portability.c b/lib/portability.c
+index 6acb0ec7..19e4c7e8 100644
+--- a/lib/portability.c
++++ b/lib/portability.c
+@@ -216,7 +216,7 @@ int xnotify_wait(struct xnotify *not, char **path)
+   }
+ }
+ 
+-#else
++#elif defined(__linux__)
+ 
+ #include <sys/inotify.h>
+ 
+@@ -261,6 +261,48 @@ int xnotify_wait(struct xnotify *not, char **path)
+   }
+ }
+ 
++#else
++
++// No file change notification: poll for a file that has grown (or shrunk)
++// past where its reader left off.
++
++struct xnotify *xnotify_init(int max)
++{
++  struct xnotify *not = xzalloc(sizeof(struct xnotify));
++
++  not->max = max;
++  not->paths = xmalloc(max * sizeof(char *));
++  not->fds = xmalloc(max * sizeof(int));
++
++  return not;
++}
++
++int xnotify_add(struct xnotify *not, int fd, char *path)
++{
++  if (not->count == not->max) error_exit("xnotify_add overflow");
++  not->paths[not->count] = path;
++  not->fds[not->count++] = fd;
++
++  return 0;
++}
++
++int xnotify_wait(struct xnotify *not, char **path)
++{
++  struct stat st;
++  int i;
++
++  for (;;) {
++    for (i = 0; i<not->count; i++) {
++      if (fstat(not->fds[i], &st) || st.st_size != lseek(not->fds[i], 0, SEEK_CUR)) {
++        *path = not->paths[i];
++
++        return not->fds[i];
++      }
++    }
++    msleep(100);
++  }
++}
++
+ #endif
+ 
+ #ifdef __APPLE__

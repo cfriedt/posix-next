@@ -640,6 +640,107 @@ patches:
       k_sig_return() installs that mask, with K_SIG_KILL and K_SIG_STOP kept
       unblocked for a user caller, in place of the one it kept; k_sig_current()
       fills the context in.
+  - path: toybox/toybox-kconfig-is-not-set-lines.patch
+    sha256sum: bede8495c6604fd47f2e588f329815063c0d1071ea522bfaf861dc539db8ecc0
+    module: modules/lib/toybox
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-10-17
+    upstreamable: true
+    comments: |
+      toybox's kconfig tool reads a KCONFIG_ALLCONFIG file to seed a
+      configuration, but recognized its "# CONFIG_X is not set" lines against
+      a trailing newline getrimline() had already removed, and from the first
+      space of the line (the one after the '#'), so every such line was
+      silently ignored and a symbol a miniconfig turned off stayed at its
+      default. Compare from the symbol's own end, without the newline.
+  - path: toybox/toybox-zephyr-module.patch
+    sha256sum: 07cc96cad7acf999d3c4d9e6fe644e86675cdc967560cc82eec85b3ded70133a
+    module: modules/lib/toybox
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-03
+    upstreamable: true
+    comments: |
+      The parts of the Zephyr port that the toybox fork does not carry
+      itself (its zephyr branch holds only module.yml, Kconfig and
+      CMakeLists.txt): the configure script that runs toybox's own genconfig
+      and header generation host-side (defconfig with zephyr/toybox.frag
+      applied over it, in a symlink mirror of the source tree so the tree
+      itself stays untouched, then toybox's own lister for the commands the
+      configuration provides, published by CMake for the /bin links), the
+      fragment, which keeps toybox's default command set less the commands
+      that need Linux kernel interfaces, /proc, utmp, sysinfo(), resource
+      limits, process priorities or C library functions Zephyr does not have,
+      the seed object that exports main() and the environ the loader binds to
+      the image's environment, header shims under zephyr/include for
+      the non-POSIX headers toybox includes unconditionally (sys/mount.h,
+      pty.h, sys/syscall.h, sys/ttydefaults.h) and the extras it expects from
+      others (TIOCSCTTY, getgrouplist(), dprintf(), NSIG, the BSD termios
+      functions), zephyr/zephyr.c with what the C library and the POSIX
+      layer lack: dprintf(), cfmakeraw(), cfsetspeed(), a failing syscall(),
+      getgrouplist() and initgroups() for the one identity, readv() and
+      writev(), the XSI basename() and dirname(), mknod() for FIFOs, statfs()
+      over statvfs(), and failing sethostname(), chroot() and settimeofday(),
+      and zephyr/exports.c, built into the application, which exports to the
+      image the C library functions it imports that the POSIX layer does not
+      export (ffs(), fmemopen(), memmem(), newlocale(), nl_langinfo(),
+      random(), srandom(), strcasestr(), strptime(), uselocale(), wcwidth()).
+  - path: toybox/toybox-portability-guards.patch
+    sha256sum: e2db397ae2c58a3389612c21af53d1682c83cbf69ee957c35f9aafc232c3959a
+    module: modules/lib/toybox
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-20
+    upstreamable: true
+    comments: |
+      Three portability fixes: getconf defines the Linux-only _SC_UIO_MAXIOV
+      as -1 wherever the C library lacks it, not only on macOS; ping names the
+      IP level IPPROTO_IP, as POSIX does, in place of Linux's SOL_IP, and sets
+      SO_MARK only where the headers define it, reporting -m as unsupported
+      elsewhere.
+  - path: toybox/toybox-notify-poll.patch
+    sha256sum: 8805d31f1d31a645172ad2f77f6ebf1896b5067f6b1a6495b5fc33b563b1b2dc
+    module: modules/lib/toybox
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-21
+    upstreamable: true
+    comments: |
+      A file change notification fallback for systems with neither kqueue nor
+      inotify: xnotify_wait() polls the watched descriptors every 100 ms for a
+      file whose size has moved past where its reader left off, so tail -f
+      follows a file wherever the build runs.
+  - path: toybox/toybox-timeout-foreground.patch
+    sha256sum: 573282a75564d42468d385c56b76cdc094c8f2ef72ef64536e5ac65d637dfeb6
+    module: modules/lib/toybox
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-21
+    upstreamable: true
+    comments: |
+      timeout --foreground leaves the command in the caller's process group,
+      so it passes xpopen_setup() no callback at all instead of one that does
+      nothing: a platform that spawns rather than forks can then run the
+      command, as nothing has to execute in the child before it.
+  - path: toybox/toybox-zephyr-platform.patch
+    sha256sum: 99672e36a35186b9fc1b3d5b4cbc554ad85c678aa9f3b5c5ea35836f72828b0f
+    module: modules/lib/toybox
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-09-03
+    upstreamable: true
+    comments: |
+      Port toybox's portability layer to Zephyr: map vfork() to fork(),
+      provide a Zephyr branch for the extended attribute helpers (none exist;
+      the prototypes the Linux and macOS branches share come along, for cp and
+      tar), and use the Linux device number encoding. xpopen_setup() forks
+      where the platform has fork() and, where it does not, spawns the command
+      with the pipe ends in place of its stdin/stdout, so the commands built
+      on it (find -exec, timeout, tar, time) run either way; the shell (toysh)
+      falls back to a spawn with its exported variables for external commands,
+      runs toybox commands through the toybox binary, reports that subshells
+      need fork().
   - path: zephyr/k-signal-fault.patch
     sha256sum: 239fae688f75845d89a0c94decbc0ff1f2420c7092dec7059ac319afdcb61e65
     module: zephyr

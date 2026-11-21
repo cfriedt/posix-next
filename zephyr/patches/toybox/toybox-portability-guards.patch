@@ -1,0 +1,44 @@
+diff --git a/toys/net/ping.c b/toys/net/ping.c
+index 3c00e0c..672099f 100644
+--- a/toys/net/ping.c
++++ b/toys/net/ping.c
+@@ -182,11 +182,15 @@ void ping_main(void)
+   if (TT.I) xbind(TT.sock, sa, sizeof(srcaddr));
+ 
+   len = 1;
+-  xsetsockopt(TT.sock, SOL_IP, IP_RECVTTL, &len, sizeof(len));
++  xsetsockopt(TT.sock, IPPROTO_IP, IP_RECVTTL, &len, sizeof(len));
+ 
+   if (FLAG(m)) {
++#ifdef SO_MARK
+     len = TT.m;
+     xsetsockopt(TT.sock, SOL_SOCKET, SO_MARK, &len, sizeof(len));
++#else
++    error_exit("no SO_MARK");
++#endif
+   }
+ 
+   if (TT.t) {
+diff --git a/toys/posix/getconf.c b/toys/posix/getconf.c
+index a6685ee..892ec55 100644
+--- a/toys/posix/getconf.c
++++ b/toys/posix/getconf.c
+@@ -30,6 +30,10 @@ config GETCONF
+ #ifndef _SC_XOPEN_UUCP
+ #define _SC_XOPEN_UUCP -1
+ #endif
++// This is a Linux extension.
++#ifndef _SC_UIO_MAXIOV
++#define _SC_UIO_MAXIOV -1
++#endif
+ 
+ #ifdef __APPLE__
+ // macOS doesn't have a bunch of stuff. The actual macOS getconf says
+@@ -38,7 +42,6 @@ config GETCONF
+ #define _SC_AVPHYS_PAGES -1
+ #define _SC_THREAD_ROBUST_PRIO_INHERIT -1
+ #define _SC_THREAD_ROBUST_PRIO_PROTECT -1
+-#define _SC_UIO_MAXIOV -1
+ #define _SC_V7_ILP32_OFF32 -1
+ #define _SC_V7_ILP32_OFFBIG -1
+ #define _SC_V7_LP64_OFF64 -1
