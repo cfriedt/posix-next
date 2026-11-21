@@ -4328,3 +4328,19 @@ patches:
       streams, so flushing them all means flushing the standard output streams,
       which are reached through weak references so that a program that never
       names them does not pull them in.
+  - path: zephyr/libc-picolibc-process-stdio.patch
+    sha256sum: 824806a727abd56e1e50984916e1eeb1abc76a60b7970e06d2294c1a830c242b
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-20
+    upstreamable: true
+    comments: |
+      The FILE objects behind stdin, stdout and stderr are the image's, shared by
+      every process, and operate on the reserved descriptors 0 to 2 unbuffered. A
+      process that sets the buffering of one with setvbuf() gets a buffered
+      tinystdio stream of its own over the descriptor, kept in its process state,
+      which the shared stream forwards to: a command's full or line buffering is
+      its own. exit() flushes the open streams, as C requires, and the glue
+      defines fflush() for the toolchain's picolibc, whose fflush(NULL)
+      dereferences the null stream (the module build carries the fix).

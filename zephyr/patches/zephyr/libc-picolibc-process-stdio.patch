@@ -1,0 +1,250 @@
+diff --git a/lib/libc/common/source/stdlib/exit.c b/lib/libc/common/source/stdlib/exit.c
+index 80c8acd0f27..e535587d49b 100644
+--- a/lib/libc/common/source/stdlib/exit.c
++++ b/lib/libc/common/source/stdlib/exit.c
+@@ -3,6 +3,7 @@
+  * SPDX-License-Identifier: Apache-2.0
+  */
+ 
++#include <stdio.h>
+ #include <stdlib.h>
+ 
+ #include <zephyr/sys/atomic.h>
+@@ -47,6 +48,7 @@ FUNC_NORETURN void exit(int status)
+ 			atexit_handlers[i]();
+ 		}
+ 	}
++	(void)fflush(NULL);
+ 
+ 	_exit(status);
+ }
+diff --git a/lib/libc/picolibc/stdio.c b/lib/libc/picolibc/stdio.c
+index 57dd3a536b0..68804fb7687 100644
+--- a/lib/libc/picolibc/stdio.c
++++ b/lib/libc/picolibc/stdio.c
+@@ -41,35 +41,161 @@ static inline int z_vrfy_zephyr_fputc(int c, FILE *stream)
+  * The standard streams operate on the reserved descriptors 0..2 so that
+  * dup2()'ed redirections (pipes, files) apply to stdio output as well; the
+  * default descriptors refer to the console.
++ *
++ * The FILE objects are the image's, shared by every process. A process that
++ * sets the buffering of a standard stream with setvbuf() gets a buffered
++ * stream of its own over the descriptor, kept in its process state; the
++ * shared stream forwards to it. Without one, the streams are unbuffered.
+  */
++#include <stdio-bufio.h>
++#include <zephyr/sys/process_state.h>
+ #include <zephyr/sys/zvfs.h>
+ 
+-static int picolibc_put(char a, FILE *f)
++#if PROCESS_STATE_SUPPORTED
++static ssize_t stdio_read(int fd, void *buf, size_t sz)
++{
++	return zvfs_read(fd, buf, sz);
++}
++
++static ssize_t stdio_write(int fd, const void *buf, size_t sz)
++{
++	return zvfs_write(fd, buf, sz);
++}
++
++static __off_t stdio_lseek(int fd, __off_t offset, int whence)
++{
++	return zvfs_lseek(fd, offset, whence);
++}
++
++struct process_stdio {
++	FILE *stream[3];
++};
++
++/* the calling process's own stream over descriptor fd, made on request */
++static FILE *stdio_process_stream(int fd, bool create)
+ {
+-	return (zvfs_write(1, &a, 1) == 1) ? 0 : _FDEV_ERR;
++	struct process_state *lp = process_state_get();
++	struct process_stdio *ps;
++	struct __file_bufio *bf;
++
++	if (lp == NULL) {
++		return NULL;
++	}
++	ps = lp->slot[PROCESS_STATE_SLOT_STDIO];
++	if ((ps != NULL) && (ps->stream[fd] != NULL)) {
++		return ps->stream[fd];
++	}
++	if (!create) {
++		return NULL;
++	}
++	process_state_lock(lp);
++	ps = lp->slot[PROCESS_STATE_SLOT_STDIO];
++	if (ps == NULL) {
++		ps = calloc(1, sizeof(*ps));
++		lp->slot[PROCESS_STATE_SLOT_STDIO] = ps;
++	}
++	if ((ps != NULL) && (ps->stream[fd] == NULL)) {
++		bf = malloc(sizeof(*bf));
++		if (bf != NULL) {
++			/* members FDEV_SETUP_BUFIO does not name, the lock among them, start at zero */
++			*bf = (struct __file_bufio)FDEV_SETUP_BUFIO(fd, NULL, 0, stdio_read, stdio_write,
++								    stdio_lseek, NULL,
++								    (fd == 0) ? __SRD : __SWR, 0);
++			ps->stream[fd] = (FILE *)bf;
++		}
++	}
++	process_state_unlock(lp);
++
++	return (ps != NULL) ? ps->stream[fd] : NULL;
++}
++#else
++static FILE *stdio_process_stream(int fd, bool create)
++{
++	ARG_UNUSED(fd);
++	ARG_UNUSED(create);
++
++	return NULL;
+ }
++#endif /* PROCESS_STATE_SUPPORTED */
+ 
+-static int picolibc_put_err(char a, FILE *f)
++static int stdio_put(int fd, char a)
+ {
+-	return (zvfs_write(2, &a, 1) == 1) ? 0 : _FDEV_ERR;
++	FILE *f = stdio_process_stream(fd, false);
++
++	if (f != NULL) {
++		return __bufio_put(a, f);
++	}
++
++	return (zvfs_write(fd, &a, 1) == 1) ? 0 : _FDEV_ERR;
+ }
+ 
+-static int picolibc_get(FILE *f)
++static int stdio_get(int fd)
+ {
++	FILE *f = stdio_process_stream(fd, false);
+ 	char a;
+-	ssize_t ret = zvfs_read(0, &a, 1);
++	ssize_t ret;
++
++	if (f != NULL) {
++		return __bufio_get(f);
++	}
++	ret = zvfs_read(fd, &a, 1);
+ 
+ 	return (ret == 1) ? (int)(unsigned char)a : ((ret == 0) ? _FDEV_EOF : _FDEV_ERR);
+ }
+ 
+-static LIBC_DATA FILE __stdout = FDEV_SETUP_STREAM(picolibc_put, NULL, NULL, _FDEV_SETUP_WRITE);
+-static LIBC_DATA FILE __stdin = FDEV_SETUP_STREAM(NULL, picolibc_get, NULL, _FDEV_SETUP_READ);
+-static LIBC_DATA FILE __stderr =
+-	FDEV_SETUP_STREAM(picolibc_put_err, NULL, NULL, _FDEV_SETUP_WRITE);
++static int stdio_flush(int fd)
++{
++	FILE *f = stdio_process_stream(fd, false);
++
++	return (f != NULL) ? __bufio_flush(f) : 0;
++}
++
++static int stdio_setvbuf(int fd, char *buf, int mode, size_t size)
++{
++	FILE *f = stdio_process_stream(fd, true);
+ 
+-FILE *const stdin = &__stdin;
+-FILE *const stdout = &__stdout;
+-FILE *const stderr = &__stderr;
++	if (f == NULL) {
++		/* no stream of its own to buffer: the shared stream is unbuffered */
++		return (mode == _IONBF) ? 0 : -1;
++	}
++	if ((buf == NULL) && (size == 0) && (mode != _IONBF)) {
++		size = BUFSIZ;
++	}
++
++	return __bufio_setvbuf(f, buf, mode, size);
++}
++
++#define STDIO_STREAM(name, fd, rw)                                                                 \
++	static int name##_put(char a, FILE *f)                                                     \
++	{                                                                                          \
++		ARG_UNUSED(f);                                                                     \
++		return stdio_put(fd, a);                                                           \
++	}                                                                                          \
++	static int name##_get(FILE *f)                                                             \
++	{                                                                                          \
++		ARG_UNUSED(f);                                                                     \
++		return stdio_get(fd);                                                              \
++	}                                                                                          \
++	static int name##_flush(FILE *f)                                                           \
++	{                                                                                          \
++		ARG_UNUSED(f);                                                                     \
++		return stdio_flush(fd);                                                            \
++	}                                                                                          \
++	static int name##_setvbuf(FILE *f, char *buf, int mode, size_t size)                       \
++	{                                                                                          \
++		ARG_UNUSED(f);                                                                     \
++		return stdio_setvbuf(fd, buf, mode, size);                                         \
++	}                                                                                          \
++	static LIBC_DATA struct __file_ext name = FDEV_SETUP_EXT(                                  \
++		name##_put, name##_get, name##_flush, NULL, NULL, name##_setvbuf, rw)
++
++STDIO_STREAM(__stdin, 0, _FDEV_SETUP_READ);
++STDIO_STREAM(__stdout, 1, _FDEV_SETUP_WRITE);
++STDIO_STREAM(__stderr, 2, _FDEV_SETUP_WRITE);
++
++FILE *const stdin = &__stdin.cfile.file;
++FILE *const stdout = &__stdout.cfile.file;
++FILE *const stderr = &__stderr.cfile.file;
+ #else /* CONFIG_ZVFS_RESERVE_STDIO_FDS */
+ static int picolibc_put(char a, FILE *f)
+ {
+@@ -91,6 +217,22 @@ FILE *const stdout = &__stdout;
+ STDIO_ALIAS(stderr);
+ #endif /* CONFIG_ZVFS_RESERVE_STDIO_FDS */
+ 
++#ifndef CONFIG_PICOLIBC_USE_MODULE
++/*
++ * The toolchain's tinystdio dereferences a null stream. It keeps no list of
++ * open streams, so flushing them all is flushing the standard output streams,
++ * which is what the module build's tinystdio-fflush-null.patch does.
++ */
++int fflush(FILE *stream)
++{
++	if (stream == NULL) {
++		return ((fflush(stdout) != 0) || (fflush(stderr) != 0)) ? EOF : 0;
++	}
++
++	return (stream->flush != NULL) ? stream->flush(stream) : 0;
++}
++#endif /* CONFIG_PICOLIBC_USE_MODULE */
++
+ void __stdout_hook_install(int (*hook)(int c))
+ {
+ 	_stdout_hook = hook;
+diff --git a/tests/lib/c_lib/stdio/src/main.c b/tests/lib/c_lib/stdio/src/main.c
+index 2d2a430982a..d8dc6e19e7b 100644
+--- a/tests/lib/c_lib/stdio/src/main.c
++++ b/tests/lib/c_lib/stdio/src/main.c
+@@ -73,6 +73,23 @@ ZTEST(libc_stdio, test_freopen)
+ }
+ #endif /* CONFIG_COMMON_LIBC_FOPEN */
+ 
++ZTEST(libc_stdio, test_fflush)
++{
++	/* every open stream, which includes the standard streams whatever the C library tracks */
++	zassert_ok(fflush(NULL));
++	zassert_ok(fflush(stdout));
++	zassert_ok(fflush(stderr));
++}
++
++#ifndef CONFIG_MINIMAL_LIBC
++ZTEST(libc_stdio, test_setvbuf)
++{
++	/* the standard streams are unbuffered unless a process buffers its own */
++	zassert_ok(setvbuf(stdout, NULL, _IONBF, 0));
++	zassert_ok(setvbuf(stderr, NULL, _IONBF, 0));
++}
++#endif /* CONFIG_MINIMAL_LIBC */
++
+ static void before(void *arg)
+ {
+ 	ARG_UNUSED(arg);
