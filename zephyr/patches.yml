@@ -5714,3 +5714,22 @@ patches:
       picolibc lacks (sighold, sigignore, siginterrupt, sigpause, sigrelse,
       sigset, SIG_HOLD) and drops picolibc's SIGEMT, which the kernel does
       not number.
+  - path: zephyr/k-signal-sigwinch.patch
+    sha256sum: a34a4f2673fed04a82006a0ff4b71a5dcbffc6979709687de934f4fec7c1ed40
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-10-17
+    upstreamable: true
+    comments: |
+      Number the window-size-change signal. The kernel's signal numbers follow
+      the usual layout with 16, 28 and 30 left unused; 28 is SIGWINCH on every
+      system a terminal program is written for, and such programs install a
+      handler for it before they draw: toybox's vi, hexedit and watch all do,
+      and sigaction() had to refuse them because the number mapped to nothing.
+      K_SIG_WINCH gets a name and the default of being ignored; nothing here
+      generates it, since the console has no window to resize, but a handler
+      can be installed and the signal can be sent. Layered over k-signal.patch.
+
+      The <signal.h> wrappers for picolibc and newlib, which renumber the
+      signals to the kernel's, name SIGWINCH by it.
