@@ -887,16 +887,17 @@ Dispositions are per-process with process support
    not in force for another and dies with its installer.
 
 The interrupted context lives in the kernel, not on the user stack
-   A handler runs on the interrupted thread's own stack, but the state needed to resume that
-   thread is kept once per thread in the kernel: the return address, stack pointer and return
-   value of the interrupted system call and the callee-saved registers, which a trampoline
-   captures at redirection and ``k_sig_return()`` restores. Nothing is pushed onto the user
-   stack beyond a return address, so a delivery costs no thread stack and the kernel never
-   allocates for it. The ``ucontext_t`` a three-argument handler receives is built by the
-   trampoline on the handler's own stack: ``uc_sigmask`` is the mask the interrupted context
-   resumes with, which the handler may change (``SIGKILL`` and ``SIGSTOP`` stay unblocked), and
-   ``uc_mcontext`` is opaque, since the registers live in the kernel: a handler cannot modify
-   the interrupted program counter.
+   A handler runs on the interrupted thread's own stack, or on its alternate signal stack, but
+   the state needed to resume that thread is kept once per thread in the kernel: the return
+   address, stack pointer and return value of the interrupted system call and the callee-saved
+   registers, which a trampoline captures at redirection and ``k_sig_return()`` restores.
+   Nothing is pushed onto the user stack beyond a return address, so a delivery costs no thread
+   stack and the kernel never allocates for it. The ``ucontext_t`` a three-argument handler
+   receives is built by the trampoline on the handler's own stack: ``uc_sigmask`` is the mask
+   the interrupted context resumes with, which the handler may change (``SIGKILL`` and
+   ``SIGSTOP`` stay unblocked), ``uc_stack`` is the alternate stack when the handler runs on
+   one, and ``uc_mcontext`` is opaque, since the registers live in the kernel: a handler cannot
+   modify the interrupted program counter.
    ``uc_link`` is unused, and there is no ``getcontext()``, ``setcontext()`` or ``swapcontext()``: a
    ``ucontext_t`` exists only as a handler's third argument, for the mask and the stack.
 
@@ -924,6 +925,16 @@ Kernel threads block all signals by default
    no signals blocked, in line with the POSIX specification, and so does a user-mode process a
    kernel thread spawns without giving :c:func:`posix_spawn` a mask: the kernel's mask is not
    one an image can start with.
+
+Alternate signal stacks belong to user threads
+   :c:func:`sigaltstack` names the stack on which a user thread runs the handlers it installed
+   with ``SA_ONSTACK`` (:kconfig:option:`CONFIG_SIGNAL_ALTSTACK`, on arm64, riscv and x86); with
+   fault delivery it is what lets a thread handle the overflow of its own stack. The stack cannot
+   change while a handler runs on it (``EPERM``), must hold ``MINSIGSTKSZ`` bytes (``ENOMEM``),
+   is copied by :c:func:`fork` and is dropped with the thread. A kernel thread takes its signals
+   where it runs, so the call fails for it with ``ENOTSUP``. A handler whose frame cannot be
+   written on the stack it is to run on, or a fault taken while a fault's handler is entered or
+   runs, ends the process with ``SIGSEGV``, as on Linux.
 
 A fault taken in user mode is a signal
    With :kconfig:option:`CONFIG_SIGNAL_FAULT` (arm64, riscv and x86), a memory, instruction or
