@@ -319,3 +319,35 @@ patches:
     comments: |
       The ARM syscall asm clobbers the condition flags: GCC otherwise keeps a compare
       live across the svc, and nothing preserves APSR through z_arm_do_syscall().
+  - path: zephyr/kernel-dyn-stack-alloc-align.patch
+    sha256sum: 48d8e863aa5c9e0b57e8c0dd8c0234d9f19c9a3c923aacc63c46dfb985da15cf
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-10-17
+    upstreamable: true
+    comments: |
+      kernel: userspace: align dynamic user stacks to their own object alignment
+
+      dynamic_object_create() allocates the buffer of a dynamic thread stack
+      aligned to DYN_OBJ_DATA_ALIGN_K_THREAD_STACK, the object alignment of
+      CONFIG_DYNAMIC_THREAD_STACK_SIZE, whatever size was requested. On
+      architectures with CONFIG_MPU_REQUIRES_POWER_OF_TWO_ALIGNMENT (ARMv7-M,
+      ARMv7-R) the object alignment of a stack is its power-of-two size, so a
+      user stack larger than the default is only aligned to the default size
+      and the MPU region programmed for it does not cover it. Whether the
+      thread then faults depends on where the heap happened to place the
+      buffer: on mps2/an385 and qemu_cortex_r5 a user thread on a stack of
+      twice the default size takes an MPU stacking fault on its first
+      exception.
+
+      Align the buffer to the larger of the default alignment and the
+      requested size's own object alignment. On every other architecture the
+      two are equal and nothing changes. STACK_ELEMENT_DATA_SIZE() already
+      reserves Z_THREAD_STACK_OBJ_ALIGN(size) of slack, so the privileged
+      stack placed at ROUND_UP(data + K_THREAD_STACK_LEN(size), obj_align)
+      still fits; with an aligned buffer the ROUND_UP is exact.
+
+      Found through zephyr#122510, whose dynamic_thread_stack test allocates
+      user stacks of twice CONFIG_DYNAMIC_THREAD_STACK_SIZE and faults on
+      exactly the two power-of-two MPU platforms in CI.
