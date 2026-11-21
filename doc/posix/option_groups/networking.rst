@@ -13,6 +13,14 @@ macros do not accept a pointer to ``struct in6_addr``, ``IN6_IS_ADDR_LINKLOCAL()
 
 Enable this option group with :kconfig:option:`CONFIG_POSIX_NETWORKING`.
 
+The host lookup of POSIX.1-2001, ``gethostbyname()``, ``gethostbyaddr()``, ``hstrerror()`` and
+``h_errno``, which POSIX.1-2008 removed, is provided for the programs that still use it: a name
+resolves through :c:func:`getaddrinfo`, an address through the hosts database, each into one static
+result holding the first address. ``<netdb.h>`` declares them only for a program that targets
+POSIX.1-2001 (Issue 6) or earlier, with ``_POSIX_C_SOURCE`` at most ``200112L`` and
+``_XOPEN_SOURCE`` at most ``600``, or that asks for the extensions with ``_DEFAULT_SOURCE``,
+``_BSD_SOURCE`` or ``_GNU_SOURCE``; a program built to POSIX.1-2008 does not see them.
+
 .. csv-table:: POSIX_NETWORKING
    :header: API, Supported
    :widths: 50,10
