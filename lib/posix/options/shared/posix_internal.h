@@ -215,6 +215,19 @@ static inline pthread_t to_pthread_thread(const struct k_thread *kth)
 	return (pthread_t)posix_from_kernel_object((void *)kth, sizeof(pthread_t));
 }
 
+/* kernel si_code values differ from the libc's SI_* constants */
+static inline int z_si_code_to_posix(int code)
+{
+	switch (code) {
+	case K_SI_QUEUE:
+		return SI_QUEUE;
+	case K_SI_TIMER:
+		return SI_TIMER;
+	default:
+		return code;
+	}
+}
+
 /*
  * Every C library on Zephyr numbers signals as the kernel does, so a POSIX signal number is the
  * kernel's. The set types can differ in size: a C library's sigset_t may hold fewer words than the
