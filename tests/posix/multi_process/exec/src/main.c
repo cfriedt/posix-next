@@ -24,8 +24,13 @@
 EXPORT_SYMBOL(_exit);
 EXPORT_SYMBOL(close);
 EXPORT_SYMBOL(execve);
+EXPORT_SYMBOL(fflush);
+EXPORT_SYMBOL(fwrite);
 EXPORT_SYMBOL(getenv);
 EXPORT_SYMBOL(setenv);
+EXPORT_SYMBOL(setvbuf);
+EXPORT_SYMBOL(stdout);
+EXPORT_SYMBOL(write);
 
 #define EXEC_IMAGE "/RAM:/hello.llext"
 #define EXEC_CHAIN_IMAGE "/RAM:/hello2.llext"
@@ -57,7 +62,7 @@ static struct fs_mount_t fs_mnt = {
 /* execve() loads the extension on the caller's stack; 64-bit frames need room */
 #define EXEC_CHILD_STACK_SIZE (IS_ENABLED(CONFIG_64BIT) ? 4096 : 3072)
 
-/* image processes have state of their own: an environment store */
+/* image processes have state of their own: an environment store, buffered streams */
 #if defined(CONFIG_TEST_USERSPACE) && defined(CONFIG_SYS_PROCESS_STATE_AREA) && \
 	(CONFIG_SYS_PROCESS_STATE_AREA > 0)
 #define EXEC_IMAGE_PROCESS_STATE 1
@@ -81,6 +86,9 @@ static char *const exec_env_argv[] = {"hello", "n", "u", NULL};
 static char *const exec_env_argv[] = {"hello", "n", NULL};
 #endif
 static char *const exec_envp[] = {"HELLO=world", NULL};
+#if EXEC_IMAGE_PROCESS_STATE
+static char *const exec_stdio_argv[] = {"hello", "b", NULL};
+#endif
 static char *const exec_exit_argv[] = {"hello", "e", NULL};
 static char *const exec_chain_argv[] = {"hello", "c", NULL};
 
@@ -102,6 +110,25 @@ static void exec_env_child_entry(void *p1, void *p2, void *p3)
 	(void)execve(EXEC_IMAGE, p1, exec_envp);
 	_exit(128 + (errno & 0x7f));
 }
+
+#if EXEC_IMAGE_PROCESS_STATE
+/* the pipe the image writes its standard output into: the child reads it in user mode */
+ZTEST_DMEM static int exec_stdio_pipe[2];
+
+static void exec_stdio_child_entry(void *p1, void *p2, void *p3)
+{
+	ARG_UNUSED(p1);
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	if ((dup2(exec_stdio_pipe[1], 1) != 1) || (close(exec_stdio_pipe[0]) != 0) ||
+	    (close(exec_stdio_pipe[1]) != 0)) {
+		_exit(127);
+	}
+	(void)execve(EXEC_IMAGE, exec_stdio_argv, NULL);
+	_exit(128 + (errno & 0x7f));
+}
+#endif
 
 /* the same name found along PATH, through each exec entry point */
 static void execvp_child_entry(void *p1, void *p2, void *p3)
@@ -230,6 +257,37 @@ static void execve_environment(void)
 	zassert_true(WIFEXITED(status));
 	zassert_equal(WEXITSTATUS(status), 44, "image environment: %d", WEXITSTATUS(status));
 }
+
+#if EXEC_IMAGE_PROCESS_STATE
+/* an image's standard output buffering is the process's own: its fflush(NULL) and
+ * exit() flush it, and a write() to the descriptor overtakes what it holds
+ */
+static void execve_image_stdio(void)
+{
+	char out[8] = {0};
+	int status = -1;
+	size_t len = 0;
+	pid_t pid;
+
+	zassert_ok(pipe(exec_stdio_pipe));
+	pid = exec_spawn_with(exec_stdio_child_entry, NULL);
+	zassert_true(pid > 0);
+	zassert_ok(close(exec_stdio_pipe[1]));
+	zassert_equal(waitpid(pid, &status, 0), pid);
+	zassert_true(WIFEXITED(status), "image stdio: status %#x", status);
+	zassert_equal(WEXITSTATUS(status), 46, "image stdio: %d", WEXITSTATUS(status));
+	while (len < sizeof(out) - 1) {
+		ssize_t n = read(exec_stdio_pipe[0], out + len, sizeof(out) - 1 - len);
+
+		if (n <= 0) {
+			break;
+		}
+		len += (size_t)n;
+	}
+	zassert_ok(close(exec_stdio_pipe[0]));
+	zassert_str_equal(out, "XabYcd");
+}
+#endif
 
 static void execve_exit_reaps_image(void)
 {
@@ -417,6 +475,10 @@ ZTEST(posix_exec, test_execve)
 {
 	execve_return_status();
 	execve_environment();
+	/* the image buffers its output only where image processes have state of their own */
+#if EXEC_IMAGE_PROCESS_STATE
+	execve_image_stdio();
+#endif
 	execve_exit_reaps_image();
 	execve_chain_unloads_prior();
 	execve_load_errors();

@@ -10,6 +10,7 @@
 #endif
 
 #include <errno.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -33,6 +34,21 @@ int main(int argc, char **argv, char **envp)
 			return 45;
 		}
 		return 42;
+	}
+	if ((argc == 2) && (argv[1][0] == 'b')) {
+		/* the image's stdout buffering is its own: a write() overtakes what it holds */
+		if (setvbuf(stdout, NULL, _IOFBF, 64) != 0) {
+			return 60;
+		}
+		(void)fputs("ab", stdout);
+		(void)write(1, "X", 1);
+		if (fflush(NULL) != 0) {
+			return 61;
+		}
+		(void)write(1, "Y", 1);
+		/* exit() flushes what is left */
+		(void)fputs("cd", stdout);
+		return 46;
 	}
 	if ((argc >= 2) && (argv[1][0] == 'n')) {
 		if ((environ != envp) || (envp[0] == NULL) || (envp[1] != NULL) ||
