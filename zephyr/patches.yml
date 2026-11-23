@@ -1612,6 +1612,23 @@ patches:
       since its send ran while the dispatch waited for the resolver lock; sent
       from the work queue once the dispatch is over, it leaves from a renewed
       port, which the test now expects.
+  - path: zephyr/net-sockets-getaddrinfo-kernel-results.patch
+    sha256sum: 099963b0bc82b35998c3ae7afb70ae0d8b6a7a31937eceb00dd63a5361f1cf86
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-23
+    upstreamable: true
+    comments: |
+      The system call behind getaddrinfo() handed the caller's result array to
+      the resolver, whose callback filled it from the socket service thread, in
+      the dispatcher's context rather than the caller's: that worked only because
+      the kernel reaches all memory from any thread. With per-process address
+      spaces the caller's buffer need not be mapped there. The results now
+      collect in an array on the privileged stack of the system call; once the
+      query is answered the entries are rebased to the caller's array and copied
+      out, in the calling thread. The array is CONFIG_DNS_RESOLVER_AI_MAX_ENTRIES
+      entries of struct zsock_addrinfo, about a hundred bytes each.
   - path: zephyr/libc-signal-h-pthread-kill.patch
     sha256sum: 9db8dc468a348bb0603646373dbe308174a5711ddbcfd454197b47f18992eb48
     module: zephyr

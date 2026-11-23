@@ -1,0 +1,46 @@
+diff --git a/subsys/net/lib/sockets/getaddrinfo.c b/subsys/net/lib/sockets/getaddrinfo.c
+index c5a3fa238d9..0ee14bb3c3f 100644
+--- a/subsys/net/lib/sockets/getaddrinfo.c
++++ b/subsys/net/lib/sockets/getaddrinfo.c
+@@ -326,8 +326,13 @@ static inline int z_vrfy_z_zsock_getaddrinfo_internal(const char *host,
+ 				       struct zsock_addrinfo *res)
+ {
+ 	struct zsock_addrinfo hints_copy;
++	/* The results collect here, where the resolver's threads can write
++	 * them; the caller's memory is reached from this thread alone.
++	 */
++	struct zsock_addrinfo ai_arr[AI_ARR_MAX];
+ 	char *host_copy = NULL, *service_copy = NULL;
+ 	uint32_t ret;
++	int n = 0;
+ 
+ 	if (hints) {
+ 		K_OOPS(k_usermode_from_copy(&hints_copy, (void *)hints,
+@@ -351,9 +356,25 @@ static inline int z_vrfy_z_zsock_getaddrinfo_internal(const char *host,
+ 		}
+ 	}
+ 
++	memset(ai_arr, 0, sizeof(ai_arr));
+ 	ret = z_impl_z_zsock_getaddrinfo_internal(host_copy, service_copy,
+-						 hints ? &hints_copy : NULL,
+-						 (struct zsock_addrinfo *)res);
++						 hints ? &hints_copy : NULL, ai_arr);
++	if (ret != 0) {
++		goto out;
++	}
++
++	/* The entries point into their own array: into the caller's, once there */
++	for (struct zsock_addrinfo *ai = ai_arr; ai != NULL; ai = ai->ai_next) {
++		n++;
++	}
++
++	for (int i = 0; i < n; i++) {
++		ai_arr[i].ai_addr = net_sad(&res[i]._ai_addr);
++		ai_arr[i].ai_canonname = res[i]._ai_canonname;
++		ai_arr[i].ai_next = (i + 1 < n) ? &res[i + 1] : NULL;
++	}
++
++	K_OOPS(k_usermode_to_copy(res, ai_arr, n * sizeof(ai_arr[0])));
+ out:
+ 	k_free(service_copy);
+ 	k_free(host_copy);
