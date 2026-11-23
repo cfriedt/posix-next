@@ -55,9 +55,7 @@ int posix_spawn(pid_t *pid, const char *path, const posix_spawn_file_actions_t *
 {
 	int ret;
 	k_pid_t child;
-	sigset_t inherit;
 	struct k_sig_set kmask;
-	const sigset_t *maskp = &inherit;
 	const struct posix_spawn_image *img;
 	struct sys_clone_args args = {0};
 	/* staged with the vectors: the kernel's budget bounds them */
@@ -101,13 +99,14 @@ int posix_spawn(pid_t *pid, const char *path, const posix_spawn_file_actions_t *
 		args.prio = posix_to_zephyr_priority(attrp->schedparam.sched_priority, policy);
 	}
 
-	/* POSIX: the child gets the SETSIGMASK mask, else the caller's mask */
+	/*
+	 * POSIX: the child gets the SETSIGMASK mask, else the caller's, which sys_clone()
+	 * inherits by itself. A kernel thread's mask (every signal) is not one an image can
+	 * start with: the kernel starts a user-mode process it creates with none blocked.
+	 */
 	if ((attrp != NULL) && ((attrp->flags & POSIX_SPAWN_SETSIGMASK) != 0)) {
-		maskp = &attrp->sigmask;
-	} else {
-		(void)sigprocmask(SIG_SETMASK, NULL, &inherit);
+		args.sigmask = z_sig_set_from_posix(&attrp->sigmask, &kmask);
 	}
-	args.sigmask = z_sig_set_from_posix(maskp, &kmask);
 
 	ret = sys_clone(&args, &child);
 	if (ret < 0) {

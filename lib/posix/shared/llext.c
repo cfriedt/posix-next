@@ -844,4 +844,3 @@ EXPORT_SYMBOL(optopt);
 EXPORT_SYMBOL(zephyr_getopt);
 #endif /* CONFIG_ZEPHYR_GETOPT */
 #endif /* CONFIG_POSIX_C_LIB_EXT */
-
