@@ -28,6 +28,7 @@ if(NOT CONFIG_TC_PROVIDES_POSIX_NETWORKING)
     gethostname.c
     getsockname.c
     getsockopt.c
+    hosts.c
     if_indextoname.c
     if_nameindex.c
     if_nametoindex.c

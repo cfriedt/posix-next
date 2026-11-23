@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -23,6 +24,10 @@ int try_resolve_literal_addr(const char *host, const char *service,
 			     const struct zsock_addrinfo *hints, struct zsock_addrinfo *res);
 #endif
 
+/* the hosts database, into the caller's array */
+int posix_hosts_lookup(const char *host, uint16_t port, const struct zsock_addrinfo *hints,
+		       struct zsock_addrinfo *res, size_t max);
+
 /* slow path: a POSIX result entry with its own address and name storage */
 struct posix_addrinfo_entry {
 	struct addrinfo ai;
@@ -30,25 +35,53 @@ struct posix_addrinfo_entry {
 	char canonname[DNS_MAX_NAME_SIZE + 1];
 };
 
-/* the two steps zsock_getaddrinfo() runs, into a result array the caller owns */
+/* a service is a port number; a name is EAI_SERVICE, as one no database lists */
+static int service_port(const char *service, uint16_t *port)
+{
+	char *end;
+	long n;
+
+	*port = 0;
+	if (service == NULL) {
+		return 0;
+	}
+	n = strtol(service, &end, 10);
+	if ((*service == '\0') || (*end != '\0') || (n < 0) || (n > UINT16_MAX)) {
+		return EAI_SERVICE;
+	}
+	*port = (uint16_t)n;
+
+	return 0;
+}
+
+/* an address literal, the hosts database, then Zephyr's resolver, into the caller's array */
 static int resolve(const char *host, const char *service, const struct zsock_addrinfo *hints,
 		   struct zsock_addrinfo *res)
 {
-	int ret = EAI_FAIL;
+	uint16_t port;
+	int ret;
 
+	ret = service_port(service, &port);
+	if (ret != 0) {
+		return ret;
+	}
+
+	ret = EAI_NONAME;
 #if defined(CONFIG_NET_IP)
 	ret = try_resolve_literal_addr(host, service, hints, res);
 #endif
-#if defined(CONFIG_DNS_RESOLVER)
-	if (ret != 0) {
-		ret = z_zsock_getaddrinfo_internal(host, service, hints, res);
+	if (ret == 0) {
+		return 0;
 	}
-#endif
-#if !defined(CONFIG_NET_IP) && !defined(CONFIG_DNS_RESOLVER)
-	ARG_UNUSED(host);
-	ARG_UNUSED(service);
-	ARG_UNUSED(hints);
-	ARG_UNUSED(res);
+	/* a name must not be mistaken for an address literal */
+	if ((hints != NULL) && ((hints->ai_flags & ZSOCK_AI_NUMERICHOST) != 0)) {
+		return EAI_NONAME;
+	}
+	if (posix_hosts_lookup(host, port, hints, res, AI_ARR_MAX) == 0) {
+		return 0;
+	}
+#if defined(CONFIG_DNS_RESOLVER)
+	ret = z_zsock_getaddrinfo_internal(host, service, hints, res);
 #endif
 
 	return ret;
