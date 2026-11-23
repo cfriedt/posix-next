@@ -169,7 +169,14 @@
 #undef MQ_PRIO_MAX
 #define MQ_PRIO_MAX                   _POSIX_MQ_PRIO_MAX
 #undef OPEN_MAX
+/* the descriptor table: per process when sized, else the system-wide one CMake sizes */
+#if defined(CONFIG_ZVFS_PROC_OPEN_MAX) && (CONFIG_ZVFS_PROC_OPEN_MAX > 0)
+#define OPEN_MAX                      CONFIG_ZVFS_PROC_OPEN_MAX
+#elif defined(ZVFS_OPEN_SIZE)
+#define OPEN_MAX                      ZVFS_OPEN_SIZE
+#else
 #define OPEN_MAX                      CONFIG_POSIX_OPEN_MAX
+#endif
 #undef PAGE_SIZE
 #define PAGE_SIZE                     CONFIG_POSIX_PAGE_SIZE
 #undef PAGESIZE

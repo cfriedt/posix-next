@@ -22,6 +22,7 @@
 #include <zephyr/sys/dlist.h>
 #include <zephyr/sys/fdtable.h>
 #include <zephyr/sys/hash_function.h>
+#include <zephyr/sys/internal/fdtable_priv.h>
 
 #define _page_size COND_CODE_1(CONFIG_MMU, (CONFIG_MMU_PAGE_SIZE), (CONFIG_POSIX_PAGE_SIZE))
 
@@ -33,7 +34,6 @@ static K_MUTEX_DEFINE(shm_lock);
 struct shm_obj {
 	uint8_t *mem;
 	sys_dnode_t node;
-	size_t refs;
 	size_t size;
 	uint32_t hash;
 	bool unlinked: 1;
@@ -244,8 +244,11 @@ static int shm_close(void *obj)
 	struct shm_obj *shm = obj;
 
 	k_mutex_lock(&shm_lock, K_FOREVER);
-	shm->refs -= (shm->refs > 0) ? 1 : 0;
-	if (shm->unlinked && (shm->refs == 0)) {
+	/*
+	 * zvfs_close() invokes this only when the last fd for @obj is closed.
+	 * Drop the object if it was already unlinked.
+	 */
+	if (shm->unlinked) {
 		shm_obj_remove(shm);
 	}
 	k_mutex_unlock(&shm_lock);
@@ -381,7 +384,6 @@ int shm_open(const char *name, int oflag, mode_t mode)
 		return -1;
 	}
 
-	++shm->refs;
 	k_mutex_unlock(&shm_lock);
 
 	zvfs_finalize_typed_fd(fd, shm, &shm_vtable, ZVFS_MODE_IFSHM);
@@ -412,7 +414,7 @@ int shm_unlink(const char *name)
 	}
 
 	shm->unlinked = true;
-	if (shm->refs == 0) {
+	if (zvfs_fd_obj_refcount(shm) == 0) {
 		shm_obj_remove(shm);
 	}
 
