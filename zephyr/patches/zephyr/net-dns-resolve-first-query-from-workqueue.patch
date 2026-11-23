@@ -1,0 +1,199 @@
+diff --git a/subsys/net/lib/dns/resolve.c b/subsys/net/lib/dns/resolve.c
+index 9b7010356c0..af3ba03a990 100644
+--- a/subsys/net/lib/dns/resolve.c
++++ b/subsys/net/lib/dns/resolve.c
+@@ -200,6 +200,19 @@ static void dns_query_fail_pending_servers(struct dns_pending_query *pending_que
+ 	}
+ }
+ 
++/* The hash a reply's question is matched by: the packed name, lowered in
++ * place, and the two bytes of query type that follow it. The length counts
++ * the terminating zero.
++ */
++static uint16_t dns_question_hash(uint8_t *query_name, uint16_t name_len)
++{
++	for (int i = 0; i < name_len; i++) {
++		query_name[i] = tolower(query_name[i]);
++	}
++
++	return crc16_ansi(query_name, name_len + 2);
++}
++
+ /* Length of the query name without the trailing dot of an absolute name */
+ static size_t dns_query_name_len(const char *query)
+ {
+@@ -2314,18 +2327,8 @@ static int dns_write(struct dns_resolve_context *ctx,
+ 
+ 	query_name = buf + DNS_MSG_HEADER_SIZE;
+ 
+-	/* Convert the query name to small case so that our
+-	 * hash checker can find it later when we get the answer.
+-	 */
+-	for (int i = 0; i < dns_qname->len; i++) {
+-		query_name[i] = tolower(query_name[i]);
+-	}
+-
+-	/* Add \0 and query type (A or AAAA) to the hash. Note that
+-	 * the dns_qname->len contains the length of \0
+-	 */
+ 	ctx->queries[query_idx].query_hash =
+-		crc16_ansi(query_name, dns_qname->len + 2);
++		dns_question_hash(query_name, dns_qname->len);
+ 
+ 	if (hop_limit > 0) {
+ 		if (IS_ENABLED(CONFIG_NET_IPV6) && family == NET_AF_INET6) {
+@@ -2576,6 +2579,10 @@ static void query_timeout(struct k_work *work)
+ 
+ 	slot = pending_query - ctx->queries;
+ 
++	/* A query not yet sent arrives here at once: no server of its is
++	 * awaiting a reply, so the failure handling queries the first eligible
++	 * one. That is its first send, deferred to this work queue.
++	 */
+ 	dns_query_fail_pending_servers(pending_query);
+ 	dns_handle_server_failure(ctx, slot, -1, DNS_EAI_CANCELED);
+ 
+@@ -2623,6 +2630,7 @@ int dns_resolve_name_internal(struct dns_resolve_context *ctx,
+ 	struct net_sockaddr_storage addr = { 0 };
+ 	struct net_sockaddr *sa = net_sad(&addr);
+ 	int ret, i = -1;
++	uint16_t len;
+ 	bool mdns_query = false;
+ #ifdef CONFIG_DNS_RESOLVER_CACHE
+ 	struct dns_addrinfo cached_info[CONFIG_DNS_RESOLVER_AI_MAX_ENTRIES] = {0};
+@@ -2882,17 +2890,30 @@ try_resolve:
+ 		NET_DBG("DNS id will be %u", *dns_id);
+ 	}
+ 
+-	ret = dns_query_servers(ctx, i, dns_data->data,
+-				net_buf_tailroom(dns_data),
+-				net_buf_tailroom(dns_data),
+-				dns_qname, false);
++	/* The question as it will be sent, for the hash a reply or a
++	 * cancellation by name is matched with: the query is found by its name
++	 * from the moment it is accepted, not from its first send.
++	 */
++	len = net_buf_tailroom(dns_data);
++	ret = dns_msg_pack_query(dns_data->data, &len, net_buf_tailroom(dns_data),
++				 dns_qname->data, dns_qname->len,
++				 ctx->queries[i].id, (enum dns_rr_type)type);
+ 	if (ret < 0) {
+-		ret = -ENOENT;
+ 		goto quit;
+ 	}
+ 
++	ctx->queries[i].query_hash =
++		dns_question_hash(dns_data->data + DNS_MSG_HEADER_SIZE, dns_qname->len);
+ 	ctx->queries[i].orig_query_hash = ctx->queries[i].query_hash;
+ 
++	/* The first query goes out from the system work queue, as a retransmit
++	 * does: query_timeout() finds no server tried and sends to the first
++	 * one eligible. Nothing of the resolver's then runs on the caller's
++	 * thread, which may be a user thread in a system call with no right to
++	 * the resolver's sockets.
++	 */
++	(void)k_work_reschedule(&ctx->queries[i].timer, K_NO_WAIT);
++
+ 	ret = 0;
+ 
+ quit:
+diff --git a/tests/net/lib/dns_resolve/src/main.c b/tests/net/lib/dns_resolve/src/main.c
+index ac48f3231b3..c58d730021c 100644
+--- a/tests/net/lib/dns_resolve/src/main.c
++++ b/tests/net/lib/dns_resolve/src/main.c
+@@ -2845,14 +2845,17 @@ ZTEST(dns_resolve, test_dns_query_all_servers_llmnr_enabled_dns_fanout)
+ 
+ #endif /* CONFIG_DNS_RESOLVER_QUERY_ALL_AVAILABLE_SERVERS */
+ 
+-/* Renewing a server's source port while a reply from that server waits to
+- * be dispatched must not deadlock. The dispatch holds the dispatcher's lock
+- * and waits for the resolver lock, which the thread renewing the port holds,
+- * so the renewal must not wait for the dispatch.
++/* A lookup started while a reply from its server waits to be dispatched must
++ * not deadlock. The dispatch holds the dispatcher's lock and waits for the
++ * resolver lock, which the thread starting the lookup holds. The lookup's
++ * first send is deferred to the work queue, which takes the resolver lock once
++ * the dispatch is over, so nothing waits on the dispatch and the query leaves
++ * from a renewed port like any other.
+  */
+ static K_THREAD_STACK_DEFINE(renew_stack, 2048);
+ static struct k_thread renew_thread;
+ static volatile int renew_ret;
++static uint16_t renew_dns_id;
+ 
+ static void renew_inject_reply(const struct net_in_addr *from, uint16_t to_port)
+ {
+@@ -2887,7 +2890,6 @@ static void renew_worker(void *p1, void *p2, void *p3)
+ 	struct dns_resolve_context *ctx = p1;
+ 	struct dns_server_info *server = p2;
+ 	struct net_sockaddr *local = net_sad(&server->dispatcher.local_addr_storage);
+-	uint16_t dns_id = 0U;
+ 
+ 	ARG_UNUSED(p3);
+ 
+@@ -2901,14 +2903,10 @@ static void renew_worker(void *p1, void *p2, void *p3)
+ 	 */
+ 	k_msleep(100);
+ 
+-	renew_ret = dns_get_addr_info(NAME4, DNS_QUERY_TYPE_A, &dns_id, dns_result_cb_dummy,
+-				      NULL, DNS_TIMEOUT);
++	renew_ret = dns_get_addr_info(NAME4, DNS_QUERY_TYPE_A, &renew_dns_id,
++				      dns_result_cb_dummy, NULL, DNS_TIMEOUT);
+ 
+ 	k_mutex_unlock(&ctx->lock);
+-
+-	if (renew_ret == 0) {
+-		(void)dns_cancel_addr_info(dns_id);
+-	}
+ }
+ 
+ ZTEST(dns_resolve, test_dns_source_port_renewal_during_dispatch)
+@@ -2945,15 +2943,23 @@ ZTEST(dns_resolve, test_dns_source_port_renewal_during_dispatch)
+ 			renew_worker, ctx, server, NULL, K_PRIO_PREEMPT(8), 0, K_NO_WAIT);
+ 
+ 	zassert_ok(k_thread_join(&renew_thread, K_SECONDS(3)),
+-		   "renewing the source port during a dispatch deadlocked");
+-	/* Let the dispatch that was waiting finish */
+-	k_msleep(50);
++		   "starting a lookup during a dispatch deadlocked");
++
++	/* Let the dispatch that was waiting finish and the deferred send go out */
++	for (int i = 0; i < 20 && query_src_port == 0U; i++) {
++		k_msleep(50);
++	}
++
++	if (renew_ret == 0) {
++		(void)dns_cancel_addr_info(renew_dns_id);
++	}
+ 
+ 	zassert_false(test_failed, "could not deliver the reply");
+-	zassert_ok(renew_ret, "the query was not sent (%d)", renew_ret);
+-	zassert_equal(query_src_port, old_port,
+-		      "the query left from port %u; the port should have been kept (%u)",
+-		      query_src_port, old_port);
++	zassert_ok(renew_ret, "the lookup was not accepted (%d)", renew_ret);
++	zassert_not_equal(query_src_port, 0U, "the query was not sent");
++	zassert_not_equal(query_src_port, old_port,
++			  "the query left from port %u, the dispatch's; sent after it, the port "
++			  "should have been renewed", query_src_port);
+ }
+ 
+ /* Regression tests for the poll slots the resolver keeps in ctx->fds.
+@@ -3284,4 +3290,16 @@ ZTEST(dns_resolve, test_dns_query_llmnr_absolute_name)
+ 	check_same_query(&relative, &absolute);
+ }
+ 
+-ZTEST_SUITE(dns_resolve, NULL, test_init, NULL, NULL, NULL);
++/* A query's callbacks give the semaphores once each, and most tests take one of them: the
++ * first send of a query leaves the work queue after the test has issued it, so a count left
++ * over by one test must not let the next return before its own callbacks have run.
++ */
++static void test_before(void *fixture)
++{
++	ARG_UNUSED(fixture);
++
++	k_sem_reset(&wait_data);
++	k_sem_reset(&wait_data2);
++}
++
++ZTEST_SUITE(dns_resolve, NULL, test_init, test_before, NULL, NULL);

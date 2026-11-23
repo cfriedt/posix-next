@@ -1580,6 +1580,38 @@ patches:
       so consumers that bypass the zvfs syscall verifiers (e.g. the BSD
       socket layer) are still permission-checked during user syscalls, and
       grant all threads access to the stdio slots at boot.
+  - path: zephyr/net-dns-resolve-first-query-from-workqueue.patch
+    sha256sum: e6b73da945beef079df3476c93862be0fd67ecfae768949753fb8d5f719cac2e
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-23
+    upstreamable: true
+    comments: |
+      The resolver sent the first query of a name from the thread that asked for
+      it: dns_resolve_name() packed and wrote the question through zsock_sendto()
+      on the resolver's own socket, after renewing that socket's source port, all
+      inside the caller's call. Retransmits and the next server already go out
+      from the system work queue (query_timeout(), dns_query_next_server()) and
+      replies are read on the socket service thread; only this first send ran as
+      the caller. From a user thread's system call that send was permission-checked
+      as the caller, which has no right to the resolver's sockets, and the renewed
+      socket was granted to that thread, so the resolver's descriptors migrated to
+      whichever thread queried last; a descriptor's use checked against the
+      caller's kernel-object permissions makes that send a kernel oops.
+
+      dns_resolve_name() now validates the name, claims the query slot and
+      schedules the query's timer work with no delay: query_timeout() finds no
+      server tried and sends to the first eligible one, from the work queue, as a
+      retransmit would. The hash a reply or a cancellation by name is matched
+      with is computed when the query is accepted, from the question as it will
+      be sent, so a query cancelled before its first send is found; a send
+      failure reaches the caller through the callback as a retransmit's does.
+      Argument errors stay synchronous. The unit test of a lookup started while a
+      reply waits to be dispatched expected the lookup to keep its source port,
+      since its send ran while the dispatch waited for the resolver lock; sent
+      from the work queue once the dispatch is over, it leaves from a renewed
+      port, which the test now expects.
   - path: zephyr/libc-signal-h-pthread-kill.patch
     sha256sum: 9db8dc468a348bb0603646373dbe308174a5711ddbcfd454197b47f18992eb48
     module: zephyr
