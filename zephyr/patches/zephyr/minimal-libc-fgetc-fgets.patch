@@ -1,0 +1,934 @@
+diff --git a/lib/libc/minimal/CMakeLists.txt b/lib/libc/minimal/CMakeLists.txt
+--- a/lib/libc/minimal/CMakeLists.txt
++++ b/lib/libc/minimal/CMakeLists.txt
+@@ -28,15 +28,17 @@ zephyr_library_sources(
+   source/string/strstr.c
+   source/string/string.c
+   source/string/strspn.c
+-  source/stdout/stdout_console.c
+-  source/stdout/sprintf.c
+-  source/stdout/fprintf.c
++  source/stdio/stdout_console.c
++  source/stdio/fgetc.c
++  source/stdio/fgets.c
++  source/stdio/sprintf.c
++  source/stdio/fprintf.c
+   source/math/sqrtf.c
+   source/math/sqrt.c
+   ${STRERROR_TABLE_H}
+ )
+ 
+-zephyr_library_sources_ifdef(CONFIG_ZVFS source/stdout/zvfs_libc.c)
++zephyr_library_sources_ifdef(CONFIG_ZVFS source/stdio/zvfs_libc.c)
+ 
+ if(CONFIG_STD_C23)
+   # pull in from posix-next, since the libc must provide this for c23
+diff --git a/lib/libc/minimal/source/stdio/fgetc.c b/lib/libc/minimal/source/stdio/fgetc.c
+new file mode 100644
+--- /dev/null
++++ b/lib/libc/minimal/source/stdio/fgetc.c
+@@ -0,0 +1,40 @@
++/*
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <stdio.h>
++
++#if defined(CONFIG_ZVFS)
++#include <zephyr/sys/zvfs.h>
++#include <zephyr/sys/zvfs_libc.h>
++#endif
++
++int fgetc(FILE *stream)
++{
++#if defined(CONFIG_ZVFS)
++	unsigned char ch;
++	int fd;
++	long ret;
++
++	if (stream == NULL) {
++		return EOF;
++	}
++
++	fd = zvfs_libc_fileno(stream);
++	if (fd < 3) {
++		return EOF;
++	}
++
++	ret = zvfs_read(fd, &ch, 1);
++	if (ret != 1) {
++		return EOF;
++	}
++
++	return (int)ch;
++#else
++	ARG_UNUSED(stream);
++
++	return EOF;
++#endif
++}
+diff --git a/lib/libc/minimal/source/stdio/fgets.c b/lib/libc/minimal/source/stdio/fgets.c
+new file mode 100644
+--- /dev/null
++++ b/lib/libc/minimal/source/stdio/fgets.c
+@@ -0,0 +1,37 @@
++/*
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <stdio.h>
++
++char *fgets(char *ZRESTRICT s, int n, FILE *ZRESTRICT stream)
++{
++	int i;
++	int c;
++
++	if ((s == NULL) || (n <= 0) || (stream == NULL)) {
++		return NULL;
++	}
++
++	for (i = 0; i < (n - 1); i++) {
++		c = fgetc(stream);
++		if (c == EOF) {
++			break;
++		}
++
++		s[i] = (char)c;
++		if (c == '\n') {
++			i++;
++			break;
++		}
++	}
++
++	if (i == 0) {
++		return NULL;
++	}
++
++	s[i] = '\0';
++
++	return s;
++}
+diff --git a/lib/libc/minimal/source/stdio/fprintf.c b/lib/libc/minimal/source/stdio/fprintf.c
+new file mode 100644
+--- /dev/null
++++ b/lib/libc/minimal/source/stdio/fprintf.c
+@@ -0,0 +1,56 @@
++/* fprintf.c */
++
++/*
++ * Copyright (c) 1997-2010, 2013-2014 Wind River Systems, Inc.
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <stdarg.h>
++#include <stdio.h>
++#include <zephyr/sys/cbprintf.h>
++
++#define DESC(d) ((void *)(d))
++
++int fprintf(FILE *ZRESTRICT stream, const char *ZRESTRICT format, ...)
++{
++	va_list vargs;
++	int     r;
++
++	va_start(vargs, format);
++	r = cbvprintf((cbprintf_cb)fputc, DESC(stream), format, vargs);
++	va_end(vargs);
++
++	return r;
++}
++
++int vfprintf(FILE *ZRESTRICT stream, const char *ZRESTRICT format,
++	     va_list vargs)
++{
++	int r;
++
++	r = cbvprintf((cbprintf_cb)fputc, DESC(stream), format, vargs);
++
++	return r;
++}
++
++int printf(const char *ZRESTRICT format, ...)
++{
++	va_list vargs;
++	int     r;
++
++	va_start(vargs, format);
++	r = cbvprintf((cbprintf_cb)fputc, DESC(stdout), format, vargs);
++	va_end(vargs);
++
++	return r;
++}
++
++int vprintf(const char *ZRESTRICT format, va_list vargs)
++{
++	int r;
++
++	r = cbvprintf((cbprintf_cb)fputc, DESC(stdout), format, vargs);
++
++	return r;
++}
+diff --git a/lib/libc/minimal/source/stdio/sprintf.c b/lib/libc/minimal/source/stdio/sprintf.c
+new file mode 100644
+--- /dev/null
++++ b/lib/libc/minimal/source/stdio/sprintf.c
+@@ -0,0 +1,103 @@
++/* sprintf.c */
++
++/*
++ * Copyright (c) 1997-2010, 2013-2014 Wind River Systems, Inc.
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <stdarg.h>
++#include <stdio.h>
++#include <zephyr/sys/cbprintf.h>
++
++struct emitter {
++	char *ptr;
++	int len;
++};
++
++static int sprintf_out(int c, struct emitter *p)
++{
++	if (p->len > 1) { /* need to reserve a byte for EOS */
++		*(p->ptr) = c;
++		p->ptr += 1;
++		p->len -= 1;
++	}
++	return 0; /* indicate keep going so we get the total count */
++}
++
++int snprintf(char *ZRESTRICT str, size_t len,
++	     const char *ZRESTRICT format, ...)
++{
++	va_list vargs;
++
++	struct emitter p;
++	int     r;
++	char    dummy;
++
++	if (len == 0) {
++		str = &dummy; /* write final NUL to dummy, can't change *s */
++	}
++
++	p.ptr = str;
++	p.len = (int) len;
++
++	va_start(vargs, format);
++	r = cbvprintf((cbprintf_cb)sprintf_out, (void *) (&p), format, vargs);
++	va_end(vargs);
++
++	*(p.ptr) = 0;
++	return r;
++}
++
++int sprintf(char *ZRESTRICT str, const char *ZRESTRICT format, ...)
++{
++	va_list vargs;
++
++	struct emitter p;
++	int     r;
++
++	p.ptr = str;
++	p.len = (int) 0x7fffffff; /* allow up to "maxint" characters */
++
++	va_start(vargs, format);
++	r = cbvprintf((cbprintf_cb)sprintf_out, (void *) (&p), format, vargs);
++	va_end(vargs);
++
++	*(p.ptr) = 0;
++	return r;
++}
++
++int vsnprintf(char *ZRESTRICT str, size_t len,
++	      const char *ZRESTRICT format, va_list vargs)
++{
++	struct emitter p;
++	int     r;
++	char    dummy;
++
++	if (len == 0) {
++		str = &dummy; /* write final NUL to dummy, can't change * *s */
++	}
++
++	p.ptr = str;
++	p.len = (int) len;
++
++	r = cbvprintf((cbprintf_cb)sprintf_out, (void *) (&p), format, vargs);
++
++	*(p.ptr) = 0;
++	return r;
++}
++
++int vsprintf(char *ZRESTRICT str, const char *ZRESTRICT format,
++	     va_list vargs)
++{
++	struct emitter p;
++	int     r;
++
++	p.ptr = str;
++	p.len = (int) 0x7fffffff; /* allow up to "maxint" characters */
++
++	r = cbvprintf((cbprintf_cb)sprintf_out, (void *) (&p), format, vargs);
++
++	*(p.ptr) = 0;
++	return r;
++}
+diff --git a/lib/libc/minimal/source/stdio/stdout_console.c b/lib/libc/minimal/source/stdio/stdout_console.c
+new file mode 100644
+--- /dev/null
++++ b/lib/libc/minimal/source/stdio/stdout_console.c
+@@ -0,0 +1,192 @@
++/* stdout_console.c */
++
++/*
++ * Copyright (c) 2014 Wind River Systems, Inc.
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <stdio.h>
++#include <zephyr/sys/libc-hooks.h>
++#include <zephyr/internal/syscall_handler.h>
++#include <string.h>
++
++#if defined(CONFIG_ZVFS)
++#include <zephyr/sys/zvfs.h>
++#include <zephyr/sys/zvfs_libc.h>
++#endif
++
++static int _stdout_hook_default(int c)
++{
++	(void)(c);  /* Prevent warning about unused argument */
++
++	return EOF;
++}
++
++static int (*_stdout_hook)(int c) = _stdout_hook_default;
++
++void __stdout_hook_install(int (*hook)(int c))
++{
++	_stdout_hook = hook;
++}
++
++static size_t minimal_console_write(const unsigned char *buf, size_t nbyte)
++{
++	size_t i;
++
++	for (i = 0; i < nbyte; i++) {
++		if (_stdout_hook((int)buf[i]) == EOF) {
++			break;
++		}
++	}
++
++	return i;
++}
++
++#if defined(CONFIG_ZVFS)
++static size_t minimal_zvfs_stream_write(int fd, const void *ptr, size_t nbyte)
++{
++	const char *p = ptr;
++	size_t written = 0;
++
++	while (written < nbyte) {
++		long ret = zvfs_write(fd, p + written, nbyte - written);
++
++		if (ret <= 0) {
++			break;
++		}
++
++		written += ret;
++	}
++
++	return written;
++}
++#endif
++
++static size_t minimal_stream_write(const void *ptr, size_t nbyte, FILE *stream)
++{
++#if defined(CONFIG_ZVFS)
++	int fd = zvfs_libc_fileno(stream);
++
++	if (fd == 1 || fd == 2) {
++		return minimal_console_write((const unsigned char *)ptr, nbyte);
++	}
++
++	if (fd >= 3) {
++		return minimal_zvfs_stream_write(fd, ptr, nbyte);
++	}
++#else
++	if ((stream == stdout) || (stream == stderr)) {
++		return minimal_console_write((const unsigned char *)ptr, nbyte);
++	}
++
++	ARG_UNUSED(stream);
++#endif
++
++	return 0;
++}
++
++int z_impl_zephyr_fputc(int c, FILE *stream)
++{
++	unsigned char ch = (unsigned char)c;
++
++	if (minimal_stream_write(&ch, 1, stream) == 1) {
++		return c;
++	}
++
++	return EOF;
++}
++
++#ifdef CONFIG_USERSPACE
++static inline int z_vrfy_zephyr_fputc(int c, FILE *stream)
++{
++	return z_impl_zephyr_fputc(c, stream);
++}
++#include <zephyr/syscalls/zephyr_fputc_mrsh.c>
++#endif
++
++int fputc(int c, FILE *stream)
++{
++	return zephyr_fputc(c, stream);
++}
++
++int fputs(const char *ZRESTRICT s, FILE *ZRESTRICT stream)
++{
++	size_t len;
++	size_t n;
++
++	if (s == NULL) {
++		return EOF;
++	}
++
++	len = strlen(s);
++	if (len == 0) {
++		return 0;
++	}
++
++	n = minimal_stream_write(s, len, stream);
++
++	return (n == len) ? 0 : EOF;
++}
++
++#undef putc
++int putc(int c, FILE *stream)
++{
++	return zephyr_fputc(c, stream);
++}
++
++#undef putchar
++int putchar(int c)
++{
++	return zephyr_fputc(c, stdout);
++}
++
++size_t z_impl_zephyr_fwrite(const void *ZRESTRICT ptr, size_t size,
++			    size_t nitems, FILE *ZRESTRICT stream)
++{
++	size_t nbyte;
++	size_t written;
++
++	if ((nitems == 0) || (size == 0)) {
++		return 0;
++	}
++
++	nbyte = size * nitems;
++	written = minimal_stream_write(ptr, nbyte, stream);
++
++	return written / size;
++}
++
++#ifdef CONFIG_USERSPACE
++static inline size_t z_vrfy_zephyr_fwrite(const void *ZRESTRICT ptr,
++					  size_t size, size_t nitems,
++					  FILE *ZRESTRICT stream)
++{
++
++	K_OOPS(K_SYSCALL_MEMORY_ARRAY_READ(ptr, nitems, size));
++	return z_impl_zephyr_fwrite(ptr, size, nitems, stream);
++}
++#include <zephyr/syscalls/zephyr_fwrite_mrsh.c>
++#endif
++
++size_t fwrite(const void *ZRESTRICT ptr, size_t size, size_t nitems,
++			  FILE *ZRESTRICT stream)
++{
++	return zephyr_fwrite(ptr, size, nitems, stream);
++}
++
++int fflush(FILE *stream)
++{
++	(void)stream;
++
++	return 0;
++}
++
++int puts(const char *s)
++{
++	if (fputs(s, stdout) == EOF) {
++		return EOF;
++	}
++
++	return (fputc('\n', stdout) == EOF) ? EOF : 0;
++}
+diff --git a/lib/libc/minimal/source/stdio/zvfs_libc.c b/lib/libc/minimal/source/stdio/zvfs_libc.c
+new file mode 100644
+--- /dev/null
++++ b/lib/libc/minimal/source/stdio/zvfs_libc.c
+@@ -0,0 +1,40 @@
++/*
++ * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++/*
++ * Minimal libc implementation of the ZVFS FILE<->fd hooks.
++ *
++ * Minimal libc has no real FILE object: FILE is an int and the standard streams
++ * are the literal pointers (FILE *)1/2/3 (see lib/libc/minimal/include/stdio.h).
++ * ZVFS-backed streams encode their fd as (fd + 4) so they never alias stdin/stdout/
++ * stderr when the fdtable does not pre-reserve stdio slots
++ * (CONFIG_ZVFS_RESERVE_STDIO_FDS=n).
++ * No backing store is required.
++ */
++
++#include <stdint.h>
++#include <stdio.h>
++
++#include <zephyr/sys/zvfs_libc.h>
++
++#define MINIMAL_LIBC_STDIO_FILE_BASE 4
++
++FILE *zvfs_libc_fdopen(int fd, const char *mode)
++{
++	ARG_UNUSED(mode);
++
++	return (FILE *)(intptr_t)(fd + MINIMAL_LIBC_STDIO_FILE_BASE);
++}
++
++int zvfs_libc_fileno(FILE *fp)
++{
++	intptr_t stream = (intptr_t)fp;
++
++	if (stream >= 1 && stream <= 3) {
++		return (int)stream - 1;
++	}
++
++	return (int)stream - MINIMAL_LIBC_STDIO_FILE_BASE;
++}
+diff --git a/lib/libc/minimal/source/stdout/fprintf.c b/lib/libc/minimal/source/stdout/fprintf.c
+deleted file mode 100644
+--- a/lib/libc/minimal/source/stdout/fprintf.c
++++ /dev/null
+@@ -1,56 +0,0 @@
+-/* fprintf.c */
+-
+-/*
+- * Copyright (c) 1997-2010, 2013-2014 Wind River Systems, Inc.
+- *
+- * SPDX-License-Identifier: Apache-2.0
+- */
+-
+-#include <stdarg.h>
+-#include <stdio.h>
+-#include <zephyr/sys/cbprintf.h>
+-
+-#define DESC(d) ((void *)(d))
+-
+-int fprintf(FILE *ZRESTRICT stream, const char *ZRESTRICT format, ...)
+-{
+-	va_list vargs;
+-	int     r;
+-
+-	va_start(vargs, format);
+-	r = cbvprintf((cbprintf_cb)fputc, DESC(stream), format, vargs);
+-	va_end(vargs);
+-
+-	return r;
+-}
+-
+-int vfprintf(FILE *ZRESTRICT stream, const char *ZRESTRICT format,
+-	     va_list vargs)
+-{
+-	int r;
+-
+-	r = cbvprintf((cbprintf_cb)fputc, DESC(stream), format, vargs);
+-
+-	return r;
+-}
+-
+-int printf(const char *ZRESTRICT format, ...)
+-{
+-	va_list vargs;
+-	int     r;
+-
+-	va_start(vargs, format);
+-	r = cbvprintf((cbprintf_cb)fputc, DESC(stdout), format, vargs);
+-	va_end(vargs);
+-
+-	return r;
+-}
+-
+-int vprintf(const char *ZRESTRICT format, va_list vargs)
+-{
+-	int r;
+-
+-	r = cbvprintf((cbprintf_cb)fputc, DESC(stdout), format, vargs);
+-
+-	return r;
+-}
+diff --git a/lib/libc/minimal/source/stdout/sprintf.c b/lib/libc/minimal/source/stdout/sprintf.c
+deleted file mode 100644
+--- a/lib/libc/minimal/source/stdout/sprintf.c
++++ /dev/null
+@@ -1,103 +0,0 @@
+-/* sprintf.c */
+-
+-/*
+- * Copyright (c) 1997-2010, 2013-2014 Wind River Systems, Inc.
+- *
+- * SPDX-License-Identifier: Apache-2.0
+- */
+-
+-#include <stdarg.h>
+-#include <stdio.h>
+-#include <zephyr/sys/cbprintf.h>
+-
+-struct emitter {
+-	char *ptr;
+-	int len;
+-};
+-
+-static int sprintf_out(int c, struct emitter *p)
+-{
+-	if (p->len > 1) { /* need to reserve a byte for EOS */
+-		*(p->ptr) = c;
+-		p->ptr += 1;
+-		p->len -= 1;
+-	}
+-	return 0; /* indicate keep going so we get the total count */
+-}
+-
+-int snprintf(char *ZRESTRICT str, size_t len,
+-	     const char *ZRESTRICT format, ...)
+-{
+-	va_list vargs;
+-
+-	struct emitter p;
+-	int     r;
+-	char    dummy;
+-
+-	if (len == 0) {
+-		str = &dummy; /* write final NUL to dummy, can't change *s */
+-	}
+-
+-	p.ptr = str;
+-	p.len = (int) len;
+-
+-	va_start(vargs, format);
+-	r = cbvprintf((cbprintf_cb)sprintf_out, (void *) (&p), format, vargs);
+-	va_end(vargs);
+-
+-	*(p.ptr) = 0;
+-	return r;
+-}
+-
+-int sprintf(char *ZRESTRICT str, const char *ZRESTRICT format, ...)
+-{
+-	va_list vargs;
+-
+-	struct emitter p;
+-	int     r;
+-
+-	p.ptr = str;
+-	p.len = (int) 0x7fffffff; /* allow up to "maxint" characters */
+-
+-	va_start(vargs, format);
+-	r = cbvprintf((cbprintf_cb)sprintf_out, (void *) (&p), format, vargs);
+-	va_end(vargs);
+-
+-	*(p.ptr) = 0;
+-	return r;
+-}
+-
+-int vsnprintf(char *ZRESTRICT str, size_t len,
+-	      const char *ZRESTRICT format, va_list vargs)
+-{
+-	struct emitter p;
+-	int     r;
+-	char    dummy;
+-
+-	if (len == 0) {
+-		str = &dummy; /* write final NUL to dummy, can't change * *s */
+-	}
+-
+-	p.ptr = str;
+-	p.len = (int) len;
+-
+-	r = cbvprintf((cbprintf_cb)sprintf_out, (void *) (&p), format, vargs);
+-
+-	*(p.ptr) = 0;
+-	return r;
+-}
+-
+-int vsprintf(char *ZRESTRICT str, const char *ZRESTRICT format,
+-	     va_list vargs)
+-{
+-	struct emitter p;
+-	int     r;
+-
+-	p.ptr = str;
+-	p.len = (int) 0x7fffffff; /* allow up to "maxint" characters */
+-
+-	r = cbvprintf((cbprintf_cb)sprintf_out, (void *) (&p), format, vargs);
+-
+-	*(p.ptr) = 0;
+-	return r;
+-}
+diff --git a/lib/libc/minimal/source/stdout/stdout_console.c b/lib/libc/minimal/source/stdout/stdout_console.c
+deleted file mode 100644
+--- a/lib/libc/minimal/source/stdout/stdout_console.c
++++ /dev/null
+@@ -1,192 +0,0 @@
+-/* stdout_console.c */
+-
+-/*
+- * Copyright (c) 2014 Wind River Systems, Inc.
+- *
+- * SPDX-License-Identifier: Apache-2.0
+- */
+-
+-#include <stdio.h>
+-#include <zephyr/sys/libc-hooks.h>
+-#include <zephyr/internal/syscall_handler.h>
+-#include <string.h>
+-
+-#if defined(CONFIG_ZVFS)
+-#include <zephyr/sys/zvfs.h>
+-#include <zephyr/sys/zvfs_libc.h>
+-#endif
+-
+-static int _stdout_hook_default(int c)
+-{
+-	(void)(c);  /* Prevent warning about unused argument */
+-
+-	return EOF;
+-}
+-
+-static int (*_stdout_hook)(int c) = _stdout_hook_default;
+-
+-void __stdout_hook_install(int (*hook)(int c))
+-{
+-	_stdout_hook = hook;
+-}
+-
+-static size_t minimal_console_write(const unsigned char *buf, size_t nbyte)
+-{
+-	size_t i;
+-
+-	for (i = 0; i < nbyte; i++) {
+-		if (_stdout_hook((int)buf[i]) == EOF) {
+-			break;
+-		}
+-	}
+-
+-	return i;
+-}
+-
+-#if defined(CONFIG_ZVFS)
+-static size_t minimal_zvfs_stream_write(int fd, const void *ptr, size_t nbyte)
+-{
+-	const char *p = ptr;
+-	size_t written = 0;
+-
+-	while (written < nbyte) {
+-		long ret = zvfs_write(fd, p + written, nbyte - written);
+-
+-		if (ret <= 0) {
+-			break;
+-		}
+-
+-		written += ret;
+-	}
+-
+-	return written;
+-}
+-#endif
+-
+-static size_t minimal_stream_write(const void *ptr, size_t nbyte, FILE *stream)
+-{
+-#if defined(CONFIG_ZVFS)
+-	int fd = zvfs_libc_fileno(stream);
+-
+-	if (fd == 1 || fd == 2) {
+-		return minimal_console_write((const unsigned char *)ptr, nbyte);
+-	}
+-
+-	if (fd >= 3) {
+-		return minimal_zvfs_stream_write(fd, ptr, nbyte);
+-	}
+-#else
+-	if ((stream == stdout) || (stream == stderr)) {
+-		return minimal_console_write((const unsigned char *)ptr, nbyte);
+-	}
+-
+-	ARG_UNUSED(stream);
+-#endif
+-
+-	return 0;
+-}
+-
+-int z_impl_zephyr_fputc(int c, FILE *stream)
+-{
+-	unsigned char ch = (unsigned char)c;
+-
+-	if (minimal_stream_write(&ch, 1, stream) == 1) {
+-		return c;
+-	}
+-
+-	return EOF;
+-}
+-
+-#ifdef CONFIG_USERSPACE
+-static inline int z_vrfy_zephyr_fputc(int c, FILE *stream)
+-{
+-	return z_impl_zephyr_fputc(c, stream);
+-}
+-#include <zephyr/syscalls/zephyr_fputc_mrsh.c>
+-#endif
+-
+-int fputc(int c, FILE *stream)
+-{
+-	return zephyr_fputc(c, stream);
+-}
+-
+-int fputs(const char *ZRESTRICT s, FILE *ZRESTRICT stream)
+-{
+-	size_t len;
+-	size_t n;
+-
+-	if (s == NULL) {
+-		return EOF;
+-	}
+-
+-	len = strlen(s);
+-	if (len == 0) {
+-		return 0;
+-	}
+-
+-	n = minimal_stream_write(s, len, stream);
+-
+-	return (n == len) ? 0 : EOF;
+-}
+-
+-#undef putc
+-int putc(int c, FILE *stream)
+-{
+-	return zephyr_fputc(c, stream);
+-}
+-
+-#undef putchar
+-int putchar(int c)
+-{
+-	return zephyr_fputc(c, stdout);
+-}
+-
+-size_t z_impl_zephyr_fwrite(const void *ZRESTRICT ptr, size_t size,
+-			    size_t nitems, FILE *ZRESTRICT stream)
+-{
+-	size_t nbyte;
+-	size_t written;
+-
+-	if ((nitems == 0) || (size == 0)) {
+-		return 0;
+-	}
+-
+-	nbyte = size * nitems;
+-	written = minimal_stream_write(ptr, nbyte, stream);
+-
+-	return written / size;
+-}
+-
+-#ifdef CONFIG_USERSPACE
+-static inline size_t z_vrfy_zephyr_fwrite(const void *ZRESTRICT ptr,
+-					  size_t size, size_t nitems,
+-					  FILE *ZRESTRICT stream)
+-{
+-
+-	K_OOPS(K_SYSCALL_MEMORY_ARRAY_READ(ptr, nitems, size));
+-	return z_impl_zephyr_fwrite(ptr, size, nitems, stream);
+-}
+-#include <zephyr/syscalls/zephyr_fwrite_mrsh.c>
+-#endif
+-
+-size_t fwrite(const void *ZRESTRICT ptr, size_t size, size_t nitems,
+-			  FILE *ZRESTRICT stream)
+-{
+-	return zephyr_fwrite(ptr, size, nitems, stream);
+-}
+-
+-int fflush(FILE *stream)
+-{
+-	(void)stream;
+-
+-	return 0;
+-}
+-
+-int puts(const char *s)
+-{
+-	if (fputs(s, stdout) == EOF) {
+-		return EOF;
+-	}
+-
+-	return (fputc('\n', stdout) == EOF) ? EOF : 0;
+-}
+diff --git a/lib/libc/minimal/source/stdout/zvfs_libc.c b/lib/libc/minimal/source/stdout/zvfs_libc.c
+deleted file mode 100644
+--- a/lib/libc/minimal/source/stdout/zvfs_libc.c
++++ /dev/null
+@@ -1,40 +0,0 @@
+-/*
+- * SPDX-FileCopyrightText: Copyright The Zephyr Project Contributors
+- * SPDX-License-Identifier: Apache-2.0
+- */
+-
+-/*
+- * Minimal libc implementation of the ZVFS FILE<->fd hooks.
+- *
+- * Minimal libc has no real FILE object: FILE is an int and the standard streams
+- * are the literal pointers (FILE *)1/2/3 (see lib/libc/minimal/include/stdio.h).
+- * ZVFS-backed streams encode their fd as (fd + 4) so they never alias stdin/stdout/
+- * stderr when the fdtable does not pre-reserve stdio slots
+- * (CONFIG_ZVFS_RESERVE_STDIO_FDS=n).
+- * No backing store is required.
+- */
+-
+-#include <stdint.h>
+-#include <stdio.h>
+-
+-#include <zephyr/sys/zvfs_libc.h>
+-
+-#define MINIMAL_LIBC_STDIO_FILE_BASE 4
+-
+-FILE *zvfs_libc_fdopen(int fd, const char *mode)
+-{
+-	ARG_UNUSED(mode);
+-
+-	return (FILE *)(intptr_t)(fd + MINIMAL_LIBC_STDIO_FILE_BASE);
+-}
+-
+-int zvfs_libc_fileno(FILE *fp)
+-{
+-	intptr_t stream = (intptr_t)fp;
+-
+-	if (stream >= 1 && stream <= 3) {
+-		return (int)stream - 1;
+-	}
+-
+-	return (int)stream - MINIMAL_LIBC_STDIO_FILE_BASE;
+-}
