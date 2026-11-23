@@ -1906,14 +1906,34 @@ patches:
     comments: |
       POSIX getaddrinfo() owns its result array (allocated with calloc(), freed
       with free()) so a user-mode process never faults taking the kernel heap
-      lock, and hands it to the network stack to fill. Reusing zsock_getaddrinfo()
-      is not possible because it k_calloc()s the result itself; the caller instead
-      drives the same two steps directly. The DNS step is already the public
+      lock, and hands it to the network stack to fill. zsock_getaddrinfo() returns
+      Zephyr entries in a list of its own, which the wrapper would translate and
+      free again; the caller instead drives the same two steps directly. The DNS
+      step is already the public
       z_zsock_getaddrinfo_internal() syscall, but the literal-address fast path
       (net_ipaddr_parse for e.g. "127.0.0.1" when no resolver is configured) is a
       file-static helper. Drop its static qualifier so the POSIX wrapper can call
       it; it stays undeclared in any public header, forward-declared at its single
       call site.
+  - path: zephyr/net-sockets-getaddrinfo-libc-heap.patch
+    sha256sum: b75e72a68f799c38ad4b05b939a4f78fdbcc194dd8dee1b74b31c62809cb1117
+    module: zephyr
+    author: Chris Friedt
+    email: chris@fr4.co
+    date: 2026-11-23
+    upstreamable: true
+    comments: |
+      zsock_getaddrinfo() allocated the list it returns with k_calloc() and
+      zsock_freeaddrinfo() freed it with k_free(): the kernel heap, whose lock a
+      user thread cannot take, so the first call from user mode took a CPU
+      exception before the system call was reached. The list is the caller's and
+      now comes from the C library heap, with calloc() and free(). An image that
+      resolves names needs that heap, which the minimal C library has none of by
+      default; the socket documentation and the NET_SOCKETS help say so.
+      tests/net/socket/getaddrinfo claimed user-mode coverage with
+      CONFIG_TEST_USERSPACE and not one ZTEST_USER; its tests now run from user
+      mode, with the counters they share with the server thread in the test
+      partition.
   - path: zephyr/net-dns-resolve-first-query-from-workqueue.patch
     sha256sum: e6b73da945beef079df3476c93862be0fd67ecfae768949753fb8d5f719cac2e
     module: zephyr

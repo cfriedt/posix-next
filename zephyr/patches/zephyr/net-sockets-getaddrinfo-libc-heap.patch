@@ -1,0 +1,168 @@
+diff --git a/doc/services/connectivity/networking/api/sockets.rst b/doc/services/connectivity/networking/api/sockets.rst
+index fbbb31315ad..8360969ca65 100644
+--- a/doc/services/connectivity/networking/api/sockets.rst
++++ b/doc/services/connectivity/networking/api/sockets.rst
+@@ -32,6 +32,11 @@ config option and implements the following operations: ``socket()``, ``close()``
+ ``getsockopt()``, ``setsockopt()``, ``poll()``, ``select()``,
+ ``getaddrinfo()``, ``getnameinfo()``.
+ 
++``getaddrinfo()`` returns a list allocated with the C library's ``malloc()``, which the caller
++gives back with ``freeaddrinfo()``, so an image that resolves names needs a C library heap
++(:kconfig:option:`CONFIG_COMMON_LIBC_MALLOC_ARENA_SIZE`); the minimal C library has none by
++default.
++
+ Based on the namespacing requirements above, these operations are by
+ default exposed as functions with ``zsock_`` prefix, e.g.
+ :c:func:`zsock_socket` and :c:func:`zsock_close`. If the config option
+diff --git a/subsys/net/lib/sockets/Kconfig b/subsys/net/lib/sockets/Kconfig
+index aa2b3928e8d..c4d79746f4e 100644
+--- a/subsys/net/lib/sockets/Kconfig
++++ b/subsys/net/lib/sockets/Kconfig
+@@ -10,6 +10,10 @@ menuconfig NET_SOCKETS
+ 	select ZVFS_SELECT
+ 	help
+ 	  Provide BSD Sockets like API on top of native Zephyr networking API.
++	  getaddrinfo() allocates the list it returns with the C library's
++	  malloc(), so resolving names needs a C library heap, which the
++	  minimal C library has none of by default
++	  (COMMON_LIBC_MALLOC_ARENA_SIZE).
+ 
+ if NET_SOCKETS
+ 
+diff --git a/subsys/net/lib/sockets/getaddrinfo.c b/subsys/net/lib/sockets/getaddrinfo.c
+index 2ace7f95fab..c5a3fa238d9 100644
+--- a/subsys/net/lib/sockets/getaddrinfo.c
++++ b/subsys/net/lib/sockets/getaddrinfo.c
+@@ -452,7 +452,8 @@ int zsock_getaddrinfo(const char *host, const char *service,
+ 	int ret = DNS_EAI_FAIL;
+ 
+ #if defined(ANY_RESOLVER)
+-	*res = k_calloc(AI_ARR_MAX, sizeof(struct zsock_addrinfo));
++	/* the caller's list, from the caller's heap */
++	*res = calloc(AI_ARR_MAX, sizeof(struct zsock_addrinfo));
+ 	if (!(*res)) {
+ 		return DNS_EAI_MEMORY;
+ 	}
+@@ -473,7 +474,7 @@ int zsock_getaddrinfo(const char *host, const char *service,
+ 
+ #if defined(ANY_RESOLVER)
+ 	if (ret) {
+-		k_free(*res);
++		free(*res);
+ 		*res = NULL;
+ 	}
+ #endif
+@@ -488,7 +489,7 @@ void zsock_freeaddrinfo(struct zsock_addrinfo *ai)
+ 		return;
+ 	}
+ 
+-	k_free(ai);
++	free(ai);
+ }
+ 
+ #define ERR(e) case DNS_ ## e: return #e
+diff --git a/tests/net/socket/getaddrinfo/src/main.c b/tests/net/socket/getaddrinfo/src/main.c
+index f5b9ad48637..e153e9f4e1a 100644
+--- a/tests/net/socket/getaddrinfo/src/main.c
++++ b/tests/net/socket/getaddrinfo/src/main.c
+@@ -36,8 +36,8 @@ static int sock_v6;
+ static struct net_sockaddr_in addr_v4;
+ static struct net_sockaddr_in6 addr_v6;
+ 
+-static int queries_received;
+-static int expected_query_count =
++static ZTEST_BMEM int queries_received;
++static ZTEST_DMEM int expected_query_count =
+ 	CONFIG_NET_SOCKETS_DNS_BACKOFF_INTERVAL >= CONFIG_NET_SOCKETS_DNS_TIMEOUT ?
+ 	2 :
+ 	/* Calculate for both IPv4 and IPv6 so need to double the value */
+@@ -225,7 +225,7 @@ static void *test_getaddrinfo_setup(void)
+ 	return NULL;
+ }
+ 
+-ZTEST(net_socket_getaddrinfo, test_getaddrinfo_ok)
++ZTEST_USER(net_socket_getaddrinfo, test_getaddrinfo_ok)
+ {
+ 	struct zsock_addrinfo *res = NULL;
+ 
+@@ -249,7 +249,7 @@ ZTEST(net_socket_getaddrinfo, test_getaddrinfo_ok)
+ 	zsock_freeaddrinfo(res);
+ }
+ 
+-ZTEST(net_socket_getaddrinfo, test_getaddrinfo_cancelled)
++ZTEST_USER(net_socket_getaddrinfo, test_getaddrinfo_cancelled)
+ {
+ 	struct zsock_addrinfo *res = NULL;
+ 	int ret;
+@@ -269,7 +269,7 @@ ZTEST(net_socket_getaddrinfo, test_getaddrinfo_cancelled)
+ 	zsock_freeaddrinfo(res);
+ }
+ 
+-ZTEST(net_socket_getaddrinfo, test_getaddrinfo_no_host)
++ZTEST_USER(net_socket_getaddrinfo, test_getaddrinfo_no_host)
+ {
+ 	struct zsock_addrinfo *res = NULL;
+ 	int ret;
+@@ -283,7 +283,7 @@ ZTEST(net_socket_getaddrinfo, test_getaddrinfo_no_host)
+ 	zsock_freeaddrinfo(res);
+ }
+ 
+-ZTEST(net_socket_getaddrinfo, test_getaddrinfo_num_ipv4)
++ZTEST_USER(net_socket_getaddrinfo, test_getaddrinfo_num_ipv4)
+ {
+ 	struct zsock_addrinfo *res = NULL;
+ 	struct net_sockaddr_in *saddr;
+@@ -332,7 +332,7 @@ ZTEST(net_socket_getaddrinfo, test_getaddrinfo_num_ipv4)
+ 	zsock_freeaddrinfo(res);
+ }
+ 
+-ZTEST(net_socket_getaddrinfo, test_getaddrinfo_num_ipv6)
++ZTEST_USER(net_socket_getaddrinfo, test_getaddrinfo_num_ipv6)
+ {
+ 	struct zsock_addrinfo *res = NULL;
+ 	struct net_sockaddr_in6 *saddr;
+@@ -541,7 +541,7 @@ ZTEST(net_socket_getaddrinfo, test_getaddrinfo_num_ipv6)
+ 	zsock_freeaddrinfo(res);
+ }
+ 
+-ZTEST(net_socket_getaddrinfo, test_getaddrinfo_flags_numerichost)
++ZTEST_USER(net_socket_getaddrinfo, test_getaddrinfo_flags_numerichost)
+ {
+ 	int ret;
+ 	struct zsock_addrinfo *res = NULL;
+@@ -560,7 +560,7 @@ ZTEST(net_socket_getaddrinfo, test_getaddrinfo_flags_numerichost)
+ 	zsock_freeaddrinfo(res);
+ }
+ 
+-ZTEST(net_socket_getaddrinfo, test_getaddrinfo_ipv4_hints_ipv6)
++ZTEST_USER(net_socket_getaddrinfo, test_getaddrinfo_ipv4_hints_ipv6)
+ {
+ 	struct zsock_addrinfo *res = NULL;
+ 	struct zsock_addrinfo hints = {
+@@ -574,7 +574,7 @@ ZTEST(net_socket_getaddrinfo, test_getaddrinfo_ipv4_hints_ipv6)
+ 	zsock_freeaddrinfo(res);
+ }
+ 
+-ZTEST(net_socket_getaddrinfo, test_getaddrinfo_ipv6_hints_ipv4)
++ZTEST_USER(net_socket_getaddrinfo, test_getaddrinfo_ipv6_hints_ipv4)
+ {
+ 	struct zsock_addrinfo *res = NULL;
+ 	struct zsock_addrinfo hints = {
+@@ -588,7 +588,7 @@ ZTEST(net_socket_getaddrinfo, test_getaddrinfo_ipv6_hints_ipv4)
+ 	zsock_freeaddrinfo(res);
+ }
+ 
+-ZTEST(net_socket_getaddrinfo, test_getaddrinfo_port_invalid)
++ZTEST_USER(net_socket_getaddrinfo, test_getaddrinfo_port_invalid)
+ {
+ 	int ret;
+ 	struct zsock_addrinfo *res = NULL;
+@@ -598,7 +598,7 @@ ZTEST(net_socket_getaddrinfo, test_getaddrinfo_port_invalid)
+ 	zsock_freeaddrinfo(res);
+ }
+ 
+-ZTEST(net_socket_getaddrinfo, test_getaddrinfo_null_host)
++ZTEST_USER(net_socket_getaddrinfo, test_getaddrinfo_null_host)
+ {
+ 	struct net_sockaddr_in *saddr;
+ 	struct net_sockaddr_in6 *saddr6;
