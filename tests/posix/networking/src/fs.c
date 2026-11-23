@@ -26,7 +26,7 @@ struct _entry {
 };
 
 static const struct _entry _data[] = {
-	{.name = "/etc/hosts", .data = "127.0.0.1 localhost\n"},
+	{.name = "/etc/hosts", .data = "127.0.0.1 localhost\n::1 localhost ip6-localhost\n"},
 	{.name = "/etc/protocols", .data = "tcp 6 TCP\nudp 17 UDP\n"},
 	{.name = "/etc/services", .data = "http 80/tcp\n"},
 	{.name = "/etc/networks", .data = "link 0\n"},
