@@ -581,6 +581,37 @@ site-local tests match the ``fe80::/10`` and ``fec0::/10`` prefixes of RFC 4291.
 ``IN6_IS_ADDR_V4COMPAT()`` is implemented in the header itself, as Zephyr has no notion of the
 deprecated IPv4-compatible form (``::a.b.c.d`` other than ``::`` and ``::1``).
 
+.. _posix_name_resolution:
+
+Name resolution
+---------------
+
+:c:func:`getaddrinfo` is a translation layer over the kernel's resolver; the module adds the
+databases POSIX puts in front of it. The service is a port number, taken as given; a service name
+is ``EAI_SERVICE``, as one no database lists. An address literal, or a ``NULL`` host, is then
+resolved in the caller without a system call, and ``AI_NUMERICHOST`` with a name is
+``EAI_NONAME``. A name is looked up in ``/etc/hosts`` next, case-insensitively against the
+canonical name and the aliases of every line, in the family the hints ask for. A name the hosts
+database does not list goes to Zephyr's resolver (:kconfig:option:`CONFIG_DNS_RESOLVER`) through
+its system call: one resolver, with the server list that DHCP and router advertisements maintain,
+its cache and its source-port randomisation, shared by every process and by the kernel's own
+clients. The result array is the caller's, from the C library heap, with at most
+:kconfig:option:`CONFIG_DNS_RESOLVER_AI_MAX_ENTRIES` entries; :c:func:`freeaddrinfo` releases it.
+
+Three changes to the resolver make that call safe from a user-mode process. The list that
+``zsock_getaddrinfo()`` returns comes from the C library heap rather than the kernel's, whose lock
+a user thread cannot take. The first query of a name is sent from the system work queue, as its
+retransmits already were, so nothing of the resolver's runs on the caller's thread: no socket of
+the resolver's is touched, renewed or permission-checked as the caller, whose descriptor table is
+its own. The results collect on the privileged stack of the system call and are copied to the
+caller's array in the calling thread, since the resolver's threads cannot assume the caller's
+memory is mapped. A query cancelled before its first send is found by its name, so a lookup that
+times out leaves nothing behind that could write into the caller's stack later.
+
+The hosts database is read over a plain descriptor rather than through stdio: in a user-mode
+build picolibc's ``fopen()`` allocates a kernel mutex object for the FILE that ``fclose()`` only
+revokes, so each open would leak a kernel heap object until collection.
+
 Distributed Kconfig
 ===================
 

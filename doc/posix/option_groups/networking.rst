@@ -6,6 +6,10 @@ POSIX_NETWORKING
 The function ``sockatmark()`` is not yet supported and is expected to fail setting ``errno``
 to ``ENOSYS`` :ref:`†<posix_undefined_behaviour>`.
 
+:c:func:`getaddrinfo` resolves an address literal itself, consults the hosts database next, and
+hands a name it does not list to Zephyr's resolver (:kconfig:option:`CONFIG_DNS_RESOLVER`); a
+service is a port number. See :ref:`posix_name_resolution`.
+
 Enable this option group with :kconfig:option:`CONFIG_POSIX_NETWORKING`.
 
 The host lookup of POSIX.1-2001, ``gethostbyname()``, ``gethostbyaddr()``, ``hstrerror()`` and
