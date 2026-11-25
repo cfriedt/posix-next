@@ -30,16 +30,12 @@ extern "C" {
 #if defined(_BSD_SOURCE) || defined(__DOXYGEN__)
 /**
  * @brief Get an environment variable into a caller-supplied buffer (BSD extension).
- * @ingroup posix_option_thread_safe_functions
- *
- * Thread-safe alternative to getenv().
  *
  * @param name Name of the environment variable.
  * @param buf  Buffer to write the value into.
  * @param len  Size of @p buf.
  * @return 0 on success, or a positive error number on failure (ENOENT if not set,
  *         ERANGE if @p buf is too small).
- * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/getenv_r.html
  */
 int getenv_r(const char *name, char *buf, size_t len);
 #endif
