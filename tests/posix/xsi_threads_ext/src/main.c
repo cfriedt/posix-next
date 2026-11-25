@@ -140,8 +140,10 @@ ZTEST(xsi_threads_ext, test_pthread_attr_setstack)
 	zassert_ok(pthread_attr_setstack(&attr, stackaddr, stacksize));
 	can_create_thread(&attr);
 
-	/* qemu_x86 seems to be unable to set thread stacks to be anything less than 4096 */
-	if (!IS_ENABLED(CONFIG_X86)) {
+	/* a stack of the minimum size cannot shrink: the minimum is a page where kernel stacks are
+	 * page-aligned, as on x86 and on RISC-V with the MMU
+	 */
+	if (stacksize > PTHREAD_STACK_MIN) {
 		/*
 		 * check we can set a smaller stacksize
 		 * should not require dynamic reallocation
@@ -244,8 +246,10 @@ ZTEST(xsi_threads_ext, test_pthread_attr_setstacksize)
 	zassert_equal(new_stacksize, stacksize);
 	can_create_thread(&attr);
 
-	/* qemu_x86 seems to be unable to set thread stacks to be anything less than 4096 */
-	if (!IS_ENABLED(CONFIG_X86)) {
+	/* a stack of the minimum size cannot shrink: the minimum is a page where kernel stacks are
+	 * page-aligned, as on x86 and on RISC-V with the MMU
+	 */
+	if (stacksize > PTHREAD_STACK_MIN) {
 		zassert_ok(pthread_attr_setstacksize(&attr, stacksize - 1));
 		/* ensure we can read back the values we just set */
 		zassert_ok(pthread_attr_getstacksize(&attr, &new_stacksize));
