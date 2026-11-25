@@ -13,14 +13,28 @@
 
 #include <zephyr/sys/util.h>
 
-#define SIGNO_WORD_IDX(_signo) (_signo / BITS_PER_LONG)
-#define SIGNO_WORD_BIT(_signo) (_signo & BIT_MASK(LOG2(BITS_PER_LONG)))
+#define SIGNO_WORD_IDX(_signo) ((_signo - 1) / BITS_PER_LONG)
+#define SIGNO_WORD_BIT(_signo) ((_signo - 1) & BIT_MASK(LOG2(BITS_PER_LONG)))
 
 #define SIGSET_NLONGS (sizeof(sigset_t) / sizeof(unsigned long))
 
+static inline bool posix_sig_is_reserved(int signo)
+{
+	return signo == CONFIG_THREAD_CANCEL_SIGNAL_NUMBER ||
+	       signo == (CONFIG_THREAD_CANCEL_SIGNAL_NUMBER + 1);
+}
+
 static inline bool signo_valid(int signo)
 {
-	return ((signo > 0) && (signo <= SIGRTMAX));
+	if (signo <= 0 || posix_sig_is_reserved(signo)) {
+		return false;
+	}
+
+	if (signo < SIGRTMIN) {
+		return signo <= 31;
+	}
+
+	return signo <= SIGRTMAX;
 }
 
 static inline bool signo_is_rt(int signo)
@@ -31,7 +45,7 @@ static inline bool signo_is_rt(int signo)
 static inline bool signo_fits(int signo)
 {
 	/* technically, 0 is not a valid signal number, but it still fits */
-	return ((signo >= 0) && (signo < SIGSET_NLONGS * BITS_PER_LONG));
+	return ((signo > 0) && (signo <= SIGSET_NLONGS * BITS_PER_LONG));
 }
 
 #undef sigemptyset
@@ -48,6 +62,13 @@ int sigfillset(sigset_t *set)
 
 	for (int i = 0; i < SIGSET_NLONGS; i++) {
 		_set[i] = -1;
+	}
+
+	for (int signo = CONFIG_THREAD_CANCEL_SIGNAL_NUMBER; signo < SIGRTMIN;
+	     signo++) {
+		if ((signo > 0) && ((signo - 1) < SIGSET_NLONGS * BITS_PER_LONG)) {
+			WRITE_BIT(_set[SIGNO_WORD_IDX(signo)], SIGNO_WORD_BIT(signo), 0);
+		}
 	}
 
 	return 0;
@@ -113,8 +134,7 @@ int sigismember(const sigset_t *set, int signo)
 
 char *strsignal(int signum)
 {
-	/* Using -INT_MAX here because compiler resolves INT_MIN to (-2147483647 - 1) */
-	static char buf[sizeof("RT signal -" STRINGIFY(INT_MAX))];
+	static char buf[sizeof("RT signal " STRINGIFY(UINT_MAX))];
 
 	if (!signo_valid(signum)) {
 		errno = EINVAL;
@@ -122,7 +142,7 @@ char *strsignal(int signum)
 	}
 
 	if (signo_is_rt(signum)) {
-		snprintf(buf, sizeof(buf), "RT signal %d", signum - SIGRTMIN);
+		snprintf(buf, sizeof(buf), "RT signal %u", (unsigned int)(signum - SIGRTMIN));
 		return buf;
 	}
 

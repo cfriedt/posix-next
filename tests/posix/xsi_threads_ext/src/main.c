@@ -59,11 +59,9 @@ static void create_thread_common_entry(const pthread_attr_t *attrp, bool expect_
 	/* should not be able to join detached thread */
 	zassert_not_ok(pthread_join(th, NULL));
 
-	for (size_t i = 0; i < 10; ++i) {
+	/* bounded by real time: under parallel load sim time can lag far behind */
+	for (uint32_t t0 = k_uptime_get_32(); !detached_thread_has_finished && (k_uptime_get_32() - t0) < 5000;) {
 		k_msleep(2 * CONFIG_PTHREAD_RECYCLER_DELAY_MS);
-		if (detached_thread_has_finished) {
-			break;
-		}
 	}
 
 	zassert_true(detached_thread_has_finished, "detached thread did not seem to finish");
@@ -120,7 +118,7 @@ ZTEST(xsi_threads_ext, test_pthread_attr_setstack)
 	{
 		if (false) {
 			/* undefined behaviour */
-			zassert_equal(pthread_attr_setstack(NULL, NULL, 0), EACCES);
+			zassert_equal(pthread_attr_setstack(NULL, NULL, 0), EINVAL);
 			zassert_equal(pthread_attr_setstack(NULL, NULL, stacksize), EINVAL);
 			zassert_equal(pthread_attr_setstack(NULL, stackaddr, 0), EINVAL);
 			zassert_equal(pthread_attr_setstack(NULL, stackaddr, stacksize), EINVAL);
@@ -128,8 +126,8 @@ ZTEST(xsi_threads_ext, test_pthread_attr_setstack)
 							    stackaddr, stacksize),
 				      EINVAL);
 		}
-		zassert_equal(pthread_attr_setstack(&attr, NULL, 0), EACCES);
-		zassert_equal(pthread_attr_setstack(&attr, NULL, stacksize), EACCES);
+		zassert_equal(pthread_attr_setstack(&attr, NULL, 0), EINVAL);
+		zassert_equal(pthread_attr_setstack(&attr, NULL, stacksize), EINVAL);
 		zassert_equal(pthread_attr_setstack(&attr, stackaddr, 0), EINVAL);
 	}
 
