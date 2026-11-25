@@ -20,10 +20,12 @@
 #include <zephyr/sys/process.h>
 #include <zephyr/ztest.h>
 
-/* resolve the image's _exit() and execve() references at llext link time */
+/* resolve the image's references at llext link time */
 EXPORT_SYMBOL(_exit);
 EXPORT_SYMBOL(close);
 EXPORT_SYMBOL(execve);
+EXPORT_SYMBOL(getenv);
+EXPORT_SYMBOL(setenv);
 
 #define EXEC_IMAGE "/RAM:/hello.llext"
 #define EXEC_CHAIN_IMAGE "/RAM:/hello2.llext"
@@ -55,6 +57,14 @@ static struct fs_mount_t fs_mnt = {
 /* execve() loads the extension on the caller's stack; 64-bit frames need room */
 #define EXEC_CHILD_STACK_SIZE (IS_ENABLED(CONFIG_64BIT) ? 4096 : 3072)
 
+/* image processes have state of their own: an environment store */
+#if defined(CONFIG_TEST_USERSPACE) && defined(CONFIG_SYS_PROCESS_STATE_AREA) && \
+	(CONFIG_SYS_PROCESS_STATE_AREA > 0)
+#define EXEC_IMAGE_PROCESS_STATE 1
+#else
+#define EXEC_IMAGE_PROCESS_STATE 0
+#endif
+
 static K_THREAD_STACK_DEFINE(exec_child_stack, EXEC_CHILD_STACK_SIZE);
 static struct k_thread exec_child_thread;
 
@@ -64,6 +74,13 @@ static K_THREAD_STACK_ARRAY_DEFINE(exec_extra_stacks, EXEC_IMAGE_SLOTS,
 static struct k_thread exec_extra_threads[EXEC_IMAGE_SLOTS];
 
 static char *const exec_argv[] = {"hello", "x", NULL};
+/* the image checks its own environment store only where image processes have one */
+#if EXEC_IMAGE_PROCESS_STATE
+static char *const exec_env_argv[] = {"hello", "n", "u", NULL};
+#else
+static char *const exec_env_argv[] = {"hello", "n", NULL};
+#endif
+static char *const exec_envp[] = {"HELLO=world", NULL};
 static char *const exec_exit_argv[] = {"hello", "e", NULL};
 static char *const exec_chain_argv[] = {"hello", "c", NULL};
 
@@ -74,6 +91,15 @@ static void exec_child_entry(void *p1, void *p2, void *p3)
 
 	(void)execve(EXEC_IMAGE, p1, NULL);
 	/* a failed exec reports its errno: 128 + errno */
+	_exit(128 + (errno & 0x7f));
+}
+
+static void exec_env_child_entry(void *p1, void *p2, void *p3)
+{
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	(void)execve(EXEC_IMAGE, p1, exec_envp);
 	_exit(128 + (errno & 0x7f));
 }
 
@@ -189,6 +215,20 @@ static void execve_return_status(void)
 	zassert_equal(WEXITSTATUS(status), 42, "extension main() did not run: %d",
 		      WEXITSTATUS(status));
 	zassert_is_null(llext_by_name("hello.llext"), "image not unloaded after a normal return");
+}
+
+/* the image's environ names the environment it was entered with, and the C
+ * library's environment functions work on that
+ */
+static void execve_environment(void)
+{
+	int status = -1;
+	pid_t pid = exec_spawn_with(exec_env_child_entry, exec_env_argv);
+
+	zassert_true(pid > 0);
+	zassert_equal(waitpid(pid, &status, 0), pid);
+	zassert_true(WIFEXITED(status));
+	zassert_equal(WEXITSTATUS(status), 44, "image environment: %d", WEXITSTATUS(status));
 }
 
 static void execve_exit_reaps_image(void)
@@ -376,6 +416,7 @@ static void execve_sweep_stale_slots(void)
 ZTEST(posix_exec, test_execve)
 {
 	execve_return_status();
+	execve_environment();
 	execve_exit_reaps_image();
 	execve_chain_unloads_prior();
 	execve_load_errors();

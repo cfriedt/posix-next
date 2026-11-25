@@ -4,11 +4,12 @@ common:
     - exec
     - llext
   extra_configs:
-    # MMU targets round every llext region up to a 4 KiB-aligned block
-    - platform:qemu_cortex_a53/qemu_cortex_a53:CONFIG_LLEXT_HEAP_SIZE=64
-    - platform:qemu_riscv64/qemu_virt_riscv64:CONFIG_LLEXT_HEAP_SIZE=64
-    - platform:qemu_x86/atom:CONFIG_LLEXT_HEAP_SIZE=64
-    - platform:qemu_x86_64/atom:CONFIG_LLEXT_HEAP_SIZE=64
+    # MMU targets round every llext region up to a 4 KiB-aligned block; a chain exec
+    # holds two images, each with code, data and bss regions
+    - platform:qemu_cortex_a53/qemu_cortex_a53:CONFIG_LLEXT_HEAP_SIZE=128
+    - platform:qemu_riscv64/qemu_virt_riscv64:CONFIG_LLEXT_HEAP_SIZE=128
+    - platform:qemu_x86/atom:CONFIG_LLEXT_HEAP_SIZE=128
+    - platform:qemu_x86_64/atom:CONFIG_LLEXT_HEAP_SIZE=128
     # the PMP data-execution prevention of v4.5 would lock the llext heap execute-never
     - platform:qemu_riscv32/qemu_virt_riscv32:CONFIG_PMP_DATA_EXECUTION_PREVENTION=n
 tests:
@@ -51,6 +52,11 @@ tests:
       - CONFIG_TEST_USERSPACE=y
       - CONFIG_USERSPACE=y
       - CONFIG_ZTEST_FATAL_HOOK=y
+      # image processes get C library state of their own: the environment store and
+      # standard stream sections run; the area rounds an image's RW block up to the
+      # next MPU region size
+      - CONFIG_SYS_PROCESS_STATE_AREA=4096
+      - platform:mps2/an385:CONFIG_LLEXT_HEAP_SIZE=64
       - CONFIG_ZTEST_STACK_SIZE=4096
       - CONFIG_MAIN_STACK_SIZE=4096
       # a user process loads its next image inside a system call
