@@ -16,4 +16,5 @@ zephyr_library_compile_options_ifdef(CONFIG_XSI -U_XOPEN_SOURCE -D_XOPEN_SOURCE=
 
 if(NOT CONFIG_TC_PROVIDES_POSIX_NON_PORTABLE)
   zephyr_library_sources(pthread_np.c)
+  zephyr_library_sources_ifdef(CONFIG_POSIX_FILE_SYSTEM mntent.c)
 endif()

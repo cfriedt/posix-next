@@ -1,0 +1,47 @@
+diff --git a/lib/os/zvfs/zvfs_path.c b/lib/os/zvfs/zvfs_path.c
+index 0a8a4a78243..a45b71c067e 100644
+--- a/lib/os/zvfs/zvfs_path.c
++++ b/lib/os/zvfs/zvfs_path.c
+@@ -425,12 +425,12 @@ int z_impl_zvfs_statvfs(const char *path, struct zvfs_statvfs *buf)
+ 		errno = -rrc;
+ 		return -1;
+ 	}
+-	if (r[1] == '\0') {
++	res = fs_statvfs(r, &vfs);
++	if ((res < 0) && (r[1] == '\0')) {
++		/* nothing is mounted at the root: it is the directory of mount points */
+ 		zvfs_statvfs_root(buf);
+ 		return 0;
+ 	}
+-
+-	res = fs_statvfs(r, &vfs);
+ 	if (res < 0) {
+ 		return zvfs_err(res);
+ 	}
+diff --git a/subsys/fs/fs.c b/subsys/fs/fs.c
+index ff588f36fe2..5187a81003e 100644
+--- a/subsys/fs/fs.c
++++ b/subsys/fs/fs.c
+@@ -878,7 +878,8 @@ int fs_statvfs(const char *abs_path, struct fs_statvfs *stat)
+ 	struct fs_mount_t *mp;
+ 	int rc;
+ 
+-	if ((abs_path == NULL) || (abs_path[0] != '/') || (abs_path[1] == '\0')) {
++	/* the root names the file system mounted there, if any */
++	if ((abs_path == NULL) || (abs_path[0] != '/')) {
+ 		LOG_ERR("invalid file or dir name!!");
+ 		return -EINVAL;
+ 	}
+diff --git a/tests/subsys/fs/fs_api/src/test_fs_dir_file.c b/tests/subsys/fs/fs_api/src/test_fs_dir_file.c
+index 5662c12bd8d..65a04e066c8 100644
+--- a/tests/subsys/fs/fs_api/src/test_fs_dir_file.c
++++ b/tests/subsys/fs/fs_api/src/test_fs_dir_file.c
+@@ -233,7 +233,7 @@ ZTEST(fs_api_dir_file, test_file_statvfs)
+ 	zassert_not_equal(ret, 0, "Pass NULL for stat structure pointer");
+ 
+ 	ret = fs_statvfs("/", &stat);
+-	zassert_not_equal(ret, 0, "Path name too short");
++	zassert_not_equal(ret, 0, "Nothing is mounted at the root");
+ 
+ 	ret = fs_statvfs("SDCARD:", &stat);
+ 	zassert_not_equal(ret, 0, "Path name should start with /");

@@ -22,6 +22,9 @@ pid_t waitpid(pid_t pid, int *stat_loc, int options)
 		return -1;
 	}
 
+	/* exits are reported beside whatever job events are asked for */
+	options |= WEXITED;
+
 	if (pid == -1) {
 		ret = posix_wait_common(NULL, NULL, false, &num, &kws, options);
 	} else if (pid == 0) {

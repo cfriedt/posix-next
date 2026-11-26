@@ -5,13 +5,11 @@
 
 #include <unistd.h>
 
-#include <zephyr/sys/zvfs_fs.h>
-#include <zephyr/toolchain.h>
+#include <zephyr/sys/fdtable.h>
 
-BUILD_ASSERT(F_OK == ZVFS_F_OK && R_OK == ZVFS_R_OK && W_OK == ZVFS_W_OK && X_OK == ZVFS_X_OK,
-	     "POSIX amode constants must match their ZVFS counterparts");
+#include "posix_access.h"
 
 int access(const char *path, int amode)
 {
-	return zvfs_access(path, amode);
+	return posix_access_check(ZVFS_AT_FDCWD, path, amode, 0);
 }

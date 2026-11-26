@@ -330,6 +330,14 @@ long fpathconf(int fildes, int name);
  */
 int fsync(int fd);
 #endif
+#if defined(_XOPEN_SOURCE) || defined(__DOXYGEN__)
+/**
+ * @brief Write every open file's buffered data to its backing store (XSI extension).
+ * @ingroup posix_option_group_xsi_file_system
+ * @see https://pubs.opengroup.org/onlinepubs/9699919799/functions/sync.html
+ */
+void sync(void);
+#endif
 /**
  * @brief Truncate an open file to a specified length.
  * @ingroup posix_option_group_fd_mgmt

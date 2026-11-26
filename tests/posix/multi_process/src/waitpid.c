@@ -115,7 +115,130 @@ static void waitpid_sigchld(void)
 	zassert_ok(sigprocmask(SIG_BLOCK, &set, NULL));
 }
 
+#ifdef CONFIG_POSIX_JOB_CONTROL
+static void waitpid_stop_child_entry(void *p1, void *p2, void *p3)
+{
+	sigset_t set;
+
+	ARG_UNUSED(p1);
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	(void)sigemptyset(&set);
+	(void)sigaddset(&set, SIGSTOP);
+	(void)sigaddset(&set, SIGCONT);
+	(void)sigprocmask(SIG_UNBLOCK, &set, NULL);
+	/* delivery points */
+	for (int i = 0; i < 200; i++) {
+		k_sleep(K_MSEC(10));
+	}
+	_exit(7);
+}
+
+/* a SIGCHLD handler does not hide a stop or a continue from the wait that it interrupts */
+static void waitpid_stopped_handled(void)
+{
+	struct sigaction act = {.sa_sigaction = waitpid_chld_handler, .sa_flags = SA_SIGINFO};
+	struct sys_clone_args args = {
+		.entry = waitpid_stop_child_entry,
+		.thread = &waitpid_child_thread,
+		.stack = waitpid_child_stack,
+		.stack_size = WAITPID_CHILD_STACK_SIZE,
+		.prio = k_thread_priority_get(k_current_get()),
+	};
+	k_pid_t child = NULL;
+	sigset_t set;
+	int status = 0;
+	pid_t pid;
+
+	zassert_ok(sigemptyset(&set));
+	zassert_ok(sigaddset(&set, SIGCHLD));
+	zassert_ok(sigaction(SIGCHLD, &act, NULL));
+	zassert_ok(sigprocmask(SIG_UNBLOCK, &set, NULL));
+
+	zassert_ok(sys_clone(&args, &child));
+	pid = (pid_t)sys_process_id(child);
+	zassert_ok(kill(pid, SIGSTOP));
+	zassert_equal(waitpid(pid, &status, WUNTRACED), pid, "errno %d", errno);
+	zassert_true(WIFSTOPPED(status), "0x%x", status);
+	zassert_ok(kill(pid, SIGCONT));
+	zassert_equal(waitpid(pid, &status, WCONTINUED), pid, "errno %d", errno);
+	zassert_true(WIFCONTINUED(status), "0x%x", status);
+	zassert_ok(kill(pid, SIGKILL));
+	zassert_equal(waitpid(pid, &status, 0), pid, "errno %d", errno);
+	zassert_true(WIFSIGNALED(status) && (WTERMSIG(status) == SIGKILL), "0x%x", status);
+
+	act.sa_handler = SIG_DFL;
+	act.sa_flags = 0;
+	zassert_ok(sigaction(SIGCHLD, &act, NULL));
+	zassert_ok(sigprocmask(SIG_BLOCK, &set, NULL));
+}
+#endif /* CONFIG_POSIX_JOB_CONTROL */
+
 /* pid > 0: a blocking wait fills the status; a NULL stat_loc is allowed */
+#ifdef CONFIG_POSIX_JOB_CONTROL
+static atomic_t waitpid_cont_exit;
+
+/* naps a tick at a time, stoppable, and exits as soon as it is told to */
+static void waitpid_cont_exit_entry(void *p1, void *p2, void *p3)
+{
+	sigset_t set;
+
+	ARG_UNUSED(p1);
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	(void)sigemptyset(&set);
+	(void)sigaddset(&set, SIGSTOP);
+	(void)sigaddset(&set, SIGCONT);
+	(void)sigprocmask(SIG_UNBLOCK, &set, NULL);
+	while (atomic_get(&waitpid_cont_exit) == 0) {
+		k_sleep(K_TICKS(1));
+	}
+	_exit(7);
+}
+
+/*
+ * A child continued after a job report may exit before the report is consumed: the exit
+ * status must still come out of waitpid(), never a stale report followed by ECHILD. The
+ * window lies between two kernel calls, so a tick-driven child of higher priority gets
+ * many chances to land in it.
+ */
+static void waitpid_stopped_then_exited(void)
+{
+	for (int round = 0; round < 64; round++) {
+		struct sys_clone_args args = {
+			.entry = waitpid_cont_exit_entry,
+			.thread = &waitpid_child_thread,
+			.stack = waitpid_child_stack,
+			.stack_size = WAITPID_CHILD_STACK_SIZE,
+			.prio = k_thread_priority_get(k_current_get()) - 1,
+		};
+		k_pid_t child = NULL;
+		int status = 0;
+		pid_t pid;
+
+		atomic_set(&waitpid_cont_exit, 0);
+		zassert_ok(sys_clone(&args, &child));
+		pid = (pid_t)sys_process_id(child);
+		zassert_ok(kill(pid, SIGSTOP));
+		zassert_equal(waitpid(pid, &status, WUNTRACED), pid, "round %d: errno %d", round,
+			      errno);
+		zassert_true(WIFSTOPPED(status), "round %d: 0x%x", round, status);
+		atomic_set(&waitpid_cont_exit, 1);
+		zassert_ok(kill(pid, SIGCONT));
+		do {
+			zassert_equal(waitpid(pid, &status, WUNTRACED | WCONTINUED), pid,
+				      "round %d: errno %d", round, errno);
+		} while (!WIFEXITED(status));
+		zassert_equal(WEXITSTATUS(status), 7, "round %d: 0x%x", round, status);
+		errno = 0;
+		zassert_equal(waitpid(pid, &status, 0), -1);
+		zassert_equal(errno, ECHILD);
+	}
+}
+#endif /* CONFIG_POSIX_JOB_CONTROL */
+
 static void waitpid_specific(void)
 {
 	int status = -1;
@@ -196,6 +319,10 @@ ZTEST_USER(posix_multi_process, test_waitpid)
 		waitpid_pgrp();
 		waitpid_interrupted();
 		waitpid_sigchld();
+#ifdef CONFIG_POSIX_JOB_CONTROL
+		waitpid_stopped_handled();
+		waitpid_stopped_then_exited();
+#endif /* CONFIG_POSIX_JOB_CONTROL */
 	}
 #endif /* !CONFIG_USERSPACE */
 }

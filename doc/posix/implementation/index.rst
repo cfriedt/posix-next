@@ -231,6 +231,14 @@ permission on the thread object.
   the full set and the setter accepts only that set, returning ``ENOTSUP`` for anything
   narrower; with :kconfig:option:`CONFIG_SCHED_CPU_MASK_PIN_ONLY` a set may name only one CPU
   and a runnable thread cannot be moved, matching the kernel's rules for that variant.
+- :c:func:`setmntent`, :c:func:`getmntent`, :c:func:`endmntent` and :c:func:`hasmntopt`
+  (``<mntent.h>``, with :kconfig:option:`CONFIG_POSIX_FILE_SYSTEM`) enumerate the mounted file
+  systems. There is no mount table file to parse: the path given to :c:func:`setmntent` is
+  ignored and the stream it returns is a cursor on the kernel's list of mounts, read one entry
+  per call through the ``zvfs_readmount()`` system call, which reports each mount point, the
+  file system type by its conventional name (``vfat``, ``littlefs``, ``ext2``, ``tmpfs``) and
+  whether it is read-only (``mnt_opts`` of ``ro`` or ``rw``). ``mnt_fsname`` repeats the type,
+  as Linux reports for file systems without a backing device.
 
 Event file descriptors
 ----------------------
@@ -1480,7 +1488,7 @@ option group works from user mode when :kconfig:option:`CONFIG_USERSPACE` is ena
 
 ZVFS is the common waypoint for every file-descriptor consumer. The POSIX file API and the C
 library's ``<stdio.h>`` both bottom out in the same ZVFS entry points - ``fopen()`` and
-``open()`` are two spellings of ``zvfs_open()`` - so an application reaches one file system
+``open()`` are two spellings of ``zvfs_openat()`` - so an application reaches one file system
 implementation whichever interface it uses.
 
 **Timestamps through a descriptor.** :c:func:`futimens` resolves the ``UTIME_NOW`` and
@@ -1590,18 +1598,24 @@ No hard links
    ``st_nlink`` is always 1. This is a subsystem limitation, not a file system one: ext2, for
    example, stores hard links on disk, but the subsystem offers no way to create or count them.
 
-No symbolic links
-   The subsystem exposes no symbolic-link operations, so path resolution never follows a symlink
-   and stays purely lexical (see *Working directory* above). As with hard links this is a subsystem
-   limitation, not a file system one - ext2 stores symbolic links on disk, but the subsystem offers
-   no way to create or read them.
+Symbolic links depend on the backend
+   The subsystem exposes ``fs_symlink()``, ``fs_readlink()``, and ``fs_lstat()``, which back
+   :c:func:`symlink`, :c:func:`readlink`, and :c:func:`lstat`, but creating and following a link
+   is the backend's job; among the in-tree backends only ext2 implements it. Elsewhere
+   :c:func:`symlink` fails, :c:func:`readlink` reports ``EINVAL``, and :c:func:`lstat` is
+   equivalent to :c:func:`stat`. A backend that follows links does so component by component
+   inside the driver, after ZVFS has already collapsed ``..`` lexically (see *Working directory*
+   above). The file system layer builds them with :kconfig:option:`CONFIG_FILE_SYSTEM_SYMLINKS`,
+   which the option group implies.
 
-Permission bits are not exposed
-   The subsystem's ``struct fs_dirent`` carries no mode bits, so :c:func:`stat` cannot report a
-   file system's stored permissions even when it has them - ext2 again being the example. It
-   reports a synthesised mode instead: read and search for everyone, plus write unless the mount
-   is read-only. :c:func:`access` and :c:func:`mkdir` follow suit - ``mkdir()`` accepts its
-   ``mode`` argument and ignores it, and :c:func:`access` grants ``X_OK`` only for directories.
+Permission bits depend on the backend
+   The subsystem's ``struct fs_dirent`` carries the mode, owner and group a file system records
+   (:kconfig:option:`CONFIG_FILE_SYSTEM_ATTRIBUTES`), and ``fs_chmod()``, ``fs_chown()`` and
+   ``fs_lchown()`` change them; tmpfs and ext2 record them, FAT and LittleFS do not. Where none
+   is recorded, :c:func:`stat` reports a synthesised mode - read and search for everyone, plus
+   write unless the mount is read-only, and execute on every regular file - with ``st_uid`` and
+   ``st_gid`` 0, and :c:func:`chmod` and :c:func:`chown` fail with ``ENOTSUP``. See
+   :ref:`posix_file_attributes_design`.
 
 Timestamps
    File timestamps are surfaced only when the backend records them, gated by
@@ -1667,11 +1681,126 @@ Hard links are not supported
    :c:func:`link` fails with ``EPERM`` and ``st_nlink`` is always 1, though ext2 stores hard links
    on disk.
 
-Symbolic links are not supported
-   Symbolic links are neither created nor followed, though ext2 stores them on disk.
+Symbolic links are fast symbolic links only
+   ext2 creates and follows symbolic links, but only as fast symbolic links: the target is stored
+   in the inode itself, so :c:func:`symlink` rejects a target longer than 60 bytes with
+   ``ENAMETOOLONG``. Resolution follows at most 8 links in one lookup before failing with
+   ``ELOOP``.
 
-Permissions may not be reported accurately
-   :c:func:`stat` reports a synthesised mode rather than the file's stored permission bits.
+Timestamps are whole seconds, and reads leave no trace
+   ext2 stores the inode's access, modification and status-change times with one-second
+   resolution: creation stamps all three, a write or truncation stamps the modification and
+   status-change times, a new or removed entry stamps its directory, and :c:func:`utime` and
+   :c:func:`futimens` store the given times. Reading a file does not update its access time
+   (the ``noatime`` behaviour of Linux), so ``st_atim`` moves only through creation and the
+   ``utime()`` family.
+
+.. _posix_file_attributes_design:
+
+File Attributes
+===============
+
+The :ref:`POSIX_FILE_ATTRIBUTES <posix_option_group_file_attributes>` and
+:ref:`POSIX_FILE_ATTRIBUTES_FD <posix_option_group_file_attributes_fd>` option groups, and
+:c:func:`lchown` of :ref:`POSIX_SYMBOLIC_LINKS <posix_option_group_symbolic_links>`, are thin
+layers over four ZVFS system calls - ``zvfs_chmodat()``, ``zvfs_fchmod()``, ``zvfs_chownat()``
+and ``zvfs_fchown()`` - and the per-process creation mask, ``zvfs_umask()``. Every call works
+from user mode.
+
+Storage
+   A mode and an owner belong to the node, so they are the file system's: ``struct fs_dirent``
+   reports them and ``fs_chmod()``, ``fs_chown()`` and ``fs_lchown()`` change them. tmpfs keeps
+   them in its node, ext2 in the inode fields the on-disk format has always had (``i_mode``,
+   ``i_uid``, ``i_gid``), so they survive a remount. A backend that records none leaves the
+   fields zero and ZVFS reports the synthesised mode described under *Zephyr FS subsystem
+   caveats*; :c:func:`chmod` and :c:func:`chown` on such a file fail with ``ENOTSUP`` (a
+   missing file is still ``ENOENT``). The ``-1`` that leaves an ID unchanged is resolved by
+   ZVFS from the node's current owner. The storage, the operations and the ``struct
+   fs_dirent`` fields are built with :kconfig:option:`CONFIG_FILE_SYSTEM_ATTRIBUTES`, which
+   the option group implies.
+
+Creation
+   The file mode creation mask lives beside the working directory in the per-process ZVFS
+   state: a child created by :c:func:`fork` or :c:func:`posix_spawn` starts with a copy of its
+   parent's, threads that belong to no process share the boot mask, and the mask is ``022`` at
+   boot. ``zvfs_openat()``, ``zvfs_mkdirat()`` and ``zvfs_mknodat()`` create a node with the backend's
+   default mode and then withhold the mask's bits from the requested mode with one
+   ``fs_chmod()``, only when they created the node: opening an existing file with ``O_CREAT``
+   leaves its mode alone. A backend without modes has nothing to withhold.
+
+Identity and access
+   ZVFS keeps no identity, so it enforces nothing; what a caller may do is decided in the
+   POSIX layer, where the credentials live. There is one identity, the privileged one, so
+   :c:func:`access` and :c:func:`faccessat` grant read and write to everything (a read-only
+   file system still refuses writes with ``EROFS``) and grant execute only when some execute
+   bit is set, as Linux does for root; :c:func:`chown` may give a file to any owner. The
+   class-based check for other identities is in place for when there are any. :c:func:`open`
+   enforces nothing, as the privileged identity may open anything.
+
+Deviations
+   ``AT_SYMLINK_NOFOLLOW`` to :c:func:`fchmodat` or :c:func:`utimensat` on a symbolic link fails
+   with ``EOPNOTSUPP``, which POSIX permits: no file system here stores a link's own permissions
+   or times. No status-change time is kept, so a mode or owner change is invisible
+   to ``st_ctim``. The set-user-ID, set-group-ID and sticky bits are stored and reported but
+   have no effect.
+
+.. _posix_xsi_file_system_design:
+
+XSI File System
+===============
+
+The :ref:`XSI_FILE_SYSTEM <posix_option_group_xsi_file_system>` option group
+(:kconfig:option:`CONFIG_XSI_FILE_SYSTEM`) stands on ZVFS alone: none of its functions calls
+another option group, so it builds and runs with :ref:`POSIX_FILE_SYSTEM
+<posix_option_group_file_system>` and :ref:`POSIX_FD_MGMT <posix_option_group_fd_mgmt>` disabled,
+and every function works from user mode.
+
+Pathnames
+   :c:func:`basename` and :c:func:`dirname` edit the string they are given, as the standard allows,
+   and return ``"."`` or ``"/"`` from read-only storage when the answer is not part of the input.
+   :c:func:`realpath` resolves one component at a time against the working directory
+   (``zvfs_getcwd()``), dropping ``.`` and ``..``, and reads each symbolic link it meets with
+   ``zvfs_readlinkat()`` to splice the target in front of what follows; more than ``SYMLOOP_MAX``
+   links in one lookup is ``ELOOP``. Every component has to exist (``ENOENT``) and every one but
+   the last has to be a directory (``ENOTDIR``). A ``NULL`` result buffer is one of ``PATH_MAX``
+   bytes from :c:func:`malloc`.
+
+Directory positions
+   A directory stream's position is kept by ZVFS as the count of entries read since the stream was
+   opened or last rewound: :c:func:`telldir` reports it (``zvfs_telldir()``) and :c:func:`seekdir`
+   returns to it (``zvfs_seekdir()``), rewinding and reading forward when the position lies behind
+   the current one. A position past the end leaves the stream at the end.
+
+Tree walks
+   :c:func:`nftw` and :c:func:`ftw` share one walker over ``zvfs_fdopendir()``, ``zvfs_readdir()``
+   and ``zvfs_statat()``. It descends into a directory while holding that
+   directory's stream open; when the descent would exceed the caller's descriptor limit, the
+   stream is closed first and reopened afterwards at the position it had, which is what the
+   directory position above is for. ``FTW_PHYS`` reports links as ``FTW_SL``; without it a
+   link to nothing is ``FTW_SLN``. ``FTW_MOUNT`` compares ``st_dev`` with the starting
+   directory's, ``FTW_DEPTH`` reports a directory as ``FTW_DP`` after its contents, and
+   ``FTW_CHDIR`` changes into the directory holding each reported object before the callback
+   and back to the caller's working directory when the walk ends. A starting path whose status
+   cannot be obtained is an error (``-1``); below it, such an object is reported as ``FTW_NS``.
+
+Locks, nodes, names
+   :c:func:`lockf` is the write-lock subset of the ZVFS record locks (``zvfs_fcntl()`` with
+   ``ZVFS_F_SETLK``, ``ZVFS_F_SETLKW`` and ``ZVFS_F_GETLK``), which are owned by the process:
+   ``F_TEST`` reports only other processes' locks, so a region the caller holds tests as free.
+   A negative size locks the region ending at the current offset, measured with
+   ``zvfs_lseek()``; a region that would start before the file is ``EINVAL``.
+   :c:func:`mknod` is ``zvfs_mknodat()``: ``S_IFIFO`` makes a FIFO, ``S_IFREG`` or no type an
+   empty regular file, and any other type is ``EINVAL``, since no device special file exists to
+   make. :c:func:`tempnam` picks the first usable directory of ``TMPDIR``, its argument,
+   ``P_tmpdir`` and ``/tmp``, usable meaning ``zvfs_accessat()`` grants search and write, and
+   returns the first generated name (five prefix characters at most, six random ones) that
+   ``zvfs_accessat()`` reports as absent; the name is allocated with :c:func:`malloc`.
+
+Synchronization
+   :c:func:`sync` is ``zvfs_sync()``: ZVFS walks its system-wide table of open file descriptions
+   and flushes each one under the description's lock, the lock a close holds, so a description is
+   either flushed or already closed; descriptions with nothing to flush are passed over. Data
+   held only by a memory mapping is written back by :c:func:`msync`.
 
 .. _posix_mapped_files_design:
 

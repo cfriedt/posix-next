@@ -1,0 +1,268 @@
+diff --git a/include/zephyr/fs/fs.h b/include/zephyr/fs/fs.h
+index 5b52dbc998b..d32883b9b0d 100644
+--- a/include/zephyr/fs/fs.h
++++ b/include/zephyr/fs/fs.h
+@@ -892,6 +892,18 @@ int fs_normalize_path(const char *path, char *buf, size_t len);
+  */
+ int fs_mount_flags(const char *path, uint8_t *flags);
+ 
++/**
++ * @brief Get the type of the file system containing a path
++ *
++ * @param path Path to the file or directory
++ * @param type Destination for the mount's file system type (FS_FATFS, ...)
++ *
++ * @retval 0 on success;
++ * @retval -EINVAL when a bad file name is given;
++ * @retval -ENOENT when no mount point contains @p path.
++ */
++int fs_mount_type(const char *path, int *type);
++
+ /**
+  * @brief Set file or directory timestamps
+  *
+diff --git a/include/zephyr/sys/zvfs_fs.h b/include/zephyr/sys/zvfs_fs.h
+index 4ee65483659..889e23b54a4 100644
+--- a/include/zephyr/sys/zvfs_fs.h
++++ b/include/zephyr/sys/zvfs_fs.h
+@@ -105,6 +105,23 @@ struct zvfs_dirent {
+ 	char d_name[ZVFS_NAME_MAX + 1];  /**< NUL-terminated entry name */
+ };
+ 
++/** @name zvfs_mntent mnt_flags bits */
++/**@{*/
++#define ZVFS_MNT_RDONLY 0x1 /**< Mounted read-only */
++/**@}*/
++
++/** Longest file system type name zvfs_readmount() reports */
++#define ZVFS_MNT_TYPE_MAX 15
++
++/**
++ * @brief One mounted file system, as reported by zvfs_readmount().
++ */
++struct zvfs_mntent {
++	char mnt_dir[ZVFS_NAME_MAX + 1];      /**< Mount point */
++	char mnt_type[ZVFS_MNT_TYPE_MAX + 1]; /**< File system type name: "vfat", "ext2", ... */
++	uint32_t mnt_flags;                   /**< ZVFS_MNT_* bits */
++};
++
+ /**
+  * @brief Directory stream state backing a POSIX DIR.
+  *
+@@ -330,6 +347,16 @@ __syscall int zvfs_mknodat(int dirfd, const char *path, uint32_t mode, unsigned
+  */
+ __syscall int zvfs_statvfs(const char *path, struct zvfs_statvfs *buf);
+ 
++/**
++ * @brief Read the mount table, one entry at a time.
++ *
++ * @param index In: the position to read, 0 for the first; out: the position after it.
++ * @param ent Destination for the entry.
++ *
++ * @return 0 on success, -1 with errno set on error: ENOENT past the last entry.
++ */
++__syscall int zvfs_readmount(int *index, struct zvfs_mntent *ent);
++
+ /**
+  * @brief Get statistics of the file system containing the open file @p fd.
+  *
+diff --git a/lib/os/zvfs/zvfs_path.c b/lib/os/zvfs/zvfs_path.c
+index a45b71c067e..52e591d32f0 100644
+--- a/lib/os/zvfs/zvfs_path.c
++++ b/lib/os/zvfs/zvfs_path.c
+@@ -9,6 +9,7 @@
+  */
+ 
+ #include <errno.h>
++#include <stdio.h>
+ #include <string.h>
+ 
+ #include <zephyr/fs/fs.h>
+@@ -480,6 +481,79 @@ static int z_vrfy_zvfs_fstatvfs(int fd, struct zvfs_statvfs *buf)
+ #include <zephyr/syscalls/zvfs_fstatvfs_mrsh.c>
+ #endif /* CONFIG_USERSPACE */
+ 
++static const char *zvfs_fs_type_name(int type)
++{
++	switch (type) {
++	case FS_FATFS:
++		return "vfat";
++	case FS_LITTLEFS:
++		return "littlefs";
++	case FS_EXT2:
++		return "ext2";
++	case FS_VIRTIOFS:
++		return "virtiofs";
++	case FS_RPMSGFS:
++		return "rpmsgfs";
++	case FS_NATIVE_MOUNT:
++		return "native";
++	case FS_TMPFS:
++		return "tmpfs";
++	default:
++		return NULL;
++	}
++}
++
++int z_impl_zvfs_readmount(int *index, struct zvfs_mntent *ent)
++{
++	const char *name;
++	const char *type_name;
++	uint8_t flags = 0;
++	int type = 0;
++	int rc;
++
++	if (*index < 0) {
++		errno = EINVAL;
++		return -1;
++	}
++
++	rc = fs_readmount(index, &name);
++	if (rc < 0) {
++		return zvfs_err(rc);
++	}
++	(void)fs_mount_flags(name, &flags);
++	(void)fs_mount_type(name, &type);
++
++	strncpy(ent->mnt_dir, name, sizeof(ent->mnt_dir) - 1);
++	ent->mnt_dir[sizeof(ent->mnt_dir) - 1] = '\0';
++	type_name = zvfs_fs_type_name(type);
++	if (type_name != NULL) {
++		strncpy(ent->mnt_type, type_name, sizeof(ent->mnt_type) - 1);
++		ent->mnt_type[sizeof(ent->mnt_type) - 1] = '\0';
++	} else {
++		snprintf(ent->mnt_type, sizeof(ent->mnt_type), "fs%d", type);
++	}
++	ent->mnt_flags = ((flags & FS_MOUNT_FLAG_READ_ONLY) != 0) ? ZVFS_MNT_RDONLY : 0;
++
++	return 0;
++}
++
++#ifdef CONFIG_USERSPACE
++static int z_vrfy_zvfs_readmount(int *index, struct zvfs_mntent *ent)
++{
++	int idx;
++	int ret;
++
++	K_OOPS(k_usermode_from_copy(&idx, index, sizeof(idx)));
++	K_OOPS(K_SYSCALL_MEMORY_WRITE(ent, sizeof(*ent)));
++
++	ret = z_impl_zvfs_readmount(&idx, ent);
++	K_OOPS(k_usermode_to_copy(index, &idx, sizeof(idx)));
++
++	return ret;
++}
++#include <zephyr/syscalls/zvfs_readmount_mrsh.c>
++#endif /* CONFIG_USERSPACE */
++
+ int z_impl_zvfs_mknodat(int dirfd, const char *path, uint32_t mode, unsigned long dev)
+ {
+ 	int fd;
+diff --git a/subsys/fs/fs.c b/subsys/fs/fs.c
+index 5187a81003e..dfc8c78057e 100644
+--- a/subsys/fs/fs.c
++++ b/subsys/fs/fs.c
+@@ -985,6 +985,25 @@ int fs_mount_flags(const char *abs_path, uint8_t *flags)
+ 	return 0;
+ }
+ 
++int fs_mount_type(const char *abs_path, int *type)
++{
++	struct fs_mount_t *mp;
++	int rc;
++
++	if ((abs_path == NULL) || (abs_path[0] != '/')) {
++		return -EINVAL;
++	}
++
++	rc = fs_get_mnt_point(&mp, abs_path, NULL);
++	if (rc < 0) {
++		return rc;
++	}
++
++	*type = mp->type;
++
++	return 0;
++}
++
+ int fs_utime(const char *abs_path, const struct timespec times[2])
+ {
+ 	struct fs_mount_t *mp;
+diff --git a/tests/lib/zvfs_fs/src/main.c b/tests/lib/zvfs_fs/src/main.c
+index e3f9cba251f..a4009aa04b4 100644
+--- a/tests/lib/zvfs_fs/src/main.c
++++ b/tests/lib/zvfs_fs/src/main.c
+@@ -398,6 +398,37 @@ static void mkdirat_plain(void)
+ 	zassert_ok(zvfs_rmdir(MNT "/plaindir"));
+ }
+ 
++ZTEST_USER(zvfs_fs, test_zvfs_readmount)
++{
++	struct zvfs_mntent ent;
++	bool saw_fat = false;
++	bool saw_tmp = false;
++	int index = 0;
++	int n = 0;
++
++	errno = 0;
++	while (zvfs_readmount(&index, &ent) == 0) {
++		zassert_equal(index, ++n, "the index moves past the entry read");
++		if (strcmp(ent.mnt_dir, MNT) == 0) {
++			saw_fat = true;
++			zassert_str_equal(ent.mnt_type, "vfat");
++			zassert_equal(ent.mnt_flags & ZVFS_MNT_RDONLY, 0);
++		} else if (strcmp(ent.mnt_dir, AMNT) == 0) {
++			saw_tmp = true;
++			zassert_str_equal(ent.mnt_type, "tmpfs");
++		}
++	}
++	/* the end of the table */
++	zassert_equal(errno, ENOENT);
++	zassert_true(saw_fat, "the FAT mount is not listed");
++	zassert_true(saw_tmp, "the tmpfs mount is not listed");
++
++	errno = 0;
++	index = -1;
++	zassert_equal(zvfs_readmount(&index, &ent), -1);
++	zassert_equal(errno, EINVAL);
++}
++
+ ZTEST_USER(zvfs_fs, test_zvfs_mkdirat)
+ {
+ 	struct zvfs_stat st;
+diff --git a/tests/subsys/fs/common/test_fs_mount_flags.c b/tests/subsys/fs/common/test_fs_mount_flags.c
+index c2b0c871ab5..8db4e022487 100644
+--- a/tests/subsys/fs/common/test_fs_mount_flags.c
++++ b/tests/subsys/fs/common/test_fs_mount_flags.c
+@@ -16,6 +16,8 @@ extern const char *mount_flags_mnt_point_str;
+ void test_fs_mount_flags(void)
+ {
+ 	int ret = 0;
++	int type = -1;
++	uint8_t flags = 0;
+ 	struct fs_file_t fs;
+ 	struct fs_mount_t *mp = mount_flags_mp;
+ 
+@@ -38,6 +40,12 @@ void test_fs_mount_flags(void)
+ 	ret = fs_mount(mp);
+ 	TC_PRINT("Mount again to format volume\n");
+ 	zassert_equal(ret, 0, "Expected success got %d", ret);
++	ret = fs_mount_type(mp->mnt_point, &type);
++	zassert_equal(ret, 0, "Expected success got %d", ret);
++	zassert_equal(type, mp->type, "Expected type %d got %d", mp->type, type);
++	ret = fs_mount_flags(mp->mnt_point, &flags);
++	zassert_equal(ret, 0, "Expected success got %d", ret);
++	zassert_equal(flags & FS_MOUNT_FLAG_READ_ONLY, 0, "Expected a writable mount");
+ 	TC_PRINT("Create some file\n");
+ 	ret = fs_open(&fs, "/sml/some", FS_O_CREATE);
+ 	zassert_equal(ret, 0, "Expected success got %d", ret);
+@@ -54,6 +62,9 @@ void test_fs_mount_flags(void)
+ 	TC_PRINT("Mount as read-only\n");
+ 	ret = fs_mount(mp);
+ 	zassert_equal(ret, 0, "Expected success got %d", ret);
++	ret = fs_mount_flags(mp->mnt_point, &flags);
++	zassert_equal(ret, 0, "Expected success got %d", ret);
++	zassert_not_equal(flags & FS_MOUNT_FLAG_READ_ONLY, 0, "Expected a read-only mount");
+ 
+ 	/* Attempt creating new file */
+ 	ret = fs_open(&fs, "/sml/nosome", FS_O_CREATE);

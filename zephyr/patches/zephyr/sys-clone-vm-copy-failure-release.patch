@@ -1,0 +1,63 @@
+diff --git a/lib/os/process.c b/lib/os/process.c
+--- a/lib/os/process.c
++++ b/lib/os/process.c
+@@ -1131,6 +1131,14 @@ static void fork_leader_discard(k_tid_t tid)
+ 	k_thread_abort(tid);
+ 	z_thread_reap(tid, false);
+ }
++
++/* a child that never ran: its copied address space and record go back */
++static void fork_discard(struct k_process *proc)
++{
++	z_process_vm_teardown(proc->vm);
++	proc->vm = NULL;
++	(void)z_process_record_free(proc);
++}
+ #endif /* CONFIG_PROCESS_VM */
+ 
+ int z_sys_clone_vm_copy(const struct sys_clone_args *args, k_pid_t *child)
+@@ -1215,7 +1223,7 @@ int z_sys_clone_vm_copy(const struct sys_clone_args *args, k_pid_t *child)
+ 					       K_USER | K_INHERIT_PERMS);
+ 	}
+ 	if (ret < 0) {
+-		(void)z_process_record_free(proc);
++		fork_discard(proc);
+ 		return ret;
+ 	}
+ 
+@@ -1230,7 +1238,7 @@ int z_sys_clone_vm_copy(const struct sys_clone_args *args, k_pid_t *child)
+ 	ret = z_zvfs_fds_clone(proc, tid);
+ 	if (ret < 0) {
+ 		fork_leader_discard(tid);
+-		(void)z_process_record_free(proc);
++		fork_discard(proc);
+ 		return ret;
+ 	}
+ 
+@@ -1239,7 +1247,7 @@ int z_sys_clone_vm_copy(const struct sys_clone_args *args, k_pid_t *child)
+ 	if (ret < 0) {
+ 		fork_leader_discard(tid);
+ 		z_process_fds_drop(proc);
+-		(void)z_process_record_free(proc);
++		fork_discard(proc);
+ 		return ret;
+ 	}
+ 
+@@ -1250,7 +1258,7 @@ int z_sys_clone_vm_copy(const struct sys_clone_args *args, k_pid_t *child)
+ 		fork_leader_discard(tid);
+ 		z_process_mmap_drop(proc);
+ 		z_process_fds_drop(proc);
+-		(void)z_process_record_free(proc);
++		fork_discard(proc);
+ 		return -EAGAIN;
+ 	}
+ #endif /* CONFIG_SIGNAL */
+@@ -1263,7 +1271,7 @@ int z_sys_clone_vm_copy(const struct sys_clone_args *args, k_pid_t *child)
+ #endif /* CONFIG_SIGNAL */
+ 		z_process_mmap_drop(proc);
+ 		z_process_fds_drop(proc);
+-		(void)z_process_record_free(proc);
++		fork_discard(proc);
+ 		return ret;
+ 	}
+ 	/* the leader is bound and numbered: its thread number becomes the pid */

@@ -13,6 +13,10 @@
 #include <zephyr/sys/timeutil.h>
 #include <zephyr/sys/util.h>
 #include <zephyr/ztest.h>
+#if defined(CONFIG_FILE_SYSTEM) && !defined(CONFIG_NATIVE_LIBC)
+#include <ff.h>
+#include <zephyr/fs/fs.h>
+#endif
 
 #include "../../shared/linux_compat_test.h"
 
@@ -387,4 +391,30 @@ ZTEST_USER(posix_non_portable, test_pthread_timedjoin_np)
 	})
 }
 
-ZTEST_SUITE(posix_non_portable, NULL, NULL, NULL, NULL, NULL);
+#if defined(CONFIG_FILE_SYSTEM) && !defined(CONFIG_NATIVE_LIBC)
+/* a volume for the mount table tests to find */
+static FATFS fat_fs;
+static struct fs_mount_t fs_mnt = {
+	.type = FS_FATFS,
+	.mnt_point = "/RAM:",
+	.fs_data = &fat_fs,
+};
+
+static void *non_portable_setup(void)
+{
+	zassert_ok(fs_mount(&fs_mnt));
+
+	return NULL;
+}
+
+static void non_portable_teardown(void *fixture)
+{
+	ARG_UNUSED(fixture);
+	(void)fs_unmount(&fs_mnt);
+}
+#else
+#define non_portable_setup NULL
+#define non_portable_teardown NULL
+#endif
+
+ZTEST_SUITE(posix_non_portable, NULL, non_portable_setup, NULL, NULL, non_portable_teardown);
